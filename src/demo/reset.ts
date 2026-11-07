@@ -1,7 +1,6 @@
 import { matchBillPayments } from "../bills/match";
 import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
 import { nameKey } from "../settings/category-form";
-import { storeSuggestedNames } from "../transactions/name-suggestions";
 import {
 	buildSeed,
 	monthOffset,
@@ -44,6 +43,7 @@ export const TABLES_CHILD_FIRST = [
 	"category_archive_periods",
 	"savings_goal_amounts",
 	"merchant_name_failures",
+	"merchant_suggested_names",
 	"merchants",
 	"categories",
 	"accounts",
@@ -159,15 +159,26 @@ export async function resetDemo(
 		...seed.merchants.map((m) =>
 			db
 				.prepare(
-					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill, suggested_name, suggestion_status) VALUES (?, ?, ?, ?, ?, ?)",
+					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill, suggestion_status) VALUES (?, ?, ?, ?, ?)",
 				)
 				.bind(
 					m.key,
 					m.displayName,
 					m.defaultCategoryId,
 					m.notABill ? 1 : 0,
-					m.suggestedNames ? storeSuggestedNames(m.suggestedNames) : null,
-					m.suggestedNames ? "pending" : "none",
+					(m.suggestedNames?.length ?? 0) > 0 ? "pending" : "none",
+				),
+		),
+		// A seeded suggestion's names, one row per name (at most three), as a person would have them waiting.
+		...seed.merchants.flatMap((m) =>
+			(m.suggestedNames ?? [])
+				.slice(0, 3)
+				.map((name, position) =>
+					db
+						.prepare(
+							"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES (?, ?, ?)",
+						)
+						.bind(m.key, position, name),
 				),
 		),
 		...seed.budgetAmounts.map((a) =>

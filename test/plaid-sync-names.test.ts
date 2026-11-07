@@ -4,6 +4,13 @@ import { namesToReview } from "../src/db/merchant-names";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { suggestMerchantNames } from "../src/suggest-names-pending";
+import {
+	assertMerchantInvariants,
+	clearMerchants,
+	merchantNames,
+	seedMerchant,
+	setMerchantNames,
+} from "./helpers/merchants";
 
 // Plaid's merchant name is the merchant's first suggested name (spec §8.6, decision 68, issue #194):
 // sync stores it, with no AI call, and a person still has to choose it.
@@ -114,28 +121,36 @@ function counting(db: D1Database) {
 
 type MerchantRow = {
 	raw_name: string;
-	suggested_name: string | null;
+	names: string[];
 	display_name: string | null;
 	suggestion_status: string;
 };
 
-/** The suggested names waiting for a person, in order, for merchants that still have a charge (the review lists no other). */
-const pendingNames = async () =>
-	(
-		await env.DB.prepare(
-			`SELECT suggested_name FROM merchants
-			 WHERE suggestion_status = 'pending'
-			   AND EXISTS (SELECT 1 FROM transactions t WHERE t.merchant_name = merchants.raw_name)
-			 ORDER BY raw_name`,
-		).all<{ suggested_name: string }>()
-	).results.map((row) => row.suggested_name);
+/**
+ * The names each merchant waiting for a person offers, one array per merchant, in order, for merchants that still have a
+ * charge (the review lists no other).
+ */
+const pendingNames = async () => {
+	const { results } = await env.DB.prepare(
+		`SELECT raw_name FROM merchants
+		 WHERE suggestion_status = 'pending'
+		   AND EXISTS (SELECT 1 FROM transactions t WHERE t.merchant_name = merchants.raw_name)
+		 ORDER BY raw_name`,
+	).all<{ raw_name: string }>();
+	return Promise.all(results.map((row) => merchantNames(env.DB, row.raw_name)));
+};
 
-const merchants = async () =>
-	(
-		await env.DB.prepare(
-			"SELECT raw_name, suggested_name, display_name, suggestion_status FROM merchants ORDER BY raw_name",
-		).all<MerchantRow>()
-	).results;
+const merchants = async (): Promise<MerchantRow[]> => {
+	const { results } = await env.DB.prepare(
+		"SELECT raw_name, display_name, suggestion_status FROM merchants ORDER BY raw_name",
+	).all<Omit<MerchantRow, "names">>();
+	return Promise.all(
+		results.map(async (row) => ({
+			...row,
+			names: await merchantNames(env.DB, row.raw_name),
+		})),
+	);
+};
 
 describe("Plaid's merchant name as the first name suggestion", () => {
 	beforeEach(async () => {
@@ -143,6 +158,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM household_settings WHERE key = 'ai_names'"),
 		]);
@@ -155,10 +171,23 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 		expect(await merchants()).toEqual([
 			{
 				raw_name: "Blue Bottle Coffee",
-				suggested_name: "Blue Bottle Coffee",
+				names: ["Blue Bottle Coffee"],
 				display_name: null,
 				suggestion_status: "pending",
 			},
+		]);
+	});
+
+	it("keeps every name a waiting merchant offers, not only the first", async () => {
+		const id = await addItem();
+		await sync(id, { added: [transaction()] });
+		await setMerchantNames(env.DB, "Blue Bottle Coffee", [
+			"Blue Bottle Coffee",
+			"Blue Bottle",
+			"Blue Bottle Cafe",
+		]);
+		expect(await pendingNames()).toEqual([
+			["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
 		]);
 	});
 
@@ -202,9 +231,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				transaction({ name: "T-MOBILE 8812", merchant_name: "T-Mobile" }),
 			],
 		});
-		expect((await merchants()).map((m) => m.suggested_name)).toEqual([
-			"T-Mobile",
-		]);
+		expect((await merchants()).map((m) => m.names[0])).toEqual(["T-Mobile"]);
 	});
 
 	it("suggests it on a modified transaction too", async () => {
@@ -229,7 +256,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 		expect(await merchants()).toEqual([
 			{
 				raw_name: "Blue Bottle Coffee",
-				suggested_name: null,
+				names: [],
 				display_name: "The Bottle",
 				suggestion_status: "none",
 			},
@@ -240,10 +267,16 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle Coffee', 'rejected')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Blue Bottle Coffee', 'rejected', 0)",
 			),
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Lupitas', 'Lupitas', 'accepted')",
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Blue Bottle Coffee', 0, 'Blue Bottle Coffee')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Lupitas', 'accepted', 0)",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Lupitas', 0, 'Lupitas')",
 			),
 		]);
 		await sync(id, {
@@ -265,12 +298,15 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 	it("puts Plaid's name in front of an older suggestion that is still waiting", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle', 'pending')",
+			"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Blue Bottle Coffee', 'pending', 0)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Blue Bottle Coffee', 0, 'Blue Bottle')",
 		).run();
 		await sync(id, { added: [transaction()] });
 		expect(await merchants()).toMatchObject([
 			{
-				suggested_name: "Blue Bottle Coffee",
+				names: ["Blue Bottle Coffee"],
 				suggestion_status: "pending",
 			},
 		]);
@@ -298,13 +334,10 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 		await sync(id, {
 			modified: [transaction({ merchant_name: "Blue Bottle" })],
 		});
-		const row = await env.DB.prepare(
-			`SELECT m.suggested_name FROM transactions t
-			 JOIN merchants m ON m.raw_name = COALESCE(NULLIF(t.merchant_name, ''), t.raw_name)`,
-		).first<{ suggested_name: string }>();
-		expect(row?.suggested_name).toBe("Blue Bottle");
+		// The charge's merchant is the newest name, and that merchant's suggestion is it.
+		expect(await merchantNames(env.DB, "Blue Bottle")).toEqual(["Blue Bottle"]);
 		// The name no charge carries any more is not asked about.
-		expect(await pendingNames()).toEqual(["Blue Bottle"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 	});
 
 	describe("one bank text with different Plaid names suggests the newest (decision 79)", () => {
@@ -338,7 +371,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				},
 			]);
 
-			expect(await pendingNames()).toEqual(["Target", "Target Corp"]);
+			expect(await pendingNames()).toEqual([["Target"], ["Target Corp"]]);
 		});
 
 		it("suggests the newer name when it arrives in a later sync, and withdraws the older one", async () => {
@@ -352,7 +385,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 			await sync(id, {
 				added: [
 					transaction({
@@ -362,18 +395,18 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 			// The older name's merchant is untouched apart from its waiting suggestion.
 			expect(await merchants()).toEqual([
 				{
 					raw_name: "Blue Bottle",
-					suggested_name: null,
+					names: [],
 					display_name: null,
 					suggestion_status: "none",
 				},
 				{
 					raw_name: "Blue Bottle Coffee",
-					suggested_name: "Blue Bottle Coffee",
+					names: ["Blue Bottle Coffee"],
 					display_name: null,
 					suggestion_status: "pending",
 				},
@@ -393,7 +426,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				merchant_name: "Blue Bottle Coffee",
 			});
 			await sync(id, { added: [newer, older] });
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
 
 		it("keeps the newer name when an older charge with the older name arrives afterwards", async () => {
@@ -416,7 +449,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
 
 		it("lets the same date go to the charge that came last", async () => {
@@ -434,7 +467,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
 
 		it("suggests nothing when the newest name is only the bank's text tidied, and withdraws the older name", async () => {
@@ -449,7 +482,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Target Corp"]);
+			expect(await pendingNames()).toEqual([["Target Corp"]]);
 			// The newest charge's name says what the list already shows ("Target"), so there is nothing to suggest.
 			await sync(id, {
 				added: [
@@ -486,7 +519,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 			expect(await merchants()).toEqual([
 				{
 					raw_name: "Target Corp",
-					suggested_name: "Target Corp",
+					names: ["Target Corp"],
 					display_name: null,
 					suggestion_status: "pending",
 				},
@@ -525,8 +558,8 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				],
 			});
 			expect(await pendingNames()).toEqual([
-				"Blue Bottle",
-				"Blue Bottle Coffee",
+				["Blue Bottle"],
+				["Blue Bottle Coffee"],
 			]);
 		});
 
@@ -537,7 +570,10 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					"INSERT INTO merchants (raw_name, display_name) VALUES ('Blue Bottle', 'My coffee')",
 				),
 				env.DB.prepare(
-					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Cafe', 'Blue Bottle Cafe', 'rejected')",
+					"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Blue Bottle Cafe', 'rejected', 0)",
+				),
+				env.DB.prepare(
+					"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Blue Bottle Cafe', 0, 'Blue Bottle Cafe')",
 				),
 			]);
 			await sync(id, {
@@ -562,19 +598,19 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 			expect(await merchants()).toEqual([
 				{
 					raw_name: "Blue Bottle",
-					suggested_name: null,
+					names: [],
 					display_name: "My coffee",
 					suggestion_status: "none",
 				},
 				{
 					raw_name: "Blue Bottle Cafe",
-					suggested_name: "Blue Bottle Cafe",
+					names: ["Blue Bottle Cafe"],
 					display_name: null,
 					suggestion_status: "rejected",
 				},
 				{
 					raw_name: "Blue Bottle Coffee",
-					suggested_name: "Blue Bottle Coffee",
+					names: ["Blue Bottle Coffee"],
 					display_name: null,
 					suggestion_status: "pending",
 				},
@@ -597,8 +633,8 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				],
 			});
 			expect(await pendingNames()).toEqual([
-				"Blue Bottle Coffee",
-				"Lupita's Taqueria",
+				["Blue Bottle Coffee"],
+				["Lupita's Taqueria"],
 			]);
 		});
 	});
@@ -610,7 +646,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 		).run();
 		await sync(id, { added: [transaction()] });
 		expect(await merchants()).toMatchObject([
-			{ suggested_name: "Blue Bottle Coffee", suggestion_status: "pending" },
+			{ names: ["Blue Bottle Coffee"], suggestion_status: "pending" },
 		]);
 	});
 
@@ -624,7 +660,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 			{
 				raw_name: "Blue Bottle Coffee",
 				display_name: "My coffee place",
-				suggested_name: null,
+				names: [],
 				suggestion_status: "none",
 			},
 			{ raw_name: "SQ *BLUE BOTTLE COF 0412" },
@@ -646,6 +682,7 @@ describe("Workers AI is asked only when Plaid sends no name", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM household_settings WHERE key = 'ai_names'"),
 		]);
@@ -660,7 +697,7 @@ describe("Workers AI is asked only when Plaid sends no name", () => {
 		expect(await merchants()).toEqual([
 			{
 				raw_name: "Blue Bottle Coffee",
-				suggested_name: "Blue Bottle Coffee",
+				names: ["Blue Bottle Coffee"],
 				display_name: null,
 				suggestion_status: "pending",
 			},
@@ -684,7 +721,7 @@ describe("Workers AI is asked only when Plaid sends no name", () => {
 		expect(await merchants()).toEqual([
 			{
 				raw_name: "SQ *BLUE BOTTLE COF 0412",
-				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				names: ["Blue Bottle Coffee", "Blue Bottle"],
 				display_name: null,
 				suggestion_status: "pending",
 			},
@@ -729,7 +766,7 @@ describe("Workers AI is asked only when Plaid sends no name", () => {
 		await suggestMerchantNames({ DB: env.DB, AI: ai });
 		expect(ai.run).not.toHaveBeenCalled();
 		expect(await merchants()).toMatchObject([
-			{ suggested_name: "Blue Bottle Coffee", suggestion_status: "pending" },
+			{ names: ["Blue Bottle Coffee"], suggestion_status: "pending" },
 		]);
 	});
 });
@@ -739,6 +776,7 @@ async function resetTables() {
 		env.DB.prepare("DELETE FROM transactions"),
 		env.DB.prepare("DELETE FROM accounts"),
 		env.DB.prepare("DELETE FROM plaid_items"),
+		env.DB.prepare("DELETE FROM merchant_suggested_names"),
 		env.DB.prepare("DELETE FROM merchants"),
 		env.DB.prepare("DELETE FROM household_settings WHERE key = 'ai_names'"),
 	]);
@@ -775,8 +813,9 @@ describe("a page of named charges stays under D1's query limit", () => {
 		const id = await addItem();
 		const named = counting(env.DB);
 		await sync(id, { added: page(true), db: named.db });
-		// Everything Plaid's names add is a handful of statements, none per charge.
-		expect(named.statements() - unnamed.statements()).toBeLessThanOrEqual(8);
+		// Everything Plaid's names add is a handful of statements, none per charge. The bank's names and the newest names
+		// are three statements each (a merchant row, then its names), so the page's extra statements are a fixed 16.
+		expect(named.statements() - unnamed.statements()).toBeLessThanOrEqual(16);
 	});
 });
 
@@ -803,13 +842,13 @@ describe("a bank text's newest charge leaves it", () => {
 	it("offers the remaining charge's name when the bank removes the newest one", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest(), older()] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 
 		await sync(id, { removed: ["new"] });
-		expect(await pendingNames()).toEqual(["Blue Bottle"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 		expect(await merchants()).toContainEqual({
 			raw_name: "Blue Bottle",
-			suggested_name: "Blue Bottle",
+			names: ["Blue Bottle"],
 			display_name: null,
 			suggestion_status: "pending",
 		});
@@ -819,7 +858,7 @@ describe("a bank text's newest charge leaves it", () => {
 		const id = await addItem();
 		await sync(id, { added: [newest(), older()] });
 		await sync(id, { removed: ["old"] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 	});
 
 	it("offers nothing when the remaining charge's name is only the bank's text tidied", async () => {
@@ -830,7 +869,7 @@ describe("a bank text's newest charge leaves it", () => {
 				older({ name: "TARGET 1234", merchant_name: "Target" }),
 			],
 		});
-		expect(await pendingNames()).toEqual(["Target Corp"]);
+		expect(await pendingNames()).toEqual([["Target Corp"]]);
 		await sync(id, { removed: ["new"] });
 		expect(await pendingNames()).toEqual([]);
 	});
@@ -842,7 +881,10 @@ describe("a bank text's newest charge leaves it", () => {
 				"INSERT INTO merchants (raw_name, display_name) VALUES ('Blue Bottle', 'My coffee')",
 			),
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Cafe', 'Blue Bottle Cafe', 'rejected')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Blue Bottle Cafe', 'rejected', 0)",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Blue Bottle Cafe', 0, 'Blue Bottle Cafe')",
 			),
 		]);
 		await sync(id, {
@@ -861,13 +903,13 @@ describe("a bank text's newest charge leaves it", () => {
 		).toEqual([
 			{
 				raw_name: "Blue Bottle",
-				suggested_name: null,
+				names: [],
 				display_name: "My coffee",
 				suggestion_status: "none",
 			},
 			{
 				raw_name: "Blue Bottle Cafe",
-				suggested_name: "Blue Bottle Cafe",
+				names: ["Blue Bottle Cafe"],
 				display_name: null,
 				suggestion_status: "rejected",
 			},
@@ -877,25 +919,28 @@ describe("a bank text's newest charge leaves it", () => {
 	it("waits for the last page to count a pending charge the bank dropped", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest({ pending: true }), older()] });
-		const seen: string[][] = [];
+		const seen: string[][][] = [];
 		await syncPages(id, [{ removed: ["new"], hasMore: true }, {}], {
 			between: async () => {
 				seen.push(await pendingNames());
 			},
 		});
 		// Not deleted yet, so its name is still the one offered; once the update ends it is gone.
-		expect(seen).toEqual([["Blue Bottle Coffee"]]);
-		expect(await pendingNames()).toEqual(["Blue Bottle"]);
+		expect(seen).toEqual([[["Blue Bottle Coffee"]]]);
+		expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 	});
 
 	it("offers the older name again when the newest charge's bank text changes", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest(), older()] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 
 		await sync(id, { modified: [newest({ name: "BLUE BOTTLE OAKLAND" })] });
 		// The Oakland text's newest charge is still "Blue Bottle Coffee"; the old text's is now "Blue Bottle".
-		expect(await pendingNames()).toEqual(["Blue Bottle", "Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([
+			["Blue Bottle"],
+			["Blue Bottle Coffee"],
+		]);
 	});
 
 	it("does not revive an older name a person decided when a bank text changes", async () => {
@@ -905,13 +950,13 @@ describe("a bank text's newest charge leaves it", () => {
 			"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = 'Blue Bottle'",
 		).run();
 		await sync(id, { modified: [newest({ name: "BLUE BOTTLE OAKLAND" })] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 	});
 
 	it("offers the older name again when a pending charge posts under a different bank text", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest({ pending: true }), older()] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 
 		// The bank posts it as a new transaction with new text, and drops the pending one.
 		await sync(id, {
@@ -924,7 +969,10 @@ describe("a bank text's newest charge leaves it", () => {
 			],
 			removed: ["new"],
 		});
-		expect(await pendingNames()).toEqual(["Blue Bottle", "Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([
+			["Blue Bottle"],
+			["Blue Bottle Coffee"],
+		]);
 	});
 
 	it("leaves nothing offered when the removed charge was the text's only one", async () => {
@@ -940,7 +988,7 @@ describe("a bank text's newest charge leaves it", () => {
 // (or the text tidied) there is nothing to suggest (decision 79): a guess made earlier is not carried over
 // to the Plaid-named merchant to sit there as "Tally's guess".
 describe("a guess Workers AI made before Plaid named the text", () => {
-	const GUESS = "Target Stores\nTarget Corp";
+	const GUESS = ["Target Stores", "Target Corp"];
 	const unnamed = (overrides: Record<string, unknown> = {}) =>
 		transaction({
 			transaction_id: "t1",
@@ -948,18 +996,16 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 			merchant_name: null,
 			...overrides,
 		});
-	const row = (key: string) =>
-		env.DB.prepare(
-			"SELECT suggested_name, display_name, suggestion_status FROM merchants WHERE raw_name = ?",
+	const row = async (key: string) => {
+		const found = await env.DB.prepare(
+			"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
 		)
 			.bind(key)
-			.first();
-	const guessOn = (key: string, status = "pending") =>
-		env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, ?)",
-		)
-			.bind(key, GUESS, status)
-			.run();
+			.first<{ display_name: string | null; suggestion_status: string }>();
+		return found && { ...found, names: await merchantNames(env.DB, key) };
+	};
+	const guessOn = (key: string) =>
+		seedMerchant(env.DB, { key, status: "pending", names: GUESS });
 
 	beforeEach(resetTables);
 
@@ -973,7 +1019,7 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 			modified: [unnamed({ merchant_name: "Target" })],
 		});
 		expect(await row("Target")).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: null,
 			suggestion_status: "none",
 		});
@@ -990,7 +1036,7 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 			modified: [unnamed({ name: "Netflix", merchant_name: "Netflix" })],
 		});
 		expect(await row("Netflix")).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: null,
 			suggestion_status: "none",
 		});
@@ -1001,7 +1047,7 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 		await guessOn("TARGET 1234");
 		await sync(id, { added: [unnamed({ merchant_name: "Target" })] });
 		expect(await row("Target")).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: null,
 			suggestion_status: "none",
 		});
@@ -1011,27 +1057,30 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 	it("never touches a name a person chose, or a suggestion they decided", async () => {
 		const id = await addItem();
 		await sync(id, { added: [unnamed()] });
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, display_name, suggestion_status) VALUES ('TARGET 1234', ?, 'My Target', 'none')",
-		)
-			.bind(GUESS)
-			.run();
+		// A guess a person has named: the row is pending with the name they chose, and the guess is kept (the stale
+		// clearing only touches a row with no chosen name).
+		await seedMerchant(env.DB, {
+			key: "TARGET 1234",
+			status: "pending",
+			names: GUESS,
+			displayName: "My Target",
+		});
 		await sync(id, { modified: [unnamed({ merchant_name: "Target" })] });
 		expect(await row("Target")).toEqual({
-			suggested_name: GUESS,
+			names: GUESS,
 			display_name: "My Target",
-			suggestion_status: "none",
+			suggestion_status: "pending",
 		});
 
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM merchants"),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('TARGET 1234', ?, 'rejected')",
-			).bind(GUESS),
-		]);
+		await clearMerchants(env.DB);
+		await seedMerchant(env.DB, {
+			key: "TARGET 1234",
+			status: "rejected",
+			names: GUESS,
+		});
 		await sync(id, { modified: [unnamed({ merchant_name: "Target" })] });
 		expect(await row("Target")).toEqual({
-			suggested_name: GUESS,
+			names: GUESS,
 			display_name: null,
 			suggestion_status: "rejected",
 		});
@@ -1076,9 +1125,314 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 			],
 		});
 		expect(await row("Target")).toEqual({
-			suggested_name: "Target",
+			names: ["Target"],
 			display_name: null,
 			suggestion_status: "pending",
 		});
+	});
+});
+
+// The copy of a Plaid name reads its bank texts' rows from before the page writes them (copyPlaidNamesSql). A bank text on
+// the page that is also another pair's Plaid name is read as it was. The rows named here have a display name, so the
+// newest-name step of the same sync (which only replaces a merchant with no name chosen) leaves the copied names alone.
+describe("a bank text that is also another Plaid name on the same page (copy reads before the page writes)", () => {
+	beforeEach(resetTables);
+
+	it("copies the names of a text as they were, when that text is also a Plaid name on the page", async () => {
+		await seedMerchant(env.DB, {
+			key: "COMCAST*1",
+			status: "pending",
+			names: ["Comcast Cable Co", "Xfinity"],
+			displayName: "Comcast Cable",
+		});
+		await seedMerchant(env.DB, {
+			key: "COMCAST*2",
+			status: "pending",
+			names: ["Other Co"],
+		});
+		const id = await addItem();
+		await sync(id, {
+			added: [
+				// "Comcast" is the name of a charge whose bank text is COMCAST*1, which is also the Plaid name of another charge.
+				transaction({
+					transaction_id: "a",
+					name: "COMCAST*1",
+					merchant_name: "Comcast",
+					date: "2026-09-27",
+				}),
+				transaction({
+					transaction_id: "b",
+					name: "COMCAST*2",
+					merchant_name: "COMCAST*1",
+					date: "2026-09-27",
+				}),
+			],
+		});
+		expect(await merchantNames(env.DB, "Comcast")).toEqual([
+			"Comcast Cable Co",
+			"Xfinity",
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = 'Comcast'",
+			).first(),
+		).toEqual({ display_name: "Comcast Cable", suggestion_status: "pending" });
+		await assertMerchantInvariants(env.DB);
+	});
+
+	// The copy removes a key's names past the count of its text after the same page has written the text. The text's count
+	// is never below what the copy read (the page only overwrites positions), and a text that wins for a key that already
+	// has names is one the page cannot rewrite, so the count is right here. This test pins the case the order is for:
+	// "T1" is copied from "X1" on page one, and on page two it takes "X2"'s single name (accepted, so it ranks first), while
+	// "Comcast" copies its three names from "T1" in the same page.
+	it("keeps all three names a copied name takes from a text that the same sync rewrites to one name", async () => {
+		await seedMerchant(env.DB, {
+			key: "X1",
+			status: "pending",
+			names: ["Q1", "Q2", "Q3"],
+			displayName: "Named X1",
+		});
+		await seedMerchant(env.DB, {
+			key: "X2",
+			status: "accepted",
+			names: ["R1"],
+		});
+		const id = await addItem();
+		await syncPages(id, [
+			{
+				added: [
+					transaction({
+						transaction_id: "a",
+						name: "X1",
+						merchant_name: "T1",
+						date: "2026-09-20",
+					}),
+				],
+				hasMore: true,
+			},
+			{
+				added: [
+					transaction({
+						transaction_id: "b",
+						name: "T1",
+						merchant_name: "Comcast",
+						date: "2026-09-27",
+					}),
+					transaction({
+						transaction_id: "c",
+						name: "X2",
+						merchant_name: "T1",
+						date: "2026-09-27",
+					}),
+				],
+			},
+		]);
+		expect(await merchantNames(env.DB, "Comcast")).toEqual(["Q1", "Q2", "Q3"]);
+		await assertMerchantInvariants(env.DB);
+	});
+});
+
+// The copy's second statement removes a key's names past the count of its winner text, and reads that count after the
+// first statement has rewritten rows. These two cases make the text's count change within the same sync: the text is
+// the Plaid name of a pair on page two, which rewrites it. The copy must keep every name it copied.
+describe("a copy whose bank text the same sync rewrites to a different number of names (count read after the write)", () => {
+	beforeEach(resetTables);
+
+	it("copies three names from a text that the same sync rewrites down to one name, and keeps all three", async () => {
+		await seedMerchant(env.DB, {
+			key: "BANK ZERO",
+			status: "pending",
+			names: ["A1", "A2", "A3"],
+			displayName: "Named Zero",
+		});
+		await seedMerchant(env.DB, {
+			key: "BANK ONE",
+			status: "accepted",
+			names: ["B1"],
+		});
+		const id = await addItem();
+		await syncPages(id, [
+			{
+				added: [
+					transaction({
+						transaction_id: "a",
+						name: "BANK ZERO",
+						merchant_name: "Shared Name",
+						date: "2026-09-20",
+					}),
+				],
+				hasMore: true,
+			},
+			{
+				added: [
+					// "Key Copy" copies its names from "Shared Name", as it stood before this page.
+					transaction({
+						transaction_id: "b",
+						name: "Shared Name",
+						merchant_name: "Key Copy",
+						date: "2026-09-27",
+					}),
+					// "Shared Name" is rewritten on this page, to the accepted name of "BANK ONE".
+					transaction({
+						transaction_id: "c",
+						name: "BANK ONE",
+						merchant_name: "Shared Name",
+						date: "2026-09-27",
+					}),
+				],
+			},
+		]);
+		expect(await merchantNames(env.DB, "Shared Name")).toEqual(["B1"]);
+		expect(await merchantNames(env.DB, "Key Copy")).toEqual(["A1", "A2", "A3"]);
+		await assertMerchantInvariants(env.DB);
+	});
+
+	it("copies one name from a text that the same sync rewrites up to three names, and keeps just the one", async () => {
+		await seedMerchant(env.DB, {
+			key: "BANK ZERO",
+			status: "pending",
+			names: ["A1"],
+			displayName: "Named Zero",
+		});
+		await seedMerchant(env.DB, {
+			key: "BANK ONE",
+			status: "accepted",
+			names: ["B1", "B2", "B3"],
+		});
+		const id = await addItem();
+		await syncPages(id, [
+			{
+				added: [
+					transaction({
+						transaction_id: "a",
+						name: "BANK ZERO",
+						merchant_name: "Shared Name",
+						date: "2026-09-20",
+					}),
+				],
+				hasMore: true,
+			},
+			{
+				added: [
+					transaction({
+						transaction_id: "b",
+						name: "Shared Name",
+						merchant_name: "Key Copy",
+						date: "2026-09-27",
+					}),
+					transaction({
+						transaction_id: "c",
+						name: "BANK ONE",
+						merchant_name: "Shared Name",
+						date: "2026-09-27",
+					}),
+				],
+			},
+		]);
+		expect(await merchantNames(env.DB, "Shared Name")).toEqual([
+			"B1",
+			"B2",
+			"B3",
+		]);
+		expect(await merchantNames(env.DB, "Key Copy")).toEqual(["A1"]);
+		await assertMerchantInvariants(env.DB);
+	});
+});
+
+// A none-asked text (rank 2) beats a named pending destination (rank 4), so the copy can take a winner that has no names.
+// Before the copy removed a none winner's destination names itself, only the unscoped sweep (which runs later in the same
+// batch) removed them, and this test failed with the sweep disabled. It now passes either way: the copy is self-sufficient.
+describe("a copy whose winner has no names, over a destination that had names", () => {
+	beforeEach(resetTables);
+
+	it("leaves the destination with no names and the status the winner gives, when a named pending key is beaten by an asked text", async () => {
+		await seedMerchant(env.DB, { key: "Y", status: "none", namesAsked: true });
+		await seedMerchant(env.DB, {
+			key: "V",
+			status: "pending",
+			names: ["D1", "D2"],
+			displayName: "Named K",
+		});
+		await seedMerchant(env.DB, {
+			key: "U",
+			status: "accepted",
+			names: ["U1", "U2", "U3"],
+		});
+		const id = await addItem();
+		await syncPages(
+			id,
+			[
+				{
+					added: [
+						// Page one: K copies V (pending, named), and T copies Y (asked, no names).
+						transaction({
+							transaction_id: "a",
+							name: "V",
+							merchant_name: "K",
+							date: "2026-09-20",
+						}),
+						transaction({
+							transaction_id: "b",
+							name: "Y",
+							merchant_name: "T",
+							date: "2026-09-20",
+						}),
+					],
+					hasMore: true,
+				},
+				{
+					added: [
+						// Page two: K copies T (asked, no names, so it beats K's own pending row), and T takes U (accepted).
+						transaction({
+							transaction_id: "c",
+							name: "T",
+							merchant_name: "K",
+							date: "2026-09-27",
+						}),
+						transaction({
+							transaction_id: "d",
+							name: "U",
+							merchant_name: "T",
+							date: "2026-09-27",
+						}),
+					],
+				},
+			],
+			{
+				// Between the pages T is an asked text with no names, the state the copy on page two starts from.
+				between: async () => {
+					await seedMerchant(env.DB, {
+						key: "T",
+						status: "none",
+						namesAsked: true,
+					});
+				},
+			},
+		);
+		const statusOf = async (key: string) =>
+			env.DB.prepare(
+				"SELECT suggestion_status AS status, names_asked AS asked, display_name AS display FROM merchants WHERE raw_name = ?",
+			)
+				.bind(key)
+				.first();
+		expect(await statusOf("K")).toEqual({
+			status: "none",
+			asked: 1,
+			display: "Named K",
+		});
+		expect(await merchantNames(env.DB, "K")).toEqual([]);
+		expect(await statusOf("T")).toEqual({
+			status: "accepted",
+			asked: 0,
+			display: null,
+		});
+		expect(await merchantNames(env.DB, "T")).toEqual(["U1", "U2", "U3"]);
+		expect(await statusOf("U")).toEqual({
+			status: "accepted",
+			asked: 0,
+			display: null,
+		});
+		expect(await merchantNames(env.DB, "U")).toEqual(["U1", "U2", "U3"]);
+		await assertMerchantInvariants(env.DB);
 	});
 });

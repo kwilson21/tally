@@ -8,7 +8,9 @@ export const EXPORT_COLUMNS = {
 	budget_amounts: "category_id, effective_month, amount_cents",
 	savings_goal_amounts: "effective_month, amount_cents",
 	merchants:
-		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill",
+		"raw_name, display_name, default_category_id, suggestion_status, names_asked, not_a_bill",
+	// One row per suggested name of a merchant, by position (merchant_suggested_names, migration 0071).
+	merchant_suggested_names: "merchant_key, position, name",
 	merchant_name_failures: "raw_name, failed_at",
 	// Each account names its bank and says whether it's disconnected, since bank rows carry no id. An uploaded Apple Card
 	// has no bank connection: its bank is Apple Card, and it can't be disconnected (spec §8.10).

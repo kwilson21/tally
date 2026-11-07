@@ -7,6 +7,7 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { buildSeed, monthOffset, RENT_PAYEE } from "../src/demo/seed";
 import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
+import { merchantNames } from "./helpers/merchants";
 
 describe("buildSeed", () => {
 	// The demo's spending is paced through the month (#322), so a month's designed totals are whole only on its last day.
@@ -499,12 +500,14 @@ describe("resetDemo", () => {
 	it("seeds a few names Tally guessed, waiting for a person, on merchants nobody named (the demo never calls Workers AI)", async () => {
 		await resetDemo(env.DB, "2026-09-22");
 		const { results } = await env.DB.prepare(
-			"SELECT raw_name, suggested_name, display_name FROM merchants WHERE suggestion_status = 'pending' ORDER BY raw_name",
+			"SELECT raw_name, display_name FROM merchants WHERE suggestion_status = 'pending' ORDER BY raw_name",
 		).all<{
 			raw_name: string;
-			suggested_name: string;
 			display_name: string | null;
 		}>();
+		const names = new Map<string, string[]>();
+		for (const m of results)
+			names.set(m.raw_name, await merchantNames(env.DB, m.raw_name));
 		expect(results.map((m) => m.raw_name)).toEqual([
 			// Plaid names the CVS charge, so its merchant is keyed by that name and its suggestion is the bank's (#194).
 			"CVS Pharmacy",
@@ -512,17 +515,16 @@ describe("resetDemo", () => {
 			"SP * CRAFTSUPPLY",
 			"TST* CORNER DELI",
 		]);
-		// Up to three names, one per line, and none of them chosen.
+		// Up to three names, and none of them chosen.
 		for (const m of results) {
 			expect(m.display_name).toBeNull();
-			expect(m.suggested_name.split("\n").length).toBeLessThanOrEqual(3);
+			expect(names.get(m.raw_name)?.length).toBeLessThanOrEqual(3);
 		}
-		expect(results.find((m) => m.raw_name === "CVS Pharmacy")).toMatchObject({
-			suggested_name: "CVS Pharmacy",
-		});
-		expect(
-			results.find((m) => m.raw_name === "SP * CRAFTSUPPLY"),
-		).toMatchObject({ suggested_name: "Craft Supply Co\nCraft Supply" });
+		expect(names.get("CVS Pharmacy")).toEqual(["CVS Pharmacy"]);
+		expect(names.get("SP * CRAFTSUPPLY")).toEqual([
+			"Craft Supply Co",
+			"Craft Supply",
+		]);
 	});
 
 	it("gives the seed's Jev-categorized rows a matching Jev pick", async () => {

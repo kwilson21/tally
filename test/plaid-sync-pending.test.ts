@@ -184,6 +184,7 @@ beforeEach(async () => {
 		env.DB.prepare("DELETE FROM transactions"),
 		env.DB.prepare("DELETE FROM accounts"),
 		env.DB.prepare("DELETE FROM plaid_items"),
+		env.DB.prepare("DELETE FROM merchant_suggested_names"),
 		env.DB.prepare("DELETE FROM merchants"),
 	]);
 });

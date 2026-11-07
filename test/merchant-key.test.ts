@@ -90,6 +90,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM bills"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 	]);
 });
@@ -752,6 +753,11 @@ describe("one merchants row per key, whatever the bank text", () => {
 				"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('COMCAST CABLE', 'Old name', 3)",
 			)
 			.run();
+		await db
+			.prepare(
+				"DELETE FROM merchant_suggested_names WHERE merchant_key IN (SELECT raw_name FROM merchants WHERE raw_name = 'Comcast')",
+			)
+			.run();
 		await db.prepare("DELETE FROM merchants WHERE raw_name = 'Comcast'").run();
 
 		await applyMerchantRules(db);
@@ -1060,6 +1066,7 @@ describe("bills saved under the bank's raw text", () => {
 			.run();
 		expect(await found()).toEqual([]);
 
+		await db.prepare("DELETE FROM merchant_suggested_names").run();
 		await db.prepare("DELETE FROM merchants").run();
 		await bill(8706, "COMCAST CABLE", 10, 8000, true);
 		expect(await found()).toEqual([]);

@@ -13,6 +13,7 @@ import {
 import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestions } from "../src/routes/suggestions";
+import { seedMerchant } from "./helpers/merchants";
 
 // The one review screen's queue (spec §8.6, decisions 79 and 101, issue #195): every "Maybe …" a person
 // hasn't answered, one item at a time, in the order money first, then categories, new categories, names.
@@ -115,11 +116,11 @@ async function oneOfEachKind() {
 			jevCategoryId: null,
 		});
 	}
-	await db
-		.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BLUE BOTTLE COF', 'Blue Bottle Coffee', 'pending')",
-		)
-		.run();
+	await seedMerchant(db, {
+		key: "BLUE BOTTLE COF",
+		status: "pending",
+		names: ["Blue Bottle Coffee"],
+	});
 	await transaction({ amount: 600, raw: "BLUE BOTTLE COF" });
 	return { income, transfer, category, suggestion: suggestion?.id ?? 0 };
 }
@@ -130,6 +131,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM never_suggest_rules"),
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);
@@ -247,11 +249,16 @@ describe("suggestionQueue", () => {
 	});
 
 	it("with Suggest store names off, a bank-sent name is still asked and no Tally guess is", async () => {
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BLUE BOTTLE COF', 'Blue Bottle Coffee', 'pending'), ('Petsmart', 'Petsmart', 'pending')",
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "BLUE BOTTLE COF",
+			status: "pending",
+			names: ["Blue Bottle Coffee"],
+		});
+		await seedMerchant(db, {
+			key: "Petsmart",
+			status: "pending",
+			names: ["Petsmart"],
+		});
 		await transaction({ amount: 600, raw: "BLUE BOTTLE COF" });
 		await transaction({
 			amount: 1200,

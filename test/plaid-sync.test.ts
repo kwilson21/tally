@@ -22,6 +22,7 @@ import {
 } from "../src/db/transactions";
 import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { merchantNames } from "./helpers/merchants";
 
 const KEY = btoa("01234567890123456789012345678901");
 
@@ -130,6 +131,7 @@ describe("syncItem", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM never_suggest_rules"),
 		]);
@@ -674,6 +676,9 @@ describe("syncItem", () => {
 				same: [first, "merchant_rule"],
 			});
 			await env.DB.prepare(
+				"DELETE FROM merchant_suggested_names WHERE merchant_key = 'New Shop'",
+			).run();
+			await env.DB.prepare(
 				"DELETE FROM merchants WHERE raw_name = 'New Shop'",
 			).run();
 		},
@@ -756,8 +761,14 @@ describe("syncItem", () => {
 			env.DB.prepare(
 				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name, merchant_raw_text) VALUES ('Internet', 1234, 27, 'monthly', 'COMCAST CABLE', 1)",
 			),
+			// A waiting guess on a row a person has named: the sync copies it with the rest of the row (rank 4). It is reached
+			// through the sync's copy, which starts the new key from this bank text's row: the row is pending with a name, so it
+			// ranks 4 (a waiting guess on a named merchant), and the new key takes its status, names and display name from it.
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, suggested_name, default_category_id, not_a_bill) VALUES ('COMCAST CABLE', 'Comcast Cable', 'Comcast', (SELECT id FROM categories LIMIT 1), 1)",
+				"INSERT INTO merchants (raw_name, display_name, suggestion_status, default_category_id, not_a_bill) VALUES ('COMCAST CABLE', 'Comcast Cable', 'pending', (SELECT id FROM categories LIMIT 1), 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('COMCAST CABLE', 0, 'Comcast')",
 			),
 		]);
 
@@ -783,25 +794,27 @@ describe("syncItem", () => {
 		expect(
 			(
 				await env.DB.prepare(
-					"SELECT raw_name, display_name, suggested_name, (default_category_id IS NOT NULL) AS ruled, not_a_bill FROM merchants ORDER BY raw_name",
+					"SELECT raw_name, display_name, suggestion_status, (default_category_id IS NOT NULL) AS ruled, not_a_bill FROM merchants ORDER BY raw_name",
 				).all()
 			).results,
 		).toEqual([
 			{
 				raw_name: "COMCAST CABLE",
 				display_name: "Comcast Cable",
-				suggested_name: "Comcast",
+				suggestion_status: "pending",
 				ruled: 1,
 				not_a_bill: 1,
 			},
 			{
 				raw_name: "Comcast",
 				display_name: "Comcast Cable",
-				suggested_name: "Comcast",
+				suggestion_status: "pending",
 				ruled: 1,
 				not_a_bill: 1,
 			},
 		]);
+		expect(await merchantNames(env.DB, "Comcast")).toEqual(["Comcast"]);
+		expect(await merchantNames(env.DB, "COMCAST CABLE")).toEqual(["Comcast"]);
 		const charge = await env.DB.prepare(
 			"SELECT id, category_source FROM transactions",
 		).first<{ id: number; category_source: string | null }>();
@@ -4091,6 +4104,7 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
 		await saveAiSwitches(env.DB, { details: false });
@@ -4437,6 +4451,7 @@ describe("balance snapshots at sync (spec §5, §8.3, decision 64)", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM household_settings"),
 		]);
@@ -4532,6 +4547,7 @@ describe("syncItem reports which rows it changed", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
 	});

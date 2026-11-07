@@ -7,6 +7,7 @@ import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
+import { seedMerchant } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
 
 // The one review screen for every "Maybe …" (issue #195, decisions 79 and 101): Settings' Band leads to
@@ -154,12 +155,11 @@ async function oneOfEach() {
 			suggestionId: suggestion?.id,
 		}),
 	];
-	await db
-		.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Blue Bottle Coffee', 'pending')",
-		)
-		.bind(BLUE)
-		.run();
+	await seedMerchant(db, {
+		key: BLUE,
+		status: "pending",
+		names: ["Blue Bottle Coffee"],
+	});
 	const named = await insertTx({ raw: BLUE, amount: 600 });
 	return {
 		income,
@@ -215,6 +215,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM never_suggest_rules"),
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);
@@ -2401,11 +2402,11 @@ describe("names", () => {
 			amount: 4000,
 			merchantName: "Comcast",
 		});
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Comcast', 'Comcast', 'pending')",
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "Comcast",
+			status: "pending",
+			names: ["Comcast"],
+		});
 		for (const names of [true, false]) {
 			await saveAiSwitches(db, { names });
 			const { html } = await get("/settings/suggestions");
@@ -2421,12 +2422,11 @@ describe("names", () => {
 		const raw = `SQ *${"x".repeat(48)}`;
 		await insertTx({ raw, amount: 1200 });
 		await insertTx({ raw, amount: 1200 });
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Long Store Name', 'pending')",
-			)
-			.bind(raw)
-			.run();
+		await seedMerchant(db, {
+			key: raw,
+			status: "pending",
+			names: ["Long Store Name"],
+		});
 		const { html } = await get("/settings/suggestions");
 		expect(html).toContain(raw);
 		const heading = html.split("<h2").find((part) => part.includes(raw)) ?? "";
@@ -2435,18 +2435,13 @@ describe("names", () => {
 });
 
 describe("names: the toast counts only the transactions whose shown name changes (decision 101)", () => {
-	const NAMES = "Blue Bottle Coffee\nBlue Bottle\nBlue Bottle Cafe";
+	const NAMES = ["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"];
 
 	/** Blue Bottle's charges, with a name waiting for them, as the screen asks it. */
 	async function blueCharges(count = 3) {
 		for (let i = 0; i < count; i += 1)
 			await insertTx({ raw: BLUE, amount: 650 });
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			)
-			.bind(BLUE, NAMES)
-			.run();
+		await seedMerchant(db, { key: BLUE, status: "pending", names: NAMES });
 	}
 
 	/** Gives the first `count` top-level charges of Blue Bottle a name of their own. */

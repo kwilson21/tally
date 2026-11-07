@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { merchantRules } from "../src/db/merchant-rules";
 import { resetDemo } from "../src/demo/reset";
+import { seedMerchant } from "./helpers/merchants";
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -323,9 +324,24 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'on') ON CONFLICT(key) DO UPDATE SET value = 'on'",
 		).run();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, default_category_id) VALUES ('RULE FOCUS RAW A', 'Zebra', 'pending', 1), ('RULE FOCUS RAW B', 'Apple', 'pending', 1), ('RULE FOCUS RAW C', 'Mango', 'pending', 1)",
-		).run();
+		await seedMerchant(env.DB, {
+			key: "RULE FOCUS RAW A",
+			status: "pending",
+			names: ["Zebra"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FOCUS RAW B",
+			status: "pending",
+			names: ["Apple"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FOCUS RAW C",
+			status: "pending",
+			names: ["Mango"],
+			defaultCategoryId: 1,
+		});
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS RAW B",
 		});
@@ -341,9 +357,24 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'off') ON CONFLICT(key) DO UPDATE SET value = 'off'",
 		).run();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, default_category_id) VALUES ('RULE FOCUS RAW A', 'Zebra', 'pending', 1), ('RULE FOCUS RAW B', 'Apple', 'pending', 1), ('RULE FOCUS RAW C', 'Mango', 'pending', 1)",
-		).run();
+		await seedMerchant(env.DB, {
+			key: "RULE FOCUS RAW A",
+			status: "pending",
+			names: ["Zebra"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FOCUS RAW B",
+			status: "pending",
+			names: ["Apple"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FOCUS RAW C",
+			status: "pending",
+			names: ["Mango"],
+			defaultCategoryId: 1,
+		});
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS RAW A",
 		});
@@ -360,9 +391,30 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('ai_names', 'on') ON CONFLICT(key) DO UPDATE SET value = 'on'",
 		).run();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, default_category_id) VALUES ('RULE FILTER RAW A', 'Zebra Match', 'pending', 1), ('RULE FILTER RAW B', 'Apple Match', 'pending', 1), ('RULE FILTER RAW C', 'Mango Match', 'pending', 1), ('RULE FILTER RAW D', 'Other', 'pending', 1)",
-		).run();
+		await seedMerchant(env.DB, {
+			key: "RULE FILTER RAW A",
+			status: "pending",
+			names: ["Zebra Match"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FILTER RAW B",
+			status: "pending",
+			names: ["Apple Match"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FILTER RAW C",
+			status: "pending",
+			names: ["Mango Match"],
+			defaultCategoryId: 1,
+		});
+		await seedMerchant(env.DB, {
+			key: "RULE FILTER RAW D",
+			status: "pending",
+			names: ["Other"],
+			defaultCategoryId: 1,
+		});
 		const otherRules = Array.from(
 			{ length: 21 },
 			(_, i) => `('RULE FILTER OTHER ${i}', 'Other ${i}', 1)`,

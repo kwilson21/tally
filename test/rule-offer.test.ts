@@ -4,6 +4,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { firstRuleOfferAmong } from "../src/transactions/rule-offer";
+import { setMerchantNames } from "./helpers/merchants";
 
 const BASE = "http://tally.test";
 const QUESTION = "Always use Groceries for rule-offer-store?";
@@ -1192,10 +1193,11 @@ describe("the rule offer names the store, not a name a row has of its own (decis
 
 	it("an edit-panel category save on an own-named row offers the store's suggested name, not the tidied bank text", async () => {
 		await env.DB.prepare(
-			"UPDATE merchants SET suggested_name = 'Pet Supplies Co', suggestion_status = 'pending' WHERE raw_name = ?",
+			"UPDATE merchants SET suggestion_status = 'pending' WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.run();
+		await setMerchantNames(env.DB, merchant, ["Pet Supplies Co"]);
 		await env.DB.prepare(
 			"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
 		)
@@ -1213,12 +1215,14 @@ describe("the rule offer names the store, not a name a row has of its own (decis
 });
 
 describe("the rule offer after the store's own name is picked (decision 101)", () => {
-	const suggest = () =>
-		env.DB.prepare(
-			"UPDATE merchants SET suggested_name = 'Pet Supplies Co', suggestion_status = 'pending' WHERE raw_name = ?",
+	const suggest = async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET suggestion_status = 'pending' WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.run();
+		await setMerchantNames(env.DB, merchant, ["Pet Supplies Co"]);
+	};
 
 	it("This one only keeps the store's suggestion, so the offer names the suggestion, not the tidied bank text", async () => {
 		await suggest();

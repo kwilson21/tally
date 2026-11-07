@@ -1,28 +1,50 @@
-// A merchant's suggested names (spec §5, §7, decision 64). `merchants.suggested_name` holds up to three,
-// one per line (a name never has a newline: src/ai/suggest-name.ts keeps single lines). They show only while
-// `suggestion_status` is `pending`: nothing is renamed until a person chooses, and a name a person
-// chose, or turned down, is never suggested again.
+// A merchant's suggested names (spec §5, §7, decision 64). They are rows of `merchant_suggested_names`, up to three
+// per merchant, and read here as the JSON text merchantNamesJsonSql gives. They show only while `suggestion_status` is
+// `pending`: nothing is renamed until a person chooses, and a name a person chose, or turned down, is never suggested again.
 import { MERCHANT_SUGGESTION_WAITING } from "../machines/merchant-suggestion";
 import { tidyName } from "./tidy-name";
 
 export const MAX_SUGGESTED_NAMES = 3;
 
-const SEPARATOR = "\n";
-
-/** The names a merchant row holds, in order. An empty value means a name was asked for and none was useful. */
+/**
+ * The names a merchant holds, in position order, from the JSON text merchantNamesJsonSql gives (`[[position, name], …]`).
+ * Total: null, text that isn't JSON, or any other shape gives no names. Blank names are dropped.
+ */
 export function parseSuggestedNames(
 	stored: string | null | undefined,
 ): string[] {
-	return (stored ?? "")
-		.split(SEPARATOR)
-		.map((name) => name.trim())
-		.filter(Boolean)
+	let rows: unknown;
+	try {
+		rows = JSON.parse(stored ?? "[]");
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(rows)) return [];
+	const named: [number, string][] = [];
+	for (const row of rows) {
+		if (
+			Array.isArray(row) &&
+			typeof row[0] === "number" &&
+			typeof row[1] === "string"
+		)
+			named.push([row[0], row[1].trim()]);
+	}
+	return named
+		.filter(([, name]) => name !== "")
+		.sort((a, b) => a[0] - b[0])
+		.map(([, name]) => name)
 		.slice(0, MAX_SUGGESTED_NAMES);
 }
 
-/** The value to keep in `suggested_name`: at most three names, one per line. */
-export function storeSuggestedNames(names: string[]): string {
-	return names.slice(0, MAX_SUGGESTED_NAMES).join(SEPARATOR);
+/**
+ * The names to store for one merchant (the write rule of merchant_suggested_names): each trimmed, blank ones dropped, the
+ * first three kept. Not de-duplicated: the AI path already removes repeats (src/ai/suggest-name.ts).
+ */
+export function normaliseNames(names: readonly string[]): string[] {
+	return names
+		.map((name) => name.trim())
+		.filter((name) => name !== "")
+		.slice(0, MAX_SUGGESTED_NAMES);
 }
 
 /** Where a suggested name came from (spec §8.6, P87 B): the bank sent it, or Tally guessed it. */

@@ -1,4 +1,4 @@
-// Hand-kept Drizzle description of two tables: `merchants` and `category_suggestions`. The migrations in
+// Hand-kept Drizzle description of three tables: `merchants`, `merchant_suggested_names` and `category_suggestions`. The migrations in
 // migrations/*.sql are the only thing that changes the database; this file is written to match them, and
 // test/db-schema.test.ts fails when they disagree (columns, SQLite types, not-null, defaults, primary keys, CHECK
 // value lists, and indexes, including unique and partial).
@@ -12,6 +12,7 @@
 import { sql } from "drizzle-orm";
 import {
 	integer,
+	primaryKey,
 	sqliteTable,
 	text,
 	uniqueIndex,
@@ -35,7 +36,6 @@ export const CATEGORY_SUGGESTION_STATUS_VALUES = [
 
 export const merchants = sqliteTable("merchants", {
 	rawName: text("raw_name").primaryKey(),
-	suggestedName: text("suggested_name"),
 	displayName: text("display_name"),
 	defaultCategoryId: integer("default_category_id"),
 	suggestionStatus: text("suggestion_status", {
@@ -43,8 +43,20 @@ export const merchants = sqliteTable("merchants", {
 	})
 		.notNull()
 		.default("none"),
+	namesAsked: integer("names_asked").notNull().default(0),
 	notABill: integer("not_a_bill").notNull().default(0),
 });
+
+/** A merchant's suggested names, one row per name, by position (migrations/0071_merchant_suggested_names.sql). */
+export const merchantSuggestedNames = sqliteTable(
+	"merchant_suggested_names",
+	{
+		merchantKey: text("merchant_key").notNull(),
+		position: integer("position").notNull(),
+		name: text("name").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.merchantKey, t.position] })],
+);
 
 export const categorySuggestions = sqliteTable(
 	"category_suggestions",
@@ -70,6 +82,10 @@ export const CHECK_LISTS = {
 	merchants: {
 		suggestion_status: MERCHANT_STATUS_VALUES,
 		not_a_bill: ["0", "1"],
+		names_asked: ["0", "1"],
+	},
+	merchant_suggested_names: {
+		position: ["0", "1", "2"],
 	},
 	category_suggestions: {
 		status: CATEGORY_SUGGESTION_STATUS_VALUES,

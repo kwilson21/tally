@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { namesToReview, settleSuggestion } from "../src/db/merchant-names";
 import { resetDemo } from "../src/demo/reset";
+import { clearMerchants, seedMerchant } from "./helpers/merchants";
 
 // Suggested merchant names (P29 A, decision 64, #33): which names wait for a person (namesToReview) and
 // how a choice settles one (settleSuggestion). The one review screen that asks them is tested in
@@ -56,13 +57,14 @@ async function charges(rawName: string, count: number, merchantName?: string) {
 			.bind(`plaid-${crypto.randomUUID()}`, rawName, merchantName ?? null)
 			.run();
 }
-const suggest = (key: string, names: string, status = "pending") =>
-	db
-		.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, ?)",
-		)
-		.bind(key, names, status)
-		.run();
+/** A suggestion waiting for a person; no names is an empty answer (asked, nothing usable), which is status none. */
+const suggest = (key: string, names: string[], status = "pending") =>
+	seedMerchant(db, {
+		key,
+		status: names.length === 0 ? "none" : (status as "pending"),
+		names,
+		namesAsked: names.length === 0,
+	});
 const merchant = (key: string) =>
 	db
 		.prepare(
@@ -76,6 +78,7 @@ beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 	]);
 });
@@ -91,9 +94,13 @@ const rowId = async (key: string) =>
 
 async function twoMerchants() {
 	await charges(BLUE, 3);
-	await suggest(BLUE, "Blue Bottle Coffee\nBlue Bottle\nBlue Bottle Cafe");
+	await suggest(BLUE, [
+		"Blue Bottle Coffee",
+		"Blue Bottle",
+		"Blue Bottle Cafe",
+	]);
 	await charges(LUPITA, 1);
-	await suggest(LUPITA, "Lupita's Taqueria");
+	await suggest(LUPITA, ["Lupita's Taqueria"]);
 }
 
 /** Gives the first `count` top-level charges of one bank text a name of their own. */
@@ -166,25 +173,26 @@ describe("namesToReview", () => {
 
 	it("leaves out a merchant that was decided, named by a person, has nothing to suggest, or has no transactions left", async () => {
 		await charges("DECIDED 1", 1);
-		await suggest("DECIDED 1", "Decided", "accepted");
+		await suggest("DECIDED 1", ["Decided"], "accepted");
 		await charges("NAMED 1", 1);
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES ('NAMED 1', 'Named', 'pending', 'Mine')",
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "NAMED 1",
+			status: "pending",
+			names: ["Named"],
+			displayName: "Mine",
+		});
 		await charges("EMPTY 1", 1);
-		await suggest("EMPTY 1", "");
-		await suggest("GONE 1", "Gone");
+		await suggest("EMPTY 1", []);
+		await suggest("GONE 1", ["Gone"]);
 		await charges("NETFLIX", 1);
-		await suggest("NETFLIX", "Netflix");
+		await suggest("NETFLIX", ["Netflix"]);
 		expect(await namesToReview(db)).toEqual([]);
 	});
 
 	it("with the names switch off keeps only the bank's own names, and lists the guesses again when it is back on (decision 80)", async () => {
 		await twoMerchants();
 		await charges(LUPITA, 1, "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		await saveAiSwitches(db, { names: false });
 		expect(await namesToReview(db)).toMatchObject([
 			{
@@ -204,7 +212,7 @@ describe("namesToReview", () => {
 	it("says where each merchant's names came from: Tally's guess, or the bank", async () => {
 		await twoMerchants();
 		await charges("SQ *COMCAST 99", 1, "Comcast");
-		await suggest("Comcast", "Comcast");
+		await suggest("Comcast", ["Comcast"]);
 		const review = await namesToReview(db);
 		expect(review.find((r) => r.key === BLUE)?.source).toBe("tally");
 		expect(review.find((r) => r.key === "Comcast")?.source).toBe("bank");
@@ -217,7 +225,7 @@ describe("namesToReview with several bank texts for one merchant", () => {
 		// "TGT*0099 SF" doesn't, so those rows show it dashed and the review must still offer it.
 		await charges("TARGET 1234", 3, "Target");
 		await charges("TGT*0099 SF", 1, "Target");
-		await suggest("Target", "Target");
+		await suggest("Target", ["Target"]);
 		expect(await namesToReview(db)).toEqual([
 			{
 				key: "Target",
@@ -238,7 +246,7 @@ describe("namesToReview with several bank texts for one merchant", () => {
 		await charges("TGT*0099 SF", 1, "Target");
 		await ownNames("TARGET 1234", 1);
 		await ownNames("TGT*0099 SF", 1);
-		await suggest("Target", "Target Stores");
+		await suggest("Target", ["Target Stores"]);
 		const [review] = await namesToReview(db);
 		expect(review).toMatchObject({ key: "Target", count: 4, owned: 2 });
 	});
@@ -247,7 +255,7 @@ describe("namesToReview with several bank texts for one merchant", () => {
 		await charges("TGT*0099 SF", 1, "Target");
 		await charges("TGT*5 OAKLAND", 2, "Target");
 		await charges("TARGET 1234", 5, "Target");
-		await suggest("Target", "Target\nTarget Stores");
+		await suggest("Target", ["Target", "Target Stores"]);
 		const [review] = await namesToReview(db);
 		// The first text's tidied form repeats "Target", so only "Target Stores" is offered there; the
 		// text shown is the busiest one where something is offered.
@@ -258,14 +266,14 @@ describe("namesToReview with several bank texts for one merchant", () => {
 
 	it("drops a merchant only when no text of it has a name to offer", async () => {
 		await charges("TARGET 1234", 2, "Target");
-		await suggest("Target", "Target");
+		await suggest("Target", ["Target"]);
 		expect(await namesToReview(db)).toEqual([]);
 	});
 
 	it("keeps the Settings count and the review in step", async () => {
 		await charges("TARGET 1234", 3, "Target");
 		await charges("TGT*0099 SF", 1, "Target");
-		await suggest("Target", "Target");
+		await suggest("Target", ["Target"]);
 		expect(textOf((await get("/settings")).html)).toContain(
 			"1 suggestion to check",
 		);
@@ -333,7 +341,7 @@ describe("the names switch and the Band on the contents page (#606)", () => {
 
 describe("settleSuggestion", () => {
 	it("only settles a suggestion that is still waiting for a merchant nobody has named", async () => {
-		await suggest(BLUE, "Blue Bottle Coffee");
+		await suggest(BLUE, ["Blue Bottle Coffee"]);
 		expect(
 			await settleSuggestion(db, BLUE, { kind: "name", name: "Mine" }),
 		).toBe(true);
@@ -372,14 +380,14 @@ describe("Settings", () => {
 	it("with the names switch off counts only the bank's own names", async () => {
 		await twoMerchants();
 		await charges("SQ *COMCAST 99", 1, "Comcast");
-		await suggest("Comcast", "Comcast");
+		await suggest("Comcast", ["Comcast"]);
 		expect(textOf((await get("/settings")).html)).toContain(
 			"3 suggestions to check",
 		);
 		await saveAiSwitches(db, { names: false });
 		const { html } = await get("/settings");
 		expect(textOf(html)).toContain("1 suggestion to check");
-		await db.prepare("DELETE FROM merchants WHERE raw_name = 'Comcast'").run();
+		await clearMerchants(db, "raw_name = 'Comcast'");
 		expect((await get("/settings")).html).not.toContain(
 			'href="/settings/suggestions"',
 		);
@@ -387,7 +395,7 @@ describe("Settings", () => {
 
 	it("says '1 suggestion to check' for one, and shows no Band for none", async () => {
 		await charges(BLUE, 1);
-		await suggest(BLUE, "Blue Bottle Coffee");
+		await suggest(BLUE, ["Blue Bottle Coffee"]);
 		expect(textOf((await get("/settings")).html)).toContain(
 			"1 suggestion to check",
 		);

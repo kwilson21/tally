@@ -1066,7 +1066,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		// The bank-name suggestion Jev is told when a row has no name of its own or a chosen merchant name.
 		[
 			"suggested name",
-			"INSERT INTO merchants (raw_name, suggested_name) VALUES ('SORT STEP 1', '[\"Corner shop\"]') ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name",
+			"INSERT OR REPLACE INTO merchant_suggested_names (merchant_key, position, name) VALUES ('SORT STEP 1', 0, 'Corner shop')",
 		],
 		[
 			"suggestion status",

@@ -3,7 +3,7 @@
 // planned first (plan.ts), from the day Tally's history starts (historyStart).
 
 import { daysBefore } from "../dates";
-import { suggestBankNamesSql } from "../db/merchant-names";
+import { suggestBankNames } from "../db/merchant-names";
 import { tidyName } from "../transactions/tidy-name";
 import type { AppleRow } from "./csv";
 import { type HeldTwins, type ImportPlan, planImport, rowKey } from "./plan";
@@ -71,7 +71,8 @@ export async function historyStart(
  * which is the Description or the Description tidied (the same test as sync's plaidNameToSuggest).
  */
 function suggestableName(row: AppleRow): string | null {
-	const name = row.merchant;
+	// A name is stored trimmed, and its key must equal it, so a padded Merchant is trimmed before it is suggested.
+	const name = (row.merchant ?? "").trim();
 	if (!name) return null;
 	if (name === row.description || name === tidyName(row.description))
 		return null;
@@ -247,9 +248,7 @@ export async function importAppleCard(
 		),
 	];
 	if (names.length > 0)
-		statements.push(
-			db.prepare(suggestBankNamesSql("1")).bind(JSON.stringify(names)),
-		);
+		statements.push(...suggestBankNames(db, names, "1", []));
 
 	const results = await db.batch<{ id: number }>(statements);
 	const accountId = results[1]?.results[0]?.id;

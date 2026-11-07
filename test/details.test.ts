@@ -6,6 +6,7 @@ import { listTransactions, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestTransactionNotes } from "../src/suggest-names-pending";
 import { parseFilters } from "../src/transactions/filters";
+import { seedMerchant } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
@@ -296,7 +297,10 @@ describe("transaction detail guesses", () => {
 	it("keeps a guess that repeats only a name a person turned down", async () => {
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'rejected')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('UBER *TRIP', 'rejected', 0)",
+			),
+			db.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('UBER *TRIP', 0, 'Uber Eats')",
 			),
 			db.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
@@ -314,7 +318,10 @@ describe("transaction detail guesses", () => {
 	it("drops a guess that repeats a pending name the row shows, while names are on", async () => {
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'pending')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('UBER *TRIP', 'pending', 0)",
+			),
+			db.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('UBER *TRIP', 0, 'Uber Eats')",
 			),
 			db.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
@@ -331,7 +338,10 @@ describe("transaction detail guesses", () => {
 		await saveAiSwitches(db, { names: false });
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'pending')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('UBER *TRIP', 'pending', 0)",
+			),
+			db.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('UBER *TRIP', 0, 'Uber Eats')",
 			),
 			db.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
@@ -350,7 +360,10 @@ describe("transaction detail guesses", () => {
 		await saveAiSwitches(db, { names: false });
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Harbor Hardware', 'Harbor Hardware', 'pending')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Harbor Hardware', 'pending', 0)",
+			),
+			db.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Harbor Hardware', 0, 'Harbor Hardware')",
 			),
 			db.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'HBR HDWR #88', 'Harbor Hardware', 1, 1, 'queued')",
@@ -370,7 +383,10 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, display_name) VALUES ('BL BTTL COF', 'Blue Bottle Coffee')",
 			),
 			db.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BLUE BTL CO', 'Blue Bottle Coffee', 'pending')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('BLUE BTL CO', 'pending', 0)",
+			),
+			db.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('BLUE BTL CO', 0, 'Blue Bottle Coffee')",
 			),
 			db.prepare(
 				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state) VALUES
@@ -910,11 +926,11 @@ describe("transaction detail guesses", () => {
 
 	it("Looks right keeps all four details, and turning details off preserves them", async () => {
 		const id = await charge();
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('COFFEE SHOP', 'Corner Coffee', 'pending')",
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "COFFEE SHOP",
+			status: "pending",
+			names: ["Corner Coffee"],
+		});
 		const before = await get(`/transactions/${id}`);
 		expect(before.html).toContain('value="s:Corner Coffee"');
 		await db
@@ -1055,11 +1071,11 @@ describe("transaction detail guesses", () => {
 
 	it("Looks right accepts the displayed name suggestion when no name is posted", async () => {
 		const id = await charge();
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name,suggested_name,suggestion_status) VALUES ('COFFEE SHOP','Corner Coffee','pending')",
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "COFFEE SHOP",
+			status: "pending",
+			names: ["Corner Coffee"],
+		});
 		const saved = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",

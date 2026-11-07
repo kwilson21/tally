@@ -205,6 +205,7 @@ beforeEach(async () => {
 	await db.prepare("DELETE FROM transactions").run();
 	await db.prepare("DELETE FROM bill_payments").run();
 	await db.prepare("DELETE FROM bills").run();
+	await db.prepare("DELETE FROM merchant_suggested_names").run();
 	await db.prepare("DELETE FROM merchants").run();
 	await db.prepare("DELETE FROM accounts").run();
 	await db.prepare("DELETE FROM plaid_items").run();

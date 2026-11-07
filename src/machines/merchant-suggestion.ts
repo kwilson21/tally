@@ -18,9 +18,9 @@ import type { MERCHANT_STATUS_VALUES } from "../db/schema";
  * to have no name a person chose (`display_name IS NULL`); that is a column, not a state, so the SQL checks it and
  * this machine does not repeat it.
  *
- * `none` and `asked` are one stored status, `none`: an asked text is kept as `suggested_name = ''`, which is what
- * stops Workers AI asking about it again, while a bank name can still replace it. MERCHANT_SUGGESTION_ROWS says how
- * each state is stored. The real writes are SQL (src/db/merchant-names.ts, src/db/transactions.ts,
+ * `none` and `asked` are one stored status, `none`: an asked text is kept as `names_asked = 1` with no name rows,
+ * which is what stops Workers AI asking about it again, while a bank name can still replace it. MERCHANT_SUGGESTION_ROWS
+ * says how each state is stored. The real writes are SQL (src/db/merchant-names.ts, src/db/transactions.ts,
  * src/plaid/sync.ts); this machine is the one place the rule is stated, and test/suggestion-machines.test.ts runs
  * the store functions against it.
  */
@@ -99,21 +99,23 @@ export const MERCHANT_SUGGESTION_LABELS: Record<
 };
 
 /**
- * How each state is stored in `merchants`: its `suggestion_status`, and whether `suggested_name` is empty text (`''`),
- * `null`, or a name. Two states share the status `none`; only the empty text tells them apart. Typed by state.
+ * How each state is stored in `merchants` and `merchant_suggested_names`: its `suggestion_status`, whether `names_asked`
+ * is set, and its names (the rows, in position order). Two states share the status `none`; only `names_asked` tells
+ * them apart. Typed by state.
  */
 export const MERCHANT_SUGGESTION_ROWS: Record<
 	keyof typeof merchantSuggestionMachine.states,
 	{
 		status: (typeof MERCHANT_STATUS_VALUES)[number];
-		suggestedName: string | null;
+		namesAsked: boolean;
+		names: string[];
 	}
 > = {
-	none: { status: "none", suggestedName: null },
-	asked: { status: "none", suggestedName: "" },
-	pending: { status: "pending", suggestedName: "Zed Cafe" },
-	accepted: { status: "accepted", suggestedName: "Zed Cafe" },
-	rejected: { status: "rejected", suggestedName: "Zed Cafe" },
+	none: { status: "none", namesAsked: false, names: [] },
+	asked: { status: "none", namesAsked: true, names: [] },
+	pending: { status: "pending", namesAsked: false, names: ["Zed Cafe"] },
+	accepted: { status: "accepted", namesAsked: false, names: ["Zed Cafe"] },
+	rejected: { status: "rejected", namesAsked: false, names: ["Zed Cafe"] },
 };
 
 /** The values the database's CHECK on `merchants.suggestion_status` allows, from the rows above. */
@@ -124,9 +126,10 @@ export const MERCHANT_SUGGESTION_STATUSES = [
 /** The state a stored row is in, the reverse of MERCHANT_SUGGESTION_ROWS. */
 export function merchantSuggestionState(row: {
 	status: string;
-	suggestedName: string | null;
+	namesAsked: boolean;
+	names: string[];
 }): keyof typeof MERCHANT_SUGGESTION_ROWS {
-	if (row.status === "none") return row.suggestedName === "" ? "asked" : "none";
+	if (row.status === "none") return row.namesAsked ? "asked" : "none";
 	if (
 		row.status === "pending" ||
 		row.status === "accepted" ||

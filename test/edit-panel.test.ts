@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
+import { seedMerchant } from "./helpers/merchants";
 
 // The edit panel leads with its category (P120 B, decision 111): the name is the one headline, the category
 // is open while it needs one and folds to a row once it's set, and Exclude and Count as income are switches.
@@ -574,11 +575,11 @@ describe("an empty detail has no source line (#688)", () => {
 		)
 			.bind("Lupita's Taqueria")
 			.first<{ id: number }>();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES (?, ?, 'pending', NULL)",
-		)
-			.bind("Lupita's Taqueria", "Lupita's Taqueria")
-			.run();
+		await seedMerchant(env.DB, {
+			key: "Lupita's Taqueria",
+			status: "pending",
+			names: ["Lupita's Taqueria"],
+		});
 		const summary = summaryOf(
 			(await get(`/transactions/${row?.id}`)).html,
 			"detail-name",

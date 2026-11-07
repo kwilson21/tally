@@ -21,6 +21,7 @@ import {
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { jevCallLimit } from "../src/sort-groups";
+import { seedMerchant } from "./helpers/merchants";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -864,7 +865,12 @@ describe("categorizePending", () => {
 		it("tells Jev the bank's own store name when no name is chosen", async () => {
 			await db
 				.prepare(
-					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle Coffee', 'pending')",
+					"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Blue Bottle Coffee', 'pending', 0)",
+				)
+				.run();
+			await db
+				.prepare(
+					"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Blue Bottle Coffee', 0, 'Blue Bottle Coffee')",
 				)
 				.run();
 			expect(await merchantJevIsTold("BL BTTL COF", "Blue Bottle Coffee")).toBe(
@@ -875,18 +881,25 @@ describe("categorizePending", () => {
 		it("doesn't tell Jev a name Tally guessed", async () => {
 			await db
 				.prepare(
-					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BL BTTL COF', 'Blue Bottle Coffee', 'pending')",
+					"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('BL BTTL COF', 'pending', 0)",
+				)
+				.run();
+			await db
+				.prepare(
+					"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('BL BTTL COF', 0, 'Blue Bottle Coffee')",
 				)
 				.run();
 			expect(await merchantJevIsTold("BL BTTL COF", null)).toBeNull();
 		});
 
 		it("tells Jev the chosen name over the bank's own", async () => {
-			await db
-				.prepare(
-					"INSERT INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle', 'Blue Bottle Coffee', 'pending')",
-				)
-				.run();
+			// A person chose "Blue Bottle" from the suggestion, so the row is accepted with the name they chose.
+			await seedMerchant(db, {
+				key: "Blue Bottle Coffee",
+				status: "accepted",
+				names: ["Blue Bottle Coffee"],
+				displayName: "Blue Bottle",
+			});
 			expect(await merchantJevIsTold("BL BTTL COF", "Blue Bottle Coffee")).toBe(
 				"Blue Bottle",
 			);
@@ -895,7 +908,12 @@ describe("categorizePending", () => {
 		it("doesn't tell Jev a bank name the person turned down", async () => {
 			await db
 				.prepare(
-					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle Coffee', 'rejected')",
+					"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('Blue Bottle Coffee', 'rejected', 0)",
+				)
+				.run();
+			await db
+				.prepare(
+					"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('Blue Bottle Coffee', 0, 'Blue Bottle Coffee')",
 				)
 				.run();
 			expect(

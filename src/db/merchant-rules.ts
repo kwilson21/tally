@@ -1,5 +1,5 @@
 import { shownName } from "../transactions/name-suggestions";
-import { merchantKeySql } from "./merchant-key";
+import { merchantKeySql, merchantNamesJsonSql } from "./merchant-key";
 
 export const CLEAR_MERCHANT_RULE_SQL =
 	"UPDATE merchants SET default_category_id = NULL WHERE raw_name = ?";
@@ -30,7 +30,7 @@ export async function merchantRules(
 			.first<{ n: number }>(),
 		db
 			.prepare(
-				`SELECT m.raw_name AS merchantKey, m.display_name, m.suggested_name, m.suggestion_status,
+				`SELECT m.raw_name AS merchantKey, m.display_name, ${merchantNamesJsonSql("m.raw_name")} AS suggestedNames, m.suggestion_status,
 					c.id AS categoryId, c.name AS category, c.icon, c.color, c.archived
 				FROM merchants m JOIN categories c ON c.id = m.default_category_id
 				WHERE m.default_category_id IS NOT NULL
@@ -39,17 +39,17 @@ export async function merchantRules(
 			.all<
 				Omit<MerchantRuleRow, "merchant" | "transactions"> & {
 					display_name: string | null;
-					suggested_name: string | null;
+					suggestedNames: string | null;
 					suggestion_status: string | null;
 				}
 			>(),
 	]);
 	const rules = rows.results.map(
-		({ display_name, suggested_name, suggestion_status, ...rule }) => ({
+		({ display_name, suggestedNames, suggestion_status, ...rule }) => ({
 			...rule,
 			merchant: shownName({
 				chosen: display_name,
-				stored: suggested_name,
+				stored: suggestedNames,
 				status: suggestion_status,
 				key: rule.merchantKey,
 				rawName: rule.merchantKey,

@@ -10,6 +10,7 @@ import { destinations } from "../src/routes/destinations";
 import { home } from "../src/routes/home";
 import { howItWorks } from "../src/routes/how-it-works";
 import { transactions } from "../src/routes/transactions";
+import { clearMerchants, seedMerchant } from "./helpers/merchants";
 import { pinClock } from "./pinned-clock";
 
 // Some describe bodies read "this month" when the file loads, so the clock is pinned now as well as before each test (#808).
@@ -181,12 +182,12 @@ describe("GET /how-it-works in the demo", () => {
 	});
 
 	it("counts older pending merchant names without assigning them to this month", async () => {
-		await env.DB.prepare(
-			"DELETE FROM merchants WHERE suggestion_status = 'pending'",
-		).run();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('OLD SHOP 123', 'Old Shop Market', 'pending')",
-		).run();
+		await clearMerchants(env.DB, "suggestion_status = 'pending'");
+		await seedMerchant(env.DB, {
+			key: "OLD SHOP 123",
+			status: "pending",
+			names: ["Old Shop Market"],
+		});
 		await env.DB.prepare(
 			"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('old-shop-review', 1, '2025-01-10', 650, 'OLD SHOP 123')",
 		).run();
@@ -378,9 +379,7 @@ describe("the budget guide with no activity", () => {
 
 describe("outside the demo", () => {
 	it("says both AI jobs are live and gives a household example when no names wait", async () => {
-		await env.DB.prepare(
-			"DELETE FROM merchants WHERE suggestion_status = 'pending'",
-		).run();
+		await clearMerchants(env.DB, "suggestion_status = 'pending'");
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
