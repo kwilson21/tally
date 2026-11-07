@@ -1,4 +1,6 @@
 import { setup } from "xstate";
+// Type-only: erased at build time, so this machine never pulls in the Drizzle runtime.
+import type { MERCHANT_STATUS_VALUES } from "../db/schema";
 
 /**
  * The name Tally suggests for a bank's text ("AMZN Mktp US*2K4" becomes "Amazon"), in plain words:
@@ -102,7 +104,10 @@ export const MERCHANT_SUGGESTION_LABELS: Record<
  */
 export const MERCHANT_SUGGESTION_ROWS: Record<
 	keyof typeof merchantSuggestionMachine.states,
-	{ status: string; suggestedName: string | null }
+	{
+		status: (typeof MERCHANT_STATUS_VALUES)[number];
+		suggestedName: string | null;
+	}
 > = {
 	none: { status: "none", suggestedName: null },
 	asked: { status: "none", suggestedName: "" },

@@ -50,9 +50,9 @@ describe("the suggestion machines against the schema", () => {
 	});
 
 	it("the types agree: category states minus born are the schema's values, merchant rows use the schema's values", () => {
-		expectTypeOf<
-			Exclude<CategorySuggestionState, "born">
-		>().toEqualTypeOf<(typeof CATEGORY_SUGGESTION_STATUS_VALUES)[number]>();
+		expectTypeOf<Exclude<CategorySuggestionState, "born">>().toEqualTypeOf<
+			(typeof CATEGORY_SUGGESTION_STATUS_VALUES)[number]
+		>();
 		expectTypeOf<
 			(typeof MERCHANT_SUGGESTION_ROWS)[keyof typeof MERCHANT_SUGGESTION_ROWS]["status"]
 		>().toExtend<(typeof MERCHANT_STATUS_VALUES)[number]>();
