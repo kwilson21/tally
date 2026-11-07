@@ -126,6 +126,14 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 	return `${rows.map((row) => row.map(csvField).join(",")).join("\r\n")}\r\n`;
 }
 
+/** The two tables tallyExport reads with their own statements: a bank's name and status, and a document's file name and date. */
+export const OWN_STATEMENTS = {
+	// A disconnected bank keeps its old status column; its exported status says "disconnected".
+	plaid_items:
+		"SELECT institution_name, CASE WHEN disconnected_at IS NOT NULL THEN 'disconnected' ELSE status END AS status FROM plaid_items ORDER BY id",
+	documents: "SELECT filename, uploaded_at FROM documents ORDER BY id",
+} as const;
+
 /** Build an allowlisted export in one batch, so every table comes from the same moment. Bank logins and document contents are never selected. */
 export async function tallyExport(db: D1Database) {
 	const tables = Object.entries(EXPORT_COLUMNS);
@@ -133,11 +141,8 @@ export async function tallyExport(db: D1Database) {
 		...tables.map(([table, columns]) =>
 			db.prepare(`SELECT ${columns} FROM ${table}`),
 		),
-		// A disconnected bank keeps its old status column; its exported status says "disconnected".
-		db.prepare(
-			"SELECT institution_name, CASE WHEN disconnected_at IS NOT NULL THEN 'disconnected' ELSE status END AS status FROM plaid_items ORDER BY id",
-		),
-		db.prepare("SELECT filename, uploaded_at FROM documents ORDER BY id"),
+		db.prepare(OWN_STATEMENTS.plaid_items),
+		db.prepare(OWN_STATEMENTS.documents),
 	]);
 	const [plaidItems, documents] = results.slice(tables.length);
 	return {
