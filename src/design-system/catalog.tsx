@@ -22,6 +22,14 @@ import {
 	skippedPay,
 } from "../first-tally/skipped";
 import type { YourBank } from "../first-tally/your-banks";
+import {
+	CATEGORY_SUGGESTION_LABELS,
+	categorySuggestionMachine,
+} from "../machines/category-suggestion";
+import {
+	MERCHANT_SUGGESTION_LABELS,
+	merchantSuggestionMachine,
+} from "../machines/merchant-suggestion";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { closingToast, FINISHED_ANNOUNCEMENT } from "../resort-toast";
@@ -103,6 +111,7 @@ import { LearnedPage } from "../views/learned-page";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
 import { LinkBankButton, LinkBankError } from "../views/link-bank";
+import { MachineDiagram } from "../views/machine-diagram";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -6679,6 +6688,30 @@ function Diagrams() {
 				sentence="The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers."
 			>
 				<SystemDiagram />
+			</Specimen>
+			<Specimen
+				id="machine-diagram"
+				title="MachineDiagram"
+				tier="visual"
+				components={["MachineDiagram"]}
+				sentence="A state machine drawn from its own definition (decision 175): one box for each state, left to right, finished states shaded, a dot and short arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
+			>
+				<State label="A suggested new category (one state, three ways out)">
+					<MachineDiagram
+						id="machine-diagram-category"
+						title="How a suggested new category is decided"
+						machine={categorySuggestionMachine}
+						labels={CATEGORY_SUGGESTION_LABELS}
+					/>
+				</State>
+				<State label="A suggested store name (a loop on one state, an arrow back, two ways out)">
+					<MachineDiagram
+						id="machine-diagram-name"
+						title="How a suggested store name is decided"
+						machine={merchantSuggestionMachine}
+						labels={MERCHANT_SUGGESTION_LABELS}
+					/>
+				</State>
 			</Specimen>
 			<Specimen
 				id="how-diagrams"
