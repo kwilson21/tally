@@ -16,6 +16,16 @@ import { setup } from "xstate";
  * The real writes are SQL (src/db/merchant-names.ts, src/db/transactions.ts, src/plaid/sync.ts); this machine is
  * the one place the rule is stated, and test/suggestion-machines.test.ts runs the store functions against it.
  */
+/** Every state of the machine, once. The machine's `states` and the diagram labels below must both match it, or the build fails. */
+export const MERCHANT_SUGGESTION_STATES = [
+	"none",
+	"pending",
+	"accepted",
+	"rejected",
+] as const;
+export type MerchantSuggestionState =
+	(typeof MERCHANT_SUGGESTION_STATES)[number];
+
 export const merchantSuggestionMachine = setup({}).createMachine({
 	id: "merchant-suggestion",
 	initial: "none",
@@ -64,7 +74,10 @@ export const MERCHANT_SUGGESTION_STATUSES = Object.keys(
 );
 
 /** The short word each state wears in a diagram box. Typed by state, so a new state fails to compile until it has one. */
-export const MERCHANT_SUGGESTION_LABELS: Record<string, string> = {
+export const MERCHANT_SUGGESTION_LABELS: Record<
+	MerchantSuggestionState,
+	string
+> = {
 	none: "None",
 	pending: "Waiting",
 	accepted: "Accepted",

@@ -47,10 +47,52 @@ describe("MachineDiagram", () => {
 		expect(html).toContain("Waiting goes to Accepted on accept.");
 	});
 
-	it("stays inside its 360 wide frame, loop and arrow back included", () => {
-		const html = draw(merchantSuggestionMachine, MERCHANT_SUGGESTION_LABELS);
-		expect(html).toContain('viewBox="0 0 360 ');
-		for (const x of html.matchAll(/ x="(-?[\d.]+)"/g))
-			expect(Number(x[1])).toBeGreaterThanOrEqual(0);
+	it("keeps every box, arrow and word inside its frame, loop and arrow back included", () => {
+		for (const [machine, labels] of [
+			[categorySuggestionMachine, CATEGORY_SUGGESTION_LABELS],
+			[merchantSuggestionMachine, MERCHANT_SUGGESTION_LABELS],
+		] as const) {
+			const html = draw(machine as typeof merchantSuggestionMachine, labels);
+			const frame = html.match(/viewBox="0 0 (\d+) (\d+)"/);
+			const width = Number(frame?.[1]);
+			const height = Number(frame?.[2]);
+			expect(width).toBe(360);
+			const inside = (x: number, y: number, what: string) => {
+				expect(x, `${what} x`).toBeGreaterThanOrEqual(0);
+				expect(x, `${what} x`).toBeLessThanOrEqual(width);
+				expect(y, `${what} y`).toBeGreaterThanOrEqual(0);
+				expect(y, `${what} y`).toBeLessThanOrEqual(height);
+			};
+			for (const rect of html.matchAll(
+				/<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)"/g,
+			))
+				inside(
+					Number(rect[1]) + Number(rect[3]),
+					Number(rect[2]) + Number(rect[4]),
+					"box far corner",
+				);
+			for (const text of html.matchAll(/<text x="([-\d.]+)" y="([-\d.]+)"/g))
+				inside(Number(text[1]), Number(text[2]), "word");
+			for (const path of html.matchAll(/<path d="([^"]+)"/g)) {
+				// Every command here is M, L, C (pairs), H (an x) or V (a y); read its points in order.
+				let x = 0;
+				let y = 0;
+				for (const part of path[1]?.match(/[MLCHV][^MLCHV]*/g) ?? []) {
+					const nums = (part.slice(1).match(/-?[\d.]+/g) ?? []).map(Number);
+					if (part[0] === "H") {
+						x = nums[0] as number;
+						inside(x, y, "arrow");
+					} else if (part[0] === "V") {
+						y = nums[0] as number;
+						inside(x, y, "arrow");
+					} else
+						for (let i = 0; i + 1 < nums.length; i += 2) {
+							x = nums[i] as number;
+							y = nums[i + 1] as number;
+							inside(x, y, "arrow");
+						}
+				}
+			}
+		}
 	});
 });

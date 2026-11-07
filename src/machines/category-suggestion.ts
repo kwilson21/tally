@@ -19,6 +19,17 @@ import { setup } from "xstate";
  * against it. The claim stamp (`decided_at`) that keeps two people from deciding at once is not a state: it is a
  * guard inside the accept write, drawn here only as a note.
  */
+/** Every state of the machine, once. The machine's `states` and the diagram labels below must both match it, or the build fails. */
+export const CATEGORY_SUGGESTION_STATES = [
+	"born",
+	"pending",
+	"created",
+	"dismissed",
+	"none",
+] as const;
+export type CategorySuggestionState =
+	(typeof CATEGORY_SUGGESTION_STATES)[number];
+
 export const categorySuggestionMachine = setup({}).createMachine({
 	id: "category-suggestion",
 	initial: "born",
@@ -79,7 +90,10 @@ export const CATEGORY_SUGGESTION_STATUSES = Object.keys(
 ).filter((state) => state !== CATEGORY_SUGGESTION_UNSAVED);
 
 /** The short word each state wears in a diagram box. Typed by state, so a new state fails to compile until it has one. */
-export const CATEGORY_SUGGESTION_LABELS: Record<string, string> = {
+export const CATEGORY_SUGGESTION_LABELS: Record<
+	CategorySuggestionState,
+	string
+> = {
 	born: "Found",
 	pending: "Waiting",
 	created: "Made",

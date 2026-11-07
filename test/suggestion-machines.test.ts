@@ -140,6 +140,21 @@ describe("the category suggestion store follows its machine", () => {
 			.first<{ id: number }>();
 		return row?.id as number;
 	}
+	const eligible = async () => {
+		const ids: number[] = [];
+		for (let i = 0; i < 3; i++) {
+			const row = await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category,
+						category_confidence, jev_none_fit, excluded, flag_income, is_split, pending)
+					 VALUES (1, '2026-09-20', 1500, 'NETFLIX.COM', 'ENTERTAINMENT', 0.93, 1, 0, 0, 0, 0) RETURNING id`,
+				)
+				.first<{ id: number }>();
+			ids.push(row?.id as number);
+		}
+		return ids;
+	};
+
 	const statusOf = async (id: number) =>
 		(
 			await db
@@ -173,20 +188,6 @@ describe("the category suggestion store follows its machine", () => {
 	});
 
 	it("a new group is stored as waiting when it has a usable name and as nothing when it has none, as the machine says", async () => {
-		const eligible = async () => {
-			const ids: number[] = [];
-			for (let i = 0; i < 3; i++) {
-				const row = await db
-					.prepare(
-						`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category,
-							category_confidence, jev_none_fit, excluded, flag_income, is_split, pending)
-						 VALUES (1, '2026-09-20', 1500, 'NETFLIX.COM', 'ENTERTAINMENT', 0.93, 1, 0, 0, 0, 0) RETURNING id`,
-					)
-					.first<{ id: number }>();
-				ids.push(row?.id as number);
-			}
-			return ids;
-		};
 		const named = await saveSuggestion(db, "Streaming", await eligible());
 		const nameless = await saveSuggestion(db, null, await eligible());
 		expect(await statusOf(named as number)).toBe(
@@ -194,6 +195,22 @@ describe("the category suggestion store follows its machine", () => {
 		);
 		expect(await statusOf(nameless as number)).toBe(
 			next(categorySuggestionMachine, CATEGORY_SUGGESTION_UNSAVED, "NAMELESS"),
+		);
+	});
+
+	it("accepting a waiting suggestion creates the category and moves it where the machine says", async () => {
+		const purchases = await eligible();
+		const id = (await saveSuggestion(db, "Zed Streaming", purchases)) as number;
+		expect(await statusOf(id)).toBe("pending");
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{ ticked: purchases, shown: purchases, notes: {} },
+			"person",
+		);
+		expect(result).toMatchObject({ ok: true });
+		expect(await statusOf(id)).toBe(
+			next(categorySuggestionMachine, "pending", "ACCEPT"),
 		);
 	});
 
