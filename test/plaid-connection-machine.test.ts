@@ -3,25 +3,50 @@ import { next } from "../src/machines/next";
 import { plaidConnectionMachine } from "../src/machines/plaid-connection";
 
 // Every state x event pair, walked against the machine. A legal pair names where it goes; every other pair is refused.
-const STATES = ["ok", "needs_attention", "disconnected"] as const;
+const STATES = [
+	"ok",
+	"login_broken",
+	"expiring",
+	"login_broken_and_expiring",
+	"disconnected",
+] as const;
 const EVENTS = [
 	"LOGIN_BROKEN",
-	"RELINKED",
+	"EXPIRY_WARNING",
 	"SYNC_SUCCEEDED",
+	"RELINKED",
 	"DISCONNECT",
 ] as const;
 
 const LEGAL: Partial<Record<string, Partial<Record<string, string>>>> = {
 	ok: {
-		LOGIN_BROKEN: "needs_attention",
-		RELINKED: "ok",
+		LOGIN_BROKEN: "login_broken",
+		EXPIRY_WARNING: "expiring",
 		SYNC_SUCCEEDED: "ok",
+		RELINKED: "ok",
 		DISCONNECT: "disconnected",
 	},
-	needs_attention: {
-		LOGIN_BROKEN: "needs_attention",
-		RELINKED: "ok",
+	login_broken: {
+		LOGIN_BROKEN: "login_broken",
+		EXPIRY_WARNING: "login_broken_and_expiring",
+		// A good sync clears a login problem, and nothing else.
 		SYNC_SUCCEEDED: "ok",
+		RELINKED: "ok",
+		DISCONNECT: "disconnected",
+	},
+	expiring: {
+		LOGIN_BROKEN: "login_broken_and_expiring",
+		EXPIRY_WARNING: "expiring",
+		// A good sync does not clear an expiry warning: only a relink does.
+		SYNC_SUCCEEDED: "expiring",
+		RELINKED: "ok",
+		DISCONNECT: "disconnected",
+	},
+	login_broken_and_expiring: {
+		LOGIN_BROKEN: "login_broken_and_expiring",
+		EXPIRY_WARNING: "login_broken_and_expiring",
+		SYNC_SUCCEEDED: "expiring",
+		RELINKED: "ok",
 		DISCONNECT: "disconnected",
 	},
 	// Final: nothing moves a disconnected bank.
@@ -38,12 +63,9 @@ describe("plaid connection machine", () => {
 		}
 	}
 
-	it("has exactly the three states, with disconnected final", () => {
+	it("has exactly the five states, with disconnected final", () => {
 		const states = plaidConnectionMachine.config.states ?? {};
-		expect(Object.keys(states).sort()).toEqual([
-			"disconnected",
-			"needs_attention",
-			"ok",
-		]);
+		expect(Object.keys(states).sort()).toEqual([...STATES].sort());
+		expect(states.disconnected).toMatchObject({ type: "final" });
 	});
 });

@@ -50,7 +50,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
-		"SELECT id, access_token_encrypted, status, disconnected_at FROM plaid_items WHERE plaid_item_id = ?",
+		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held FROM plaid_items WHERE plaid_item_id = ?",
 	)
 		.bind(body.item_id)
 		.first<{
@@ -58,6 +58,8 @@ webhooks.post("/webhooks/plaid", async (c) => {
 			access_token_encrypted: ArrayBuffer;
 			status: string;
 			disconnected_at: string | null;
+			attention_login: number;
+			attention_held: number;
 		}>();
 	if (!item) return c.body(null, 200);
 	if (item.disconnected_at !== null) return c.body(null, 200);

@@ -22,10 +22,15 @@ async function addItem(status: "ok" | "needs_attention" = "ok") {
 	const token = await encryptToken(`token-${crypto.randomUUID()}`, KEY);
 	const row = await env.DB.prepare(
 		`INSERT INTO plaid_items
-			(access_token_encrypted, institution_name, linked_by, plaid_item_id, status)
-		 VALUES (?, 'Bank', 'person@example.com', ?, ?) RETURNING id`,
+			(access_token_encrypted, institution_name, linked_by, plaid_item_id, status, attention_login)
+		 VALUES (?, 'Bank', 'person@example.com', ?, ?, ?) RETURNING id`,
 	)
-		.bind(token, crypto.randomUUID(), status)
+		.bind(
+			token,
+			crypto.randomUUID(),
+			status,
+			status === "needs_attention" ? 1 : 0,
+		)
 		.first<{ id: number }>();
 	return row?.id as number;
 }

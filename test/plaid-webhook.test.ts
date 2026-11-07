@@ -286,9 +286,13 @@ describe("Plaid webhook route", () => {
 		).toBe(200);
 		expect(
 			await env.DB.prepare(
-				"SELECT status, attention_reason FROM plaid_items",
+				"SELECT status, attention_login, attention_held FROM plaid_items",
 			).first(),
-		).toEqual({ status: "needs_attention", attention_reason: "expiring" });
+		).toEqual({
+			status: "needs_attention",
+			attention_login: 0,
+			attention_held: 1,
+		});
 	});
 
 	it.each([

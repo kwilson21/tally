@@ -237,7 +237,7 @@ describe("Plaid routes", () => {
 
 	describe("relink when the bank moves between the route's read and its write", () => {
 		const RELINK_WRITE =
-			/^UPDATE plaid_items SET status = 'ok', attention_reason = NULL, reconnect_emailed_at = NULL WHERE id = \? AND disconnected_at IS NULL AND status = \? AND attention_reason IS \?/;
+			/^UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = \? AND disconnected_at IS NULL AND status = \? AND attention_login = \? AND attention_held = \?/;
 
 		/**
 		 * The database the route sees, where the guarded relink write loses a race: `before` runs just ahead of it,
@@ -288,9 +288,13 @@ describe("Plaid routes", () => {
 
 		async function insertBank(status: "ok" | "needs_attention") {
 			const row = await env.DB.prepare(
-				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status, reconnect_emailed_at) VALUES (?, 'Race Bank', 'member@example.com', ?, '2026-10-06 04:00:00') RETURNING id",
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status, reconnect_emailed_at, attention_login) VALUES (?, 'Race Bank', 'member@example.com', ?, '2026-10-06 04:00:00', ?) RETURNING id",
 			)
-				.bind(await encryptToken("race-token", KEY), status)
+				.bind(
+					await encryptToken("race-token", KEY),
+					status,
+					status === "needs_attention" ? 1 : 0,
+				)
 				.first<{ id: number }>();
 			return row?.id as number;
 		}
@@ -299,7 +303,7 @@ describe("Plaid routes", () => {
 			const id = await insertBank("needs_attention");
 			const response = await relinkWith(
 				raceBeforeRelink(
-					"UPDATE plaid_items SET status = 'ok', attention_reason = NULL, reconnect_emailed_at = NULL WHERE id = ?",
+					"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?",
 				),
 				id,
 			);
