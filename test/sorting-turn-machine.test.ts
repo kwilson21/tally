@@ -347,9 +347,10 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 	});
 });
 
-describe("a duplicated key reads the same everywhere", () => {
-	it("a first text id makes a live turn that every statement and the reader agree on", async () => {
-		const raw = `{"id":"B","id":3,"until":${Date.now() + SORTING_TURN_MS}}`;
+describe("a valid but odd row reads the same everywhere", () => {
+	const future = () => Date.now() + SORTING_TURN_MS;
+
+	async function seedRaw(value: string) {
 		await db
 			.prepare("DELETE FROM household_settings WHERE key = 'sorting_turn'")
 			.run();
@@ -357,14 +358,32 @@ describe("a duplicated key reads the same everywhere", () => {
 			.prepare(
 				"INSERT INTO household_settings (key, value) VALUES ('sorting_turn', ?)",
 			)
-			.bind(raw)
+			.bind(value)
 			.run();
+	}
+	const held = async (id: string) =>
+		(
+			await db
+				.prepare(`SELECT ${turnHeldSql()} AS held`)
+				.bind(id)
+				.first<{ held: number }>()
+		)?.held;
+
+	it("a first text id makes a live turn that every statement and the reader agree on", async () => {
+		await seedRaw(`{"id":"B","id":3,"until":${future()}}`);
 		expect((await readSortingTurn(db))?.id).toBe(OTHER);
 		expect(await takeSortingTurn(db, ME)).toBe(false);
-		const guard = await db
-			.prepare(`SELECT ${turnHeldSql()} AS held`)
-			.bind(OTHER)
-			.first<{ held: number }>();
-		expect(guard?.held).toBe(1);
+		expect(await held(OTHER)).toBe(1);
+	});
+
+	it("an empty text id is a live turn too: the reader keeps it, the statements refuse to replace it", async () => {
+		await seedRaw(`{"id":"","until":${future()}}`);
+		expect((await readSortingTurn(db))?.id).toBe("");
+		expect(sortingTurnState(await readSortingTurn(db), Date.now())).toBe(
+			"held",
+		);
+		expect(await takeSortingTurn(db, ME)).toBe(false);
+		expect(await held("")).toBe(1);
+		expect(await held(ME)).toBe(0);
 	});
 });

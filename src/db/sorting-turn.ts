@@ -39,7 +39,8 @@ export async function readSortingTurn(
 			`SELECT ${turnIdSql("value")} AS id, ${turnUntilSql("value")} AS until FROM household_settings WHERE key = 'sorting_turn'`,
 		)
 		.first<{ id: string | null; until: number | null }>();
-	return row?.id ? { id: row.id, until: row.until } : null;
+	// A null id is a damaged row. An id that is empty text is still a turn, as the statements treat it.
+	return row && row.id !== null ? { id: row.id, until: row.until } : null;
 }
 
 /**
