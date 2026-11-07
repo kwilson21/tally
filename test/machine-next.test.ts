@@ -55,4 +55,33 @@ describe("next (machine helper)", () => {
 			'Unknown state "ajar" for machine "door"',
 		);
 	});
+
+	// A guard in XState v6 is plain code inside the transition: returning nothing refuses it.
+	// The helper rebuilds the snapshot with the machine's default context, so a guard reads
+	// that default, and these two machines differ only in it.
+	const gatedDoor = (locked: boolean) =>
+		setup({}).createMachine({
+			id: "gatedDoor",
+			initial: "closed",
+			context: { locked },
+			states: {
+				closed: {
+					on: {
+						OPEN: ({ context }) => {
+							if (context.locked) return;
+							return { target: "open" };
+						},
+					},
+				},
+				open: {},
+			},
+		});
+
+	it("returns null when a guard refuses the event", () => {
+		expect(next(gatedDoor(true), "closed", "OPEN")).toBeNull();
+	});
+
+	it("moves when the same guard allows the event", () => {
+		expect(next(gatedDoor(false), "closed", "OPEN")).toBe("open");
+	});
 });

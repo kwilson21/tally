@@ -2842,7 +2842,7 @@ describe("syncItem", () => {
 		).toBe(0);
 	});
 
-	it("clears needs_attention and the reminder when a sync gets every page (decision 169)", async () => {
+	it("clears needs_attention and the reminder when a sync gets every page (decision 173)", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET status = 'needs_attention', reconnect_emailed_at = '2026-10-06 04:00:00' WHERE id = ?",

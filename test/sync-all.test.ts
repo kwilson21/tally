@@ -116,7 +116,7 @@ describe("syncAllItems", () => {
 		);
 	});
 
-	it("syncs every live Item in order, including one that needs attention (decision 169)", async () => {
+	it("syncs every live Item in order, including one that needs attention (decision 173)", async () => {
 		const first = await addItem();
 		const second = await addItem();
 		const flagged = await addItem("needs_attention");

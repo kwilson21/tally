@@ -21,7 +21,7 @@ import { setup } from "xstate";
 //   needs_attention Plaid says the login is broken: Accounts shows Fix connection and a reminder email may go out.
 //   disconnected    the bank was removed. This state is final: no event moves it, and its token is gone.
 //
-// Writing ok clears the reminder email's timestamp too (decision 169). This machine only says where a bank
+// Writing ok clears the reminder email's timestamp too (decision 173). This machine only says where a bank
 // goes; the store does the write.
 export const plaidConnectionMachine = setup({}).createMachine({
 	id: "plaidConnection",

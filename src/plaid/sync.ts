@@ -1168,7 +1168,7 @@ export async function syncItem(
 			}
 			if (!page.has_more) {
 				// Every page is in and this run still holds the lease, so the login works: a bank that needed attention is
-				// fine again (decision 169). Refused or unchanged for a bank that was fine already.
+				// fine again (decision 173). Refused or unchanged for a bank that was fine already.
 				await markSyncSucceeded(env.DB, itemRowId, lockId);
 				if (runAfterSync) await afterSync(env.DB);
 				return { ...summary, changedIds: [...changedIds] };

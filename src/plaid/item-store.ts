@@ -157,7 +157,7 @@ export function clearAttention(
 	return change(db, itemId, "RELINKED");
 }
 
-/** A sync got every page while it held its lease, so the login works (decision 169). */
+/** A sync got every page while it held its lease, so the login works (decision 173). */
 export function markSyncSucceeded(
 	db: D1Database,
 	itemId: number,
