@@ -425,7 +425,7 @@ async function afterUpload(c: Context<App>, addedIds: number[]) {
 		console.error("apple card bills failed");
 		c.executionCtx.waitUntil(
 			matchBillPayments(c.env.DB).catch(() =>
-				console.error("apple card bills failed"),
+				console.error("apple card bills retry failed"),
 			),
 		);
 	}

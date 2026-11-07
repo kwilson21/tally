@@ -111,16 +111,15 @@ function view(
 feedback.get("/feedback", async (c) => {
 	let source: string | undefined;
 	const referer = c.req.header("referer");
-	if (referer) {
-		try {
-			const url = new URL(referer);
-			if (url.origin === new URL(c.req.url).origin)
-				// On /feedback itself, the sidebar's current item carries the page the form came from.
-				source =
-					url.pathname === "/feedback"
-						? c.req.query("return_to")
-						: `${url.pathname}${url.search}`;
-		} catch {}
+	// A Referer that is not a URL is no page to come from, so the form comes from Home.
+	if (referer && URL.canParse(referer)) {
+		const url = new URL(referer);
+		if (url.origin === new URL(c.req.url).origin)
+			// On /feedback itself, the sidebar's current item carries the page the form came from.
+			source =
+				url.pathname === "/feedback"
+					? c.req.query("return_to")
+					: `${url.pathname}${url.search}`;
 	}
 	const from = source ? sanitizeFeedbackRoute(source) : "/";
 	const returnTo = source ? safePath(source, true) : "/";
