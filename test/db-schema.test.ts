@@ -1,13 +1,13 @@
 import { env } from "cloudflare:workers";
 import { sql } from "drizzle-orm";
 import {
+	getTableConfig,
 	type Index,
 	index,
 	integer,
-	SQLiteSyncDialect,
 	type SQLiteColumn,
+	SQLiteSyncDialect,
 	type SQLiteTable,
-	getTableConfig,
 	sqliteTable,
 	text,
 	uniqueIndex,
@@ -152,7 +152,9 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 			problems.push(
 				`${where} type differs: schema ${schemaType}, database ${liveType}`,
 			);
-		if (column.notNull !== Boolean(found.notnull))
+		// Drizzle's primaryKey() sets notNull in the model, but the migrations do not write NOT NULL on these keys
+		// (SQLite reports notnull 0), so a primary key's not-null is not compared.
+		if (!column.primary && column.notNull !== Boolean(found.notnull))
 			problems.push(`${where} not-null differs`);
 		const wantDefault = schemaDefault(column);
 		const haveDefault =
@@ -166,7 +168,9 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 	}
 	for (const name of liveByName.keys())
 		if (!config.columns.some((column) => column.name === name))
-			problems.push(`${tableName}.${name} is in the database, not in the schema`);
+			problems.push(
+				`${tableName}.${name} is in the database, not in the schema`,
+			);
 
 	const { results: tableRow } = await env.DB.prepare(
 		"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -217,9 +221,7 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 			problems.push(`index ${live.name} uniqueness differs`);
 		if ((want.where !== undefined) !== (have.where !== undefined))
 			problems.push(`index ${live.name} partial-ness differs`);
-		if (
-			normaliseSql(want.expression) !== normaliseSql(have.expression)
-		)
+		if (normaliseSql(want.expression) !== normaliseSql(have.expression))
 			problems.push(
 				`index ${live.name} expression differs: schema ${want.expression}, database ${have.expression}`,
 			);
@@ -287,12 +289,14 @@ describe("the drift check fails on a wrong schema", () => {
 			id: integer().primaryKey({ autoIncrement: true }),
 			name: text().notNull(),
 			status: text({ enum: CATEGORY_SUGGESTION_STATUS_VALUES }).notNull(),
-			createdAt: integer("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+			createdAt: integer("created_at")
+				.notNull()
+				.default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at"),
 		});
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("category_suggestions.created_at type differs");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.created_at type differs",
+		);
 	});
 
 	it("a column with an invented default", async () => {
@@ -303,9 +307,9 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at").default("never"),
 		});
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("category_suggestions.decided_at default differs");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.decided_at default differs",
+		);
 	});
 
 	it("a live column the schema leaves out", async () => {
@@ -315,9 +319,9 @@ describe("the drift check fails on a wrong schema", () => {
 			status: text({ enum: CATEGORY_SUGGESTION_STATUS_VALUES }).notNull(),
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		});
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("category_suggestions.decided_at is in the database, not in the schema");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.decided_at is in the database, not in the schema",
+		);
 	});
 
 	it("a schema column the live table does not have", async () => {
@@ -329,9 +333,9 @@ describe("the drift check fails on a wrong schema", () => {
 			decidedAt: text("decided_at"),
 			ghost: text(),
 		});
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("category_suggestions.ghost is not in the database");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.ghost is not in the database",
+		);
 	});
 
 	it("a wrong enum list", async () => {
@@ -339,16 +343,16 @@ describe("the drift check fails on a wrong schema", () => {
 			...CHECK_LISTS,
 			category_suggestions: { status: ["pending", "created", "dismissed"] },
 		};
-		expect(
-			(await drift(categorySuggestions, lists)).join("\n"),
-		).toContain("category_suggestions.status CHECK differs");
+		expect((await drift(categorySuggestions, lists)).join("\n")).toContain(
+			"category_suggestions.status CHECK differs",
+		);
 	});
 
 	it("a live CHECK with no entry in CHECK_LISTS", async () => {
 		const lists = { merchants: CHECK_LISTS.merchants };
-		expect(
-			(await drift(categorySuggestions, lists)).join("\n"),
-		).toContain("category_suggestions.status has a CHECK in the database and no entry in CHECK_LISTS");
+		expect((await drift(categorySuggestions, lists)).join("\n")).toContain(
+			"category_suggestions.status has a CHECK in the database and no entry in CHECK_LISTS",
+		);
 	});
 
 	it("a CHECK_LISTS entry with no live CHECK", async () => {
@@ -356,9 +360,9 @@ describe("the drift check fails on a wrong schema", () => {
 			...CHECK_LISTS,
 			merchants: { ...CHECK_LISTS.merchants, ghost: ["x"] },
 		};
-		expect(
-			(await drift(merchants, lists)).join("\n"),
-		).toContain("CHECK_LISTS has merchants.ghost, but the database has no such CHECK");
+		expect((await drift(merchants, lists)).join("\n")).toContain(
+			"CHECK_LISTS has merchants.ghost, but the database has no such CHECK",
+		);
 	});
 
 	it("a missing partial unique index", async () => {
@@ -369,9 +373,9 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at"),
 		});
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("index category_suggestions_pending_name is in the database, not in the schema");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index category_suggestions_pending_name is in the database, not in the schema",
+		);
 	});
 
 	it("an index with the wrong indexed expression", async () => {
@@ -390,9 +394,9 @@ describe("the drift check fails on a wrong schema", () => {
 					.where(sql`${t.status} = 'pending' AND ${t.name} <> ''`),
 			],
 		);
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("index category_suggestions_pending_name expression differs");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index category_suggestions_pending_name expression differs",
+		);
 	});
 
 	it("an index with the wrong WHERE", async () => {
@@ -411,9 +415,9 @@ describe("the drift check fails on a wrong schema", () => {
 					.where(sql`${t.status} = 'created' AND ${t.name} <> ''`),
 			],
 		);
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("index category_suggestions_pending_name WHERE differs");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index category_suggestions_pending_name WHERE differs",
+		);
 	});
 
 	it("an index that is declared without UNIQUE", async () => {
@@ -432,8 +436,8 @@ describe("the drift check fails on a wrong schema", () => {
 					.where(sql`${t.status} = 'pending' AND ${t.name} <> ''`),
 			],
 		);
-		expect(
-			(await drift(wrong, CHECK_LISTS)).join("\n"),
-		).toContain("index category_suggestions_pending_name uniqueness differs");
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index category_suggestions_pending_name uniqueness differs",
+		);
 	});
 });
