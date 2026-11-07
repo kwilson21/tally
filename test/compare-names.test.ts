@@ -312,6 +312,21 @@ describe("formatNamesReport", () => {
 	});
 });
 
+describe("CANDIDATES list", () => {
+	it("has dropped the model Cloudflare already switched off and added two that fit the token cap", () => {
+		const keys = Object.keys(CANDIDATES);
+		expect(keys).not.toContain("llama-awq");
+		expect(keys).toEqual(
+			expect.arrayContaining([
+				"llama",
+				"granite",
+				"mistral-small",
+				"llama4-scout",
+			]),
+		);
+	});
+});
+
 describe("CANDIDATES", () => {
 	it("are all in the generated Workers AI catalog, so none can fail as an unknown model", () => {
 		for (const { id } of Object.values(CANDIDATES)) {
@@ -437,5 +452,39 @@ describe("formatNamesReport cut-off answers", () => {
 	it("marks the cut-off answer where its names are shown, so it doesn't look complete", () => {
 		expect(report).toMatch(/\| B \| Beta \/ Be[^|]*cut off/i);
 		expect(report).not.toMatch(/\| A \| Alpha[^|]*cut off/i);
+	});
+});
+
+describe("formatNamesReport response-shape note", () => {
+	const result = (shape: "response" | "chat") => ({
+		text: "A",
+		ok: true,
+		names: ["Alpha"],
+		ms: 10,
+		shape,
+	});
+	const note = (report: string) =>
+		/shape \(([^\n]*)\) carries no finish reason/.exec(report)?.[1];
+
+	it("names only the models whose answers have the response shape", () => {
+		const report = formatNamesReport({
+			today: TODAY,
+			tokens: 60,
+			models: [
+				{ key: "llama", results: [result("response")] },
+				{ key: "granite", results: [result("chat")] },
+			],
+		});
+		expect(note(report)).toContain("Llama");
+		expect(note(report)).not.toContain("Granite");
+	});
+
+	it("leaves the note out when no model has that shape", () => {
+		const report = formatNamesReport({
+			today: TODAY,
+			tokens: 60,
+			models: [{ key: "granite", results: [result("chat")] }],
+		});
+		expect(report).not.toContain("carries no finish reason");
 	});
 });

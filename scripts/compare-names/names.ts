@@ -20,13 +20,17 @@ export const CANDIDATES = {
 		label: "Llama 3.1 8B fp8 (today's, baseline)",
 		id: "@cf/meta/llama-3.1-8b-instruct-fp8",
 	},
-	"llama-awq": {
-		label: "Llama 3.1 8B awq",
-		id: "@cf/meta/llama-3.1-8b-instruct-awq",
-	},
 	granite: {
 		label: "Granite 4.0 H Micro",
 		id: "@cf/ibm-granite/granite-4.0-h-micro",
+	},
+	"mistral-small": {
+		label: "Mistral Small 3.1 24B",
+		id: "@cf/mistralai/mistral-small-3.1-24b-instruct",
+	},
+	"llama4-scout": {
+		label: "Llama 4 Scout 17B",
+		id: "@cf/meta/llama-4-scout-17b-16e-instruct",
 	},
 	gemma4: {
 		label: "Gemma 4 26B",
@@ -317,14 +321,13 @@ export function formatNamesReport(input: ReportInput): string {
 			`- ${label(key)}: ${[...new Set(results.map((r) => r.shape))].join(", ")}`,
 	);
 	lines.push("", "Answer shapes seen:", ...shapes);
-	if (
-		input.models.some(({ results }) =>
-			results.some((r) => r.shape === "response"),
-		)
-	)
+	const noFinish = input.models
+		.filter(({ results }) => results.some((r) => r.shape === "response"))
+		.map(({ key }) => label(key));
+	if (noFinish.length > 0)
 		lines.push(
 			"",
-			'The `response` shape (Llama, Granite) carries no finish reason, so "Cut off mid-answer" is always 0 for it. Check its names for a last name that stops short.',
+			`The \`response\` shape (${noFinish.join(", ")}) carries no finish reason, so "Cut off mid-answer" is always 0 for it. Check its names for a last name that stops short.`,
 		);
 	const failures = input.models.flatMap(({ key, results }) => {
 		const first = results.find((r) => r.error);
