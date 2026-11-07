@@ -31,7 +31,7 @@ export function BillsDiagram({
 			title="How a bill payment is matched"
 			desc={`A ${amount} bill due ${due} matches its payment on ${paid} when merchant and amount match and the date is within ${windowDays} days.`}
 			source={[
-				"flowchart LR",
+				"flowchart TB",
 				`  bill["Bill ${amount}<br/>due ${due}"] ---|"same merchant<br/>±${tolerance}<br/>within ${windowDays} days"| pay["Payment<br/>${paid}"]`,
 			].join("\n")}
 		/>

@@ -8,6 +8,10 @@ const SOURCE = [
 	'  server <--> db[("Database<br/>(D1)")]',
 	'  server --> jev["Jev:<br/>picks categories"]',
 	'  server --> ai["Workers AI:<br/>suggests names"]',
+	// Without these two invisible links the three boxes under the server share one row, 504px wide, which a phone
+	// scales down to 12px text. The database sits above Jev and Workers AI, so the picture is 360px wide (issue #904).
+	"  db ~~~ jev",
+	"  db ~~~ ai",
 ].join("\n");
 
 /** The system diagram on How Tally works: the bank, the server, the database, and the two AI helpers. */
