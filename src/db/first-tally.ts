@@ -139,7 +139,14 @@ function pickEntries<T>(
 	if (!isObject(value)) return kept;
 	for (const [key, entry] of Object.entries(value)) {
 		const result = keep(entry);
-		if (result !== undefined) kept[key] = result;
+		// defineProperty, not assignment: a key named __proto__ (a merchant's raw name can be) would set the prototype.
+		if (result !== undefined)
+			Object.defineProperty(kept, key, {
+				value: result,
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
 	}
 	return kept;
 }

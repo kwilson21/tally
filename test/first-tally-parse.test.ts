@@ -188,3 +188,13 @@ describe("the record the writers make is read back whole", () => {
 		});
 	});
 });
+
+describe("a merchant named like an object's own plumbing", () => {
+	it("keeps a pay answer filed under __proto__", () => {
+		const text =
+			'{"strokes":{},"budgets":{},"pay":{"__proto__":{"yes":{"1":{"date":"2026-09-01","cents":100}},"at":0}}}';
+		const record = parseFirstTally(text);
+		expect(Object.keys(record.pay ?? {})).toEqual(["__proto__"]);
+		expect(Object.entries(record.pay ?? {})).toHaveLength(1);
+	});
+});
