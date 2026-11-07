@@ -1,13 +1,16 @@
 // Hand-kept Drizzle description of two tables: `merchants` and `category_suggestions`. The migrations in
 // migrations/*.sql are the only thing that changes the database; this file is written to match them, and
 // test/db-schema.test.ts fails when they disagree (columns, SQLite types, not-null, defaults, primary keys, CHECK
-// value lists, and indexes, including unique and partial). The CHECK() calls below are documentation only.
+// value lists, and indexes, including unique and partial).
+//
+// The CHECK value lists are CHECK_LISTS at the bottom of this file: the drift test compares them both ways with the
+// live CREATE TABLE statements, so they are the verified record. No CHECK() is declared here, because nothing
+// compares those to the database and they could drift silently.
 //
 // Not described or compared yet: foreign keys (merchants.default_category_id references categories). Nothing here
 // uses .references(), and the drift test does not look at foreign keys.
 import { sql } from "drizzle-orm";
 import {
-	check,
 	integer,
 	sqliteTable,
 	text,
@@ -30,28 +33,18 @@ export const CATEGORY_SUGGESTION_STATUS_VALUES = [
 	"none",
 ] as const;
 
-export const merchants = sqliteTable(
-	"merchants",
-	{
-		rawName: text("raw_name").primaryKey(),
-		suggestedName: text("suggested_name"),
-		displayName: text("display_name"),
-		defaultCategoryId: integer("default_category_id"),
-		suggestionStatus: text("suggestion_status", {
-			enum: MERCHANT_STATUS_VALUES,
-		})
-			.notNull()
-			.default("none"),
-		notABill: integer("not_a_bill").notNull().default(0),
-	},
-	(t) => [
-		check(
-			"merchants_suggestion_status",
-			sql`${t.suggestionStatus} IN ('none', 'pending', 'accepted', 'rejected')`,
-		),
-		check("merchants_not_a_bill", sql`${t.notABill} IN (0, 1)`),
-	],
-);
+export const merchants = sqliteTable("merchants", {
+	rawName: text("raw_name").primaryKey(),
+	suggestedName: text("suggested_name"),
+	displayName: text("display_name"),
+	defaultCategoryId: integer("default_category_id"),
+	suggestionStatus: text("suggestion_status", {
+		enum: MERCHANT_STATUS_VALUES,
+	})
+		.notNull()
+		.default("none"),
+	notABill: integer("not_a_bill").notNull().default(0),
+});
 
 export const categorySuggestions = sqliteTable(
 	"category_suggestions",
@@ -63,10 +56,6 @@ export const categorySuggestions = sqliteTable(
 		decidedAt: text("decided_at"),
 	},
 	(t) => [
-		check(
-			"category_suggestions_status",
-			sql`${t.status} IN ('pending', 'created', 'dismissed', 'none')`,
-		),
 		uniqueIndex("category_suggestions_pending_name")
 			.on(sql`lower(${t.name})`)
 			.where(sql`${t.status} = 'pending' AND ${t.name} <> ''`),
