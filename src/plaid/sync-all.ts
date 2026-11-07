@@ -44,8 +44,10 @@ export async function syncAllItems(
 		return result;
 	}
 
+	// A bank that needs attention is retried here too (decision 169): a sync that gets every page clears its flag.
+	// A bank that still fails stays flagged, and its reminder is not touched here.
 	const { results: items } = await env.DB.prepare(
-		"SELECT id, institution_name FROM plaid_items WHERE status = 'ok' AND disconnected_at IS NULL ORDER BY id",
+		"SELECT id, institution_name FROM plaid_items WHERE status IN ('ok', 'needs_attention') AND disconnected_at IS NULL ORDER BY id",
 	).all<{ id: number; institution_name: string }>();
 
 	for (const [index, item] of items.entries()) {
@@ -75,7 +77,8 @@ export async function syncAllItems(
 			)
 				.bind(item.id)
 				.first<{ status: string }>();
-			if (current?.status !== "ok") {
+			// Gone or disconnected since the list was read: skip. Either live status is synced.
+			if (!current) {
 				result.skipped += 1;
 				continue;
 			}
