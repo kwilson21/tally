@@ -729,15 +729,19 @@ describe("HELD_FOR_REVIEW_SQL is self-contained (owner decision c)", () => {
 	});
 });
 
-// Owner decision: a credit flagged as a transfer and not excluded is settled, not held for review.
-describe("a transfer credit is settled, not held (owner decision)", () => {
-	it("a credit flagged as a transfer and in the budget is not held, and is in the settled transfer state", () => {
+// Deliberately unchanged: a transfer credit the person included on purpose stays held until they review it. Treating it as
+// settled contradicted the list, the edit panel, the breakdown and split parts. Tracked in GitHub issue #870 (stuck held
+// credits) and the design issue "Design how a person-included transfer credit works".
+describe("an included, unreviewed transfer credit is held (characterization, #870)", () => {
+	it("is held for review, and no income or category question reaches it", () => {
 		const name = "credit flagged as transfer, Jev income maybe";
-		expect(sqlSays("heldForReview", name)).toBe(false);
+		expect(sqlSays("heldForReview", name)).toBe(true);
 		expect(classifiedOf(idOf(name)).money).toEqual({
 			kind: "credit",
-			state: { kind: "settled_transfer" },
+			state: { kind: "held_for_review" },
 		});
+		expect(sqlSays("incomeAsked", name)).toBe(false);
+		expect(sqlSays("categoryAsked", name)).toBe(false);
 	});
 });
 

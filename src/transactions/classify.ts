@@ -82,13 +82,11 @@ export type Money =
 	| { kind: "credit"; state: CreditState };
 
 export type CreditState =
-	// Money in that nobody has reviewed, in the budget, not income and not a transfer: it waits for a person
+	// Money in that nobody has reviewed, in the budget, not income and not a split parent: it waits for a person
 	// (decision 70). Exactly the rows HELD_FOR_REVIEW_SQL matches.
 	| { kind: "held_for_review" }
 	// Money in flagged as income by Tally, not reviewed. It counts as income, so it is not held.
 	| { kind: "unreviewed_income" }
-	// Money in flagged as a transfer, not reviewed, not income, and not explained by a bill or plan: settled, not held (decision 174, d).
-	| { kind: "settled_transfer" }
 	// Money in, not reviewed, and not held: out of the budget, or a split parent.
 	| { kind: "unreviewed_not_held" }
 	// A reviewed credit that is not a refund of a counted purchase.
@@ -191,9 +189,6 @@ function moneyOf(
 	if (!reviewed) {
 		if (income.kind === "income")
 			return { kind: "credit", state: { kind: "unreviewed_income" } };
-		// A transfer that a bill or plan explains is a payment, which is never Excluded, so it stays held.
-		if (r.flag_transfer === 1 && !ctx.paysBillOrPlan)
-			return { kind: "credit", state: { kind: "settled_transfer" } };
 		if (counted && r.is_split === 0)
 			return { kind: "credit", state: { kind: "held_for_review" } };
 		return { kind: "credit", state: { kind: "unreviewed_not_held" } };

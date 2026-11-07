@@ -66,16 +66,16 @@ const SEEDS: Seed[] = [
 		amount: -500,
 		creditReviewed: 1,
 	},
-	// The owner's case (decision 174, d): a transfer credit that is in the budget is settled. It is in no
-	// counted or held bucket, so it has to be in the excluded transfer line.
+	// A transfer credit the person included on purpose stays held until they review it (#870 and the design issue
+	// on a person-included transfer credit). It is in the budget, so it is held, not excluded.
 	{
-		name: "credit settled as transfer, in the budget",
-		expect: "excluded",
+		name: "credit transfer, in the budget, not reviewed",
+		expect: "held",
 		amount: -500,
 		flagTransfer: 1,
 	},
 	{
-		name: "credit settled as transfer, excluded by user",
+		name: "credit transfer, excluded by user",
 		expect: "excluded",
 		amount: -500,
 		flagTransfer: 1,
@@ -213,9 +213,7 @@ async function contextFor(r: Row, byId: Map<number, Row>): Promise<Context> {
 function bucketOf(r: Row, c: Classified): Bucket | "split_parent" {
 	if (r.is_split === 1) return "split_parent";
 	if (c.questions.heldForReview) return "held";
-	const settledTransfer =
-		c.money.kind === "credit" && c.money.state.kind === "settled_transfer";
-	if (!c.questions.included || settledTransfer) return "excluded";
+	if (!c.questions.included) return "excluded";
 	return "counted";
 }
 
@@ -250,10 +248,10 @@ describe("every transaction of a month lands in exactly one How Tally bucket", (
 		);
 	});
 
-	it("an included transfer credit is in the excluded transfer line, not in no bucket", async () => {
+	it("the transfer line holds only the plaid-excluded transfer, so an included transfer credit is not in it", async () => {
 		const breakdown = await excludedBreakdown(db, MONTH);
-		// The plaid-excluded transfer purchase and the settled transfer credit in the budget.
-		expect(breakdown.transfer).toBe(2);
+		// Only the plaid-excluded transfer purchase is in the transfer line: included transfer credits are held.
+		expect(breakdown.transfer).toBe(1);
 		expect(breakdown.reimbursement).toBe(1);
 		expect(breakdown.byPerson).toBe(3);
 	});

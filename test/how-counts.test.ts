@@ -241,8 +241,8 @@ describe("excludedBreakdown", () => {
 	});
 });
 
-describe("the held count (Home) leaves out a credit flagged as a transfer", () => {
-	it("counts an ordinary held credit, and does not count a credit flagged as a transfer", async () => {
+describe("the held count (Home) counts a credit flagged as a transfer that the person included", () => {
+	it("counts an ordinary held credit, and also counts an included credit flagged as a transfer (#870)", async () => {
 		const insertCredit = (rawName: string, flagTransfer: 0 | 1) =>
 			db
 				.prepare(
@@ -256,7 +256,8 @@ describe("the held count (Home) leaves out a credit flagged as a transfer", () =
 		await insertCredit("SYNTH ORDINARY HELD CREDIT", 0);
 		expect((await monthCounts(db, MONTH)).heldForReview).toBe(before + 1);
 
+		// Included on purpose, so it stays held until a person reviews it (see #870 and the design issue).
 		await insertCredit("SYNTH TRANSFER CREDIT", 1);
-		expect((await monthCounts(db, MONTH)).heldForReview).toBe(before + 1);
+		expect((await monthCounts(db, MONTH)).heldForReview).toBe(before + 2);
 	});
 });
