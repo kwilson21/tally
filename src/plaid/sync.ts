@@ -221,11 +221,19 @@ const copyMerchantRowSql = (ownsLock: string) => {
  * (an empty answer, or none at all) leave the name with none. A winner that is the name's own row changes nothing.
  * Both carry the lock, so a lost lock writes neither.
  *
- * Why the second statement's count is safe though it is read after the first statement's write: the write only overwrites
- * positions below the winner's pre-page count, it never deletes, so the text's count after the write is at least its count
- * before. The second statement therefore removes only positions the copy did not write. A text whose names the same page
- * rewrites is also never the winner of a name that already has names (a winner must rank strictly better, and only a
- * decided suggestion can beat one). Tests in test/plaid-sync-names.test.ts cover a text rewritten to fewer names and to more.
+ * Why the second statement is right though it reads counts after the first has written:
+ * - The first statement only overwrites positions below the winner's pre-page count and never deletes, so the count the
+ *   second statement reads for a text is never lower than that text's own pre-page count.
+ * - A winner that has names is never rewritten by this statement while it wins for a destination that has names. A
+ *   winner beats a destination with names only when it ranks strictly better, which needs a decided text (rank 0; its own
+ *   row can't be beaten, so it isn't rewritten) or, for a named pending destination, a none-asked text, which has no
+ *   names (invariant I1).
+ * - A none winner has no names, so the second statement removes all of the destination's names (position >= 0). This is
+ *   the case that used to leave a destination's old names for the sweep: a none-asked text beats a named pending
+ *   destination, and then only the unscoped sweep (sweepStaleNamesSql, which runs later in the same batch) removed them.
+ *   The copy now does this itself; the sweep is still needed for the withdrawals (withdrawOlderPlaidNamesSql and
+ *   clearStaleGuessesSql) and must not be removed. Regression test: "leaves the destination with no names ..." in
+ *   test/plaid-sync-names.test.ts, which passes with the sweep disabled.
  */
 const copyPlaidNamesSql = (ownsLock: string): [string, string] => [
 	`${COPY_WINNERS}
@@ -235,8 +243,9 @@ const copyPlaidNamesSql = (ownsLock: string): [string, string] => [
 	`${COPY_WINNERS}
 	 DELETE FROM merchant_suggested_names
 	 WHERE merchant_key IN (SELECT w.k FROM winner w WHERE w.t IS NOT NULL)
-	   AND position >= (SELECT COUNT(*) FROM merchant_suggested_names s
-	     WHERE s.merchant_key = (SELECT w2.t FROM winner w2 WHERE w2.k = merchant_suggested_names.merchant_key))
+	   AND position >= (SELECT CASE WHEN w2.status = 'none' THEN 0
+	     ELSE (SELECT COUNT(*) FROM merchant_suggested_names s WHERE s.merchant_key = w2.t) END
+	     FROM winner w2 WHERE w2.k = merchant_suggested_names.merchant_key)
 	   AND ${ownsLock}`,
 ];
 

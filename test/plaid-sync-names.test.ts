@@ -1338,3 +1338,101 @@ describe("a copy whose bank text the same sync rewrites to a different number of
 		await assertMerchantInvariants(env.DB);
 	});
 });
+
+// A none-asked text (rank 2) beats a named pending destination (rank 4), so the copy can take a winner that has no names.
+// Before the copy removed a none winner's destination names itself, only the unscoped sweep (which runs later in the same
+// batch) removed them, and this test failed with the sweep disabled. It now passes either way: the copy is self-sufficient.
+describe("a copy whose winner has no names, over a destination that had names", () => {
+	beforeEach(resetTables);
+
+	it("leaves the destination with no names and the status the winner gives, when a named pending key is beaten by an asked text", async () => {
+		await seedMerchant(env.DB, { key: "Y", status: "none", namesAsked: true });
+		await seedMerchant(env.DB, {
+			key: "V",
+			status: "pending",
+			names: ["D1", "D2"],
+			displayName: "Named K",
+		});
+		await seedMerchant(env.DB, {
+			key: "U",
+			status: "accepted",
+			names: ["U1", "U2", "U3"],
+		});
+		const id = await addItem();
+		await syncPages(
+			id,
+			[
+				{
+					added: [
+						// Page one: K copies V (pending, named), and T copies Y (asked, no names).
+						transaction({
+							transaction_id: "a",
+							name: "V",
+							merchant_name: "K",
+							date: "2026-09-20",
+						}),
+						transaction({
+							transaction_id: "b",
+							name: "Y",
+							merchant_name: "T",
+							date: "2026-09-20",
+						}),
+					],
+					hasMore: true,
+				},
+				{
+					added: [
+						// Page two: K copies T (asked, no names, so it beats K's own pending row), and T takes U (accepted).
+						transaction({
+							transaction_id: "c",
+							name: "T",
+							merchant_name: "K",
+							date: "2026-09-27",
+						}),
+						transaction({
+							transaction_id: "d",
+							name: "U",
+							merchant_name: "T",
+							date: "2026-09-27",
+						}),
+					],
+				},
+			],
+			{
+				// Between the pages T is an asked text with no names, the state the copy on page two starts from.
+				between: async () => {
+					await seedMerchant(env.DB, {
+						key: "T",
+						status: "none",
+						namesAsked: true,
+					});
+				},
+			},
+		);
+		const statusOf = async (key: string) =>
+			env.DB.prepare(
+				"SELECT suggestion_status AS status, names_asked AS asked, display_name AS display FROM merchants WHERE raw_name = ?",
+			)
+				.bind(key)
+				.first();
+		expect(await statusOf("K")).toEqual({
+			status: "none",
+			asked: 1,
+			display: "Named K",
+		});
+		expect(await merchantNames(env.DB, "K")).toEqual([]);
+		expect(await statusOf("T")).toEqual({
+			status: "accepted",
+			asked: 0,
+			display: null,
+		});
+		expect(await merchantNames(env.DB, "T")).toEqual(["U1", "U2", "U3"]);
+		expect(await statusOf("U")).toEqual({
+			status: "accepted",
+			asked: 0,
+			display: null,
+		});
+		expect(await merchantNames(env.DB, "U")).toEqual(["U1", "U2", "U3"]);
+		await assertMerchantInvariants(env.DB);
+	});
+});
