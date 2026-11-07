@@ -16,6 +16,7 @@ import {
 	undoRun,
 } from "../src/db/resort-run";
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
+import { categoryAskedSql } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 
 // The re-sort's run state (decision 160): the run and its progress in household_settings (`resort_run`), the rows it
@@ -479,6 +480,46 @@ describe("bumpDoneStatement", () => {
 });
 
 describe("finishRun", () => {
+	it("a candidate that turns pending before the run finishes is not counted in needAnswer, and is asked once it posts", async () => {
+		const stayed = await tx({
+			plaidCategory: HINT,
+			confidence: 0.58,
+			jevCategoryId: groceries,
+		});
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === stayed),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([stayed]);
+		// Plaid marks the purchase pending before the run ends. The category queue leaves a pending row out (owner decision).
+		await db
+			.prepare("UPDATE transactions SET pending = 1 WHERE id = ?")
+			.bind(stayed)
+			.run();
+		const result = await finishRun(db, {
+			runId: runIdOf(started),
+			now: T0 + 5000,
+		});
+		expect(result).toMatchObject({ needAnswer: 0 });
+		// Once it posts, the same question the count uses asks about it again, so the queue and the next count see it.
+		await db
+			.prepare("UPDATE transactions SET pending = 0 WHERE id = ?")
+			.bind(stayed)
+			.run();
+		expect(
+			(
+				await db
+					.prepare(
+						`SELECT COUNT(*) AS n FROM transactions t WHERE t.id = ? AND ${categoryAskedSql("t")}`,
+					)
+					.bind(stayed)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(1);
+	});
+
 	it("marks the run done, records exactly the rows the sort moved into its category, and counts the Maybe rows left", async () => {
 		const moved = await tx({ plaidCategory: HINT, confidence: 0.58 });
 		// Jev guessed Groceries for it and is not sure: a Maybe the category queue asks about (decision 27, #842 round 2).
