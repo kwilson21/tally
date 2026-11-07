@@ -29,6 +29,10 @@ export const EXPORT_COLUMNS = {
 		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
 	// What a person answered to a "Maybe …" (decision 155): the kind, the guess's confidence, the answer and the day; no transaction.
 	maybe_answers: "id, kind, confidence, answer, household_day, created_at",
+	// The name Workers AI gave a Maybe card's "New category" row, or NULL for "no name" (decision 161), and when it was kept.
+	// categories_key is a hash of the active categories it was asked against (decision 165). claim is left out: it is the
+	// random token that lets one request finish the row (migration 0063).
+	maybe_names: "transaction_id, name, created_at, categories_key",
 	// What Tally has learned (decision 162): the cleaned bank text a person forgot, and when. Its lines are derived.
 	// rule_category_id is the rule a Forget removed, for its Undo (decision 163).
 	forgotten_texts:
