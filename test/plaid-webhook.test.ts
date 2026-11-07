@@ -295,6 +295,80 @@ describe("Plaid webhook route", () => {
 		});
 	});
 
+	it("answers 503 so Plaid retries an expiry warning that loses three races in a row (decision 173)", async () => {
+		const row = await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person') RETURNING id",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.first<{ id: number }>();
+		// Every guarded write loses: the held flag is flipped just ahead of each attempt.
+		const fired = { count: 0 };
+		const racing = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop !== "prepare") {
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				}
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (
+						!sql.startsWith(
+							"UPDATE plaid_items SET status = 'needs_attention'",
+						) ||
+						fired.count >= 3
+					) {
+						return statement;
+					}
+					return {
+						bind: (...values: unknown[]) => {
+							const bound = statement.bind(...values);
+							const race = async () => {
+								fired.count += 1;
+								await target
+									.prepare(
+										"UPDATE plaid_items SET attention_held = 1 - attention_held WHERE id = ?",
+									)
+									.bind(row?.id)
+									.run();
+							};
+							return {
+								run: async () => {
+									await race();
+									return bound.run();
+								},
+							};
+						},
+					} as unknown as D1PreparedStatement;
+				};
+			},
+		});
+		const sign = await signer();
+		const body = JSON.stringify({
+			item_id: "item-1",
+			webhook_type: "ITEM",
+			webhook_code: "PENDING_EXPIRATION",
+		});
+		const { token, jwk } = await sign(body);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
+		);
+		const response = await app.request(
+			"http://tally.test/webhooks/plaid",
+			{
+				method: "POST",
+				body,
+				headers: {
+					"content-type": "application/json",
+					"Plaid-Verification": token,
+				},
+			},
+			{ ...env, DB: racing },
+		);
+		expect(response.status).toBe(503);
+		expect(fired.count).toBe(3);
+	});
+
 	it.each([
 		["ITEM_LOGIN_REQUIRED", null, "ok"],
 		[
@@ -364,10 +438,10 @@ describe("Plaid webhook route", () => {
 		},
 	);
 
-	it("doesn't overwrite a repair completed while confirming an ITEM error", async () => {
+	it("a repair made while an ITEM error is confirmed is overruled by Plaid's answer, which is read fresh (decision 173)", async () => {
 		const encryptedToken = await encryptToken("access-token", KEY);
 		await env.DB.prepare(
-			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, status) VALUES ('item-1', ?, 'Bank', 'person', 'needs_attention')",
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, status, attention_login) VALUES ('item-1', ?, 'Bank', 'person', 'needs_attention', 1)",
 		)
 			.bind(encryptedToken)
 			.run();
@@ -385,7 +459,9 @@ describe("Plaid webhook route", () => {
 				if (String(input).endsWith("/webhook_verification_key/get")) {
 					return Response.json({ key: { ...jwk, expired_at: null } });
 				}
-				await env.DB.prepare("UPDATE plaid_items SET status = 'ok'").run();
+				await env.DB.prepare(
+					"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0",
+				).run();
 				return Response.json({
 					item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
 				});
@@ -416,9 +492,10 @@ describe("Plaid webhook route", () => {
 			).status,
 		).toBe(200);
 		await Promise.all(promises);
+		// The store read the repaired row, and Plaid still reports the login error: that is the state the webhook acts on.
 		expect(
 			await env.DB.prepare("SELECT status FROM plaid_items").first(),
-		).toEqual({ status: "ok" });
+		).toEqual({ status: "needs_attention" });
 	});
 
 	it("syncs the matching Item in waitUntil without logging secrets", async () => {

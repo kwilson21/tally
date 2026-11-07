@@ -212,12 +212,35 @@ function alreadyAs(current: Current, to: LiveState): boolean {
 	);
 }
 
-/** Runs the four steps for one event. Every named operation below is this with a different event. */
+/** How many times a lost race is tried again, when the store read the row itself (decision 173). */
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Runs the four steps for one event. Every named operation below is this with a different event. A lost race is
+ * retried against the latest state, but only when the store read the row itself: a caller that passed `seen`, or
+ * holds a lease, decided on that state, so it hears about the race at once.
+ */
 async function change(
 	db: D1Database,
 	itemId: number,
 	event: Event,
 	options: ItemOptions = {},
+): Promise<ItemResult> {
+	const retryable = options.seen === undefined && options.lockId === undefined;
+	let result: ItemResult = "lost-race";
+	for (let attempt = 1; attempt <= (retryable ? MAX_ATTEMPTS : 1); attempt++) {
+		result = await attemptChange(db, itemId, event, options);
+		if (result !== "lost-race") break;
+	}
+	return result;
+}
+
+/** One attempt: read the row, ask the machine, and write or confirm. */
+async function attemptChange(
+	db: D1Database,
+	itemId: number,
+	event: Event,
+	options: ItemOptions,
 ): Promise<ItemResult> {
 	// Step 1: the row now. A caller's seen state must still be the state.
 	const current = await readCurrent(db, itemId);

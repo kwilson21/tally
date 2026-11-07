@@ -318,7 +318,7 @@ describe("Plaid routes", () => {
 			).toEqual({ status: "ok", reconnect_emailed_at: null });
 		});
 
-		it("answers the repair failure when the bank is not ok after the race", async () => {
+		it("answers not found when the bank was disconnected in that window, since the retry sees no bank to fix", async () => {
 			const id = await insertBank("needs_attention");
 			const response = await relinkWith(
 				raceBeforeRelink(
@@ -327,8 +327,7 @@ describe("Plaid routes", () => {
 				id,
 			);
 
-			expect(response.status).toBe(502);
-			expect(await response.text()).toContain("fix the connection. Try again.");
+			expect(response.status).toBe(404);
 		});
 
 		it("relinks a bank that is already ok as a success", async () => {

@@ -204,14 +204,14 @@ describe("clearAttention", () => {
 		expect((await rowOf(id))?.reconnect_emailed_at).toBe(REMINDED);
 	});
 
-	it("answers lost-race when a webhook flags the bank between the read and the confirming read", async () => {
+	it("retries a relink that races a webhook's flag, so the relink still lands", async () => {
 		const id = await addBank("ok");
 		const db = raceBeforeConfirm(
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
 			id,
 		);
-		expect(await clearAttention(db, id)).toBe("lost-race");
-		expect((await rowOf(id))?.status).toBe("needs_attention");
+		expect(await clearAttention(db, id)).toBe("changed");
+		expect((await rowOf(id))?.status).toBe("ok");
 	});
 });
 
@@ -330,11 +330,22 @@ describe("disconnectStatement", () => {
 });
 
 /**
- * The database a store operation sees, where the bank changes between its read and its confirming read: `before`
- * runs first, once, as if a webhook or a sync landed in that gap.
+ * The database a store operation sees, where a webhook or a sync lands between the operation's read and its guarded
+ * statement: `before` runs just ahead of each statement whose SQL starts with `prefix`, for at most `times` firings.
+ * `fired` counts the firings, so a test can see how many attempts the store made.
  */
-function raceBeforeConfirm(before: string, id: number): D1Database {
-	let raced = false;
+function raceBefore(
+	prefix: string,
+	before: string,
+	id: number,
+	options: { times?: number; fired?: { count: number } } = {},
+): D1Database {
+	const fired = options.fired ?? { count: 0 };
+	const times = options.times ?? 1;
+	const fire = async (target: D1Database) => {
+		fired.count += 1;
+		await target.prepare(before).bind(id).run();
+	};
 	return new Proxy(env.DB, {
 		get(target, prop) {
 			if (prop !== "prepare") {
@@ -343,14 +354,17 @@ function raceBeforeConfirm(before: string, id: number): D1Database {
 			}
 			return (sql: string) => {
 				const statement = target.prepare(sql);
-				if (raced || !sql.startsWith("SELECT 1 AS holds")) return statement;
+				if (!sql.startsWith(prefix) || fired.count >= times) return statement;
 				return {
 					bind: (...values: unknown[]) => {
 						const bound = statement.bind(...values);
 						return {
+							run: async () => {
+								await fire(target);
+								return bound.run();
+							},
 							first: async () => {
-								raced = true;
-								await target.prepare(before).bind(id).run();
+								await fire(target);
 								return bound.first();
 							},
 						};
@@ -360,6 +374,89 @@ function raceBeforeConfirm(before: string, id: number): D1Database {
 		},
 	});
 }
+
+/** The race in the store's confirming read (the no-write path): the bank changes after it was read. */
+function raceBeforeConfirm(before: string, id: number): D1Database {
+	return raceBefore("SELECT 1 AS holds", before, id);
+}
+
+const WRITE_LOGIN_AND_EXPIRING =
+	"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 1";
+const WRITE_OK =
+	"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?";
+
+describe("a lost race is retried against the latest state (decision 173)", () => {
+	it("an expiry warning racing a successful sync ends in expiring, not lost", async () => {
+		// The bank reads login_broken. A sync makes it ok before the write; the retry then sees ok and writes expiring.
+		const id = await addBank("needs_attention", { lockId: undefined });
+		const db = raceBefore(WRITE_LOGIN_AND_EXPIRING, WRITE_OK, id);
+		expect(await markNeedsAttention(db, id, "expiring")).toBe("changed");
+		expect(await rowOf(id)).toMatchObject({
+			status: "needs_attention",
+			attention_login: 0,
+			attention_held: 1,
+		});
+	});
+
+	it("a login error racing a relink ends flagged for the login problem alone", async () => {
+		// The bank reads expiring. A relink makes it ok before the write; the retry sees ok and writes a login error.
+		const id = await addBank("needs_attention", { login: false, held: true });
+		const db = raceBefore(
+			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 1",
+			"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?",
+			id,
+		);
+		expect(await markNeedsAttention(db, id, "login")).toBe("changed");
+		expect(await rowOf(id)).toMatchObject({
+			status: "needs_attention",
+			attention_login: 1,
+			attention_held: 0,
+		});
+	});
+
+	it("three consecutive lost races end in lost-race, after exactly three attempts", async () => {
+		const id = await addBank("ok");
+		const fired = { count: 0 };
+		// Every write loses: the held flag is flipped ahead of each attempt's guarded write.
+		const db = raceBefore(
+			"UPDATE plaid_items SET status = 'needs_attention'",
+			"UPDATE plaid_items SET attention_held = 1 - attention_held WHERE id = ?",
+			id,
+			{ times: 3, fired },
+		);
+		expect(await markNeedsAttention(db, id, "expiring")).toBe("lost-race");
+		expect(fired.count).toBe(3);
+	});
+
+	it("a caller that passed seen is not retried: its lost race comes back at once", async () => {
+		const id = await addBank("ok");
+		const fired = { count: 0 };
+		const db = raceBefore(
+			"UPDATE plaid_items SET status = 'needs_attention'",
+			"UPDATE plaid_items SET attention_held = 1 WHERE id = ?",
+			id,
+			{ times: 3, fired },
+		);
+		expect(await markNeedsAttention(db, id, "expiring", { seen: "ok" })).toBe(
+			"lost-race",
+		);
+		expect(fired.count).toBe(1);
+	});
+
+	it("a sync holding its lease is not retried either", async () => {
+		const id = await addBank("needs_attention", { lockId: LOCK });
+		const fired = { count: 0 };
+		const db = raceBefore(
+			"UPDATE plaid_items SET status = 'ok'",
+			"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+			id,
+			{ times: 3, fired },
+		);
+		expect(await markSyncSucceeded(db, id, LOCK)).toBe("lost-race");
+		// One attempt only: the lease is gone, so the store does not read and write again.
+		expect(fired.count).toBe(1);
+	});
+});
 
 describe("the two attention flags (decision 173)", () => {
 	it("a login problem, then an expiry warning, then a good sync leaves the bank flagged for the expiry", async () => {

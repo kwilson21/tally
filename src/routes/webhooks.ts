@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { type PlaidEnv, PlaidError } from "../plaid/client";
-import { connectionOf, markNeedsAttention } from "../plaid/item-store";
+import { markNeedsAttention } from "../plaid/item-store";
 import { loginStillBroken } from "../plaid/login-broken";
 import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { TRANSIENT_ITEM_ERROR_CODES } from "../plaid/sync";
@@ -50,16 +50,13 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
-		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held FROM plaid_items WHERE plaid_item_id = ?",
+		"SELECT id, access_token_encrypted, disconnected_at FROM plaid_items WHERE plaid_item_id = ?",
 	)
 		.bind(body.item_id)
 		.first<{
 			id: number;
 			access_token_encrypted: ArrayBuffer;
-			status: string;
 			disconnected_at: string | null;
-			attention_login: number;
-			attention_held: number;
 		}>();
 	if (!item) return c.body(null, 200);
 	if (item.disconnected_at !== null) return c.body(null, 200);
@@ -92,25 +89,36 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		typeof body.webhook_code === "string" &&
 		attentionCodes.has(body.webhook_code);
 	if (isAttentionWarning) {
-		// The store reads the bank's state now. If something moves the bank between that read and the write, the write
-		// is skipped and the state that is there stands (the later fact wins, decision 173).
+		// The store reads the bank now, and a race with a sync or a relink is tried again against the latest state
+		// (decision 173). Only a race it loses three times comes back here as lost-race: the warning did not land, so
+		// the answer is 503, and Plaid sends the webhook again.
 		const expiring =
 			typeof body.webhook_code === "string" &&
 			expiringCodes.has(body.webhook_code);
-		await markNeedsAttention(
+		const result = await markNeedsAttention(
 			c.env.DB,
 			item.id,
 			expiring ? "expiring" : "login",
 		);
+		if (result === "lost-race") {
+			console.error(
+				`plaid webhook ${String(body.webhook_code)} lost a race for item ${item.id}`,
+			);
+			return c.body(null, 503);
+		}
 	}
 	if (isItemError) {
 		c.executionCtx.waitUntil(
 			(async () => {
 				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
-					// The state this request read, so a repair made while Plaid was asked is not overwritten.
-					await markNeedsAttention(c.env.DB, item.id, "login", {
-						seen: connectionOf(item),
-					});
+					// The store reads the bank now, so the answer is the latest state. This runs after the 200 is sent,
+					// so a race it still loses after its tries is only logged: Plaid is not asked to send it again.
+					const result = await markNeedsAttention(c.env.DB, item.id, "login");
+					if (result === "lost-race") {
+						console.error(
+							`plaid webhook ITEM error lost a race for item ${item.id}`,
+						);
+					}
 				}
 			})().catch((error: unknown) => {
 				const requestId =
