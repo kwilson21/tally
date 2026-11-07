@@ -21,17 +21,12 @@ export const DEFAULT_TIME_ZONE = "America/New_York";
 
 function dateIn(timeZone: string, now: Date): string | null {
 	try {
-		const parts = new Intl.DateTimeFormat("en-CA", {
-			timeZone,
-			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
-		}).formatToParts(now);
-		const part = (type: string) =>
-			parts.find((p) => p.type === type)?.value ?? "";
-		return `${part("year")}-${part("month")}-${part("day")}`;
+		return Temporal.Instant.fromEpochMilliseconds(now.getTime())
+			.toZonedDateTimeISO(timeZone)
+			.toPlainDate()
+			.toString();
 	} catch {
-		// Intl throws a RangeError for a time zone it doesn't know.
+		// Temporal throws a RangeError for a time zone it doesn't know.
 		return null;
 	}
 }
@@ -91,15 +86,12 @@ export function monthName(month: string): string {
  * keeps four digits ("0100-01", 1 → "0099-12").
  */
 export function monthsBefore(month: string, n: number): string {
-	const [year = 0, m = 1] = month.split("-").map(Number);
-	const index = year * 12 + (m - 1) - n;
-	return `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}`;
+	return Temporal.PlainYearMonth.from(month).subtract({ months: n }).toString();
 }
 
 /** How many days 'YYYY-MM' has (28 to 31; leap years counted). */
 export function daysInMonth(month: string): number {
-	const [year = 0, m = 1] = month.split("-").map(Number);
-	return new Date(Date.UTC(year, m, 0)).getUTCDate();
+	return Temporal.PlainYearMonth.from(month).daysInMonth;
 }
 
 const SHORT = [
@@ -141,8 +133,7 @@ export function dayLabel(date: string, today: string): string {
 
 /** The calendar date `days` days before a YYYY-MM-DD date (calendar arithmetic only, no time zones). */
 export function daysBefore(date: string, days: number): string {
-	const [y, m, d] = date.split("-").map(Number) as [number, number, number];
-	return new Date(Date.UTC(y, m - 1, d - days)).toISOString().slice(0, 10);
+	return Temporal.PlainDate.from(date).subtract({ days }).toString();
 }
 
 /** "September", or "December 2025" when it isn't this year. */

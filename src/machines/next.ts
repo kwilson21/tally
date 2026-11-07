@@ -1,0 +1,41 @@
+import { type AnyStateMachine, initialTransition, transition } from "xstate";
+
+// Asks a small state machine what it does next. Pure: no actors, no timers, no effects.
+// Tally's real writes are SQL compare-and-set guards; these machines describe the rules
+// so people can read them, and tests keep the two in step.
+
+/**
+ * The state the machine moves to on this event, or null when it may not.
+ *
+ * Null covers an unknown event, an event that this state does not handle, a guard that
+ * says no, and any event sent from a final state. XState ignores an unhandled event
+ * silently, so this helper asks `can()` first and never relies on that.
+ *
+ * Throws when `state` is not one of the machine's states. A bad state string from the
+ * database is a bug to surface, not a "not allowed" answer.
+ */
+export function next(
+	machine: AnyStateMachine,
+	state: string,
+	event: string,
+): string | null {
+	const current = restoreState(machine, state);
+	if (!current.can({ type: event })) return null;
+	const [after] = transition(machine, current, { type: event });
+	return String(after.value);
+}
+
+// Turns a state string into a snapshot the machine can reason about. The default context
+// comes from the machine itself, so guards read the same values they would at start.
+function restoreState(machine: AnyStateMachine, state: string) {
+	if (!isKnownState(machine, state)) {
+		throw new Error(`Unknown state "${state}" for machine "${machine.id}"`);
+	}
+	const [initial] = initialTransition(machine);
+	return machine.resolveState({ value: state, context: initial.context });
+}
+
+// True when the string names one of the machine's top-level states.
+function isKnownState(machine: AnyStateMachine, state: string): boolean {
+	return Object.hasOwn(machine.config.states ?? {}, state);
+}
