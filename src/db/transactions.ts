@@ -13,7 +13,7 @@ import {
 } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
-import { gaveUpSql, waitingSql } from "../machines/jev-retry";
+import { gaveUpSql, openSql } from "../machines/jev-retry";
 import {
 	type Edit,
 	excludedAfterSave,
@@ -2895,7 +2895,7 @@ export function seenSaveGuard(seen: JevSeen): {
 
 /**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
- * A failure counts only while the row is waiting (JEV_FAILED in src/machines/jev-retry.ts, decision 171): a filed, unsure
+ * A failure counts while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts, decision 175): a filed
  * or gave-up row is left as it is. `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
@@ -2905,7 +2905,7 @@ export function markJevFailedStatement(
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
 		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
-		WHERE id = ? AND ${waitingSql("transactions")}`,
+		WHERE id = ? AND ${openSql("transactions")}`,
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
@@ -2922,7 +2922,7 @@ export function markReaskFailedStatement(
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
 		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
-		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND ${waitingSql("transactions")}`,
+		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND ${openSql("transactions")}`,
 		turnId,
 	);
 	return db

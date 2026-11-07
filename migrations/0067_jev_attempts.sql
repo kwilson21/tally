@@ -1,4 +1,4 @@
--- Decision 171 (#864): how many times in a row Jev has failed on this one transaction. jev_failed_at only orders a failed row
+-- Decision 175 (#864): how many times in a row Jev has failed on this one transaction. jev_failed_at only orders a failed row
 --   last, so a row Jev can never answer was asked again on every run. At 5 the sorting run leaves the row out, until a
 --   person's "ask again" sets it back to 0 (askAgainMany). Every row starts at 0, so nothing changes until a call fails.
 --   The trigger starts the count again from 0 when the row's bank text, name, amount or account changes, the fields
@@ -13,6 +13,6 @@ WHEN OLD.jev_attempts > 0 AND (
 	OR OLD.own_name IS NOT NEW.own_name
 )
 BEGIN
-	-- A row with a category is filed (decision 171): a change does not reopen it, so its count stays.
+	-- A row with a category is filed (decision 175): a change does not reopen it, so its count stays.
 	UPDATE transactions SET jev_attempts = 0 WHERE id = NEW.id AND category_id IS NULL;
 END;
