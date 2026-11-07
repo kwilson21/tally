@@ -8,7 +8,7 @@ import {
 	isRecordOf,
 	isShape,
 	isString,
-	parseStored,
+	readStored,
 } from "../src/db/stored-shape";
 
 // The guards a stored JSON value is checked with before the code trusts its type (audit finding 11).
@@ -64,19 +64,16 @@ describe("isShape", () => {
 	});
 });
 
-describe("parseStored", () => {
+describe("readStored", () => {
 	const isPair = isShape<{ a: number }>({ a: isNumber });
 
 	it("returns the value when the text is JSON of the right shape", () => {
-		expect(parseStored("pair", '{"a":1}', isPair)).toEqual({ a: 1 });
+		expect(readStored('{"a":1}', isPair)).toEqual({ a: 1 });
 	});
 
-	it("throws naming the record when the text is not JSON or the shape is wrong", () => {
-		expect(() => parseStored("pair", "not json", isPair)).toThrow(
-			"pair is not JSON",
-		);
-		expect(() => parseStored("pair", '{"a":"1"}', isPair)).toThrow(
-			"pair does not have the shape it is read as",
-		);
+	it("returns null when the text is not JSON or is not shaped like the type", () => {
+		expect(readStored("not json", isPair)).toBeNull();
+		expect(readStored('{"a":"1"}', isPair)).toBeNull();
+		expect(readStored("null", isPair)).toBeNull();
 	});
 });

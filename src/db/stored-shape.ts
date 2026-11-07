@@ -51,15 +51,13 @@ export const isShape =
 			(guard as Guard<unknown>)(value[key]),
 		);
 
-/** The stored text as a T. Throws, naming the record, when the text is not JSON or is not shaped like T. */
-export function parseStored<T>(name: string, text: string, guard: Guard<T>): T {
+/** The stored text as a T, or null when it is not JSON or is not shaped like T. The caller decides what null means. */
+export function readStored<T>(text: string, guard: Guard<T>): T | null {
 	let value: unknown;
 	try {
 		value = JSON.parse(text);
 	} catch {
-		throw new Error(`${name} is not JSON`);
+		return null;
 	}
-	if (!guard(value))
-		throw new Error(`${name} does not have the shape it is read as`);
-	return value;
+	return guard(value) ? value : null;
 }

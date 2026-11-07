@@ -1802,31 +1802,63 @@ describe("reading the stored run and moved record", () => {
 		);
 	});
 
-	it("refuses a stored run that is not JSON or has a field of the wrong type", async () => {
+	it("treats a stored run that is not JSON or has a field of the wrong type as none, logs fixed words, and starts over it", async () => {
 		await finishedRun();
 		const run = JSON.parse(await stored("resort_run"));
-		await put("resort_run", "not json");
-		await expect(readRun(db)).rejects.toThrow("resort_run is not JSON");
-		await put("resort_run", JSON.stringify({ ...run, total: "2" }));
-		await expect(readRun(db)).rejects.toThrow(
-			"resort_run does not have the shape it is read as",
-		);
-		await put("resort_run", JSON.stringify({ ...run, snapshots: [{ id: 1 }] }));
-		await expect(readRun(db)).rejects.toThrow("resort_run does not have");
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			for (const bad of [
+				"not json",
+				JSON.stringify({ ...run, total: "2" }),
+				JSON.stringify({ ...run, snapshots: [{ id: 1 }] }),
+			]) {
+				await put("resort_run", bad);
+				expect(await readRun(db)).toBeNull();
+			}
+			expect(logged).toHaveBeenCalledWith(
+				"a stored re-sort record is unusable, none used",
+			);
+			// A run that is running and unreadable would otherwise hold the re-sort for good: the next start replaces it.
+			await put(
+				"resort_run",
+				JSON.stringify({ ...run, status: "running", total: "2" }),
+			);
+			const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+			const started = await startOrJoinRun(db, {
+				candidates: (await candidatesNow()).filter((c) => c.id === a),
+				categoryId: groceries,
+				categoryName: "Groceries",
+				now: T0 + 10_000,
+			});
+			expect(started.runId).not.toBeNull();
+			expect((await readRun(db))?.id).toBe(started.runId);
+			// The log holds the fixed words only, never a row's text.
+			expect(JSON.stringify(logged.mock.calls)).not.toContain("CHECKCARD");
+		} finally {
+			logged.mockRestore();
+		}
 	});
 
-	it("refuses a moved record whose rows are not rows, in the read, the counts and Undo alike", async () => {
+	it("treats a moved record whose rows are not rows as none, in the read, the counts and Undo alike", async () => {
 		const runId = await finishedRun();
 		const record = JSON.parse(await stored(movedKey(runId)));
-		await put(movedKey(runId), JSON.stringify({ ...record, rows: "x" }));
-		await expect(readMoved(db, runId)).rejects.toThrow(
-			"does not have the shape",
-		);
-		await expect(undoRun(db, { runId, now: T0 + 6000 })).rejects.toThrow(
-			"does not have the shape",
-		);
-		await expect(finishRun(db, { runId, now: T0 + 7000 })).rejects.toThrow(
-			"does not have the shape",
-		);
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await put(movedKey(runId), JSON.stringify({ ...record, rows: "x" }));
+			expect(await readMoved(db, runId)).toBeNull();
+			expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
+				restored: 0,
+				changedSince: 0,
+				expired: true,
+			});
+			await expect(
+				finishRun(db, { runId, now: T0 + 7000 }),
+			).resolves.toBeDefined();
+			expect(logged).toHaveBeenCalledWith(
+				"a stored re-sort record is unusable, none used",
+			);
+		} finally {
+			logged.mockRestore();
+		}
 	});
 });

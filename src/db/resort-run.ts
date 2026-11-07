@@ -24,6 +24,7 @@ import {
 } from "./resort-candidates";
 import { withTurnGuard } from "./sorting-turn";
 import {
+	type Guard,
 	isArrayOf,
 	isBoolean,
 	isNullable,
@@ -32,7 +33,7 @@ import {
 	isRecordOf,
 	isShape,
 	isString,
-	parseStored,
+	readStored,
 } from "./stored-shape";
 import { categoryAskedSql } from "./suggestions-queue";
 import { type JevSeen, seenSaveGuard } from "./transactions";
@@ -173,10 +174,19 @@ const isMovedRecord = isShape<MovedRecord>({
 	needAnswer: isNumber,
 });
 
-const parseRun = (value: string): ResortRun =>
-	parseStored(RUN_KEY, value, isResortRun);
-const parseMoved = (key: string, value: string): MovedRecord =>
-	parseStored(key, value, isMovedRecord);
+/**
+ * A stored record as its type, or null when it does not fit: the record is then treated as none and a fixed line is
+ * logged (never the record's text). Both records are temporary state that gates a feature, so one that cannot be read
+ * must not hold the re-sort for good: the next start replaces a run, and a moved record is just not there to show or undo.
+ */
+function usable<T>(text: string, guard: Guard<T>): T | null {
+	const record = readStored(text, guard);
+	if (record === null)
+		console.error("a stored re-sort record is unusable, none used");
+	return record;
+}
+const parseRun = (value: string) => usable(value, isResortRun);
+const parseMoved = (value: string) => usable(value, isMovedRecord);
 
 /** The run, or null when none has ever been started. */
 export async function readRun(db: D1Database): Promise<ResortRun | null> {
@@ -199,7 +209,7 @@ export async function readMoved(
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
-	return row ? parseMoved(movedKey(runId), row.value) : null;
+	return row ? parseMoved(row.value) : null;
 }
 
 /** Writes `next` only if the stored text is still `expected` (null: no row yet). True when it wrote. */
@@ -757,7 +767,8 @@ async function readRecord(
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
 	if (!row) return null;
-	const record = parseMoved(movedKey(runId), row.value);
+	const record = parseMoved(row.value);
+	if (!record) return null;
 	return {
 		moved: record.rows.length,
 		needAnswer: record.needAnswer,
@@ -826,7 +837,9 @@ export async function undoRun(
 		.bind(key)
 		.first<{ value: string }>();
 	if (!existing) return { restored: 0, changedSince: 0, expired: true };
-	const moved = parseMoved(key, existing.value).rows.length;
+	const record = parseMoved(existing.value);
+	if (!record) return { restored: 0, changedSince: 0, expired: true };
+	const moved = record.rows.length;
 
 	// Parameter ?1 is the record's key, ?2 the time. The record's own `until` (null until claimed) is checked in every write.
 	const live = `EXISTS (SELECT 1 FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') >= ?2)`;
