@@ -7,6 +7,7 @@ import {
 	saveSuggestion,
 } from "../src/db/category-suggestions";
 import {
+	saveAskedNames,
 	settleSuggestion,
 	suggestBankNamesSql,
 } from "../src/db/merchant-names";
@@ -20,9 +21,11 @@ import {
 import { machineGraph } from "../src/machines/graph";
 import {
 	MERCHANT_SUGGESTION_LABELS,
+	MERCHANT_SUGGESTION_ROWS,
 	MERCHANT_SUGGESTION_STATUSES,
 	MERCHANT_SUGGESTION_WAITING,
 	merchantSuggestionMachine,
+	merchantSuggestionState,
 } from "../src/machines/merchant-suggestion";
 import { next } from "../src/machines/next";
 
@@ -68,7 +71,7 @@ describe("the suggestion machines against the schema", () => {
 			[...CATEGORY_SUGGESTION_STATUSES, CATEGORY_SUGGESTION_UNSAVED].sort(),
 		);
 		expect(Object.keys(MERCHANT_SUGGESTION_LABELS).sort()).toEqual(
-			[...MERCHANT_SUGGESTION_STATUSES].sort(),
+			Object.keys(merchantSuggestionMachine.states).sort(),
 		);
 	});
 });
@@ -104,24 +107,42 @@ describe("every state met with every event", () => {
 	});
 
 	it("merchant suggestion: a name is offered, then decided or withdrawn; decided ones refuse everything", () => {
+		const none = {
+			BANK_NAME: null,
+			NAMES: null,
+			NO_NAMES: null,
+			ACCEPT: null,
+			REJECT: null,
+			WITHDRAW: null,
+		};
 		const moves: Record<string, Record<string, string | null>> = {
-			none: { SUGGEST: "pending", ACCEPT: null, REJECT: null, WITHDRAW: null },
+			none: {
+				...none,
+				BANK_NAME: "pending",
+				NAMES: "pending",
+				NO_NAMES: "asked",
+			},
+			asked: { ...none, BANK_NAME: "pending" },
 			pending: {
-				SUGGEST: "pending",
+				...none,
+				BANK_NAME: "pending",
 				ACCEPT: "accepted",
 				REJECT: "rejected",
 				WITHDRAW: "none",
 			},
-			accepted: { SUGGEST: null, ACCEPT: null, REJECT: null, WITHDRAW: null },
-			rejected: { SUGGEST: null, ACCEPT: null, REJECT: null, WITHDRAW: null },
+			accepted: none,
+			rejected: none,
 		};
+		expect(Object.keys(moves).sort()).toEqual(
+			Object.keys(merchantSuggestionMachine.states).sort(),
+		);
 		for (const [state, events] of Object.entries(moves))
 			for (const [event, target] of Object.entries(events))
 				expect(
 					next(merchantSuggestionMachine, state, event),
 					`${state} ${event}`,
 				).toBe(target);
-		expect(machineGraph(merchantSuggestionMachine).edges).toHaveLength(5);
+		expect(machineGraph(merchantSuggestionMachine).edges).toHaveLength(8);
 	});
 });
 
@@ -235,50 +256,88 @@ describe("the category suggestion store follows its machine", () => {
 });
 
 describe("the merchant suggestion store follows its machine", () => {
+	const states = Object.keys(
+		merchantSuggestionMachine.states,
+	) as (keyof typeof MERCHANT_SUGGESTION_ROWS)[];
+
 	beforeEach(async () => {
 		await resetDemo(db, "2026-09-22");
-		await db.prepare("DELETE FROM merchants WHERE raw_name = 'ZED CAFE'").run();
 	});
 
-	async function seed(status: string) {
+	async function seed(state: keyof typeof MERCHANT_SUGGESTION_ROWS) {
+		const row = MERCHANT_SUGGESTION_ROWS[state] as NonNullable<
+			(typeof MERCHANT_SUGGESTION_ROWS)[typeof state]
+		>;
 		await db.prepare("DELETE FROM merchants WHERE raw_name = 'ZED CAFE'").run();
 		await db
 			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('ZED CAFE', 'Zed Cafe', ?)",
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('ZED CAFE', ?, ?)",
 			)
-			.bind(status)
+			.bind(row.suggestedName, row.status)
 			.run();
 	}
-	const statusOf = async () =>
-		(
-			await db
-				.prepare(
-					"SELECT suggestion_status AS s FROM merchants WHERE raw_name = 'ZED CAFE'",
-				)
-				.first<{ s: string }>()
-		)?.s;
+	/** The machine's state for the stored row, so every check reads one answer. */
+	const stateNow = async () => {
+		const row = await db
+			.prepare(
+				"SELECT suggestion_status AS status, suggested_name AS suggestedName FROM merchants WHERE raw_name = 'ZED CAFE'",
+			)
+			.first<{ status: string; suggestedName: string | null }>();
+		return merchantSuggestionState(row as NonNullable<typeof row>);
+	};
 
-	it("an offered name moves a row exactly where the machine says", async () => {
-		for (const state of MERCHANT_SUGGESTION_STATUSES) {
+	it("every state is stored in a way that reads back as that state", async () => {
+		for (const state of states) {
+			await seed(state);
+			expect(await stateNow(), state).toBe(state);
+		}
+	});
+
+	it("a bank's name moves a row exactly where the machine says", async () => {
+		for (const state of states) {
 			await seed(state);
 			await db
 				.prepare(suggestBankNamesSql("1"))
 				.bind(JSON.stringify(["ZED CAFE"]))
 				.run();
-			expect(await statusOf(), `${state} after SUGGEST`).toBe(
-				next(merchantSuggestionMachine, state, "SUGGEST") ?? state,
+			expect(await stateNow(), `${state} after BANK_NAME`).toBe(
+				next(merchantSuggestionMachine, state, "BANK_NAME") ?? state,
+			);
+		}
+	});
+
+	it("Workers AI's names move a row exactly where the machine says", async () => {
+		for (const state of states) {
+			await seed(state);
+			await saveAskedNames(
+				db,
+				[{ rawName: "ZED CAFE", names: ["Zed Cafe"] }],
+				[],
+			);
+			expect(await stateNow(), `${state} after NAMES`).toBe(
+				next(merchantSuggestionMachine, state, "NAMES") ?? state,
+			);
+		}
+	});
+
+	it("Workers AI's empty answer moves a row exactly where the machine says", async () => {
+		for (const state of states) {
+			await seed(state);
+			await saveAskedNames(db, [{ rawName: "ZED CAFE", names: [] }], []);
+			expect(await stateNow(), `${state} after NO_NAMES`).toBe(
+				next(merchantSuggestionMachine, state, "NO_NAMES") ?? state,
 			);
 		}
 	});
 
 	it("picking a suggested name accepts, exactly where the machine says", async () => {
-		for (const state of MERCHANT_SUGGESTION_STATUSES) {
+		for (const state of states) {
 			await seed(state);
 			await settleSuggestion(db, "ZED CAFE", {
 				kind: "name",
 				name: "Zed Cafe",
 			});
-			expect(await statusOf(), `${state} after ACCEPT`).toBe(
+			expect(await stateNow(), `${state} after ACCEPT`).toBe(
 				next(merchantSuggestionMachine, state, "ACCEPT") ?? state,
 			);
 		}
@@ -289,10 +348,10 @@ describe("the merchant suggestion store follows its machine", () => {
 			{ kind: "name", name: "My own name" },
 			{ kind: "keep" },
 		] as const) {
-			for (const state of MERCHANT_SUGGESTION_STATUSES) {
+			for (const state of states) {
 				await seed(state);
 				await settleSuggestion(db, "ZED CAFE", choice);
-				expect(await statusOf(), `${state} after REJECT (${choice.kind})`).toBe(
+				expect(await stateNow(), `${state} after REJECT (${choice.kind})`).toBe(
 					next(merchantSuggestionMachine, state, "REJECT") ?? state,
 				);
 			}

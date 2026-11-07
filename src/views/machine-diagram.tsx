@@ -9,6 +9,7 @@ const W = 360;
 const BW = 72;
 const BH = 40;
 const PITCH = 72;
+const LOOP_PITCH = 96;
 const LEFT = 24;
 const RIGHT = 8;
 const LOOP_ROOM = 34;
@@ -51,7 +52,8 @@ export function MachineDiagram({
 	);
 	const hasLoop = edges.some((e) => e.from === e.to);
 	const top = TOP + (hasLoop ? LOOP_ROOM : 0);
-	const innerHeight = (tallest - 1) * PITCH + BH;
+	const pitch = hasLoop && tallest > 1 ? LOOP_PITCH : PITCH;
+	const innerHeight = (tallest - 1) * pitch + BH;
 	const height = top + innerHeight + (backEdges ? 44 : 16);
 	const centerY = top + innerHeight / 2;
 
@@ -63,19 +65,24 @@ export function MachineDiagram({
 				? W / 2
 				: LEFT + BW / 2 + (c * (W - LEFT - RIGHT - BW)) / (columns - 1);
 		keys.forEach((key, r) => {
-			place.set(key, { x, y: centerY + (r - (keys.length - 1) / 2) * PITCH });
+			place.set(key, { x, y: centerY + (r - (keys.length - 1) / 2) * pitch });
 		});
 	}
 	const at = (key: string) => place.get(key) as Point;
 
-	const arrows = edges.map((edge) =>
-		arrow(edge, at, column, centerY + innerHeight / 2),
+	const groups = new Map<string, { edge: Edge; events: string[] }>();
+	for (const edge of edges) {
+		const key = `${edge.from}>${edge.to}`;
+		const group = groups.get(key);
+		if (group) group.events.push(edge.event);
+		else groups.set(key, { edge, events: [edge.event] });
+	}
+	const arrows = [...groups.values()].map((g) =>
+		arrow(g.edge, g.events.map(shown), at, column, centerY + innerHeight / 2),
 	);
+	placeLabels(arrows, [...place.values()], W);
 	const desc = `${label(initial)} is where it starts. ${edges
-		.map(
-			(e) =>
-				`${label(e.from)} goes to ${label(e.to)} on ${e.event.toLowerCase()}.`,
-		)
+		.map((e) => `${label(e.from)} goes to ${label(e.to)} on ${shown(e.event)}.`)
 		.join(" ")}`;
 	const start = at(initial);
 
@@ -145,15 +152,20 @@ export function MachineDiagram({
 				})}
 				{arrows.map((a) => (
 					<text
-						x={a.label.x}
-						y={a.label.y}
-						text-anchor="middle"
+						text-anchor={a.anchor}
 						font-size="11"
 						stroke-width="4"
 						paint-order="stroke"
 						class="fill-muted stroke-paper"
 					>
-						{a.event.toLowerCase()}
+						{a.lines.map((line, i) => (
+							<tspan
+								x={a.label.x}
+								y={a.label.y - (a.lines.length - 1 - i) * 12}
+							>
+								{line}
+							</tspan>
+						))}
 					</text>
 				))}
 			</svg>
@@ -163,7 +175,7 @@ export function MachineDiagram({
 				{edges.map((e) => (
 					<div>
 						<dt class="inline font-semibold">
-							{label(e.from)} → {label(e.to)} on {e.event.toLowerCase()}:
+							{label(e.from)} → {label(e.to)} on {shown(e.event)}:
 						</dt>{" "}
 						<dd class="inline">{e.words}.</dd>
 					</div>
@@ -173,26 +185,91 @@ export function MachineDiagram({
 	);
 }
 
-type Drawn = { path: string; label: Point; event: string };
+type Box = { x1: number; y1: number; x2: number; y2: number };
+const overlaps = (a: Box, b: Box) =>
+	a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
 
-// One arrow's path and where its word sits. Forward arrows run straight from a box's right edge to the next
-// box's left edge; an arrow back to an earlier column bends under the row; an arrow to the same state loops
-// over the top of its box; two states in one column join with a straight vertical.
+// Moves each arrow's words to the nearest spot, from a short list around where they would sit, that touches no box
+// and no words already placed and stays inside the frame. A line under the words is left to the halo drawn
+// behind them. If every spot is taken, the words stay where the arrow put them.
+function placeLabels(arrows: Drawn[], boxes: Point[], frameWidth: number) {
+	const taken: Box[] = boxes.map((p) => ({
+		x1: p.x - BW / 2 - 2,
+		y1: p.y - BH / 2 - 2,
+		x2: p.x + BW / 2 + 2,
+		y2: p.y + BH / 2 + 2,
+	}));
+	const nudges: Point[] = [
+		[0, 0],
+		[0, -12],
+		[0, 12],
+		[-12, 0],
+		[12, 0],
+		[0, -24],
+		[0, 24],
+		[-24, 0],
+		[24, 0],
+		[-12, -12],
+		[12, -12],
+		[-12, 12],
+		[12, 12],
+	].map(([x, y]) => ({ x: x as number, y: y as number }));
+	for (const a of arrows) {
+		const wide = Math.max(...a.lines.map((l) => l.length)) * 6.3 + 4;
+		const tall = a.lines.length * 12 + 3;
+		const boxAt = (n: Point): Box => {
+			const x = a.label.x + n.x;
+			const y = a.label.y + n.y;
+			const left =
+				a.anchor === "middle"
+					? x - wide / 2
+					: a.anchor === "end"
+						? x - wide
+						: x;
+			return { x1: left, y1: y - tall + 2, x2: left + wide, y2: y + 3 };
+		};
+		const fits = (b: Box) =>
+			b.x1 >= 0 &&
+			b.x2 <= frameWidth &&
+			b.y1 >= 0 &&
+			!taken.some((t) => overlaps(b, t));
+		const pick = nudges.find((n) => fits(boxAt(n))) ?? nudges[0];
+		const chosen = pick as Point;
+		taken.push(boxAt(chosen));
+		a.label = { x: a.label.x + chosen.x, y: a.label.y + chosen.y };
+	}
+}
+
+// An event as a person reads it: "BANK_NAME" is "bank name".
+const shown = (event: string) => event.toLowerCase().replaceAll("_", " ");
+
+type Drawn = {
+	path: string;
+	label: Point;
+	anchor: "start" | "middle" | "end";
+	lines: string[];
+};
+
+// One arrow's path and where its words sit; arrows between the same two states are one arrow with a line for each
+// event. Forward arrows run straight from a box's right edge to the next box's left edge; an arrow back to an
+// earlier column bends under the row; an arrow to the same state loops over the top of its box, its word beside the
+// loop; two states in one column join with a straight vertical on the right of the boxes' middle, its word beside it.
 function arrow(
 	edge: Edge,
+	lines: string[],
 	at: (key: string) => Point,
 	column: Map<string, number>,
 	bottom: number,
 ): Drawn {
 	const a = at(edge.from);
 	const b = at(edge.to);
-	const event = edge.event;
 	if (edge.from === edge.to) {
 		const top = a.y - BH / 2;
 		return {
 			path: `M${a.x - 30} ${top} C${a.x - 30} ${top - 26} ${a.x - 4} ${top - 26} ${a.x - 4} ${top - 1}`,
 			label: { x: a.x - 17, y: top - 29 },
-			event,
+			anchor: "middle",
+			lines,
 		};
 	}
 	const ca = column.get(edge.from) ?? 0;
@@ -206,7 +283,8 @@ function arrow(
 				x: from.x + (to.x - from.x) * 0.5,
 				y: from.y + (to.y - from.y) * 0.5 + (to.y > from.y ? 12 : -6),
 			},
-			event,
+			anchor: "middle",
+			lines,
 		};
 	}
 	if (cb < ca) {
@@ -216,15 +294,18 @@ function arrow(
 		return {
 			path: `M${from.x} ${from.y} C${from.x} ${low} ${to.x} ${low} ${to.x} ${to.y}`,
 			label: { x: (from.x + to.x) / 2, y: low - 4 },
-			event,
+			anchor: "middle",
+			lines,
 		};
 	}
 	const down = b.y > a.y;
-	const from = { x: a.x, y: a.y + (down ? BH / 2 : -BH / 2) };
-	const to = { x: b.x, y: b.y + (down ? -BH / 2 - 1 : BH / 2 + 1) };
+	const x = a.x + 14;
+	const from = { x, y: a.y + (down ? BH / 2 : -BH / 2) };
+	const to = { x, y: b.y + (down ? -BH / 2 - 1 : BH / 2 + 1) };
 	return {
 		path: `M${from.x} ${from.y} L${to.x} ${to.y}`,
-		label: { x: from.x + 20, y: (from.y + to.y) / 2 + 4 },
-		event,
+		label: { x: x + 6, y: (from.y + to.y) / 2 + 4 },
+		anchor: "start",
+		lines,
 	};
 }
