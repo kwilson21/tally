@@ -235,6 +235,106 @@ describe("Plaid routes", () => {
 		},
 	);
 
+	describe("relink when the bank moves between the route's read and its write", () => {
+		const RELINK_WRITE =
+			/^UPDATE plaid_items SET status = 'ok', reconnect_emailed_at = NULL WHERE id = \? AND disconnected_at IS NULL AND status = \?/;
+
+		/**
+		 * The database the route sees, where the guarded relink write loses a race: `before` runs just ahead of it,
+		 * as if a sync or a disconnect landed between the route's read and its write. It happens once.
+		 */
+		function raceBeforeRelink(before: string): D1Database {
+			let raced = false;
+			return new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop !== "prepare") {
+						const value = Reflect.get(target, prop);
+						return typeof value === "function" ? value.bind(target) : value;
+					}
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						if (raced || !RELINK_WRITE.test(sql)) return statement;
+						raced = true;
+						return {
+							bind: (...values: unknown[]) => {
+								const bound = statement.bind(...values);
+								return {
+									run: async () => {
+										await target.prepare(before).bind(values[0]).run();
+										return bound.run();
+									},
+								};
+							},
+						} as unknown as D1PreparedStatement;
+					};
+				},
+			});
+		}
+
+		async function relinkWith(db: D1Database, id: number) {
+			const waitUntil = vi.fn((promise: Promise<unknown>) => {
+				void promise.catch(() => {});
+			});
+			vi.stubGlobal("fetch", async () =>
+				Response.json({ item: { institution_id: "ins-1", error: null } }),
+			);
+			return plaid.request(
+				`http://tally.test/plaid/items/${id}/repaired`,
+				{ method: "POST", headers: { Origin: BASE } },
+				{ ...env, DB: db },
+				{ waitUntil, passThroughOnException() {}, props: {} },
+			);
+		}
+
+		async function insertBank(status: "ok" | "needs_attention") {
+			const row = await env.DB.prepare(
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status, reconnect_emailed_at) VALUES (?, 'Race Bank', 'member@example.com', ?, '2026-10-06 04:00:00') RETURNING id",
+			)
+				.bind(await encryptToken("race-token", KEY), status)
+				.first<{ id: number }>();
+			return row?.id as number;
+		}
+
+		it("still answers the success path when a sync cleared the flag first", async () => {
+			const id = await insertBank("needs_attention");
+			const response = await relinkWith(
+				raceBeforeRelink(
+					"UPDATE plaid_items SET status = 'ok', reconnect_emailed_at = NULL WHERE id = ?",
+				),
+				id,
+			);
+
+			expect(response.status).toBe(204);
+			expect(
+				await env.DB.prepare(
+					"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+				)
+					.bind(id)
+					.first(),
+			).toEqual({ status: "ok", reconnect_emailed_at: null });
+		});
+
+		it("answers the repair failure when the bank is not ok after the race", async () => {
+			const id = await insertBank("needs_attention");
+			const response = await relinkWith(
+				raceBeforeRelink(
+					"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
+				),
+				id,
+			);
+
+			expect(response.status).toBe(502);
+			expect(await response.text()).toContain("fix the connection. Try again.");
+		});
+
+		it("relinks a bank that is already ok as a success", async () => {
+			const id = await insertBank("ok");
+			const response = await relinkWith(env.DB, id);
+
+			expect(response.status).toBe(204);
+		});
+	});
+
 	it("marks an item repaired, starts its sync, and returns only its announcement", async () => {
 		const inserted = await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status, reconnect_emailed_at) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention', '2026-10-06 04:00:00') RETURNING id",

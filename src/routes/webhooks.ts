@@ -88,6 +88,8 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		typeof body.webhook_code === "string" &&
 		attentionCodes.has(body.webhook_code);
 	if (isAttentionWarning) {
+		// The store reads the bank's state now. If something moves the bank between that read and the write, the write
+		// is skipped and the state that is there stands (the later fact wins, decision 169).
 		await markNeedsAttention(c.env.DB, item.id);
 	}
 	if (isItemError) {

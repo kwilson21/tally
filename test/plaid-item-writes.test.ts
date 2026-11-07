@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // Only src/plaid/item-store.ts may write plaid_items.status or disconnected_at. This reads every source file as text
-// (Vite's raw import) and fails on a SET clause that names either column in any other file.
+// (Vite's raw import) and fails on a SET clause that assigns either column in any other file.
 const sources = import.meta.glob("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
@@ -10,9 +10,19 @@ const sources = import.meta.glob("../src/**/*.{ts,tsx}", {
 
 const STORE = "../src/plaid/item-store.ts";
 
-/** The SET part of each `UPDATE plaid_items SET ...` in the text: from SET up to WHERE, or to the end of the statement. */
+// The table, bare, aliased (with or without AS), or quoted with double quotes or backticks. SET must follow it.
+// The SET part runs to the end of the statement (a backtick or a semicolon) and is split at WHERE below.
+const UPDATE_PLAID_ITEMS =
+	/UPDATE\s+[`"]?plaid_items[`"]?(?:\s+(?:AS\s+)?(?!SET\b)\w+)?\s+SET\b([^`;]*)/gi;
+
+/** Blanks out the text of every single-quoted string, so a word inside quotes is never read as SQL. */
+function withoutLiterals(text: string): string {
+	return text.replace(/'(?:[^']|'')*'/g, "''");
+}
+
+/** The SET part of each UPDATE of plaid_items in the text: from SET up to WHERE, or to the end of the statement. */
 function setClauses(text: string): string[] {
-	return [...text.matchAll(/UPDATE\s+plaid_items\s+SET\b([^`"';]*)/gi)].map(
+	return [...withoutLiterals(text).matchAll(UPDATE_PLAID_ITEMS)].map(
 		(match) => (match[1] ?? "").split(/\bWHERE\b/i)[0] ?? "",
 	);
 }
@@ -20,6 +30,11 @@ function setClauses(text: string): string[] {
 /** Whether a SET clause assigns status or disconnected_at (a WHERE comparison such as `status = ?` is not a write). */
 function writesProtectedColumn(setClause: string): boolean {
 	return /\b(status|disconnected_at)\s*=/.test(setClause);
+}
+
+/** The SET clauses in the text that write a protected column. */
+function protectedWrites(text: string): string[] {
+	return setClauses(text).filter(writesProtectedColumn);
 }
 
 describe("the Plaid connection write guard", () => {
@@ -40,6 +55,52 @@ describe("the Plaid connection write guard", () => {
 		).toEqual([" reconnect_emailed_at = ? "]);
 	});
 
+	it.each([
+		[
+			"a protected column after a quoted literal",
+			"UPDATE plaid_items SET sync_cursor = 'abc', status = 'ok' WHERE id = 1",
+		],
+		[
+			"a protected column on a later line",
+			"UPDATE plaid_items SET sync_cursor = 'x',\n\t\t status = 'ok' WHERE id = 1",
+		],
+		[
+			"an aliased table with AS",
+			"UPDATE plaid_items AS p SET status = 'ok' WHERE p.id = 1",
+		],
+		[
+			"an aliased table without AS",
+			"UPDATE plaid_items p SET disconnected_at = datetime('now') WHERE p.id = 1",
+		],
+		[
+			"a double-quoted table name",
+			"UPDATE \"plaid_items\" SET status = 'ok' WHERE id = 1",
+		],
+		[
+			"a backtick-quoted table name",
+			"UPDATE `plaid_items` SET status = 'ok' WHERE id = 1",
+		],
+	])("flags %s", (_name, sql) => {
+		expect(protectedWrites(sql)).toHaveLength(1);
+	});
+
+	it.each([
+		[
+			"a status word inside a quoted value",
+			"UPDATE plaid_items SET last_synced_at = 'status = x' WHERE id = 1",
+		],
+		[
+			"a status comparison in WHERE",
+			"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND status = 'needs_attention'",
+		],
+		[
+			"an aliased write that only touches the reminder",
+			"UPDATE plaid_items AS p SET reconnect_emailed_at = ? WHERE p.status = 'x'",
+		],
+	])("does not flag %s", (_name, sql) => {
+		expect(protectedWrites(sql)).toEqual([]);
+	});
+
 	it("reads the store's own SQL, so the scan is not empty", () => {
 		expect(setClauses(sources[STORE] ?? "").length).toBeGreaterThan(0);
 	});
@@ -48,9 +109,7 @@ describe("the Plaid connection write guard", () => {
 		const offenders = Object.entries(sources)
 			.filter(([path]) => path !== STORE)
 			.flatMap(([path, text]) =>
-				setClauses(text)
-					.filter(writesProtectedColumn)
-					.map((clause) => `${path}: SET ${clause.trim()}`),
+				protectedWrites(text).map((clause) => `${path}: SET ${clause.trim()}`),
 			);
 		expect(offenders).toEqual([]);
 	});

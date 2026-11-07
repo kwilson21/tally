@@ -102,6 +102,16 @@ describe("markNeedsAttention", () => {
 		});
 	});
 
+	it("answers lost-race, not unchanged, when the caller's seen state is no longer true and the event would leave it as it was", async () => {
+		// The caller read needs_attention, but a sync has since made the bank ok. LOGIN_BROKEN from needs_attention
+		// leaves needs_attention where it is, which is a no-op for the caller's view, yet the row now says ok.
+		const id = await addBank("ok");
+		expect(
+			await markNeedsAttention(env.DB, id, { seen: "needs_attention" }),
+		).toBe("lost-race");
+		expect((await rowOf(id))?.status).toBe("ok");
+	});
+
 	it("uses the seen state the caller passed, without reading the row again", async () => {
 		const id = await addBank("ok");
 		expect(await markNeedsAttention(env.DB, id, { seen: "ok" })).toBe(
@@ -123,6 +133,21 @@ describe("clearAttention", () => {
 	it("reports unchanged for a bank already ok", async () => {
 		const id = await addBank("ok");
 		expect(await clearAttention(env.DB, id)).toBe("unchanged");
+	});
+
+	it("a relink on a bank that is already ok is unchanged and leaves its row alone", async () => {
+		const id = await addBank("ok");
+		await env.DB.prepare(
+			"UPDATE plaid_items SET sync_cursor = 'kept' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		expect(await clearAttention(env.DB, id)).toBe("unchanged");
+		expect(
+			await env.DB.prepare("SELECT sync_cursor FROM plaid_items WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ sync_cursor: "kept" });
 	});
 
 	it("is refused for a disconnected bank", async () => {
@@ -154,6 +179,15 @@ describe("markSyncSucceeded", () => {
 		const id = await addBank("ok", { lockId: LOCK });
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
 		expect((await rowOf(id))?.status).toBe("ok");
+	});
+
+	it("answers lost-race for an ok bank when this run no longer holds the lease", async () => {
+		const id = await addBank("ok", { lockId: "newer-run" });
+		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("lost-race");
+		expect(await rowOf(id)).toMatchObject({
+			status: "ok",
+			sync_lock_id: "newer-run",
+		});
 	});
 
 	it("writes nothing when a newer run has taken the lease", async () => {

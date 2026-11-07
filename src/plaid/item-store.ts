@@ -70,24 +70,49 @@ function nextStateOf(
 	return next(plaidConnectionMachine, from, event) as ConnectionState | null;
 }
 
-/** Step 3: the write, guarded so it lands only if the row is still in the state we read (and our lease is held). */
-async function writeIfStillIn(
-	db: D1Database,
+/**
+ * The row must still be live, in the state we read, and (for a sync) held under the caller's lease. Each
+ * condition and its value are pushed together, so the SQL and the values cannot fall out of step.
+ */
+function stillInState(
 	itemId: number,
 	from: ConnectionState,
-	to: "ok" | "needs_attention",
 	lockId: string | undefined,
+) {
+	const conditions = ["id = ?", "disconnected_at IS NULL", "status = ?"];
+	const values: unknown[] = [itemId, from];
+	if (lockId !== undefined) {
+		conditions.push("sync_lock_id = ?");
+		values.push(lockId);
+	}
+	return { where: conditions.join(" AND "), values };
+}
+
+type Guard = ReturnType<typeof stillInState>;
+
+/** Step 3: the write itself. It lands only if the guard still holds; if not, the row moved on. */
+async function writeIfStillIn(
+	db: D1Database,
+	guard: Guard,
+	to: "ok" | "needs_attention",
 ): Promise<ItemResult> {
-	const lease = lockId === undefined ? "" : " AND sync_lock_id = ?";
-	const binds = lockId === undefined ? [itemId, from] : [itemId, from, lockId];
 	const result = await db
-		.prepare(
-			`UPDATE plaid_items SET ${LANDING[to]} WHERE id = ? AND disconnected_at IS NULL AND status = ?${lease}`,
-		)
-		.bind(...binds)
+		.prepare(`UPDATE plaid_items SET ${LANDING[to]} WHERE ${guard.where}`)
+		.bind(...guard.values)
 		.run();
-	// Step 4: one row written is a change; no row is a race (the row or the lease moved on).
 	return result.meta.changes === 1 ? "changed" : "lost-race";
+}
+
+/**
+ * The no-write path, for a bank already where the event leaves it. A caller that read the state or holds a
+ * lease still needs that to be true now, so this reads the row and answers lost-race when it isn't.
+ */
+async function stillTrue(db: D1Database, guard: Guard): Promise<ItemResult> {
+	const row = await db
+		.prepare(`SELECT 1 AS holds FROM plaid_items WHERE ${guard.where}`)
+		.bind(...guard.values)
+		.first();
+	return row ? "unchanged" : "lost-race";
 }
 
 /** Runs the four steps for one event. Every named operation below is this with a different event. */
@@ -103,11 +128,16 @@ async function change(
 	// Step 2: the machine's answer.
 	const to = nextStateOf(from, event);
 	if (to === null) return "refused";
-	if (to === from) return "unchanged";
+	const guard = stillInState(itemId, from, options.lockId);
+	if (to === from) {
+		// Nothing to write. A caller that passed a seen state or a lease is checked; a fresh read is unchanged.
+		const checked = options.seen !== undefined || options.lockId !== undefined;
+		return checked ? stillTrue(db, guard) : "unchanged";
+	}
 	// Only disconnectStatement moves a bank to disconnected, so no event here lands there.
 	if (to === "disconnected") return "refused";
 	// Steps 3 and 4: the guarded write, and what it did.
-	return writeIfStillIn(db, itemId, from, to, options.lockId);
+	return writeIfStillIn(db, guard, to);
 }
 
 /** Plaid says the login is broken: a webhook, or a sync that met a login error and confirmed it with Plaid. */
