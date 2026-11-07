@@ -1,7 +1,7 @@
 import { merchantColumnSql } from "../db/merchant-key";
 import { tidyName } from "../transactions/tidy-name";
 
-const EXPORT_COLUMNS = {
+export const EXPORT_COLUMNS = {
 	categories: "id, name, icon, color, sort_order, archived, archived_on",
 	category_archive_periods: "category_id, archived_on, restored_on",
 	category_suggestions: "id, name, status, created_at, decided_at",
