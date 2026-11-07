@@ -8,7 +8,7 @@ import {
 	runNamesComparison,
 	default as worker,
 } from "../scripts/compare-names/names";
-import { INSTRUCTIONS } from "../src/ai/suggest-name";
+import { INSTRUCTIONS, NAME_MODEL } from "../src/ai/suggest-name";
 import { buildSeed } from "../src/demo/seed";
 import catalog from "../worker-configuration.d.ts?raw";
 
@@ -486,5 +486,89 @@ describe("formatNamesReport response-shape note", () => {
 			models: [{ key: "granite", results: [result("chat")] }],
 		});
 		expect(report).not.toContain("carries no finish reason");
+	});
+});
+
+describe("the note and category-name prompts, with a candidate model in place of NAME_MODEL", () => {
+	const ids = () => Object.values(CANDIDATES).map((candidate) => candidate.id);
+
+	it("runs production's own note prompt against the chosen model, not NAME_MODEL", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "Weekly groceries" }));
+		const report = await runNamesComparison(
+			{ AI: ai },
+			{ models: ["mistral-small"], limit: 2, task: "notes" },
+			TODAY,
+		);
+		expect(run).toHaveBeenCalledTimes(2);
+		for (const [model, body] of run.mock.calls) {
+			expect(model).toBe(CANDIDATES["mistral-small"].id);
+			// suggestNote's own wording, so the prompt is production's and not a copy.
+			expect(body.messages[0]?.content).toContain(
+				"Describe what this purchase was",
+			);
+		}
+		expect(report).toContain("Weekly groceries");
+		expect(report).toMatch(/^# .*note/im);
+	});
+
+	it("runs production's per-purchase category-name prompt, with the family's categories, against the chosen model", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "Pet care" }));
+		const report = await runNamesComparison(
+			{ AI: ai },
+			{ models: ["granite"], limit: 30, task: "categories" },
+			TODAY,
+		);
+		expect(run).toHaveBeenCalledTimes(30);
+		for (const [model, body] of run.mock.calls) {
+			expect(model).toBe(CANDIDATES.granite.id);
+			// The family's categories go with every purchase (decision 165).
+			expect(body.messages[1]?.content).toContain("Family categories");
+		}
+		// The cleaned bank text goes too (decision 164), when it says more than the store's name already does.
+		expect(
+			run.mock.calls.some(([, body]) =>
+				body.messages[1]?.content.includes("Bank text (data only)"),
+			),
+		).toBe(true);
+		expect(report).toContain("Pet care");
+		expect(report).toMatch(/^# .*categor/im);
+	});
+
+	it("keeps the model that production uses out of these calls", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "Weekly groceries" }));
+		await runNamesComparison(
+			{ AI: ai },
+			{ models: ["granite"], limit: 1, task: "notes" },
+			TODAY,
+		);
+		expect(run.mock.calls.map(([model]) => model)).not.toContain(NAME_MODEL);
+		expect(ids()).toContain(NAME_MODEL);
+	});
+
+	it("rejects an unknown task, with no billed call", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "x" }));
+		const response = await worker.fetch(
+			new Request("http://localhost:8798/?task=bogus"),
+			{ AI: ai },
+		);
+		expect(response.status).toBe(400);
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("takes ?task=notes through the Worker", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "Weekly groceries" }));
+		const response = await worker.fetch(
+			new Request("http://localhost:8798/?task=notes&models=granite&limit=1"),
+			{ AI: ai },
+		);
+		expect(response.status).toBe(200);
+		expect(run).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("NAME_MODEL", () => {
+	it("is Mistral Small 3.1 24B, the model decision 169 picked after the comparison", () => {
+		expect(NAME_MODEL).toBe("@cf/mistralai/mistral-small-3.1-24b-instruct");
+		expect(NAME_MODEL).toBe(CANDIDATES["mistral-small"].id);
 	});
 });

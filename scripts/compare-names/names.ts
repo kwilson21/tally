@@ -7,10 +7,18 @@
 //   npx wrangler dev --config scripts/compare-names/wrangler.jsonc --port 8798
 //   curl -s http://localhost:8798/ > report.md
 // Add ?models=granite,gemma4 (see CANDIDATES), ?limit=20 (first N texts) or ?tokens=400 (the answer budget;
-// production uses 60) to run a slice.
-import { cleanSuggestedNames, INSTRUCTIONS } from "../../src/ai/suggest-name";
+// production uses 60) to run a slice. ?task=notes or ?task=categories asks the same models production's other two
+// prompts (the "what it was" note, and a category name for a purchase), which share the name model.
+import {
+	cleanSuggestedNames,
+	INSTRUCTIONS,
+	suggestCategoryName,
+	suggestNote,
+} from "../../src/ai/suggest-name";
 import { DEFAULT_TIME_ZONE, todayIn } from "../../src/dates";
 import { buildSeed, type Seed } from "../../src/demo/seed";
+import { tidyName } from "../../src/transactions/tidy-name";
+import { demoCategories } from "../compare-models/score";
 
 export type CompareEnv = { AI: Ai };
 
@@ -235,7 +243,72 @@ export async function askNames(
 	}
 }
 
-export type Slice = { models?: string[]; limit?: number; tokens?: number };
+/** What a run asks: the name prompt, the "what it was" note, or a category name for a purchase. */
+export type Task = "names" | "notes" | "categories";
+const TASKS: Task[] = ["names", "notes", "categories"];
+
+/**
+ * An Ai that asks `modelId` wherever production's code asks for NAME_MODEL, so production's own note and
+ * category-name functions run unchanged (their prompts are not copied here) against a candidate.
+ */
+const withModel = (ai: Ai, modelId: string): Ai =>
+	({
+		run: (_model: string, body: never, options?: never) =>
+			ai.run(modelId as keyof AiModels, body, options),
+	}) as unknown as Ai;
+
+/**
+ * One model, one bank text, through production's note prompt (suggestNote) or its per-purchase category-name
+ * prompt (suggestCategoryName: the bank text and the family's categories, decisions 164 and 165). These
+ * functions keep why an answer failed to themselves, so a failure shows only that it failed.
+ */
+export async function askOther(
+	task: Exclude<Task, "names">,
+	ai: Ai,
+	modelId: string,
+	text: string,
+	categories: string[],
+): Promise<NameResult> {
+	const started = Date.now();
+	const candidate = withModel(ai, modelId);
+	const value =
+		task === "notes"
+			? await suggestNote(candidate, text).then((r) =>
+					r.ok ? { ok: true as const, value: r.note } : { ok: false as const },
+				)
+			: await suggestCategoryName(
+					candidate,
+					[tidyName(text) || text],
+					categories,
+					text,
+					categories,
+				).then((r) =>
+					r.ok ? { ok: true as const, value: r.name } : { ok: false as const },
+				);
+	const ms = Date.now() - started;
+	if (!value.ok)
+		return {
+			text,
+			ok: false,
+			error: "no usable answer (the Worker's log has the error's name)",
+			ms,
+			shape: "unknown",
+		};
+	return {
+		text,
+		ok: true,
+		names: value.value ? [value.value] : [],
+		ms,
+		shape: "unknown",
+	};
+}
+
+export type Slice = {
+	models?: string[];
+	limit?: number;
+	tokens?: number;
+	task?: string;
+};
 
 /** Every chosen model over every text, one call at a time with no retries, as a markdown report. */
 export async function runNamesComparison(
@@ -249,18 +322,33 @@ export async function runNamesComparison(
 		throw new Error(
 			`Unknown model ${unknown.join(", ")}. Choose from ${KEYS.join(", ")}.`,
 		);
+	const task = slice.task ?? "names";
+	if (!TASKS.includes(task as Task))
+		throw new Error(`Unknown task ${task}. Choose from ${TASKS.join(", ")}.`);
 	const tokens = slice.tokens ?? PRODUCTION_TOKENS;
-	const texts = bankTexts(buildSeed(today), slice.limit);
+	const seed = buildSeed(today);
+	const texts = bankTexts(seed, slice.limit);
+	const categories = demoCategories(seed);
 	const models: ReportModel[] = [];
 	for (const key of keys as CandidateKey[]) {
 		const results: NameResult[] = [];
 		for (const text of texts) {
-			results.push(await askNames(env.AI, CANDIDATES[key].id, text, tokens));
+			results.push(
+				task === "names"
+					? await askNames(env.AI, CANDIDATES[key].id, text, tokens)
+					: await askOther(
+							task as Exclude<Task, "names">,
+							env.AI,
+							CANDIDATES[key].id,
+							text,
+							categories,
+						),
+			);
 		}
 		console.log(`compare-names ${key} done`);
 		models.push({ key, results });
 	}
-	return formatNamesReport({ today, tokens, models });
+	return formatNamesReport({ today, tokens, models, task: task as Task });
 }
 
 export type ReportModel = { key: string; results: NameResult[] };
@@ -268,6 +356,14 @@ export type ReportInput = {
 	today: string;
 	tokens: number;
 	models: ReportModel[];
+	/** Which prompt was asked; names when left out. */
+	task?: Task;
+};
+
+const HEADINGS: Record<Task, string> = {
+	names: "# Merchant-name model comparison",
+	notes: "# Purchase-note model comparison",
+	categories: "# Category-name model comparison",
 };
 
 const cell = (value: string) =>
@@ -292,9 +388,11 @@ export function formatNamesReport(input: ReportInput): string {
 	const idOf = (key: string) =>
 		(CANDIDATES as Record<string, { id: string }>)[key]?.id ?? key;
 	const lines = [
-		"# Merchant-name model comparison",
+		HEADINGS[input.task ?? "names"],
 		"",
-		`Run on ${input.today}. Answer budget: ${input.tokens} tokens (production allows ${PRODUCTION_TOKENS}). Names are what production would offer after its own name check, so "named" counts texts with at least one name that passed.`,
+		input.task && input.task !== "names"
+			? `Run on ${input.today}. Production's own prompt and limits are used for this task (\`?tokens\` is ignored), and each answer is what production would keep after its own checks, so "named" counts texts with an answer that passed. The two token columns are always 0 here: production's function keeps the reason an answer was unusable to itself, so a failure shows only that it failed.`
+			: `Run on ${input.today}. Answer budget: ${input.tokens} tokens (production allows ${PRODUCTION_TOKENS}). Names are what production would offer after its own name check, so "named" counts texts with at least one name that passed.`,
 		"",
 		"| Model | Id | Texts | Named | Empty after check | Failed | Ran out of tokens | Cut off mid-answer | Avg ms |",
 		"|---|---|---|---|---|---|---|---|---|",
@@ -320,11 +418,12 @@ export function formatNamesReport(input: ReportInput): string {
 		({ key, results }) =>
 			`- ${label(key)}: ${[...new Set(results.map((r) => r.shape))].join(", ")}`,
 	);
-	lines.push("", "Answer shapes seen:", ...shapes);
+	const isNames = (input.task ?? "names") === "names";
+	if (isNames) lines.push("", "Answer shapes seen:", ...shapes);
 	const noFinish = input.models
 		.filter(({ results }) => results.some((r) => r.shape === "response"))
 		.map(({ key }) => label(key));
-	if (noFinish.length > 0)
+	if (isNames && noFinish.length > 0)
 		lines.push(
 			"",
 			`The \`response\` shape (${noFinish.join(", ")}) carries no finish reason, so "Cut off mid-answer" is always 0 for it. Check its names for a last name that stops short.`,
@@ -388,6 +487,8 @@ export default {
 					models === null ? undefined : models.split(",").map((m) => m.trim()),
 				limit: numberOf("limit", url.searchParams.get("limit")),
 				tokens: numberOf("tokens", url.searchParams.get("tokens")),
+				// A missing task is the name prompt; an unknown one is refused before any call.
+				task: url.searchParams.get("task") ?? undefined,
 			});
 			return new Response(report, {
 				headers: { "content-type": "text/markdown; charset=utf-8" },
