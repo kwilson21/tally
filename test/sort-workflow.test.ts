@@ -11,6 +11,19 @@ import { resetDemo } from "../src/demo/reset";
 const db = env.DB;
 const TODAY = "2026-09-22";
 
+/**
+ * The instance's status once the workflow has completed, waiting on the runtime's own signal and not on a timer.
+ * A run that errors never completes, so it fails as the test's timeout, not by hanging.
+ */
+async function finished(
+	introspector: Awaited<ReturnType<typeof introspectWorkflow>>,
+	instance: Awaited<ReturnType<typeof env.SORT.create>>,
+) {
+	for (const watched of await introspector.get())
+		await watched.waitForStatus("complete");
+	return instance.status();
+}
+
 /** A Jev reply: Eating Out at 0.9, no flags. */
 const jevReply = () =>
 	new Response(
@@ -62,15 +75,7 @@ describe("SortWorkflow", () => {
 			const instance = await env.SORT.create({
 				params: { ids: [id], bySync: false, rulesApplied: false },
 			});
-			let status = await instance.status();
-			for (
-				let i = 0;
-				i < 100 && status.status !== "complete" && status.status !== "errored";
-				i++
-			) {
-				await new Promise((resolve) => setTimeout(resolve, 100));
-				status = await instance.status();
-			}
+			const status = await finished(introspector, instance);
 			expect({ status: status.status, error: status.error?.name }).toEqual({
 				status: "complete",
 				error: undefined,
@@ -101,15 +106,7 @@ describe("SortWorkflow", () => {
 			const instance = await env.SORT.create({
 				params: { bySync: false, rulesApplied: false, night: TODAY },
 			});
-			let status = await instance.status();
-			for (
-				let i = 0;
-				i < 100 && status.status !== "complete" && status.status !== "errored";
-				i++
-			) {
-				await new Promise((resolve) => setTimeout(resolve, 100));
-				status = await instance.status();
-			}
+			const status = await finished(introspector, instance);
 			expect({ status: status.status, error: status.error?.name }).toEqual({
 				status: "complete",
 				error: undefined,
@@ -149,15 +146,7 @@ describe("SortWorkflow", () => {
 			const instance = await env.SORT.create({
 				params: { ids: [id], bySync: false, rulesApplied: false },
 			});
-			let status = await instance.status();
-			for (
-				let i = 0;
-				i < 100 && status.status !== "complete" && status.status !== "errored";
-				i++
-			) {
-				await new Promise((resolve) => setTimeout(resolve, 100));
-				status = await instance.status();
-			}
+			const status = await finished(introspector, instance);
 			expect({ status: status.status, error: status.error?.name }).toEqual({
 				status: "complete",
 				error: undefined,
