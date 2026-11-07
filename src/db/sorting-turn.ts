@@ -6,7 +6,55 @@
 // own batch while its group's reservation record exists (decision 143). A save that already went through finds no
 // record, so it takes nothing.
 
+import type { sortingTurnMachine } from "../machines/sorting-turn";
+
 export const SORTING_TURN_MS = 15 * 60_000;
+
+/** What the `sorting_turn` row holds: the group with the turn, and when it ends (missing on a turn that can't block). */
+export type SortingTurn = { id: string; until: number | null };
+
+/**
+ * Reads the stored `sorting_turn` value, checking its shape: a group id, and an `until` that is a number or missing.
+ * Null for anything else, so a damaged row reads as no turn rather than being trusted.
+ */
+export function parseSortingTurn(value: string): SortingTurn | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(value);
+	} catch {
+		// Not JSON at all: a damaged row is no turn, the same as a missing one.
+		return null;
+	}
+	if (typeof parsed !== "object" || parsed === null) return null;
+	const { id, until } = parsed as { id?: unknown; until?: unknown };
+	if (typeof id !== "string") return null;
+	if (until !== undefined && until !== null && typeof until !== "number")
+		return null;
+	return { id, until: typeof until === "number" ? until : null };
+}
+
+/**
+ * Which state of the sorting-turn machine the stored turn is in at time `now` (ms): free with no row, ran out when its
+ * `until` has passed or is missing, held otherwise. A pure function of the row, so the test can ask it before and
+ * after every statement.
+ */
+export function sortingTurnState(
+	turn: SortingTurn | null,
+	now: number,
+): keyof typeof sortingTurnMachine.states {
+	if (turn === null) return "free";
+	return (turn.until ?? 0) < now ? "expired" : "held";
+}
+
+/** The turn as the database holds it now, for `sortingTurnState`. */
+export async function readSortingTurn(
+	db: D1Database,
+): Promise<SortingTurn | null> {
+	const row = await db
+		.prepare("SELECT value FROM household_settings WHERE key = 'sorting_turn'")
+		.first<{ value: string }>();
+	return row ? parseSortingTurn(row.value) : null;
+}
 
 /** True while the turn is held by the id bound to `param`; a save's statements append it to their WHERE clause. */
 export const turnHeldSql = (param = "?") =>
