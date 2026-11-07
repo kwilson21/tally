@@ -2647,7 +2647,7 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * values in a statement and a bank's first sync brings in thousands.
  */
 /**
- * How many failures in a row Jev may have on one transaction before the sorting run leaves it out (decision 169). A
+ * How many failures in a row Jev may have on one transaction before the sorting run leaves it out (decision 171). A
  * person's "ask again" starts its count over (askAgainMany), and so does a change to its bank text, name, amount or
  * account (a trigger, migration 0067).
  */
@@ -3196,7 +3196,7 @@ export function saveJevResultStatements(
 		const guarded = withTurnGuard(
 			`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
-					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
+					jev_mixed = ?, jev_also_category_id = ?, jev_attempts = 0, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0 AND is_split = 0 AND ${INCLUDED_ROW}
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${STILL_ON_SQL}${seenSql}${activeSql}
@@ -3241,7 +3241,7 @@ export function saveJevResultStatements(
 		const guarded = withTurnGuard(
 			`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
-					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
+					jev_mixed = ?, jev_also_category_id = ?, jev_attempts = 0, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
@@ -3304,6 +3304,7 @@ export function saveJevResultStatements(
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				jev_attempts = 0,
 				updated_at = datetime('now')
 			WHERE id = ? AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
 				AND excluded = 0 AND is_split = 0

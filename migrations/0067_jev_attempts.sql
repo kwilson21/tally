@@ -1,4 +1,4 @@
--- Decision 169 (#864): how many times in a row Jev has failed on this one transaction. jev_failed_at only orders a failed row
+-- Decision 171 (#864): how many times in a row Jev has failed on this one transaction. jev_failed_at only orders a failed row
 --   last, so a row Jev can never answer was asked again on every run. At 5 the sorting run leaves the row out, until a
 --   person's "ask again" sets it back to 0 (askAgainMany). Every row starts at 0, so nothing changes until a call fails.
 --   The trigger starts the count again from 0 when the row's bank text, name, amount or account changes, the fields

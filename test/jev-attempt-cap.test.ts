@@ -8,7 +8,7 @@ import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
 import { recordSorting } from "./record-sorting";
 
-// A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 169). Only a person's
+// A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 171). Only a person's
 // "ask again" or a change to the row's bank text, name, amount or account starts its count again.
 
 const db = env.DB;
@@ -70,9 +70,12 @@ async function categoryOf(id: number): Promise<number | null> {
 }
 
 /** One sorting run over these rows, as a sync or the night would start it. */
-async function sortRun(ids: number[]) {
+async function sortRun(
+	ids: number[],
+	fetch: (url: string, init?: RequestInit) => Promise<Response> = fetchImpl,
+) {
 	const fake = fakeSteps();
-	await sortGroups(withKey, fake.runStep, fetchImpl, {
+	await sortGroups(withKey, fake.runStep, fetch, {
 		rulesApplied: true,
 		onlyIds: ids,
 		runId: crypto.randomUUID(),
@@ -93,6 +96,10 @@ beforeEach(async () => {
 	await resetDemo(db, TODAY);
 	// The category answer alone: a "Fill in details" question would need its own answers, or the call fails.
 	await saveAiSwitches(db, { details: false });
+	// The test env is the demo (40 calls a day), and resetDemo keeps the day's count: start each test with none.
+	await db
+		.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'")
+		.run();
 	fetchImpl.mockClear();
 	vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -169,6 +176,22 @@ describe("a row Jev can never answer", () => {
 });
 
 describe("a row Jev answers", () => {
+	it("a success after earlier failures sets its count back to 0", async () => {
+		const id = await addRow("FLAKY BANK TEXT");
+		let calls = 0;
+		const flaky = vi.fn(async () => {
+			calls += 1;
+			return calls <= 2 ? new Response("{}", { status: 400 }) : answer();
+		});
+		await sortRun([id], flaky);
+		await sortRun([id], flaky);
+		expect(await attempts(id)).toBe(2);
+
+		await sortRun([id], flaky);
+		expect(await categoryOf(id)).not.toBeNull();
+		expect(await attempts(id)).toBe(0);
+	});
+
 	it("is categorized, keeps no failure count, and is not capped", async () => {
 		const id = await addRow("GOOD BANK TEXT");
 		await sortRun([id]);
