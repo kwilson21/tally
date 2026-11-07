@@ -17,6 +17,7 @@ import {
 	PlaidError,
 	removeItem,
 } from "../plaid/client";
+import { clearAttention, readConnection } from "../plaid/item-store";
 import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { decryptToken, encryptToken, isValidKey } from "../plaid/token-crypto";
 
@@ -135,12 +136,17 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 		if (result.item.error) {
 			return c.html(repairFailure(result.item.error), 502);
 		}
-		const repaired = await c.env.DB.prepare(
-			"UPDATE plaid_items SET status = 'ok', reconnect_emailed_at = NULL WHERE id = ? AND disconnected_at IS NULL",
-		)
-			.bind(item.id)
-			.run();
-		if (repaired.meta.changes === 0) return c.notFound();
+		let repaired = await clearAttention(c.env.DB, item.id);
+		if (repaired === "lost-race") {
+			// The bank moved between the read and the write. If a sync made it ok meanwhile, the repair has held: the
+			// success path. Anything else is a real failure.
+			repaired =
+				(await readConnection(c.env.DB, item.id)) === "ok"
+					? "unchanged"
+					: "lost-race";
+		}
+		if (repaired === "refused") return c.notFound();
+		if (repaired === "lost-race") return c.html(repairFailure(null), 502);
 		c.executionCtx.waitUntil(
 			syncItemAndSort(c.env, item.id).catch((error: unknown) => {
 				logPlaidRequestId(error);

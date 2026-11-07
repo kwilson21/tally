@@ -17,6 +17,7 @@ import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
+import { markNeedsAttention, markSyncSucceeded, readSeen } from "./item-store";
 import { loginStillBroken } from "./login-broken";
 import { mergePendingIntoPosted } from "./pending-merge";
 import { decryptToken } from "./token-crypto";
@@ -412,20 +413,13 @@ async function handlePlaidError(
 			error.error_type === "ITEM_ERROR" &&
 			!transient.has(error.error_code ?? "")
 		) {
-			const item = await env.DB.prepare(
-				"SELECT status FROM plaid_items WHERE id = ?",
-			)
-				.bind(itemRowId)
-				.first<{ status: string }>();
+			// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
+			const seen = await readSeen(env.DB, itemRowId);
 			if (
-				item &&
+				seen !== null &&
 				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
 			) {
-				await env.DB.prepare(
-					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ? AND status = ? AND disconnected_at IS NULL",
-				)
-					.bind(itemRowId, lockId, item.status)
-					.run();
+				await markNeedsAttention(env.DB, itemRowId, "login", { seen, lockId });
 			}
 		}
 	}
@@ -1169,6 +1163,17 @@ export async function syncItem(
 				);
 			}
 			if (!page.has_more) {
+				// Every page is in and this run still holds the lease, so the login works: a bank that needed attention is
+				// fine again (decision 173). The store retries a completion that loses only to a change of state, so a
+				// lost-race here means the lease was taken, or the bank kept changing through every try. Either way the
+				// sync does not report success: the bank's flags are left alone, and the next run tries again.
+				const completed = await markSyncSucceeded(env.DB, itemRowId, lockId);
+				if (completed === "lost-race") {
+					console.error(
+						`plaid sync could not record its completion for item ${itemRowId}`,
+					);
+					throw new Error("Plaid sync could not record its completion");
+				}
 				if (runAfterSync) await afterSync(env.DB);
 				return { ...summary, changedIds: [...changedIds] };
 			}
