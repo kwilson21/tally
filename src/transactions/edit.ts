@@ -1,6 +1,7 @@
 // What the edit panel's form may change, checked before anything is saved.
 
 import { followsPurchase } from "../db/counted-month";
+import { isTransactionKind, type TransactionKind } from "./kind";
 
 export type Edit = {
 	/** null leaves the category as it is. */
@@ -57,8 +58,8 @@ export type Edit = {
 	creditReviewedWas?: boolean;
 	/** False when the edit form omitted the credit-review control for an income credit. */
 	creditReviewedProvided?: boolean;
-	kind?: "subscription" | "one_off" | "bill" | "transfer" | null;
-	kindWas?: "subscription" | "one_off" | "bill" | "transfer" | null;
+	kind?: TransactionKind | null;
+	kindWas?: TransactionKind | null;
 	forPersonId?: number | null;
 	forPersonIdWas?: number | null;
 	keepDetails?: boolean;
@@ -285,10 +286,7 @@ export function parseEdit(
 	const fieldChanged = shown === null || typedName !== String(shown).trim();
 	const note = text(form, "note");
 	const rawKind = text(form, "kind");
-	const allowedKinds = ["subscription", "one_off", "bill", "transfer"];
-	const kind = allowedKinds.includes(rawKind)
-		? (rawKind as "subscription" | "one_off" | "bill" | "transfer")
-		: null;
+	const kind = isTransactionKind(rawKind) ? rawKind : null;
 	const rawPerson = text(form, "for_person_id");
 	const forPersonId = rawPerson ? Number(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
@@ -328,7 +326,7 @@ export function parseEdit(
 		errors.merchant = "Type a name here, or pick one above.";
 	if (note.length > MAX_NOTE)
 		errors.note = `Keep the note under ${MAX_NOTE} characters.`;
-	if (rawKind && !allowedKinds.includes(rawKind))
+	if (rawKind && !isTransactionKind(rawKind))
 		errors.kind = "Pick a kind from the list.";
 	if (
 		rawPerson &&

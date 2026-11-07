@@ -12,6 +12,7 @@ import {
 	excludedAfterSave,
 	followsPurchaseAfterSave,
 } from "../transactions/edit";
+import { TRANSACTION_KINDS } from "../transactions/kind";
 import { refundPurchaseLabel } from "../transactions/refund-guards";
 import { jevAsksAbout } from "../transactions/rename";
 import { BottomSheet } from "./bottom-sheet";
@@ -879,20 +880,18 @@ export function EditSheet({
 								name="kind_was"
 								value={values.kindWas ?? values.kind ?? ""}
 							/>
-							{(["subscription", "one_off", "bill", "transfer"] as const).map(
-								(kind) => (
-									<Chip
-										type="radio"
-										name="kind"
-										value={kind}
-										checked={values.kind === kind}
-									>
-										{kind === "one_off"
-											? "One-off"
-											: kind[0]?.toUpperCase() + kind.slice(1)}
-									</Chip>
-								),
-							)}
+							{TRANSACTION_KINDS.map((kind) => (
+								<Chip
+									type="radio"
+									name="kind"
+									value={kind}
+									checked={values.kind === kind}
+								>
+									{kind === "one_off"
+										? "One-off"
+										: kind[0]?.toUpperCase() + kind.slice(1)}
+								</Chip>
+							))}
 							<Chip
 								type="radio"
 								name="kind"
