@@ -41,6 +41,14 @@ import {
 	transactionsExample,
 	trendsExample,
 } from "../how-it-works/examples";
+import {
+	CATEGORY_SUGGESTION_LABELS,
+	categorySuggestionMachine,
+} from "../machines/category-suggestion";
+import {
+	MERCHANT_SUGGESTION_LABELS,
+	merchantSuggestionMachine,
+} from "../machines/merchant-suggestion";
 import { formatCents } from "../money";
 import { buildTrends, RUN_MONTHS, sameDaysCaption } from "../trends";
 import { TallyMark } from "../views/brand";
@@ -53,6 +61,7 @@ import {
 	TransactionsDiagram,
 } from "../views/how-diagrams";
 import { Layout } from "../views/layout";
+import { MachineDiagram } from "../views/machine-diagram";
 import { StartHere } from "../views/start-here";
 import { SystemDiagram } from "../views/system-diagram";
 
@@ -519,6 +528,19 @@ howItWorks.get("/how-it-works", async (c) => {
 					) : (
 						<p class="mt-3">There are no transactions this month yet.</p>
 					)}
+					<p class="mt-3">
+						When {ai} finds three or more purchases that fit no category, Tally
+						may suggest a new one. It is only an idea: it waits until a person
+						creates the category or dismisses it.
+					</p>
+					<Diagram>
+						<MachineDiagram
+							id="category-suggestion-diagram"
+							title="How a suggested new category is decided"
+							machine={categorySuggestionMachine}
+							labels={CATEGORY_SUGGESTION_LABELS}
+						/>
+					</Diagram>
 					<RulesFold count={9}>
 						<ol class="mt-3 list-decimal space-y-1 pl-5">
 							<li>A person's choice, which nothing overwrites.</li>
@@ -582,6 +604,18 @@ howItWorks.get("/how-it-works", async (c) => {
 						The list shows what your bank printed, tidied by code. Names can be
 						suggested for it, and you decide whether to use them.
 					</p>
+					<p class="mt-3">
+						A suggestion waits until you decide. Once you pick a name or turn
+						the suggestion down, Tally never suggests for that store again.
+					</p>
+					<Diagram>
+						<MachineDiagram
+							id="name-suggestion-diagram"
+							title="How a suggested store name is decided"
+							machine={merchantSuggestionMachine}
+							labels={MERCHANT_SUGGESTION_LABELS}
+						/>
+					</Diagram>
 					<Example
 						demo={demo}
 						monthName={monthLabel}

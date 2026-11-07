@@ -2,6 +2,7 @@
 // one per line (a name never has a newline: src/ai/suggest-name.ts keeps single lines). They show only while
 // `suggestion_status` is `pending`: nothing is renamed until a person chooses, and a name a person
 // chose, or turned down, is never suggested again.
+import { MERCHANT_SUGGESTION_WAITING } from "../machines/merchant-suggestion";
 import { tidyName } from "./tidy-name";
 
 export const MAX_SUGGESTED_NAMES = 3;
@@ -61,7 +62,7 @@ export function usableSuggestedNames({
 	key,
 	namesOn,
 }: Stored): string[] {
-	if (status !== "pending") return [];
+	if (status !== MERCHANT_SUGGESTION_WAITING) return [];
 	const names = parseSuggestedNames(stored);
 	return namesOn ? names : names.filter((name) => isBankName(name, key));
 }
