@@ -6694,7 +6694,7 @@ function Diagrams() {
 				title="MachineDiagram"
 				tier="visual"
 				components={["MachineDiagram"]}
-				sentence="A state machine drawn from its own definition (decision 171): one box for each state, left to right, finished states shaded, a dot and short arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
+				sentence="A state machine drawn from its own definition (decision 175): one box for each state, left to right, finished states shaded, a dot and short arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
 			>
 				<State label="A suggested new category (one state, three ways out)">
 					<MachineDiagram

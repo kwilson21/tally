@@ -1454,3 +1454,78 @@ describe("suggestedCategoryName: a change to the categories while the call is in
 		);
 	});
 });
+
+// Owner decision: a pending purchase is not asked, so filing into a new category leaves it out until it posts.
+describe("a pending purchase is filed once it posts", () => {
+	beforeEach(async () => {
+		await resetDemo(db, "2026-09-22");
+		await db.batch([
+			db.prepare("DELETE FROM transactions"),
+			db.prepare("DELETE FROM category_suggestions"),
+		]);
+	});
+
+	it("is not filed into a new category while pending, and is filed once it posts", async () => {
+		const row = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name,
+					category_confidence, jev_category_id, pending)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 1499,
+					'AUDIBLE*TE3E10I7 WA', 0.58, (SELECT id FROM categories WHERE name = 'Eating Out'), 1)
+				RETURNING id`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`)
+			.first<{ id: number }>();
+		const tx = row?.id ?? 0;
+		const target = newCategoryTarget("Pending shelf", [
+			{ id: 1, name: "Groceries", archived: false },
+		]);
+		if (!target.ok || target.kind !== "create")
+			throw new Error("expected create");
+		const categoriesBefore = (
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM categories")
+				.first<{ n: number }>()
+		)?.n;
+
+		expect(
+			await fileInNewCategory(db, {
+				transactionId: tx,
+				target,
+				today: "2026-10-02",
+				who: "Kazon",
+			}),
+		).toEqual({ ok: false, reason: "gone" });
+		expect(
+			(
+				await db
+					.prepare("SELECT COUNT(*) AS n FROM categories")
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(categoriesBefore);
+		expect(
+			await db
+				.prepare("SELECT category_id FROM transactions WHERE id = ?")
+				.bind(tx)
+				.first(),
+		).toEqual({ category_id: null });
+
+		await db
+			.prepare("UPDATE transactions SET pending = 0 WHERE id = ?")
+			.bind(tx)
+			.run();
+		expect(
+			await fileInNewCategory(db, {
+				transactionId: tx,
+				target,
+				today: "2026-10-02",
+				who: "Kazon",
+			}),
+		).toEqual({ ok: true, name: "Pending shelf", created: true });
+		const filed = await db
+			.prepare("SELECT category_id FROM transactions WHERE id = ?")
+			.bind(tx)
+			.first<{ category_id: number | null }>();
+		expect(filed?.category_id).not.toBeNull();
+	});
+});
