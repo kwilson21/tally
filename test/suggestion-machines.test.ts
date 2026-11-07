@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
@@ -11,11 +11,16 @@ import {
 	settleSuggestion,
 	suggestBankNamesSql,
 } from "../src/db/merchant-names";
+import {
+	CATEGORY_SUGGESTION_STATUS_VALUES,
+	MERCHANT_STATUS_VALUES,
+} from "../src/db/schema";
 import { resetDemo } from "../src/demo/reset";
 import {
 	CATEGORY_SUGGESTION_LABELS,
 	CATEGORY_SUGGESTION_STATUSES,
 	CATEGORY_SUGGESTION_UNSAVED,
+	type CategorySuggestionState,
 	categorySuggestionMachine,
 } from "../src/machines/category-suggestion";
 import { machineGraph } from "../src/machines/graph";
@@ -34,30 +39,23 @@ import { next } from "../src/machines/next";
 
 const db = env.DB;
 
-/** The values a column's CHECK allows, read from the live schema. */
-async function allowedBy(table: string, column: string): Promise<string[]> {
-	const row = await db
-		.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
-		.bind(table)
-		.first<{ sql: string }>();
-	const check = row?.sql.match(
-		new RegExp(`\\b${column}\\s+IN\\s*\\(([^)]*)\\)`),
-	);
-	expect(check, `${table}.${column} has no CHECK`).not.toBeNull();
-	return [...(check?.[1] ?? "").matchAll(/'([^']+)'/g)].map((m) => m[1] ?? "");
-}
-
 describe("the suggestion machines against the schema", () => {
-	it("category suggestions allow exactly the machine's states", async () => {
-		expect((await allowedBy("category_suggestions", "status")).sort()).toEqual(
-			[...CATEGORY_SUGGESTION_STATUSES].sort(),
+	it("the machines' status lists are the schema's, as sets", () => {
+		expect(new Set(CATEGORY_SUGGESTION_STATUSES)).toEqual(
+			new Set(CATEGORY_SUGGESTION_STATUS_VALUES),
+		);
+		expect(new Set(MERCHANT_SUGGESTION_STATUSES)).toEqual(
+			new Set(MERCHANT_STATUS_VALUES),
 		);
 	});
 
-	it("merchant suggestions allow exactly the machine's states", async () => {
-		expect((await allowedBy("merchants", "suggestion_status")).sort()).toEqual(
-			[...MERCHANT_SUGGESTION_STATUSES].sort(),
-		);
+	it("the types agree: category states minus born are the schema's values, merchant rows use the schema's values", () => {
+		expectTypeOf<
+			Exclude<CategorySuggestionState, "born">
+		>().toEqualTypeOf<(typeof CATEGORY_SUGGESTION_STATUS_VALUES)[number]>();
+		expectTypeOf<
+			(typeof MERCHANT_SUGGESTION_ROWS)[keyof typeof MERCHANT_SUGGESTION_ROWS]["status"]
+		>().toExtend<(typeof MERCHANT_STATUS_VALUES)[number]>();
 	});
 
 	it("the state a name is shown from is one the machine can still decide", () => {
