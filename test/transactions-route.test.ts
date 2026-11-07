@@ -809,10 +809,10 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 	it("searches only the notes a row shows: a guessed note hidden by the details switch doesn't match (#314)", async () => {
 		await env.DB.batch([
 			env.DB.prepare(
-				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, note, note_guessed) VALUES (99340, 1, '${THIS}-05', -2500, 'TARGET 00412', 1, 'Birthday gift', 1)`,
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, note, note_guessed, note_state) VALUES (99340, 1, '${THIS}-05', -2500, 'TARGET 00412', 1, 'Birthday gift', 1, 'guessed')`,
 			),
 			env.DB.prepare(
-				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, note, note_guessed) VALUES (99341, 1, '${THIS}-05', -2600, 'TARGET 00413', 1, 'Birthday kept', 0)`,
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, note, note_guessed, note_state) VALUES (99341, 1, '${THIS}-05', -2600, 'TARGET 00413', 1, 'Birthday kept', 0, 'written')`,
 			),
 		]);
 		const search = `/transactions?q=birthday&month=${THIS}`;

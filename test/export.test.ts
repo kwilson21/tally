@@ -397,6 +397,7 @@ describe("data exports", () => {
 				"note_failed_at",
 				"note_dismissed",
 				"note_worth_writing",
+				"note_state",
 				"kind",
 				"kind_guessed",
 				"kind_cleared",
@@ -545,7 +546,7 @@ describe("data exports", () => {
 			"INSERT INTO household_people (name) VALUES ('Kids') RETURNING id",
 		).first<{ id: number }>();
 		await env.DB.prepare(
-			"UPDATE transactions SET note = 'Soccer shoes', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1, details_asked = 1, note_tried_at = '2026-10-06 09:00:00' WHERE id = 1",
+			"UPDATE transactions SET note = 'Soccer shoes', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1, details_asked = 1, note_tried_at = '2026-10-06 09:00:00' WHERE id = 1",
 		)
 			.bind(person?.id)
 			.run();

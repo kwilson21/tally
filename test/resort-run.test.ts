@@ -1632,7 +1632,7 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 		});
 	});
 
-	// Undo puts back the failure counter the row had before the run (decision 175), as it puts back jev_failed_at.
+	// Undo puts back the failure counter the row had before the run (decision 176), as it puts back jev_failed_at.
 	const counter = async (id: number) =>
 		(
 			await db

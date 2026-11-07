@@ -64,9 +64,9 @@ beforeEach(async () => {
 describe("transaction detail guesses", () => {
 	it("records empty note answers and reaches older untried purchases next", async () => {
 		await db
-			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,details_asked, note_worth_writing) VALUES
-			(1,'2026-10-01',100,'NEWEST A',1,1),(1,'2026-10-02',100,'NEWEST B',1,1),
-			(1,'2026-10-03',100,'NEWEST C',1,1),(1,'2026-09-01',100,'OLDER',1,1)`)
+			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,details_asked, note_worth_writing, note_state) VALUES
+			(1,'2026-10-01',100,'NEWEST A', 1, 1, 'queued'),(1,'2026-10-02',100,'NEWEST B', 1, 1, 'queued'),
+			(1,'2026-10-03',100,'NEWEST C', 1, 1, 'queued'),(1,'2026-09-01',100,'OLDER', 1, 1, 'queued')`)
 			.run();
 		const asked: string[] = [];
 		const ai = {
@@ -94,8 +94,8 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
-			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing)
-			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1 FROM n`,
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state)
+			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1, 'queued' FROM n`,
 			)
 			.run();
 		let statements = 0;
@@ -121,8 +121,8 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
-			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing)
-			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1 FROM n`,
+			 INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state)
+			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1, 'queued' FROM n`,
 			)
 			.run();
 		const run = vi.fn(async () => {
@@ -149,12 +149,12 @@ describe("transaction detail guesses", () => {
 	it("guesses only empty notes and keeps a note typed after candidates were read", async () => {
 		await db
 			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, details_asked, note_worth_writing)
-			 VALUES (1, '2026-09-20', 500, 'EMPTY STRING', '', 1, 1),
-			        (1, '2026-09-20', 600, 'WHITESPACE NOTE', '   ', 1, 1),
-			        (1, '2026-09-20', 700, 'NULL NOTE', NULL, 1, 1),
-			        (1, '2026-09-20', 800, 'PERSON NOTE', 'Costco run', 1, 1),
-			        (1, '2026-09-20', 900, 'RACE NOTE', NULL, 1, 1)`,
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, details_asked, note_worth_writing, note_state)
+			 VALUES (1, '2026-09-20', 500, 'EMPTY STRING', '', 1, 1, 'queued'),
+			        (1, '2026-09-20', 600, 'WHITESPACE NOTE', '   ', 1, 1, 'queued'),
+			        (1, '2026-09-20', 700, 'NULL NOTE', NULL, 1, 1, 'queued'),
+			        (1, '2026-09-20', 800, 'PERSON NOTE', 'Costco run', 1, 1, 'written'),
+			        (1, '2026-09-20', 900, 'RACE NOTE', NULL, 1, 1, 'queued')`,
 			)
 			.run();
 		const run = vi.fn(
@@ -299,7 +299,7 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'rejected')",
 			),
 			db.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1)",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
 			),
 		]);
 		const ai = {
@@ -317,7 +317,7 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'pending')",
 			),
 			db.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1)",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
 			),
 		]);
 		const ai = {
@@ -334,7 +334,7 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('UBER *TRIP', 'Uber Eats', 'pending')",
 			),
 			db.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1)",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
 			),
 		]);
 		const ai = {
@@ -353,7 +353,7 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Harbor Hardware', 'Harbor Hardware', 'pending')",
 			),
 			db.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing) VALUES (1, '2026-10-01', 1299, 'HBR HDWR #88', 'Harbor Hardware', 1, 1)",
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'HBR HDWR #88', 'Harbor Hardware', 1, 1, 'queued')",
 			),
 		]);
 		const ai = {
@@ -373,9 +373,9 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BLUE BTL CO', 'Blue Bottle Coffee', 'pending')",
 			),
 			db.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing) VALUES
-				(1, '2026-10-01', 1299, 'BL BTTL COF', NULL, 1, 1),
-				(1, '2026-10-02', 1299, 'BL BTTL COF', 'BLUE BTL CO', 1, 1)`,
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state) VALUES
+				(1, '2026-10-01', 1299, 'BL BTTL COF', NULL, 1, 1, 'queued'),
+				(1, '2026-10-02', 1299, 'BL BTTL COF', 'BLUE BTL CO', 1, 1, 'queued')`,
 			),
 		]);
 		const ai = {
@@ -491,7 +491,7 @@ describe("transaction detail guesses", () => {
 		const id = await charge();
 		await db
 			.prepare(
-				"UPDATE transactions SET note = 'Coffee with a friend', note_guessed = 1, kind = 'one_off', kind_guessed = 1 WHERE id = ?",
+				"UPDATE transactions SET note = 'Coffee with a friend', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1 WHERE id = ?",
 			)
 			.bind(id)
 			.run();
@@ -515,7 +515,7 @@ describe("transaction detail guesses", () => {
 		const id = await charge();
 		await db
 			.prepare(
-				"UPDATE transactions SET note='Dinner claim',note_guessed=1,kind='one_off',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
+				"UPDATE transactions SET note='Dinner claim',note_guessed=1, note_state = 'guessed',kind='one_off',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
 			)
 			.bind(id)
 			.run();
@@ -528,7 +528,7 @@ describe("transaction detail guesses", () => {
 		expect(list.html).not.toContain("Dinner claim");
 		await db
 			.prepare(
-				"UPDATE transactions SET note_guessed=0,kind_guessed=0,for_person_guessed=0 WHERE id=?",
+				"UPDATE transactions SET note_guessed=0, note_state='written',kind_guessed=0,for_person_guessed=0 WHERE id=?",
 			)
 			.bind(id)
 			.run();
@@ -697,7 +697,7 @@ describe("transaction detail guesses", () => {
 		const id = await charge();
 		await db
 			.prepare(
-				"UPDATE transactions SET note = ?, note_guessed = 1 WHERE id = ?",
+				"UPDATE transactions SET note = ?, note_guessed = 1, note_state = 'guessed' WHERE id = ?",
 			)
 			.bind("Coffee with a friend", id)
 			.run();
@@ -724,7 +724,7 @@ describe("transaction detail guesses", () => {
 		const id = await charge();
 		await db
 			.prepare(
-				"UPDATE transactions SET note='Unwanted guess',note_guessed=1,details_asked=1 WHERE id=?",
+				"UPDATE transactions SET note='Unwanted guess',note_guessed=1, note_state = 'guessed',details_asked=1 WHERE id=?",
 			)
 			.bind(id)
 			.run();
@@ -763,7 +763,7 @@ describe("transaction detail guesses", () => {
 			.first<{ id: number }>();
 		await db
 			.prepare(
-				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
+				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
 			)
 			.bind(person?.id, id)
 			.run();
@@ -850,7 +850,7 @@ describe("transaction detail guesses", () => {
 			.first<{ id: number }>();
 		await db
 			.prepare(
-				"UPDATE transactions SET note='Dinner',note_guessed=1,kind='one_off',kind_guessed=1,for_person_id=?,for_person_guessed=1 WHERE id=?",
+				"UPDATE transactions SET note='Dinner',note_guessed=1, note_state = 'guessed',kind='one_off',kind_guessed=1,for_person_id=?,for_person_guessed=1 WHERE id=?",
 			)
 			.bind(person?.id, id)
 			.run();
@@ -889,12 +889,14 @@ describe("transaction detail guesses", () => {
 		const guessed = await charge();
 		await db
 			.prepare(
-				"UPDATE transactions SET note='Written',note_guessed=0 WHERE id=?",
+				"UPDATE transactions SET note='Written',note_guessed=0, note_state='written' WHERE id=?",
 			)
 			.bind(written)
 			.run();
 		await db
-			.prepare("UPDATE transactions SET note='Guess',note_guessed=1 WHERE id=?")
+			.prepare(
+				"UPDATE transactions SET note='Guess',note_guessed=1, note_state = 'guessed' WHERE id=?",
+			)
 			.bind(guessed)
 			.run();
 		await saveAiSwitches(db, { details: false });
@@ -923,7 +925,7 @@ describe("transaction detail guesses", () => {
 			.first<{ id: number }>();
 		await db
 			.prepare(
-				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
+				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
 			)
 			.bind(person?.id, id)
 			.run();
@@ -1021,7 +1023,7 @@ describe("transaction detail guesses", () => {
 			.first<{ id: number }>();
 		await db
 			.prepare(
-				"UPDATE transactions SET note='Old guess',note_guessed=1,kind='subscription',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
+				"UPDATE transactions SET note='Old guess',note_guessed=1, note_state = 'guessed',kind='subscription',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
 			)
 			.bind(id)
 			.run();

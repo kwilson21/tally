@@ -69,6 +69,7 @@ import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
 import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { neverSuggestedSql } from "./never-suggest";
+import { afterNoteEvent, type NoteState, QUEUED_NOTE_SQL } from "./note-state";
 import { ownNameSql } from "./own-name";
 import { unlinkUnfitCashPlanPaymentsSql } from "./planned-expenses";
 import {
@@ -178,7 +179,7 @@ const suggestedNameMatch = (namesOn: boolean) =>
 export const visibleNoteSql = (detailsOn: boolean) =>
 	detailsOn
 		? "t.note"
-		: "CASE WHEN t.note_guessed = 1 THEN NULL ELSE t.note END";
+		: "CASE WHEN t.note_state = 'guessed' THEN NULL ELSE t.note END";
 
 export const PAGE_SIZE = 25;
 
@@ -392,7 +393,7 @@ export async function listTransactions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : visibleNoteSql(detailsOn)} AS note, ${f.raw ? "0" : `CASE WHEN t.note_guessed = 1 AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : visibleNoteSql(detailsOn)} AS note, ${f.raw ? "0" : `CASE WHEN t.note_state = 'guessed' AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
 				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${ownNameSql("p")} AS parentOwnName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
@@ -851,7 +852,7 @@ export async function getTransaction(
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, (SELECT rc.name FROM categories rc WHERE rc.id = ${merchantColumnSql("t", "default_category_id")}) AS merchantRuleCategoryName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				(SELECT COUNT(*) FROM transactions m WHERE m.parent_id IS NULL AND ${merchantKeySql("m")} = ${merchantKeySql("t")}) AS merchantTotal,
 				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date, 'part', o.parent_id IS NOT NULL)) FROM transactions o WHERE o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
-				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
+				(t.note_state = 'guessed') AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
 				t.for_person_id AS forPersonId, (SELECT name FROM household_people WHERE id = t.for_person_id) AS forPersonName, t.for_person_guessed AS forPersonGuessed,
 				t.is_split AS isSplit, NULL AS parentName,
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
@@ -1091,7 +1092,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, excluded_source AS excludedSource, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, excluded_source AS excludedSource, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_state AS noteState, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -1113,7 +1114,7 @@ export async function saveEdit(
 			refundOfId: number | null;
 			isSplit: number;
 			note: string | null;
-			noteGuessed: number;
+			noteState: NoteState;
 			kind: string | null;
 			kindGuessed: number;
 			forPersonId: number | null;
@@ -1131,9 +1132,20 @@ export async function saveEdit(
 	const noteChanged =
 		edit.noteProvided !== false &&
 		edit.note !== current.note &&
-		(current.noteGuessed === 0 ||
+		(current.noteState !== "guessed" ||
 			edit.detailsVisible !== false ||
 			edit.noteProvided === true);
+	// The note's state after this save: a person's words, a person's keeping of a guess, or no change.
+	const noteEvent = noteChanged
+		? (edit.note ?? "").trim() === ""
+			? "person_emptied"
+			: "person_wrote"
+		: edit.keepDetails
+			? "person_kept"
+			: null;
+	const nextNote: NoteState = noteEvent
+		? afterNoteEvent(current.noteState, noteEvent)
+		: current.noteState;
 	const newLink =
 		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId
 			? edit.refundOfId
@@ -1309,7 +1321,7 @@ export async function saveEdit(
 		changed
 			? gated(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
-						note = CASE WHEN ? = 1 THEN ? ELSE note END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+						note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 						income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
@@ -1318,17 +1330,26 @@ export async function saveEdit(
 						edit.categoryId,
 						noteChanged ? 1 : 0,
 						edit.note,
+						noteChanged ? 1 : 0,
+						nextNote,
 						...excludeArgs,
 						...reviewArgs,
 					],
 				)
 			: gated(
-					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL, split_removed_bills = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL, split_removed_bills = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 				income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
-					[noteChanged ? 1 : 0, edit.note, ...excludeArgs, ...reviewArgs],
+					[
+						noteChanged ? 1 : 0,
+						edit.note,
+						noteChanged ? 1 : 0,
+						nextNote,
+						...excludeArgs,
+						...reviewArgs,
+					],
 				),
 	);
 	// A guessed name a person keeps is logged before the merchant's suggestion settles (spec §8.6).
@@ -1522,6 +1543,7 @@ export async function saveEdit(
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
 					for_person_cleared = CASE WHEN ? = 1 THEN ? ELSE for_person_cleared END,
 					note = CASE WHEN ? = 1 THEN ? ELSE note END,
+					note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
 					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
 					note_dismissed = CASE WHEN ? = 1 AND ? = 1 AND trim(COALESCE(?, '')) = '' THEN 1 ELSE note_dismissed END,
@@ -1542,12 +1564,15 @@ export async function saveEdit(
 					edit.forPersonId === null ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.note,
+					// Written only when the machine moves the note, so an untouched note's state is never rewritten.
+					nextNote !== current.noteState ? 1 : 0,
+					nextNote,
 					noteChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.note,
 					noteChanged ? 1 : 0,
-					current.noteGuessed,
+					current.noteState === "guessed" ? 1 : 0,
 					edit.note,
 					kindChanged ? 1 : 0,
 					personChanged ? 1 : 0,
@@ -2895,7 +2920,7 @@ export function seenSaveGuard(seen: JevSeen): {
 
 /**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
- * A failure counts while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts, decision 175): a filed
+ * A failure counts while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts, decision 176): a filed
  * or gave-up row is left as it is. `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
@@ -2969,6 +2994,10 @@ export function saveJevDetailsStatement(
 				for_person_id = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN (SELECT forPersonId FROM answers WHERE answers.id = transactions.id) ELSE for_person_id END,
 				for_person_guessed = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
 				note_worth_writing = (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id),
+				note_state = CASE WHEN note_state != 'unasked' THEN note_state
+					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 1 THEN 'queued'
+					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 0 THEN 'no_call'
+					ELSE 'unanswered' END,
 				details_asked = 1, updated_at = datetime('now')
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still} AND ${seenIntact}`,
 		options.turnId,
@@ -2998,13 +3027,11 @@ export type NoteNameRow = {
 };
 
 /**
- * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
- * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
- * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
- * text, Plaid's merchant name, the names the row can show, and its own name (`ownName`, #426). Only the bank
- * text is sent. A row with `note_tried_at` set is left out: Workers AI answered it, even with no note, or a
- * person saved its note empty. A row whose call failed (`note_failed_at`) stays in, but after the rows that
- * never failed.
+ * The bounded set of note guesses for this run: the rows whose note is queued or failed (`note_state`, see
+ * src/db/note-state.ts). Only a transaction Jev said a what-it-was line could help with (decision 103) is queued, so a
+ * no, an unanswered one and a note a person emptied are never sent. Each row carries the names a guess is checked
+ * against: the bank text, Plaid's merchant name, the names the row can show, and its own name (`ownName`, #426).
+ * Only the bank text is sent. A failed row (`note_failed_at`) stays in, but after the rows that never failed.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -3014,9 +3041,9 @@ export async function transactionsNeedingNoteGuess(
 		.prepare(
 			`SELECT t.id, ${NOTE_NAME_COLUMNS}
 			 FROM transactions t
-			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
+			 WHERE t.note_state IN (${QUEUED_NOTE_SQL})
 			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
-			 ORDER BY t.note_failed_at IS NOT NULL, t.note_failed_at, t.date DESC, t.id DESC LIMIT ?`,
+			 ORDER BY t.note_state = 'failed', t.note_failed_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
 		.all<NoteNameRow>();
@@ -3044,9 +3071,9 @@ export async function noteNameRows(
 }
 
 /**
- * Stores successful note guesses, and marks each call Workers AI answered as tried, even when its answer
- * was empty, so it isn't asked again. A failed call is stamped in `note_failed_at` and stays untried, so it is
- * asked again, after the untried notes (`transactionsNeedingNoteGuess`). One JSON parameter for each stays below
+ * Stores successful note guesses, and moves each queued or failed note by the answer: a guess is `guessed`, an
+ * empty answer is `tried_empty`, and a failed call is stamped in `note_failed_at` and stays `failed`, so it is asked
+ * again after the queued notes (`transactionsNeedingNoteGuess`). A note in any other state is left alone. One JSON parameter for each stays below
  * D1's bind limit, and the whole save is one statement.
  */
 export async function saveNoteAttempts(
@@ -3062,8 +3089,15 @@ export async function saveNoteAttempts(
 				failed AS (SELECT value AS id FROM json_each(?)),
 				guesses AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?))
 			UPDATE transactions AS t SET
-				note = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN (SELECT note FROM guesses WHERE guesses.id = t.id) ELSE note END,
-				note_guessed = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 1 ELSE note_guessed END,
+				note = CASE WHEN t.note_state IN (${QUEUED_NOTE_SQL}) AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN (SELECT note FROM guesses WHERE guesses.id = t.id) ELSE note END,
+				note_state = CASE WHEN t.note_state NOT IN (${QUEUED_NOTE_SQL}) THEN t.note_state
+					-- A person typed a note while the call was out: the note is theirs, and the guess is dropped.
+					WHEN NOT ${EMPTY_NOTE} THEN 'written'
+					WHEN EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 'guessed'
+					WHEN t.id IN (SELECT id FROM attempted) THEN 'tried_empty'
+					WHEN t.id IN (SELECT id FROM failed) THEN 'failed'
+					ELSE t.note_state END,
+				note_guessed = CASE WHEN t.note_state IN (${QUEUED_NOTE_SQL}) AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 1 ELSE note_guessed END,
 				note_tried_at = CASE WHEN t.id IN (SELECT id FROM attempted) THEN datetime('now') ELSE note_tried_at END,
 				note_failed_at = CASE WHEN t.id IN (SELECT id FROM failed) THEN datetime('now') ELSE note_failed_at END,
 				updated_at = CASE WHEN t.id IN (SELECT id FROM attempted) THEN datetime('now') ELSE updated_at END

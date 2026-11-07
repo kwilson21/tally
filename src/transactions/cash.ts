@@ -116,8 +116,8 @@ export async function saveCash(
 			"INSERT INTO accounts (name,type) VALUES ('Cash','cash') ON CONFLICT(type) WHERE type='cash' DO NOTHING",
 		),
 		db
-			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id,category_source,flag_income,note,updated_by,entry_key)
-			VALUES ((SELECT id FROM accounts WHERE type='cash'),?,?,?,?, 'user',?,?,?,?)
+			.prepare(`INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id,category_source,flag_income,note,updated_by,entry_key,note_state)
+			VALUES ((SELECT id FROM accounts WHERE type='cash'),?,?,?,?, 'user',?,?,?,?, CASE WHEN trim(COALESCE(?,'')) = '' THEN 'unasked' ELSE 'written' END)
 			ON CONFLICT(entry_key) WHERE entry_key IS NOT NULL DO NOTHING`)
 			.bind(
 				value.date,
@@ -128,6 +128,7 @@ export async function saveCash(
 				value.note,
 				by,
 				entryKey,
+				value.note,
 			),
 	]);
 	const stored = entryKey

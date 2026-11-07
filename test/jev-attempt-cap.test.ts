@@ -20,7 +20,7 @@ import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
 import { recordSorting } from "./record-sorting";
 
-// A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 175). Only a person's
+// A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 176). Only a person's
 // "ask again" or a change to the row's bank text, name, amount or account starts its count again.
 
 const db = env.DB;
@@ -161,7 +161,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-// The machine's transitions (decision 175), from one state, event and row context.
+// The machine's transitions (decision 176), from one state, event and row context.
 describe("the Jev retry machine", () => {
 	const at = (attempts: number, categorized = false, answered = false) => ({
 		attempts,
@@ -267,7 +267,7 @@ describe("the Jev retry machine", () => {
 });
 
 // A failed income question is one of Jev's asks on a row that may already have a category. It counts only while the
-// row is waiting: on an unsure or filed row it leaves the failure stamp alone (decision 175).
+// row is waiting: on an unsure or filed row it leaves the failure stamp alone (decision 176).
 describe("a failed income question stamps only a waiting row", () => {
 	async function stampedAfterFailure(id: number): Promise<boolean> {
 		await markJevFailedStatement(db, id).run();
@@ -305,7 +305,7 @@ describe("a failed income question stamps only a waiting row", () => {
 	});
 });
 
-// Every writer, from every state, against the machine (decision 175). A row is built in each state, the real writer
+// Every writer, from every state, against the machine (decision 176). A row is built in each state, the real writer
 // runs (the failure statement, the sorting run's answer, ask again, or the bank-text trigger), and the row is read
 // back. Where the machine allows the event, the row must reach the machine's state. Where it refuses, the row's retry
 // columns must be exactly as they were. There are no exceptions to this grid. JEV_FAILED is allowed from waiting and
@@ -554,7 +554,7 @@ describe("a row Jev answers", () => {
 });
 
 // An unsure row is still asked about its income question, so its failures count. Once it gives up, a run no longer
-// asks it, and the rows beside it still run (decision 175).
+// asks it, and the rows beside it still run (decision 176).
 describe("an unsure row whose income question keeps failing", () => {
 	it("gives up at the cap, and a later run no longer asks it, so the rows beside it still run", async () => {
 		const unsure = await addRow("HOPELESS UNSURE");

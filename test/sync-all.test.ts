@@ -22,10 +22,15 @@ async function addItem(status: "ok" | "needs_attention" = "ok") {
 	const token = await encryptToken(`token-${crypto.randomUUID()}`, KEY);
 	const row = await env.DB.prepare(
 		`INSERT INTO plaid_items
-			(access_token_encrypted, institution_name, linked_by, plaid_item_id, status)
-		 VALUES (?, 'Bank', 'person@example.com', ?, ?) RETURNING id`,
+			(access_token_encrypted, institution_name, linked_by, plaid_item_id, status, attention_login)
+		 VALUES (?, 'Bank', 'person@example.com', ?, ?, ?) RETURNING id`,
 	)
-		.bind(token, crypto.randomUUID(), status)
+		.bind(
+			token,
+			crypto.randomUUID(),
+			status,
+			status === "needs_attention" ? 1 : 0,
+		)
 		.first<{ id: number }>();
 	return row?.id as number;
 }
@@ -116,27 +121,170 @@ describe("syncAllItems", () => {
 		);
 	});
 
-	it("syncs every ok Item in order and leaves needs_attention alone", async () => {
+	it("syncs every live Item in order, including one that needs attention (decision 173)", async () => {
 		const first = await addItem();
 		const second = await addItem();
-		await addItem("needs_attention");
+		const flagged = await addItem("needs_attention");
 		const fetchImpl = fakePlaid();
 
-		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
-			added: 2,
+		expect(
+			await syncAllItems(enabledEnv, fetchImpl, Date.now, false, {
+				retryFlagged: true,
+			}),
+		).toEqual({
+			added: 3,
 			modified: 0,
 			changedIds: expect.any(Array),
-			synced: 2,
+			synced: 3,
 			skipped: 0,
 			busy: 0,
 			failed: 0,
 			failedBanks: [],
 		});
-		expect(fetchImpl).toHaveBeenCalledTimes(4);
+		expect(fetchImpl).toHaveBeenCalledTimes(6);
 		const { results } = await env.DB.prepare(
 			"SELECT plaid_item_id FROM accounts ORDER BY plaid_item_id",
 		).all<{ plaid_item_id: number }>();
-		expect(results.map((row) => row.plaid_item_id)).toEqual([first, second]);
+		expect(results.map((row) => row.plaid_item_id)).toEqual([
+			first,
+			second,
+			flagged,
+		]);
+	});
+
+	it("clears a flagged Item's flag and reminder when the daily run's sync succeeds", async () => {
+		const id = await addItem("needs_attention");
+		await env.DB.prepare(
+			"UPDATE plaid_items SET reconnect_emailed_at = '2026-10-06 04:00:00' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+
+		const result = await syncAllItems(
+			enabledEnv,
+			fakePlaid(),
+			Date.now,
+			false,
+			{ retryFlagged: true },
+		);
+
+		expect(result).toMatchObject({ synced: 1, failed: 0 });
+		expect(
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ status: "ok", reconnect_emailed_at: null });
+	});
+
+	it("keeps a flagged Item flagged, writes no reminder and calls no email service when its sync fails", async () => {
+		const id = await addItem("needs_attention");
+		await env.DB.prepare(
+			"UPDATE plaid_items SET reconnect_emailed_at = '2026-10-06 04:00:00' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+			if (String(url).endsWith("/accounts/get")) {
+				return response({ accounts: [] });
+			}
+			return response(
+				{ error_type: "API_ERROR", request_id: "request-safe" },
+				500,
+			);
+		});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const result = await syncAllItems(enabledEnv, fetchImpl, Date.now, false, {
+			retryFlagged: true,
+		});
+
+		expect(result).toMatchObject({ synced: 0, failed: 1 });
+		expect(
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({
+			status: "needs_attention",
+			reconnect_emailed_at: "2026-10-06 04:00:00",
+		});
+		// Only Plaid is called: no reminder or email service is reached from the sync.
+		for (const [url] of fetchImpl.mock.calls) {
+			expect(String(url)).toMatch(/plaid|sandbox|production/);
+		}
+		error.mockRestore();
+	});
+
+	it("still skips a disconnected Item", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const fetchImpl = fakePlaid();
+
+		expect(await syncAllItems(enabledEnv, fetchImpl)).toMatchObject({
+			synced: 0,
+			skipped: 0,
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("skips a flagged Item in a manual Sync now: no Plaid call, and its flag and reminder stay", async () => {
+		const id = await addItem("needs_attention");
+		await env.DB.prepare(
+			"UPDATE plaid_items SET reconnect_emailed_at = '2026-10-06 04:00:00' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const fetchImpl = fakePlaid();
+
+		expect(await syncAllItems(enabledEnv, fetchImpl, Date.now, true)).toEqual({
+			added: 0,
+			modified: 0,
+			changedIds: [],
+			synced: 0,
+			skipped: 0,
+			busy: 0,
+			failed: 0,
+			failedBanks: [],
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({
+			status: "needs_attention",
+			reconnect_emailed_at: "2026-10-06 04:00:00",
+		});
+	});
+
+	it("leaves an ok Item's status and reminder as they were", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET reconnect_emailed_at = NULL WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+
+		expect(await syncAllItems(enabledEnv, fakePlaid())).toMatchObject({
+			synced: 1,
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ status: "ok", reconnect_emailed_at: null });
 	});
 
 	it("lists the rows every bank added, so the sort that follows asks about those", async () => {
@@ -339,7 +487,7 @@ describe("syncAllItems", () => {
 			calls += 1;
 			if (calls === 2) {
 				await env.DB.prepare(
-					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+					"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
 				)
 					.bind(second)
 					.run();
@@ -461,5 +609,89 @@ describe("syncAllItems", () => {
 		expect(error).toHaveBeenCalledWith(
 			`plaid daily sync: item ${first} failed Error`,
 		);
+	});
+});
+
+describe("syncAllItems and a completion that loses its lease", () => {
+	beforeEach(async () => {
+		vi.restoreAllMocks();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+		]);
+	});
+
+	// The database the daily run sees, where a newer run takes the lease just ahead of the bank's completion write.
+	function stealLeaseAtCompletion(id: number): D1Database {
+		let fired = false;
+		return new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop !== "prepare") {
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				}
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (
+						fired ||
+						!sql.startsWith("UPDATE plaid_items SET connection_revision")
+					) {
+						return statement;
+					}
+					return {
+						bind: (...values: unknown[]) => {
+							const bound = statement.bind(...values);
+							return {
+								run: async () => {
+									fired = true;
+									await target
+										.prepare(
+											"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+										)
+										.bind(id)
+										.run();
+									return bound.run();
+								},
+							};
+						},
+					} as unknown as D1PreparedStatement;
+				};
+			},
+		});
+	}
+
+	it("counts the bank as failed, and the next run syncs it", async () => {
+		const id = await addItem();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		expect(
+			await syncAllItems(
+				{ ...enabledEnv, DB: stealLeaseAtCompletion(id) },
+				fakePlaid(),
+			),
+		).toMatchObject({ synced: 0, failed: 1, failedBanks: ["Bank"] });
+		expect(errors).toHaveBeenCalledWith(
+			expect.stringContaining(`item ${id} failed`),
+		);
+
+		// The newer run finishes and lets go of the lease.
+		await env.DB.prepare(
+			"UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+
+		expect(await syncAllItems(enabledEnv, fakePlaid())).toMatchObject({
+			synced: 1,
+			failed: 0,
+		});
+		expect(
+			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ status: "ok" });
+		errors.mockRestore();
 	});
 });

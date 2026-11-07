@@ -1100,7 +1100,7 @@ describe("POST /transactions/:id", () => {
 			const personAId = String(personA?.id);
 			const personBId = String(personB?.id);
 			await env.DB.prepare(
-				"UPDATE transactions SET note='Old guess', note_guessed=1, kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+				"UPDATE transactions SET note='Old guess', note_guessed=1, note_state = 'guessed', kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
 			)
 				.bind(personA?.id, bakery)
 				.run();
@@ -1158,7 +1158,7 @@ describe("POST /transactions/:id", () => {
 			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
 		).first<{ id: number }>();
 		await env.DB.prepare(
-			"UPDATE transactions SET note='Old guess', note_guessed=1, kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+			"UPDATE transactions SET note='Old guess', note_guessed=1, note_state = 'guessed', kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
 		)
 			.bind(person?.id, bakery)
 			.run();
