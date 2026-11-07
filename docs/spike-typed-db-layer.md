@@ -37,7 +37,7 @@ Baseline for the bundle: 3627.14 KiB raw / 768.51 KiB gzip. For comparison decis
 - Type safety (compile-time errors for a wrong column) was not tested for any candidate; the tests are runtime. I did not run `tsc` on the spike files.
 - Drizzle's 1.0 beta line, `drizzle-kit generate`/`migrate`, and Drizzle relational queries were not tried. `drizzle-kit pull` was run on a local SQLite file built from our migrations, not against D1 over HTTP; the introspection code is shared.
 - Full suite, feedback integration, typecheck, lint and the production dry-run were not run, because nothing here changes `src/`. Only the four spike test files were run.
-- Nothing was pushed and no PR was opened.
+- The spike branch `spike/typed-db-layer` was pushed for reference only (no PR, not for merge); its drift test checks columns, not-null, enum CHECK lists and indexes, but **not column types, defaults or primary keys**. The test the conversion writes must (decision 178).
 
 ## Recommendation (updated after the owner's answer)
 
