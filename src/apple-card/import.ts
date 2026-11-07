@@ -71,7 +71,8 @@ export async function historyStart(
  * which is the Description or the Description tidied (the same test as sync's plaidNameToSuggest).
  */
 function suggestableName(row: AppleRow): string | null {
-	const name = row.merchant;
+	// A name is stored trimmed, and its key must equal it, so a padded Merchant is trimmed before it is suggested.
+	const name = (row.merchant ?? "").trim();
 	if (!name) return null;
 	if (name === row.description || name === tidyName(row.description))
 		return null;

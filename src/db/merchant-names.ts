@@ -83,7 +83,9 @@ export function pendingNameStatements(
 	// Every statement reads the candidates first, then the guard's binds.
 	const all = [...binds, ...guardBinds];
 	const from = `(${candidates}) AS c`;
-	const usable = `trim(c.value, ${NAME_TRIM_SQL}) <> ''`;
+	// A key is usable only when it is its own trimmed name and not empty: a padded key would be stored under the padded
+	// text while its name is trimmed, so the bank's-own-name test (name = key) could never match it.
+	const usable = `c.value = trim(c.value, ${NAME_TRIM_SQL}) AND c.value <> ''`;
 	const waiting = `(SELECT raw_name FROM merchants WHERE display_name IS NULL AND suggestion_status = 'pending')`;
 	return [
 		db
@@ -152,8 +154,13 @@ export async function saveAskedNames(
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
 	const firstByText = new Map<string, { rawName: string; names: string[] }>();
+	// A padded text is skipped, as pendingNameStatements skips a padded bank name: its key would not equal its name.
 	for (const answer of answers)
-		if (!firstByText.has(answer.rawName))
+		if (
+			answer.rawName === answer.rawName.trim() &&
+			answer.rawName !== "" &&
+			!firstByText.has(answer.rawName)
+		)
 			firstByText.set(answer.rawName, answer);
 	const kept = [...firstByText.values()].map(({ rawName, names }) => {
 		const usable = normaliseNames(names);

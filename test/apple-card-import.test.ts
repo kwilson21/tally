@@ -547,6 +547,24 @@ describe("importAppleCard: names", () => {
 		expect(none).toBeNull();
 	});
 
+	it("trims a padded Merchant before suggesting it: no row under the padded text, and the upload still lands", async () => {
+		await uploadOk(
+			csvOf(
+				row({
+					desc: "PADDED SHOP",
+					merchant: "  Padded Shop  ",
+					category: "Shopping",
+				}),
+			),
+		);
+		const padded = await db
+			.prepare(
+				"SELECT raw_name FROM merchants WHERE raw_name = '  Padded Shop  '",
+			)
+			.first();
+		expect(padded).toBeNull();
+	});
+
 	it("doesn't suggest Apple's Merchant when it is the Description tidied, as sync doesn't", async () => {
 		// tidyName("HARBOR DELI #7") is "Harbor deli", so that Merchant is what the list would show already.
 		await uploadOk(
