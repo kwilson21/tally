@@ -220,6 +220,12 @@ const copyMerchantRowSql = (ownsLock: string) => {
  * the name's positions past the winner's count, which removes the names it had before. Winners with no rows of their own
  * (an empty answer, or none at all) leave the name with none. A winner that is the name's own row changes nothing.
  * Both carry the lock, so a lost lock writes neither.
+ *
+ * Why the second statement's count is safe though it is read after the first statement's write: the write only overwrites
+ * positions below the winner's pre-page count, it never deletes, so the text's count after the write is at least its count
+ * before. The second statement therefore removes only positions the copy did not write. A text whose names the same page
+ * rewrites is also never the winner of a name that already has names (a winner must rank strictly better, and only a
+ * decided suggestion can beat one). Tests in test/plaid-sync-names.test.ts cover a text rewritten to fewer names and to more.
  */
 const copyPlaidNamesSql = (ownsLock: string): [string, string] => [
 	`${COPY_WINNERS}

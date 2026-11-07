@@ -761,7 +761,9 @@ describe("syncItem", () => {
 			env.DB.prepare(
 				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name, merchant_raw_text) VALUES ('Internet', 1234, 27, 'monthly', 'COMCAST CABLE', 1)",
 			),
-			// A waiting guess on a row a person has named: the sync copies it with the rest of the row (rank 4).
+			// A waiting guess on a row a person has named: the sync copies it with the rest of the row (rank 4). It is reached
+			// through the sync's copy, which starts the new key from this bank text's row: the row is pending with a name, so it
+			// ranks 4 (a waiting guess on a named merchant), and the new key takes its status, names and display name from it.
 			env.DB.prepare(
 				"INSERT INTO merchants (raw_name, display_name, suggestion_status, default_category_id, not_a_bill) VALUES ('COMCAST CABLE', 'Comcast Cable', 'pending', (SELECT id FROM categories LIMIT 1), 1)",
 			),

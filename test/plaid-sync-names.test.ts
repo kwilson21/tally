@@ -9,6 +9,7 @@ import {
 	clearMerchants,
 	merchantNames,
 	seedMerchant,
+	setMerchantNames,
 } from "./helpers/merchants";
 
 // Plaid's merchant name is the merchant's first suggested name (spec §8.6, decision 68, issue #194):
@@ -126,8 +127,8 @@ type MerchantRow = {
 };
 
 /**
- * The first name each merchant waiting for a person offers, in order, for merchants that still have a charge (the review
- * lists no other). Most merchants here have one name, so the first is the one a test is about.
+ * The names each merchant waiting for a person offers, one array per merchant, in order, for merchants that still have a
+ * charge (the review lists no other).
  */
 const pendingNames = async () => {
 	const { results } = await env.DB.prepare(
@@ -136,9 +137,7 @@ const pendingNames = async () => {
 		   AND EXISTS (SELECT 1 FROM transactions t WHERE t.merchant_name = merchants.raw_name)
 		 ORDER BY raw_name`,
 	).all<{ raw_name: string }>();
-	return Promise.all(
-		results.map(async (row) => (await merchantNames(env.DB, row.raw_name))[0]),
-	);
+	return Promise.all(results.map((row) => merchantNames(env.DB, row.raw_name)));
 };
 
 const merchants = async (): Promise<MerchantRow[]> => {
@@ -176,6 +175,19 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				display_name: null,
 				suggestion_status: "pending",
 			},
+		]);
+	});
+
+	it("keeps every name a waiting merchant offers, not only the first", async () => {
+		const id = await addItem();
+		await sync(id, { added: [transaction()] });
+		await setMerchantNames(env.DB, "Blue Bottle Coffee", [
+			"Blue Bottle Coffee",
+			"Blue Bottle",
+			"Blue Bottle Cafe",
+		]);
+		expect(await pendingNames()).toEqual([
+			["Blue Bottle Coffee", "Blue Bottle", "Blue Bottle Cafe"],
 		]);
 	});
 
@@ -325,7 +337,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 		// The charge's merchant is the newest name, and that merchant's suggestion is it.
 		expect(await merchantNames(env.DB, "Blue Bottle")).toEqual(["Blue Bottle"]);
 		// The name no charge carries any more is not asked about.
-		expect(await pendingNames()).toEqual(["Blue Bottle"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 	});
 
 	describe("one bank text with different Plaid names suggests the newest (decision 79)", () => {
@@ -359,7 +371,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				},
 			]);
 
-			expect(await pendingNames()).toEqual(["Target", "Target Corp"]);
+			expect(await pendingNames()).toEqual([["Target"], ["Target Corp"]]);
 		});
 
 		it("suggests the newer name when it arrives in a later sync, and withdraws the older one", async () => {
@@ -373,7 +385,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 			await sync(id, {
 				added: [
 					transaction({
@@ -383,7 +395,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 			// The older name's merchant is untouched apart from its waiting suggestion.
 			expect(await merchants()).toEqual([
 				{
@@ -414,7 +426,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				merchant_name: "Blue Bottle Coffee",
 			});
 			await sync(id, { added: [newer, older] });
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
 
 		it("keeps the newer name when an older charge with the older name arrives afterwards", async () => {
@@ -437,7 +449,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
 
 		it("lets the same date go to the charge that came last", async () => {
@@ -455,7 +467,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
 
 		it("suggests nothing when the newest name is only the bank's text tidied, and withdraws the older name", async () => {
@@ -470,7 +482,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 					}),
 				],
 			});
-			expect(await pendingNames()).toEqual(["Target Corp"]);
+			expect(await pendingNames()).toEqual([["Target Corp"]]);
 			// The newest charge's name says what the list already shows ("Target"), so there is nothing to suggest.
 			await sync(id, {
 				added: [
@@ -546,8 +558,8 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				],
 			});
 			expect(await pendingNames()).toEqual([
-				"Blue Bottle",
-				"Blue Bottle Coffee",
+				["Blue Bottle"],
+				["Blue Bottle Coffee"],
 			]);
 		});
 
@@ -621,8 +633,8 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 				],
 			});
 			expect(await pendingNames()).toEqual([
-				"Blue Bottle Coffee",
-				"Lupita's Taqueria",
+				["Blue Bottle Coffee"],
+				["Lupita's Taqueria"],
 			]);
 		});
 	});
@@ -830,10 +842,10 @@ describe("a bank text's newest charge leaves it", () => {
 	it("offers the remaining charge's name when the bank removes the newest one", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest(), older()] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 
 		await sync(id, { removed: ["new"] });
-		expect(await pendingNames()).toEqual(["Blue Bottle"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 		expect(await merchants()).toContainEqual({
 			raw_name: "Blue Bottle",
 			names: ["Blue Bottle"],
@@ -846,7 +858,7 @@ describe("a bank text's newest charge leaves it", () => {
 		const id = await addItem();
 		await sync(id, { added: [newest(), older()] });
 		await sync(id, { removed: ["old"] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 	});
 
 	it("offers nothing when the remaining charge's name is only the bank's text tidied", async () => {
@@ -857,7 +869,7 @@ describe("a bank text's newest charge leaves it", () => {
 				older({ name: "TARGET 1234", merchant_name: "Target" }),
 			],
 		});
-		expect(await pendingNames()).toEqual(["Target Corp"]);
+		expect(await pendingNames()).toEqual([["Target Corp"]]);
 		await sync(id, { removed: ["new"] });
 		expect(await pendingNames()).toEqual([]);
 	});
@@ -907,25 +919,28 @@ describe("a bank text's newest charge leaves it", () => {
 	it("waits for the last page to count a pending charge the bank dropped", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest({ pending: true }), older()] });
-		const seen: (string | undefined)[][] = [];
+		const seen: string[][][] = [];
 		await syncPages(id, [{ removed: ["new"], hasMore: true }, {}], {
 			between: async () => {
 				seen.push(await pendingNames());
 			},
 		});
 		// Not deleted yet, so its name is still the one offered; once the update ends it is gone.
-		expect(seen).toEqual([["Blue Bottle Coffee"]]);
-		expect(await pendingNames()).toEqual(["Blue Bottle"]);
+		expect(seen).toEqual([[["Blue Bottle Coffee"]]]);
+		expect(await pendingNames()).toEqual([["Blue Bottle"]]);
 	});
 
 	it("offers the older name again when the newest charge's bank text changes", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest(), older()] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 
 		await sync(id, { modified: [newest({ name: "BLUE BOTTLE OAKLAND" })] });
 		// The Oakland text's newest charge is still "Blue Bottle Coffee"; the old text's is now "Blue Bottle".
-		expect(await pendingNames()).toEqual(["Blue Bottle", "Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([
+			["Blue Bottle"],
+			["Blue Bottle Coffee"],
+		]);
 	});
 
 	it("does not revive an older name a person decided when a bank text changes", async () => {
@@ -935,13 +950,13 @@ describe("a bank text's newest charge leaves it", () => {
 			"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = 'Blue Bottle'",
 		).run();
 		await sync(id, { modified: [newest({ name: "BLUE BOTTLE OAKLAND" })] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 	});
 
 	it("offers the older name again when a pending charge posts under a different bank text", async () => {
 		const id = await addItem();
 		await sync(id, { added: [newest({ pending: true }), older()] });
-		expect(await pendingNames()).toEqual(["Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 
 		// The bank posts it as a new transaction with new text, and drops the pending one.
 		await sync(id, {
@@ -954,7 +969,10 @@ describe("a bank text's newest charge leaves it", () => {
 			],
 			removed: ["new"],
 		});
-		expect(await pendingNames()).toEqual(["Blue Bottle", "Blue Bottle Coffee"]);
+		expect(await pendingNames()).toEqual([
+			["Blue Bottle"],
+			["Blue Bottle Coffee"],
+		]);
 	});
 
 	it("leaves nothing offered when the removed charge was the text's only one", async () => {
@@ -1210,6 +1228,113 @@ describe("a bank text that is also another Plaid name on the same page (copy rea
 			},
 		]);
 		expect(await merchantNames(env.DB, "Comcast")).toEqual(["Q1", "Q2", "Q3"]);
+		await assertMerchantInvariants(env.DB);
+	});
+});
+
+// The copy's second statement removes a key's names past the count of its winner text, and reads that count after the
+// first statement has rewritten rows. These two cases make the text's count change within the same sync: the text is
+// the Plaid name of a pair on page two, which rewrites it. The copy must keep every name it copied.
+describe("a copy whose bank text the same sync rewrites to a different number of names (count read after the write)", () => {
+	beforeEach(resetTables);
+
+	it("copies three names from a text that the same sync rewrites down to one name, and keeps all three", async () => {
+		await seedMerchant(env.DB, {
+			key: "BANK ZERO",
+			status: "pending",
+			names: ["A1", "A2", "A3"],
+			displayName: "Named Zero",
+		});
+		await seedMerchant(env.DB, {
+			key: "BANK ONE",
+			status: "accepted",
+			names: ["B1"],
+		});
+		const id = await addItem();
+		await syncPages(id, [
+			{
+				added: [
+					transaction({
+						transaction_id: "a",
+						name: "BANK ZERO",
+						merchant_name: "Shared Name",
+						date: "2026-09-20",
+					}),
+				],
+				hasMore: true,
+			},
+			{
+				added: [
+					// "Key Copy" copies its names from "Shared Name", as it stood before this page.
+					transaction({
+						transaction_id: "b",
+						name: "Shared Name",
+						merchant_name: "Key Copy",
+						date: "2026-09-27",
+					}),
+					// "Shared Name" is rewritten on this page, to the accepted name of "BANK ONE".
+					transaction({
+						transaction_id: "c",
+						name: "BANK ONE",
+						merchant_name: "Shared Name",
+						date: "2026-09-27",
+					}),
+				],
+			},
+		]);
+		expect(await merchantNames(env.DB, "Shared Name")).toEqual(["B1"]);
+		expect(await merchantNames(env.DB, "Key Copy")).toEqual(["A1", "A2", "A3"]);
+		await assertMerchantInvariants(env.DB);
+	});
+
+	it("copies one name from a text that the same sync rewrites up to three names, and keeps just the one", async () => {
+		await seedMerchant(env.DB, {
+			key: "BANK ZERO",
+			status: "pending",
+			names: ["A1"],
+			displayName: "Named Zero",
+		});
+		await seedMerchant(env.DB, {
+			key: "BANK ONE",
+			status: "accepted",
+			names: ["B1", "B2", "B3"],
+		});
+		const id = await addItem();
+		await syncPages(id, [
+			{
+				added: [
+					transaction({
+						transaction_id: "a",
+						name: "BANK ZERO",
+						merchant_name: "Shared Name",
+						date: "2026-09-20",
+					}),
+				],
+				hasMore: true,
+			},
+			{
+				added: [
+					transaction({
+						transaction_id: "b",
+						name: "Shared Name",
+						merchant_name: "Key Copy",
+						date: "2026-09-27",
+					}),
+					transaction({
+						transaction_id: "c",
+						name: "BANK ONE",
+						merchant_name: "Shared Name",
+						date: "2026-09-27",
+					}),
+				],
+			},
+		]);
+		expect(await merchantNames(env.DB, "Shared Name")).toEqual([
+			"B1",
+			"B2",
+			"B3",
+		]);
+		expect(await merchantNames(env.DB, "Key Copy")).toEqual(["A1"]);
 		await assertMerchantInvariants(env.DB);
 	});
 });
