@@ -2928,7 +2928,7 @@ export function seenSaveGuard(seen: JevSeen): {
 /**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
  * A failure counts toward the cap while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts,
- * decision 179). A filed row that is still asked, for its details or its income question, is stamped but not counted,
+ * decision 182). A filed row that is still asked, for its details or its income question, is stamped but not counted,
  * so it goes behind the rows that have not failed. A row that has given up is left as it is. `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
@@ -3008,7 +3008,7 @@ export function saveJevDetailsStatement(
 					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 1 THEN 'queued'
 					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 0 THEN 'no_call'
 					ELSE 'unanswered' END,
-				-- A call that came back is a success, so the run of failures ends on a row with no category (decision 179).
+				-- A call that came back is a success, so the run of failures ends on a row with no category (decision 182).
 				jev_attempts = CASE WHEN category_id IS NULL AND category_source IS NULL THEN 0 ELSE jev_attempts END,
 				details_asked = 1, updated_at = datetime('now')
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers) AND NOT ${gaveUpSql("transactions")}${still} AND ${seenIntact}`,

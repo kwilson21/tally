@@ -24,8 +24,8 @@ function expectLabelled(html: string) {
 	expect(ids).toHaveLength(2);
 	expect(html).toMatch(new RegExp(`<title id="${ids[0]}">[^<]+</title>`));
 	expect(html).toMatch(new RegExp(`<desc id="${ids[1]}">[^<]+</desc>`));
-	// Scales to the screen, like the system diagram.
-	expect(svg).toContain("w-full");
+	// Scales to the screen: the hand-drawn pictures by class, a Pele picture by app.css's .pele rule.
+	expect(svg).toMatch(/w-full|class="pele /);
 }
 /** The Budget boxes' picture (decision 115, extended by #600): one role="img" wrapper, labelled and described by sr-only text. */
 function expectLabelledPicture(html: string, id: string) {
@@ -56,21 +56,19 @@ describe("BillsDiagram", () => {
 		tolerance: "10%",
 	};
 
-	it("draws its connector in ink, since terracotta means you can click it", async () => {
+	it("is drawn by Pele in the page's ink, not the accent, since terracotta means you can click it", async () => {
 		const html = await render(BillsDiagram(props));
 		expectLabelled(html);
-		expect(html).toContain('<path d="M120 50 H238" class="stroke-ink"');
-		expect(html).not.toContain("stroke-accent");
+		expect(html).toContain("pele-flowchart");
+		expect(html).not.toContain("accent");
+		expect(html).not.toMatch(/\sstyle=/);
 	});
 
-	it("stacks the match words in the gap, so no line reaches either box", async () => {
+	it("says the match words on the line between the two boxes", async () => {
 		const html = await render(BillsDiagram(props));
-		const label = (text: string) =>
-			html.match(new RegExp(`<text [^>]*>${text}</text>`))?.[0] ?? "";
-		// Each line stays short enough for the 118-unit gap at 11px, even with a long tolerance.
-		expect(label("same merchant")).toContain('text-anchor="middle"');
-		expect(label("±10%")).toContain('text-anchor="middle"');
+		expect(words(html)).toContain("Bill $142.00 due Sep 21");
 		expect(words(html)).toContain("same merchant ±10% within 5 days");
+		expect(words(html)).toContain("Payment Sep 24");
 		expect(html).not.toContain("same merchant ·");
 	});
 });
@@ -158,8 +156,10 @@ describe("TransactionsDiagram", () => {
 			}),
 		);
 		expectLabelled(html);
-		expect(words(html)).toContain(
-			"This month 37 − 3 excluded − 2 held for review Counted 32 Needs a category 10",
+		const text = words(html);
+		expect(text).toContain("− 3 excluded − 2 held for review");
+		expect(text).toContain(
+			"This month · 37 Counted · 32 Needs a category · 10",
 		);
 		expect(desc(html)).toBe(
 			"37 transactions this month: 32 counted, 2 held for review, 3 excluded. 10 of those need a category.",
@@ -176,7 +176,9 @@ describe("TransactionsDiagram", () => {
 				needsCategory: 0,
 			}),
 		);
-		expect(words(html)).toContain("This month 1 Counted 1 Needs a category 0");
+		expect(words(html)).toContain(
+			"This month · 1 Counted · 1 Needs a category · 0",
+		);
 		expect(words(html)).not.toContain("excluded");
 		expect(desc(html)).toBe(
 			"1 transaction this month: 1 counted. None need a category.",
@@ -250,7 +252,7 @@ describe("ExclusionsDiagram", () => {
 });
 
 describe("CategoriesDiagram", () => {
-	it("places the income note below the final step when the month has income", async () => {
+	it("adds the income note after the final step when the month has income", async () => {
 		const html = await render(
 			CategoriesDiagram({
 				user: 1,
@@ -262,16 +264,13 @@ describe("CategoriesDiagram", () => {
 				threshold: "80%",
 			}),
 		);
-		const lastStep = [
-			...html.matchAll(/<rect[^>]*y="([\d.]+)"[^>]*height="([\d.]+)"[^>]*>/g),
-		].at(-1);
-		const note = html.match(/<text[^>]*y="([\d.]+)"[^>]*>\+ 6 income/);
-		const viewBoxHeight = Number(html.match(/viewBox="0 0 \d+ (\d+)"/)?.[1]);
-		expect(lastStep).toBeDefined();
-		expect(note).toBeDefined();
-		const bottom = Number(lastStep?.[1]) + Number(lastStep?.[2]);
-		expect(Number(note?.[1])).toBeGreaterThan(bottom);
-		expect(viewBoxHeight).toBeGreaterThan(Number(note?.[1]));
+		const text = words(html);
+		expect(text.indexOf("Waits for a person")).toBeGreaterThan(-1);
+		expect(text.indexOf("+ 6 income")).toBeGreaterThan(
+			text.indexOf("Waits for a person"),
+		);
+		// A box of its own, joined by a line, so it can no longer overlap the dashed step.
+		expect(html.match(/class="pele-node pele-shape-rect/g)).toHaveLength(6);
 	});
 
 	it("shows the five steps in order, with how many each handled", async () => {
@@ -289,13 +288,13 @@ describe("CategoriesDiagram", () => {
 		);
 		expectLabelled(html);
 		expect(words(html)).toContain(
-			"1 A person's choice 1 2 A merchant rule 0 3 A bill 3 4 Jev, if 80% or more sure 19 5 Waits for a person 10 + 2 income, which needs no category",
+			"1 A person's choice · 1 2 A merchant rule · 0 3 A bill · 3 4 Jev, if 80% or more sure · 19 5 Waits for a person · 10 + 2 income, which needs no category",
 		);
 		expect(desc(html)).toBe(
 			"Each transaction's category comes from the first step that applies. This month: a person chose 1, merchant rules 0, bills 3, Jev 19, and 10 wait for a person. 2 are income, which needs no category.",
 		);
-		// The waiting step is dashed: nothing has decided yet.
-		expect(html.match(/stroke-dasharray/g)).toHaveLength(1);
+		// The waiting step is dashed (app.css's .undecided rule): nothing has decided yet.
+		expect(html.match(/pele-shape-rect undecided"/g)).toHaveLength(1);
 	});
 
 	it("names the AI as Tally outside the demo", async () => {
@@ -312,7 +311,7 @@ describe("CategoriesDiagram", () => {
 			}),
 		);
 		expect(html).not.toMatch(/jev/i);
-		expect(words(html)).toContain("4 Tally, if 80% or more sure 4");
+		expect(words(html)).toContain("4 Tally, if 80% or more sure · 4");
 		expect(desc(html)).toContain("Tally 4");
 	});
 

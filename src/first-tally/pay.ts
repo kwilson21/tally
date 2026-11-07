@@ -1,7 +1,7 @@
 // The pay step's words (P125 E, decision 114, spec §8.8): one merchant whose money in Tally marked as income. Every
 // number comes from the deposits the bank sent, so nothing here is typed in.
 import { BILL_FIND_MAX_DAYS, BILL_FIND_MIN_DAYS } from "../bills/find";
-import { shortDay } from "../dates";
+import { dayNumber, shortDay } from "../dates";
 import { formatCents } from "../money";
 
 /** One deposit of a merchant's money in: its day (YYYY-MM-DD) and its amount in cents (positive). */
@@ -16,10 +16,6 @@ const WEEKDAYS = [
 	"Friday",
 	"Saturday",
 ] as const;
-const DAY_MS = 86_400_000;
-
-const epochDay = (date: string) =>
-	Math.floor(Date.parse(`${date}T00:00:00Z`) / DAY_MS);
 const weekdayOf = (date: string) =>
 	WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 
@@ -40,7 +36,7 @@ export function cadenceOf(dates: string[]): string | null {
 	if (sorted.length < 2) return null;
 	const gaps = sorted
 		.slice(1)
-		.map((date, i) => epochDay(date) - epochDay(sorted[i] as string));
+		.map((date, i) => dayNumber(date) - dayNumber(sorted[i] as string));
 	const every = (low: number, high: number) =>
 		gaps.every((gap) => gap >= low && gap <= high);
 	const latest = sorted[sorted.length - 1] as string;

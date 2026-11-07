@@ -1,3 +1,4 @@
+import { dayNumber } from "../dates";
 import {
 	isMerchantTextOfSql,
 	merchantColumnOfSql,
@@ -36,8 +37,6 @@ export type BillSuggestion = {
 	chargeCount: number;
 };
 
-const epochDay = (date: string) =>
-	Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
 export function findBillSuggestions(
 	charges: BillFindingCharge[],
 ): BillSuggestion[] {
@@ -55,7 +54,7 @@ export function findBillSuggestions(
 		// so a store that once matched by chance doesn't show up.
 		const latest = list[list.length - 1] as BillFindingCharge;
 		const partner = list.slice(0, -1).some((previous) => {
-			const days = epochDay(latest.date) - epochDay(previous.date);
+			const days = dayNumber(latest.date) - dayNumber(previous.date);
 			return (
 				days >= BILL_FIND_MIN_DAYS &&
 				days <= BILL_FIND_MAX_DAYS &&

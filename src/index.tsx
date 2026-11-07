@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { verifiedAccessIdentity } from "./access";
-import { DEFAULT_TIME_ZONE, todayIn } from "./dates";
+import { DAY_MS, DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { noteHouseholdMember } from "./db/reconnect";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
@@ -111,7 +111,7 @@ export async function runScheduled(
 	time?: RunClock,
 ) {
 	await env.DB.prepare("DELETE FROM cash_delete_holds WHERE created_at <= ?")
-		.bind(Date.now() - 86_400_000)
+		.bind(Date.now() - DAY_MS)
 		.run();
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE), {

@@ -1609,3 +1609,44 @@ html:not(.js) [data-money-js] {
 .selection-list:has(#not-on-page details[open]) {
 	padding-bottom: calc(40vh + 11rem);
 }
+
+/* A diagram drawn by Pele (decision 181, src/views/pele-diagram.tsx). Pele sets these variables in an inline style
+   attribute, which the CSP refuses, so they are set here from the tokens: ink lines and text, paper boxes, band for
+   a finished state, rule for the muted words. test/pele-diagram.test.ts fails if a Pele upgrade uses another one. */
+@layer components {
+	.pele {
+		--_bg: var(--color-paper);
+		--_fg: var(--color-ink);
+		--_m: var(--color-muted);
+		--_l: var(--color-ink);
+		--_s: var(--color-paper);
+		--_a: var(--color-band);
+		--_b: var(--color-ink);
+		--_c: var(--color-accent);
+		--_r: 0.75rem;
+		--_fm: var(--font-mono);
+		--_w: 600;
+		color: var(--_fg);
+		font-family: var(--font-sans);
+		font-size: 16px;
+		height: auto;
+		max-width: 100%;
+	}
+	.pele rect {
+		rx: var(--_r);
+	}
+	.pele .pele-edge-label text {
+		fill: var(--_m);
+	}
+	/* A finished state is shaded; "not decided yet" is dashed; the answer a picture leads to is green. */
+	.pele .done rect {
+		fill: var(--_a);
+	}
+	.pele .undecided rect {
+		stroke-dasharray: 5 4;
+	}
+	.pele .ok rect {
+		stroke: var(--color-ok);
+		stroke-width: 2px;
+	}
+}

@@ -30,7 +30,7 @@ export type ResortSnapshot = {
 	jev_mixed: number | null;
 	jev_also_category_id: number | null;
 	jev_failed_at: string | null;
-	/** The row's failure counter (decision 179): Undo puts it back, so a run's own failure is not kept twice. */
+	/** The row's failure counter (decision 182): Undo puts it back, so a run's own failure is not kept twice. */
 	jev_attempts: number;
 };
 

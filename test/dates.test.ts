@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	DEFAULT_TIME_ZONE,
+	dateOfDayNumber,
+	dayNumber,
 	daysBefore,
 	daysInMonth,
 	householdToday,
@@ -169,4 +171,18 @@ describe("shortMonthName", () => {
 		["2026-09", "Sep"],
 		["2027-01", "Jan"],
 	])("%s is %s", (month, name) => expect(shortMonthName(month)).toBe(name));
+});
+
+describe("dayNumber and dateOfDayNumber", () => {
+	it("count whole days from 1970-01-01", () => {
+		expect(dayNumber("1970-01-01")).toBe(0);
+		expect(dayNumber("1970-01-02")).toBe(1);
+		expect(dayNumber("2026-09-22") - dayNumber("2026-09-01")).toBe(21);
+		expect(dateOfDayNumber(dayNumber("2026-02-28") + 1)).toBe("2026-03-01");
+	});
+
+	it("keep a year below 100 as written, not as 19xx", () => {
+		expect(dayNumber("0100-01-01") - dayNumber("0099-12-31")).toBe(1);
+		expect(dateOfDayNumber(dayNumber("0099-12-31"))).toBe("0099-12-31");
+	});
 });
