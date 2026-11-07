@@ -486,7 +486,12 @@ describe("outside the demo", () => {
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
 		expect(html).not.toMatch(/jev/i);
-		expect(decodeHtml(html)).toContain("Tally, if 80% or more sure");
+		// Pele wraps a long box label over several lines of its own, so read the words, not the markup.
+		expect(
+			decodeHtml(html)
+				.replace(/<[^>]+>/g, " ")
+				.replace(/\s+/g, " "),
+		).toContain("Tally, if 80% or more sure");
 	});
 
 	it("shows the calculation when there's spending but no budget", async () => {
