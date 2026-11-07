@@ -814,6 +814,17 @@ it("renders a plain feedback link on app pages", async () => {
 	expect(html).not.toContain("/feedback?from=");
 });
 
+describe("a Referer that is not a URL", () => {
+	it("is ignored, so the form comes from Home", async () => {
+		const html = await (
+			await productionApp().fetch("/feedback", {
+				headers: { Referer: "not a url" },
+			})
+		).text();
+		expect(html).toContain('name="from" value="/"');
+	});
+});
+
 describe("the Feedback item on its own page", () => {
 	const SELF_HREF = "/feedback?return_to=%2Ftransactions%3Funcategorized%3D1";
 	const hiddenValue = (html: string, name: string) =>

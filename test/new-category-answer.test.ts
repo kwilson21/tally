@@ -465,7 +465,8 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 
 	it("ten parallel first requests make exactly one AI call and store one row", async () => {
 		const item = await itemFor();
-		// The call takes a moment, so every request is in flight before the first one finishes.
+		// The call takes a moment, so every request is in flight before the first one finishes. The wait only makes the
+		// overlap likely; the assertions hold however long it takes.
 		const run = vi.fn(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 30));
 			return "Books & audio";

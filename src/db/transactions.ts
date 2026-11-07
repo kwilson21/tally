@@ -13,6 +13,7 @@ import {
 } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
+import { gaveUpSql, openSql } from "../machines/jev-retry";
 import {
 	type Edit,
 	excludedAfterSave,
@@ -2681,6 +2682,7 @@ export const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed
  * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
  * values in a statement and a bank's first sync brings in thousands.
  */
+
 export async function pendingForJev(
 	db: D1Database,
 	limit: number,
@@ -2728,7 +2730,7 @@ export async function pendingForJev(
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
-			WHERE NOT ${FOLLOWS_PURCHASE} AND (
+			WHERE NOT ${gaveUpSql("t")} AND NOT ${FOLLOWS_PURCHASE} AND (
 				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND (
 					(t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))
 					OR (? = 1 AND NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)
@@ -2925,7 +2927,9 @@ export function seenSaveGuard(seen: JevSeen): {
 
 /**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
- * `turnId` guards it to the sorting turn (decision 139).
+ * A failure counts toward the cap while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts,
+ * decision 182). A filed row that is still asked, for its details or its income question, is stamped but not counted,
+ * so it goes behind the rows that have not failed. A row that has given up is left as it is. `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
 	db: D1Database,
@@ -2933,7 +2937,9 @@ export function markJevFailedStatement(
 	turnId?: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		"UPDATE transactions SET jev_failed_at = datetime('now') WHERE id = ?",
+		`UPDATE transactions SET jev_failed_at = datetime('now'),
+			jev_attempts = CASE WHEN ${openSql("transactions")} THEN jev_attempts + 1 ELSE jev_attempts END
+		WHERE id = ? AND NOT ${gaveUpSql("transactions")}`,
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
@@ -2949,8 +2955,9 @@ export function markReaskFailedStatement(
 	turnId: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET jev_failed_at = datetime('now')
-		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ?`,
+		`UPDATE transactions SET jev_failed_at = datetime('now'),
+			jev_attempts = CASE WHEN ${openSql("transactions")} THEN jev_attempts + 1 ELSE jev_attempts END
+		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND NOT ${gaveUpSql("transactions")}`,
 		turnId,
 	);
 	return db
@@ -3001,8 +3008,10 @@ export function saveJevDetailsStatement(
 					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 1 THEN 'queued'
 					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 0 THEN 'no_call'
 					ELSE 'unanswered' END,
+				-- A call that came back is a success, so the run of failures ends on a row with no category (decision 182).
+				jev_attempts = CASE WHEN category_id IS NULL AND category_source IS NULL THEN 0 ELSE jev_attempts END,
 				details_asked = 1, updated_at = datetime('now')
-			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still} AND ${seenIntact}`,
+			WHERE details_asked = 0 AND id IN (SELECT id FROM answers) AND NOT ${gaveUpSql("transactions")}${still} AND ${seenIntact}`,
 		options.turnId,
 	);
 	return db
@@ -3233,13 +3242,13 @@ export function saveJevResultStatements(
 		const guarded = withTurnGuard(
 			`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
-					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
+					jev_mixed = ?, jev_also_category_id = ?, jev_attempts = 0, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0 AND is_split = 0 AND ${INCLUDED_ROW}
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${STILL_ON_SQL}${seenSql}${activeSql}
 					AND EXISTS (SELECT 1 FROM household_settings WHERE key = 'resort_run'
 						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')
-					AND plaid_transaction_id IS ? AND amount_cents = ?${options.leaderFiled ? " AND EXISTS (SELECT 1 FROM transactions g WHERE g.id = ? AND g.category_id = ? AND g.category_source = 'jev')" : ""}`,
+					AND NOT ${gaveUpSql("transactions")} AND plaid_transaction_id IS ? AND amount_cents = ?${options.leaderFiled ? " AND EXISTS (SELECT 1 FROM transactions g WHERE g.id = ? AND g.category_id = ? AND g.category_source = 'jev')" : ""}`,
 			options.turn,
 		);
 		const category = db
@@ -3278,12 +3287,12 @@ export function saveJevResultStatements(
 		const guarded = withTurnGuard(
 			`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
-					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
+					jev_mixed = ?, jev_also_category_id = ?, jev_attempts = 0, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
+					AND ${INCLUDED_ROW} AND is_split = 0 AND NOT ${gaveUpSql("transactions")} AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
 			options.turn,
 		);
 		const category = db
@@ -3341,8 +3350,9 @@ export function saveJevResultStatements(
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				jev_attempts = CASE WHEN category_id IS NULL AND category_source IS NULL THEN 0 ELSE jev_attempts END,
 				updated_at = datetime('now')
-			WHERE id = ? AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
+			WHERE id = ? AND NOT ${gaveUpSql("transactions")} AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
 				AND excluded = 0 AND is_split = 0
 				AND COALESCE(income_source, '') != 'user' AND COALESCE(credit_reviewed_by, '') != 'user'
 				AND (

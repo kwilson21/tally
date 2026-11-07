@@ -386,6 +386,7 @@ describe("data exports", () => {
 				"is_split",
 				"jev_category_id",
 				"jev_failed_at",
+				"jev_attempts",
 				"jev_none_fit",
 				"jev_mixed",
 				"jev_also_category_id",

@@ -20,8 +20,8 @@ Baseline for the bundle: 3627.14 KiB raw / 768.51 KiB gzip. For comparison decis
 
 ## What the spike found in today's code
 
-- The hand-kept `transactions` export list (`src/settings/export.ts`) has 57 of 58 columns. The one left out is `entry_key`. Nothing records whether that is on purpose, which is the problem.
-- `TABLES_CHILD_FIRST` (`src/demo/reset.ts`) does not list `feedback`, `household_settings` or `push_subscriptions`. Nothing in the code says whether that is deliberate. Its order is valid against the foreign keys today.
+- **Correction (2026-11-07):** this section's first two findings came from an older checkout and are partly wrong. `test/export.test.ts` already pins the one transaction column the JSON export leaves out (`entry_key`, the cash form's double-submit token, which is not family data), and `TABLES_CHILD_FIRST` (`src/demo/reset.ts`) already lists `feedback` and `push_subscriptions`, with `test/demo-reset-tables.test.ts` failing if any table is missing or out of foreign-key order (PR #882, merged while the spike ran). `household_settings` is cleared by its own statement on purpose. So audit finding 10 is already covered for these two lists; what remains is a per-table export guard for the tables other than `transactions`.
+- (Superseded by the correction above: `feedback` and `push_subscriptions` are listed and guarded by `test/demo-reset-tables.test.ts`.)
 - Four places match `/UNIQUE/` against `error.message` (`category-suggestions.ts` lines 130 and 502, `categories.ts` 121, `routes/settings.tsx` 1243). Drizzle wraps every driver error as `Failed query: …` and puts the UNIQUE text in `error.cause`, so those four checks would silently stop matching after a conversion.
 
 ## Maintenance (from the npm registry; GitHub issues were not read)
@@ -54,5 +54,5 @@ The decision is recorded once, in `docs/decisions.md` (entry 179). It is not cop
 ## Answered by the owner, and what is still open
 
 - Drizzle: accepted. Suggested names: a table, landing before the `merchant-names.ts` conversion.
-- `entry_key` is the hidden double-submit token on the cash-entry form (`src/views/cash-form.tsx`, `src/transactions/cash.ts`), not family data, so the export leaves it out; it will be listed as a named exclusion. The owner did not know either way; this is read from the code.
-- Demo reset: `household_settings` is handled on purpose (its own delete, keeping the day's `jev_calls_*` rows, then a re-insert), so leaving it out of `TABLES_CHILD_FIRST` is right. Nothing in the code or decisions says whether `feedback` and `push_subscriptions` are left out on purpose; the owner does not know either; they are left as they are, and the conversion will name them as explicit exclusions.
+- `entry_key` is the hidden double-submit token on the cash-entry form (`src/views/cash-form.tsx`, `src/transactions/cash.ts`), not family data, so the export leaves it out on purpose; `test/export.test.ts` already pins it as the one omitted transaction column.
+- Demo reset: nothing is open. `household_settings` is cleared by its own statement; every other table, `feedback` and `push_subscriptions` included, is in `TABLES_CHILD_FIRST` and guarded by `test/demo-reset-tables.test.ts`.

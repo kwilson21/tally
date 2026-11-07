@@ -219,6 +219,8 @@ step(
 // Layout keeps out of the page), so nothing is saved and the steps after this still see 10 to categorize.
 await page.setViewportSize({ width: 390, height: 844 });
 const answers = [];
+// A short wait before checking that something did NOT happen (a second press sends nothing). No event announces a
+// request that never comes, so a pause is the only check; waiting for something that must happen uses `until`.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
 const until = async (check, what) => {
 	for (let i = 0; i < 200 && !check(); i++)

@@ -84,4 +84,22 @@ describe("next (machine helper)", () => {
 	it("moves when the same guard allows the event", () => {
 		expect(next(gatedDoor(false), "closed", "OPEN")).toBe("open");
 	});
+
+	// A caller's context, given as the fourth argument, replaces the machine's default for the guards.
+	it("refuses when the given context makes the guard say no, though the default would allow it", () => {
+		expect(
+			next(gatedDoor(false), "closed", "OPEN", { locked: true }),
+		).toBeNull();
+	});
+
+	it("moves when the given context makes the guard say yes, though the default would refuse it", () => {
+		expect(next(gatedDoor(true), "closed", "OPEN", { locked: false })).toBe(
+			"open",
+		);
+	});
+
+	it("keeps the default context when none is given", () => {
+		expect(next(gatedDoor(true), "closed", "OPEN")).toBeNull();
+		expect(next(gatedDoor(false), "closed", "OPEN")).toBe("open");
+	});
 });
