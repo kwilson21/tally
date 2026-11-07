@@ -702,7 +702,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 	async function mergeWith(
 		pending: { attempts: number },
 		posted: { name: string; categoryId?: number | null },
-	): Promise<number> {
+	): Promise<Snapshot> {
 		lock += 1;
 		const key = `merge-${lock}`;
 		const item = (
@@ -723,8 +723,8 @@ describe("the pending-to-posted merge and the failure count", () => {
 		) =>
 			db
 				.prepare(
-					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, jev_attempts, category_id, category_source, updated_by)
-					 VALUES ((SELECT MIN(id) FROM accounts), ?, -600, ?, ?, ?, ?, ?, ?, 'test') RETURNING id`,
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, jev_attempts, jev_failed_at, category_id, category_source, updated_by)
+					 VALUES ((SELECT MIN(id) FROM accounts), ?, -600, ?, ?, ?, ?, CASE WHEN ? > 0 THEN datetime('now') END, ?, ?, 'test') RETURNING id`,
 				)
 				.bind(
 					TODAY,
@@ -732,6 +732,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 					plaidId,
 					isPending,
 					attemptCount,
+					isPending === 1 ? attemptCount : 0,
 					categoryId,
 					categoryId === null ? null : "user",
 				)
@@ -754,27 +755,34 @@ describe("the pending-to-posted merge and the failure count", () => {
 				plaidCategory: null,
 			}),
 		);
-		return attempts(Number(postedRow?.id));
+		return snapshot(Number(postedRow?.id));
 	}
 
-	it("carries a pending row's count onto the posted row when the bank text is the same", async () => {
-		expect(await mergeWith({ attempts: CAP }, { name: "CORNER COFFEE" })).toBe(
-			CAP,
+	it("carries a pending row's count and failure stamp onto the posted row when the bank text is the same", async () => {
+		const merged = await mergeWith(
+			{ attempts: CAP },
+			{ name: "CORNER COFFEE" },
 		);
+		expect(merged.attempts).toBe(CAP);
+		// The stamp goes with the count, so a row nothing will ask again is not still counted as waiting.
+		expect(merged.failed).toBe(true);
 	});
 
 	it("starts over when the posted row's bank text is different", async () => {
-		expect(
-			await mergeWith({ attempts: CAP }, { name: "CORNER COFFEE #12" }),
-		).toBe(0);
+		const merged = await mergeWith(
+			{ attempts: CAP },
+			{ name: "CORNER COFFEE #12" },
+		);
+		expect(merged.attempts).toBe(0);
+		expect(merged.failed).toBe(false);
 	});
 
 	it("leaves a posted row that already has a category alone", async () => {
-		expect(
-			await mergeWith(
-				{ attempts: CAP },
-				{ name: "CORNER COFFEE", categoryId: EATING_OUT },
-			),
-		).toBe(0);
+		const merged = await mergeWith(
+			{ attempts: CAP },
+			{ name: "CORNER COFFEE", categoryId: EATING_OUT },
+		);
+		expect(merged.attempts).toBe(0);
+		expect(merged.failed).toBe(false);
 	});
 });
