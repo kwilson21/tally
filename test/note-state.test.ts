@@ -1,11 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	isQueuedNote,
-	NOTE_STATES,
-	type NoteState,
-	nextNoteState,
-} from "../src/db/note-state";
+import type { NoteState } from "../src/db/note-state";
 import {
 	saveEdit,
 	saveJevDetailsStatement,
@@ -94,50 +89,6 @@ async function queued(ids: number[]) {
 	const rows = await transactionsNeedingNoteGuess(db, 100);
 	return rows.map((row) => row.id).filter((id) => ids.includes(id));
 }
-
-describe("the transition grid", () => {
-	it("moves a queued note to guessed, failed or tried_empty by what Workers AI answered", () => {
-		expect(nextNoteState("queued", "ai_guessed")).toBe("guessed");
-		expect(nextNoteState("queued", "ai_failed")).toBe("failed");
-		expect(nextNoteState("queued", "ai_empty")).toBe("tried_empty");
-	});
-
-	it("keeps a failed note eligible: a later failure stays failed and a later success wins", () => {
-		expect(nextNoteState("failed", "ai_failed")).toBe("failed");
-		expect(nextNoteState("failed", "ai_guessed")).toBe("guessed");
-		expect(nextNoteState("failed", "ai_empty")).toBe("tried_empty");
-	});
-
-	it("starts a note only from Jev's answer, and keeps unanswered and no_call apart", () => {
-		expect(nextNoteState("unasked", "jev_worth")).toBe("queued");
-		expect(nextNoteState("unasked", "jev_not_worth")).toBe("no_call");
-		expect(nextNoteState("unasked", "jev_no_answer")).toBe("unanswered");
-		expect(nextNoteState("unanswered", "jev_worth")).toBe("unanswered");
-		expect(nextNoteState("no_call", "jev_worth")).toBe("no_call");
-	});
-
-	it("a person's emptying stops the note, and a dismissed guess stays dismissed", () => {
-		expect(nextNoteState("guessed", "person_emptied")).toBe("dismissed");
-		expect(nextNoteState("written", "person_emptied")).toBe(
-			"emptied_by_person",
-		);
-		expect(nextNoteState("queued", "person_emptied")).toBe("emptied_by_person");
-		expect(nextNoteState("emptied_by_person", "jev_worth")).toBe(
-			"emptied_by_person",
-		);
-		expect(nextNoteState("dismissed", "ai_guessed")).toBe("dismissed");
-	});
-
-	it("a person's kept guess is written, and a person's own note is written too", () => {
-		expect(nextNoteState("guessed", "person_kept")).toBe("written");
-		expect(nextNoteState("dismissed", "person_wrote")).toBe("written");
-		expect(nextNoteState("guessed", "person_wrote")).toBe("written");
-	});
-
-	it("only queued and failed notes are asked for, from the one list", () => {
-		expect(NOTE_STATES.filter(isQueuedNote)).toEqual(["queued", "failed"]);
-	});
-});
 
 describe("saveNoteAttempts moves a note through the pipeline", () => {
 	beforeEach(async () => {

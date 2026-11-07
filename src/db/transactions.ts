@@ -67,7 +67,7 @@ import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
 import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { neverSuggestedSql } from "./never-suggest";
-import { type NoteState, nextNoteState, QUEUED_NOTE_SQL } from "./note-state";
+import { afterNoteEvent, type NoteState, QUEUED_NOTE_SQL } from "./note-state";
 import { ownNameSql } from "./own-name";
 import { unlinkUnfitCashPlanPaymentsSql } from "./planned-expenses";
 import {
@@ -1140,7 +1140,7 @@ export async function saveEdit(
 			? "person_kept"
 			: null;
 	const nextNote: NoteState = noteEvent
-		? nextNoteState(current.noteState, noteEvent)
+		? afterNoteEvent(current.noteState, noteEvent)
 		: current.noteState;
 	const newLink =
 		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId

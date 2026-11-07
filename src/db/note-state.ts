@@ -1,35 +1,30 @@
 /**
- * The one state of a transaction's "what it was" note. It replaces reading note_guessed, note_tried_at,
- * note_failed_at, note_dismissed and note_worth_writing together to decide what the note is and whether Workers
- * AI is asked for it. Every writer sets it in the same statement as the note. The old columns are still written,
- * but nothing decides from them.
+ * The state of a transaction's "what it was" note (decision 172). The moves between states are an XState v6 machine
+ * (src/machines/note-state.ts), asked through `next()`. The real writes are SQL compare-and-set guards in the writers
+ * (transactions.ts, pending-merge.ts), and the tests walk every state and event against the machine.
  *
- * In plain words:
- * - unasked: Jev has not been asked the note question yet.
- * - unanswered: Jev was asked, but the note question was never answered (rows from before migration 0042).
- * - no_call: Jev said a note would not say more than the store's name, so Workers AI is not asked.
- * - queued: Jev said a note is worth writing, and Workers AI has not been asked yet.
- * - failed: Workers AI failed to answer. It stays queued, after the notes that never failed.
- * - tried_empty: Workers AI answered with no note.
- * - emptied_by_person: a person emptied the note, so it is never asked for again.
- * - guessed: Workers AI wrote a note, shown dashed until a person keeps it or empties it.
- * - written: a person's note, or a guess a person kept.
- * - dismissed: a person emptied a guess.
+ * Plain words for each state are on the machine. Here, the list of states and events, the queue check, and the SQL
+ * helpers the writers share.
  */
-export const NOTE_STATES = [
-	"unasked",
-	"unanswered",
-	"no_call",
-	"queued",
-	"failed",
-	"tried_empty",
-	"emptied_by_person",
-	"guessed",
-	"written",
-	"dismissed",
-] as const;
+import { next } from "../machines/next";
+import { noteStateMachine } from "../machines/note-state";
 
-export type NoteState = (typeof NOTE_STATES)[number];
+/** The states, in the machine's order. The migration's CHECK lists the same ten. */
+export const NOTE_STATES = Object.keys(
+	noteStateMachine.config.states ?? {},
+) as NoteState[];
+
+export type NoteState =
+	| "unasked"
+	| "unanswered"
+	| "no_call"
+	| "queued"
+	| "failed"
+	| "tried_empty"
+	| "emptied_by_person"
+	| "guessed"
+	| "written"
+	| "dismissed";
 
 /** What happens to a note: Jev's answer, Workers AI's answer, or a person's edit of the note. */
 export const NOTE_EVENTS = [
@@ -47,139 +42,19 @@ export const NOTE_EVENTS = [
 export type NoteEvent = (typeof NOTE_EVENTS)[number];
 
 /**
- * The transition grid: the state the note moves to, for each state (a row) and event (a column). `null` means the event
- * leaves the state as it is. Jev's answers only apply to a note nobody has asked about yet, and a person's words always
- * win over a machine's, except that a person's empty note is never filled in again.
- *
- *                     jev    jev    jev     ai      ai     ai      person  person   person
- *   state             worth  no     no ans  guess   empty  fails   wrote   emptied  kept
- *   unasked           queued no_call unans  -       -      -       written emptied  -
- *   unanswered        -      -      -       -       -      -       written emptied  -
- *   no_call           -      -      -       -       -      -       written emptied  -
- *   queued            -      -      -       guessed tried  failed  written emptied  -
- *   failed            -      -      -       guessed tried  failed  written emptied  -
- *   tried_empty       -      -      -       -       -      -       written emptied  -
- *   emptied_by_person -      -      -       -       -      -       written -        -
- *   guessed           -      -      -       -       -      -       written dismissed written
- *   written           -      -      -       -       -      -       -       emptied  -
- *   dismissed         -      -      -       -       -      -       written -        -
+ * The state the note moves to on this event, or null when the machine refuses the event from this state. A writer
+ * that gets null leaves the note as it is.
  */
-const GRID: Record<NoteState, Record<NoteEvent, NoteState | null>> = {
-	unasked: {
-		jev_worth: "queued",
-		jev_not_worth: "no_call",
-		jev_no_answer: "unanswered",
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	unanswered: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	no_call: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	queued: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: "guessed",
-		ai_empty: "tried_empty",
-		ai_failed: "failed",
-		person_wrote: "written",
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	failed: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: "guessed",
-		ai_empty: "tried_empty",
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	tried_empty: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	emptied_by_person: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: null,
-		person_kept: null,
-	},
-	guessed: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: "dismissed",
-		person_kept: "written",
-	},
-	written: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: null,
-		person_emptied: "emptied_by_person",
-		person_kept: null,
-	},
-	dismissed: {
-		jev_worth: null,
-		jev_not_worth: null,
-		jev_no_answer: null,
-		ai_guessed: null,
-		ai_empty: null,
-		ai_failed: null,
-		person_wrote: "written",
-		person_emptied: null,
-		person_kept: null,
-	},
-};
+export function nextNoteState(
+	state: NoteState,
+	event: NoteEvent,
+): NoteState | null {
+	return next(noteStateMachine, state, event) as NoteState | null;
+}
 
-/** The state after an event. An event the grid leaves out, for this state, keeps the state. */
-export function nextNoteState(state: NoteState, event: NoteEvent): NoteState {
-	return GRID[state][event] ?? state;
+/** The state after an event, where a refused event keeps the state. For the writers that always store a state. */
+export function afterNoteEvent(state: NoteState, event: NoteEvent): NoteState {
+	return nextNoteState(state, event) ?? state;
 }
 
 export function assertNever(value: never): never {
