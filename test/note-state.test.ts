@@ -496,4 +496,44 @@ describe("a save that reads a note's state before it writes", () => {
 			note: "Birthday cake",
 		});
 	});
+	it("does not mark a note kept when another save cleared the guess between the read and the batch", async () => {
+		await seed(21, "guessed", { note: "Birthday cake", guessed: 1 });
+		// A second save clears the guess after "Looks right" has read it and before its batch runs.
+		const racing = new Proxy(db, {
+			get(target, property) {
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						await target
+							.prepare(
+								"UPDATE transactions SET note = NULL, note_state = 'emptied_by_person', note_guessed = 0 WHERE id = ?",
+							)
+							.bind(idOf(21))
+							.run();
+						return target.batch(statements);
+					};
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		await saveEdit(
+			racing as unknown as D1Database,
+			idOf(21),
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: "Birthday cake",
+				excluded: false,
+				income: false,
+				creditReviewed: true,
+				keepDetails: true,
+			} as Parameters<typeof saveEdit>[2],
+			"user@example.com",
+		);
+		// The empty note must not become "written", which would outrank a person's real note at the next merge.
+		expect(await stateOf(idOf(21))).toMatchObject({
+			state: "emptied_by_person",
+			note: null,
+		});
+	});
 });

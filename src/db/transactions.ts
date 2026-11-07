@@ -1320,7 +1320,7 @@ export async function saveEdit(
 		changed
 			? gated(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
-						note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+						note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 						income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
@@ -1330,13 +1330,15 @@ export async function saveEdit(
 						noteChanged ? 1 : 0,
 						edit.note,
 						noteChanged ? 1 : 0,
+						noteChanged ? 1 : 0,
+						current.noteState,
 						nextNote,
 						...excludeArgs,
 						...reviewArgs,
 					],
 				)
 			: gated(
-					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL, split_removed_bills = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
+					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL, split_removed_bills = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 				income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
 					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
@@ -1345,6 +1347,8 @@ export async function saveEdit(
 						noteChanged ? 1 : 0,
 						edit.note,
 						noteChanged ? 1 : 0,
+						noteChanged ? 1 : 0,
+						current.noteState,
 						nextNote,
 						...excludeArgs,
 						...reviewArgs,
@@ -1542,7 +1546,7 @@ export async function saveEdit(
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
 					for_person_cleared = CASE WHEN ? = 1 THEN ? ELSE for_person_cleared END,
 					note = CASE WHEN ? = 1 THEN ? ELSE note END,
-					note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END,
+					note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
 					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
 					note_dismissed = CASE WHEN ? = 1 AND ? = 1 AND trim(COALESCE(?, '')) = '' THEN 1 ELSE note_dismissed END,
@@ -1563,8 +1567,11 @@ export async function saveEdit(
 					edit.forPersonId === null ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.note,
-					// Written only when the machine moves the note, so an untouched note's state is never rewritten.
+					// Written only when the machine moves the note, and, when the text is untouched, only if the stored state is still
+					// the one this save read, so a save that raced a clear cannot turn an empty note into "written".
 					nextNote !== current.noteState ? 1 : 0,
+					noteChanged ? 1 : 0,
+					current.noteState,
 					nextNote,
 					noteChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
