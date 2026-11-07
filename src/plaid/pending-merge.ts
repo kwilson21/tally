@@ -59,6 +59,11 @@ import {
 	paysPlanGroupSql,
 } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
+import {
+	noteRankSql,
+	PIPELINE_NOTE_SQL,
+	pipelineNoteStateSql,
+} from "../db/note-state";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
 function hasAnswerSql(personChoice: string, jevAnswer: string) {
@@ -72,6 +77,9 @@ const POSTED = "(SELECT id FROM transactions WHERE plaid_transaction_id = ?2)";
 const POSTED_GROUP = `(SELECT g.id FROM transactions g WHERE g.id IN (${POSTED}, (SELECT parent_id FROM transactions WHERE id = ${POSTED})) OR g.parent_id = ${POSTED})`;
 const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 	SELECT 1 FROM plaid_items WHERE id = ?4 AND sync_lock_id = ?5 AND disconnected_at IS NULL)`;
+
+/** Whether the pending row's note is further along than the posted row's (see noteRankSql and NOTE_RANK). */
+const PENDING_NOTE_WINS = `${noteRankSql("p.note_state")} > ${noteRankSql("transactions.note_state")}`;
 
 /** A person's choice, as the posted row `transactions` takes it from the pending row `p`. */
 const FROM_PENDING = `FROM transactions AS p WHERE p.id = ${PENDING} AND transactions.id = ${POSTED} AND ${READY}`;
@@ -180,11 +188,13 @@ const STATEMENTS = [
 	`UPDATE transactions SET category_id = p.category_id, category_source = 'user', category_confidence = NULL
 	 ${FROM_PENDING} AND p.category_source = 'user' AND p.category_id IS NOT NULL
 	 AND COALESCE(transactions.category_source, '') != 'user'`,
-	// Note: a note the posted row already has is kept.
-	`UPDATE transactions SET note = p.note, note_guessed = p.note_guessed
-	 ${FROM_PENDING} AND COALESCE(p.note, '') != '' AND COALESCE(transactions.note, '') = ''`,
-	// Kept details beat guesses; a posted person's answer, or a clear, always wins.
+	// Kept details beat guesses; a posted person's answer, or a clear, always wins. The note is in this statement too: the
+	// note further along wins, so a person's note beats a guess and a dismissed row stays dismissed. Its text, guess flag
+	// and state move together, and the state is read before any of this statement's changes.
 	`UPDATE transactions SET
+		note = CASE WHEN ${PENDING_NOTE_WINS} THEN p.note ELSE transactions.note END,
+		note_guessed = CASE WHEN ${PENDING_NOTE_WINS} THEN (p.note_state = 'guessed') ELSE transactions.note_guessed END,
+		note_state = CASE WHEN ${PENDING_NOTE_WINS} THEN p.note_state ELSE transactions.note_state END,
 		kind = CASE WHEN ${KIND_TAKEN} THEN p.kind ELSE transactions.kind END,
 		kind_guessed = CASE WHEN ${KIND_TAKEN} THEN p.kind_guessed ELSE transactions.kind_guessed END,
 		kind_cleared = CASE WHEN ${KIND_TAKEN} THEN p.kind_cleared ELSE transactions.kind_cleared END,
@@ -193,11 +203,14 @@ const STATEMENTS = [
 		for_person_cleared = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_cleared ELSE transactions.for_person_cleared END,
 		details_asked = MAX(transactions.details_asked, p.details_asked),
 		note_worth_writing = COALESCE(transactions.note_worth_writing, p.note_worth_writing),
-		note_guessed = CASE WHEN COALESCE(transactions.note, '') = '' AND COALESCE(p.note, '') != '' THEN p.note_guessed ELSE transactions.note_guessed END,
 		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
 		note_failed_at = COALESCE(transactions.note_failed_at, p.note_failed_at),
-		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)
-	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
+		note_dismissed = CASE WHEN (CASE WHEN ${PENDING_NOTE_WINS} THEN p.note_state ELSE transactions.note_state END) = 'guessed' THEN 0 ELSE MAX(transactions.note_dismissed, p.note_dismissed) END
+	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_state != 'unasked')`,
+	// A pipeline state the merged flags no longer fit (a posted Jev answer beside a pending try, say) is read again from the
+	// flags, so the state always agrees with the Jev answer beside it.
+	`UPDATE transactions SET note_state = ${pipelineNoteStateSql("transactions")}
+	 WHERE transactions.id = ${POSTED} AND transactions.note_state IN (${PIPELINE_NOTE_SQL}) AND ${READY}`,
 	// Jev's unsure transfer score goes before the exclusions below: a copied exclusion would otherwise look like
 	// the posted row's own answer, and the score would be lost (#309).
 	`UPDATE transactions SET transfer_confidence = p.transfer_confidence

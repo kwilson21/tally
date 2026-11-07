@@ -22,6 +22,15 @@ const D = 9784; // Jev never answered whether a note is worth writing: stays sta
 const E = 9785; // Jev said no: stays stamped
 const F = 9786; // a note with text: stays stamped
 const IDS = [A, B, C, D, E, F];
+// The state migration 0067 gives each row after this reset: the queue (transactionsNeedingNoteGuess) reads it.
+const STATE_AFTER_RESET: Record<number, string> = {
+	[A]: "queued",
+	[B]: "queued",
+	[C]: "dismissed",
+	[D]: "unanswered",
+	[E]: "no_call",
+	[F]: "written",
+};
 
 const STAMP = "2026-10-01 09:25:00";
 const UPDATED = "2026-10-02 08:00:00";
@@ -59,8 +68,8 @@ async function seed() {
 		...ROWS.map((row) =>
 			db
 				.prepare(
-					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_dismissed, note, note_tried_at, updated_by, updated_at)
-					 VALUES (?, ?, '2026-10-01', 1299, 'CORNER STORE', 1, ?, ?, ?, ?, 'user', ?)`,
+					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_dismissed, note, note_tried_at, updated_by, updated_at, note_state)
+					 VALUES (?, ?, '2026-10-01', 1299, 'CORNER STORE', 1, ?, ?, ?, ?, 'user', ?, ?)`,
 				)
 				.bind(
 					row.id,
@@ -70,6 +79,8 @@ async function seed() {
 					row.note,
 					STAMP,
 					UPDATED,
+					// The state migration 0067 gives each row once this reset has run: the queue reads the state.
+					STATE_AFTER_RESET[row.id] ?? "written",
 				),
 		),
 	]);

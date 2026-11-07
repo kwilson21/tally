@@ -795,7 +795,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			"INSERT INTO household_people(id,name) VALUES (2,'Kept person') ON CONFLICT(id) DO NOTHING",
 		).run();
 		await env.DB.prepare(
-			"UPDATE transactions SET kind='bill', kind_guessed=0, for_person_id=2, for_person_guessed=0, note='Maybe', note_guessed=1, details_asked=1, note_tried_at='2026-10-06 09:00:00' WHERE id=?",
+			"UPDATE transactions SET kind='bill', kind_guessed=0, for_person_id=2, for_person_guessed=0, note='Maybe', note_guessed=1, details_asked=1, note_tried_at='2026-10-06 09:00:00', note_state='guessed' WHERE id=?",
 		)
 			.bind(ids.pending)
 			.run();
@@ -831,7 +831,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item);
 		await env.DB.prepare(
-			"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-06 09:25:00' WHERE id = ?",
+			"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-06 09:25:00', note_state = 'failed' WHERE id = ?",
 		)
 			.bind(ids.pending)
 			.run();
@@ -844,7 +844,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		});
 		// A note that never failed is asked before the posted one, which failed on the last run.
 		await env.DB.prepare(
-			"INSERT INTO transactions(account_id,date,amount_cents,raw_name,details_asked,note_worth_writing) SELECT account_id,'2026-09-01',-1000,'NEVER FAILED',1,1 FROM transactions WHERE plaid_transaction_id = 'posted-1'",
+			"INSERT INTO transactions(account_id,date,amount_cents,raw_name,details_asked,note_worth_writing,note_state) SELECT account_id,'2026-09-01',-1000,'NEVER FAILED',1,1,'queued' FROM transactions WHERE plaid_transaction_id = 'posted-1'",
 		).run();
 		const older = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'NEVER FAILED'",
@@ -856,10 +856,10 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const own = await bothStored(secondItem);
 		await env.DB.batch([
 			env.DB.prepare(
-				"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-07 08:00:00' WHERE id = ?",
+				"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-07 08:00:00', note_state = 'failed' WHERE id = ?",
 			).bind(own.pending),
 			env.DB.prepare(
-				"UPDATE transactions SET note_failed_at = '2026-10-05 07:00:00' WHERE id = ?",
+				"UPDATE transactions SET note_failed_at = '2026-10-05 07:00:00', note_state = 'failed' WHERE id = ?",
 			).bind(own.posted),
 		]);
 		await post(secondItem, {});
@@ -872,7 +872,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item);
 		await env.DB.prepare(
-			"UPDATE transactions SET note_worth_writing = 1, details_asked = 1 WHERE id = ?",
+			"UPDATE transactions SET note_worth_writing = 1, details_asked = 1, note_state = 'queued' WHERE id = ?",
 		)
 			.bind(ids.pending)
 			.run();
@@ -989,7 +989,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const ids = await bothStored(item, { amount: -42 });
 		await env.DB.batch([
 			env.DB.prepare(
-				`UPDATE transactions SET category_id = 3, category_source = 'user', note = 'Birthday money',
+				`UPDATE transactions SET category_id = 3, category_source = 'user', note = 'Birthday money', note_state = 'written',
 					excluded = 1, excluded_source = 'user', flag_income = 1, income_source = 'user',
 					credit_reviewed = 1, credit_reviewed_by = 'user', updated_by = 'person@example.com'
 				 WHERE id = ?`,
@@ -3366,7 +3366,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item);
 		await env.DB.prepare(
-			"UPDATE transactions SET category_id = 3, category_source = 'user', note = 'Kept' WHERE id = ?",
+			"UPDATE transactions SET category_id = 3, category_source = 'user', note = 'Kept', note_state = 'written' WHERE id = ?",
 		)
 			.bind(ids.pending)
 			.run();
