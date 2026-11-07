@@ -7,6 +7,7 @@ import {
 	jevAsksAboutSql,
 } from "../src/db/counted-month";
 import { WAITING } from "../src/db/more-like-this";
+import { neverSuggestedSql } from "../src/db/never-suggest";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
@@ -45,7 +46,12 @@ const PURCHASE_EXCLUDED = 2; // excluded purchase
 const SPLIT_PARENT = 3; // split parent, paid by a planned expense
 
 type Link = "bill" | "plan" | "dismissed_bill";
-type Seed = Partial<Row> & { name?: string; link?: Link };
+type Seed = Partial<Row> & { name?: string; link?: Link; raw_name?: string };
+
+// The bank text a "Never suggest income" rule covers. Seeds have no merchant name, so their merchant key is their bank
+// text, and the rule's key is this text. The oracle reads that fact from the seed itself; SQL reads the rule table.
+const NEVER_RAW = "NEVER-INCOME";
+const PLAIN_RAW = "CLASSIFY";
 
 const DEFAULTS: Omit<Row, "id"> = {
 	amount_cents: 1000,
@@ -175,6 +181,12 @@ const NAMED: Seed[] = [
 		name: "credit held, Jev income sure (80%)",
 		amount_cents: -500,
 		income_confidence: 0.8,
+	},
+	{
+		name: "credit held, Jev income maybe, never suggested",
+		amount_cents: -500,
+		income_confidence: 0.5,
+		raw_name: NEVER_RAW,
 	},
 	{
 		name: "credit held, Jev income maybe, pending",
@@ -377,6 +389,16 @@ function randomSeeds(n: number): Seed[] {
 		refund_of_id: pick([null, null, null, PURCHASE, PURCHASE_EXCLUDED]),
 		jev_failed_at: pick([null, null, null, "2026-01-01"]),
 		plaid_transaction_id: pick(["plaid-x", "plaid-x", null]),
+		raw_name: pick([
+			PLAIN_RAW,
+			PLAIN_RAW,
+			PLAIN_RAW,
+			PLAIN_RAW,
+			PLAIN_RAW,
+			PLAIN_RAW,
+			PLAIN_RAW,
+			NEVER_RAW,
+		]),
 		link: pick<Link | undefined>([
 			undefined,
 			undefined,
@@ -436,6 +458,7 @@ async function sqlSet(key: keyof Questions): Promise<Set<number>> {
 // ---- seeding -----------------------------------------------------------------------------------------------------------
 
 let rows: Row[] = [];
+const contexts = new Map<number, Context>();
 const names = new Map<number, string>();
 const idByName = new Map<string, number>();
 const classified = new Map<number, Classified>();
@@ -460,7 +483,15 @@ beforeAll(async () => {
 	const acct = account.id;
 
 	const insertTxn = `INSERT INTO transactions (id, account_id, date, raw_name, ${COLS.join(", ")})
-		VALUES (?, ${acct}, '2026-10-05', 'CLASSIFY', ${COLS.map(() => "?").join(", ")})`;
+		VALUES (?, ${acct}, '2026-10-05', ?, ${COLS.map(() => "?").join(", ")})`;
+
+	// The "Never suggest income" rule for the bank text NEVER_RAW (decision 101). SQL reads it from this table.
+	await db
+		.prepare(
+			"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'income', '2026-10-01')",
+		)
+		.bind(NEVER_RAW)
+		.run();
 
 	const all: Seed[] = [...FIXED, ...NAMED, ...randomSeeds(4000)];
 	const statements: D1PreparedStatement[] = [];
@@ -478,7 +509,9 @@ beforeAll(async () => {
 				? `classify-${++plaidN}`
 				: v;
 		});
-		statements.push(db.prepare(insertTxn).bind(id, ...values));
+		statements.push(
+			db.prepare(insertTxn).bind(id, seed.raw_name ?? PLAIN_RAW, ...values),
+		);
 		if (seed.name) {
 			names.set(id, seed.name);
 			idByName.set(seed.name, id);
@@ -519,6 +552,17 @@ beforeAll(async () => {
 			seed.link === "bill" || seed.link === "plan" ? [index + 1] : [],
 		),
 	);
+	// Facts from outside the row. The active-category fact is read from the table. The Never-suggest fact is the
+	// seed's bank text against the rule's text (seeds have no merchant name, so the key is the bank text).
+	const activeCategories =
+		(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
+				.first<{ n: number }>()
+		)?.n ?? 0;
+	const bankTextOf = new Map(
+		all.map((s, i) => [i + 1, s.raw_name ?? PLAIN_RAW]),
+	);
 	const contextFor = (r: Row): Context => {
 		const target =
 			r.refund_of_id === null ? undefined : byId.get(r.refund_of_id);
@@ -530,11 +574,15 @@ beforeAll(async () => {
 				: null,
 			jevCategoryActive:
 				r.jev_category_id !== null && ACTIVE_IDS.has(r.jev_category_id),
-			anyActiveCategory: true,
-			neverSuggestIncome: false,
+			anyActiveCategory: activeCategories > 0,
+			neverSuggestIncome: bankTextOf.get(r.id) === NEVER_RAW,
 		};
 	};
-	for (const r of rows) classified.set(r.id, classify(r, contextFor(r)));
+	for (const r of rows) {
+		const ctx = contextFor(r);
+		contexts.set(r.id, ctx);
+		classified.set(r.id, classify(r, ctx));
+	}
 
 	const keys = Object.keys(SQL_FOR) as (keyof Questions)[];
 	const found = await Promise.all(keys.map((k) => sqlSet(k)));
@@ -646,7 +694,7 @@ describe("named rows come out as the readable answers", () => {
 	});
 });
 
-// Owner decisions on the review queue and the held credits. Each test fails until the SQL is changed to match.
+// The owner's decisions (a) and (b) on the review queue: a pending row and a transfer are not asked. These tests pin the SQL to them.
 describe("review questions: pending and transfer rows are not asked (owner decisions a and b)", () => {
 	it("a pending purchase is not asked about its category", () => {
 		expect(sqlSays("categoryAsked", "pending purchase, Jev maybe")).toBe(false);
@@ -693,7 +741,7 @@ describe("a transfer credit is settled, not held (owner decision)", () => {
 	});
 });
 
-// Current behaviour that the owner has not decided yet (owner decision d). These tests document it: they pass today,
+// Current behaviour that the owner has not decided yet (owner decision d), tracked in GitHub issue #870. These tests document it: they pass today,
 // and they do not say the behaviour is right. Change them only when the owner decides.
 describe("current behaviour awaiting an owner decision (owner decision d)", () => {
 	it("a category source with no category id is counted as needing a category, and nothing asks about it", () => {
@@ -717,5 +765,66 @@ describe("current behaviour awaiting an owner decision (owner decision d)", () =
 		expect(sqlSays("heldForReview", name)).toBe(true);
 		expect(sqlSays("incomeAsked", name)).toBe(false);
 		expect(sqlSays("waitingForJev", name)).toBe(false);
+	});
+});
+
+const ctxOf = (id: number): Context => {
+	const found = contexts.get(id);
+	if (!found) throw new Error(`row ${id} has no context`);
+	return found;
+};
+
+describe("the Never-suggest income rule (the oracle's fact against SQL's rule table)", () => {
+	it("the rule covers the same rows whether SQL reads its table or the oracle reads the bank text", async () => {
+		const bySql = await countedIds(neverSuggestedSql("t", "income"));
+		const byFact = rows
+			.filter((r) => ctxOf(r.id).neverSuggestIncome)
+			.map((r) => r.id);
+		expect(bySql.size).toBeGreaterThan(0);
+		expect([...bySql].sort((a, b) => a - b)).toEqual(byFact);
+	});
+
+	it("hides the income question but not the pay question, and the oracle agrees", () => {
+		const name = "credit held, Jev income maybe, never suggested";
+		expect(sqlSays("incomeAsked", name)).toBe(false);
+		expect(sqlSays("payAsked", name)).toBe(true);
+		expect(classifiedOf(idOf(name)).questions.incomeAsked).toBe(false);
+		expect(classifiedOf(idOf(name)).questions.payAsked).toBe(true);
+	});
+});
+
+describe("waitingForJev with no active category (the other branch of the category work)", () => {
+	it("matches the oracle when no category is active, and that branch changes some rows", async () => {
+		// The migrations seed default categories, so every category is archived for this query, then restored.
+		const saved = await db
+			.prepare("SELECT id, archived FROM categories")
+			.all<{ id: number; archived: number }>();
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		let withoutActive = new Set<number>();
+		try {
+			withoutActive = await sqlSet("waitingForJev");
+		} finally {
+			await db.batch(
+				saved.results.map((c) =>
+					db
+						.prepare("UPDATE categories SET archived = ? WHERE id = ?")
+						.bind(c.archived, c.id),
+				),
+			);
+		}
+		const oracle = (r: Row) =>
+			classify(r, { ...ctxOf(r.id), anyActiveCategory: false }).questions
+				.waitingForJev;
+		const wrong = rows
+			.filter((r) => oracle(r) !== withoutActive.has(r.id))
+			.map((r) => r.id);
+		expect(wrong.slice(0, 10), `${wrong.length} rows differ`).toEqual([]);
+		// No vacuous pass: the question must say yes to some row, and the branch must change some answer.
+		expect(withoutActive.size).toBeGreaterThan(0);
+		expect(
+			rows.filter(
+				(r) => sets.waitingForJev.has(r.id) !== withoutActive.has(r.id),
+			).length,
+		).toBeGreaterThan(0);
 	});
 });

@@ -104,9 +104,15 @@ export type Category =
 	| { kind: "unset"; source: Row["category_source"]; guess: Guess };
 
 export type Questions = {
-	/** Needs category, Home's count and Organize: a counted row with no category, that is not a held credit. */
+	/**
+	 * Needs category, Home's count and Organize: a counted row with no category that is not income, not a split
+	 * parent, not a refund that follows its purchase, and not a held credit (money in that nobody reviewed).
+	 */
 	needsCategory: boolean;
-	/** Waiting: needs a category, and nobody has decided it, it is not part of a split or a bill, and it is not pending. */
+	/**
+	 * Waiting: needs a category, and nothing has set a category source yet (a person, a merchant rule, Jev or a bill),
+	 * it is not a split part, and it is not pending.
+	 */
 	waiting: boolean;
 	/** Held for review: money in that nobody has reviewed. */
 	heldForReview: boolean;
@@ -310,18 +316,23 @@ function questionsOf(
 		((!personChose && (noCategoryYet || heldCredit)) ||
 			(noCategoryYet && isCredit && creditReviewed && personChose));
 
-	// Jev has work for a row when its category or income answer is still missing.
-	const categoryWork =
-		r.category_confidence === null &&
-		(ctx.anyActiveCategory ||
-			(!categoryOnly &&
-				r.amount_cents > 0 &&
-				r.transfer_confidence === null &&
-				r.excluded_source !== "user"));
+	// Jev's work for a row: a category or an income answer that is still missing.
+	const categoryAnswerMissing = r.category_confidence === null;
+	// With a category active, Jev can always be asked. With none, only an outgoing payment a person did not
+	// put back in the budget can be asked for its transfer answer, which is the category question's stand-in.
+	const categoryQuestionPossible =
+		ctx.anyActiveCategory ||
+		(!categoryOnly &&
+			r.amount_cents > 0 &&
+			r.transfer_confidence === null &&
+			r.excluded_source !== "user");
+	const categoryWork = categoryAnswerMissing && categoryQuestionPossible;
 	const incomeWork = !categoryOnly && isCredit && r.income_confidence === null;
+	// Imported from Plaid and not failed, and Jev has a question for it (with the same switches the count uses).
+	const importedAndNotFailed =
+		r.plaid_transaction_id !== null && r.jev_failed_at === null;
 	const waitingForJev =
-		r.plaid_transaction_id !== null &&
-		r.jev_failed_at === null &&
+		importedAndNotFailed &&
 		!follows &&
 		needsJevClassification &&
 		(categoryWork || incomeWork);
