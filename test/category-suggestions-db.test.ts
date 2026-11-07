@@ -9,6 +9,7 @@ import {
 	dismissSuggestion,
 	namesToAvoid,
 	noneFitTransactions,
+	pendingSuggestionPage,
 	pendingSuggestions,
 	purchaseNamesToAvoid,
 	saveSuggestion,
@@ -788,8 +789,8 @@ describe("pendingSuggestions: what Settings shows", () => {
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as D1Database;
-		const result = await pendingSuggestions(counted);
-		expect(result).toHaveLength(10);
+		const result = await pendingSuggestionPage(counted);
+		expect(result.suggestions).toHaveLength(10);
 		expect(result.more).toBe(40);
 		expect(statements).toBe(4);
 	});

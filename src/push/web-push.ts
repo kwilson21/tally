@@ -136,7 +136,7 @@ export async function encrypt(
 			{
 				name: "ECDH",
 				public: receiverKey,
-			} as unknown as SubtleCryptoDeriveKeyAlgorithm,
+			} as SubtleCryptoDeriveKeyAlgorithm,
 			sender.privateKey,
 			256,
 		),
