@@ -30,6 +30,8 @@ export type ResortSnapshot = {
 	jev_mixed: number | null;
 	jev_also_category_id: number | null;
 	jev_failed_at: string | null;
+	/** The row's failure counter (decision 182): Undo puts it back, so a run's own failure is not kept twice. */
+	jev_attempts: number;
 };
 
 /** A candidate row: what clustering needs, the date for ordering, and its pre-run snapshot. */
@@ -63,6 +65,7 @@ type CandidateRow = {
 	jevMixed: number | null;
 	jevAlsoCategoryId: number | null;
 	jevFailedAt: string | null;
+	jevAttempts: number;
 };
 
 /**
@@ -125,7 +128,8 @@ export async function resortCandidates(
 				t.category_id AS categoryId, t.category_source AS categorySource,
 				t.category_confidence AS categoryConfidence, t.jev_category_id AS jevCategoryId,
 				t.jev_none_fit AS jevNoneFit, t.jev_mixed AS jevMixed,
-				t.jev_also_category_id AS jevAlsoCategoryId, t.jev_failed_at AS jevFailedAt
+				t.jev_also_category_id AS jevAlsoCategoryId, t.jev_failed_at AS jevFailedAt,
+				t.jev_attempts AS jevAttempts
 			FROM transactions t ${COUNTED_JOINS}
 			WHERE (${WAITING}) AND t.id <> ?1 AND t.jev_failed_at IS NULL
 				AND (t.category_confidence IS NULL
@@ -159,6 +163,7 @@ export async function resortCandidates(
 			jev_mixed: row.jevMixed,
 			jev_also_category_id: row.jevAlsoCategoryId,
 			jev_failed_at: row.jevFailedAt,
+			jev_attempts: row.jevAttempts,
 		},
 	}));
 	return orderCandidates(rows, queueIds).slice(0, RESORT_CANDIDATE_MAX);

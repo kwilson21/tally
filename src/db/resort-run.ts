@@ -588,6 +588,7 @@ async function finalizeRun(
 				jev_mixed = ${snap("jev_mixed")},
 				jev_also_category_id = ${snap("jev_also_category_id")},
 				jev_failed_at = ${snap("jev_failed_at")},
+				jev_attempts = COALESCE(${snap("jev_attempts")}, jev_attempts),
 				updated_at = CASE WHEN category_id IS NOT ${snap("category_id")}
 					OR category_source IS NOT ${snap("category_source")}
 					OR category_confidence IS NOT ${snap("category_confidence")}
@@ -762,6 +763,7 @@ export async function undoRun(
 				jev_mixed = ${undoSnap("jev_mixed")},
 				jev_also_category_id = ${undoSnap("jev_also_category_id")},
 				jev_failed_at = ${undoSnap("jev_failed_at")},
+				jev_attempts = COALESCE(${undoSnap("jev_attempts")}, jev_attempts),
 				updated_at = datetime('now')
 			WHERE id IN (SELECT json_extract(s.value, '$.id') FROM json_each(${rows}) s)
 				AND category_id = (SELECT json_extract(s.value, '$.categoryId') FROM json_each(${rows}) s WHERE json_extract(s.value, '$.id') = transactions.id)

@@ -3,6 +3,7 @@
 // starts a Workflow instance instead (startSorting, src/sort-start.ts).
 import { readAiSwitches } from "./db/ai-switches";
 import { finishRun } from "./db/resort-run";
+import { filedSql } from "./machines/jev-retry";
 import type { Deadline } from "./run-budget";
 import { type SortEnv, type StepRunner, sortGroups } from "./sort-groups";
 import { type ReaskParams, startSorting } from "./sort-start";
@@ -107,6 +108,12 @@ export async function askAgainMany(
 ): Promise<void> {
 	if (!env.JEV_API_KEY || !ids.length) return;
 	try {
+		// A person asking again starts these rows' failure count over, so one that reached the cap is asked (decision 182).
+		await env.DB.prepare(
+			`UPDATE transactions SET jev_attempts = 0 WHERE id IN (SELECT value FROM json_each(?)) AND NOT ${filedSql("transactions")}`,
+		)
+			.bind(JSON.stringify(ids))
+			.run();
 		await env.DB.prepare(
 			`UPDATE transactions SET category_confidence = NULL, jev_mixed = NULL, jev_also_category_id = NULL
 			 WHERE id IN (SELECT value FROM json_each(?)) AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NOT NULL`,

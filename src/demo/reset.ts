@@ -21,7 +21,8 @@ const ELECTRIC_MERCHANT = "METRO ELECTRIC CO";
 const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
-const TABLES_CHILD_FIRST = [
+export const TABLES_CHILD_FIRST = [
+	"feedback",
 	"forgotten_texts",
 	"bank_text_rules",
 	"ai_log",
@@ -47,6 +48,7 @@ const TABLES_CHILD_FIRST = [
 	"categories",
 	"accounts",
 	"plaid_items",
+	"push_subscriptions",
 	"household_members",
 ];
 

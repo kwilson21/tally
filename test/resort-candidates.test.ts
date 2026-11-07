@@ -269,6 +269,11 @@ describe("resortCandidates: the cap and the order", () => {
 			jevCategoryId: eatingOut,
 			jevMixed: 0.2,
 		});
+		await env.DB.prepare(
+			"UPDATE transactions SET jev_attempts = 2 WHERE id = ?",
+		)
+			.bind(row)
+			.run();
 		const found = (await candidates()).find((r) => r.id === row);
 		expect(found?.snapshot).toEqual({
 			id: row,
@@ -280,6 +285,7 @@ describe("resortCandidates: the cap and the order", () => {
 			jev_mixed: 0.2,
 			jev_also_category_id: null,
 			jev_failed_at: null,
+			jev_attempts: 2,
 		});
 	});
 
