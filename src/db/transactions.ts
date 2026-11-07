@@ -13,7 +13,7 @@ import {
 } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
-import { gaveUpSql, JEV_ATTEMPT_CAP } from "../machines/jev-retry";
+import { gaveUpSql, waitingSql } from "../machines/jev-retry";
 import {
 	type Edit,
 	excludedAfterSave,
@@ -2891,16 +2891,9 @@ export function seenSaveGuard(seen: JevSeen): {
 }
 
 /**
- * The counter's write for a failed ask (decision 171, JEV_FAILED in src/machines/jev-retry.ts): one more failure while the
- * row is waiting, and none for a row that is answered or has given up. The cap itself is the machine's.
- */
-function countFailureSql(): string {
-	return `jev_attempts = CASE WHEN category_confidence IS NULL AND jev_attempts < ${JEV_ATTEMPT_CAP} THEN jev_attempts + 1 ELSE jev_attempts END`;
-}
-
-/**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
- * `turnId` guards it to the sorting turn (decision 139).
+ * A failure counts only while the row is waiting (JEV_FAILED in src/machines/jev-retry.ts, decision 171): a filed, unsure
+ * or gave-up row is left as it is. `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
 	db: D1Database,
@@ -2908,7 +2901,8 @@ export function markJevFailedStatement(
 	turnId?: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET jev_failed_at = datetime('now'), ${countFailureSql()} WHERE id = ?`,
+		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
+		WHERE id = ? AND ${waitingSql("transactions")}`,
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
@@ -2924,8 +2918,8 @@ export function markReaskFailedStatement(
 	turnId: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET jev_failed_at = datetime('now'), ${countFailureSql()}
-		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ?`,
+		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
+		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND ${waitingSql("transactions")}`,
 		turnId,
 	);
 	return db
@@ -3205,7 +3199,7 @@ export function saveJevResultStatements(
 					AND ${STILL_ON_SQL}${seenSql}${activeSql}
 					AND EXISTS (SELECT 1 FROM household_settings WHERE key = 'resort_run'
 						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')
-					AND plaid_transaction_id IS ? AND amount_cents = ?${options.leaderFiled ? " AND EXISTS (SELECT 1 FROM transactions g WHERE g.id = ? AND g.category_id = ? AND g.category_source = 'jev')" : ""}`,
+					AND NOT ${gaveUpSql("transactions")} AND plaid_transaction_id IS ? AND amount_cents = ?${options.leaderFiled ? " AND EXISTS (SELECT 1 FROM transactions g WHERE g.id = ? AND g.category_id = ? AND g.category_source = 'jev')" : ""}`,
 			options.turn,
 		);
 		const category = db
@@ -3249,7 +3243,7 @@ export function saveJevResultStatements(
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
+					AND ${INCLUDED_ROW} AND is_split = 0 AND NOT ${gaveUpSql("transactions")} AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
 			options.turn,
 		);
 		const category = db
@@ -3309,7 +3303,7 @@ export function saveJevResultStatements(
 				excluded_source = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				jev_attempts = 0,
 				updated_at = datetime('now')
-			WHERE id = ? AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
+			WHERE id = ? AND NOT ${gaveUpSql("transactions")} AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
 				AND excluded = 0 AND is_split = 0
 				AND COALESCE(income_source, '') != 'user' AND COALESCE(credit_reviewed_by, '') != 'user'
 				AND (
