@@ -14,14 +14,14 @@ const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
 	},
 	bill_payments: {
 		undo_token:
-			"A random one-use token for a Not this one's Undo (spec §5, #340); not family data.",
+			"A random one-use token for a Not this one's Undo (migration 0048, decision 99); not family data.",
 	},
 	category_archive_periods: {
-		id: "A row number; the category and both days are exported.",
+		id: "A row number; the category and both days are exported (decision 185).",
 	},
 	maybe_names: {
 		claim:
-			"A random token that lets one request finish the row (migration 0063, decision 161); not family data.",
+			"A random token that lets one request finish the row (migration 0063, decision 161); not family data (decision 185).",
 	},
 };
 
@@ -34,7 +34,7 @@ const NOT_EXPORTED: Record<string, string> = {
 	planned_delete_holds:
 		"A ten-second undo snapshot for a deleted plan, removed by each later delete (spec §5, decision 101).",
 	feedback:
-		"Left out of the download by the owner's choice (2026-11-07); the in-app feedback form has its own privacy handling (decision 61).",
+		"Left out of the download by the owner's choice (decision 185); the in-app feedback form has its own privacy handling (decision 61).",
 };
 
 // Tables tallyExport reads with its own statement rather than EXPORT_COLUMNS.
