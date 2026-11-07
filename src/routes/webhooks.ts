@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { type PlaidEnv, PlaidError } from "../plaid/client";
+import { connectionOf, markNeedsAttention } from "../plaid/item-store";
 import { loginStillBroken } from "../plaid/login-broken";
 import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { TRANSIENT_ITEM_ERROR_CODES } from "../plaid/sync";
@@ -87,21 +88,16 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		typeof body.webhook_code === "string" &&
 		attentionCodes.has(body.webhook_code);
 	if (isAttentionWarning) {
-		await c.env.DB.prepare(
-			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND disconnected_at IS NULL",
-		)
-			.bind(item.id)
-			.run();
+		await markNeedsAttention(c.env.DB, item.id);
 	}
 	if (isItemError) {
 		c.executionCtx.waitUntil(
 			(async () => {
 				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
-					await c.env.DB.prepare(
-						"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND status = ? AND disconnected_at IS NULL",
-					)
-						.bind(item.id, item.status)
-						.run();
+					// The state this request read, so a repair made while Plaid was asked is not overwritten.
+					await markNeedsAttention(c.env.DB, item.id, {
+						seen: connectionOf(item),
+					});
 				}
 			})().catch((error: unknown) => {
 				const requestId =

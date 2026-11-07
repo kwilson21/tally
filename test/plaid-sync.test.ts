@@ -2842,6 +2842,46 @@ describe("syncItem", () => {
 		).toBe(0);
 	});
 
+	it("clears needs_attention and the reminder when a sync gets every page (decision 169)", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET status = 'needs_attention', reconnect_emailed_at = '2026-10-06 04:00:00' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch(() => response(page({ next_cursor: "cursor-2" }))),
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ status: "ok", reconnect_emailed_at: null });
+	});
+
+	it("keeps needs_attention when a sync fails before it gets every page", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+		await expect(
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(() => response({}, 500)),
+			),
+		).rejects.toThrow();
+		spy.mockRestore();
+		expect((await itemState(id))?.status).toBe("needs_attention");
+	});
+
 	it("doesn't flag the Item for an error after another run has taken its lock", async () => {
 		const id = await addItem();
 		const spy = vi.spyOn(console, "error").mockImplementation(() => {});

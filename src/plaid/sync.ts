@@ -17,6 +17,11 @@ import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
+import {
+	markNeedsAttention,
+	markSyncSucceeded,
+	readConnection,
+} from "./item-store";
 import { loginStillBroken } from "./login-broken";
 import { mergePendingIntoPosted } from "./pending-merge";
 import { decryptToken } from "./token-crypto";
@@ -412,20 +417,13 @@ async function handlePlaidError(
 			error.error_type === "ITEM_ERROR" &&
 			!transient.has(error.error_code ?? "")
 		) {
-			const item = await env.DB.prepare(
-				"SELECT status FROM plaid_items WHERE id = ?",
-			)
-				.bind(itemRowId)
-				.first<{ status: string }>();
+			// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
+			const seen = await readConnection(env.DB, itemRowId);
 			if (
-				item &&
+				seen !== null &&
 				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
 			) {
-				await env.DB.prepare(
-					"UPDATE plaid_items SET status = 'needs_attention' WHERE id = ? AND sync_lock_id = ? AND status = ? AND disconnected_at IS NULL",
-				)
-					.bind(itemRowId, lockId, item.status)
-					.run();
+				await markNeedsAttention(env.DB, itemRowId, { seen, lockId });
 			}
 		}
 	}
@@ -1169,6 +1167,9 @@ export async function syncItem(
 				);
 			}
 			if (!page.has_more) {
+				// Every page is in and this run still holds the lease, so the login works: a bank that needed attention is
+				// fine again (decision 169). Refused or unchanged for a bank that was fine already.
+				await markSyncSucceeded(env.DB, itemRowId, lockId);
 				if (runAfterSync) await afterSync(env.DB);
 				return { ...summary, changedIds: [...changedIds] };
 			}

@@ -30,6 +30,7 @@ import { toCents } from "../money";
 import { netWorthView } from "../net-worth";
 import { afterSyncSteps } from "../plaid/after-sync";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
+import { disconnectStatement } from "../plaid/item-store";
 import { sortAfterSync } from "../plaid/sort-after-sync";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { decryptToken } from "../plaid/token-crypto";
@@ -762,11 +763,7 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 		: [];
 	// Before setup is done, the last connected bank going takes the four strokes back (spec §8.8), in this batch.
 	statements.push(takeBackBankStrokes(c.env.DB, item.id));
-	statements.push(
-		c.env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now'), access_token_encrypted = X'', sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND disconnected_at IS NULL",
-		).bind(item.id),
-	);
+	statements.push(disconnectStatement(c.env.DB, item.id));
 	let results: D1Result[];
 	try {
 		results = await c.env.DB.batch(statements);
