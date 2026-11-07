@@ -183,7 +183,7 @@ const NAMED: Seed[] = [
 		pending: 1,
 	},
 	{
-		name: "credit held, Jev income maybe, flagged transfer",
+		name: "credit flagged as transfer, Jev income maybe",
 		amount_cents: -500,
 		income_confidence: 0.5,
 		flag_transfer: 1,
@@ -660,7 +660,7 @@ describe("review questions: pending and transfer rows are not asked (owner decis
 
 	it("a credit flagged as a transfer is not asked about its income", () => {
 		expect(
-			sqlSays("incomeAsked", "credit held, Jev income maybe, flagged transfer"),
+			sqlSays("incomeAsked", "credit flagged as transfer, Jev income maybe"),
 		).toBe(false);
 	});
 
@@ -678,6 +678,18 @@ describe("HELD_FOR_REVIEW_SQL is self-contained (owner decision c)", () => {
 		expect(sqlSays("heldForReview", "credit held, excluded by user")).toBe(
 			false,
 		);
+	});
+});
+
+// Owner decision: a credit flagged as a transfer and not excluded is settled, not held for review.
+describe("a transfer credit is settled, not held (owner decision)", () => {
+	it("a credit flagged as a transfer and in the budget is not held, and is in the settled transfer state", () => {
+		const name = "credit flagged as transfer, Jev income maybe";
+		expect(sqlSays("heldForReview", name)).toBe(false);
+		expect(classifiedOf(idOf(name)).money).toEqual({
+			kind: "credit",
+			state: { kind: "settled_transfer" },
+		});
 	});
 });
 

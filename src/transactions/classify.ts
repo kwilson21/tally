@@ -84,6 +84,8 @@ export type Money =
 export type CreditState =
 	// Money in that nobody has reviewed yet: it waits for a person (decision 70).
 	| { kind: "held_for_review" }
+	// Flagged as a transfer, so settled and not held for review (owner decision, #861).
+	| { kind: "settled_transfer" }
 	// A reviewed credit that is not a refund of a counted purchase.
 	| { kind: "reviewed"; by: "user" | "other" }
 	// A reviewed refund whose purchase is still counted. It takes the purchase's month and category.
@@ -170,7 +172,11 @@ function incomeOf(r: Row): Income {
 function moneyOf(r: Row, ctx: Context, income: Income): Money {
 	if (r.amount_cents >= 0) return { kind: "purchase" };
 	const reviewed = (r.credit_reviewed ?? 0) === 1;
-	if (!reviewed) return { kind: "credit", state: { kind: "held_for_review" } };
+	if (!reviewed) {
+		if (r.flag_transfer === 1)
+			return { kind: "credit", state: { kind: "settled_transfer" } };
+		return { kind: "credit", state: { kind: "held_for_review" } };
+	}
 	const purchaseCounts =
 		ctx.refundTarget !== null && !ctx.refundTarget.excluded;
 	if (purchaseCounts && income.kind === "not_income")
@@ -289,7 +295,13 @@ function questionsOf(
 		notSplitParent &&
 		!pending;
 
-	const heldForReview = heldCredit && !isIncome && notSplitParent && counted;
+	// A transfer credit is settled, so it is not held (owner decision, #861).
+	const heldForReview =
+		heldCredit &&
+		!isIncome &&
+		notSplitParent &&
+		counted &&
+		r.flag_transfer === 0;
 
 	const needsJevClassification =
 		counted &&

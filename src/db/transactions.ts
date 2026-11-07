@@ -185,11 +185,11 @@ export const PAGE_SIZE = 25;
 /** A transaction that still needs a category (Home's count, Organize's list). Needs `t` and COUNTED_JOINS. */
 export const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 /**
- * A credit a person still has to review (decision 70): money in, not reviewed, not income, not a split parent, and in the
- * budget (INCLUDED). Monthly counts and the night's needs-you count both read it. Needs `t` only, so it is self-contained.
+ * A credit a person still has to review (decision 70): money in, not reviewed, not income, not flagged as a transfer
+ * (a transfer is settled, owner decision for #861), not a split parent, and in the budget (INCLUDED). Monthly counts and the night's needs-you count both read it. Needs `t` only, so it is self-contained.
  * It needs no "not a refund that follows its purchase" check: a follows-purchase refund is always reviewed, so it can't be here.
  */
-export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.is_split = 0 AND ${INCLUDED}`;
+export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.flag_transfer = 0 AND t.is_split = 0 AND ${INCLUDED}`;
 export const OLDER_NEEDS_CATEGORY_SQL = `SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS}
 	WHERE (t.date < ?1 OR (t.date >= ?1 AND t.date < ?2 AND ${COUNTED_MONTH} < ?3))
 	AND ${NEEDS_CATEGORY}`;
