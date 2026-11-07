@@ -59,11 +59,8 @@ import {
 	paysPlanGroupSql,
 } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
-import {
-	noteRankSql,
-	PIPELINE_NOTE_SQL,
-	pipelineNoteStateSql,
-} from "../db/note-state";
+import { PIPELINE_NOTE_SQL, pipelineNoteStateSql } from "../db/note-state";
+import { pendingNoteWinsSql } from "../machines/note-state";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
 function hasAnswerSql(personChoice: string, jevAnswer: string) {
@@ -78,8 +75,11 @@ const POSTED_GROUP = `(SELECT g.id FROM transactions g WHERE g.id IN (${POSTED},
 const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 	SELECT 1 FROM plaid_items WHERE id = ?4 AND sync_lock_id = ?5 AND disconnected_at IS NULL)`;
 
-/** Whether the pending row's note is further along than the posted row's (see noteRankSql and NOTE_RANK). */
-const PENDING_NOTE_WINS = `${noteRankSql("p.note_state")} > ${noteRankSql("transactions.note_state")}`;
+/** Whether the pending row's note is strictly later than the posted row's (laterNoteState in the note machine). */
+const PENDING_NOTE_WINS = pendingNoteWinsSql(
+	"p.note_state",
+	"transactions.note_state",
+);
 
 /** A person's choice, as the posted row `transactions` takes it from the pending row `p`. */
 const FROM_PENDING = `FROM transactions AS p WHERE p.id = ${PENDING} AND transactions.id = ${POSTED} AND ${READY}`;

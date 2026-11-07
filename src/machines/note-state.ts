@@ -106,3 +106,66 @@ export const noteStateMachine = setup({}).createMachine({
 		},
 	},
 });
+
+/** The ten states, as a type. The machine's own keys are the runtime list, and a test checks the two agree. */
+export type NoteState =
+	| "unasked"
+	| "unanswered"
+	| "no_call"
+	| "queued"
+	| "failed"
+	| "tried_empty"
+	| "emptied_by_person"
+	| "guessed"
+	| "written"
+	| "dismissed";
+
+/** The states, in the machine's order. */
+export const NOTE_STATES = Object.keys(
+	noteStateMachine.config.states ?? {},
+) as NoteState[];
+
+/**
+ * How far along a note is, for the pending-to-posted merge (decision 172): the later state wins, and a tie keeps the
+ * posted row's state. In plain words:
+ * - unasked (0): nothing has been asked yet, so any answer beats it.
+ * - unanswered (1): Jev was asked the detail question but gave no answer to the note question; a Jev answer beats it.
+ * - no_call (2) and queued (2): Jev's answer. They tie, so the posted row's own answer stays: the merge moves a note
+ *   only when the pending one is strictly later.
+ * - failed (3): Workers AI failed; a later try beats it.
+ * - tried_empty (4): Workers AI answered with no note; a guess beats it.
+ * - guessed (5): Workers AI wrote a note. It is a machine's act, so a person's act beats it.
+ * - emptied_by_person (6) and dismissed (6): a person emptied the note, or emptied a guess. A person's act beats any
+ *   machine's act, and a guess copied onto a dismissed row never wins.
+ * - written (7): a person's own note, or a guess a person kept. It is the newest and most personal act, so it wins.
+ */
+export const NOTE_RANK: Record<NoteState, number> = {
+	unasked: 0,
+	unanswered: 1,
+	no_call: 2,
+	queued: 2,
+	failed: 3,
+	tried_empty: 4,
+	guessed: 5,
+	emptied_by_person: 6,
+	dismissed: 6,
+	written: 7,
+};
+
+/** The later of two states. On a tie the first one (the posted row's) is kept. */
+export function laterNoteState(a: NoteState, b: NoteState): NoteState {
+	return NOTE_RANK[b] > NOTE_RANK[a] ? b : a;
+}
+
+/** The rank of a note state, as an SQL CASE over the expression (a column or a bound value). Built from NOTE_RANK. */
+export function noteRankSql(expression: string): string {
+	const whens = NOTE_STATES.map(
+		(state) => `WHEN '${state}' THEN ${NOTE_RANK[state]}`,
+	).join(" ");
+	return `(CASE ${expression} ${whens} END)`;
+}
+
+/** SQL: 1 when the pending note is strictly later than the posted one, else 0 (the merge keeps the posted row on a tie). */
+export function pendingNoteWinsSql(pending: string, posted: string): string {
+	return `${noteRankSql(pending)} > ${noteRankSql(posted)}`;
+}

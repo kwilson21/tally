@@ -1,30 +1,18 @@
 /**
- * The state of a transaction's "what it was" note (decision 172). The moves between states are an XState v6 machine
- * (src/machines/note-state.ts), asked through `next()`. The real writes are SQL compare-and-set guards in the writers
+ * The state of a transaction's "what it was" note (decision 172). The states, their moves and their ranks live in the
+ * XState v6 machine (src/machines/note-state.ts). The real writes are SQL compare-and-set guards in the writers
  * (transactions.ts, pending-merge.ts), and the tests walk every state and event against the machine.
  *
- * Plain words for each state are on the machine. Here, the list of states and events, the queue check, and the SQL
- * helpers the writers share.
+ * Here: the event names, the queue check, and the SQL helpers the writers share.
  */
 import { next } from "../machines/next";
-import { noteStateMachine } from "../machines/note-state";
+import {
+	NOTE_STATES,
+	type NoteState,
+	noteStateMachine,
+} from "../machines/note-state";
 
-/** The states, in the machine's order. The migration's CHECK lists the same ten. */
-export const NOTE_STATES = Object.keys(
-	noteStateMachine.config.states ?? {},
-) as NoteState[];
-
-export type NoteState =
-	| "unasked"
-	| "unanswered"
-	| "no_call"
-	| "queued"
-	| "failed"
-	| "tried_empty"
-	| "emptied_by_person"
-	| "guessed"
-	| "written"
-	| "dismissed";
+export { NOTE_STATES, type NoteState } from "../machines/note-state";
 
 /** What happens to a note: Jev's answer, Workers AI's answer, or a person's edit of the note. */
 export const NOTE_EVENTS = [
@@ -81,31 +69,9 @@ export function isQueuedNote(state: NoteState): boolean {
 	}
 }
 
-/** The later of two states, for the merge. A person's act is later than a machine's, and a later Jev answer than none. */
-export const NOTE_RANK: Record<NoteState, number> = {
-	unasked: 0,
-	unanswered: 1,
-	no_call: 2,
-	queued: 2,
-	failed: 3,
-	tried_empty: 4,
-	guessed: 5,
-	emptied_by_person: 6,
-	dismissed: 6,
-	written: 7,
-};
-
 /** The SQL list of states, for `note_state IN (...)`. */
 export function noteStateList(states: readonly NoteState[]): string {
 	return states.map((state) => `'${state}'`).join(", ");
-}
-
-/** The rank of a note state column, for comparing two rows in SQL. */
-export function noteRankSql(column: string): string {
-	const whens = NOTE_STATES.map(
-		(state) => `WHEN '${state}' THEN ${NOTE_RANK[state]}`,
-	).join(" ");
-	return `(CASE ${column} ${whens} END)`;
 }
 
 /**
