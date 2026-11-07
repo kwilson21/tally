@@ -71,8 +71,29 @@ describe("MachineDiagram", () => {
 					Number(rect[2]) + Number(rect[4]),
 					"box far corner",
 				);
+			// Box labels carry their own x and y; an arrow's words are lines (tspans) inside a text whose anchor says
+			// which way they run from x, so each line's far end is checked too, at about 6 px a letter.
 			for (const text of html.matchAll(/<text x="([-\d.]+)" y="([-\d.]+)"/g))
 				inside(Number(text[1]), Number(text[2]), "word");
+			const arrowWords = [
+				...html.matchAll(/<text text-anchor="(\w+)"[^>]*>(.*?)<\/text>/g),
+			];
+			expect(arrowWords.length, "every arrow has its words").toBeGreaterThan(0);
+			for (const words of arrowWords)
+				for (const line of (words[2] ?? "").matchAll(
+					/<tspan x="([-\d.]+)" y="([-\d.]+)">([^<]*)<\/tspan>/g,
+				)) {
+					const x = Number(line[1]);
+					const long = (line[3] ?? "").length * 6;
+					const [near, far] =
+						words[1] === "middle"
+							? [x - long / 2, x + long / 2]
+							: words[1] === "end"
+								? [x - long, x]
+								: [x, x + long];
+					inside(near, Number(line[2]), `arrow word "${line[3]}" near end`);
+					inside(far, Number(line[2]), `arrow word "${line[3]}" far end`);
+				}
 			for (const path of html.matchAll(/<path d="([^"]+)"/g)) {
 				// Every command here is M, L, C (pairs), H (an x) or V (a y); read its points in order.
 				let x = 0;
