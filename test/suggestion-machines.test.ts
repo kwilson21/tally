@@ -4,6 +4,7 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 	pendingSuggestions,
+	saveSuggestion,
 } from "../src/db/category-suggestions";
 import {
 	settleSuggestion,
@@ -13,6 +14,7 @@ import { resetDemo } from "../src/demo/reset";
 import {
 	CATEGORY_SUGGESTION_LABELS,
 	CATEGORY_SUGGESTION_STATUSES,
+	CATEGORY_SUGGESTION_UNSAVED,
 	categorySuggestionMachine,
 } from "../src/machines/category-suggestion";
 import { machineGraph } from "../src/machines/graph";
@@ -63,7 +65,7 @@ describe("the suggestion machines against the schema", () => {
 
 	it("every state has a short word for its diagram box, and no word is for a state that is gone", () => {
 		expect(Object.keys(CATEGORY_SUGGESTION_LABELS).sort()).toEqual(
-			[...CATEGORY_SUGGESTION_STATUSES].sort(),
+			[...CATEGORY_SUGGESTION_STATUSES, CATEGORY_SUGGESTION_UNSAVED].sort(),
 		);
 		expect(Object.keys(MERCHANT_SUGGESTION_LABELS).sort()).toEqual(
 			[...MERCHANT_SUGGESTION_STATUSES].sort(),
@@ -74,18 +76,31 @@ describe("the suggestion machines against the schema", () => {
 describe("every state met with every event", () => {
 	it("category suggestion: only a waiting suggestion moves, and finished ones refuse everything", () => {
 		const moves: Record<string, Record<string, string | null>> = {
+			born: { NAME: "pending", NAMELESS: "none" },
 			pending: { ACCEPT: "created", DISMISS: "dismissed", EMPTY: "none" },
 			created: { ACCEPT: null, DISMISS: null, EMPTY: null },
 			dismissed: { ACCEPT: null, DISMISS: null, EMPTY: null },
 			none: { ACCEPT: null, DISMISS: null, EMPTY: null },
 		};
+		// A stored suggestion is never born again, and an unsaved one cannot be decided.
+		for (const state of CATEGORY_SUGGESTION_STATUSES)
+			for (const event of ["NAME", "NAMELESS"])
+				expect(
+					next(categorySuggestionMachine, state, event),
+					`${state} ${event}`,
+				).toBeNull();
+		for (const event of ["ACCEPT", "DISMISS", "EMPTY"])
+			expect(
+				next(categorySuggestionMachine, "born", event),
+				`born ${event}`,
+			).toBeNull();
 		for (const [state, events] of Object.entries(moves))
 			for (const [event, target] of Object.entries(events))
 				expect(
 					next(categorySuggestionMachine, state, event),
 					`${state} ${event}`,
 				).toBe(target);
-		expect(machineGraph(categorySuggestionMachine).edges).toHaveLength(3);
+		expect(machineGraph(categorySuggestionMachine).edges).toHaveLength(5);
 	});
 
 	it("merchant suggestion: a name is offered, then decided or withdrawn; decided ones refuse everything", () => {
@@ -155,6 +170,31 @@ describe("the category suggestion store follows its machine", () => {
 				next(categorySuggestionMachine, state, "EMPTY") ?? state,
 			);
 		}
+	});
+
+	it("a new group is stored as waiting when it has a usable name and as nothing when it has none, as the machine says", async () => {
+		const eligible = async () => {
+			const ids: number[] = [];
+			for (let i = 0; i < 3; i++) {
+				const row = await db
+					.prepare(
+						`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category,
+							category_confidence, jev_none_fit, excluded, flag_income, is_split, pending)
+						 VALUES (1, '2026-09-20', 1500, 'NETFLIX.COM', 'ENTERTAINMENT', 0.93, 1, 0, 0, 0, 0) RETURNING id`,
+					)
+					.first<{ id: number }>();
+				ids.push(row?.id as number);
+			}
+			return ids;
+		};
+		const named = await saveSuggestion(db, "Streaming", await eligible());
+		const nameless = await saveSuggestion(db, null, await eligible());
+		expect(await statusOf(named as number)).toBe(
+			next(categorySuggestionMachine, CATEGORY_SUGGESTION_UNSAVED, "NAME"),
+		);
+		expect(await statusOf(nameless as number)).toBe(
+			next(categorySuggestionMachine, CATEGORY_SUGGESTION_UNSAVED, "NAMELESS"),
+		);
 	});
 
 	it("accepting a suggestion that is no longer waiting is refused where the machine refuses it", async () => {

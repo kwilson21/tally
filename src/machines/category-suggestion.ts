@@ -7,8 +7,12 @@ import { setup } from "xstate";
  *   waiting  --dismiss--> dismissed  a person said no; the name is never suggested again
  *   waiting  --empty-->   nothing    no purchase backs it any more, so it quietly goes away
  *
- * Made, dismissed and nothing are final. A suggestion is born `pending` when Jev gave a name and at least three
- * purchases share it, and `none` when the group has no usable name (it only holds those purchases together).
+ * Made, dismissed and nothing are final. A group of purchases Jev found no category for starts as `born`, which is
+ * never stored: three or more purchases and a usable name make a `pending` row, and three or more with no usable
+ * name make a `none` row that only holds the group together, so it is not asked about again.
+ *
+ *   born     --name-->    waiting   a usable name came back
+ *   born     --nameless-> nothing   no usable name came back
  *
  * The real writes are the compare-and-set statements in src/db/category-suggestions.ts (`WHERE status = 'pending'`);
  * this machine is the one place the rule is stated, and test/suggestion-machines.test.ts runs every store function
@@ -17,8 +21,22 @@ import { setup } from "xstate";
  */
 export const categorySuggestionMachine = setup({}).createMachine({
 	id: "category-suggestion",
-	initial: "pending",
+	initial: "born",
 	states: {
+		born: {
+			description: "A group of purchases Jev found no category for",
+			on: {
+				NAME: {
+					target: "pending",
+					description: "A usable name came back for the group",
+				},
+				NAMELESS: {
+					target: "none",
+					description:
+						"No usable name came back, so the group is kept only so it is not asked about again",
+				},
+			},
+		},
 		pending: {
 			description: "Waiting for a person to decide",
 			on: {
@@ -52,13 +70,17 @@ export const categorySuggestionMachine = setup({}).createMachine({
 	},
 });
 
-/** The values the database's CHECK on `category_suggestions.status` allows, from the machine itself. */
+/** The state a suggestion has before any row exists. It is never stored, so the database's CHECK does not list it. */
+export const CATEGORY_SUGGESTION_UNSAVED = "born";
+
+/** The values the database's CHECK on `category_suggestions.status` allows: every state but the unsaved one. */
 export const CATEGORY_SUGGESTION_STATUSES = Object.keys(
 	categorySuggestionMachine.config.states ?? {},
-);
+).filter((state) => state !== CATEGORY_SUGGESTION_UNSAVED);
 
 /** The short word each state wears in a diagram box. Typed by state, so a new state fails to compile until it has one. */
 export const CATEGORY_SUGGESTION_LABELS: Record<string, string> = {
+	born: "Found",
 	pending: "Waiting",
 	created: "Made",
 	dismissed: "Dismissed",

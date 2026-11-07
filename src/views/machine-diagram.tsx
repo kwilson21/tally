@@ -6,7 +6,7 @@ import type { AnyStateMachine } from "xstate";
 import { type Edge, machineGraph } from "../machines/graph";
 
 const W = 360;
-const BW = 76;
+const BW = 72;
 const BH = 40;
 const PITCH = 72;
 const LEFT = 24;
@@ -203,8 +203,8 @@ function arrow(
 		return {
 			path: `M${from.x} ${from.y} L${to.x} ${to.y}`,
 			label: {
-				x: from.x + (to.x - from.x) * 0.55,
-				y: from.y + (to.y - from.y) * 0.55 - 6,
+				x: from.x + (to.x - from.x) * 0.5,
+				y: from.y + (to.y - from.y) * 0.5 + (to.y > from.y ? 12 : -6),
 			},
 			event,
 		};
