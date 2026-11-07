@@ -17,11 +17,7 @@ import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
-import {
-	markNeedsAttention,
-	markSyncSucceeded,
-	readConnection,
-} from "./item-store";
+import { markNeedsAttention, markSyncSucceeded, readSeen } from "./item-store";
 import { loginStillBroken } from "./login-broken";
 import { mergePendingIntoPosted } from "./pending-merge";
 import { decryptToken } from "./token-crypto";
@@ -418,7 +414,7 @@ async function handlePlaidError(
 			!transient.has(error.error_code ?? "")
 		) {
 			// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
-			const seen = await readConnection(env.DB, itemRowId);
+			const seen = await readSeen(env.DB, itemRowId);
 			if (
 				seen !== null &&
 				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))

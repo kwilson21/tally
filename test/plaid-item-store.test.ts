@@ -47,7 +47,7 @@ async function addBank(
 
 async function rowOf(id: number) {
 	return env.DB.prepare(
-		"SELECT status, disconnected_at, reconnect_emailed_at, attention_login, attention_held, sync_lock_id, sync_locked_until, length(access_token_encrypted) AS token_length FROM plaid_items WHERE id = ?",
+		"SELECT status, disconnected_at, reconnect_emailed_at, attention_login, attention_held, sync_lock_id, sync_locked_until, length(access_token_encrypted) AS token_length, connection_revision FROM plaid_items WHERE id = ?",
 	)
 		.bind(id)
 		.first<{
@@ -59,6 +59,7 @@ async function rowOf(id: number) {
 			sync_lock_id: string | null;
 			sync_locked_until: string | null;
 			token_length: number;
+			connection_revision: number;
 		}>();
 }
 
@@ -68,16 +69,16 @@ beforeEach(async () => {
 
 describe("connectionOf (the state a row is in)", () => {
 	// A row's state comes from its status, its disconnected_at and its two flags. An inconsistent row (status ok with a
-	// flag, or needs_attention with no login flag) reads as expiring, so only a relink clears it (decision 173).
+	// flag, or needs_attention with no login flag) reads as needs_relink, so only a relink clears it (decision 173).
 	it.each([
 		["ok", 0, 0, null, "ok"],
-		["ok", 1, 0, null, "expiring"],
-		["ok", 0, 1, null, "expiring"],
-		["ok", 1, 1, null, "expiring"],
+		["ok", 1, 0, null, "needs_relink"],
+		["ok", 0, 1, null, "needs_relink"],
+		["ok", 1, 1, null, "needs_relink"],
 		["needs_attention", 1, 0, null, "login_broken"],
-		["needs_attention", 0, 1, null, "expiring"],
-		["needs_attention", 1, 1, null, "login_broken_and_expiring"],
-		["needs_attention", 0, 0, null, "expiring"],
+		["needs_attention", 0, 1, null, "needs_relink"],
+		["needs_attention", 1, 1, null, "login_broken_and_needs_relink"],
+		["needs_attention", 0, 0, null, "needs_relink"],
 		["ok", 0, 0, REMINDED, "disconnected"],
 		["needs_attention", 1, 1, REMINDED, "disconnected"],
 	] as const)(
@@ -126,9 +127,11 @@ describe("markNeedsAttention", () => {
 
 	it("writes nothing when the caller's seen state is stale (the row moved on)", async () => {
 		const id = await addBank("needs_attention", { reminded: REMINDED });
-		expect(await markNeedsAttention(env.DB, id, "login", { seen: "ok" })).toBe(
-			"lost-race",
-		);
+		expect(
+			await markNeedsAttention(env.DB, id, "login", {
+				seen: { state: "ok", revision: 0 },
+			}),
+		).toBe("lost-race");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
 			reconnect_emailed_at: REMINDED,
@@ -139,7 +142,9 @@ describe("markNeedsAttention", () => {
 		// The caller read login_broken, but a sync has since made the bank ok.
 		const id = await addBank("ok");
 		expect(
-			await markNeedsAttention(env.DB, id, "login", { seen: "login_broken" }),
+			await markNeedsAttention(env.DB, id, "login", {
+				seen: { state: "login_broken", revision: 0 },
+			}),
 		).toBe("lost-race");
 		expect((await rowOf(id))?.status).toBe("ok");
 	});
@@ -157,9 +162,11 @@ describe("markNeedsAttention", () => {
 
 	it("uses the seen state the caller passed", async () => {
 		const id = await addBank("ok");
-		expect(await markNeedsAttention(env.DB, id, "login", { seen: "ok" })).toBe(
-			"changed",
-		);
+		expect(
+			await markNeedsAttention(env.DB, id, "login", {
+				seen: { state: "ok", revision: 0 },
+			}),
+		).toBe("changed");
 	});
 });
 
@@ -206,7 +213,9 @@ describe("clearAttention", () => {
 
 	it("retries a relink that races a webhook's flag, so the relink still lands", async () => {
 		const id = await addBank("ok");
-		const db = raceBeforeConfirm(
+		// A relink on an ok bank is a completion: it writes the revision, and that write is where the race lands.
+		const db = raceBefore(
+			"UPDATE plaid_items SET connection_revision = connection_revision + 1",
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
 			id,
 		);
@@ -273,7 +282,7 @@ describe("readConnection", () => {
 	it("reads each state, and null for no bank", async () => {
 		const ok = await addBank("ok");
 		const login = await addBank("needs_attention");
-		const expiring = await addBank("needs_attention", {
+		const held = await addBank("needs_attention", {
 			login: false,
 			held: true,
 		});
@@ -285,7 +294,7 @@ describe("readConnection", () => {
 			.run();
 		expect(await readConnection(env.DB, ok)).toBe("ok");
 		expect(await readConnection(env.DB, login)).toBe("login_broken");
-		expect(await readConnection(env.DB, expiring)).toBe("expiring");
+		expect(await readConnection(env.DB, held)).toBe("needs_relink");
 		expect(await readConnection(env.DB, gone)).toBe("disconnected");
 		expect(await readConnection(env.DB, 999_999)).toBeNull();
 	});
@@ -375,22 +384,17 @@ function raceBefore(
 	});
 }
 
-/** The race in the store's confirming read (the no-write path): the bank changes after it was read. */
-function raceBeforeConfirm(before: string, id: number): D1Database {
-	return raceBefore("SELECT 1 AS holds", before, id);
-}
-
-const WRITE_LOGIN_AND_EXPIRING =
+const WRITE_LOGIN_AND_NEEDS_RELINK =
 	"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 1";
 const WRITE_OK =
 	"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?";
 
 describe("a lost race is retried against the latest state (decision 173)", () => {
-	it("an expiry warning racing a successful sync ends in expiring, not lost", async () => {
-		// The bank reads login_broken. A sync makes it ok before the write; the retry then sees ok and writes expiring.
+	it("an expiry warning racing a successful sync ends in needs_relink, not lost", async () => {
+		// The bank reads login_broken. A sync makes it ok before the write; the retry then sees ok and writes needs_relink.
 		const id = await addBank("needs_attention", { lockId: undefined });
-		const db = raceBefore(WRITE_LOGIN_AND_EXPIRING, WRITE_OK, id);
-		expect(await markNeedsAttention(db, id, "expiring")).toBe("changed");
+		const db = raceBefore(WRITE_LOGIN_AND_NEEDS_RELINK, WRITE_OK, id);
+		expect(await markNeedsAttention(db, id, "relink")).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
 			attention_login: 0,
@@ -399,7 +403,7 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	});
 
 	it("a login error racing a relink ends flagged for the login problem alone", async () => {
-		// The bank reads expiring. A relink makes it ok before the write; the retry sees ok and writes a login error.
+		// The bank reads needs_relink. A relink makes it ok before the write; the retry sees ok and writes a login error.
 		const id = await addBank("needs_attention", { login: false, held: true });
 		const db = raceBefore(
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 1",
@@ -424,7 +428,7 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 			id,
 			{ times: 3, fired },
 		);
-		expect(await markNeedsAttention(db, id, "expiring")).toBe("lost-race");
+		expect(await markNeedsAttention(db, id, "relink")).toBe("lost-race");
 		expect(fired.count).toBe(3);
 	});
 
@@ -437,9 +441,11 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 			id,
 			{ times: 3, fired },
 		);
-		expect(await markNeedsAttention(db, id, "expiring", { seen: "ok" })).toBe(
-			"lost-race",
-		);
+		expect(
+			await markNeedsAttention(db, id, "relink", {
+				seen: { state: "ok", revision: 0 },
+			}),
+		).toBe("lost-race");
 		expect(fired.count).toBe(1);
 	});
 
@@ -458,11 +464,82 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	});
 });
 
+describe("the connection revision (decision 173)", () => {
+	it("a good sync on an ok bank moves the revision, though the state does not change", async () => {
+		const id = await addBank("ok", { lockId: LOCK });
+		expect((await rowOf(id))?.connection_revision).toBe(0);
+		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
+		expect((await rowOf(id))?.connection_revision).toBe(1);
+	});
+
+	it("a relink on an ok bank moves the revision, though the state does not change", async () => {
+		const id = await addBank("ok");
+		expect(await clearAttention(env.DB, id)).toBe("unchanged");
+		expect((await rowOf(id))?.connection_revision).toBe(1);
+	});
+
+	it("a good sync on a bank that needs a relink keeps its flags and reminder, and moves the revision", async () => {
+		const id = await addBank("needs_attention", {
+			login: false,
+			held: true,
+			reminded: REMINDED,
+			lockId: LOCK,
+		});
+		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
+		expect(await rowOf(id)).toMatchObject({
+			status: "needs_attention",
+			attention_held: 1,
+			reconnect_emailed_at: REMINDED,
+			connection_revision: 1,
+		});
+	});
+
+	it("a seen state from before a no-op sync is stale, so the caller's write is dropped", async () => {
+		const id = await addBank("ok", { lockId: LOCK });
+		await markSyncSucceeded(env.DB, id, LOCK);
+		expect(
+			await markNeedsAttention(env.DB, id, "login", {
+				seen: { state: "ok", revision: 0 },
+			}),
+		).toBe("lost-race");
+		expect((await rowOf(id))?.status).toBe("ok");
+	});
+});
+
+describe("USER_PERMISSION_REVOKED is a relink, not a login problem (decision 173)", () => {
+	it("a revoked permission survives a good sync, flagged, with its reminder", async () => {
+		const id = await addBank("needs_attention", {
+			login: false,
+			held: true,
+			reminded: REMINDED,
+			lockId: LOCK,
+		});
+		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
+		expect(await rowOf(id)).toMatchObject({
+			status: "needs_attention",
+			attention_login: 0,
+			attention_held: 1,
+			reconnect_emailed_at: REMINDED,
+		});
+	});
+
+	it("a relink clears a revoked permission", async () => {
+		const id = await addBank("ok");
+		expect(await markNeedsAttention(env.DB, id, "relink")).toBe("changed");
+		expect(await clearAttention(env.DB, id)).toBe("changed");
+		expect(await rowOf(id)).toMatchObject({
+			status: "ok",
+			attention_login: 0,
+			attention_held: 0,
+		});
+	});
+});
+
 describe("the two attention flags (decision 173)", () => {
 	it("a login problem, then an expiry warning, then a good sync leaves the bank flagged for the expiry", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
 		await markNeedsAttention(env.DB, id, "login");
-		await markNeedsAttention(env.DB, id, "expiring");
+		await markNeedsAttention(env.DB, id, "relink");
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
@@ -473,7 +550,7 @@ describe("the two attention flags (decision 173)", () => {
 
 	it("an expiry warning, then a login problem, then a good sync leaves the bank flagged for the expiry", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
-		await markNeedsAttention(env.DB, id, "expiring");
+		await markNeedsAttention(env.DB, id, "relink");
 		await markNeedsAttention(env.DB, id, "login");
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
@@ -497,7 +574,7 @@ describe("the two attention flags (decision 173)", () => {
 	it("a relink clears both flags", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
 		await markNeedsAttention(env.DB, id, "login");
-		await markNeedsAttention(env.DB, id, "expiring");
+		await markNeedsAttention(env.DB, id, "relink");
 		expect(await clearAttention(env.DB, id)).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "ok",
@@ -523,7 +600,7 @@ describe("the two attention flags (decision 173)", () => {
 
 	it("an expiry warning on an ok bank flags it with the held flag only", async () => {
 		const id = await addBank("ok");
-		expect(await markNeedsAttention(env.DB, id, "expiring")).toBe("changed");
+		expect(await markNeedsAttention(env.DB, id, "relink")).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
 			attention_login: 0,
@@ -533,7 +610,7 @@ describe("the two attention flags (decision 173)", () => {
 
 	it("an expiry warning does not clear a login problem already set", async () => {
 		const id = await addBank("needs_attention", { reminded: REMINDED });
-		expect(await markNeedsAttention(env.DB, id, "expiring")).toBe("changed");
+		expect(await markNeedsAttention(env.DB, id, "relink")).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			attention_login: 1,
 			attention_held: 1,

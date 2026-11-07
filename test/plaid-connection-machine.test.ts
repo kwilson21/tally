@@ -6,13 +6,13 @@ import { plaidConnectionMachine } from "../src/machines/plaid-connection";
 const STATES = [
 	"ok",
 	"login_broken",
-	"expiring",
-	"login_broken_and_expiring",
+	"needs_relink",
+	"login_broken_and_needs_relink",
 	"disconnected",
 ] as const;
 const EVENTS = [
 	"LOGIN_BROKEN",
-	"EXPIRY_WARNING",
+	"RELINK_NEEDED",
 	"SYNC_SUCCEEDED",
 	"RELINKED",
 	"DISCONNECT",
@@ -21,31 +21,31 @@ const EVENTS = [
 const LEGAL: Partial<Record<string, Partial<Record<string, string>>>> = {
 	ok: {
 		LOGIN_BROKEN: "login_broken",
-		EXPIRY_WARNING: "expiring",
+		RELINK_NEEDED: "needs_relink",
 		SYNC_SUCCEEDED: "ok",
 		RELINKED: "ok",
 		DISCONNECT: "disconnected",
 	},
 	login_broken: {
 		LOGIN_BROKEN: "login_broken",
-		EXPIRY_WARNING: "login_broken_and_expiring",
+		RELINK_NEEDED: "login_broken_and_needs_relink",
 		// A good sync clears a login problem, and nothing else.
 		SYNC_SUCCEEDED: "ok",
 		RELINKED: "ok",
 		DISCONNECT: "disconnected",
 	},
-	expiring: {
-		LOGIN_BROKEN: "login_broken_and_expiring",
-		EXPIRY_WARNING: "expiring",
-		// A good sync does not clear an expiry warning: only a relink does.
-		SYNC_SUCCEEDED: "expiring",
+	needs_relink: {
+		LOGIN_BROKEN: "login_broken_and_needs_relink",
+		RELINK_NEEDED: "needs_relink",
+		// A good sync does not clear a relink-needed flag: only a relink does.
+		SYNC_SUCCEEDED: "needs_relink",
 		RELINKED: "ok",
 		DISCONNECT: "disconnected",
 	},
-	login_broken_and_expiring: {
-		LOGIN_BROKEN: "login_broken_and_expiring",
-		EXPIRY_WARNING: "login_broken_and_expiring",
-		SYNC_SUCCEEDED: "expiring",
+	login_broken_and_needs_relink: {
+		LOGIN_BROKEN: "login_broken_and_needs_relink",
+		RELINK_NEEDED: "login_broken_and_needs_relink",
+		SYNC_SUCCEEDED: "needs_relink",
 		RELINKED: "ok",
 		DISCONNECT: "disconnected",
 	},

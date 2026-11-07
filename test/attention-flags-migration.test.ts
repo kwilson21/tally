@@ -22,7 +22,7 @@ it("migration 0069 backfills every existing flagged bank as held and leaves ok b
 			)`,
 		),
 		db.prepare(
-			"INSERT INTO pre0069_plaid_items (id, institution_name, status) VALUES (1, 'Fine Bank', 'ok'), (2, 'Expiring Bank', 'needs_attention'), (3, 'Broken Bank', 'needs_attention')",
+			"INSERT INTO pre0069_plaid_items (id, institution_name, status) VALUES (1, 'Fine Bank', 'ok'), (2, 'Relink Bank', 'needs_attention'), (3, 'Broken Bank', 'needs_attention')",
 		),
 	]);
 

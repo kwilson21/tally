@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { app } from "../src/index";
+import { clearAttention, markSyncSucceeded } from "../src/plaid/item-store";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { recordSorting } from "./record-sorting";
 
@@ -251,7 +252,7 @@ describe("Plaid webhook route", () => {
 		}
 	});
 
-	it("records an expiry warning as the expiring reason, so a sync keeps the flag (decision 173)", async () => {
+	it("records a relink warning as needs_relink, so a sync keeps the flag (decision 173)", async () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person')",
 		)
@@ -498,7 +499,7 @@ describe("Plaid webhook route", () => {
 		).toEqual({ status: "ok" });
 	});
 
-	it("an expiry warning racing a good sync still ends expiring, not lost (decision 173)", async () => {
+	it("an expiry warning racing a good sync still ends needs_relink, not lost (decision 173)", async () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, status, attention_login) VALUES ('item-1', ?, 'Bank', 'person', 'needs_attention', 1)",
 		)
@@ -699,6 +700,121 @@ describe("Plaid webhook route", () => {
 			await env.DB.prepare("SELECT status FROM plaid_items").first(),
 		).toEqual({ status: "ok" });
 		errors.mockRestore();
+	});
+
+	it.each([
+		["a good sync", "sync"],
+		["a relink", "relink"],
+	] as const)(
+		"an ITEM error that read ok is dropped when %s lands during its confirmation, though the state stays ok (decision 173)",
+		async (_name, landing) => {
+			const row = await env.DB.prepare(
+				"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, status, sync_lock_id) VALUES ('item-1', ?, 'Bank', 'person', 'ok', 'lease-x') RETURNING id",
+			)
+				.bind(await encryptToken("access-token", KEY))
+				.first<{ id: number }>();
+			const sign = await signer();
+			const body = JSON.stringify({
+				item_id: "item-1",
+				webhook_type: "ITEM",
+				webhook_code: "ERROR",
+				error: { error_code: "ITEM_LOGIN_REQUIRED" },
+			});
+			const { token, jwk } = await sign(body);
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async (input: RequestInfo | URL) => {
+					if (String(input).endsWith("/webhook_verification_key/get")) {
+						return Response.json({ key: { ...jwk, expired_at: null } });
+					}
+					// The good sync (or relink) completes while Plaid's error is being confirmed; the state stays ok.
+					if (landing === "sync") {
+						await markSyncSucceeded(env.DB, row?.id as number, "lease-x");
+					} else {
+						await clearAttention(env.DB, row?.id as number);
+					}
+					return Response.json({
+						item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
+					});
+				}),
+			);
+			const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+			const promises: Promise<unknown>[] = [];
+			const ctx = {
+				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+				passThroughOnException() {},
+				props: {},
+			} as unknown as ExecutionContext;
+			expect(
+				(
+					await app.request(
+						"http://tally.test/webhooks/plaid",
+						{
+							method: "POST",
+							body,
+							headers: {
+								"content-type": "application/json",
+								"Plaid-Verification": token,
+							},
+						},
+						env,
+						ctx,
+					)
+				).status,
+			).toBe(200);
+			await Promise.all(promises);
+			expect(
+				await env.DB.prepare("SELECT status FROM plaid_items").first(),
+			).toEqual({ status: "ok" });
+			expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+				expect.stringMatching(/lost a race for item \d+$/),
+			]);
+			errors.mockRestore();
+		},
+	);
+
+	it("a USER_PERMISSION_REVOKED warning flags the bank for a relink, not a login problem (decision 173)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person')",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.run();
+		const sign = await signer();
+		const body = JSON.stringify({
+			item_id: "item-1",
+			webhook_type: "ITEM",
+			webhook_code: "USER_PERMISSION_REVOKED",
+		});
+		const { token, jwk } = await sign(body);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
+		);
+		expect(
+			(
+				await app.request(
+					"http://tally.test/webhooks/plaid",
+					{
+						method: "POST",
+						body,
+						headers: {
+							"content-type": "application/json",
+							"Plaid-Verification": token,
+						},
+					},
+					env,
+				)
+			).status,
+		).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT status, attention_login, attention_held FROM plaid_items",
+			).first(),
+		).toEqual({
+			status: "needs_attention",
+			attention_login: 0,
+			attention_held: 1,
+		});
 	});
 
 	it("syncs the matching Item in waitUntil without logging secrets", async () => {

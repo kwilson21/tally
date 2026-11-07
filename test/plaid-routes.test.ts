@@ -237,7 +237,7 @@ describe("Plaid routes", () => {
 
 	describe("relink when the bank moves between the route's read and its write", () => {
 		const RELINK_WRITE =
-			/^UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = \? AND disconnected_at IS NULL AND status = \? AND attention_login = \? AND attention_held = \?/;
+			/^UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL, connection_revision = connection_revision \+ 1 WHERE id = \? AND disconnected_at IS NULL AND status = \? AND attention_login = \? AND attention_held = \? AND connection_revision = \?/;
 
 		/**
 		 * The database the route sees, where the guarded relink write loses a race: `before` runs just ahead of it,

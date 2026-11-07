@@ -17,13 +17,24 @@ type Webhook = {
 	historical_update_complete?: unknown;
 };
 
-const attentionCodes = new Set([
+// What each webhook this file handles needs, checked against plaid.com/docs/api/items (decision 173):
+//
+//   Webhook                                     Needs                                    Flag
+//   ITEM ERROR (not a transient code)           a login problem (update mode fixes it)  login: a good sync clears it
+//   PENDING_EXPIRATION                          update mode (UK and EU)                  relink: only a relink clears it
+//   PENDING_DISCONNECT                          update mode (US and CA)                  relink: only a relink clears it
+//   USER_PERMISSION_REVOKED                     update mode, or a fresh relink           relink: only a relink clears it
+//   TRANSACTIONS SYNC_UPDATES_AVAILABLE         a sync                                   none: it syncs the bank
+//   everything else (LOGIN_REPAIRED,            nothing for Tally to flag                none: ignored, as before
+//   NEW_ACCOUNTS_AVAILABLE, WEBHOOK_UPDATE_     (USER_ACCOUNT_REVOKED is not handled
+//   ACKNOWLEDGED, USER_ACCOUNT_REVOKED, ...)     here, as before)
+//
+// Only the relink codes below set the held flag, so a good sync never clears them.
+const relinkCodes = new Set([
 	"PENDING_EXPIRATION",
 	"PENDING_DISCONNECT",
 	"USER_PERMISSION_REVOKED",
 ]);
-// Warnings that the login is about to expire: the bank still syncs until then (decision 173).
-const expiringCodes = new Set(["PENDING_EXPIRATION", "PENDING_DISCONNECT"]);
 const transientErrors = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
 export const webhooks = new Hono<App>();
@@ -50,7 +61,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const body = parsed as Webhook;
 	if (typeof body.item_id !== "string") return c.body(null, 200);
 	const item = await c.env.DB.prepare(
-		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held FROM plaid_items WHERE plaid_item_id = ?",
+		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held, connection_revision FROM plaid_items WHERE plaid_item_id = ?",
 	)
 		.bind(body.item_id)
 		.first<{
@@ -60,6 +71,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 			disconnected_at: string | null;
 			attention_login: number;
 			attention_held: number;
+			connection_revision: number;
 		}>();
 	if (!item) return c.body(null, 200);
 	if (item.disconnected_at !== null) return c.body(null, 200);
@@ -87,23 +99,16 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		body.webhook_type === "ITEM" &&
 		body.webhook_code === "ERROR" &&
 		!(typeof itemError === "string" && transientErrors.has(itemError));
-	const isAttentionWarning =
+	const isRelinkWarning =
 		body.webhook_type === "ITEM" &&
 		typeof body.webhook_code === "string" &&
-		attentionCodes.has(body.webhook_code);
-	if (isAttentionWarning) {
+		relinkCodes.has(body.webhook_code);
+	if (isRelinkWarning) {
 		// No `seen` is passed here, so the store reads the bank now, and a race with a sync or a relink is tried again
-		// against the latest state. An expiry warning is never made stale by a repair or a sync, so it must not be
-		// dropped (decision 173). Only a race it loses three times comes back here as lost-race: the warning did not land, so
-		// the answer is 503, and Plaid sends the webhook again.
-		const expiring =
-			typeof body.webhook_code === "string" &&
-			expiringCodes.has(body.webhook_code);
-		const result = await markNeedsAttention(
-			c.env.DB,
-			item.id,
-			expiring ? "expiring" : "login",
-		);
+		// against the latest state. A relink warning is never made stale by a repair or a sync, so it must not be
+		// dropped (decision 173). Only a race it loses three times comes back here as lost-race: the warning did not
+		// land, so the answer is 503, and Plaid sends the webhook again.
+		const result = await markNeedsAttention(c.env.DB, item.id, "relink");
 		if (result === "lost-race") {
 			console.error(
 				`plaid webhook ${String(body.webhook_code)} lost a race for item ${item.id}`,
@@ -115,12 +120,14 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		c.executionCtx.waitUntil(
 			(async () => {
 				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
-					// The state this request started from is passed as `seen`, and not retried. A login error that was
-					// reported before a repair is stale once the repair has landed, so a repair (or a good sync) that
-					// lands while Plaid is asked again wins: the write is dropped and logged as lost-race. This runs
-					// after the 200 is sent, so Plaid is not asked to send it again.
+					// The state and revision this request started from are passed as `seen`, and not retried. A login
+					// error that was reported before a repair or a good sync is stale once that has landed, so it is
+					// dropped and logged as lost-race. This runs after the 200 is sent, so Plaid is not asked to send it again.
 					const result = await markNeedsAttention(c.env.DB, item.id, "login", {
-						seen: connectionOf(item),
+						seen: {
+							state: connectionOf(item),
+							revision: item.connection_revision,
+						},
 					});
 					if (result === "lost-race") {
 						console.error(
