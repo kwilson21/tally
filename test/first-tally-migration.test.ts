@@ -61,16 +61,18 @@ describe("migration 0057 first_tally setup", () => {
 			.bind(category)
 			.run();
 		await db.prepare(SETUP).run();
-		// 0057 is history: it still writes the count stroke, which migration 0061 takes out.
+		// 0057 is history: it still writes the count stroke, which migration 0061 takes out. Reading leaves
+		// out any stroke the record no longer has, so the stored text is checked for it and the read is not.
+		const raw = await db
+			.prepare("SELECT value FROM household_settings WHERE key = 'first_tally'")
+			.first<{ value: string }>();
+		expect(JSON.parse(raw?.value ?? "{}").strokes).toHaveProperty(
+			"count",
+			null,
+		);
 		const record = await readFirstTally(db);
 		expect(record).toEqual({
-			strokes: {
-				bank: null,
-				pay: null,
-				bills: null,
-				budgets: null,
-				count: null,
-			},
+			strokes: { bank: null, pay: null, bills: null, budgets: null },
 			budgets: {},
 		});
 		expect(isSetUp(record)).toBe(true);
@@ -207,7 +209,12 @@ describe("migration 0061 first_tally four strokes", () => {
 		const record = {
 			strokes: { bank: "2026-10-01", pay: "2026-10-02" },
 			budgets: { "3": { kind: "skipped", cents: null } },
-			pay: { "ACME CORP": { yes: { "7": { amount: 245000 } }, at: 0 } },
+			pay: {
+				"ACME CORP": {
+					yes: { "7": { date: "2026-10-01", cents: 245000 } },
+					at: 0,
+				},
+			},
 			reAsk: { bank: "Wells Fargo" },
 		};
 		await writeRecord(record);

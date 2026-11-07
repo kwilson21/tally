@@ -107,6 +107,9 @@ export type FirstTally = {
 	savings?: number | "skipped";
 };
 
+/** One kept try of the ready email, as the record types it (an older entry has only its read line; see parseFirstTally). */
+export type HeldReadyEmail = NonNullable<FirstTally["heldReadyEmail"]>[string];
+
 const KEY = "first_tally";
 
 /** The record as it is stored, or null before the first week has anything written. */
@@ -117,7 +120,111 @@ export async function readFirstTally(
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(KEY)
 		.first<{ value: string }>();
-	return row ? (JSON.parse(row.value) as FirstTally) : null;
+	return row ? parseFirstTally(row.value) : null;
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+const isCents = (value: unknown): value is number => Number.isInteger(value);
+const isText = (value: unknown): value is string => typeof value === "string";
+const textList = (value: unknown): string[] | undefined =>
+	Array.isArray(value) ? value.filter(isText) : undefined;
+
+/** Keeps the entries of an object that `keep` accepts, each as `keep` returns it; the rest are left out. */
+function pickEntries<T>(
+	value: unknown,
+	keep: (entry: unknown) => T | undefined,
+): Record<string, T> {
+	const kept: Record<string, T> = {};
+	if (!isObject(value)) return kept;
+	for (const [key, entry] of Object.entries(value)) {
+		const result = keep(entry);
+		if (result !== undefined) kept[key] = result;
+	}
+	return kept;
+}
+
+function budgetAnswer(entry: unknown): BudgetAnswer | undefined {
+	if (!isObject(entry)) return undefined;
+	if (entry.kind === "skipped")
+		return entry.cents === null ? { kind: "skipped", cents: null } : undefined;
+	if (
+		(entry.kind === "suggested" || entry.kind === "another") &&
+		isCents(entry.cents)
+	)
+		return { kind: entry.kind, cents: entry.cents };
+	return undefined;
+}
+
+function payDeposits(value: unknown): PayDeposits | undefined {
+	if (!isObject(value)) return undefined;
+	return pickEntries(value, (deposit) =>
+		isObject(deposit) && isText(deposit.date) && isCents(deposit.cents)
+			? { date: deposit.date, cents: deposit.cents }
+			: undefined,
+	);
+}
+
+function payRecord(entry: unknown): PayRecord | undefined {
+	if (!isObject(entry) || !isCents(entry.at)) return undefined;
+	const record: PayRecord = { at: entry.at };
+	const yes = payDeposits(entry.yes);
+	const no = payDeposits(entry.no);
+	if (yes) record.yes = yes;
+	if (no) record.no = no;
+	return record;
+}
+
+/**
+ * The first week's record from its stored text: the one place it is read from JSON. A good record comes back as it
+ * was. A part of the wrong shape is left out and the rest is kept, so one damaged answer never sends a household back
+ * through setup. Text that is not a JSON object at all throws: an empty record would read as "not set up yet", which
+ * is not what happened, and a bug is better shown than hidden. The ready email's kept tries are passed through as
+ * stored (an old shape is still in some of them, and `readReadyEmail` in src/first-tally/ready-email.tsx reads both).
+ */
+export function parseFirstTally(value: string): FirstTally {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(value);
+	} catch {
+		throw new Error("first_tally is not JSON");
+	}
+	if (!isObject(parsed)) throw new Error("first_tally is not a JSON object");
+	const strokes: FirstTally["strokes"] = {};
+	if (isObject(parsed.strokes))
+		for (const stroke of STROKES) {
+			const day = parsed.strokes[stroke];
+			if (day === null || isText(day)) strokes[stroke] = day;
+		}
+	const record: FirstTally = {
+		strokes,
+		budgets: pickEntries(parsed.budgets, budgetAnswer),
+	};
+	if (isObject(parsed.pay)) record.pay = pickEntries(parsed.pay, payRecord);
+	if (
+		isObject(parsed.bills) &&
+		isCents(parsed.bills.kept) &&
+		isCents(parsed.bills.cents)
+	)
+		record.bills = { kept: parsed.bills.kept, cents: parsed.bills.cents };
+	if (isObject(parsed.reAsk) && isText(parsed.reAsk.bank))
+		record.reAsk = { bank: parsed.reAsk.bank };
+	if (parsed.waitsForRun === true) record.waitsForRun = true;
+	const emailed = textList(parsed.readyEmailedTo);
+	if (emailed) record.readyEmailedTo = emailed;
+	const pushed = textList(parsed.readyPushedTo);
+	if (pushed) record.readyPushedTo = pushed;
+	if (isObject(parsed.readyPushedAt))
+		record.readyPushedAt = pickEntries(parsed.readyPushedAt, (at) =>
+			isText(at) ? at : undefined,
+		);
+	if (isObject(parsed.heldReadyEmail))
+		record.heldReadyEmail = pickEntries(parsed.heldReadyEmail, (entry) =>
+			isObject(entry) ? (entry as HeldReadyEmail) : undefined,
+		);
+	if (parsed.savings === "skipped" || isCents(parsed.savings))
+		record.savings = parsed.savings;
+	return record;
 }
 
 /**
