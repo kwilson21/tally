@@ -59,8 +59,7 @@ import {
 	paysPlanGroupSql,
 } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
-import { PIPELINE_NOTE_SQL, pipelineNoteStateSql } from "../db/note-state";
-import { pendingNoteWinsSql } from "../machines/note-state";
+import { mergedFlagsSql, pendingNoteWinsSql } from "../machines/note-state";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
 function hasAnswerSql(personChoice: string, jevAnswer: string) {
@@ -80,6 +79,18 @@ const PENDING_NOTE_WINS = pendingNoteWinsSql(
 	"p.note_state",
 	"transactions.note_state",
 );
+/** The note state the merge picks: the later of the two (laterNoteState), a tie keeping the posted row's. */
+const PICKED_NOTE_STATE = `(CASE WHEN ${PENDING_NOTE_WINS} THEN p.note_state ELSE transactions.note_state END)`;
+/**
+ * Every compatibility flag of the merged row, written from the picked state (FLAG_RULES in the note machine). "keep" is
+ * the two rows' own answers and stamps, the way the merge has always combined them.
+ */
+const MERGED_FLAGS = mergedFlagsSql(PICKED_NOTE_STATE, {
+	details: "MAX(transactions.details_asked, p.details_asked)",
+	worth: "COALESCE(transactions.note_worth_writing, p.note_worth_writing)",
+	tried: "COALESCE(transactions.note_tried_at, p.note_tried_at)",
+	failed: "COALESCE(transactions.note_failed_at, p.note_failed_at)",
+});
 
 /** A person's choice, as the posted row `transactions` takes it from the pending row `p`. */
 const FROM_PENDING = `FROM transactions AS p WHERE p.id = ${PENDING} AND transactions.id = ${POSTED} AND ${READY}`;
@@ -188,29 +199,28 @@ const STATEMENTS = [
 	`UPDATE transactions SET category_id = p.category_id, category_source = 'user', category_confidence = NULL
 	 ${FROM_PENDING} AND p.category_source = 'user' AND p.category_id IS NOT NULL
 	 AND COALESCE(transactions.category_source, '') != 'user'`,
-	// Kept details beat guesses; a posted person's answer, or a clear, always wins. The note is in this statement too: the
-	// note further along wins, so a person's note beats a guess and a dismissed row stays dismissed. Its text, guess flag
-	// and state move together, and the state is read before any of this statement's changes.
+	// The note: the rank rule picks the state (the later one, a tie keeping the posted row's), and the text moves with it. Every
+	// compatibility flag is then written from that picked state, so one rule decides the row and no flag is reread from another.
+	// Each SET reads the row's values from before this statement.
 	`UPDATE transactions SET
 		note = CASE WHEN ${PENDING_NOTE_WINS} THEN p.note ELSE transactions.note END,
-		note_guessed = CASE WHEN ${PENDING_NOTE_WINS} THEN (p.note_state = 'guessed') ELSE transactions.note_guessed END,
-		note_state = CASE WHEN ${PENDING_NOTE_WINS} THEN p.note_state ELSE transactions.note_state END,
+		note_state = ${PICKED_NOTE_STATE},
+		note_guessed = ${MERGED_FLAGS.guessed},
+		note_dismissed = ${MERGED_FLAGS.dismissed},
+		details_asked = ${MERGED_FLAGS.details},
+		note_worth_writing = ${MERGED_FLAGS.worth},
+		note_tried_at = ${MERGED_FLAGS.tried},
+		note_failed_at = ${MERGED_FLAGS.failed}
+	 ${FROM_PENDING}`,
+	// Kept details beat guesses; a posted person's answer, or a clear, always wins.
+	`UPDATE transactions SET
 		kind = CASE WHEN ${KIND_TAKEN} THEN p.kind ELSE transactions.kind END,
 		kind_guessed = CASE WHEN ${KIND_TAKEN} THEN p.kind_guessed ELSE transactions.kind_guessed END,
 		kind_cleared = CASE WHEN ${KIND_TAKEN} THEN p.kind_cleared ELSE transactions.kind_cleared END,
 		for_person_id = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_id ELSE transactions.for_person_id END,
 		for_person_guessed = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_guessed ELSE transactions.for_person_guessed END,
-		for_person_cleared = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_cleared ELSE transactions.for_person_cleared END,
-		details_asked = MAX(transactions.details_asked, p.details_asked),
-		note_worth_writing = COALESCE(transactions.note_worth_writing, p.note_worth_writing),
-		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
-		note_failed_at = COALESCE(transactions.note_failed_at, p.note_failed_at),
-		note_dismissed = CASE WHEN (CASE WHEN ${PENDING_NOTE_WINS} THEN p.note_state ELSE transactions.note_state END) = 'guessed' THEN 0 ELSE MAX(transactions.note_dismissed, p.note_dismissed) END
+		for_person_cleared = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_cleared ELSE transactions.for_person_cleared END
 	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_state != 'unasked')`,
-	// A pipeline state the merged flags no longer fit (a posted Jev answer beside a pending try, say) is read again from the
-	// flags, so the state always agrees with the Jev answer beside it.
-	`UPDATE transactions SET note_state = ${pipelineNoteStateSql("transactions")}
-	 WHERE transactions.id = ${POSTED} AND transactions.note_state IN (${PIPELINE_NOTE_SQL}) AND ${READY}`,
 	// Jev's unsure transfer score goes before the exclusions below: a copied exclusion would otherwise look like
 	// the posted row's own answer, and the score would be lost (#309).
 	`UPDATE transactions SET transfer_confidence = p.transfer_confidence

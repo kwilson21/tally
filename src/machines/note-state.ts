@@ -169,3 +169,183 @@ export function noteRankSql(expression: string): string {
 export function pendingNoteWinsSql(pending: string, posted: string): string {
 	return `${noteRankSql(pending)} > ${noteRankSql(posted)}`;
 }
+
+/** The values the two rows of a merge hold for the flags a state does not decide. */
+export type FlagsHeld = {
+	detailsAsked: number;
+	worth: number | null;
+	tried: string | null;
+	failed: string | null;
+};
+
+/**
+ * The compatibility flags each state implies (decision 172). The flags are not read for any decision any more; they are
+ * written so an older reader sees the same story as the state. A number or null is what the state implies. "set" means
+ * the state implies a stamp, and "keep" means the state does not decide the flag, so the row keeps what it holds:
+ * - details_asked: "keep" is the larger of the two rows' answers (a question asked is never un-asked by a merge).
+ * - note_worth_writing: "keep" is the posted row's Jev answer, or the pending row's when the posted row has none.
+ * - note_tried_at and note_failed_at: "keep" and "set" are the posted row's stamp, or the pending row's when it has none.
+ */
+type FlagRule = {
+	details: 0 | 1 | "keep";
+	worth: 0 | 1 | null | "keep";
+	tried: "set" | null | "keep";
+	failed: "set" | null | "keep";
+	dismissed: 0 | 1;
+	guessed: 0 | 1;
+};
+
+export const FLAG_RULES: Record<NoteState, FlagRule> = {
+	// Nothing has been asked: no question, no answer, no try and no failure.
+	unasked: {
+		details: 0,
+		worth: null,
+		tried: null,
+		failed: null,
+		dismissed: 0,
+		guessed: 0,
+	},
+	// Jev was asked the detail question and has no answer about a note.
+	unanswered: {
+		details: 1,
+		worth: null,
+		tried: null,
+		failed: null,
+		dismissed: 0,
+		guessed: 0,
+	},
+	// Jev said no: no note is ever asked for.
+	no_call: {
+		details: 1,
+		worth: 0,
+		tried: null,
+		failed: null,
+		dismissed: 0,
+		guessed: 0,
+	},
+	// Jev said yes, and no call has been made.
+	queued: {
+		details: 1,
+		worth: 1,
+		tried: null,
+		failed: null,
+		dismissed: 0,
+		guessed: 0,
+	},
+	// The call failed: the failure is stamped and the try is not.
+	failed: {
+		details: 1,
+		worth: 1,
+		tried: null,
+		failed: "set",
+		dismissed: 0,
+		guessed: 0,
+	},
+	// Workers AI answered empty. A failure stamp from before it stays.
+	tried_empty: {
+		details: 1,
+		worth: 1,
+		tried: "set",
+		failed: "keep",
+		dismissed: 0,
+		guessed: 0,
+	},
+	// A person emptied the note. The question and answer are whatever the rows already held.
+	emptied_by_person: {
+		details: "keep",
+		worth: "keep",
+		tried: "set",
+		failed: "keep",
+		dismissed: 0,
+		guessed: 0,
+	},
+	// Workers AI wrote a note.
+	guessed: {
+		details: 1,
+		worth: 1,
+		tried: "set",
+		failed: "keep",
+		dismissed: 0,
+		guessed: 1,
+	},
+	// A person's note, or a kept guess. The question and answer are whatever the rows already held.
+	written: {
+		details: "keep",
+		worth: "keep",
+		tried: "keep",
+		failed: "keep",
+		dismissed: 0,
+		guessed: 0,
+	},
+	// A person emptied a guess.
+	dismissed: {
+		details: 1,
+		worth: 1,
+		tried: "set",
+		failed: "keep",
+		dismissed: 1,
+		guessed: 0,
+	},
+};
+
+/** The stamp a "set" flag gets when neither row holds one. A merge always has one, since the winning state implies it. */
+const STAMP_FALLBACK = "1970-01-01 00:00:00";
+
+/**
+ * The flags a state implies, given what the rows hold for the flags it does not decide (`held`). The merge writes the
+ * same rule as SQL (mergedFlagsSql).
+ */
+export function flagsFor(state: NoteState, held: FlagsHeld) {
+	const rule = FLAG_RULES[state];
+	return {
+		detailsAsked: rule.details === "keep" ? held.detailsAsked : rule.details,
+		worth: rule.worth === "keep" ? held.worth : rule.worth,
+		tried:
+			rule.tried === "keep" || rule.tried === "set"
+				? (held.tried ?? (rule.tried === "set" ? STAMP_FALLBACK : null))
+				: null,
+		failed:
+			rule.failed === "keep" || rule.failed === "set"
+				? (held.failed ?? (rule.failed === "set" ? STAMP_FALLBACK : null))
+				: null,
+		dismissed: rule.dismissed,
+		guessed: rule.guessed,
+	};
+}
+
+/** One flag as SQL: a CASE over the picked state, each branch the state's rule (a "keep" or "set" is `keep`). */
+function flagCaseSql(
+	picked: string,
+	value: (rule: FlagRule) => string | number | null,
+	keep: string,
+): string {
+	const whens = NOTE_STATES.map((state) => {
+		const rule = value(FLAG_RULES[state]);
+		const branch =
+			rule === "keep" || rule === "set"
+				? keep
+				: rule === null
+					? "NULL"
+					: String(rule);
+		return `WHEN '${state}' THEN ${branch}`;
+	}).join(" ");
+	return `(CASE ${picked} ${whens} END)`;
+}
+
+/**
+ * The SQL for each compatibility flag of a merged row, written from the picked state's rule. `keep` says what a "keep"
+ * or "set" flag takes from the two rows. The merge uses this, so the SQL and flagsFor read the same table.
+ */
+export function mergedFlagsSql(
+	picked: string,
+	keep: { details: string; worth: string; tried: string; failed: string },
+) {
+	return {
+		details: flagCaseSql(picked, (rule) => rule.details, keep.details),
+		worth: flagCaseSql(picked, (rule) => rule.worth, keep.worth),
+		tried: flagCaseSql(picked, (rule) => rule.tried, keep.tried),
+		failed: flagCaseSql(picked, (rule) => rule.failed, keep.failed),
+		dismissed: flagCaseSql(picked, (rule) => rule.dismissed, ""),
+		guessed: flagCaseSql(picked, (rule) => rule.guessed, ""),
+	};
+}

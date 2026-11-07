@@ -74,33 +74,4 @@ export function noteStateList(states: readonly NoteState[]): string {
 	return states.map((state) => `'${state}'`).join(", ");
 }
 
-/**
- * The state a row with no guess and no person's note has, from its flags, for the states the pipeline moves through.
- * The merge uses it after it has merged the flags, so a state never disagrees with the Jev answer beside it.
- *
- * This TypeScript ladder is the single source for the merge's reread. The migration 0068 backfill (a frozen migration)
- * has its own literal copy of the same ladder, plus its guess and person branches; the test in
- * test/note-state-migration.test.ts checks that the two agree for every real flag combination.
- */
-export function pipelineNoteStateSql(table: string): string {
-	const t = table;
-	return `CASE
-		WHEN ${t}.note_dismissed = 1 THEN 'dismissed'
-		WHEN ${t}.note_tried_at IS NOT NULL AND NOT (${t}.details_asked = 1 AND ${t}.note_worth_writing IS 1) THEN 'emptied_by_person'
-		WHEN ${t}.note_tried_at IS NOT NULL THEN 'tried_empty'
-		WHEN ${t}.details_asked = 0 THEN 'unasked'
-		WHEN ${t}.note_worth_writing = 0 THEN 'no_call'
-		WHEN ${t}.note_worth_writing IS NULL THEN 'unanswered'
-		WHEN ${t}.note_failed_at IS NOT NULL THEN 'failed'
-		ELSE 'queued' END`;
-}
-
 export const QUEUED_NOTE_SQL = noteStateList(NOTE_STATES.filter(isQueuedNote));
-export const PIPELINE_NOTE_SQL = noteStateList([
-	"unasked",
-	"unanswered",
-	"no_call",
-	"queued",
-	"failed",
-	"tried_empty",
-]);
