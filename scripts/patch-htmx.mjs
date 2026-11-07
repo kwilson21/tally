@@ -2,7 +2,9 @@
 // slot unconditionally, so a request that was replaced (aborted) frees the slot its replacement now holds, and the next
 // queued request runs beside that replacement. The patch frees a slot only while its own request still holds it.
 // It changes htmx.js RequestQueue (about lines 90-127) and the end of #issueRequest (about lines 548-625).
-// Delete this file, and its build:vendor step, when htmx ships a fix.
+// Delete this file, and its build:vendor step, when htmx ships a fix. Nothing can see upstream from here, so the exit
+// condition is watched two ways: an htmx upgrade fails test/patch-htmx.test.ts until someone reads the changelog, and an
+// anchor that is gone fails the build (the error says the bug may be fixed).
 //
 // patchHtmx(source) is pure. Run as a script, this writes public/vendor/htmx.min.js (npm run build:vendor).
 
@@ -31,7 +33,7 @@ export function patchHtmx(source) {
 		const found = text.split(anchor).length - 1;
 		if (found !== 1) {
 			throw new Error(
-				`patch-htmx: expected "${anchor}" once, found ${found}. htmx has moved this code; update scripts/patch-htmx.mjs.`,
+				`patch-htmx: expected "${anchor}" once, found ${found}. htmx has moved this code, or fixed the bug (decision 112, #471): read its changelog. Fixed: delete this script, its test and the build:vendor step. Moved: update the anchors here.`,
 			);
 		}
 		return text.replace(anchor, () => replacement);
