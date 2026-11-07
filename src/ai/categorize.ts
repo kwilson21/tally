@@ -1,6 +1,15 @@
 // The only place Tally talks to Jev (CLAUDE.md, spec §7): one plain fetch per transaction,
 // asking the category and every flag together. It returns Jev's answers and decides nothing.
+import { TRANSACTION_KINDS, type TransactionKind } from "../transactions/kind";
 import { type Flag, type JevAnswer, NONE_FIT } from "./decide";
+
+/** What Jev is told each kind means. Typed by kind, so adding one to TRANSACTION_KINDS fails to compile until it is described here. */
+const KIND_CRITERIA: Record<TransactionKind, string> = {
+	subscription: "A repeating subscription or membership.",
+	one_off: "A one-off purchase.",
+	bill: "A household bill; this label never creates or pays a bill.",
+	transfer: "A transfer; this label never changes the amount or excludes it.",
+};
 
 export const JEV_URL = "https://api.typesafe.ai/v1/systemone";
 
@@ -164,19 +173,10 @@ export async function askJev(
 							type: "choice",
 							instructions:
 								"What kind of spending is this purchase? Choose one, or None of these.",
-							criteria: Object.fromEntries([
-								["subscription", "A repeating subscription or membership."],
-								["one_off", "A one-off purchase."],
-								[
-									"bill",
-									"A household bill; this label never creates or pays a bill.",
-								],
-								[
-									"transfer",
-									"A transfer; this label never changes the amount or excludes it.",
-								],
-								["None of these", "The kind isn't clear."],
-							]),
+							criteria: {
+								...KIND_CRITERIA,
+								"None of these": "The kind isn't clear.",
+							},
 						},
 						for_person: {
 							type: "choice",
@@ -226,9 +226,7 @@ export async function askJev(
 	const answer = parseAnswer(
 		await response.json().catch(() => null),
 		categories.length ? [...categories, NONE_FIT] : [],
-		options.details
-			? ["subscription", "one_off", "bill", "transfer", "None of these"]
-			: [],
+		options.details ? [...TRANSACTION_KINDS, "None of these"] : [],
 		options.people
 			? [...options.people.map((person) => `person:${person.id}`), "none"]
 			: [],
