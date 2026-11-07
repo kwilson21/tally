@@ -41,4 +41,21 @@ describe("one definition of a rule", () => {
 			.map(([file]) => file);
 		expect(definers).toHaveLength(1);
 	});
+
+	it("names the bill amount tolerance once, and every bill rule that uses it reads that name", () => {
+		const definers = Object.entries(SOURCES)
+			.filter(([, text]) =>
+				/\bconst\s+BILL_AMOUNT_TOLERANCE_PERCENT\s*=/.test(text),
+			)
+			.map(([file]) => file);
+		expect(definers).toEqual(["../src/bills/status.ts"]);
+		// A rule that spells the percentage out again can drift from the others, so each of these must read the name.
+		for (const file of [
+			"../src/bills/match.ts",
+			"../src/bills/find.ts",
+			"../src/bills/status.ts",
+			"../src/bills/unpaid.ts",
+		])
+			expect(SOURCES[file], file).toContain("BILL_AMOUNT_TOLERANCE_PERCENT");
+	});
 });

@@ -43,12 +43,19 @@ export const handledBeforeAdded = (
 ) => !linked && !!addedOn && dueDate < addedOn;
 
 /**
- * Decision 101 (#205): an occurrence is Paid once its linked payments add up to at least 90% of its amount, the
- * matcher's 10% tolerance (BILL_AMOUNT_TOLERANCE), so $1,080.00 of $1,200 is Paid and $1,079.99 is not. Paying
+ * How far a bill's amount may vary, in whole percent: a payment within it of the amount matches the bill (spec §6.1
+ * rule 2), an occurrence short of it by no more is Paid (decision 101), and two charges that differ by no more can be
+ * a repeat bill (spec §8.2). One number, in whole percent so every check stays in integer cents.
+ */
+export const BILL_AMOUNT_TOLERANCE_PERCENT = 10;
+
+/**
+ * Decision 101 (#205): an occurrence is Paid once its linked payments add up to at least the amount less the
+ * tolerance (BILL_AMOUNT_TOLERANCE_PERCENT, 90% now), so $1,080.00 of $1,200 is Paid and $1,079.99 is not. Paying
  * more is still Paid. Integer cents, so no float rounds the check. Until then the occurrence is part paid.
  */
 export const occurrencePaid = (paidCents: number, amountCents: number) =>
-	paidCents * 10 >= amountCents * 9;
+	paidCents * 100 >= amountCents * (100 - BILL_AMOUNT_TOLERANCE_PERCENT);
 
 /**
  * "Part paid: $600 of $1,200" (decision 101): each amount shows its cents only when it has them, so "$600" and

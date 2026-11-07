@@ -1,5 +1,6 @@
 import { occurrenceAmountSql } from "../db/bill-amounts";
 import { occurrenceMonthSql } from "../db/counted-month";
+import { BILL_AMOUNT_TOLERANCE_PERCENT } from "./status";
 
 /**
  * A bill whose payment a split change unlinked (decision 99): the bill's name and the occurrence its payment
@@ -75,8 +76,8 @@ export const UNPAID_BILLS_SQL = (parent: string) =>
 		WHERE part.parent_id = ${parent} AND bp.status = 'linked' GROUP BY b.id, bp.period ORDER BY MIN(bp.id))), '[]')`;
 
 /**
- * SQL that is true while a bill occurrence is still unpaid: its linked payments add up to less than 90% of its
- * amount (decision 74), which is occurrencePaid (src/bills/status.ts) negated, in integer cents. It counts every
+ * SQL that is true while a bill occurrence is still unpaid: its linked payments add up to less than the amount less the tolerance
+ * (BILL_AMOUNT_TOLERANCE_PERCENT, 90% now; decision 74), which is occurrencePaid (src/bills/status.ts) negated, in integer cents. It counts every
  * linked payment, not only a purchase's parts, and judges against the amount the month had (occurrenceAmountSql).
  * A linked payment a bank later turned into a credit counts as $0 (MAX(0, amount)), as the JS sums do.
  * `billId` and `period` are SQL expressions. A bill row that is gone reads as unpaid, so its entry stays.
@@ -84,8 +85,8 @@ export const UNPAID_BILLS_SQL = (parent: string) =>
 export const occurrenceUnpaidSql = (billId: string, period: string) =>
 	`COALESCE((SELECT (SELECT COALESCE(SUM(MAX(0, pt.amount_cents)), 0) FROM bill_payments paid
 			JOIN transactions pt ON pt.id = paid.transaction_id
-			WHERE paid.bill_id = ub.id AND paid.period = ${period} AND paid.status = 'linked') * 10
-		< ${occurrenceAmountSql("ub.id", occurrenceMonthSql(period, "ub"))} * 9
+			WHERE paid.bill_id = ub.id AND paid.period = ${period} AND paid.status = 'linked') * 100
+		< ${occurrenceAmountSql("ub.id", occurrenceMonthSql(period, "ub"))} * ${100 - BILL_AMOUNT_TOLERANCE_PERCENT}
 	FROM bills ub WHERE ub.id = ${billId}), 1)`;
 
 /**

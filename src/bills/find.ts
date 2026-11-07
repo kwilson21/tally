@@ -6,12 +6,12 @@ import {
 	merchantNotABillSql,
 } from "../db/merchant-key";
 import { tidyName } from "../transactions/tidy-name";
+import { BILL_AMOUNT_TOLERANCE_PERCENT } from "./status";
 
 /** Rules for finding monthly bills from recent charges (spec §8.2, P18). */
 export const BILL_FIND_MONTHS = 3;
 export const BILL_FIND_MIN_DAYS = 25;
 export const BILL_FIND_MAX_DAYS = 35;
-export const BILL_FIND_AMOUNT_PERCENT = 10;
 
 export type BillFindingCharge = {
 	/** The charge's merchant key: Plaid's merchant name, or the raw name when it sent none (spec §6.1). */
@@ -59,7 +59,7 @@ export function findBillSuggestions(
 				days >= BILL_FIND_MIN_DAYS &&
 				days <= BILL_FIND_MAX_DAYS &&
 				Math.abs(latest.amountCents - previous.amountCents) * 100 <=
-					previous.amountCents * BILL_FIND_AMOUNT_PERCENT
+					previous.amountCents * BILL_AMOUNT_TOLERANCE_PERCENT
 			);
 		});
 		if (!partner) continue;
