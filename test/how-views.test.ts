@@ -281,15 +281,12 @@ describe("SystemDiagram", () => {
 		}
 	});
 
-	it("scales to the screen width and uses the icon stroke width", async () => {
+	it("scales to the screen width: a viewBox, and app.css's .pele rule sets max-width and auto height", async () => {
 		const html = await SystemDiagram().toString();
 		expect(html).toMatch(/<svg[^>]*viewBox="[^"]+"/);
-		const svgClass = html.match(/<svg[^>]*class="([^"]+)"/)?.[1] ?? "";
-		expect(svgClass.split(" ")).toEqual(
-			expect.arrayContaining(["w-full", "h-auto"]),
+		expect(html.match(/<svg[^>]*class="([^"]+)"/)?.[1]?.split(" ")).toContain(
+			"pele",
 		);
-		expect(html.match(/stroke-width="([^"]+)"/g)).toEqual([
-			'stroke-width="1.75"',
-		]);
+		expect(html).not.toMatch(/\sstyle=/);
 	});
 });

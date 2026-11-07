@@ -6,6 +6,7 @@ import type { MonthSummary } from "../budget";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { excludedTotal } from "../how-it-works/examples";
 import { formatCents } from "../money";
+import { PeleDiagram } from "./pele-diagram";
 
 const W = 360;
 const plural = (n: number, one: string, many: string) =>
@@ -25,68 +26,15 @@ export function BillsDiagram({
 	tolerance: string;
 }) {
 	return (
-		<Figure
+		<PeleDiagram
 			id="bills-diagram"
 			title="How a bill payment is matched"
 			desc={`A ${amount} bill due ${due} matches its payment on ${paid} when merchant and amount match and the date is within ${windowDays} days.`}
-			height={112}
-		>
-			<rect x="8" y="18" width="112" height="64" rx="8" class="stroke-ink" />
-			<text x="64" y="43" text-anchor="middle" class="fill-ink" font-size="13">
-				Bill {amount}
-			</text>
-			<text
-				x="64"
-				y="63"
-				text-anchor="middle"
-				class="fill-muted"
-				font-size="12"
-			>
-				due {due}
-			</text>
-			<path d="M120 50 H238" class="stroke-ink" />
-			{/* Two short lines: "same merchant · ±10%" in one is wider than the gap and touches both boxes. */}
-			<text
-				x="179"
-				y="28"
-				text-anchor="middle"
-				class="fill-muted"
-				font-size="11"
-			>
-				same merchant
-			</text>
-			<text
-				x="179"
-				y="41"
-				text-anchor="middle"
-				class="fill-muted"
-				font-size="11"
-			>
-				±{tolerance}
-			</text>
-			<text
-				x="179"
-				y="68"
-				text-anchor="middle"
-				class="fill-muted"
-				font-size="11"
-			>
-				within {windowDays} days
-			</text>
-			<rect x="238" y="18" width="114" height="64" rx="8" class="stroke-ink" />
-			<text x="295" y="43" text-anchor="middle" class="fill-ink" font-size="13">
-				Payment
-			</text>
-			<text
-				x="295"
-				y="63"
-				text-anchor="middle"
-				class="fill-muted"
-				font-size="12"
-			>
-				{paid}
-			</text>
-		</Figure>
+			source={[
+				"flowchart LR",
+				`  bill["Bill ${amount}<br/>due ${due}"] ---|"same merchant<br/>±${tolerance}<br/>within ${windowDays} days"| pay["Payment<br/>${paid}"]`,
+			].join("\n")}
+		/>
 	);
 }
 
@@ -121,10 +69,6 @@ function Figure({
 		</svg>
 	);
 }
-
-/** A down arrow at x from y1 to y2. */
-const down = (x: number, y1: number, y2: number) =>
-	`M${x} ${y1} V${y2} M${x - 6} ${y2 - 6} L${x} ${y2} L${x + 6} ${y2 - 6}`;
 
 /** A box at the four-box size (93 × 60, 13 px labels) and the slot an operator sits in, 22 px wide. */
 const UNIT_BOX_W = 93;
@@ -281,46 +225,6 @@ export function BudgetDiagram(
 	);
 }
 
-/** One step: a full-width box with its words on the left and its count on the right. */
-function Step({
-	y,
-	label,
-	count,
-	dashed = false,
-}: {
-	y: number;
-	label: Child;
-	count: number;
-	dashed?: boolean;
-}) {
-	return (
-		<g>
-			<rect
-				x="1"
-				y={y}
-				width={W - 2}
-				height="44"
-				rx="8"
-				class="stroke-ink"
-				stroke-dasharray={dashed ? "5 4" : undefined}
-			/>
-			<text x="16" y={y + 27} font-size="15" class="fill-ink">
-				{label}
-			</text>
-			<text
-				x={W - 14}
-				y={y + 27}
-				font-size="15"
-				font-weight="600"
-				text-anchor="end"
-				class="fill-ink"
-			>
-				{count}
-			</text>
-		</g>
-	);
-}
-
 /** This month → (− excluded) → Counted → Needs a category, top to bottom. */
 export function TransactionsDiagram(c: {
 	counted: number;
@@ -339,29 +243,22 @@ export function TransactionsDiagram(c: {
 		c.excluded > 0 && `${c.excluded} excluded`,
 	].filter(Boolean);
 	const counts = `${plural(total, "transaction", "transactions")} this month: ${states.join(", ") || "none to count"}.`;
+	const dropped = [
+		c.excluded > 0 && `− ${c.excluded} excluded`,
+		c.heldForReview > 0 && `− ${c.heldForReview} held for review`,
+	].filter(Boolean);
 	return (
-		<Figure
+		<PeleDiagram
 			id="transactions-diagram"
 			title="Which transactions count"
 			desc={`${counts} ${needs}`}
-			height={218}
-		>
-			<Step y={4} label="This month" count={total} />
-			<path d={down(40, 48, 88)} class="stroke-ink" />
-			{c.excluded > 0 && (
-				<text x="56" y="64" font-size="12" class="fill-muted">
-					− {c.excluded} excluded
-				</text>
-			)}
-			{c.heldForReview > 0 && (
-				<text x="56" y="80" font-size="12" class="fill-muted">
-					− {c.heldForReview} held for review
-				</text>
-			)}
-			<Step y={88} label="Counted" count={c.counted} />
-			<path d={down(40, 132, 168)} class="stroke-ink" />
-			<Step y={172} label="Needs a category" count={c.needsCategory} />
-		</Figure>
+			source={[
+				"flowchart TB",
+				`  total["This month · <b>${total}</b>"] -->${dropped.length > 0 ? `|"${dropped.join("<br/>")}"|` : ""} counted["Counted · <b>${c.counted}</b>"]`,
+				`  counted --> needs["Needs a category · <b>${c.needsCategory}</b>"]`,
+				"  class needs undecided",
+			].join("\n")}
+		/>
 	);
 }
 
@@ -509,37 +406,25 @@ export function CategoriesDiagram(c: {
 		[`${ai}, if ${c.threshold} or more sure`, c.jev],
 		["Waits for a person", c.waiting],
 	];
-	const stepY = (i: number) => 4 + i * 64;
-	const incomeY = stepY(steps.length - 1) + 44 + 6;
+	const lines = ["flowchart TB"];
+	steps.forEach(([label, count], i) => {
+		lines.push(
+			`  s${i}["${i + 1} ${label.replaceAll('"', "'")} · <b>${count}</b>"]`,
+		);
+		if (i > 0) lines.push(`  s${i - 1} --> s${i}`);
+	});
+	lines.push("  class s4 undecided");
+	if (c.income > 0) {
+		lines.push(
+			`  s4 -.- income["+ ${c.income} income, which needs no category"]`,
+		);
+	}
 	return (
-		<Figure
+		<PeleDiagram
 			id="categories-diagram"
 			title="Where a transaction's category comes from"
 			desc={`Each transaction's category comes from the first step that applies. This month: a person chose ${c.user}, merchant rules ${c.merchantRule}, bills ${c.bill}, ${ai} ${c.jev}, and ${c.waiting} ${c.waiting === 1 ? "waits" : "wait"} for a person.${income}`}
-			height={c.income > 0 ? incomeY + 70 : 308}
-		>
-			{steps.map(([label, count], i) => (
-				<>
-					<Step
-						y={stepY(i)}
-						label={
-							<>
-								<tspan font-weight="600">{i + 1}</tspan> {label}
-							</>
-						}
-						count={count}
-						dashed={i === 4}
-					/>
-					{i < 4 && (
-						<path d={down(40, 48 + i * 64, 64 + i * 64)} class="stroke-ink" />
-					)}
-				</>
-			))}
-			{c.income > 0 && (
-				<text x="16" y={incomeY} font-size="13" class="fill-muted">
-					+ {c.income} income, which needs no category
-				</text>
-			)}
-		</Figure>
+			source={lines.join("\n")}
+		/>
 	);
 }

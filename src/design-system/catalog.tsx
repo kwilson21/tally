@@ -6685,7 +6685,7 @@ function Diagrams() {
 				title="SystemDiagram"
 				tier="visual"
 				components={["SystemDiagram"]}
-				sentence="The inline SVG diagram of Tally's parts on How Tally works; scales to the screen width, with a title and description for screen readers."
+				sentence="The diagram of Tally's parts on How Tally works, drawn by Pele (decision 176): top to bottom, scales to the screen width, with a title and description for screen readers."
 			>
 				<SystemDiagram />
 			</Specimen>
@@ -6694,7 +6694,7 @@ function Diagrams() {
 				title="MachineDiagram"
 				tier="visual"
 				components={["MachineDiagram"]}
-				sentence="A state machine drawn from its own definition (decision 175): one box for each state, left to right, finished states shaded, a dot and short arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
+				sentence="A state machine drawn by Pele from its own definition (decisions 175 and 176): one box for each state, top to bottom, finished states shaded, a dot and arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
 			>
 				<State label="A suggested new category (one state, three ways out)">
 					<MachineDiagram
@@ -6724,7 +6724,7 @@ function Diagrams() {
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
 				]}
-				sentence="Drawn from the same numbers as each worked example. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
+				sentence="Drawn from the same numbers as each worked example. Bills, Transactions and Categories are drawn by Pele (decision 176); Budget and Exclusions are drawn by hand, because they are not boxes and arrows. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
 				<State label="BudgetDiagram, four boxes">
 					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
