@@ -4,7 +4,7 @@ import type { NoteState } from "../src/db/note-state";
 
 const db = env.DB;
 const migration = env.TEST_MIGRATIONS.find((item) =>
-	item.name.startsWith("0067_note_state"),
+	item.name.startsWith("0068_note_state"),
 );
 // The migration runs once at deploy. These tests replay its two data statements (the contradiction fix and the
 // backfill) against seeded rows, so every real flag combination is checked the way production will backfill it.
@@ -298,7 +298,7 @@ async function stateRows() {
 	return results;
 }
 
-describe("migration 0067 note_state backfill", () => {
+describe("migration 0068 note_state backfill", () => {
 	beforeEach(async () => {
 		await clean();
 		await seed();
@@ -313,7 +313,7 @@ describe("migration 0067 note_state backfill", () => {
 
 	it("maps every real flag combination to one state, with the owner's fixes", async () => {
 		if (!FIX || !BACKFILL)
-			throw new Error("Migration 0067 statements are missing");
+			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
 		await db.prepare(BACKFILL).run();
 		const rows = await stateRows();
@@ -329,7 +329,7 @@ describe("migration 0067 note_state backfill", () => {
 
 	it("never leaves a guess and a dismissal on the same row", async () => {
 		if (!FIX || !BACKFILL)
-			throw new Error("Migration 0067 statements are missing");
+			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
 		await db.prepare(BACKFILL).run();
 		const bad = await db
@@ -342,7 +342,7 @@ describe("migration 0067 note_state backfill", () => {
 
 	it("changes no one's record: updated_by and updated_at stay as they were", async () => {
 		if (!FIX || !BACKFILL)
-			throw new Error("Migration 0067 statements are missing");
+			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
 		await db.prepare(BACKFILL).run();
 		for (const row of await stateRows()) {
@@ -353,7 +353,7 @@ describe("migration 0067 note_state backfill", () => {
 
 	it("gives a row Jev said yes to, that a person emptied, no queue state when the try is recorded", async () => {
 		if (!FIX || !BACKFILL)
-			throw new Error("Migration 0067 statements are missing");
+			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
 		await db.prepare(BACKFILL).run();
 		const emptied = (await stateRows()).find((row) => row.id === FIRST + 2);
