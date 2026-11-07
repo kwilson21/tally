@@ -521,8 +521,11 @@ describe("the note and category-name prompts, with a candidate model in place of
 		expect(run).toHaveBeenCalledTimes(30);
 		for (const [model, body] of run.mock.calls) {
 			expect(model).toBe(CANDIDATES.granite.id);
-			// The family's categories go with every purchase (decision 165).
+			// The family's categories go with every purchase (decision 165)...
 			expect(body.messages[1]?.content).toContain("Family categories");
+			// ...and are not also names to avoid: production leaves the active categories out of that list, because
+			// it gives them as choices (purchaseNamesToAvoid). The fixtures have no archived or dismissed names.
+			expect(body.messages[1]?.content).toMatch(/Categories to avoid: $/);
 		}
 		// The cleaned bank text goes too (decision 164), when it says more than the store's name already does.
 		expect(

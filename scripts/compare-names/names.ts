@@ -279,7 +279,9 @@ export async function askOther(
 			: await suggestCategoryName(
 					candidate,
 					[tidyName(text) || text],
-					categories,
+					// Names to avoid: none. Production lists only archived categories and dismissed suggestions here
+					// (purchaseNamesToAvoid), and gives the active ones as choices, so the fixtures have nothing to avoid.
+					[],
 					text,
 					categories,
 				).then((r) =>
