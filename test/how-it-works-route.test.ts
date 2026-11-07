@@ -456,11 +456,11 @@ describe("outside the demo", () => {
 		).text();
 		expect(html).toContain(`With your numbers for ${monthName()}:`);
 		expect(html).toContain("Electricity is");
-		expect(html).toContain('id="bills-diagram-title"');
+		expect(html).not.toContain('id="bills-diagram-title"');
 		expect(html).not.toContain("No bill has been paid yet this month.");
 	});
 
-	it("uses a plain sentence and no diagram when no bill has been paid", async () => {
+	it("uses a plain sentence when no bill has been paid", async () => {
 		await env.DB.prepare("DELETE FROM bill_payments").run();
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)

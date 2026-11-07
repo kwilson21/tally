@@ -96,7 +96,6 @@ import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { HouseholdPeople } from "../views/household-people";
 import {
-	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -6719,12 +6718,11 @@ function Diagrams() {
 				tier="visual"
 				components={[
 					"BudgetDiagram",
-					"BillsDiagram",
 					"TransactionsDiagram",
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
 				]}
-				sentence="Drawn from the same numbers as each worked example. Bills, Transactions and Categories are drawn by Pele (decision 181); Budget and Exclusions are drawn by hand, because they are not boxes and arrows. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
+				sentence="Drawn from the same numbers as each worked example. Transactions and Categories are drawn by Pele (decision 181); Budget and Exclusions are drawn by hand, because they are not boxes and arrows. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
 				<State label="BudgetDiagram, four boxes">
 					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
@@ -6755,15 +6753,6 @@ function Diagrams() {
 						savingsGoalCents={10000}
 						plannedCents={18000}
 						safeToSpendCents={51800}
-					/>
-				</State>
-				<State label="BillsDiagram">
-					<BillsDiagram
-						amount="$142.00"
-						due="Sep 21"
-						paid="Sep 24"
-						windowDays={5}
-						tolerance="10%"
 					/>
 				</State>
 				<State label="TransactionsDiagram">

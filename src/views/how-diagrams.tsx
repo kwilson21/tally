@@ -12,32 +12,6 @@ const W = 360;
 const plural = (n: number, one: string, many: string) =>
 	`${n} ${n === 1 ? one : many}`;
 
-export function BillsDiagram({
-	amount,
-	due,
-	paid,
-	windowDays,
-	tolerance,
-}: {
-	amount: string;
-	due: string;
-	paid: string;
-	windowDays: number;
-	tolerance: string;
-}) {
-	return (
-		<PeleDiagram
-			id="bills-diagram"
-			title="How a bill payment is matched"
-			desc={`A ${amount} bill due ${due} matches its payment on ${paid} when merchant and amount match and the date is within ${windowDays} days.`}
-			source={[
-				"flowchart LR",
-				`  bill["Bill ${amount}<br/>due ${due}"] ---|"same merchant<br/>±${tolerance}<br/>within ${windowDays} days"| pay["Payment<br/>${paid}"]`,
-			].join("\n")}
-		/>
-	);
-}
-
 /** An accessible SVG: a role, a title and a description that say the same numbers in words. */
 function Figure({
 	id,

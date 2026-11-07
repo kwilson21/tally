@@ -54,7 +54,6 @@ import { buildTrends, RUN_MONTHS, sameDaysCaption } from "../trends";
 import { TallyMark } from "../views/brand";
 import { FoldedRow } from "../views/folded-row";
 import {
-	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -669,30 +668,19 @@ howItWorks.get("/how-it-works", async (c) => {
 						))}
 					</dl>
 					{paidBill && (
-						<>
-							<Diagram>
-								<BillsDiagram
-									amount={formatCents(paidBill.amountCents)}
-									due={shortBillDate(paidBill.dueDate)}
-									paid={shortBillDate(paidBill.paidDate ?? paidBill.dueDate)}
-									windowDays={BILL_DATE_WINDOW_DAYS}
-									tolerance={`${Math.round(BILL_AMOUNT_TOLERANCE * 100)}%`}
-								/>
-							</Diagram>
-							<Example
-								demo={demo}
-								monthName={monthName(paidBill.dueDate.slice(0, 7))}
-							>
-								{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
-								{shortBillDate(paidBill.dueDate)}; its{" "}
-								{demo ? "demo payment" : "payment"} is{" "}
-								{shortBillDate(paidBill.paidDate ?? paidBill.dueDate)}
-								{(paidBill.paidDate ?? paidBill.dueDate).slice(0, 7) >
-								paidBill.dueDate.slice(0, 7)
-									? " and counts in the month of the bill it paid, not the month it reached the bank."
-									: ", so it counts in the month it reached the bank."}
-							</Example>
-						</>
+						<Example
+							demo={demo}
+							monthName={monthName(paidBill.dueDate.slice(0, 7))}
+						>
+							{paidBill.name} is {formatCents(paidBill.amountCents)}, due{" "}
+							{shortBillDate(paidBill.dueDate)}; its{" "}
+							{demo ? "demo payment" : "payment"} is{" "}
+							{shortBillDate(paidBill.paidDate ?? paidBill.dueDate)}
+							{(paidBill.paidDate ?? paidBill.dueDate).slice(0, 7) >
+							paidBill.dueDate.slice(0, 7)
+								? " and counts in the month of the bill it paid, not the month it reached the bank."
+								: ", so it counts in the month it reached the bank."}
+						</Example>
 					)}
 					<RulesFold count={12}>
 						<ul class="mt-3 list-disc space-y-1 pl-5">

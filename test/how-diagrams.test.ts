@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -46,32 +45,6 @@ const pictureDesc = (html: string) =>
 	(
 		html.match(/<span id="[^"]*-desc" class="sr-only">([^<]+)</)?.[1] ?? ""
 	).replaceAll("&#39;", "'");
-
-describe("BillsDiagram", () => {
-	const props = {
-		amount: "$142.00",
-		due: "Sep 21",
-		paid: "Sep 24",
-		windowDays: 5,
-		tolerance: "10%",
-	};
-
-	it("is drawn by Pele in the page's ink, not the accent, since terracotta means you can click it", async () => {
-		const html = await render(BillsDiagram(props));
-		expectLabelled(html);
-		expect(html).toContain("pele-flowchart");
-		expect(html).not.toContain("accent");
-		expect(html).not.toMatch(/\sstyle=/);
-	});
-
-	it("says the match words on the line between the two boxes", async () => {
-		const html = await render(BillsDiagram(props));
-		expect(words(html)).toContain("Bill $142.00 due Sep 21");
-		expect(words(html)).toContain("same merchant ±10% within 5 days");
-		expect(words(html)).toContain("Payment Sep 24");
-		expect(html).not.toContain("same merchant ·");
-	});
-});
 
 describe("BudgetDiagram", () => {
 	const demo = {
