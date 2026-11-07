@@ -532,7 +532,7 @@ describe("an empty detail has no source line (#688)", () => {
 
 	it("keeps Your choice under a note and a kind a person chose", async () => {
 		await setDetails(
-			"note = 'Coffee with a friend', note_guessed = 0, kind = 'one_off', kind_guessed = 0",
+			"note = 'Coffee with a friend', note_guessed = 0, note_state = 'written', kind = 'one_off', kind_guessed = 0",
 		);
 		const html = (await get(`/transactions/${bakery}`)).html;
 		expect(summaryOf(html, "detail-note")).toContain("Your choice");
@@ -541,7 +541,9 @@ describe("an empty detail has no source line (#688)", () => {
 
 	it("keeps Tally's guess and its dashed underline under a guessed note while Fill in details is on", async () => {
 		await saveAiSwitches(env.DB, { details: true });
-		await setDetails("note = 'Coffee with a friend', note_guessed = 1");
+		await setDetails(
+			"note = 'Coffee with a friend', note_guessed = 1, note_state = 'guessed'",
+		);
 		const summary = summaryOf(
 			(await get(`/transactions/${bakery}`)).html,
 			"detail-note",
@@ -555,7 +557,7 @@ describe("an empty detail has no source line (#688)", () => {
 			"INSERT INTO household_people (id, name) VALUES (2, 'Kids')",
 		).run();
 		await setDetails(
-			"note = 'Dinner claim', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
+			"note = 'Dinner claim', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
 		);
 		const html = (await get(`/transactions/${bakery}`)).html;
 		for (const id of ["detail-note", "detail-kind", "detail-for"]) {
@@ -585,7 +587,9 @@ describe("an empty detail has no source line (#688)", () => {
 	});
 
 	it("draws an emptied note from a refused save with no source line, though the saved note was a person's", async () => {
-		await setDetails("note = 'Coffee with a friend', note_guessed = 0");
+		await setDetails(
+			"note = 'Coffee with a friend', note_guessed = 0, note_state = 'written'",
+		);
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "99",
 			name_pick: "own",
@@ -609,7 +613,7 @@ describe("an empty detail has no source line (#688)", () => {
 				"INSERT INTO household_people (id, name) VALUES (2, 'Kids')",
 			).run();
 			await setDetails(
-				"note = 'Coffee', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
+				"note = 'Coffee', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
 			);
 		};
 		/** A save the category refuses, so the panel is drawn again with what was posted. */

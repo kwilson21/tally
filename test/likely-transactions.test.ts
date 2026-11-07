@@ -257,7 +257,7 @@ describe("likelyTransactions", () => {
 		);
 		await env.DB.batch([
 			env.DB.prepare(
-				"UPDATE transactions SET note = 'Dinner', note_guessed = 1 WHERE id = ?",
+				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, note_state = 'guessed' WHERE id = ?",
 			).bind(guessed),
 			env.DB.prepare(
 				"UPDATE transactions SET note = 'Vet bill' WHERE id = ?",
