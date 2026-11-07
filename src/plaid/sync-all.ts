@@ -2,6 +2,7 @@ import { enabled } from "../routes/plaid";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError } from "./client";
 import { syncItem } from "./sync";
+import { SYNC_COOLDOWN_SECONDS, SYNC_RUN_BUDGET_MS } from "./timing";
 
 type SyncAllEnv = PlaidEnv & { DB: D1Database; DEMO?: string };
 
@@ -57,7 +58,7 @@ export async function syncAllItems(
 	).all<{ id: number; institution_name: string }>();
 
 	for (const [index, item] of items.entries()) {
-		if (now() - startedAt >= 12 * 60 * 1000) {
+		if (now() - startedAt >= SYNC_RUN_BUDGET_MS) {
 			result.skipped += items.length - index;
 			break;
 		}
@@ -68,7 +69,7 @@ export async function syncAllItems(
 			const claim = await env.DB.prepare(
 				respectCooldown
 					? `UPDATE plaid_items SET last_sync_attempt_at = datetime('now')
-						WHERE id = ? AND (last_sync_attempt_at IS NULL OR last_sync_attempt_at <= datetime('now', '-60 seconds'))`
+						WHERE id = ? AND (last_sync_attempt_at IS NULL OR last_sync_attempt_at <= datetime('now', '-${SYNC_COOLDOWN_SECONDS} seconds'))`
 					: "UPDATE plaid_items SET last_sync_attempt_at = datetime('now') WHERE id = ?",
 			)
 				.bind(item.id)

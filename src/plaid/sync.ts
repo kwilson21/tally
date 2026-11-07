@@ -20,6 +20,7 @@ import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { markNeedsAttention, markSyncSucceeded, readSeen } from "./item-store";
 import { loginStillBroken } from "./login-broken";
 import { mergePendingIntoPosted } from "./pending-merge";
+import { SYNC_LEASE_MINUTES } from "./timing";
 import { decryptToken } from "./token-crypto";
 
 type SyncEnv = PlaidEnv & {
@@ -465,7 +466,7 @@ export async function syncItem(
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
-		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes'), sync_lock_id = ?
+		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+${SYNC_LEASE_MINUTES} minutes'), sync_lock_id = ?
 		 WHERE id = ? AND disconnected_at IS NULL AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
 		.bind(lockId, itemRowId)
@@ -599,7 +600,7 @@ export async function syncItem(
 
 			const statements: D1PreparedStatement[] = [
 				env.DB.prepare(
-					`UPDATE plaid_items SET sync_locked_until = datetime('now', '+5 minutes')
+					`UPDATE plaid_items SET sync_locked_until = datetime('now', '+${SYNC_LEASE_MINUTES} minutes')
 					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(itemRowId, lockId),
 			];
