@@ -139,11 +139,14 @@ export const askedSql = (kind: MaybeKind, confidence: string) => {
 
 /**
  * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked, and it must still be in the Maybe range (`askedSql`), so a guess that became sure or dropped below it is never saved against.
+ * A pending credit is not asked: Plaid can still change or remove a pending transaction, so a question about it could go stale,
+ * and it is asked once it posts (an owner decision). A transfer is not asked, since it is settled, as payAskedSql leaves transfers out too.
  * `afterNo` is the question after a No: the same check, but the No is set (`income_maybe_declined = 1`), so the guess is read without it (`incomeGuessSql`) (#440).
  */
 export const incomeAskedSql = (alias: string, afterNo = false) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.refund_of_id IS NULL AND ${alias}.amount_cents < 0
 		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillOrPlanSql(alias)})
+		AND ${alias}.pending = 0 AND ${alias}.flag_transfer = 0
 		AND ${alias}.income_maybe_declined = ${afterNo ? 1 : 0} AND ${askedSql("income", incomeGuessSql(alias))})`;
 
 /**
@@ -258,11 +261,13 @@ async function transferSuggestions(
 }
 
 /**
- * True when the review screen can ask about the category of the row `alias` names: the queue's own check, repeated by the route's Something else and Yes writes so a stale answer changes nothing. The range (`askedSql`, with the 40% floor) is written in, as code constants.
+ * True when the review screen can ask about the category of the row `alias` names: the queue's own check, repeated by the route's Something else and Yes writes so a stale answer changes nothing. The range (`askedSql`, with the 40% floor) is written in, as code constants. A pending purchase is not asked, for the same
+ * reason as a pending credit (an owner decision): Plaid can still change or remove it. So new-category filing (fileInNewCategory) and
+ * the resort run's needAnswer count leave it out until it posts, and handle it then.
  */
 export const categoryAskedSql = (alias: string) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
-		AND ${askedSql("category", `${alias}.category_confidence`)} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
+		AND ${alias}.pending = 0 AND ${askedSql("category", `${alias}.category_confidence`)} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
 		AND EXISTS (SELECT 1 FROM categories ac WHERE ac.id = ${alias}.jev_category_id AND ac.archived = 0))`;
 
