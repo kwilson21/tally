@@ -731,7 +731,7 @@ describe("HELD_FOR_REVIEW_SQL is self-contained (owner decision c)", () => {
 
 // Deliberately unchanged: a transfer credit the person included on purpose stays held until they review it. Treating it as
 // settled contradicted the list, the edit panel, the breakdown and split parts. Tracked in GitHub issue #870 (stuck held
-// credits) and the design issue "Design how a person-included transfer credit works".
+// credits) and design issue #878 ("Design how a transfer credit that a person included should work").
 describe("an included, unreviewed transfer credit is held (characterization, #870)", () => {
 	it("is held for review, and no income or category question reaches it", () => {
 		const name = "credit flagged as transfer, Jev income maybe";
