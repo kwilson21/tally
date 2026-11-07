@@ -57,14 +57,22 @@ export async function readSortingTurn(
 }
 
 /**
- * The group id and the `until` of a stored turn, read as SQL, with the same reading as `parseSortingTurn`: a value that
- * is not JSON, an id that is not text, or an until that is not a number reads as null (so, with no until, as a turn that
- * ran out). Plain `json_extract` would raise an error on a damaged row, or compare a text until as larger than any time.
+ * Whether a stored turn has the whole shape `parseSortingTurn` accepts: JSON that is an object with a text `id`, and an
+ * `until` that is a number, null or missing. 1 or 0. The shape is judged as a whole, as the parser judges it, so a row
+ * with a future `until` and no valid `id` is a damaged row, not a turn nobody can take.
+ */
+export const turnShapeOkSql = (column: string) =>
+	`(CASE WHEN json_valid(${column}) THEN (json_type(${column}, '$') = 'object' AND json_type(${column}, '$.id') = 'text' AND COALESCE(json_type(${column}, '$.until'), 'null') IN ('null', 'integer', 'real')) ELSE 0 END)`;
+
+/**
+ * The group id and the `until` of a stored turn, read as SQL with the same reading as `parseSortingTurn`: null for a
+ * damaged row (so, with no until, a turn that ran out that nobody holds). Plain `json_extract` would raise an error on
+ * a value that is not JSON, and would trust one field of a row whose other fields make it damaged.
  */
 export const turnIdSql = (column: string) =>
-	`(CASE WHEN json_valid(${column}) AND json_type(${column}, '$.id') = 'text' THEN json_extract(${column}, '$.id') END)`;
+	`(CASE WHEN ${turnShapeOkSql(column)} THEN json_extract(${column}, '$.id') END)`;
 export const turnUntilSql = (column: string) =>
-	`(CASE WHEN json_valid(${column}) AND json_type(${column}, '$.until') IN ('integer', 'real') THEN json_extract(${column}, '$.until') END)`;
+	`(CASE WHEN ${turnShapeOkSql(column)} THEN (CASE WHEN json_type(${column}, '$.until') IN ('integer', 'real') THEN json_extract(${column}, '$.until') END) END)`;
 
 /** True while the turn is held by the id bound to `param`; a save's statements append it to their WHERE clause. */
 export const turnHeldSql = (param = "?") =>

@@ -262,6 +262,10 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 		'{"id":3}',
 		'{"id":"B","until":"soon"}',
 		'{"id":"B","until":true}',
+		'{"id":"B","until":[1]}',
+		// A future until with no valid id, or with an id that is not text, is damaged, not a turn nobody can take.
+		'{"until":9999999999999}',
+		'{"id":3,"until":9999999999999}',
 	];
 
 	async function seedRaw(value: string) {
@@ -322,6 +326,12 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 				.bind(ME)
 				.first<{ held: number }>();
 			expect(checked?.held, `${bad}: guard`).toBe(0);
+			// Nor does it pass for the id a damaged row still names: a damaged row is nobody's turn.
+			const named = await db
+				.prepare(`SELECT ${turnHeldSql()} AS held`)
+				.bind(OTHER)
+				.first<{ held: number }>();
+			expect(named?.held, `${bad}: guard for ${OTHER}`).toBe(0);
 			expect(next(sortingTurnMachine, "free", "RELEASE")).toBeNull();
 			expect(next(sortingTurnMachine, "free", "HOLDS")).toBeNull();
 		}
