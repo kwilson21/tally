@@ -443,3 +443,57 @@ describe("the pending-to-posted merge picks the later note state", () => {
 		expect(row).toMatchObject({ state: "emptied_by_person", note: null });
 	});
 });
+
+describe("a save that reads a note's state before it writes", () => {
+	beforeEach(async () => {
+		await clean();
+		await db
+			.prepare(
+				"INSERT INTO accounts (id, name, type, balance_cents) VALUES (?, 'Test', 'depository', 0)",
+			)
+			.bind(ACCOUNT)
+			.run();
+	});
+
+	it("does not write the old state back over a guess stored between the read and the save", async () => {
+		await seed(20, "queued");
+		// Workers AI stores its guess after saveEdit has read the row and before its batch runs.
+		const racing = new Proxy(db, {
+			get(target, property) {
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						await saveNoteAttempts(
+							target,
+							[idOf(20)],
+							[{ id: idOf(20), note: "Birthday cake" }],
+							[],
+						);
+						return target.batch(statements);
+					};
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		// A kind-only edit: the note is not changed, so the save must not rewrite the note's state.
+		await saveEdit(
+			racing as unknown as D1Database,
+			idOf(20),
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: true,
+				kind: "one_off",
+				noteProvided: false,
+			} as Parameters<typeof saveEdit>[2],
+			"user@example.com",
+		);
+		expect(await stateOf(idOf(20))).toMatchObject({
+			state: "guessed",
+			note: "Birthday cake",
+		});
+	});
+});

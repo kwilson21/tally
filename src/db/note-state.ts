@@ -77,6 +77,10 @@ export function noteStateList(states: readonly NoteState[]): string {
 /**
  * The state a row with no guess and no person's note has, from its flags, for the states the pipeline moves through.
  * The merge uses it after it has merged the flags, so a state never disagrees with the Jev answer beside it.
+ *
+ * This TypeScript ladder is the single source for the merge's reread. The migration 0068 backfill (a frozen migration)
+ * has its own literal copy of the same ladder, plus its guess and person branches; the test in
+ * test/note-state-migration.test.ts checks that the two agree for every real flag combination.
  */
 export function pipelineNoteStateSql(table: string): string {
 	const t = table;

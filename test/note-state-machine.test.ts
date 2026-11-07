@@ -118,22 +118,20 @@ async function clean() {
 	]);
 }
 
-async function insert(id: number, state: NoteState, note: string | null) {
+async function insert(
+	id: number,
+	state: NoteState,
+	note: string | null,
+	// By default an unasked row has not been asked (0) and every other row has been (1).
+	detailsAsked: number = state === "unasked" ? 0 : 1,
+) {
 	await db
 		.prepare(
 			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, note, details_asked,
 				note_worth_writing, note_state, updated_by)
 			 VALUES (?, ?, '2026-10-01', 1299, 'CORNER STORE', ?, ?, ?, ?, 'user')`,
 		)
-		.bind(
-			id,
-			ACCOUNT,
-			note,
-			// A Jev walk starts from an unasked row (details_asked 0); the others start from an answered one.
-			state === "unasked" ? 0 : 1,
-			state === "unasked" ? null : 1,
-			state,
-		)
+		.bind(id, ACCOUNT, note, detailsAsked, detailsAsked === 0 ? null : 1, state)
 		.run();
 }
 
@@ -185,7 +183,8 @@ describe("every writer, from every state, stores what the machine says", () => {
 
 	it("Jev's answer (the detail writer)", async () => {
 		for (const walk of WALK.filter((w) => w.event.startsWith("jev_"))) {
-			await insert(walk.id, walk.state, null);
+			// Every state, unasked or not, with details_asked 0: the writer's guard lets only the unasked ones through.
+			await insert(walk.id, walk.state, null, 0);
 			const worth =
 				walk.event === "jev_worth"
 					? 1

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import type { NoteState } from "../src/db/note-state";
+import { type NoteState, pipelineNoteStateSql } from "../src/db/note-state";
 
 const db = env.DB;
 const migration = env.TEST_MIGRATIONS.find((item) =>
@@ -351,7 +351,7 @@ describe("migration 0068 note_state backfill", () => {
 		}
 	});
 
-	it("gives a row Jev said yes to, that a person emptied, no queue state when the try is recorded", async () => {
+	it("keeps a person's emptied note as emptied_by_person, and a note Workers AI answered empty out of the queue", async () => {
 		if (!FIX || !BACKFILL)
 			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
@@ -384,5 +384,33 @@ describe("migration 0068 note_state backfill", () => {
 			.prepare("DELETE FROM transactions WHERE id = ?")
 			.bind(LAST + 1)
 			.run();
+	});
+});
+
+describe("the merge's reread of a row's state agrees with the backfill", () => {
+	beforeEach(async () => {
+		await clean();
+		await seed();
+	});
+	afterAll(clean);
+
+	it("gives the backfill's state for every pipeline and dismissed row of the real flag combinations", async () => {
+		if (!FIX || !BACKFILL)
+			throw new Error("Migration 0068 statements are missing");
+		await db.prepare(FIX).run();
+		await db.prepare(BACKFILL).run();
+		// The merge rereads a row's state from its flags with the TypeScript ladder (pipelineNoteStateSql). Guessed and
+		// written rows are never reread from flags (a person's act or a guess is not a flag pattern), so they are left out.
+		const { results } = await db
+			.prepare(
+				`SELECT id, note_state AS backfilled, ${pipelineNoteStateSql("transactions")} AS reread
+				 FROM transactions WHERE id BETWEEN ? AND ? AND note_state NOT IN ('guessed', 'written') ORDER BY id`,
+			)
+			.bind(FIRST, LAST)
+			.all<{ id: number; backfilled: string; reread: string }>();
+		expect(results.length).toBeGreaterThan(10);
+		for (const row of results) {
+			expect(row.reread, `row ${row.id}`).toBe(row.backfilled);
+		}
 	});
 });

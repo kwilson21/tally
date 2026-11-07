@@ -1539,7 +1539,7 @@ export async function saveEdit(
 					for_person_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE for_person_guessed END,
 					for_person_cleared = CASE WHEN ? = 1 THEN ? ELSE for_person_cleared END,
 					note = CASE WHEN ? = 1 THEN ? ELSE note END,
-					note_state = ?,
+					note_state = CASE WHEN ? = 1 THEN ? ELSE note_state END,
 					note_guessed = CASE WHEN ? = 1 OR ? = 1 THEN 0 ELSE note_guessed END,
 					note_tried_at = CASE WHEN ? = 1 AND trim(COALESCE(?, '')) = '' THEN datetime('now') ELSE note_tried_at END,
 					note_dismissed = CASE WHEN ? = 1 AND ? = 1 AND trim(COALESCE(?, '')) = '' THEN 1 ELSE note_dismissed END,
@@ -1560,6 +1560,8 @@ export async function saveEdit(
 					edit.forPersonId === null ? 1 : 0,
 					noteChanged ? 1 : 0,
 					edit.note,
+					// Written only when the machine moves the note, so an untouched note's state is never rewritten.
+					nextNote !== current.noteState ? 1 : 0,
 					nextNote,
 					noteChanged ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
