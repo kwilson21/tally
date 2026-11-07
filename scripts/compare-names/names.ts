@@ -15,6 +15,7 @@ import {
 	suggestCategoryName,
 	suggestNote,
 } from "../../src/ai/suggest-name";
+import { cleanBankText } from "../../src/clean-bank-text";
 import { DEFAULT_TIME_ZONE, todayIn } from "../../src/dates";
 import { buildSeed, type Seed } from "../../src/demo/seed";
 import { tidyName } from "../../src/transactions/tidy-name";
@@ -282,7 +283,8 @@ export async function askOther(
 					// Names to avoid: none. Production lists only archived categories and dismissed suggestions here
 					// (purchaseNamesToAvoid), and gives the active ones as choices, so the fixtures have nothing to avoid.
 					[],
-					text,
+					// The bank text as production sends it: cleaned first (cleanBankText), as suggestedCategoryName does.
+					cleanBankText(text),
 					categories,
 				).then((r) =>
 					r.ok ? { ok: true as const, value: r.name } : { ok: false as const },

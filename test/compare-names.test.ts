@@ -537,6 +537,23 @@ describe("the note and category-name prompts, with a candidate model in place of
 		expect(report).toMatch(/^# .*categor/im);
 	});
 
+	it("gives the category prompt the bank text as production cleans it, not the raw statement text", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "Pet care" }));
+		await runNamesComparison(
+			{ AI: ai },
+			{ models: ["granite"], limit: 80, task: "categories" },
+			TODAY,
+		);
+		const sent = run.mock.calls.map(
+			([, body]) => body.messages[1]?.content ?? "",
+		);
+		// "SQ *BLUE BOTTLE COFFEE 0231" is in the extra texts; production strips its "SQ *" marker before sending.
+		expect(sent.some((content) => content.includes("SQ *"))).toBe(false);
+		expect(sent.some((content) => /blue bottle coffee/i.test(content))).toBe(
+			true,
+		);
+	});
+
 	it("keeps the model that production uses out of these calls", async () => {
 		const { ai, run } = fakeAi(() => ({ response: "Weekly groceries" }));
 		await runNamesComparison(
