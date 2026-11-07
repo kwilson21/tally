@@ -34,7 +34,6 @@ import { EmptyState } from "../src/views/empty-state";
 import { ErrorPage } from "../src/views/error-page";
 import { FilterSelect } from "../src/views/filter-select";
 import {
-	BillsDiagram,
 	BudgetDiagram,
 	CategoriesDiagram,
 	ExclusionsDiagram,
@@ -491,13 +490,6 @@ describe("GET /design-system in the demo", () => {
 			HowLink({ section: "budget" }),
 			SystemDiagram(),
 			BudgetDiagram({ ...BUDGET_EXAMPLE, id: "budget-diagram-plain" }),
-			BillsDiagram({
-				amount: "$142.00",
-				due: "Sep 21",
-				paid: "Sep 24",
-				windowDays: 5,
-				tolerance: "10%",
-			}),
 			TransactionsDiagram(TRANSACTIONS_EXAMPLE),
 			ExclusionsDiagram(EXCLUSIONS_EXAMPLE),
 			CategoriesDiagram(CATEGORIES_EXAMPLE),

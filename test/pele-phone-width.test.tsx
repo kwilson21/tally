@@ -9,7 +9,6 @@ import {
 	merchantSuggestionMachine,
 } from "../src/machines/merchant-suggestion";
 import {
-	BillsDiagram,
 	CategoriesDiagram,
 	TransactionsDiagram,
 } from "../src/views/how-diagrams";
@@ -45,17 +44,6 @@ describe("Pele pictures on a phone (issue #904)", () => {
 					title: "t",
 					machine: categorySuggestionMachine,
 					labels: CATEGORY_SUGGESTION_LABELS,
-				}),
-		],
-		[
-			"Bills",
-			() =>
-				BillsDiagram({
-					amount: "$1,234.56",
-					due: "Sep 21",
-					paid: "Sep 24",
-					windowDays: 5,
-					tolerance: "10%",
 				}),
 		],
 		[
