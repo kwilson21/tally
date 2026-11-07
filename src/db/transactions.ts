@@ -185,11 +185,17 @@ export const PAGE_SIZE = 25;
 /** A transaction that still needs a category (Home's count, Organize's list). Needs `t` and COUNTED_JOINS. */
 export const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 /**
- * A credit a person still has to review (decision 70): money in, not reviewed, not income, not flagged as a transfer
- * (a transfer is settled, owner decision for #861), not a split parent, and in the budget (INCLUDED). Monthly counts and the night's needs-you count both read it. Needs `t` only, so it is self-contained.
+ * A credit flagged as a transfer that nobody reviewed, that isn't income, and that no bill or plan explains (its link would make
+ * it a payment, which is never Excluded). It is settled, not held for review (decision 174, d). It is in How Tally works'
+ * excluded transfer line, whether or not it is in the budget (EXCLUDED_SQL).
+ */
+const SETTLED_TRANSFER_SQL = `(t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.flag_transfer = 1 AND NOT ${paysBillOrPlanSql("t")})`;
+/**
+ * A credit a person still has to review (decision 70): money in, not reviewed, not income, not a settled transfer (decision 174),
+ * not a split parent, and in the budget (INCLUDED). Monthly counts and the night's needs-you count both read it. Needs `t` only, so it is self-contained.
  * It needs no "not a refund that follows its purchase" check: a follows-purchase refund is always reviewed, so it can't be here.
  */
-export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.flag_transfer = 0 AND t.is_split = 0 AND ${INCLUDED}`;
+export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.is_split = 0 AND ${INCLUDED} AND NOT ${SETTLED_TRANSFER_SQL}`;
 export const OLDER_NEEDS_CATEGORY_SQL = `SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS}
 	WHERE (t.date < ?1 OR (t.date >= ?1 AND t.date < ?2 AND ${COUNTED_MONTH} < ?3))
 	AND ${NEEDS_CATEGORY}`;
@@ -213,13 +219,21 @@ export const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.fl
  *   so not a payment linked to a bill (spec §8.5). A split shows by its parts, as the others do, so
  *   it lists exactly what How Tally works' excluded count counts (`excludedBreakdown`).
  */
+/**
+ * Excluded, for How Tally works' excluded count and the Excluded filter: left out of the budget, or a settled transfer
+ * credit (SETTLED_TRANSFER_SQL, decision 174). Every non-split transaction of a month is in exactly one of counted,
+ * held for review, or excluded: an included credit that is not income and not settled is held, and the partition test
+ * checks the whole set.
+ */
+const EXCLUDED_SQL = `((NOT ${INCLUDED} OR ${SETTLED_TRANSFER_SQL}) AND t.is_split = 0)`;
+
 const SHOW_SQL: Record<Show, string | null> = {
 	all: null,
 	spending: `(${COUNTED_SPENDING})`,
 	income: "t.flag_income = 1",
 	refunds: `(t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(p.flag_income, 0) = 0 AND t.is_split = 0
 		AND (${paysBillOrPlanSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
-	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
+	excluded: EXCLUDED_SQL,
 };
 const RAW_SHOW_SQL: Record<Show, string | null> = {
 	...SHOW_SQL,

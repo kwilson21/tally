@@ -82,10 +82,15 @@ export type Money =
 	| { kind: "credit"; state: CreditState };
 
 export type CreditState =
-	// Money in that nobody has reviewed yet: it waits for a person (decision 70).
+	// Money in that nobody has reviewed, in the budget, not income and not a transfer: it waits for a person
+	// (decision 70). Exactly the rows HELD_FOR_REVIEW_SQL matches.
 	| { kind: "held_for_review" }
-	// Flagged as a transfer, so settled and not held for review (owner decision, #861).
+	// Money in flagged as income by Tally, not reviewed. It counts as income, so it is not held.
+	| { kind: "unreviewed_income" }
+	// Money in flagged as a transfer, not reviewed, not income, and not explained by a bill or plan: settled, not held (decision 174, d).
 	| { kind: "settled_transfer" }
+	// Money in, not reviewed, and not held: out of the budget, or a split parent.
+	| { kind: "unreviewed_not_held" }
 	// A reviewed credit that is not a refund of a counted purchase.
 	| { kind: "reviewed"; by: "user" | "other" }
 	// A reviewed refund whose purchase is still counted. It takes the purchase's month and category.
@@ -175,13 +180,23 @@ function incomeOf(r: Row): Income {
 	return { kind: "income", setBy: "unknown" };
 }
 
-function moneyOf(r: Row, ctx: Context, income: Income): Money {
+function moneyOf(
+	r: Row,
+	ctx: Context,
+	income: Income,
+	counted: boolean,
+): Money {
 	if (r.amount_cents >= 0) return { kind: "purchase" };
 	const reviewed = (r.credit_reviewed ?? 0) === 1;
 	if (!reviewed) {
-		if (r.flag_transfer === 1)
+		if (income.kind === "income")
+			return { kind: "credit", state: { kind: "unreviewed_income" } };
+		// A transfer that a bill or plan explains is a payment, which is never Excluded, so it stays held.
+		if (r.flag_transfer === 1 && !ctx.paysBillOrPlan)
 			return { kind: "credit", state: { kind: "settled_transfer" } };
-		return { kind: "credit", state: { kind: "held_for_review" } };
+		if (counted && r.is_split === 0)
+			return { kind: "credit", state: { kind: "held_for_review" } };
+		return { kind: "credit", state: { kind: "unreviewed_not_held" } };
 	}
 	const purchaseCounts =
 		ctx.refundTarget !== null && !ctx.refundTarget.excluded;
@@ -229,7 +244,7 @@ export function classify(r: Row, ctx: Context): Classified {
 	const structure = structureOf(r);
 	const budget = budgetOf(r, ctx);
 	const income = incomeOf(r);
-	const money = moneyOf(r, ctx, income);
+	const money = moneyOf(r, ctx, income, budget.kind === "counted");
 	const category = categoryOf(r);
 	const questions = questionsOf(r, ctx, {
 		structure,
@@ -301,13 +316,9 @@ function questionsOf(
 		notSplitParent &&
 		!pending;
 
-	// A transfer credit is settled, so it is not held (owner decision, #861).
+	// Read from the money state, so the named state and this question always agree (decision 174).
 	const heldForReview =
-		heldCredit &&
-		!isIncome &&
-		notSplitParent &&
-		counted &&
-		r.flag_transfer === 0;
+		a.money.kind === "credit" && a.money.state.kind === "held_for_review";
 
 	const needsJevClassification =
 		counted &&

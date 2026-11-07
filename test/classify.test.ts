@@ -828,3 +828,27 @@ describe("waitingForJev with no active category (the other branch of the categor
 		).toBeGreaterThan(0);
 	});
 });
+
+// Decision 174: the named money state and the SQL held rule say the same thing about every row.
+describe("the named money state agrees with the SQL held rule (decision 174)", () => {
+	it("held_for_review exactly where HELD_FOR_REVIEW_SQL matches, on every row", () => {
+		const isHeldState = (id: number) => {
+			const money = classifiedOf(id).money;
+			return money.kind === "credit" && money.state.kind === "held_for_review";
+		};
+		const wrong = rows
+			.filter((r) => isHeldState(r.id) !== sets.heldForReview.has(r.id))
+			.map((r) => r.id);
+		expect(wrong.slice(0, 10), `${wrong.length} rows differ`).toEqual([]);
+		expect(sets.heldForReview.size).toBeGreaterThan(0);
+	});
+
+	it("an unreviewed income credit is unreviewed_income, not held", () => {
+		const name = "income flagged by Tally, not chosen";
+		expect(classifiedOf(idOf(name)).money).toEqual({
+			kind: "credit",
+			state: { kind: "unreviewed_income" },
+		});
+		expect(sqlSays("heldForReview", name)).toBe(false);
+	});
+});
