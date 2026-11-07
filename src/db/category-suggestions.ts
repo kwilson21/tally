@@ -474,7 +474,7 @@ export async function createFromSuggestion(
 				),
 			db
 				.prepare(
-					`UPDATE transactions SET note=json_extract(note.value,'$.note'),updated_by=?,updated_at=datetime('now') FROM json_each(?) AS note WHERE transactions.id=json_extract(note.value,'$.id') AND transactions.category_suggestion_id=? AND transactions.category_id IS NULL AND transactions.category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
+					`UPDATE transactions SET note=json_extract(note.value,'$.note'),note_guessed=0,note_state='written',updated_by=?,updated_at=datetime('now') FROM json_each(?) AS note WHERE transactions.id=json_extract(note.value,'$.id') AND transactions.category_suggestion_id=? AND transactions.category_id IS NULL AND transactions.category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
 				)
 				.bind(actor, JSON.stringify(notes), id, id, token),
 			db

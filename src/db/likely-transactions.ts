@@ -66,7 +66,7 @@ type LikelyRecord = Omit<
 // refunds and caption as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN, BILL_NAME_COLUMN,
 // PLAN_NAME_COLUMN and COUNTS_IN_MONTH_COLUMN, and the caption's refund and bank-change fields), so a row reads the same here.
 const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-	${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note, t.note_guessed AS noteGuessed,
+	${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note, (t.note_state = 'guessed') AS noteGuessed,
 	t.excluded AS excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 	t.category_id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 	${MAYBE_CATEGORY_COLUMNS}, ${REFUNDED_COLUMN},

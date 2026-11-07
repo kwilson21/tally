@@ -568,8 +568,8 @@ async function addNoteCandidates(n: number) {
 	await db
 		.prepare(
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-			 INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing)
-			 SELECT 'plaid-note-' || i, 1, '2026-09-20', 650, 'NOTE SHOP ' || i, 'Note Shop', 1, 1 FROM n`,
+			 INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state)
+			 SELECT 'plaid-note-' || i, 1, '2026-09-20', 650, 'NOTE SHOP ' || i, 'Note Shop', 1, 1, 'queued' FROM n`,
 		)
 		.bind(n)
 		.run();
@@ -633,8 +633,8 @@ describe("suggestTransactionNotes", () => {
 		] as const)
 			await db
 				.prepare(
-					`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing)
-					 VALUES (?, 1, ?, 650, ?, 'Note Shop', 1, 1)`,
+					`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state)
+					 VALUES (?, 1, ?, 650, ?, 'Note Shop', 1, 1, 'queued')`,
 				)
 				.bind(`plaid-note-${rawName}`, date, rawName)
 				.run();

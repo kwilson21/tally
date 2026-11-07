@@ -647,7 +647,7 @@ describe("the likely transactions after a new category", () => {
 		async ({ details, shows }) => {
 			const guessed = (
 				await env.DB.prepare(
-					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, note_guessed) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432', 'Birthday cake', 1) RETURNING id",
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, note_guessed, note_state) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432', 'Birthday cake', 1, 'guessed') RETURNING id",
 				)
 					.bind(`${THIS}-04`)
 					.first<{ id: number }>()
