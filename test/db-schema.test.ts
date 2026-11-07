@@ -17,6 +17,7 @@ import {
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	CHECK_LISTS,
 	categorySuggestions,
+	MERCHANT_STATUS_VALUES,
 	merchants,
 } from "../src/db/schema";
 
@@ -335,6 +336,67 @@ describe("the drift check fails on a wrong schema", () => {
 		});
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.ghost is not in the database",
+		);
+	});
+
+	// Primary keys and not-null. A primary key's not-null is not compared (see drift()): Drizzle's primaryKey() sets
+	// notNull in the model although the migrations never write NOT NULL on the key, so only the non-key columns below
+	// check it.
+
+	it("a column the schema says is not the primary key, but the database says is", async () => {
+		const wrong = sqliteTable("category_suggestions", {
+			id: integer(), // the database: INTEGER PRIMARY KEY AUTOINCREMENT
+			name: text().notNull(),
+			status: text({ enum: CATEGORY_SUGGESTION_STATUS_VALUES }).notNull(),
+			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+			decidedAt: text("decided_at"),
+		});
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.id primary key differs",
+		);
+	});
+
+	it("a primary key the database does not have", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name"), // the database: TEXT PRIMARY KEY
+			suggestedName: text("suggested_name"),
+			displayName: text("display_name"),
+			defaultCategoryId: integer("default_category_id"),
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants.raw_name primary key differs",
+		);
+	});
+
+	it("a non-key column the database has NOT NULL on, but the schema leaves nullable", async () => {
+		const wrong = sqliteTable("category_suggestions", {
+			id: integer().primaryKey({ autoIncrement: true }),
+			name: text(), // the database: name TEXT NOT NULL
+			status: text({ enum: CATEGORY_SUGGESTION_STATUS_VALUES }).notNull(),
+			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+			decidedAt: text("decided_at"),
+		});
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.name not-null differs",
+		);
+	});
+
+	it("a non-key column the schema says NOT NULL, but the database leaves nullable", async () => {
+		const wrong = sqliteTable("category_suggestions", {
+			id: integer().primaryKey({ autoIncrement: true }),
+			name: text().notNull(),
+			status: text({ enum: CATEGORY_SUGGESTION_STATUS_VALUES }).notNull(),
+			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+			decidedAt: text("decided_at").notNull(), // the database: decided_at TEXT, nullable
+		});
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"category_suggestions.decided_at not-null differs",
 		);
 	});
 
