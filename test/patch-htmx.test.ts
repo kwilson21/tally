@@ -54,7 +54,7 @@ describe("the htmx the patch was written for", () => {
 	it("is the installed version, so an upgrade is looked at before it is trusted", () => {
 		expect(
 			htmxPackage.version,
-			`htmx was upgraded from ${PATCHED_FOR}. Read its changelog for the RequestQueue.continue() fix (decision 112, #471). Fixed: delete scripts/patch-htmx.mjs, its test and the build:vendor step. Not fixed: update the anchors if they moved, then set PATCHED_FOR here.`,
+			`htmx was upgraded from ${PATCHED_FOR}. Read its changelog for the RequestQueue.continue() fix (decision 112, #471). Fixed: delete scripts/patch-htmx.mjs and its test, and take the node scripts/patch-htmx.mjs command out of build:vendor (keep its html2canvas copy). Not fixed: update the anchors if they moved, then set PATCHED_FOR here.`,
 		).toBe(PATCHED_FOR);
 	});
 
