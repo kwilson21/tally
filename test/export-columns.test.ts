@@ -17,7 +17,11 @@ const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
 			"A random one-use token for a Not this one's Undo (spec §5, #340); not family data.",
 	},
 	category_archive_periods: {
-		id: "UNKNOWN: ask the owner",
+		id: "A row number; the category and both days are exported.",
+	},
+	maybe_names: {
+		claim:
+			"A random token that lets one request finish the row (migration 0063, decision 161); not family data.",
 	},
 };
 
@@ -29,8 +33,8 @@ const NOT_EXPORTED: Record<string, string> = {
 		"A one-use, ten-second undo snapshot for a deleted cash entry, removed by the nightly run (spec §5, decision 84).",
 	planned_delete_holds:
 		"A ten-second undo snapshot for a deleted plan, removed by each later delete (spec §5, decision 101).",
-	feedback: "UNKNOWN: ask the owner",
-	maybe_names: "UNKNOWN: ask the owner",
+	feedback:
+		"Left out of the download by the owner's choice (2026-11-07); the in-app feedback form has its own privacy handling (decision 61).",
 };
 
 // Tables tallyExport reads with its own statement rather than EXPORT_COLUMNS.

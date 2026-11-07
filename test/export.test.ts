@@ -231,6 +231,42 @@ describe("data exports", () => {
 		expect(csv).toMatch(/\r\n/);
 	});
 
+	it("includes each kept Maybe name with its transaction, its time and categories key, and never its claim token", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO maybe_names (transaction_id, name, claim, categories_key, created_at) VALUES (1, 'Pet Supplies', 'claim-token-one', 'abcdef0123456789', '2026-11-01 09:00:00')",
+			),
+			env.DB.prepare(
+				"INSERT INTO maybe_names (transaction_id, name, claim, categories_key, created_at) VALUES (2, NULL, 'claim-token-two', NULL, '2026-11-01 09:05:00')",
+			),
+		]);
+		const text = await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).text();
+		const data = JSON.parse(text) as {
+			maybe_names: Record<string, unknown>[];
+		};
+
+		expect(data.maybe_names).toHaveLength(2);
+		expect(data.maybe_names).toEqual(
+			expect.arrayContaining([
+				{
+					transaction_id: 1,
+					name: "Pet Supplies",
+					created_at: "2026-11-01 09:00:00",
+					categories_key: "abcdef0123456789",
+				},
+				{
+					transaction_id: 2,
+					name: null,
+					created_at: "2026-11-01 09:05:00",
+					categories_key: null,
+				},
+			]),
+		);
+		expect(text).not.toContain("claim-token");
+	});
+
 	it("includes every specified table while exposing only safe bank and document fields", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_members (email, session_issued_at) VALUES ('person@example.com', 1)",
@@ -311,6 +347,7 @@ describe("data exports", () => {
 			"household_members",
 			"household_people",
 			"never_suggest_rules",
+			"maybe_names",
 		]) {
 			expect(data[table], table).toBeInstanceOf(Array);
 		}
