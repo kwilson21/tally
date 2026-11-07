@@ -278,13 +278,36 @@ async function change(
 	event: Event,
 	options: ItemOptions = {},
 ): Promise<ItemResult> {
-	const retryable = options.seen === undefined && options.lockId === undefined;
 	let result: ItemResult = "lost-race";
-	for (let attempt = 1; attempt <= (retryable ? MAX_ATTEMPTS : 1); attempt++) {
+	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
 		result = await attemptChange(db, itemId, event, options);
 		if (result !== "lost-race") break;
+		// Two kinds of lost race. A sync that has lost its lease is finished: another run owns the bank now, so
+		// nothing more is written. A sync that still holds its lease lost only to a change of state (a webhook, or a
+		// relink), so its completion is tried again against that state.
+		if (options.lockId !== undefined) {
+			if (!(await leaseHeld(db, itemId, options.lockId))) break;
+		} else if (options.seen !== undefined) {
+			// A caller that passed `seen` decided on that state, so it hears about the race at once.
+			break;
+		}
 	}
 	return result;
+}
+
+/** True when the row is still in a live state and this sync's lease is still its own. */
+async function leaseHeld(
+	db: D1Database,
+	itemId: number,
+	lockId: string,
+): Promise<boolean> {
+	const row = await db
+		.prepare(
+			"SELECT 1 AS held FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL",
+		)
+		.bind(itemId, lockId)
+		.first();
+	return row !== null;
 }
 
 /** One attempt: read the row, ask the machine, and write or confirm. */

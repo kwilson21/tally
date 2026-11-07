@@ -464,6 +464,73 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	});
 });
 
+describe("a sync's completion that loses a race (decision 173)", () => {
+	// The sync read an ok bank under its lease. A webhook or a relink changes the bank before the completion write.
+	it("a login error that lands before the completion is superseded: the bank ends ok, and the revision moves", async () => {
+		const id = await addBank("ok", { lockId: LOCK });
+		const db = raceBefore(
+			"UPDATE plaid_items SET",
+			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
+			id,
+		);
+		expect(await markSyncSucceeded(db, id, LOCK)).toBe("changed");
+		expect(await rowOf(id)).toMatchObject({
+			status: "ok",
+			attention_login: 0,
+			attention_held: 0,
+			connection_revision: 1,
+		});
+	});
+
+	it("a needs-relink flag that lands before the completion survives it, and stays flagged for a relink", async () => {
+		const id = await addBank("ok", { lockId: LOCK });
+		const db = raceBefore(
+			"UPDATE plaid_items SET",
+			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 0, attention_held = 1 WHERE id = ?",
+			id,
+		);
+		expect(await markSyncSucceeded(db, id, LOCK)).toBe("unchanged");
+		expect(await rowOf(id)).toMatchObject({
+			status: "needs_attention",
+			attention_login: 0,
+			attention_held: 1,
+			connection_revision: 1,
+		});
+	});
+
+	it("a lost lease in that window writes nothing, and the result is lost-race", async () => {
+		const id = await addBank("ok", { lockId: LOCK });
+		const fired = { count: 0 };
+		const db = raceBefore(
+			"UPDATE plaid_items SET",
+			"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+			id,
+			{ fired },
+		);
+		expect(await markSyncSucceeded(db, id, LOCK)).toBe("lost-race");
+		expect(fired.count).toBe(1);
+		expect(await rowOf(id)).toMatchObject({
+			status: "ok",
+			connection_revision: 0,
+			sync_lock_id: "newer-run",
+		});
+	});
+
+	it("three consecutive state changes end lost-race after exactly three writes", async () => {
+		const id = await addBank("ok", { lockId: LOCK });
+		const fired = { count: 0 };
+		// Every completion write loses: the held flag is flipped just ahead of each attempt's write.
+		const db = raceBefore(
+			"UPDATE plaid_items SET",
+			"UPDATE plaid_items SET attention_held = 1 - attention_held WHERE id = ?",
+			id,
+			{ times: 3, fired },
+		);
+		expect(await markSyncSucceeded(db, id, LOCK)).toBe("lost-race");
+		expect(fired.count).toBe(3);
+	});
+});
+
 describe("the connection revision (decision 173)", () => {
 	it("a good sync on an ok bank moves the revision, though the state does not change", async () => {
 		const id = await addBank("ok", { lockId: LOCK });

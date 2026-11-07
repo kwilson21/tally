@@ -1164,8 +1164,16 @@ export async function syncItem(
 			}
 			if (!page.has_more) {
 				// Every page is in and this run still holds the lease, so the login works: a bank that needed attention is
-				// fine again (decision 173). Refused or unchanged for a bank that was fine already.
-				await markSyncSucceeded(env.DB, itemRowId, lockId);
+				// fine again (decision 173). The store retries a completion that loses only to a change of state, so a
+				// lost-race here means the lease was taken, or the bank kept changing through every try. Either way the
+				// sync does not report success: the bank's flags are left alone, and the next run tries again.
+				const completed = await markSyncSucceeded(env.DB, itemRowId, lockId);
+				if (completed === "lost-race") {
+					console.error(
+						`plaid sync could not record its completion for item ${itemRowId}`,
+					);
+					throw new Error("Plaid sync could not record its completion");
+				}
 				if (runAfterSync) await afterSync(env.DB);
 				return { ...summary, changedIds: [...changedIds] };
 			}
