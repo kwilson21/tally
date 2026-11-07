@@ -222,5 +222,32 @@ describe("JSON export column guard", () => {
 				"categories.name: in NAMED_OMISSIONS but exported, remove it",
 			);
 		});
+
+		it("reports a named omission for a column the table does not have", () => {
+			expect(
+				exportProblems(schema, exported, {
+					...lists,
+					namedOmissions: { categories: { gone: "stale" } },
+				}),
+			).toContain("categories.gone: in NAMED_OMISSIONS but not a live column");
+		});
+
+		it("reports a NOT_EXPORTED table that is not an app table", () => {
+			expect(
+				exportProblems(schema, exported, {
+					...lists,
+					notExported: { missing_table: "stale" },
+				}),
+			).toContain("missing_table: in NOT_EXPORTED but not an app table");
+		});
+
+		it("reports a NOT_EXPORTED table that EXPORT_COLUMNS also exports", () => {
+			expect(
+				exportProblems(schema, exported, {
+					...lists,
+					notExported: { categories: "stale" },
+				}),
+			).toContain("categories: in NOT_EXPORTED but also in EXPORT_COLUMNS");
+		});
 	});
 });
