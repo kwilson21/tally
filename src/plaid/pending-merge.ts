@@ -292,8 +292,17 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.amount_cents < 0 AND p.amount_cents = ?3 AND p.credit_reviewed = 1
 	 AND p.credit_reviewed_by IS NULL AND p.category_confidence IS NOT NULL
 	 AND COALESCE(transactions.credit_reviewed, 0) = 0 AND transactions.credit_reviewed_by IS NULL`,
-	`UPDATE transactions SET updated_by = p.updated_by
-	 ${FROM_PENDING} AND p.updated_by IS NOT NULL AND transactions.updated_by IS NULL`,
+	// This statement also carries Jev's failure count (decision 176), so a pending row that had given up does not start its
+	// five calls again as a posted row. The count moves only while the question is the same one Jev failed on (the same bank
+	// text, name, amount and account) and the posted row has no category, since a filed row is never counted. It shares this
+	// statement so a merge costs the same number of statements as before (test/plaid-sync-page-limit.test.ts).
+	`UPDATE transactions SET
+		updated_by = CASE WHEN p.updated_by IS NOT NULL AND transactions.updated_by IS NULL THEN p.updated_by ELSE transactions.updated_by END,
+		jev_attempts = CASE WHEN p.jev_attempts > transactions.jev_attempts AND p.amount_cents = ?3
+			AND p.raw_name IS transactions.raw_name AND p.own_name IS transactions.own_name AND p.account_id = transactions.account_id
+			AND transactions.category_id IS NULL AND transactions.category_source IS NULL AND transactions.is_split = 0
+			THEN p.jev_attempts ELSE transactions.jev_attempts END
+	 ${FROM_PENDING}`,
 	// A No on a Maybe income or transfer (decision 101) is the person's choice, so it moves with their other choices
 	// whatever the amount, as the same-row sync keeps it when the amount changes: the posted row isn't asked again.
 	`UPDATE transactions SET income_maybe_declined = MAX(transactions.income_maybe_declined, p.income_maybe_declined),

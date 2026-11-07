@@ -3004,7 +3004,7 @@ export function saveJevDetailsStatement(
 				-- A call that came back is a success, so the run of failures ends on a row with no category (decision 176).
 				jev_attempts = CASE WHEN category_id IS NULL AND category_source IS NULL THEN 0 ELSE jev_attempts END,
 				details_asked = 1, updated_at = datetime('now')
-			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still} AND ${seenIntact}`,
+			WHERE details_asked = 0 AND id IN (SELECT id FROM answers) AND NOT ${gaveUpSql("transactions")}${still} AND ${seenIntact}`,
 		options.turnId,
 	);
 	return db

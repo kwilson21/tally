@@ -17,6 +17,7 @@ import {
 	retryStateOf,
 } from "../src/machines/jev-retry";
 import { next } from "../src/machines/next";
+import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
 import { recordSorting } from "./record-sorting";
@@ -678,5 +679,102 @@ describe("the answer writer and the failure columns", () => {
 			{ id, kind: null, forPersonId: null, noteWorthWriting: 0 },
 		])?.run();
 		expect(await attempts(id)).toBe(3);
+	});
+	it("a details-only answer does not reopen a row that has given up", async () => {
+		const id = await addRow("DETAILS AFTER CAP");
+		await db
+			.prepare("UPDATE transactions SET jev_attempts = ? WHERE id = ?")
+			.bind(CAP, id)
+			.run();
+		const before = await snapshot(id);
+		await saveJevDetailsStatement(db, [
+			{ id, kind: null, forPersonId: null, noteWorthWriting: 0 },
+		])?.run();
+		expect(await snapshot(id)).toEqual(before);
+	});
+});
+
+// The pending row's failure count goes with the purchase to its posted row, as Jev's answers do, while the question is
+// the same one (decision 176). A changed question starts over.
+describe("the pending-to-posted merge and the failure count", () => {
+	let lock = 0;
+
+	async function mergeWith(
+		pending: { attempts: number },
+		posted: { name: string; categoryId?: number | null },
+	): Promise<number> {
+		lock += 1;
+		const key = `merge-${lock}`;
+		const item = (
+			await db
+				.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+				.first<{ id: number }>()
+		)?.id as number;
+		await db
+			.prepare("UPDATE plaid_items SET sync_lock_id = ? WHERE id = ?")
+			.bind(`lock-${key}`, item)
+			.run();
+		const insert = (
+			plaidId: string,
+			isPending: number,
+			name: string,
+			attemptCount: number,
+			categoryId: number | null,
+		) =>
+			db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, jev_attempts, category_id, category_source, updated_by)
+					 VALUES ((SELECT MIN(id) FROM accounts), ?, -600, ?, ?, ?, ?, ?, ?, 'test') RETURNING id`,
+				)
+				.bind(
+					TODAY,
+					name,
+					plaidId,
+					isPending,
+					attemptCount,
+					categoryId,
+					categoryId === null ? null : "user",
+				)
+				.first<{ id: number }>();
+		await insert(`pend-${key}`, 1, "CORNER COFFEE", pending.attempts, null);
+		const postedRow = await insert(
+			`post-${key}`,
+			0,
+			posted.name,
+			0,
+			posted.categoryId ?? null,
+		);
+		await db.batch(
+			mergePendingIntoPosted(db, item, `lock-${key}`, `pend-${key}`, {
+				id: `post-${key}`,
+				cents: -600,
+				date: TODAY,
+				name: posted.name,
+				merchantName: null,
+				plaidCategory: null,
+			}),
+		);
+		return attempts(Number(postedRow?.id));
+	}
+
+	it("carries a pending row's count onto the posted row when the bank text is the same", async () => {
+		expect(await mergeWith({ attempts: CAP }, { name: "CORNER COFFEE" })).toBe(
+			CAP,
+		);
+	});
+
+	it("starts over when the posted row's bank text is different", async () => {
+		expect(
+			await mergeWith({ attempts: CAP }, { name: "CORNER COFFEE #12" }),
+		).toBe(0);
+	});
+
+	it("leaves a posted row that already has a category alone", async () => {
+		expect(
+			await mergeWith(
+				{ attempts: CAP },
+				{ name: "CORNER COFFEE", categoryId: EATING_OUT },
+			),
+		).toBe(0);
 	});
 });
