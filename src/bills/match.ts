@@ -4,12 +4,12 @@ import { paysPlanGroupSql, paysPlanSql } from "../db/counted-month";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
 import { type AmountRow, amountForMonth } from "./amount";
 import {
+	BILL_AMOUNT_TOLERANCE_PERCENT,
 	type BillFrequency,
 	billOccurrenceForMonth,
 	WEEKLY_BILL_DATE_WINDOW_DAYS,
 } from "./status";
 
-export const BILL_AMOUNT_TOLERANCE = 0.1;
 export const BILL_DATE_WINDOW_DAYS = 5;
 
 /** Spec §6.1 rule 3: a weekly bill's date window is ±3 days, so two weeks' windows never overlap; the others ±5. */
@@ -45,9 +45,10 @@ async function candidatesBetween(
 	return results;
 }
 
-/** Spec §6.1 rule 2: a payment within ±10% of the bill's amount, both ends included. */
+/** Spec §6.1 rule 2: a payment within the tolerance (BILL_AMOUNT_TOLERANCE_PERCENT) of the bill's amount, both ends included. */
 export const withinBillAmount = (paymentCents: number, billCents: number) =>
-	10 * Math.abs(paymentCents - billCents) <= billCents;
+	100 * Math.abs(paymentCents - billCents) <=
+	BILL_AMOUNT_TOLERANCE_PERCENT * billCents;
 
 /** Applies all four candidate rules and the deterministic §6.1 tie-break. */
 export function pickBillPayment(

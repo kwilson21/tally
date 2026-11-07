@@ -3,14 +3,16 @@ import type { Child } from "hono/jsx";
 import { addressOf } from "../address";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import {
-	BILL_FIND_AMOUNT_PERCENT,
 	BILL_FIND_MAX_DAYS,
 	BILL_FIND_MIN_DAYS,
 	BILL_FIND_MONTHS,
 } from "../bills/find";
-import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
+import { BILL_DATE_WINDOW_DAYS } from "../bills/match";
 import { loadBillRows } from "../bills/rows";
-import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../bills/status";
+import {
+	BILL_AMOUNT_TOLERANCE_PERCENT,
+	WEEKLY_BILL_DATE_WINDOW_DAYS,
+} from "../bills/status";
 import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
@@ -686,17 +688,17 @@ howItWorks.get("/how-it-works", async (c) => {
 						<ul class="mt-3 list-disc space-y-1 pl-5">
 							<li>
 								A match has the same merchant, is within{" "}
-								{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% of the bill amount,
-								and is within {WEEKLY_BILL_DATE_WINDOW_DAYS} days of its due
-								date for a weekly bill, or {BILL_DATE_WINDOW_DAYS} days for the
-								other bills.
+								{BILL_AMOUNT_TOLERANCE_PERCENT}% of the bill amount, and is
+								within {WEEKLY_BILL_DATE_WINDOW_DAYS} days of its due date for a
+								weekly bill, or {BILL_DATE_WINDOW_DAYS} days for the other
+								bills.
 							</li>
 							<li>
 								Tally suggests a possible bill when a merchant's latest
 								money-out charge in the last {BILL_FIND_MONTHS} months repeats
 								an earlier one {BILL_FIND_MIN_DAYS}–{BILL_FIND_MAX_DAYS} days
-								before it, within {BILL_FIND_AMOUNT_PERCENT}% of that earlier
-								charge's amount.
+								before it, within {BILL_AMOUNT_TOLERANCE_PERCENT}% of that
+								earlier charge's amount.
 							</li>
 							<li>
 								Card payments and moves between your own accounts are never
@@ -715,9 +717,9 @@ howItWorks.get("/how-it-works", async (c) => {
 							</li>
 							<li>
 								A payment from the same merchant that is outside that{" "}
-								{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% is not matched. Tally
-								asks "Price changed?" on the bill instead, and nothing changes
-								until you update the bill or say it is not this bill.
+								{BILL_AMOUNT_TOLERANCE_PERCENT}% is not matched. Tally asks
+								"Price changed?" on the bill instead, and nothing changes until
+								you update the bill or say it is not this bill.
 							</li>
 							<li>
 								A payment you left out of the budget can still pay a bill, and
