@@ -223,6 +223,7 @@ export async function askJev(
 			...retryAfter(response),
 		};
 
+	// A body that is not JSON is an unusable answer like any other: the result below is ok: false with this status.
 	const answer = parseAnswer(
 		await response.json().catch(() => null),
 		categories.length ? [...categories, NONE_FIT] : [],

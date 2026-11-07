@@ -631,6 +631,9 @@ describe("Apple Card's upload sheet (#766)", () => {
 				expect(await cardRows()).toEqual({ n: 1 });
 				// The first run's failure is logged in fixed words; its retry in the background links the payment.
 				expect(logged).toHaveBeenCalledWith("apple card bills failed");
+				expect(logged).not.toHaveBeenCalledWith(
+					"apple card bills retry failed",
+				);
 				expect(await linkedCardPayments()).toEqual({ n: 1 });
 				// The rules step did not fail, so the sorting is told they were applied.
 				expect(create).toHaveBeenCalledTimes(1);
@@ -667,7 +670,9 @@ describe("Apple Card's upload sheet (#766)", () => {
 				);
 				await settled(context);
 				expect(await cardRows()).toEqual({ n: 1 });
+				// Two lines, so a log shows whether the first run failed, its retry failed, or both.
 				expect(logged).toHaveBeenCalledWith("apple card bills failed");
+				expect(logged).toHaveBeenCalledWith("apple card bills retry failed");
 				// The log holds the fixed words only, never the error's text.
 				expect(JSON.stringify(logged.mock.calls)).not.toContain("D1 is down");
 				expect(create.mock.calls[0]?.[0].params).toMatchObject({
