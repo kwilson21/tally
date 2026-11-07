@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { EXPORT_COLUMNS } from "../src/settings/export";
+import { EXPORT_COLUMNS, OWN_STATEMENTS } from "../src/settings/export";
 
 // A live column the JSON export leaves out on purpose: table -> column -> one-line reason.
 const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
@@ -19,6 +19,49 @@ const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
 	category_archive_periods: {
 		id: "A row number; the category and both days are exported (decision 185).",
 	},
+	plaid_items: {
+		id: "A row number; banks come out by name and status only (spec, Download your data).",
+		plaid_item_id:
+			"Plaid's own id for the login; banks come out by name and status only (spec, Download your data).",
+		access_token_encrypted:
+			"The encrypted access token; access tokens are never in the download (spec, Download your data).",
+		sync_cursor:
+			"Plaid's sync position; sync cursors are never in the download (spec, Download your data).",
+		sync_locked_until:
+			"When the sync lease ends; sync locks are never in the download (spec, Download your data).",
+		sync_lock_id:
+			"The sync lease's owner; sync locks are never in the download (spec, Download your data).",
+		linked_by:
+			"The email of who linked the bank; banks come out by name and status only (spec §5, Download your data).",
+		created_at:
+			"When the login was linked; banks come out by name and status only (spec, Download your data).",
+		last_synced_at:
+			"When the bank last synced; banks come out by name and status only (spec, Download your data).",
+		last_sync_attempt_at:
+			"When the bank last tried to sync; banks come out by name and status only (spec, Download your data).",
+		disconnected_at:
+			"When the bank was disconnected; its exported status says 'disconnected' instead (migration 0010, export.ts).",
+		reconnect_emailed_at:
+			"When the reconnect email last went out (spec §5, decision 82); banks come out by name and status only.",
+		history_complete_at:
+			"When the 90-day history was imported (spec §5); banks come out by name and status only (spec, Download your data).",
+		attention_login:
+			"Whether a login problem needs attention (decision 173, migration 0069); banks come out by name and status only.",
+		attention_held:
+			"Whether a relink is needed to clear the attention (decision 173, migration 0069); banks come out by name and status only.",
+		connection_revision:
+			"A count of completed syncs and relinks (decision 173, migration 0070); banks come out by name and status only.",
+	},
+	documents: {
+		id: "A row number; documents come out as file names and dates (spec, Download your data).",
+		r2_key:
+			"The storage key of the file's bytes; documents come out as file names and dates, not the files (spec, Download your data).",
+		size_bytes:
+			"The file's size; documents come out as file names and dates (spec, Download your data).",
+		uploaded_by:
+			"The email of who uploaded the file; documents come out as file names and dates (spec §5, Download your data).",
+		note: "A note a person wrote on the file; documents come out as file names and dates (spec, Download your data).",
+	},
 	maybe_names: {
 		claim:
 			"A random token that lets one request finish the row (migration 0063, decision 161); not family data (decision 185).",
@@ -36,9 +79,6 @@ const NOT_EXPORTED: Record<string, string> = {
 	feedback:
 		"Left out of the download by the owner's choice (decision 185); the in-app feedback form has its own privacy handling (decision 61).",
 };
-
-// Tables tallyExport reads with its own statement rather than EXPORT_COLUMNS.
-const OWN_STATEMENT = ["plaid_items", "documents"];
 
 type Lists = {
 	namedOmissions: Record<string, Record<string, string>>;
@@ -126,14 +166,12 @@ async function liveColumns(table: string): Promise<string[]> {
 	return results.map((row) => row.name);
 }
 
-async function exportedNames(
-	table: string,
-	columns: string,
-): Promise<string[]> {
-	// With columnNames, the names come back as the first row, even when LIMIT 0 leaves no data rows.
-	const [names] = await env.DB.prepare(
-		`SELECT ${columns} FROM ${table} LIMIT 0`,
-	).raw<string[]>({ columnNames: true });
+// The names a select returns, read from the select itself: the subquery keeps its ORDER BY out of the way.
+// With columnNames, the names come back as the first row, even when LIMIT 0 leaves no data rows.
+async function exportedNames(select: string): Promise<string[]> {
+	const [names] = await env.DB.prepare(`SELECT * FROM (${select}) LIMIT 0`).raw<
+		string[]
+	>({ columnNames: true });
 	return names;
 }
 
@@ -142,13 +180,20 @@ describe("JSON export column guard", () => {
 		const tables = await appTables();
 		const liveSchema: Record<string, string[]> = {};
 		const exportedColumns: Record<string, string[]> = {};
-		for (const table of Object.keys(EXPORT_COLUMNS)) {
+		// Every table the download reads, whether from EXPORT_COLUMNS or its own statement, is held to the same rule.
+		const selects: Record<string, string> = {
+			...Object.fromEntries(
+				Object.entries(EXPORT_COLUMNS).map(([table, columns]) => [
+					table,
+					`SELECT ${columns} FROM ${table}`,
+				]),
+			),
+			...OWN_STATEMENTS,
+		};
+		for (const [table, select] of Object.entries(selects)) {
 			if (!tables.includes(table)) continue;
 			liveSchema[table] = await liveColumns(table);
-			exportedColumns[table] = await exportedNames(
-				table,
-				EXPORT_COLUMNS[table as keyof typeof EXPORT_COLUMNS],
-			);
+			exportedColumns[table] = await exportedNames(select);
 		}
 		const problems = exportProblems(liveSchema, exportedColumns, {
 			namedOmissions: NAMED_OMISSIONS,
@@ -168,7 +213,7 @@ describe("JSON export column guard", () => {
 		const problems = exportProblems(liveSchema, exportedColumns, {
 			namedOmissions: {},
 			notExported: NOT_EXPORTED,
-			ownStatement: OWN_STATEMENT,
+			ownStatement: Object.keys(OWN_STATEMENTS),
 		});
 		expect(problems).toEqual([]);
 	});
@@ -243,6 +288,32 @@ describe("JSON export column guard", () => {
 					notExported: { missing_table: "stale" },
 				}),
 			).toContain("missing_table: in NOT_EXPORTED but not an app table");
+		});
+
+		it("reports a new live column on a table read by its own statement", () => {
+			expect(
+				exportProblems(
+					{ documents: ["id", "filename", "uploaded_at", "new_col"] },
+					{ documents: ["filename", "uploaded_at"] },
+					{ ...lists, ownStatement: ["documents"] },
+				),
+			).toEqual([
+				"documents.id: column is neither exported nor in NAMED_OMISSIONS",
+				"documents.new_col: column is neither exported nor in NAMED_OMISSIONS",
+			]);
+		});
+
+		it("reports a new live column on plaid_items, read by its own statement", () => {
+			expect(
+				exportProblems(
+					{ plaid_items: ["id", "institution_name", "status", "new_col"] },
+					{ plaid_items: ["institution_name", "status"] },
+					{ ...lists, ownStatement: ["plaid_items"] },
+				),
+			).toEqual([
+				"plaid_items.id: column is neither exported nor in NAMED_OMISSIONS",
+				"plaid_items.new_col: column is neither exported nor in NAMED_OMISSIONS",
+			]);
 		});
 
 		it("reports a NOT_EXPORTED table that EXPORT_COLUMNS also exports", () => {
