@@ -1,4 +1,4 @@
-import { monthDay, ordinal } from "../dates";
+import { dateOfDayNumber, dayNumber, monthDay, ordinal } from "../dates";
 import { formatCents } from "../money";
 
 export type BillStatus = "paid" | "overdue" | "due" | "upcoming";
@@ -109,11 +109,6 @@ function daysInMonth(year: number, month: number) {
 	] as number;
 }
 
-const dateNumber = (date: string) =>
-	Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
-const fromNumber = (day: number) =>
-	new Date(day * 86_400_000).toISOString().slice(0, 10);
-
 export function billOccurrenceForMonth(
 	bill: BillSchedule,
 	year: number,
@@ -159,7 +154,7 @@ export function billOccurrencesForMonth(
 		else if (
 			bill.frequency === "biweekly" &&
 			bill.anchorDate &&
-			(dateNumber(date) - dateNumber(bill.anchorDate)) % 14 === 0
+			(dayNumber(date) - dayNumber(bill.anchorDate)) % 14 === 0
 		)
 			result.push({ dueDate: date, period: date });
 		if (
@@ -177,25 +172,25 @@ function addMonth(year: number, month: number) {
 }
 
 function daysBetween(from: string, to: string) {
-	return dateNumber(to) - dateNumber(from);
+	return dayNumber(to) - dayNumber(from);
 }
 
 function periodicOccurrences(bill: BillSchedule, today: string) {
-	const todayNumber = dateNumber(today);
+	const todayNumber = dayNumber(today);
 	if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
 		const anchor =
 			bill.frequency === "weekly"
-				? fromNumber(
-						dateNumber(today) -
+				? dateOfDayNumber(
+						dayNumber(today) -
 							((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7) +
 							((bill.dueDay - 1) % 7),
 					)
 				: (bill.anchorDate ?? today);
 		const step = bill.frequency === "weekly" ? 7 : 14;
-		const anchorNumber = dateNumber(anchor);
+		const anchorNumber = dayNumber(anchor);
 		const firstIndex = Math.floor((todayNumber - 35 - anchorNumber) / step);
 		return Array.from({ length: 16 }, (_, i) => {
-			const dueDate = fromNumber(anchorNumber + (firstIndex + i) * step);
+			const dueDate = dateOfDayNumber(anchorNumber + (firstIndex + i) * step);
 			return { dueDate, period: dueDate };
 		});
 	}

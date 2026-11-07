@@ -131,6 +131,25 @@ export function dayLabel(date: string, today: string): string {
 	return date === today ? `Today, ${label}` : label;
 }
 
+/** A day's length in milliseconds. */
+export const DAY_MS = 86_400_000;
+
+/** Whole days from 1970-01-01 to a YYYY-MM-DD date, so two dates subtract to the days between them (calendar arithmetic only, no time zones). */
+export const dayNumber = (date: string) => {
+	// setUTCFullYear, not Date.UTC: Date.UTC reads a year below 100 as 19xx.
+	const midnight = new Date(0);
+	midnight.setUTCFullYear(
+		Number(date.slice(0, 4)),
+		Number(date.slice(5, 7)) - 1,
+		Number(date.slice(8, 10)),
+	);
+	return Math.floor(midnight.getTime() / DAY_MS);
+};
+
+/** The YYYY-MM-DD date of a day number from `dayNumber`. */
+export const dateOfDayNumber = (day: number) =>
+	new Date(day * DAY_MS).toISOString().slice(0, 10);
+
 /** The calendar date `days` days before a YYYY-MM-DD date (calendar arithmetic only, no time zones). */
 export function daysBefore(date: string, days: number): string {
 	return Temporal.PlainDate.from(date).subtract({ days }).toString();

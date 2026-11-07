@@ -94,7 +94,7 @@ export const GROUP_SIZE = 25;
 const ASK_BUDGET_MS = 2 * 60_000;
 
 /** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
-const MAX_FAILURES_IN_A_ROW = 3;
+export const MAX_FAILURES_IN_A_ROW = 3;
 
 export type SortEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 

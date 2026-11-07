@@ -2,7 +2,7 @@
 // words its view uses. `setupView` is pure over what it's given, so the rules are tested without a database; `readSetup`
 // reads the household. Setup is done at the budgets stroke (decision 148): from then on there is no setup view, and Home
 // is plain Home. The caller shows it in the family app only: the demo never shows setup.
-import { householdTimeZone } from "../dates";
+import { DAY_MS, householdTimeZone } from "../dates";
 import {
 	type FirstTally,
 	isSetUp,
@@ -72,7 +72,6 @@ export type SetupView = {
 };
 
 const HOUR_MS = 3_600_000;
-const DAY_MS = 86_400_000;
 
 /**
  * The hour (UTC) of the daily run: wrangler.jsonc's `0 9 * * *` cron, the run that syncs and starts the night's sort

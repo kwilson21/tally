@@ -14,4 +14,31 @@ describe("one definition of a rule", () => {
 			.map(([file]) => file);
 		expect(definers).toEqual(["../src/db/transactions.ts"]);
 	});
+
+	it("writes a day's length in milliseconds, and the day number of a date, only in src/dates.ts", () => {
+		// SQL that turns julian days into milliseconds is a different conversion, so lines with julianday are left out.
+		const literal = /\b86_?400_?000\b/;
+		const copies = Object.entries(SOURCES).flatMap(([file, text]) =>
+			text
+				.split("\n")
+				.filter((line) => literal.test(line) && !line.includes("julianday"))
+				.map(() => file),
+		);
+		expect([...new Set(copies)]).toEqual(["../src/dates.ts"]);
+		const definers = Object.entries(SOURCES)
+			.filter(([, text]) =>
+				/\b(const|function)\s+(dayNumber|dateNumber|epochDay|calendarDay|fromNumber)\b/.test(
+					text,
+				),
+			)
+			.map(([file]) => file);
+		expect(definers).toEqual(["../src/dates.ts"]);
+	});
+
+	it("names the failures in a row that stop a run in exactly one place", () => {
+		const definers = Object.entries(SOURCES)
+			.filter(([, text]) => /\bconst\s+MAX_FAILURES_IN_A_ROW\s*=/.test(text))
+			.map(([file]) => file);
+		expect(definers).toHaveLength(1);
+	});
 });
