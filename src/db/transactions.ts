@@ -27,6 +27,7 @@ import {
 	type Show,
 	searchAmount,
 } from "../transactions/filters";
+import type { TransactionKind } from "../transactions/kind";
 import {
 	type NameSource,
 	nameSource,
@@ -733,7 +734,7 @@ export async function firstVisitState(
 export type TransactionDetail = ListRow & {
 	detailsVisible: boolean;
 	noteGuessed: boolean;
-	kind: "subscription" | "one_off" | "bill" | "transfer" | null;
+	kind: TransactionKind | null;
 	kindGuessed: boolean;
 	forPersonId: number | null;
 	forPersonName: string | null;
