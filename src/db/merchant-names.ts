@@ -55,33 +55,59 @@ export function suggestBankNames(
 	guard: string,
 	guardBinds: readonly (string | number)[],
 ): D1PreparedStatement[] {
-	// Every statement reads the same non-blank names, `?` first, then the guard's binds.
-	const binds = [JSON.stringify(names), ...guardBinds];
-	const nonBlank = `(SELECT value FROM json_each(?) WHERE trim(value, ${NAME_TRIM_SQL}) <> '')`;
+	return pendingNameStatements(
+		db,
+		"SELECT value FROM json_each(?)",
+		[JSON.stringify(names)],
+		guard,
+		guardBinds,
+	);
+}
+
+/**
+ * The statements that make `candidates` waiting suggestions, in the order they run (spec §8.6, decision 68): the merchant
+ * rows first, then their names, the same for a bank's names (suggestBankNames) and the newest Plaid names (sync). `candidates`
+ * is a SELECT with one column, `value`, the merchant keys, which are also their names; `binds` are its `?`s. A key is
+ * a candidate only when its name is not blank. A merchant a person named, or whose suggestion they decided, is never
+ * touched; a guess still waiting gives way (its names are replaced). `guard` is the SQL that must hold for any of the
+ * rows to be written: a sync's lock (OWNS_LOCK, bound with `guardBinds`), or `1` for an upload, which runs in one batch
+ * with nothing to lock. Callers must run all of them.
+ */
+export function pendingNameStatements(
+	db: D1Database,
+	candidates: string,
+	binds: readonly unknown[],
+	guard: string,
+	guardBinds: readonly unknown[],
+): D1PreparedStatement[] {
+	// Every statement reads the candidates first, then the guard's binds.
+	const all = [...binds, ...guardBinds];
+	const from = `(${candidates}) AS c`;
+	const usable = `trim(c.value, ${NAME_TRIM_SQL}) <> ''`;
+	const waiting = `(SELECT raw_name FROM merchants WHERE display_name IS NULL AND suggestion_status = 'pending')`;
 	return [
 		db
 			.prepare(
 				`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
-				 SELECT value, 'pending', 0 FROM ${nonBlank} AS j WHERE ${guard}
+				 SELECT c.value, 'pending', 0 FROM ${from} WHERE ${usable} AND ${guard}
 				 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = 'pending', names_asked = 0
 				 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
 			)
-			.bind(...binds),
+			.bind(...all),
 		db
 			.prepare(
-				`DELETE FROM merchant_suggested_names WHERE merchant_key IN (
-					SELECT m.raw_name FROM merchants m JOIN ${nonBlank} AS j ON m.raw_name = j.value
-					WHERE m.display_name IS NULL AND m.suggestion_status = 'pending')
-				 AND ${guard}`,
+				`DELETE FROM merchant_suggested_names
+				 WHERE merchant_key IN (SELECT c.value FROM ${from} WHERE ${usable})
+				   AND merchant_key IN ${waiting} AND ${guard}`,
 			)
-			.bind(...binds),
+			.bind(...all),
 		db
 			.prepare(
 				`INSERT INTO merchant_suggested_names (merchant_key, position, name)
-				 SELECT m.raw_name, 0, trim(j.value, ${NAME_TRIM_SQL}) FROM merchants m JOIN ${nonBlank} AS j ON m.raw_name = j.value
-				 WHERE m.display_name IS NULL AND m.suggestion_status = 'pending' AND ${guard}`,
+				 SELECT c.value, 0, trim(c.value, ${NAME_TRIM_SQL}) FROM ${from}
+				 WHERE ${usable} AND c.value IN ${waiting} AND ${guard}`,
 			)
-			.bind(...binds),
+			.bind(...all),
 	];
 }
 

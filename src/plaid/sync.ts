@@ -3,7 +3,7 @@ import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
-import { NAME_TRIM_SQL, suggestBankNames } from "../db/merchant-names";
+import { pendingNameStatements, suggestBankNames } from "../db/merchant-names";
 import {
 	isPlaidTransferSql,
 	plaidTransferRuleSql,
@@ -271,42 +271,16 @@ const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	   AND ${ownsLock}`;
 
 /**
- * The charges' Plaid names this page suggests, as the rows of `json_each` for `[text, text tidied]` pairs, joined to each
- * text's newest remaining charge (latest date, then latest id) that has a Plaid name, unless that name is only the text or
- * the text tidied. The three statements of suggestNewestPlaidNamesSql all read these same candidates, so they agree.
- * `?`: the same pairs as withdrawOlderPlaidNamesSql; then the lock's binds.
+ * The charges' Plaid names this page suggests, as the keys of pendingNameStatements: each bank text's newest remaining
+ * charge (latest date, then latest id) that has a Plaid name, unless that name is only the text or the text tidied.
+ * It is read once the page's writes are all in, so a text a charge has left offers the name of the charge that is newest
+ * now. `?`: the same pairs as withdrawOlderPlaidNamesSql.
  */
-const newestPlaidNameCandidatesSql = (ownsLock: string) =>
-	`FROM json_each(?) AS a
+const newestPlaidNameCandidatesSql = `SELECT DISTINCT n.merchant_name AS value FROM json_each(?) AS a
 	 JOIN transactions n ON n.id = (SELECT x.id FROM transactions x
 	   WHERE x.raw_name = json_extract(a.value, '$[0]') AND x.parent_id IS NULL AND NULLIF(x.merchant_name, '') IS NOT NULL
 	   ORDER BY x.date DESC, x.id DESC LIMIT 1)
-	 WHERE n.merchant_name != json_extract(a.value, '$[0]') AND n.merchant_name != json_extract(a.value, '$[1]')
-	   AND trim(n.merchant_name, ${NAME_TRIM_SQL}) <> '' AND ${ownsLock}`;
-
-/**
- * Suggests the Plaid name of each bank text's newest remaining charge, as suggestBankNames does, unless that name is only
- * the text or the text tidied. It runs once the page's writes are all in, so a text a charge has left offers the name of
- * the charge that is newest now, even one withdrawn earlier. Three statements, as suggestBankNames: the merchant rows,
- * then the names of the merchants that are pending and unnamed, replaced, read from the same candidates.
- */
-const suggestNewestPlaidNamesSql = (
-	ownsLock: string,
-): [string, string, string] => {
-	const from = newestPlaidNameCandidatesSql(ownsLock);
-	const waiting = `(SELECT raw_name FROM merchants WHERE display_name IS NULL AND suggestion_status = 'pending')`;
-	return [
-		`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
-		 SELECT DISTINCT n.merchant_name, 'pending', 0 ${from}
-		 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = 'pending', names_asked = 0
-		 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
-		`DELETE FROM merchant_suggested_names WHERE merchant_key IN (SELECT n.merchant_name ${from})
-		 AND merchant_key IN ${waiting}`,
-		`INSERT INTO merchant_suggested_names (merchant_key, position, name)
-		 SELECT DISTINCT n.merchant_name, 0, trim(n.merchant_name, ${NAME_TRIM_SQL}) ${from}
-		 AND n.merchant_name IN ${waiting}`,
-	];
-};
+	 WHERE n.merchant_name != json_extract(a.value, '$[0]') AND n.merchant_name != json_extract(a.value, '$[1]')`;
 
 /**
  * Clears a guess still waiting on the merchant of a Plaid name that needs no suggestion (the text, or the
@@ -1008,7 +982,7 @@ export async function syncItem(
 			}
 			if (pairs.size > 0) {
 				// Read before the batch, so it sees only the rows of earlier pages and syncs: the names with no row yet.
-				// This run's copy and suggestBankNames make rows for this page's names, and suggestNewestPlaidNamesSql
+				// This run's copy and suggestBankNames make rows for this page's names, and pendingNameStatements
 				// for names a stored charge already carries, whose row the page that stored the charge made. So a row this
 				// run makes is for a name read here or on an earlier page. A sync that resumes from a saved cursor is a
 				// separate run: it opens no names, and the rows an earlier run made are never filled.
@@ -1155,17 +1129,19 @@ export async function syncItem(
 				const texts = JSON.stringify(
 					[...textsOfCharges].map((text) => [text, tidyName(text)]),
 				);
-				const [newestRows, newestDrop, newestNames] =
-					suggestNewestPlaidNamesSql(OWNS_LOCK);
 				statements.push(
 					env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
 						texts,
 						itemRowId,
 						lockId,
 					),
-					env.DB.prepare(newestRows).bind(texts, itemRowId, lockId),
-					env.DB.prepare(newestDrop).bind(texts, itemRowId, lockId),
-					env.DB.prepare(newestNames).bind(texts, itemRowId, lockId),
+					...pendingNameStatements(
+						env.DB,
+						newestPlaidNameCandidatesSql,
+						[texts],
+						OWNS_LOCK,
+						[itemRowId, lockId],
+					),
 				);
 			}
 			// A Plaid name that needs no suggestion (it is the bank's text, or that text tidied) leaves no guess
