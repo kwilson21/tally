@@ -17,6 +17,8 @@ export default defineConfig({
 			"verification/feedback-integration.test.ts",
 			"verification/feedback-privacy.test.ts",
 			"verification/feedback-diagnostics.test.ts",
+			// Parses the app's source to audit its log calls; it needs Node, not the Worker runtime.
+			"verification/no-secret-logs.test.ts",
 		],
 	},
 });
