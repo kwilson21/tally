@@ -2,8 +2,15 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { askAgainMany } from "../src/categorize-pending";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { pendingForJev } from "../src/db/transactions";
+import { markJevFailedStatement, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import {
+	JEV_ATTEMPT_CAP,
+	type JevRetryState,
+	jevRetry,
+	retryStateOf,
+} from "../src/machines/jev-retry";
+import { next } from "../src/machines/next";
 import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
 import { recordSorting } from "./record-sorting";
@@ -16,6 +23,137 @@ const TODAY = "2026-09-22";
 const CAP = 5;
 const withKey = { DB: db, JEV_API_KEY: "test-key" };
 const create = recordSorting();
+
+// The machine's transitions, from one state and event with the row's count (decision 171).
+describe("the Jev retry machine", () => {
+	const at = (attempts: number) => ({ attempts });
+
+	it.each([
+		[3, "waiting"],
+		[4, "gave_up"],
+	])(
+		"JEV_FAILED from waiting with %i earlier failures goes to %s at the cap",
+		(attempts, to) => {
+			expect(next(jevRetry, "waiting", "JEV_FAILED", at(attempts))).toBe(to);
+		},
+	);
+
+	it("JEV_ANSWERED from waiting goes to answered", () => {
+		expect(next(jevRetry, "waiting", "JEV_ANSWERED", at(2))).toBe("answered");
+	});
+
+	it.each(["gave_up", "answered"] as const)(
+		"%s refuses JEV_FAILED and JEV_ANSWERED",
+		(state) => {
+			expect(next(jevRetry, state, "JEV_FAILED", at(CAP))).toBeNull();
+			expect(next(jevRetry, state, "JEV_ANSWERED", at(CAP))).toBeNull();
+		},
+	);
+
+	it.each(["waiting", "gave_up", "answered"] as const)(
+		"ASK_AGAIN and ROW_CHANGED from %s go to waiting",
+		(state) => {
+			expect(next(jevRetry, state, "ASK_AGAIN", at(CAP))).toBe("waiting");
+			expect(next(jevRetry, state, "ROW_CHANGED", at(CAP))).toBe("waiting");
+		},
+	);
+
+	it("the cap is 5 failures", () => {
+		expect(JEV_ATTEMPT_CAP).toBe(5);
+	});
+});
+
+// Every writer, from every state, against the machine (decision 171). A row is built in each state, a
+// writer runs, and the state the row is then in is read back and compared with the machine's answer.
+// A refused event must leave the state as it was. The one exception is listed with its reason.
+describe("every writer agrees with the machine, state by state", () => {
+	const STATES: JevRetryState[] = ["waiting", "gave_up", "answered"];
+	const EVENTS = [
+		"JEV_FAILED",
+		"JEV_ANSWERED",
+		"ASK_AGAIN",
+		"ROW_CHANGED",
+	] as const;
+	// answered/ROW_CHANGED: a row Jev left unsure keeps its stored confidence when its bank text changes
+	// (the trigger in migration 0067 resets only the count), so it stays answered, not waiting.
+	const KNOWN_GAPS: Record<string, JevRetryState> = {
+		"answered/ROW_CHANGED": "answered",
+	};
+
+	async function rowIn(state: JevRetryState): Promise<number> {
+		const id = await addRow("GRID BANK TEXT");
+		if (state === "gave_up") {
+			await db
+				.prepare("UPDATE transactions SET jev_attempts = ? WHERE id = ?")
+				.bind(CAP, id)
+				.run();
+		}
+		if (state === "answered") {
+			// Jev's unsure answer: its confidence is stored, and no category is filed.
+			await db
+				.prepare(
+					"UPDATE transactions SET category_confidence = 0.5 WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+		}
+		return id;
+	}
+
+	async function readState(
+		id: number,
+	): Promise<{ attempts: number; state: JevRetryState }> {
+		const row = await db
+			.prepare(
+				"SELECT jev_attempts AS attempts, category_confidence AS confidence FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ attempts: number; confidence: number | null }>();
+		const attempts = Number(row?.attempts);
+		return {
+			attempts,
+			state: retryStateOf({ attempts, answered: row?.confidence != null }),
+		};
+	}
+
+	async function fire(event: (typeof EVENTS)[number], id: number) {
+		if (event === "JEV_FAILED") {
+			await markJevFailedStatement(db, id).run();
+		} else if (event === "JEV_ANSWERED") {
+			// Only a row the sorting run asks is answered; a gave-up or answered row is not asked.
+			await sortRun([id]);
+		} else if (event === "ASK_AGAIN") {
+			await askAgainMany({ DB: db, SORT: env.SORT, JEV_API_KEY: "test-key" }, [
+				id,
+			]);
+		} else {
+			await db
+				.prepare(
+					"UPDATE transactions SET raw_name = 'GRID CHANGED' WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+		}
+	}
+
+	for (const state of STATES) {
+		for (const event of EVENTS) {
+			it(`${state} + ${event}`, async () => {
+				const id = await rowIn(state);
+				const before = await readState(id);
+				expect(before.state).toBe(state);
+				const machine = next(jevRetry, before.state, event, {
+					attempts: before.attempts,
+				});
+				const expected = (machine ?? state) as JevRetryState;
+				await fire(event, id);
+				const after = await readState(id);
+				const known = KNOWN_GAPS[`${state}/${event}`];
+				expect(after.state).toBe(known ?? expected);
+			});
+		}
+	}
+});
 
 /** Jev's answer for a row it can read: Eating Out at 0.9, no flags. */
 const answer = () =>

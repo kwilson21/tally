@@ -13,6 +13,7 @@ import {
 } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
+import { gaveUpSql, JEV_ATTEMPT_CAP } from "../machines/jev-retry";
 import {
 	type Edit,
 	excludedAfterSave,
@@ -2646,12 +2647,6 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
  * values in a statement and a bank's first sync brings in thousands.
  */
-/**
- * How many failures in a row Jev may have on one transaction before the sorting run leaves it out (decision 171). A
- * person's "ask again" starts its count over (askAgainMany), and so does a change to its bank text, name, amount or
- * account (a trigger, migration 0067).
- */
-export const JEV_ATTEMPT_CAP = 5;
 
 export async function pendingForJev(
 	db: D1Database,
@@ -2700,7 +2695,7 @@ export async function pendingForJev(
 			JOIN accounts a ON a.id = t.account_id
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
-			WHERE t.jev_attempts < ${JEV_ATTEMPT_CAP} AND NOT ${FOLLOWS_PURCHASE} AND (
+			WHERE NOT ${gaveUpSql("t")} AND NOT ${FOLLOWS_PURCHASE} AND (
 				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND (
 					(t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))
 					OR (? = 1 AND NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)
@@ -2896,6 +2891,14 @@ export function seenSaveGuard(seen: JevSeen): {
 }
 
 /**
+ * The counter's write for a failed ask (decision 171, JEV_FAILED in src/machines/jev-retry.ts): one more failure while the
+ * row is waiting, and none for a row that is answered or has given up. The cap itself is the machine's.
+ */
+function countFailureSql(): string {
+	return `jev_attempts = CASE WHEN category_confidence IS NULL AND jev_attempts < ${JEV_ATTEMPT_CAP} THEN jev_attempts + 1 ELSE jev_attempts END`;
+}
+
+/**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
  * `turnId` guards it to the sorting turn (decision 139).
  */
@@ -2905,7 +2908,7 @@ export function markJevFailedStatement(
 	turnId?: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		"UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1 WHERE id = ?",
+		`UPDATE transactions SET jev_failed_at = datetime('now'), ${countFailureSql()} WHERE id = ?`,
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
@@ -2921,7 +2924,7 @@ export function markReaskFailedStatement(
 	turnId: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
+		`UPDATE transactions SET jev_failed_at = datetime('now'), ${countFailureSql()}
 		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ?`,
 		turnId,
 	);
