@@ -13,7 +13,7 @@ import {
 	needsBigAmountConfirm,
 	sameBillName,
 } from "../bills/guards";
-import { dayNumber, matchBillPayments } from "../bills/match";
+import { matchBillPayments } from "../bills/match";
 import {
 	acceptPriceOffer,
 	dismissPriceOffer,
@@ -48,6 +48,8 @@ import {
 	updateBill,
 } from "../bills/write";
 import {
+	dateOfDayNumber,
+	dayNumber,
 	householdToday,
 	monthLabel,
 	ordinal,
@@ -1080,15 +1082,11 @@ const shortDate = (date: string) =>
 
 /** The first date after `today` in the every-two-weeks series from `anchor` (anchor + 14k). */
 function nextTwoWeeksAfter(anchor: string, today: string): string {
-	const dayNumber = (date: string) =>
-		Date.parse(`${date}T00:00:00Z`) / 86_400_000;
 	const steps = Math.max(
 		0,
 		Math.floor((dayNumber(today) - dayNumber(anchor)) / 14) + 1,
 	);
-	return new Date((dayNumber(anchor) + 14 * steps) * 86_400_000)
-		.toISOString()
-		.slice(0, 10);
+	return dateOfDayNumber(dayNumber(anchor) + 14 * steps);
 }
 
 const occurrenceLabel = (date: string) =>

@@ -5,7 +5,7 @@
 // "Not this bill" stores a dismissal, the same `dismissed` row "Not this one" makes, so that payment is
 // never offered for that bill and month again. An offer never links anything by itself.
 
-import { daysBefore, householdMonth } from "../dates";
+import { dayNumber, daysBefore, householdMonth } from "../dates";
 import { occurrenceAmountSql } from "../db/bill-amounts";
 import { paysPlanGroupSql, paysPlanSql } from "../db/counted-month";
 import {
@@ -19,7 +19,6 @@ import { BIG_BILL_CENTS } from "./guards";
 import {
 	BILL_DATE_WINDOW_DAYS,
 	billDateWindowDays,
-	dayNumber,
 	type MatchCandidate,
 	withinBillAmount,
 } from "./match";

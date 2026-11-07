@@ -2,7 +2,7 @@
 // in, a line and its words out. Money stays in integer cents; only the line's coordinates are
 // fractions, and they are drawing, not money.
 
-import { monthName, shortDay } from "./dates";
+import { dayNumber, monthName, shortDay } from "./dates";
 import { formatCents } from "./money";
 
 /** One account's balance on one day, as `balance_history` stores it (debt as the amount owed). */
@@ -128,13 +128,6 @@ const sinceLabel = (date: string, today: string) =>
 		: monthName(date.slice(0, 7));
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
-
-const dayNumber = (date: string) =>
-	Date.UTC(
-		Number(date.slice(0, 4)),
-		Number(date.slice(5, 7)) - 1,
-		Number(date.slice(8, 10)),
-	) / 86_400_000;
 
 const tenth = (value: number) => Math.round(value * 10) / 10;
 

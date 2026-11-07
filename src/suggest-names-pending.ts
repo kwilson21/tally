@@ -11,6 +11,7 @@ import {
 	transactionsNeedingNoteGuess,
 } from "./db/transactions";
 import { type Deadline, pastDeadline } from "./run-budget";
+import { MAX_FAILURES_IN_A_ROW } from "./sort-groups";
 import { usableSuggestedNames } from "./transactions/name-suggestions";
 
 /**
@@ -23,9 +24,6 @@ const noteCallLimitWhileNamesWait = Math.floor(nameCallLimit / 2);
 // The switches are read after every five calls, so one turned off mid-run stops within five; a batch's
 // answers are kept or dropped together.
 const SWITCH_CHECK_BATCH = 5;
-
-/** Failures in a row that point at every call (the service is down) rather than one bank text. */
-const MAX_FAILURES_IN_A_ROW = 3;
 
 type NamesEnv = {
 	DB: D1Database;

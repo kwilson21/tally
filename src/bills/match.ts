@@ -1,4 +1,4 @@
-import { householdToday } from "../dates";
+import { dateOfDayNumber, dayNumber, householdToday } from "../dates";
 import { amountRowsByBill } from "../db/bill-amounts";
 import { paysPlanGroupSql, paysPlanSql } from "../db/counted-month";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
@@ -18,18 +18,9 @@ export const billDateWindowDays = (frequency: BillFrequency) =>
 
 export type MatchCandidate = { id: number; date: string; amountCents: number };
 
-export const dayNumber = (date: string) =>
-	Math.floor(
-		Date.UTC(
-			Number(date.slice(0, 4)),
-			Number(date.slice(5, 7)) - 1,
-			Number(date.slice(8, 10)),
-		) / 86_400_000,
-	);
-
 /** The date `shift` days from `date` (YYYY-MM-DD). */
 const shiftDay = (date: string, shift: number) =>
-	new Date((dayNumber(date) + shift) * 86_400_000).toISOString().slice(0, 10);
+	dateOfDayNumber(dayNumber(date) + shift);
 
 /**
  * The payments a bill could match, dated from `start` to `finish` (both included): one statement, whatever
@@ -172,9 +163,7 @@ export async function matchBillPayments(
 			const occurrenceDates: { due: string; period: string; day: number }[] =
 				[];
 			while (occurrenceDay <= endDay + window) {
-				const due = new Date(occurrenceDay * 86_400_000)
-					.toISOString()
-					.slice(0, 10);
+				const due = dateOfDayNumber(occurrenceDay);
 				const period = due;
 				if (!linked.has(`${bill.id}:${period}`)) {
 					occurrenceDates.push({ due, period, day: occurrenceDay });
@@ -185,16 +174,8 @@ export async function matchBillPayments(
 				const firstOccurrenceDate = occurrenceDates[0];
 				const lastOccurrenceDate = occurrenceDates.at(-1);
 				if (!firstOccurrenceDate || !lastOccurrenceDate) continue;
-				const startDate = new Date(
-					(firstOccurrenceDate.day - window) * 86_400_000,
-				)
-					.toISOString()
-					.slice(0, 10);
-				const finishDate = new Date(
-					(lastOccurrenceDate.day + window) * 86_400_000,
-				)
-					.toISOString()
-					.slice(0, 10);
+				const startDate = dateOfDayNumber(firstOccurrenceDate.day - window);
+				const finishDate = dateOfDayNumber(lastOccurrenceDate.day + window);
 				const candidates = await candidatesBetween(
 					db,
 					bill,

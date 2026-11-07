@@ -5,7 +5,7 @@ import {
 	billScheduleLabel,
 	partPaidSentence,
 } from "../bills/status";
-import { dayLabel, monthDay, shortDay } from "../dates";
+import { dayLabel, dayNumber, monthDay, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon, ROW_OPENS, RowArrow } from "./icons";
@@ -170,7 +170,7 @@ export function billStatusLine(bill: BillRowData, today: string) {
 	if (bill.status === "paid" && bill.paidDate) {
 		const late = Math.max(
 			0,
-			calendarDay(bill.paidDate) - calendarDay(bill.dueDate),
+			dayNumber(bill.paidDate) - dayNumber(bill.dueDate),
 		);
 		return `Paid ${day(bill.paidDate)}${late ? `, ${late} ${late === 1 ? "day" : "days"} late` : ""}`;
 	}
@@ -178,16 +178,6 @@ export function billStatusLine(bill: BillRowData, today: string) {
 	if (bill.status !== "paid" && (bill.paidCents ?? 0) > 0)
 		return partPaidSentence(bill.paidCents ?? 0, bill.amountCents);
 	return `${bill.status === "overdue" ? "Was due" : "Due"} ${day(bill.dueDate)}`;
-}
-
-function calendarDay(value: string) {
-	return Math.floor(
-		Date.UTC(
-			Number(value.slice(0, 4)),
-			Number(value.slice(5, 7)) - 1,
-			Number(value.slice(8, 10)),
-		) / 86400000,
-	);
 }
 
 /**
