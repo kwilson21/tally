@@ -611,3 +611,87 @@ describe("syncAllItems", () => {
 		);
 	});
 });
+
+describe("syncAllItems and a completion that loses its lease", () => {
+	beforeEach(async () => {
+		vi.restoreAllMocks();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+		]);
+	});
+
+	// The database the daily run sees, where a newer run takes the lease just ahead of the bank's completion write.
+	function stealLeaseAtCompletion(id: number): D1Database {
+		let fired = false;
+		return new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop !== "prepare") {
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				}
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (
+						fired ||
+						!sql.startsWith("UPDATE plaid_items SET connection_revision")
+					) {
+						return statement;
+					}
+					return {
+						bind: (...values: unknown[]) => {
+							const bound = statement.bind(...values);
+							return {
+								run: async () => {
+									fired = true;
+									await target
+										.prepare(
+											"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+										)
+										.bind(id)
+										.run();
+									return bound.run();
+								},
+							};
+						},
+					} as unknown as D1PreparedStatement;
+				};
+			},
+		});
+	}
+
+	it("counts the bank as failed, and the next run syncs it", async () => {
+		const id = await addItem();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		expect(
+			await syncAllItems(
+				{ ...enabledEnv, DB: stealLeaseAtCompletion(id) },
+				fakePlaid(),
+			),
+		).toMatchObject({ synced: 0, failed: 1, failedBanks: ["Bank"] });
+		expect(errors).toHaveBeenCalledWith(
+			expect.stringContaining(`item ${id} failed`),
+		);
+
+		// The newer run finishes and lets go of the lease.
+		await env.DB.prepare(
+			"UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+
+		expect(await syncAllItems(enabledEnv, fakePlaid())).toMatchObject({
+			synced: 1,
+			failed: 0,
+		});
+		expect(
+			await env.DB.prepare("SELECT status FROM plaid_items WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ status: "ok" });
+		errors.mockRestore();
+	});
+});

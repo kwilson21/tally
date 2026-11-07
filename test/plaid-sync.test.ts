@@ -2882,6 +2882,108 @@ describe("syncItem", () => {
 		expect((await itemState(id))?.status).toBe("needs_attention");
 	});
 
+	describe("a sync's completion, through syncItem", () => {
+		// The database the sync sees, where `before` runs just ahead of the first statement whose SQL starts with `prefix`.
+		function racingDb(prefix: string, before: string, id: number): D1Database {
+			let fired = false;
+			return new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop !== "prepare") {
+						const value = Reflect.get(target, prop);
+						return typeof value === "function" ? value.bind(target) : value;
+					}
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						if (fired || !sql.startsWith(prefix)) return statement;
+						return {
+							bind: (...values: unknown[]) => {
+								const bound = statement.bind(...values);
+								return {
+									run: async () => {
+										fired = true;
+										await target.prepare(before).bind(id).run();
+										return bound.run();
+									},
+								};
+							},
+						} as unknown as D1PreparedStatement;
+					};
+				},
+			});
+		}
+
+		const lastPage = () =>
+			plaidFetch(() =>
+				response(page({ added: [transaction()], next_cursor: "cursor-2" })),
+			);
+
+		it("a completion that loses its lease throws, logs the item id only, and leaves the bank and the new run's lease alone", async () => {
+			const id = await addItem();
+			const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+			const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+			const db = racingDb(
+				"UPDATE plaid_items SET connection_revision",
+				"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+				id,
+			);
+
+			await expect(
+				syncItem({ ...env, DB: db, TOKEN_ENCRYPTION_KEY: KEY }, id, lastPage()),
+			).rejects.toThrow("Plaid sync could not record its completion");
+
+			expect(errors).toHaveBeenCalledWith(
+				`plaid sync could not record its completion for item ${id}`,
+			);
+			// Nothing about the token or the transaction is logged.
+			for (const call of [...errors.mock.calls, ...logs.mock.calls]) {
+				const line = call.map(String).join(" ");
+				expect(line).not.toContain("secret-access-token");
+				expect(line).not.toContain("RAW SHOP");
+			}
+			expect(
+				await env.DB.prepare(
+					"SELECT status, attention_login, attention_held, connection_revision, sync_lock_id FROM plaid_items WHERE id = ?",
+				)
+					.bind(id)
+					.first(),
+			).toEqual({
+				status: "ok",
+				attention_login: 0,
+				attention_held: 0,
+				connection_revision: 0,
+				sync_lock_id: "newer-run",
+			});
+			errors.mockRestore();
+			logs.mockRestore();
+		});
+
+		it("a completion whose retry succeeds after a login error lands ends ok through the real sync path", async () => {
+			const id = await addItem();
+			const db = racingDb(
+				"UPDATE plaid_items SET connection_revision",
+				"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
+				id,
+			);
+
+			await expect(
+				syncItem({ ...env, DB: db, TOKEN_ENCRYPTION_KEY: KEY }, id, lastPage()),
+			).resolves.toMatchObject({ added: 1 });
+
+			expect(
+				await env.DB.prepare(
+					"SELECT status, attention_login, attention_held, connection_revision FROM plaid_items WHERE id = ?",
+				)
+					.bind(id)
+					.first(),
+			).toEqual({
+				status: "ok",
+				attention_login: 0,
+				attention_held: 0,
+				connection_revision: 1,
+			});
+		});
+	});
+
 	it("doesn't flag the Item for an error after another run has taken its lock", async () => {
 		const id = await addItem();
 		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
