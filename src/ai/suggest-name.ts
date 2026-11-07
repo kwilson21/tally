@@ -23,7 +23,8 @@ const MIN_LENGTH = 2;
 const MAX_LENGTH = 40;
 const MAX_WORDS = 5;
 
-const INSTRUCTIONS = [
+/** Exported so scripts/compare-names asks candidate models exactly what production asks. */
+export const INSTRUCTIONS = [
 	"You turn the text a bank prints for a purchase into the plain name a person would call the place.",
 	`Reply with up to ${MAX_SUGGESTED_NAMES} different names, one per line, best first, and nothing else.`,
 	"Use normal spelling and capitals. Leave out store numbers, codes, cities, amounts and dates.",
