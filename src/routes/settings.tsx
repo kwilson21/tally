@@ -51,6 +51,7 @@ import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
 import { waitingForJevSql } from "../db/transactions";
 import { hxTrigger } from "../htmx";
+import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
 import { reconnectRecipients } from "../reconnect/reminders";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import {
@@ -1151,7 +1152,9 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 			form
 				.getAll("store")
 				.map((store) => store.toString())
-				.filter((store) => store.length > 0 && store.length <= 500),
+				.filter(
+					(store) => store.length > 0 && store.length <= MERCHANT_KEY_MAX,
+				),
 		),
 	];
 	const stale = () =>
@@ -1485,12 +1488,12 @@ settings.post("/settings/people", async (c) => {
 			{ page: "people", peopleAddOpen: true, peopleFocus: true },
 		);
 	}
-	if (!name || name.length > 40)
+	if (!name || name.length > PERSON_NAME_MAX)
 		return renderPage(c, "people", {
 			peopleOpen: action === "rename" ? id : undefined,
 			peopleErrorPersonId: action === "rename" ? id : undefined,
 			peopleAddOpen: action !== "rename",
-			peopleError: "Enter a name up to 40 characters.",
+			peopleError: `Enter a name up to ${PERSON_NAME_MAX} characters.`,
 			peopleValue: nameValue,
 			status: 422,
 		});

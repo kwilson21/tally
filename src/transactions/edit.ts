@@ -1,6 +1,7 @@
 // What the edit panel's form may change, checked before anything is saved.
 
 import { followsPurchase } from "../db/counted-month";
+import { DISPLAY_NAME_MAX, NOTE_MAX } from "../limits";
 import { isTransactionKind, type TransactionKind } from "./kind";
 
 export type Edit = {
@@ -115,9 +116,6 @@ export type EditErrors = Partial<
 
 /** The For field's error when the chosen person is not in the household (the form or the save). */
 export const FOR_PERSON_ERROR = "Pick a person from the household list.";
-
-const MAX_NAME = 80;
-const MAX_NOTE = 500;
 
 const text = (form: FormData, key: string) =>
 	String(form.get(key) ?? "").trim();
@@ -320,12 +318,12 @@ export function parseEdit(
 	) {
 		errors.category = "Pick a category to use for this merchant.";
 	}
-	if (displayName.length > MAX_NAME)
-		errors.merchant = `Keep the name under ${MAX_NAME} characters.`;
+	if (displayName.length > DISPLAY_NAME_MAX)
+		errors.merchant = `Keep the name under ${DISPLAY_NAME_MAX} characters.`;
 	else if (pick === "own" && displayName === "")
 		errors.merchant = "Type a name here, or pick one above.";
-	if (note.length > MAX_NOTE)
-		errors.note = `Keep the note under ${MAX_NOTE} characters.`;
+	if (note.length > NOTE_MAX)
+		errors.note = `Keep the note under ${NOTE_MAX} characters.`;
 	if (rawKind && !isTransactionKind(rawKind))
 		errors.kind = "Pick a kind from the list.";
 	if (

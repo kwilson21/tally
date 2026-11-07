@@ -1,4 +1,5 @@
 import type { SettingsCategory } from "../db/categories";
+import { CATEGORY_NAME_MAX } from "../limits";
 import { formatCents } from "../money";
 import type { CategoryErrors } from "../settings/category-form";
 import { Button } from "./button";
@@ -60,7 +61,7 @@ function NameField({
 			label="Name"
 			name="name"
 			value={name}
-			maxlength={40}
+			maxlength={CATEGORY_NAME_MAX}
 			autocomplete="off"
 			autofocus={Boolean(errors.name)}
 			error={errors.name}

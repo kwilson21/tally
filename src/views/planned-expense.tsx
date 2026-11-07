@@ -1,4 +1,5 @@
 import { monthName, shortDay } from "../dates";
+import { PLAN_NAME_MAX } from "../limits";
 import { formatCents } from "../money";
 import { BottomSheet, sheetAttrs } from "./bottom-sheet";
 import { Button } from "./button";
@@ -8,9 +9,6 @@ import { LedgerField } from "./ledger-field";
 import { CLOSEST_PAYMENTS, PaymentRow } from "./payment-row";
 import { SelectField } from "./select-field";
 import { TextInput } from "./text-input";
-
-/** The longest name a planned expense can have: the sheet's field stops at it, and the save refuses more (plans.tsx). */
-export const PLAN_NAME_MAX = 80;
 
 export type PlannedRowData = {
 	id: number;

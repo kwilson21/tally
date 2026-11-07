@@ -24,6 +24,8 @@ export const NAME_MODEL =
 const TIMEOUT_MS = 15_000;
 const MIN_LENGTH = 2;
 const MAX_LENGTH = 40;
+/** The longest note the model may suggest. */
+const MAX_NOTE_LENGTH = 80;
 const MAX_WORDS = 5;
 
 /** Exported so scripts/compare-names asks candidate models exactly what production asks. */
@@ -182,7 +184,7 @@ export async function suggestNote(
 			note:
 				note &&
 				note.length >= 2 &&
-				note.length <= 80 &&
+				note.length <= MAX_NOTE_LENGTH &&
 				!/https?:|www\.|\d{3,}|[$#]/i.test(note) &&
 				!restatesStore(note, [rawName])
 					? note

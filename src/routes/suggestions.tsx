@@ -40,17 +40,13 @@ import {
 	transferAskedSql,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
+import { DISPLAY_NAME_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { activeNamed } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
-import {
-	MAX_OWN_NAME,
-	OWN_VALUE,
-	pickValue,
-	STORE_VALUE,
-} from "../views/name-choices";
+import { OWN_VALUE, pickValue, STORE_VALUE } from "../views/name-choices";
 import { RecheckLine, type RecheckRun } from "../views/recheck-line";
 import {
 	AskFirst,
@@ -1083,10 +1079,10 @@ function readChoice(
 	if (picked === OWN_VALUE) {
 		if (own === "")
 			return { ok: false, error: "Type a name here, or pick one above." };
-		if (own.length > MAX_OWN_NAME)
+		if (own.length > DISPLAY_NAME_MAX)
 			return {
 				ok: false,
-				error: `Keep the name under ${MAX_OWN_NAME} characters.`,
+				error: `Keep the name under ${DISPLAY_NAME_MAX} characters.`,
 			};
 		return { ok: true, value: { kind: "name", name: own } };
 	}

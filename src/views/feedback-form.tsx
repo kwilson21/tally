@@ -1,3 +1,4 @@
+import { FEEDBACK_MESSAGE_MAX } from "../limits";
 import { Button } from "./button";
 import { Chip } from "./chip";
 
@@ -133,7 +134,7 @@ export function FeedbackForm({
 						<textarea
 							id="feedback-message"
 							name="message"
-							maxlength={2000}
+							maxlength={FEEDBACK_MESSAGE_MAX}
 							required
 							rows={7}
 							class="mt-2 w-full rounded-control border border-ink bg-paper px-3 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"

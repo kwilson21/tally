@@ -1,3 +1,4 @@
+import { DISPLAY_NAME_MAX } from "../limits";
 import type { NameSource } from "../transactions/name-suggestions";
 import {
 	ALL_LATER_LINE,
@@ -10,9 +11,6 @@ import {
 import { Icon } from "./icons";
 import { TextInput } from "./text-input";
 import { WhyLink } from "./why-link";
-
-/** The longest name a person may type, as in the edit panel's rename (src/transactions/edit.ts). */
-export const MAX_OWN_NAME = 80;
 
 /**
  * How a suggested name looks wherever it stands in for a chosen one: a dashed underline, the "not decided
@@ -449,7 +447,7 @@ export function NameChoices({
 					label="Your own name"
 					name="merchant"
 					value={own}
-					maxlength={MAX_OWN_NAME}
+					maxlength={DISPLAY_NAME_MAX}
 					autocomplete="off"
 					surface="paper"
 					error={ownError}

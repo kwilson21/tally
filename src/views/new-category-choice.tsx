@@ -1,3 +1,4 @@
+import { CATEGORY_NAME_MAX } from "../limits";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { TextInput } from "./text-input";
@@ -61,7 +62,7 @@ export function NewCategoryName({
 				hint={hint}
 				error={error}
 				autocomplete="off"
-				maxlength={40}
+				maxlength={CATEGORY_NAME_MAX}
 				surface="paper"
 			/>
 		</div>
