@@ -96,7 +96,8 @@ export function isIncluded(
  * Whether Jev can be asked about the category of the row `alias` names, as jevAsksAbout (rename.ts) says for a
  * row as a save leaves it: included, not a split, not income, and not a refund that follows its purchase. This
  * is the rows pendingForJev classifies (NEEDS_JEV_CLASSIFICATION and NOT FOLLOWS_PURCHASE in
- * src/db/transactions.ts); keep it in step with them, and with jevAsksAbout. Qualify every column: INCLUDED_ROW
+ * src/db/transactions.ts). test/classify.test.ts runs it, the readable rules in src/transactions/classify.ts and
+ * jevAsksAbout over the same rows and fails on any row where they disagree. Qualify every column: INCLUDED_ROW
  * is unqualified, so it is ambiguous inside an UPDATE ... FROM transactions AS p. `paysBill` is as includedSql's.
  */
 export const jevAsksAboutSql = (

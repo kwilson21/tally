@@ -27,6 +27,7 @@ import {
 	type Questions,
 	type Row,
 } from "../src/transactions/classify";
+import { jevAsksAbout } from "../src/transactions/rename";
 import { itemAt } from "./helpers/present";
 
 // classify() is the readable oracle for Tally's transaction questions. Each SQL question must give, row by row,
@@ -664,6 +665,27 @@ describe("classify agrees with each SQL question, row by row", () => {
 			expect(sets[key].size).toBeGreaterThan(0);
 		});
 	}
+});
+
+describe("jevAsksAbout (TypeScript, rename.ts) agrees with jevAsksAboutSql, row by row", () => {
+	it("says yes to the same rows, fed the facts a save would feed it", () => {
+		const wrong = rows
+			.filter((r) => {
+				const q = classifiedOf(r.id).questions;
+
+				return (
+					jevAsksAbout({
+						included: q.included,
+						isSplit: r.is_split === 1,
+						income: r.flag_income === 1,
+						followsPurchase: q.follows,
+					}) !== sets.jevMayBeAsked.has(r.id)
+				);
+			})
+			.map((r) => `${r.id} ${names.get(r.id) ?? "random"}`);
+
+		expect(wrong.slice(0, 10), `${wrong.length} rows differ`).toEqual([]);
+	});
 });
 
 describe("named rows come out as the readable answers", () => {
