@@ -22,7 +22,7 @@ import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
 import { recordSorting } from "./record-sorting";
 
-// A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 176). Only a person's
+// A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 179). Only a person's
 // "ask again" or a change to the row's bank text, name, amount or account starts its count again.
 
 const db = env.DB;
@@ -163,7 +163,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-// The machine's transitions (decision 176), from one state, event and row context.
+// The machine's transitions (decision 179), from one state, event and row context.
 describe("the Jev retry machine", () => {
 	const at = (attempts: number, categorized = false, answered = false) => ({
 		attempts,
@@ -270,7 +270,7 @@ describe("the Jev retry machine", () => {
 
 // A failed ask is one of Jev's asks on a row that may already have a category (its details or its income question). It
 // is stamped, so the row goes behind the rows that have not failed, and it counts toward the cap only while the row is
-// waiting or unsure (decision 176).
+// waiting or unsure (decision 179).
 describe("a failed ask stamps a row that is still asked and counts only a waiting or unsure one", () => {
 	async function stampedAfterFailure(id: number): Promise<boolean> {
 		await markJevFailedStatement(db, id).run();
@@ -319,7 +319,7 @@ describe("a failed ask stamps a row that is still asked and counts only a waitin
 	});
 });
 
-// Every writer, from every state, against the machine (decision 176). A row is built in each state, the real writer
+// Every writer, from every state, against the machine (decision 179). A row is built in each state, the real writer
 // runs (the failure statement, the sorting run's answer, ask again, or the bank-text trigger), and the row is read
 // back. Where the machine allows the event, the row must reach the machine's state. Where it refuses, the row's retry
 // columns must be exactly as they were. There are no exceptions to this grid. JEV_FAILED is allowed from waiting and
@@ -574,7 +574,7 @@ describe("a row Jev answers", () => {
 });
 
 // An unsure row is still asked about its income question, so its failures count. Once it gives up, a run no longer
-// asks it, and the rows beside it still run (decision 176).
+// asks it, and the rows beside it still run (decision 179).
 describe("an unsure row whose income question keeps failing", () => {
 	it("gives up at the cap, and a later run no longer asks it, so the rows beside it still run", async () => {
 		const unsure = await addRow("HOPELESS UNSURE");
@@ -695,7 +695,7 @@ describe("the answer writer and the failure columns", () => {
 });
 
 // The pending row's failure count goes with the purchase to its posted row, as Jev's answers do, while the question is
-// the same one (decision 176). A changed question starts over.
+// the same one (decision 179). A changed question starts over.
 describe("the pending-to-posted merge and the failure count", () => {
 	let lock = 0;
 

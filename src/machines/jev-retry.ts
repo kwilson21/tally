@@ -1,13 +1,13 @@
 import { setup } from "xstate";
 
-// The retry of one transaction's Jev question (decision 176, #864). A row Jev fails on JEV_ATTEMPT_CAP times in a row
+// The retry of one transaction's Jev question (decision 179, #864). A row Jev fails on JEV_ATTEMPT_CAP times in a row
 // gives up: the sorting run leaves it out until a person asks again, or the row's bank text, name, amount or account
 // changes. Jev's answer ends a waiting row's category question: a row with a category (filed) is never reopened, and an
 // unsure row (Jev stored a confidence and set no category) is still asked about its income question, so its failures
 // count too. This machine is the one place that says so. The SQL writers keep the database's columns in step with it
 // (the SQL forms below are the same rules), and the tests walk every writer from every state against the machine.
 
-/** How many failures in a row Jev may have on one transaction before it gives up (decision 176). */
+/** How many failures in a row Jev may have on one transaction before it gives up (decision 179). */
 export const JEV_ATTEMPT_CAP = 5;
 
 export type JevRetryState = "waiting" | "gave_up" | "unsure" | "filed";
@@ -73,7 +73,7 @@ export const jevRetry = setup({}).createMachine({
 				JEV_ANSWERED: { target: "unsure", context: { attempts: 0 } },
 				ASK_AGAIN: { target: "waiting", context: { attempts: 0 } },
 				// The trigger resets only the counter, so an unsure answer stays. Whether a changed row should also
-				// reopen an unsure answer is an open question for the owner (decision 176); until it is decided, it stays.
+				// reopen an unsure answer is an open question for the owner (decision 179); until it is decided, it stays.
 				ROW_CHANGED: { target: "unsure", context: { attempts: 0 } },
 			},
 		},

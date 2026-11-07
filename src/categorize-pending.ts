@@ -108,7 +108,7 @@ export async function askAgainMany(
 ): Promise<void> {
 	if (!env.JEV_API_KEY || !ids.length) return;
 	try {
-		// A person asking again starts these rows' failure count over, so one that reached the cap is asked (decision 176).
+		// A person asking again starts these rows' failure count over, so one that reached the cap is asked (decision 179).
 		await env.DB.prepare(
 			`UPDATE transactions SET jev_attempts = 0 WHERE id IN (SELECT value FROM json_each(?)) AND NOT ${filedSql("transactions")}`,
 		)

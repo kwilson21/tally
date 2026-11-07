@@ -186,7 +186,7 @@ const JEV_MIXED_ARM = `(p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p
 	AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL`;
 
 /**
- * Whether the pending row's Jev failures move onto the posted row (decision 176): the same question Jev failed on (the same
+ * Whether the pending row's Jev failures move onto the posted row (decision 179): the same question Jev failed on (the same
  * bank text, name, amount and account), a posted row with no category, and more failures on the pending row. The failure
  * stamp moves with the count, so a row that has given up is not still counted as waiting.
  */
@@ -301,7 +301,7 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.amount_cents < 0 AND p.amount_cents = ?3 AND p.credit_reviewed = 1
 	 AND p.credit_reviewed_by IS NULL AND p.category_confidence IS NOT NULL
 	 AND COALESCE(transactions.credit_reviewed, 0) = 0 AND transactions.credit_reviewed_by IS NULL`,
-	// This statement also carries Jev's failure count (decision 176), so a pending row that had given up does not start its
+	// This statement also carries Jev's failure count (decision 179), so a pending row that had given up does not start its
 	// five calls again as a posted row. The count moves only while the question is the same one Jev failed on (the same bank
 	// text, name, amount and account) and the posted row has no category, since a filed row is never counted. It shares this
 	// statement so a merge costs the same number of statements as before (test/plaid-sync-page-limit.test.ts).
