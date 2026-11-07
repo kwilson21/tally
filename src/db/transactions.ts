@@ -185,16 +185,17 @@ export const PAGE_SIZE = 25;
 /** A transaction that still needs a category (Home's count, Organize's list). Needs `t` and COUNTED_JOINS. */
 export const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 /**
- * A credit a person still has to review (decision 70): money out, not reviewed, not income, and not a linked refund that
- * follows its purchase. Monthly counts and the night's needs-you count both read it. Needs `t` and COUNTED_JOINS.
+ * A credit a person still has to review (decision 70): money in, not reviewed, not income, not a split parent, and in the
+ * budget (INCLUDED). Monthly counts and the night's needs-you count both read it. Needs `t` only, so it is self-contained.
+ * It needs no "not a refund that follows its purchase" check: a follows-purchase refund is always reviewed, so it can't be here.
  */
-export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE}`;
+export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.is_split = 0 AND ${INCLUDED}`;
 export const OLDER_NEEDS_CATEGORY_SQL = `SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS}
 	WHERE (t.date < ?1 OR (t.date >= ?1 AND t.date < ?2 AND ${COUNTED_MONTH} < ?3))
 	AND ${NEEDS_CATEGORY}`;
 const bankRowSql = (sql: string) => sql.replaceAll(" AND t.is_split = 0", "");
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
-const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
+export const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
 
 /**
  * What each Show choice holds (spec §8.4, decision 74), once COUNTED_JOINS and the split parent `p`
@@ -2621,7 +2622,7 @@ export const jevCategoryHintSql = (alias: string) =>
 // A payment that pays a bill though it is excluded counts (spec §8.5) but is a transfer, a card payment or
 // something a person left out: Jev may suggest its category, and its flags are never written, since they
 // could only change what it is excluded as or take it out of Spent (income).
-const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
+export const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
 	OR (t.excluded = 1 AND ${paysBillOrPlanSql("t")}))`;
 
 /**
