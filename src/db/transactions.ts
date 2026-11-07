@@ -2920,8 +2920,9 @@ export function seenSaveGuard(seen: JevSeen): {
 
 /**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
- * A failure counts while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts, decision 176): a filed
- * or gave-up row is left as it is. `turnId` guards it to the sorting turn (decision 139).
+ * A failure counts toward the cap while the row is waiting or unsure (JEV_FAILED in src/machines/jev-retry.ts,
+ * decision 176). A filed row that is still asked, for its details or its income question, is stamped but not counted,
+ * so it goes behind the rows that have not failed. A row that has given up is left as it is. `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
 	db: D1Database,
@@ -2929,8 +2930,9 @@ export function markJevFailedStatement(
 	turnId?: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
-		WHERE id = ? AND ${openSql("transactions")}`,
+		`UPDATE transactions SET jev_failed_at = datetime('now'),
+			jev_attempts = CASE WHEN ${openSql("transactions")} THEN jev_attempts + 1 ELSE jev_attempts END
+		WHERE id = ? AND NOT ${gaveUpSql("transactions")}`,
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
@@ -2946,8 +2948,9 @@ export function markReaskFailedStatement(
 	turnId: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET jev_failed_at = datetime('now'), jev_attempts = jev_attempts + 1
-		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND ${openSql("transactions")}`,
+		`UPDATE transactions SET jev_failed_at = datetime('now'),
+			jev_attempts = CASE WHEN ${openSql("transactions")} THEN jev_attempts + 1 ELSE jev_attempts END
+		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND NOT ${gaveUpSql("transactions")}`,
 		turnId,
 	);
 	return db
@@ -2998,6 +3001,8 @@ export function saveJevDetailsStatement(
 					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 1 THEN 'queued'
 					WHEN (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id) = 0 THEN 'no_call'
 					ELSE 'unanswered' END,
+				-- A call that came back is a success, so the run of failures ends on a row with no category (decision 176).
+				jev_attempts = CASE WHEN category_id IS NULL AND category_source IS NULL THEN 0 ELSE jev_attempts END,
 				details_asked = 1, updated_at = datetime('now')
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still} AND ${seenIntact}`,
 		options.turnId,

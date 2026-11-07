@@ -6,6 +6,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import {
 	markJevFailedStatement,
 	pendingForJev,
+	saveJevDetailsStatement,
 	saveJevResultStatements,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -266,9 +267,10 @@ describe("the Jev retry machine", () => {
 	});
 });
 
-// A failed income question is one of Jev's asks on a row that may already have a category. It counts only while the
-// row is waiting: on an unsure or filed row it leaves the failure stamp alone (decision 176).
-describe("a failed income question stamps only a waiting row", () => {
+// A failed ask is one of Jev's asks on a row that may already have a category (its details or its income question). It
+// is stamped, so the row goes behind the rows that have not failed, and it counts toward the cap only while the row is
+// waiting or unsure (decision 176).
+describe("a failed ask stamps a row that is still asked and counts only a waiting or unsure one", () => {
 	async function stampedAfterFailure(id: number): Promise<boolean> {
 		await markJevFailedStatement(db, id).run();
 		return (await snapshot(id)).failed;
@@ -293,7 +295,7 @@ describe("a failed income question stamps only a waiting row", () => {
 		expect(await isPending(id)).toBe(false);
 	});
 
-	it("a filed row is not stamped", async () => {
+	it("a filed row is stamped, so it goes behind the rows that have not failed, but is not counted", async () => {
 		const id = await addRow("FILED ROW");
 		await db
 			.prepare(
@@ -301,7 +303,18 @@ describe("a failed income question stamps only a waiting row", () => {
 			)
 			.bind(EATING_OUT, id)
 			.run();
+		expect(await stampedAfterFailure(id)).toBe(true);
+		expect((await snapshot(id)).attempts).toBe(0);
+	});
+
+	it("a row that has given up is not stamped", async () => {
+		const id = await addRow("GAVE UP ROW");
+		await db
+			.prepare("UPDATE transactions SET jev_attempts = ? WHERE id = ?")
+			.bind(CAP, id)
+			.run();
 		expect(await stampedAfterFailure(id)).toBe(false);
+		expect((await snapshot(id)).attempts).toBe(CAP);
 	});
 });
 
@@ -415,7 +428,13 @@ describe("every writer agrees with the machine, state by state", () => {
 				await fire(event, id);
 				const after = await snapshot(id);
 				if (expected === null) {
-					expect(after).toEqual(before);
+					// A filed row that is still asked is stamped by a failed ask, so it goes behind the rows that have
+					// not failed. The machine decides the count and the state, so only the stamp is left out of the
+					// comparison, and only for that one pair.
+					const stampOnly = state === "filed" && event.name === "JEV_FAILED";
+					expect(after).toEqual(
+						stampOnly ? { ...before, failed: after.failed } : before,
+					);
 				} else {
 					expect(stateOf(after)).toBe(expected);
 				}
@@ -633,6 +652,31 @@ describe("the answer writer and the failure columns", () => {
 			id,
 			answerWith(EATING_OUT, 0.9),
 		).update.run();
+		expect(await attempts(id)).toBe(3);
+	});
+	it("a details-only answer to a row with no category sets its failure count to 0", async () => {
+		const id = await addRow("DETAILS ONLY SUCCESS");
+		await db
+			.prepare("UPDATE transactions SET jev_attempts = 4 WHERE id = ?")
+			.bind(id)
+			.run();
+		await saveJevDetailsStatement(db, [
+			{ id, kind: null, forPersonId: null, noteWorthWriting: 0 },
+		])?.run();
+		expect(await attempts(id)).toBe(0);
+	});
+
+	it("a details-only answer to a row a person filed keeps its failure count", async () => {
+		const id = await addRow("DETAILS ONLY FILED");
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user', jev_attempts = 3 WHERE id = ?",
+			)
+			.bind(EATING_OUT, id)
+			.run();
+		await saveJevDetailsStatement(db, [
+			{ id, kind: null, forPersonId: null, noteWorthWriting: 0 },
+		])?.run();
 		expect(await attempts(id)).toBe(3);
 	});
 });
