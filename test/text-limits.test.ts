@@ -4,6 +4,7 @@ import {
 	CATEGORY_NAME_MAX,
 	DISPLAY_NAME_MAX,
 	FEEDBACK_MESSAGE_MAX,
+	MERCHANT_KEY_MAX,
 	NOTE_MAX,
 	PERSON_NAME_MAX,
 	PLAN_NAME_MAX,
@@ -22,7 +23,19 @@ const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
 const APP = Object.entries(SOURCES).filter(
 	([file]) => !file.includes("/design-system/") && !file.endsWith("/limits.ts"),
 );
-const LIMITS = "40|80|120|500|2000";
+// Every number the limits file holds, so a changed limit stays covered; the feedback message is also spelled "2,000".
+const LIMITS = [
+	...new Set([
+		CATEGORY_NAME_MAX,
+		PERSON_NAME_MAX,
+		DISPLAY_NAME_MAX,
+		PLAN_NAME_MAX,
+		NOTE_MAX,
+		CASH_MERCHANT_MAX,
+		FEEDBACK_MESSAGE_MAX,
+		MERCHANT_KEY_MAX,
+	]),
+].join("|");
 
 /** The lines of code in a file: not a whole-line comment. */
 const codeLines = (text: string) =>
@@ -38,6 +51,7 @@ describe("the text limits", () => {
 			NOTE_MAX,
 			CASH_MERCHANT_MAX,
 			FEEDBACK_MESSAGE_MAX,
+			MERCHANT_KEY_MAX,
 		])
 			expect(Number.isInteger(limit) && limit > 0).toBe(true);
 	});
