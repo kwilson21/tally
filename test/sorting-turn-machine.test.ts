@@ -252,6 +252,87 @@ describe("the sorting turn statements follow the machine", () => {
 	});
 });
 
+describe("a damaged row is a free turn to the statements, as it is to the parser", () => {
+	const DAMAGED = [
+		"",
+		"nope",
+		"null",
+		"[]",
+		'{"until":5}',
+		'{"id":3}',
+		'{"id":"B","until":"soon"}',
+		'{"id":"B","until":true}',
+	];
+
+	async function seedRaw(value: string) {
+		await db
+			.prepare("DELETE FROM household_settings WHERE key = 'sorting_turn'")
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO household_settings (key, value) VALUES ('sorting_turn', ?)",
+			)
+			.bind(value)
+			.run();
+	}
+	const rawNow = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT value FROM household_settings WHERE key = 'sorting_turn'",
+				)
+				.first<{ value: string }>()
+		)?.value;
+
+	it("the parser reads each as no turn", () => {
+		for (const bad of DAMAGED) expect(parseSortingTurn(bad), bad).toBeNull();
+	});
+
+	it("take succeeds where the machine says take from free does, and the row becomes ours", async () => {
+		for (const bad of DAMAGED) {
+			await seedRaw(bad);
+			expect(await takeSortingTurn(db, ME), bad).toBe(
+				next(sortingTurnMachine, "free", "TAKE") !== null,
+			);
+			expect((await readSortingTurn(db))?.id, bad).toBe(ME);
+		}
+	});
+
+	it("a save's take, with its reservation record, takes it as well", async () => {
+		await db
+			.prepare(
+				"INSERT OR REPLACE INTO household_settings (key, value) VALUES (?, '{}')",
+			)
+			.bind(RESERVED)
+			.run();
+		for (const bad of DAMAGED) {
+			await seedRaw(bad);
+			await takeSortingTurnStatement(db, ME, RESERVED).run();
+			expect((await readSortingTurn(db))?.id, bad).toBe(ME);
+		}
+	});
+
+	it("release and a save's guard find nothing of ours in it, as from free, and leave the row alone", async () => {
+		for (const bad of DAMAGED) {
+			await seedRaw(bad);
+			await releaseSortingTurn(db, ME);
+			expect(await rawNow(), `${bad}: release`).toBe(bad);
+			const checked = await db
+				.prepare(`SELECT ${turnHeldSql()} AS held`)
+				.bind(ME)
+				.first<{ held: number }>();
+			expect(checked?.held, `${bad}: guard`).toBe(0);
+			expect(next(sortingTurnMachine, "free", "RELEASE")).toBeNull();
+			expect(next(sortingTurnMachine, "free", "HOLDS")).toBeNull();
+		}
+	});
+
+	it("a good turn held by another group with a number until is still not taken", async () => {
+		await seed({ id: OTHER, until: Date.now() + SORTING_TURN_MS });
+		expect(await takeSortingTurn(db, ME)).toBe(false);
+	});
+});
+
 describe("parseSortingTurn", () => {
 	it("reads a good row, with or without an until", () => {
 		expect(parseSortingTurn('{"id":"a","until":5}')).toEqual({

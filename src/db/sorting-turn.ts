@@ -56,9 +56,19 @@ export async function readSortingTurn(
 	return row ? parseSortingTurn(row.value) : null;
 }
 
+/**
+ * The group id and the `until` of a stored turn, read as SQL, with the same reading as `parseSortingTurn`: a value that
+ * is not JSON, an id that is not text, or an until that is not a number reads as null (so, with no until, as a turn that
+ * ran out). Plain `json_extract` would raise an error on a damaged row, or compare a text until as larger than any time.
+ */
+export const turnIdSql = (column: string) =>
+	`(CASE WHEN json_valid(${column}) AND json_type(${column}, '$.id') = 'text' THEN json_extract(${column}, '$.id') END)`;
+export const turnUntilSql = (column: string) =>
+	`(CASE WHEN json_valid(${column}) AND json_type(${column}, '$.until') IN ('integer', 'real') THEN json_extract(${column}, '$.until') END)`;
+
 /** True while the turn is held by the id bound to `param`; a save's statements append it to their WHERE clause. */
 export const turnHeldSql = (param = "?") =>
-	`EXISTS (SELECT 1 FROM household_settings WHERE key = 'sorting_turn' AND json_extract(value, '$.id') = ${param})`;
+	`EXISTS (SELECT 1 FROM household_settings WHERE key = 'sorting_turn' AND ${turnIdSql("value")} = ${param})`;
 
 /**
  * Appends the turn guard to a statement's WHERE clause and binds the turn id last, when a turn is given. With
@@ -78,8 +88,8 @@ export function withTurnGuard(
  * own back), and gives it `until` 15 minutes on. Shared by the read's take and the save's (below).
  */
 const TAKE_ON_CONFLICT = `ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	WHERE COALESCE(json_extract(household_settings.value, '$.until'), 0) < ?2
-		OR json_extract(household_settings.value, '$.id') = ?3`;
+	WHERE COALESCE(${turnUntilSql("household_settings.value")}, 0) < ?2
+		OR ${turnIdSql("household_settings.value")} = ?3`;
 
 const turnValue = (turnId: string, now: number) =>
 	JSON.stringify({ id: turnId, until: now + SORTING_TURN_MS });
@@ -125,7 +135,7 @@ export const takeSortingTurnStatement = (
 export const releaseSortingTurnStatement = (db: D1Database, turnId: string) =>
 	db
 		.prepare(
-			"DELETE FROM household_settings WHERE key = 'sorting_turn' AND json_extract(value, '$.id') = ?",
+			`DELETE FROM household_settings WHERE key = 'sorting_turn' AND ${turnIdSql("value")} = ?`,
 		)
 		.bind(turnId);
 
