@@ -12,11 +12,14 @@ import {
 import { tidyName } from "../transactions/tidy-name";
 
 /**
- * The model that tidies a bank's text. A small, cheap text model is enough for one short line, and it
- * is asked for plain lines rather than JSON so any text model works if this one changes. Spec §10
- * item 8 still asks for it to be checked against the current Workers AI catalog and pricing.
+ * The model behind all three Workers AI prompts here: tidying a bank's text into names, the one-line "what it was"
+ * note, and a category name for a purchase. It is Mistral Small 3.1 24B (decision 169), picked after
+ * scripts/compare-names measured seven models; it replaced Llama 3.1 8B fp8, which Cloudflare switched off on
+ * 2026-11-20. It answers in the plain `response` shape, and the prompts ask for plain lines rather than JSON, so any
+ * text model works if this one changes.
  */
-export const NAME_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8" as const;
+export const NAME_MODEL =
+	"@cf/mistralai/mistral-small-3.1-24b-instruct" as const;
 
 const TIMEOUT_MS = 15_000;
 const MIN_LENGTH = 2;
