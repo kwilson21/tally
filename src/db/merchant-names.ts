@@ -154,13 +154,11 @@ export async function saveAskedNames(
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
 	const firstByText = new Map<string, { rawName: string; names: string[] }>();
-	// A padded text is skipped, as pendingNameStatements skips a padded bank name: its key would not equal its name.
+	// The key is kept exactly as the bank text is (a padded text has its own row, as merchantsToAsk asked it): only the names
+	// are trimmed. An empty key is refused. Padded bank-sent names are skipped in pendingNameStatements, where a name must
+	// equal its key.
 	for (const answer of answers)
-		if (
-			answer.rawName === answer.rawName.trim() &&
-			answer.rawName !== "" &&
-			!firstByText.has(answer.rawName)
-		)
+		if (answer.rawName !== "" && !firstByText.has(answer.rawName))
 			firstByText.set(answer.rawName, answer);
 	const kept = [...firstByText.values()].map(({ rawName, names }) => {
 		const usable = normaliseNames(names);
