@@ -23,7 +23,8 @@
 	"dependencies": {
 		"hono": "^4.13.8",
 		"html2canvas": "^1.4.1",
-		"htmx.org": "^4.0.0"
+		"htmx.org": "^4.0.0",
+		"xstate": "6.0.0-beta.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.14",
