@@ -18,6 +18,7 @@ import {
 	CHECK_LISTS,
 	categorySuggestions,
 	MERCHANT_STATUS_VALUES,
+	merchantSuggestedNames,
 	merchants,
 } from "../src/db/schema";
 
@@ -139,6 +140,12 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 		`PRAGMA table_info(${tableName})`,
 	).all<LiveColumn>();
 	const liveByName = new Map(live.map((column) => [column.name, column]));
+	// A key of several columns is declared with primaryKey(), so its columns are not `primary` one by one.
+	const keyColumns = new Set(
+		config.primaryKeys.flatMap((key) =>
+			key.columns.map((column) => column.name),
+		),
+	);
 
 	for (const column of config.columns) {
 		const where = `${tableName}.${column.name}`;
@@ -164,7 +171,8 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 			problems.push(
 				`${where} default differs: schema ${wantDefault}, database ${haveDefault}`,
 			);
-		if (column.primary !== Boolean(found.pk))
+		const isKey = column.primary || keyColumns.has(column.name);
+		if (isKey !== Boolean(found.pk))
 			problems.push(`${where} primary key differs`);
 	}
 	for (const name of liveByName.keys())
@@ -247,6 +255,10 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 describe("the schema file matches the live database", () => {
 	it("merchants matches the live table", async () => {
 		expect(await drift(merchants, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("merchant_suggested_names matches the live table, its composite key included", async () => {
+		expect(await drift(merchantSuggestedNames, CHECK_LISTS)).toEqual([]);
 	});
 
 	it("category_suggestions matches the live table, index included", async () => {
@@ -359,7 +371,6 @@ describe("the drift check fails on a wrong schema", () => {
 	it("a primary key the database does not have", async () => {
 		const wrong = sqliteTable("merchants", {
 			rawName: text("raw_name"), // the database: TEXT PRIMARY KEY
-			suggestedName: text("suggested_name"),
 			displayName: text("display_name"),
 			defaultCategoryId: integer("default_category_id"),
 			suggestionStatus: text("suggestion_status", {
@@ -367,10 +378,25 @@ describe("the drift check fails on a wrong schema", () => {
 			})
 				.notNull()
 				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
 			notABill: integer("not_a_bill").notNull().default(0),
 		});
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"merchants.raw_name primary key differs",
+		);
+	});
+
+	it("a column of a composite key the schema leaves out of the key", async () => {
+		const wrong = sqliteTable("merchant_suggested_names", {
+			merchantKey: text("merchant_key").notNull(), // the database: part of PRIMARY KEY (merchant_key, position)
+			position: integer().notNull(),
+			name: text().notNull(),
+		});
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchant_suggested_names.merchant_key primary key differs",
+		);
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchant_suggested_names.position primary key differs",
 		);
 	});
 

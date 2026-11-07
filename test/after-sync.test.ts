@@ -9,6 +9,7 @@ describe("afterSync", () => {
 			env.DB.prepare("DELETE FROM bills"),
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare(
 				"INSERT INTO accounts(id,name,type,balance_cents) VALUES(1,'Checking','depository',0)",

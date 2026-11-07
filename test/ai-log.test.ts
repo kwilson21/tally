@@ -22,6 +22,7 @@ import {
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
+import { seedMerchant } from "./helpers/merchants";
 import { pinClock } from "./pinned-clock";
 
 // What AI did this month (spec §8.6, decisions 91 and 101): a small log of what Tally's AI applied,
@@ -936,12 +937,21 @@ describe("what the Jev run and the names write", () => {
 	});
 
 	it("logs a name a person keeps when Tally guessed it, and not a bank name or a rejected one", async () => {
-		await db
-			.prepare(
-				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
-				 ('ACME*X', 'Acme Shop', 'pending'), ('BANKCO', 'BANKCO', 'pending'), ('OTHER', 'Other Co', 'pending')`,
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "ACME*X",
+			status: "pending",
+			names: ["Acme Shop"],
+		});
+		await seedMerchant(db, {
+			key: "BANKCO",
+			status: "pending",
+			names: ["BANKCO"],
+		});
+		await seedMerchant(db, {
+			key: "OTHER",
+			status: "pending",
+			names: ["Other Co"],
+		});
 		await settleSuggestion(db, "BANKCO", { kind: "name", name: "BANKCO" });
 		await settleSuggestion(db, "OTHER", {
 			kind: "name",
@@ -964,12 +974,21 @@ describe("what the Jev run and the names write", () => {
 	});
 
 	it("logs a guessed name kept in the edit panel, and not the bank's name or one typed in", async () => {
-		await db
-			.prepare(
-				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
-				 ('EDIT*SHOP', 'Edit Shop', 'pending'), ('EDIT*BANK', 'EDIT*BANK', 'pending'), ('EDIT*TYPED', 'Typed Co', 'pending')`,
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "EDIT*SHOP",
+			status: "pending",
+			names: ["Edit Shop"],
+		});
+		await seedMerchant(db, {
+			key: "EDIT*BANK",
+			status: "pending",
+			names: ["EDIT*BANK"],
+		});
+		await seedMerchant(db, {
+			key: "EDIT*TYPED",
+			status: "pending",
+			names: ["Typed Co"],
+		});
 		const shop = await chargeAt("EDIT*SHOP");
 		const bank = await chargeAt("EDIT*BANK");
 		const typed = await chargeAt("EDIT*TYPED");
@@ -998,12 +1017,16 @@ describe("what the Jev run and the names write", () => {
 	});
 
 	it("logs a guessed name kept for an Organize group, and not the bank's name", async () => {
-		await db
-			.prepare(
-				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
-				 ('ORG*SHOP', 'Org Shop', 'pending'), ('ORG*BANK', 'ORG*BANK', 'pending')`,
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "ORG*SHOP",
+			status: "pending",
+			names: ["Org Shop"],
+		});
+		await seedMerchant(db, {
+			key: "ORG*BANK",
+			status: "pending",
+			names: ["ORG*BANK"],
+		});
 		await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by) VALUES (1, ?, 650, 'ORG*SHOP', 'test'), (1, ?, 700, 'ORG*BANK', 'test')",
@@ -1028,12 +1051,16 @@ describe("what the Jev run and the names write", () => {
 	});
 
 	it("logs no kept name for a merchant in the group that another save filed first", async () => {
-		await db
-			.prepare(
-				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES
-				 ('ORG*FIRST', 'Org Pick', 'pending'), ('ORG*SECOND', 'Org Pick', 'pending')`,
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "ORG*FIRST",
+			status: "pending",
+			names: ["Org Pick"],
+		});
+		await seedMerchant(db, {
+			key: "ORG*SECOND",
+			status: "pending",
+			names: ["Org Pick"],
+		});
 		await chargeAt("ORG*FIRST");
 		await chargeAt("ORG*SECOND");
 		const category = await db
@@ -1068,13 +1095,27 @@ describe("what the Jev run and the names write", () => {
 	});
 
 	it("logs a small Organize group's kept guesses under the day it is saved, and no bank name, settled name or unknown merchant", async () => {
-		await db
-			.prepare(
-				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES
-				 ('GRP*ONE', 'Group Shop', 'pending', NULL), ('GRP*TWO', 'Group Shop', 'pending', NULL),
-				 ('GRP*BANK', 'GRP*BANK', 'pending', NULL), ('GRP*DONE', 'Group Shop', 'accepted', 'Group Shop')`,
-			)
-			.run();
+		await seedMerchant(db, {
+			key: "GRP*ONE",
+			status: "pending",
+			names: ["Group Shop"],
+		});
+		await seedMerchant(db, {
+			key: "GRP*TWO",
+			status: "pending",
+			names: ["Group Shop"],
+		});
+		await seedMerchant(db, {
+			key: "GRP*BANK",
+			status: "pending",
+			names: ["GRP*BANK"],
+		});
+		await seedMerchant(db, {
+			key: "GRP*DONE",
+			status: "accepted",
+			names: ["Group Shop"],
+			displayName: "Group Shop",
+		});
 		const keys = ["GRP*ONE", "GRP*TWO", "GRP*BANK", "GRP*DONE", "GRP*NEW"];
 		for (const key of keys) await chargeAt(key);
 		const category = await db
@@ -1108,8 +1149,13 @@ describe("what the Jev run and the names write", () => {
 		await db.batch([
 			db.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
-				 INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-				 SELECT 'BIG SHOP ' || i, 'Big Shop', 'pending' FROM n`,
+				 INSERT INTO merchants (raw_name, suggestion_status, names_asked)
+				 SELECT 'BIG SHOP ' || i, 'pending', 0 FROM n`,
+			),
+			db.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+				 INSERT INTO merchant_suggested_names (merchant_key, position, name)
+				 SELECT 'BIG SHOP ' || i, 0, 'Big Shop' FROM n`,
 			),
 			db
 				.prepare(
@@ -1163,8 +1209,13 @@ describe("what the Jev run and the names write", () => {
 		await db.batch([
 			db.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
-				 INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-				 SELECT 'RULE SHOP ' || (i + 100), 'Rule Shop', 'pending' FROM n`,
+				 INSERT INTO merchants (raw_name, suggestion_status, names_asked)
+				 SELECT 'RULE SHOP ' || (i + 100), 'pending', 0 FROM n`,
+			),
+			db.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+				 INSERT INTO merchant_suggested_names (merchant_key, position, name)
+				 SELECT 'RULE SHOP ' || (i + 100), 0, 'Rule Shop' FROM n`,
 			),
 			db
 				.prepare(

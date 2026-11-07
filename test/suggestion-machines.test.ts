@@ -9,7 +9,7 @@ import {
 import {
 	saveAskedNames,
 	settleSuggestion,
-	suggestBankNamesSql,
+	suggestBankNames,
 } from "../src/db/merchant-names";
 import {
 	CATEGORY_SUGGESTION_STATUS_VALUES,
@@ -33,6 +33,11 @@ import {
 	merchantSuggestionState,
 } from "../src/machines/merchant-suggestion";
 import { next } from "../src/machines/next";
+import {
+	assertMerchantInvariants,
+	merchantNames,
+	seedMerchant,
+} from "./helpers/merchants";
 
 // The two suggestion machines are the one place their rules are written. These tests keep the database's own
 // checks and every store function in step with them: the allowed values, then each state met with each event.
@@ -266,22 +271,25 @@ describe("the merchant suggestion store follows its machine", () => {
 		const row = MERCHANT_SUGGESTION_ROWS[state] as NonNullable<
 			(typeof MERCHANT_SUGGESTION_ROWS)[typeof state]
 		>;
-		await db.prepare("DELETE FROM merchants WHERE raw_name = 'ZED CAFE'").run();
-		await db
-			.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('ZED CAFE', ?, ?)",
-			)
-			.bind(row.suggestedName, row.status)
-			.run();
+		await seedMerchant(db, {
+			key: "ZED CAFE",
+			status: row.status,
+			names: row.names,
+			namesAsked: row.namesAsked,
+		});
 	}
 	/** The machine's state for the stored row, so every check reads one answer. */
 	const stateNow = async () => {
 		const row = await db
 			.prepare(
-				"SELECT suggestion_status AS status, suggested_name AS suggestedName FROM merchants WHERE raw_name = 'ZED CAFE'",
+				"SELECT suggestion_status AS status, names_asked AS namesAsked FROM merchants WHERE raw_name = 'ZED CAFE'",
 			)
-			.first<{ status: string; suggestedName: string | null }>();
-		return merchantSuggestionState(row as NonNullable<typeof row>);
+			.first<{ status: string; namesAsked: number }>();
+		return merchantSuggestionState({
+			status: (row as NonNullable<typeof row>).status,
+			namesAsked: (row as NonNullable<typeof row>).namesAsked === 1,
+			names: await merchantNames(db, "ZED CAFE"),
+		});
 	};
 
 	it("every state is stored in a way that reads back as that state", async () => {
@@ -294,13 +302,11 @@ describe("the merchant suggestion store follows its machine", () => {
 	it("a bank's name moves a row exactly where the machine says", async () => {
 		for (const state of states) {
 			await seed(state);
-			await db
-				.prepare(suggestBankNamesSql("1"))
-				.bind(JSON.stringify(["ZED CAFE"]))
-				.run();
+			await db.batch(suggestBankNames(db, ["ZED CAFE"], "1", []));
 			expect(await stateNow(), `${state} after BANK_NAME`).toBe(
 				next(merchantSuggestionMachine, state, "BANK_NAME") ?? state,
 			);
+			await assertMerchantInvariants(db);
 		}
 	});
 
@@ -315,6 +321,7 @@ describe("the merchant suggestion store follows its machine", () => {
 			expect(await stateNow(), `${state} after NAMES`).toBe(
 				next(merchantSuggestionMachine, state, "NAMES") ?? state,
 			);
+			await assertMerchantInvariants(db);
 		}
 	});
 
@@ -325,6 +332,7 @@ describe("the merchant suggestion store follows its machine", () => {
 			expect(await stateNow(), `${state} after NO_NAMES`).toBe(
 				next(merchantSuggestionMachine, state, "NO_NAMES") ?? state,
 			);
+			await assertMerchantInvariants(db);
 		}
 	});
 
@@ -338,6 +346,7 @@ describe("the merchant suggestion store follows its machine", () => {
 			expect(await stateNow(), `${state} after ACCEPT`).toBe(
 				next(merchantSuggestionMachine, state, "ACCEPT") ?? state,
 			);
+			await assertMerchantInvariants(db);
 		}
 	});
 
@@ -352,6 +361,7 @@ describe("the merchant suggestion store follows its machine", () => {
 				expect(await stateNow(), `${state} after REJECT (${choice.kind})`).toBe(
 					next(merchantSuggestionMachine, state, "REJECT") ?? state,
 				);
+				await assertMerchantInvariants(db);
 			}
 		}
 	});

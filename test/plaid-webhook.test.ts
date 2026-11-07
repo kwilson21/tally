@@ -54,6 +54,7 @@ describe("Plaid webhook route", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
 		await saveAiSwitches(env.DB, { details: false });
@@ -1089,6 +1090,7 @@ describe("Plaid webhook sorting what arrived", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM household_settings WHERE key != 'time_zone'"),
 		]);

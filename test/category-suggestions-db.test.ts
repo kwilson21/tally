@@ -156,6 +156,7 @@ beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);

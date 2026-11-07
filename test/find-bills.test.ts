@@ -491,10 +491,16 @@ describe("finding bills", () => {
 		await insertCandidate("CHOSEN NAME", 0, false);
 		await env.DB.batch([
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('SUGGESTED ONLY', 'A Guess', 'pending')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('SUGGESTED ONLY', 'pending', 0)",
 			),
 			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES ('CHOSEN NAME', 'A Guess', 'accepted', 'Mine')",
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('SUGGESTED ONLY', 0, 'A Guess')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked, display_name) VALUES ('CHOSEN NAME', 'accepted', 0, 'Mine')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('CHOSEN NAME', 0, 'A Guess')",
 			),
 		]);
 		const found = await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE));

@@ -8,6 +8,7 @@ import { pendingSuggestions } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
+import { setMerchantNames } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
 
 // Spec §7, decision 79: when a person adds a clearer name or a note to a transaction that still needs
@@ -1008,9 +1009,10 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await db
 			.prepare(
-				"UPDATE merchants SET display_name = NULL, suggested_name = 'Bakery Lane', suggestion_status = 'pending' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+				"UPDATE merchants SET display_name = NULL, suggestion_status = 'pending' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 			)
 			.run();
+		await setMerchantNames(db, "SQ *LOCAL BAKERY 4432", ["Bakery Lane"]);
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Bakery Lane' WHERE id = ?")
 			.bind(bakery)
@@ -1292,9 +1294,10 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		await pickedByTally(await firstCategory());
 		await db
 			.prepare(
-				"UPDATE merchants SET display_name = NULL, suggested_name = 'Bakery Lane', suggestion_status = 'pending' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+				"UPDATE merchants SET display_name = NULL, suggestion_status = 'pending' WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 			)
 			.run();
+		await setMerchantNames(db, "SQ *LOCAL BAKERY 4432", ["Bakery Lane"]);
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Bakery Lane' WHERE id = ?")
 			.bind(bakery)

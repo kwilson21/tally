@@ -4,13 +4,18 @@ import { saveAskedNames } from "../src/db/merchant-names";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { tidyName } from "../src/transactions/tidy-name";
+import {
+	clearMerchants,
+	type MerchantSeed,
+	merchantNames,
+	seedMerchant,
+} from "./helpers/merchants";
 
 // Names Workers AI suggested are saved under each bank text (spec §7). When Plaid later gives several bank
 // texts one merchant name in one sync, on any of its pages, sync starts that merchant's row from their rows: each
 // choice a person made (a name, a rule, Not a bill) comes from the first text that has it, and the suggestion comes
-// from one row. Workers AI is
-// asked only about texts Plaid doesn't name (decision 68), and a Plaid name that is only the text tidied has
-// nothing to suggest (decision 79), so a guess made for a text is not left waiting on the merchant Plaid
+// from one row. Workers AI is asked only about texts Plaid doesn't name (decision 68), and a Plaid name that is only the
+// text tidied has nothing to suggest (decision 79), so a guess made for a text is not left waiting on the merchant Plaid
 // named, whichever text's row it was on.
 
 const KEY = btoa("01234567890123456789012345678901");
@@ -87,44 +92,41 @@ async function syncPages(id: number, pages: Page[]) {
 /** A sync whose one page holds these transactions. */
 const sync = (id: number, added: unknown[]) => syncPages(id, [{ added }]);
 
-const row = (key: string) =>
-	env.DB.prepare(
-		"SELECT suggested_name, display_name, suggestion_status FROM merchants WHERE raw_name = ?",
+/** A merchant's row and names as the sync left them, or null when it has no row. */
+const row = async (key: string) => {
+	const found = await env.DB.prepare(
+		"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
 	)
 		.bind(key)
-		.first<{
-			suggested_name: string | null;
-			display_name: string | null;
-			suggestion_status: string;
-		}>();
+		.first<{ display_name: string | null; suggestion_status: string }>();
+	return found && { ...found, names: await merchantNames(env.DB, key) };
+};
 
-const GUESSES = "Target Stores\nTarget Corp";
+const GUESSES = ["Target Stores", "Target Corp"];
+
+/** A merchant row a person's earlier save left: a waiting guess, a decided one, or an empty answer (`asked`). */
+const put = (key: string, state: Omit<MerchantSeed, "key">) =>
+	seedMerchant(env.DB, { key, ...state });
 
 beforeEach(async () => {
+	await clearMerchants(env.DB);
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM transactions"),
 		env.DB.prepare("DELETE FROM accounts"),
 		env.DB.prepare("DELETE FROM plaid_items"),
-		env.DB.prepare("DELETE FROM merchants"),
 	]);
 });
 
 describe("a guess made for a bank text does not wait on the merchant Plaid names", () => {
 	it("takes the other text's guess over the empty answer, then clears it, since Plaid's name is only the text tidied", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			// Asked about, nothing usable: the empty answer that stops it being asked again.
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, '', 'none')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T2, GUESSES),
-		]);
+		// Asked about, nothing usable: the empty answer that stops it being asked again.
+		await put(T1, { namesAsked: true });
+		await put(T2, { status: "pending", names: GUESSES });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		// The waiting guess is the bare suggestion, so the shared key copies it; the page then clears it as stale.
 		expect(await row(PLAID)).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: null,
 			suggestion_status: "none",
 		});
@@ -137,14 +139,12 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Tea', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, '', 'none')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My tea', ?, 1)",
-			).bind(T2, category?.id),
-		]);
+		await put(T1, { namesAsked: true });
+		await put(T2, {
+			displayName: "My tea",
+			defaultCategoryId: category?.id,
+			notABill: true,
+		});
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(
 			await env.DB.prepare(
@@ -164,14 +164,8 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Snacks', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'My coffee')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)",
-			).bind(T2, category?.id),
-		]);
+		await put(T1, { displayName: "My coffee" });
+		await put(T2, { defaultCategoryId: category?.id });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(
 			await env.DB.prepare(
@@ -184,17 +178,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("takes a decided suggestion over the empty answer that comes first, with its name and status together", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, '', 'none')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Old Guess', 'rejected')",
-			).bind(T2),
-		]);
+		await put(T1, { namesAsked: true });
+		await put(T2, { status: "rejected", names: ["Old Guess"] });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: "Old Guess",
+			names: ["Old Guess"],
 			display_name: null,
 			suggestion_status: "rejected",
 		});
@@ -202,17 +190,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("takes a decided suggestion over a bare guess that comes first, with its name and status together", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T1, GUESSES),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Old Guess', 'rejected')",
-			).bind(T2),
-		]);
+		await put(T1, { status: "pending", names: GUESSES });
+		await put(T2, { status: "rejected", names: ["Old Guess"] });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: "Old Guess",
+			names: ["Old Guess"],
 			display_name: null,
 			suggestion_status: "rejected",
 		});
@@ -220,17 +202,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("never copies a waiting guess onto a merchant a person named, when the guess's text comes first", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T1, GUESSES),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'My coffee')",
-			).bind(T2),
-		]);
+		await put(T1, { status: "pending", names: GUESSES });
+		await put(T2, { displayName: "My coffee" });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: "My coffee",
 			suggestion_status: "none",
 		});
@@ -238,17 +214,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("never copies a waiting guess onto a merchant a person named, when the named text holds only the empty answer", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T1, GUESSES),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES (?, 'My coffee', '', 'none')",
-			).bind(T2),
-		]);
+		await put(T1, { status: "pending", names: GUESSES });
+		await put(T2, { displayName: "My coffee", namesAsked: true });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: "",
+			names: [],
 			display_name: "My coffee",
 			suggestion_status: "none",
 		});
@@ -256,15 +226,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("clears the guess copied from a text's row, whichever text comes first", async () => {
 		const id = await addItem();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-		)
-			.bind(T2, GUESSES)
-			.run();
+		await put(T2, { status: "pending", names: GUESSES });
 		// T1 has no row at all, so T2's is the one copied.
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: null,
 			suggestion_status: "none",
 		});
@@ -272,17 +238,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("clears the first row's guess when both have some", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'First Names', 'pending')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T2, GUESSES),
-		]);
+		await put(T1, { status: "pending", names: ["First Names"] });
+		await put(T2, { status: "pending", names: GUESSES });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: null,
 			suggestion_status: "none",
 		});
@@ -290,11 +250,7 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("copies the first text that has a row, even when an earlier text has none", async () => {
 		const id = await addItem();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'My coffee')",
-		)
-			.bind(T2)
-			.run();
+		await put(T2, { displayName: "My coffee" });
 		// T1 comes first and has no row; T2's is the first there is, so its name carries over.
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toMatchObject({ display_name: "My coffee" });
@@ -307,11 +263,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 		).first<{ id: number }>();
 		// T1's name call failed. The failure is kept apart from merchants (#468), so T1 gets no row here.
 		await saveAskedNames(env.DB, [], [T1]);
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My coffee', ?, 1)",
-		)
-			.bind(T2, category?.id)
-			.run();
+		await put(T2, {
+			displayName: "My coffee",
+			defaultCategoryId: category?.id,
+			notABill: true,
+		});
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toMatchObject({ display_name: "My coffee" });
 		expect(
@@ -332,26 +288,14 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("never changes a suggestion a person already decided, or a name a person chose", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Old Guess', 'rejected')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T2, GUESSES),
-		]);
+		await put(T1, { status: "rejected", names: ["Old Guess"] });
+		await put(T2, { status: "pending", names: GUESSES });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toMatchObject({ suggestion_status: "rejected" });
 
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM merchants"),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'My coffee')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T2, GUESSES),
-		]);
+		await clearMerchants(env.DB);
+		await put(T1, { displayName: "My coffee" });
+		await put(T2, { status: "pending", names: GUESSES });
 		await sync(id, [transaction("c", T1, PLAID), transaction("d", T2, PLAID)]);
 		expect(await row(PLAID)).toMatchObject({
 			display_name: "My coffee",
@@ -382,14 +326,12 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Hobbies', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, '', 'none')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My tea', ?, 1)",
-			).bind(T2, category?.id),
-		]);
+		await put(T1, { namesAsked: true });
+		await put(T2, {
+			displayName: "My tea",
+			defaultCategoryId: category?.id,
+			notABill: true,
+		});
 		await syncPages(id, [
 			{ added: [transaction("a", T1, PLAID)], hasMore: true },
 			{ added: [transaction("b", T2, PLAID)] },
@@ -411,17 +353,17 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Books', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My tea', ?, 1)",
-		)
-			.bind(T2, category?.id)
-			.run();
+		await put(T2, {
+			displayName: "My tea",
+			defaultCategoryId: category?.id,
+			notABill: true,
+		});
 		await syncPages(id, [
 			{ added: [transaction("a", "TGT 0412", PLAID)], hasMore: true },
 			{ added: [transaction("b", T2, PLAID)] },
 		]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: "My tea",
 			suggestion_status: "none",
 		});
@@ -439,17 +381,17 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Stationery', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My tea', ?, 1)",
-		)
-			.bind(T2, category?.id)
-			.run();
+		await put(T2, {
+			displayName: "My tea",
+			defaultCategoryId: category?.id,
+			notABill: true,
+		});
 		await sync(id, [
 			transaction("a", "TGT 0412", PLAID),
 			transaction("b", T2, PLAID),
 		]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: null,
+			names: [],
 			display_name: "My tea",
 			suggestion_status: "none",
 		});
@@ -462,21 +404,15 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 
 	it("never copies a waiting guess onto a key page one made for a person's name", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES (?, 'My coffee', '', 'none')",
-			).bind(T2),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-			).bind(T1, GUESSES),
-		]);
-		// The '' and 'none' are what tell the outcomes apart: a copied guess would read as pending with its names.
+		await put(T2, { displayName: "My coffee", namesAsked: true });
+		await put(T1, { status: "pending", names: GUESSES });
+		// The asked answer and the name are what tell the outcomes apart: a copied guess would read as pending with its names.
 		await syncPages(id, [
 			{ added: [transaction("a", T2, PLAID)], hasMore: true },
 			{ added: [transaction("b", T1, PLAID)] },
 		]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: "",
+			names: [],
 			display_name: "My coffee",
 			suggestion_status: "none",
 		});
@@ -484,20 +420,14 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 
 	it("takes a decided suggestion on page two over the empty answer on page one", async () => {
 		const id = await addItem();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, '', 'none')",
-			).bind(T1),
-			env.DB.prepare(
-				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Old Guess', 'rejected')",
-			).bind(T2),
-		]);
+		await put(T1, { namesAsked: true });
+		await put(T2, { status: "rejected", names: ["Old Guess"] });
 		await syncPages(id, [
 			{ added: [transaction("a", T1, PLAID)], hasMore: true },
 			{ added: [transaction("b", T2, PLAID)] },
 		]);
 		expect(await row(PLAID)).toEqual({
-			suggested_name: "Old Guess",
+			names: ["Old Guess"],
 			display_name: null,
 			suggestion_status: "rejected",
 		});
@@ -508,11 +438,7 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Gifts', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, '', 'none')",
-		)
-			.bind(T1)
-			.run();
+		await put(T1, { namesAsked: true });
 		await syncPages(id, [{ added: [transaction("a", T1, PLAID)] }]);
 		expect(await choices(PLAID)).toEqual({
 			display_name: null,
@@ -520,11 +446,11 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 			not_a_bill: 0,
 		});
 
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My tea', ?, 1)",
-		)
-			.bind(T2, category?.id)
-			.run();
+		await put(T2, {
+			displayName: "My tea",
+			defaultCategoryId: category?.id,
+			notABill: true,
+		});
 		// A second sync is a new run: the row the first one made is not open, so nothing is copied onto it.
 		await syncPages(id, [{ added: [transaction("b", T2, PLAID)] }]);
 		expect(await choices(PLAID)).toEqual({

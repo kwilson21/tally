@@ -12,6 +12,7 @@ beforeAll(async () => {
 		db.prepare("DELETE FROM bills"),
 		db.prepare("DELETE FROM transactions"),
 		db.prepare("DELETE FROM budget_amounts"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM categories"),
 		db.prepare("DELETE FROM accounts"),

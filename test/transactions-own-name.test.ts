@@ -4,6 +4,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { listTransactions } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
+import { merchantNames, seedMerchant } from "./helpers/merchants";
 
 // A name a person gives one transaction only (decision 101, spec §5 and §7): "This one only" leaves the
 // merchant's name, its suggestions and the other transactions alone; "All" renames the merchant for the
@@ -51,25 +52,18 @@ async function charge(
 	return row?.id as number;
 }
 
-const suggest = (key: string, names: string) =>
-	db
-		.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
-		)
-		.bind(key, names)
-		.run();
+const suggest = (key: string, names: string[]) =>
+	seedMerchant(db, { key, status: "pending", names });
 
-const merchant = (key: string) =>
-	db
+const merchant = async (key: string) => {
+	const found = await db
 		.prepare(
-			"SELECT display_name, suggested_name, suggestion_status FROM merchants WHERE raw_name = ?",
+			"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
 		)
 		.bind(key)
-		.first<{
-			display_name: string | null;
-			suggested_name: string | null;
-			suggestion_status: string;
-		}>();
+		.first<{ display_name: string | null; suggestion_status: string }>();
+	return found && { ...found, names: await merchantNames(db, key) };
+};
 
 const filters = parseFilters(new URLSearchParams("month=all"), "2026-09");
 const rowOf = async (id: number) =>
@@ -102,6 +96,7 @@ beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 	]);
 	await saveAiSwitches(db, { details: false });
@@ -170,11 +165,11 @@ describe("a name for one transaction (decision 101)", () => {
 	it("keeps a suggested name waiting when it is chosen for This one only", async () => {
 		const id = await charge(RAW);
 		const other = await charge(RAW, null, "2026-09-18");
-		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 		await save(id, { name_pick: "s:Blue Bottle", name_scope: "one" });
 		expect(await merchant(RAW)).toEqual({
 			display_name: null,
-			suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+			names: ["Blue Bottle Coffee", "Blue Bottle"],
 			suggestion_status: "pending",
 		});
 		expect(await rowOf(id)).toMatchObject({
@@ -190,7 +185,7 @@ describe("a name for one transaction (decision 101)", () => {
 	it("Looks right with nothing ticked confirms the store's guess for all, whatever scope the hidden list posted", async () => {
 		const id = await charge(RAW);
 		const other = await charge(RAW, null, "2026-09-18");
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await save(id, {
 			details_action: "keep",
 			displayed_name_guess: "Blue Bottle Coffee",
@@ -206,7 +201,7 @@ describe("a name for one transaction (decision 101)", () => {
 	it("Looks right with a name ticked saves it for This one only, as Save does", async () => {
 		const id = await charge(RAW);
 		const other = await charge(RAW, null, "2026-09-18");
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await save(id, {
 			name_pick: "s:Blue Bottle Coffee",
 			name_scope: "one",
@@ -215,7 +210,7 @@ describe("a name for one transaction (decision 101)", () => {
 		});
 		expect(await merchant(RAW)).toEqual({
 			display_name: null,
-			suggested_name: "Blue Bottle Coffee",
+			names: ["Blue Bottle Coffee"],
 			suggestion_status: "pending",
 		});
 		expect(await rowOf(id)).toMatchObject({
@@ -230,7 +225,7 @@ describe("a name for one transaction (decision 101)", () => {
 
 	it("a guess that is no longer offered does not rename the merchant when Looks right is kept", async () => {
 		const id = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Co");
+		await suggest(RAW, ["Blue Bottle Co"]);
 		// The panel was drawn with "Blue Bottle Coffee" as the guess; another tab settled the suggestions since.
 		await save(id, {
 			details_action: "keep",
@@ -239,14 +234,14 @@ describe("a name for one transaction (decision 101)", () => {
 		});
 		expect(await merchant(RAW)).toEqual({
 			display_name: null,
-			suggested_name: "Blue Bottle Co",
+			names: ["Blue Bottle Co"],
 			suggestion_status: "pending",
 		});
 	});
 
 	it("a guess that was drawn before the merchant was named does not rename it", async () => {
 		const id = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		// Another tab names the merchant after this panel was drawn with the guess showing.
 		await db
 			.prepare(
@@ -298,7 +293,7 @@ describe("a name for one transaction (decision 101)", () => {
 
 	it("the store's own name for All turns a suggestion down and shows the tidied text", async () => {
 		const id = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const { res } = await post(
 			`/transactions/${id}`,
 			{
@@ -371,7 +366,7 @@ describe("a name for one transaction (decision 101)", () => {
 
 	it("a save that names nothing while the row shows an undecided guess says just Saved.", async () => {
 		const id = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const { res } = await post(
 			`/transactions/${id}`,
 			{ back: "/transactions?month=all", note: "Dinner" },
@@ -542,7 +537,7 @@ describe("a name for one transaction (decision 101)", () => {
 	it("The store's own name under This one only names this row and leaves a suggested name waiting", async () => {
 		const id = await charge(RAW);
 		const other = await charge(RAW, null, "2026-09-18");
-		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 		const { res } = await post(
 			`/transactions/${id}`,
 			{
@@ -555,7 +550,7 @@ describe("a name for one transaction (decision 101)", () => {
 		expect(toastOf(res)).toBe("Saved Blue bottle cof");
 		expect(await merchant(RAW)).toEqual({
 			display_name: null,
-			suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+			names: ["Blue Bottle Coffee", "Blue Bottle"],
 			suggestion_status: "pending",
 		});
 		expect(await rowOf(id)).toMatchObject({
@@ -571,7 +566,7 @@ describe("a name for one transaction (decision 101)", () => {
 	it("The store's own name under This one only still names this row when the names switch is off, and turns no suggestion down", async () => {
 		await saveAiSwitches(db, { names: false });
 		const id = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await post(
 			`/transactions/${id}`,
 			{

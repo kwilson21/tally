@@ -375,11 +375,12 @@ describe("data exports", () => {
 			merchants: [
 				"default_category_id",
 				"display_name",
+				"names_asked",
 				"raw_name",
-				"suggested_name",
 				"suggestion_status",
 				"not_a_bill",
 			],
+			merchant_suggested_names: ["merchant_key", "name", "position"],
 			merchant_name_failures: ["failed_at", "raw_name"],
 			accounts: [
 				"balance_cents",

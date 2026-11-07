@@ -9,6 +9,7 @@ import {
 import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { seedMerchant } from "./helpers/merchants";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -550,9 +551,11 @@ describe("the likely transactions after a new category", () => {
 	});
 
 	it("name each row as the list does, with a guessed name marked as a guess", async () => {
-		await env.DB.prepare(
-			"INSERT OR REPLACE INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES ('SQ *LOCAL BAKERY 4432', NULL, 'Bakery Co', 'pending')",
-		).run();
+		await seedMerchant(env.DB, {
+			key: "SQ *LOCAL BAKERY 4432",
+			status: "pending",
+			names: ["Bakery Co"],
+		});
 
 		const saved = await post(
 			`/transactions/${bakery}`,

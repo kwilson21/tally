@@ -16,6 +16,7 @@ import {
 	suggestMerchantNames,
 } from "../src/suggest-names-pending";
 import { fakeSteps } from "./fake-sort-steps";
+import { merchantNames } from "./helpers/merchants";
 import { recordSorting, sortInProcess } from "./record-sorting";
 
 // Every 09:00 request here starts its night's instance on a recorder, so no real Workflow starts (test/record-sorting.ts).
@@ -180,6 +181,7 @@ describe("scheduled handler", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
 		const category = await env.DB.prepare(
@@ -255,6 +257,7 @@ describe("scheduled handler", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
 		const category = await env.DB.prepare(
@@ -507,16 +510,30 @@ describe("scheduled handler: merchant names", () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare(
 				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('plaid-1', 1, '2026-09-20', 650, 'SQ *BLUE BOTTLE COF 0412')",
 			),
 		]);
 	}
-	const pending = () =>
-		env.DB.prepare(
-			"SELECT raw_name, suggested_name, display_name, suggestion_status FROM merchants",
-		).all();
+	const pending = async () => {
+		const { results } = await env.DB.prepare(
+			"SELECT raw_name, display_name, suggestion_status FROM merchants",
+		).all<{
+			raw_name: string;
+			display_name: string | null;
+			suggestion_status: string;
+		}>();
+		return {
+			results: await Promise.all(
+				results.map(async (row) => ({
+					...row,
+					names: await merchantNames(env.DB, row.raw_name),
+				})),
+			),
+		};
+	};
 
 	it("asks no names in production's 09:00 run, which syncs and starts the night's instance", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
@@ -538,7 +555,7 @@ describe("scheduled handler: merchant names", () => {
 		expect((await pending()).results).toEqual([
 			{
 				raw_name: "SQ *BLUE BOTTLE COF 0412",
-				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				names: ["Blue Bottle Coffee", "Blue Bottle"],
 				display_name: null,
 				suggestion_status: "pending",
 			},
@@ -553,6 +570,7 @@ describe("scheduled handler: merchant names", () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 150)
@@ -598,6 +616,7 @@ describe("scheduled handler: merchant names", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM feedback"),
 		]);
@@ -856,6 +875,7 @@ describe("scheduled handler: new category suggestions", () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM category_suggestions"),
 		]);
@@ -1070,6 +1090,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
@@ -1086,9 +1107,9 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		const ai = aiThatSays("Some Place Name");
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
-		// One candidate query and the switch read, then for every five calls a switch read and two writes (the
-		// merchants upsert and the failures delete): 1 + 1 + 20 × 3 = 62.
-		expect(counted.statements()).toBeLessThanOrEqual(62);
+		// One candidate query and the switch read, then for every five calls a switch read and three writes (the
+		// merchants upsert, its names and the failures delete): 1 + 1 + 20 × 4 = 82.
+		expect(counted.statements()).toBeLessThanOrEqual(82);
 	});
 
 	it("the scheduled names pass's worst mixed night, every merchant already failed and calls alternating fail and answer, stays under 82 statements", async () => {
@@ -1112,8 +1133,8 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		} as unknown as Ai;
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
-		// 1 + 1 + 20 × 4 = 82: a switch read, a merchants upsert, a failures upsert and a failures delete per batch.
-		expect(counted.statements()).toBeLessThanOrEqual(82);
+		// 1 + 1 + 20 × 5 = 102: a switch read, a merchants upsert, its names, a failures upsert and a failures delete per batch.
+		expect(counted.statements()).toBeLessThanOrEqual(102);
 		logged.mockRestore();
 		vi.restoreAllMocks();
 	});
@@ -1145,6 +1166,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 			env.DB.prepare("DELETE FROM feedback"),
 		]);
@@ -1270,6 +1292,7 @@ const answeredHousehold = async () => {
 		env.DB.prepare("DELETE FROM transactions"),
 		env.DB.prepare("DELETE FROM accounts"),
 		env.DB.prepare("DELETE FROM plaid_items"),
+		env.DB.prepare("DELETE FROM merchant_suggested_names"),
 		env.DB.prepare("DELETE FROM merchants"),
 		env.DB.prepare("DELETE FROM merchant_name_failures"),
 		env.DB.prepare("DELETE FROM household_settings WHERE key = 'first_tally'"),

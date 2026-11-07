@@ -139,6 +139,7 @@ beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);

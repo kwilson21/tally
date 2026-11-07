@@ -336,6 +336,11 @@ describe("saveEdit", () => {
 
 	it("renames the merchant everywhere, creating its merchant row if needed", async () => {
 		await db
+			.prepare(
+				"DELETE FROM merchant_suggested_names WHERE merchant_key IN (SELECT raw_name FROM merchants WHERE raw_name = 'PAYPAL *XYZSHOP')",
+			)
+			.run();
+		await db
 			.prepare("DELETE FROM merchants WHERE raw_name = 'PAYPAL *XYZSHOP'")
 			.run();
 		const id = await idOf("PAYPAL *XYZSHOP");

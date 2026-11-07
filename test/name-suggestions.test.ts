@@ -3,41 +3,59 @@ import {
 	isBankName,
 	MAX_SUGGESTED_NAMES,
 	nameSource,
+	normaliseNames,
 	offeredNames,
 	parseSuggestedNames,
 	shownName,
-	storeSuggestedNames,
 	usableSuggestedNames,
 } from "../src/transactions/name-suggestions";
+import { storedNames } from "./helpers/merchants";
 
-// A merchant's suggested names (spec §5, §7, decision 64): up to three, kept one per line in
-// `merchants.suggested_name`, and shown only while the suggestion is pending.
+// A merchant's suggested names (spec §5, §7, decision 64): up to three, rows of `merchant_suggested_names`, and shown
+// only while the suggestion is pending.
 
-describe("parseSuggestedNames and storeSuggestedNames", () => {
-	it("round-trips up to three names, one per line", () => {
-		const stored = storeSuggestedNames(["Blue Bottle Coffee", "Blue Bottle"]);
-		expect(stored).toBe("Blue Bottle Coffee\nBlue Bottle");
-		expect(parseSuggestedNames(stored)).toEqual([
-			"Blue Bottle Coffee",
-			"Blue Bottle",
-		]);
+describe("parseSuggestedNames", () => {
+	it("reads the names a merchant holds, in position order, from the JSON text merchantNamesJsonSql gives", () => {
+		expect(
+			parseSuggestedNames(storedNames(["Blue Bottle Coffee", "Blue Bottle"])),
+		).toEqual(["Blue Bottle Coffee", "Blue Bottle"]);
+		// Positions sort the names even when the rows come back out of order.
+		expect(
+			parseSuggestedNames('[[1,"Blue Bottle"],[0,"Blue Bottle Coffee"]]'),
+		).toEqual(["Blue Bottle Coffee", "Blue Bottle"]);
 	});
 
 	it("reads a single plain name, which is how Plaid's name is stored", () => {
-		expect(parseSuggestedNames("Comcast")).toEqual(["Comcast"]);
+		expect(parseSuggestedNames(storedNames(["Comcast"]))).toEqual(["Comcast"]);
 	});
 
-	it("reads nothing, an empty value ('asked, nothing useful') and blank lines as no names", () => {
+	it("reads nothing, and no names, as no names: null, the empty list, and text that is not a list", () => {
 		expect(parseSuggestedNames(null)).toEqual([]);
 		expect(parseSuggestedNames(undefined)).toEqual([]);
+		expect(parseSuggestedNames("[]")).toEqual([]);
 		expect(parseSuggestedNames("")).toEqual([]);
-		expect(parseSuggestedNames("\n \n")).toEqual([]);
+		expect(parseSuggestedNames("not json")).toEqual([]);
+		expect(parseSuggestedNames('{"a":1}')).toEqual([]);
+		expect(parseSuggestedNames('[["x"],[1,2],"y"]')).toEqual([]);
 	});
 
-	it("keeps no more than three", () => {
+	it("drops blank names and keeps no more than three", () => {
 		expect(MAX_SUGGESTED_NAMES).toBe(3);
-		expect(storeSuggestedNames(["a1", "b2", "c3", "d4"])).toBe("a1\nb2\nc3");
-		expect(parseSuggestedNames("a1\nb2\nc3\nd4")).toEqual(["a1", "b2", "c3"]);
+		expect(parseSuggestedNames(storedNames(["  ", "Acme"]))).toEqual(["Acme"]);
+		expect(parseSuggestedNames(storedNames(["a1", "b2", "c3", "d4"]))).toEqual([
+			"a1",
+			"b2",
+			"c3",
+		]);
+	});
+});
+
+describe("normaliseNames", () => {
+	it("trims, drops blank names and keeps the first three, without de-duplicating", () => {
+		expect(
+			normaliseNames([" Acme ", "", "   ", "Acme", "B", "C", "D"]),
+		).toEqual(["Acme", "Acme", "B"]);
+		expect(normaliseNames([])).toEqual([]);
 	});
 });
 
@@ -61,7 +79,7 @@ describe("where a name came from (P87 B)", () => {
 describe("usableSuggestedNames", () => {
 	const KEY = "SQ *BLUE BOTTLE COF 0412";
 	const base = {
-		stored: "Blue Bottle Coffee\nBlue Bottle",
+		stored: storedNames(["Blue Bottle Coffee", "Blue Bottle"]),
 		status: "pending",
 		key: KEY,
 		namesOn: true,
@@ -85,7 +103,7 @@ describe("usableSuggestedNames", () => {
 		expect(usableSuggestedNames({ ...base, namesOn: false })).toEqual([]);
 		expect(
 			usableSuggestedNames({
-				stored: "Blue Bottle Coffee",
+				stored: storedNames(["Blue Bottle Coffee"]),
 				status: "pending",
 				key: "Blue Bottle Coffee",
 				namesOn: false,
@@ -103,7 +121,7 @@ describe("shownName", () => {
 	const raw = "SQ *BLUE BOTTLE COF 0412";
 	const input = {
 		chosen: null,
-		stored: "Blue Bottle Coffee\nBlue Bottle",
+		stored: storedNames(["Blue Bottle Coffee", "Blue Bottle"]),
 		status: "pending",
 		key: raw,
 		rawName: raw,
@@ -142,7 +160,7 @@ describe("shownName", () => {
 		const bank = {
 			...input,
 			key: "Blue Bottle Coffee",
-			stored: "Blue Bottle Coffee",
+			stored: storedNames(["Blue Bottle Coffee"]),
 		};
 		expect(shownName(bank)).toEqual({
 			name: "Blue Bottle Coffee",
@@ -162,7 +180,7 @@ describe("shownName", () => {
 				...input,
 				rawName: "NETFLIX.COM",
 				key: "NETFLIX.COM",
-				stored: "Netflix.com\nNetflix",
+				stored: storedNames(["Netflix.com", "Netflix"]),
 			}),
 		).toEqual({ name: "Netflix", suggested: true, fromBank: false });
 		expect(
@@ -170,14 +188,14 @@ describe("shownName", () => {
 				...input,
 				rawName: "NETFLIX",
 				key: "NETFLIX",
-				stored: "Netflix",
+				stored: storedNames(["Netflix"]),
 			}),
 		).toEqual({ name: "Netflix", suggested: false, fromBank: false });
 	});
 
 	it("does not offer a Tally guess that only recapitalizes the shown text", () => {
 		const guess = {
-			stored: "blue BOTTLE cof",
+			stored: storedNames(["blue BOTTLE cof"]),
 			status: "pending",
 			key: raw,
 			namesOn: true,
@@ -192,7 +210,7 @@ describe("shownName", () => {
 
 	it("keeps the bank's own name offered when it only recapitalizes the shown text (P87 B)", () => {
 		const bank = {
-			stored: "Blue Bottle Cof",
+			stored: storedNames(["Blue Bottle Cof"]),
 			status: "pending",
 			key: "Blue Bottle Cof",
 			namesOn: true,
@@ -218,7 +236,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 		"is not offered beside %j (shown as %j) when the guess is %j",
 		(raw, tidied, guess) => {
 			const merchant = {
-				stored: guess,
+				stored: storedNames([guess]),
 				status: "pending",
 				key: raw,
 				namesOn: true,
@@ -234,7 +252,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 
 	it("still offers a Tally guess that says a different word", () => {
 		const merchant = {
-			stored: "Trader Joe's Market\nTrader Joes",
+			stored: storedNames(["Trader Joe's Market", "Trader Joes"]),
 			status: "pending",
 			key: "TRADER JOE'S #552",
 			namesOn: true,
@@ -246,7 +264,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 
 	it("still offers a Tally guess with different digits, since Motel 8 is not Motel 6", () => {
 		const merchant = {
-			stored: "Motel 8",
+			stored: storedNames(["Motel 8"]),
 			status: "pending",
 			key: "MOTEL 6",
 			namesOn: true,
@@ -263,7 +281,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 
 	it("keeps the bank's own name offered when it only differs by punctuation (P87 B)", () => {
 		const bank = {
-			stored: "ATT",
+			stored: storedNames(["ATT"]),
 			status: "pending",
 			key: "ATT",
 			namesOn: true,

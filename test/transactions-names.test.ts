@@ -10,6 +10,11 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { parseEdit } from "../src/transactions/edit";
 import { parseFilters } from "../src/transactions/filters";
+import {
+	merchantNames,
+	seedMerchant,
+	setMerchantNames,
+} from "./helpers/merchants";
 
 // Suggested merchant names in the Transactions list and the edit panel (P29 A, decision 64, #33): the
 // first pending suggestion shows dashed until a person chooses, the panel offers up to three names,
@@ -61,27 +66,19 @@ async function charge(
 }
 const suggest = (
 	key: string,
-	names: string,
-	status = "pending",
+	names: string[],
+	status: "pending" | "accepted" | "rejected" = "pending",
 	display: string | null = null,
-) =>
-	db
+) => seedMerchant(db, { key, status, names, displayName: display });
+const merchant = async (key: string) => {
+	const found = await db
 		.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES (?, ?, ?, ?)",
-		)
-		.bind(key, names, status, display)
-		.run();
-const merchant = (key: string) =>
-	db
-		.prepare(
-			"SELECT display_name, suggested_name, suggestion_status FROM merchants WHERE raw_name = ?",
+			"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
 		)
 		.bind(key)
-		.first<{
-			display_name: string | null;
-			suggested_name: string | null;
-			suggestion_status: string;
-		}>();
+		.first<{ display_name: string | null; suggestion_status: string }>();
+	return found && { ...found, names: await merchantNames(db, key) };
+};
 const filters = parseFilters(new URLSearchParams("month=all"), "2026-09");
 const rowOf = async (id: number) =>
 	(await listTransactions(db, filters)).rows.find((r) => r.id === id);
@@ -117,6 +114,7 @@ beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 	]);
 	await saveAiSwitches(db, { details: false });
@@ -129,13 +127,13 @@ describe("the Transactions list", () => {
 		expect(plain).not.toContain("Dashed names are suggestions.");
 
 		await charge("CHECKCARD 0921 CVS", "CVS Pharmacy");
-		await suggest("CVS Pharmacy", "CVS Pharmacy");
+		await suggest("CVS Pharmacy", ["CVS Pharmacy"]);
 		const banked = (await get("/transactions?month=all")).html;
 		expect(banked).toContain("Dashed names are suggestions.");
 		expect(banked.match(/Dashed names are suggestions\./g)).toHaveLength(1);
 
 		await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const guessed = (await get("/transactions?month=all")).html;
 		expect(guessed).toContain("Dashed names are suggestions.");
 		expect(guessed).toContain('href="/how-it-works#names"');
@@ -150,7 +148,7 @@ describe("the Transactions list", () => {
 
 	it("shows the dashed-name note only for names displayed in the selected view", async () => {
 		await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 
 		const normal = (await get("/transactions?month=all")).html;
 		const raw = (await get("/transactions?month=all&raw=1")).html;
@@ -161,7 +159,7 @@ describe("the Transactions list", () => {
 	it("keeps a long unbroken name inside the edit sheet and its chips", async () => {
 		const raw = `SQ *${"x".repeat(48)}`;
 		const id = await charge(raw);
-		await suggest(raw, `A long guessed store name ${"word ".repeat(5)}end`);
+		await suggest(raw, [`A long guessed store name ${"word ".repeat(5)}end`]);
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).toContain('id="edit-title"');
 		expect(html).toContain("wrap-anywhere");
@@ -172,7 +170,7 @@ describe("the Transactions list", () => {
 
 	it("shows the first pending suggestion in place of the tidied bank text, marked as only suggested", async () => {
 		const id = await charge();
-		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 		expect(await rowOf(id)).toMatchObject({
 			displayName: "Blue Bottle Coffee",
 			nameSuggested: true,
@@ -183,8 +181,8 @@ describe("the Transactions list", () => {
 		const plain = await charge("PLAIN SHOP 123");
 		const turnedDown = await charge("TURNED DOWN 123");
 		const taken = await charge("TAKEN 123");
-		await suggest("TURNED DOWN 123", "Turned Down", "rejected");
-		await suggest("TAKEN 123", "Taken", "accepted");
+		await suggest("TURNED DOWN 123", ["Turned Down"], "rejected");
+		await suggest("TAKEN 123", ["Taken"], "accepted");
 		for (const id of [plain, turnedDown, taken])
 			expect(await rowOf(id)).toMatchObject({ nameSuggested: false });
 		expect((await rowOf(turnedDown))?.displayName).toBe("Turned down");
@@ -192,7 +190,7 @@ describe("the Transactions list", () => {
 
 	it("never replaces a name a person chose", async () => {
 		const id = await charge();
-		await suggest(RAW, "Blue Bottle Coffee", "pending", "The Bottle");
+		await suggest(RAW, ["Blue Bottle Coffee"], "pending", "The Bottle");
 		expect(await rowOf(id)).toMatchObject({
 			displayName: "The Bottle",
 			nameSuggested: false,
@@ -201,7 +199,7 @@ describe("the Transactions list", () => {
 
 	it("reads a Plaid-named merchant's suggestion from its key", async () => {
 		const id = await charge(RAW, "Blue Bottle Coffee");
-		await suggest("Blue Bottle Coffee", "Blue Bottle Coffee");
+		await suggest("Blue Bottle Coffee", ["Blue Bottle Coffee"]);
 		expect(await rowOf(id)).toMatchObject({
 			displayName: "Blue Bottle Coffee",
 			nameSuggested: true,
@@ -210,9 +208,9 @@ describe("the Transactions list", () => {
 
 	it("with the names switch off hides Tally's guesses but still shows the bank's own name, and the guesses come back when it is on (decision 80)", async () => {
 		const guessed = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const banked = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		await saveAiSwitches(db, { names: false });
 		expect(await rowOf(guessed)).toMatchObject({
 			displayName: "Blue bottle cof",
@@ -233,10 +231,10 @@ describe("the Transactions list", () => {
 
 	it("draws a name Tally guessed dashed, with the sparkles icon and the words for a screen reader (P87 B), and a chosen name plain", async () => {
 		await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await charge("LOCAL SHOP 99");
 		await charge("NAMED SHOP 7");
-		await suggest("NAMED SHOP 7", "A Guess", "pending", "Mine");
+		await suggest("NAMED SHOP 7", ["A Guess"], "pending", "Mine");
 		const { html } = await get("/transactions?month=all");
 		// The icon and "Tally's guess" come before the dashed name; only the one guessed row has them.
 		expect(html).toMatch(
@@ -249,7 +247,7 @@ describe("the Transactions list", () => {
 
 	it("draws the bank's own name dashed but with no icon, and says it is from the bank only to a screen reader", async () => {
 		await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		const { html } = await get("/transactions?month=all");
 		expect(html).toMatch(
 			/<span class="sr-only">From your bank: <\/span><span class="[^"]*decoration-dashed[^"]*">Lupita&#39;s Taqueria<\/span>/,
@@ -266,9 +264,9 @@ describe("the Transactions list", () => {
 
 	it("shows a guess and the bank's name in one list, one with the icon and one without", async () => {
 		await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		const { html } = await get("/transactions?month=all");
 		expect(html.match(/decoration-dashed/g)).toHaveLength(2);
 		expect(html.match(/Tally&#39;s guess: /g)).toHaveLength(1);
@@ -281,7 +279,7 @@ describe("searching the Transactions list", () => {
 	it("finds a row by the name it shows as a suggestion, and still by its bank text", async () => {
 		const id = await charge();
 		await charge("OTHER SHOP 5");
-		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+		await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 		expect(await found("Blue Bottle Coffee")).toEqual([id]);
 		expect(await found("bottle cof")).toEqual([id]);
 		expect(await found("0412")).toEqual([id]);
@@ -291,7 +289,7 @@ describe("searching the Transactions list", () => {
 
 	it("finds it from the page too", async () => {
 		await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const { html } = await get("/transactions?month=all&q=Blue+Bottle+Coffee");
 		expect(html).toContain("Blue Bottle Coffee");
 		expect(html).toContain(RAW);
@@ -299,7 +297,7 @@ describe("searching the Transactions list", () => {
 
 	it("finds nothing by a suggestion that is hidden or decided: with the names switch off, rejected, or accepted as another name", async () => {
 		await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await saveAiSwitches(db, { names: false });
 		expect(await found("Blue Bottle Coffee")).toEqual([]);
 		await saveAiSwitches(db, { names: true });
@@ -319,9 +317,9 @@ describe("searching the Transactions list", () => {
 
 	it("with the names switch off still finds a row by the bank's own name, but not by Tally's guess", async () => {
 		const guessed = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const banked = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		await saveAiSwitches(db, { names: false });
 		expect(await found("Blue Bottle Coffee")).toEqual([]);
 		expect(await found("Lupita's Taqueria")).toEqual([banked]);
@@ -331,7 +329,7 @@ describe("searching the Transactions list", () => {
 
 	it("matches a % or _ in the search literally, as before", async () => {
 		const id = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		expect(await found("%")).toEqual([]);
 		expect(await found("Blue_Bottle")).toEqual([]);
 		expect(await found("Blue Bottle")).toEqual([id]);
@@ -340,7 +338,7 @@ describe("searching the Transactions list", () => {
 	it("finds nothing by a suggestion the row hides behind its own name, and still finds that row by its bank text", async () => {
 		const named = await charge();
 		const plain = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
 			.bind(named)
@@ -353,7 +351,12 @@ describe("searching the Transactions list", () => {
 	it("finds nothing by a name a person chose for the merchant when the row's own name hides it, and still finds that row by its bank text", async () => {
 		const named = await charge();
 		const plain = await charge();
-		await suggest(RAW, "Blue Bottle Coffee", "accepted", "Blue Bottle Coffee");
+		await suggest(
+			RAW,
+			["Blue Bottle Coffee"],
+			"accepted",
+			"Blue Bottle Coffee",
+		);
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
 			.bind(named)
@@ -368,7 +371,7 @@ describe("searching the Transactions list", () => {
 
 	it("finds nothing by a suggestion a split part hides behind its purchase's own name", async () => {
 		const part = await splitPart();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await db
 			.prepare(
 				"UPDATE transactions SET own_name = 'Dog bed' WHERE is_split = 1",
@@ -381,7 +384,7 @@ describe("searching the Transactions list", () => {
 	it("Select all's whole set is the rows the list finds for the same search", async () => {
 		const named = await charge();
 		const plain = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
 			.bind(named)
@@ -400,7 +403,7 @@ describe("searching the Transactions list", () => {
 describe("a split part's caption", () => {
 	it("names its parent the way the parent's own row does: the suggestion, shown while it is offered", async () => {
 		const part = await splitPart();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		expect(await rowOf(part)).toMatchObject({
 			displayName: "Blue Bottle Coffee",
 			parentName: "Blue Bottle Coffee",
@@ -412,14 +415,14 @@ describe("a split part's caption", () => {
 		await db
 			.prepare("UPDATE transactions SET merchant_name = 'Lupita''s Taqueria'")
 			.run();
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		await saveAiSwitches(db, { names: false });
 		expect((await rowOf(part))?.parentName).toBe("Lupita's Taqueria");
 	});
 
 	it("says the tidied bank text when the suggestion is hidden (names off) or decided, and the chosen name once chosen", async () => {
 		const part = await splitPart();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await saveAiSwitches(db, { names: false });
 		expect((await rowOf(part))?.parentName).toBe("Blue bottle cof");
 		await saveAiSwitches(db, { names: true });
@@ -436,7 +439,11 @@ describe("the edit panel's name choices", () => {
 	it("offers up to three suggested names, the bank's, and a field for your own, with nothing chosen", async () => {
 		const id = await charge();
 		await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle\nBlue Bottle Cafe");
+		await suggest(RAW, [
+			"Blue Bottle Coffee",
+			"Blue Bottle",
+			"Blue Bottle Cafe",
+		]);
 		const { res, html } = await get(`/transactions/${id}?month=all`);
 		expect(res.status).toBe(200);
 		const radios = [...html.matchAll(/<input[^>]*name="name_pick"[^>]*>/g)].map(
@@ -485,7 +492,7 @@ describe("the edit panel's name choices", () => {
 
 	it("leaves out a name that says what the tidied bank text already says", async () => {
 		const id = await charge("NETFLIX.COM");
-		await suggest("NETFLIX.COM", "Netflix.com\nNetflix");
+		await suggest("NETFLIX.COM", ["Netflix.com", "Netflix"]);
 		const { html } = await get(`/transactions/${id}?month=all`);
 		const values = [...html.matchAll(/name="name_pick"[^>]*value="([^"]*)"/g)];
 		expect(values.map((m) => m[1])).toEqual(["s:Netflix", "store", "own"]);
@@ -493,7 +500,7 @@ describe("the edit panel's name choices", () => {
 
 	it("says under the names that they are Tally's guess, with the sparkles icon and a Why? (P87 B)", async () => {
 		const id = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).toMatch(
 			/<span id="name-source-0"[^>]*><svg[^>]*>.*?<\/svg>\s*Tally&#39;s guess<\/span>/,
@@ -507,7 +514,7 @@ describe("the edit panel's name choices", () => {
 
 	it("says the bank's own name is from your bank, in muted words, with no icon and no Why? (P87 B)", async () => {
 		const id = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		const { html } = await get(`/transactions/${id}?month=all`);
 		expect(html).toMatch(
 			/<p id="name-source-0" class="text-sm text-muted">From your bank<\/p>/,
@@ -524,9 +531,9 @@ describe("the edit panel's name choices", () => {
 
 	it("with the names switch off offers the bank's name, labelled From your bank, but not Tally's guesses (decision 80)", async () => {
 		const guessed = await charge(RAW);
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const banked = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-		await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+		await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 		await saveAiSwitches(db, { names: false });
 		const off = (await get(`/transactions/${guessed}`)).html;
 		expect(off).not.toContain('value="s:Blue Bottle Coffee"');
@@ -556,12 +563,12 @@ describe("the edit panel's name choices", () => {
 		it("a chosen suggestion becomes the merchant's name, for all its transactions, and is accepted", async () => {
 			const id = await charge();
 			const other = await charge(RAW, null, "2026-09-18");
-			await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+			await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 			const { res } = await save(id, { name_pick: "s:Blue Bottle" });
 			expect(res.status).toBe(303);
 			expect(await merchant(RAW)).toEqual({
 				display_name: "Blue Bottle",
-				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				names: ["Blue Bottle Coffee", "Blue Bottle"],
 				suggestion_status: "accepted",
 			});
 			for (const t of [id, other])
@@ -600,7 +607,7 @@ describe("the edit panel's name choices", () => {
 
 				it("carries the posted merchant_was through, not the name another tab chose, so fixing the form doesn't erase it", async () => {
 					const id = await charge();
-					await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+					await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 					// The panel was drawn with nothing chosen; another tab then chooses a name.
 					await save(id, { name_pick: "s:Blue Bottle", merchant_was: "" });
 					expect(await merchant(RAW)).toMatchObject({
@@ -664,7 +671,7 @@ describe("the edit panel's name choices", () => {
 
 				it("a name typed before the error is still the person's own once the form is fixed", async () => {
 					const id = await charge();
-					await suggest(RAW, "Blue Bottle Coffee");
+					await suggest(RAW, ["Blue Bottle Coffee"]);
 					const failed = await redraw(id, {
 						merchant_was: "",
 						name_pick: "own",
@@ -730,7 +737,7 @@ describe("the edit panel's name choices", () => {
 
 			it("draws what the name field held, so a save can tell", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee");
+				await suggest(RAW, ["Blue Bottle Coffee"]);
 				const open = (await get(`/transactions/${id}?month=all`)).html;
 				expect(open).toMatch(
 					/<input type="hidden" name="merchant_was" value=""/,
@@ -748,7 +755,7 @@ describe("the edit panel's name choices", () => {
 
 			it("a name chosen in another tab survives saving the old panel with a category change", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 				// Tab B chooses a name.
 				await save(id, { name_pick: "s:Blue Bottle", merchant_was: "" });
 				expect(await merchant(RAW)).toMatchObject({
@@ -811,7 +818,7 @@ describe("the edit panel's name choices", () => {
 
 			it("keeping the bank's name turns the suggestions down and leaves a name chosen elsewhere alone", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee");
+				await suggest(RAW, ["Blue Bottle Coffee"]);
 				await save(id, { merchant_was: "", name_pick: "store" });
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: null,
@@ -847,13 +854,13 @@ describe("the edit panel's name choices", () => {
 		describe("a chip that is no longer offered is ignored (the panel was open while things changed)", () => {
 			const stillPending = {
 				display_name: null,
-				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				names: ["Blue Bottle Coffee", "Blue Bottle"],
 				suggestion_status: "pending",
 			};
 
 			it("once the names switch is off, neither a guess nor Keep accepts or turns anything down", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 				await saveAiSwitches(db, { names: false });
 				for (const pick of ["s:Blue Bottle Coffee", "store"]) {
 					const { res } = await save(id, { name_pick: pick });
@@ -870,7 +877,7 @@ describe("the edit panel's name choices", () => {
 
 			it("the rest of the form still saves: the category goes in even though the name pick is ignored", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
+				await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 				await saveAiSwitches(db, { names: false });
 				const category = await db
 					.prepare("SELECT id FROM categories WHERE archived = 0 LIMIT 1")
@@ -889,10 +896,8 @@ describe("the edit panel's name choices", () => {
 
 			it("once the suggestion was settled elsewhere, or its names changed, a stale chip changes nothing", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee\nBlue Bottle");
-				await db
-					.prepare("UPDATE merchants SET suggested_name = 'Other Name'")
-					.run();
+				await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
+				await setMerchantNames(db, RAW, ["Other Name"]);
 				await save(id, { name_pick: "s:Blue Bottle" });
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: null,
@@ -911,7 +916,7 @@ describe("the edit panel's name choices", () => {
 
 			it("the bank's own name is still offered with the names switch off, so it can still be picked", async () => {
 				const id = await charge("SQ *LUPITAS TAQ 2210", "Lupita's Taqueria");
-				await suggest("Lupita's Taqueria", "Lupita's Taqueria");
+				await suggest("Lupita's Taqueria", ["Lupita's Taqueria"]);
 				await saveAiSwitches(db, { names: false });
 				await save(id, { name_pick: "s:Lupita's Taqueria" });
 				expect(await merchant("Lupita's Taqueria")).toMatchObject({
@@ -922,7 +927,7 @@ describe("the edit panel's name choices", () => {
 
 			it("a name typed in the field is still the person's own, offered or not", async () => {
 				const id = await charge();
-				await suggest(RAW, "Blue Bottle Coffee");
+				await suggest(RAW, ["Blue Bottle Coffee"]);
 				await saveAiSwitches(db, { names: false });
 				await save(id, { name_pick: "own", merchant: "Mine" });
 				expect(await merchant(RAW)).toMatchObject({
@@ -934,7 +939,7 @@ describe("the edit panel's name choices", () => {
 
 		it("a name typed under Type your own is the person's own, and rejects the suggestions", async () => {
 			const id = await charge();
-			await suggest(RAW, "Blue Bottle Coffee");
+			await suggest(RAW, ["Blue Bottle Coffee"]);
 			await save(id, {
 				name_pick: "own",
 				merchant: "The Bottle",
@@ -947,7 +952,7 @@ describe("the edit panel's name choices", () => {
 
 		it("typing a name that is one of the suggestions counts as accepting it", async () => {
 			const id = await charge();
-			await suggest(RAW, "Blue Bottle Coffee");
+			await suggest(RAW, ["Blue Bottle Coffee"]);
 			await save(id, { name_pick: "own", merchant: "Blue Bottle Coffee" });
 			expect(await merchant(RAW)).toMatchObject({
 				display_name: "Blue Bottle Coffee",
@@ -957,7 +962,7 @@ describe("the edit panel's name choices", () => {
 
 		it("keeping the bank's name turns the suggestions down and leaves the name to the tidied text", async () => {
 			const id = await charge();
-			await suggest(RAW, "Blue Bottle Coffee");
+			await suggest(RAW, ["Blue Bottle Coffee"]);
 			await save(id, { name_pick: "store" });
 			expect(await merchant(RAW)).toMatchObject({
 				display_name: null,
@@ -975,19 +980,19 @@ describe("the edit panel's name choices", () => {
 
 		it("saving with no choice changes nothing about the name: it stays a pending suggestion", async () => {
 			const id = await charge();
-			await suggest(RAW, "Blue Bottle Coffee");
+			await suggest(RAW, ["Blue Bottle Coffee"]);
 			const { res } = await save(id, { note: "for the office", merchant: "" });
 			expect(res.status).toBe(303);
 			expect(await merchant(RAW)).toEqual({
 				display_name: null,
-				suggested_name: "Blue Bottle Coffee",
+				names: ["Blue Bottle Coffee"],
 				suggestion_status: "pending",
 			});
 		});
 
 		it("says what was saved, naming the chosen name", async () => {
 			const id = await charge();
-			await suggest(RAW, "Blue Bottle Coffee");
+			await suggest(RAW, ["Blue Bottle Coffee"]);
 			const { res } = await save(
 				id,
 				{ name_pick: "s:Blue Bottle Coffee" },
@@ -1000,7 +1005,7 @@ describe("the edit panel's name choices", () => {
 
 		it("a name that is too long comes back with the choices and the error, nothing saved", async () => {
 			const id = await charge();
-			await suggest(RAW, "Blue Bottle Coffee");
+			await suggest(RAW, ["Blue Bottle Coffee"]);
 			const { res, html } = await save(id, {
 				name_pick: "own",
 				merchant: "x".repeat(81),
@@ -1026,8 +1031,8 @@ describe("Organize", () => {
 	it("settles a pending suggestion when a person names the group: accepted if it is a suggestion, rejected if it is their own", async () => {
 		await charge();
 		await charge("LUPITAS 55");
-		await suggest(RAW, "Blue Bottle Coffee");
-		await suggest("LUPITAS 55", "Lupitas Taqueria");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
+		await suggest("LUPITAS 55", ["Lupitas Taqueria"]);
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
@@ -1053,7 +1058,7 @@ describe("Organize", () => {
 
 	it("leaves a pending suggestion waiting when no name is given", async () => {
 		await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
@@ -1097,7 +1102,7 @@ describe("saveEdit and parseEdit", () => {
 
 	it("settles a pending suggestion only when a person names the merchant", async () => {
 		const id = await charge();
-		await suggest(RAW, "Blue Bottle Coffee");
+		await suggest(RAW, ["Blue Bottle Coffee"]);
 		const detail = await getTransaction(db, id);
 		expect(detail?.nameChoices?.names).toEqual(["Blue Bottle Coffee"]);
 		await saveEdit(

@@ -8,6 +8,7 @@ import {
 	suggestNightlyNames,
 	suggestTransactionNotes,
 } from "../src/suggest-names-pending";
+import { merchantNames } from "./helpers/merchants";
 
 // The nightly names step (spec §7, §8.6, §9; #33): Workers AI is asked, once per bank text, only for a
 // merchant Plaid didn't name, and only while the names switch is on. What it says is only ever a
@@ -67,18 +68,23 @@ async function addTransactions(
 
 type MerchantRow = {
 	raw_name: string;
-	suggested_name: string | null;
+	names: string[];
 	display_name: string | null;
 	suggestion_status: string;
 };
-const merchants = async () =>
-	(
-		await db
-			.prepare(
-				"SELECT raw_name, suggested_name, display_name, suggestion_status FROM merchants ORDER BY raw_name",
-			)
-			.all<MerchantRow>()
-	).results;
+const merchants = async (): Promise<MerchantRow[]> => {
+	const { results } = await db
+		.prepare(
+			"SELECT raw_name, display_name, suggestion_status FROM merchants ORDER BY raw_name",
+		)
+		.all<Omit<MerchantRow, "names">>();
+	return Promise.all(
+		results.map(async (row) => ({
+			...row,
+			names: await merchantNames(db, row.raw_name),
+		})),
+	);
+};
 
 /** The bank texts whose last name call failed, the longest-ago failure first. */
 const failedNames = async () =>
@@ -95,6 +101,7 @@ beforeEach(async () => {
 	await db.batch([
 		db.prepare("DELETE FROM bill_payments"),
 		db.prepare("DELETE FROM transactions"),
+		db.prepare("DELETE FROM merchant_suggested_names"),
 		db.prepare("DELETE FROM merchants"),
 	]);
 });
@@ -121,9 +128,10 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
 		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
-		// One candidate query and the names switch read, then for every five calls a switch read and two writes
-		// (the merchants upsert and the failures delete): 1 + 1 + 20 × 3 = 62. A save per name would be 100 or more.
-		expect(statements).toBeLessThanOrEqual(62);
+		// One candidate query and the names switch read, then for every five calls a switch read and three writes
+		// (the merchants upsert, the merchants' names and the failures delete): 1 + 1 + 20 × 4 = 82. A save per name
+		// would be 100 or more.
+		expect(statements).toBeLessThanOrEqual(82);
 	});
 
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
@@ -140,7 +148,7 @@ describe("suggestMerchantNames", () => {
 		expect(await merchants()).toEqual([
 			{
 				raw_name: RAW,
-				suggested_name: "Blue Bottle Coffee\nBlue Bottle",
+				names: ["Blue Bottle Coffee", "Blue Bottle"],
 				display_name: null,
 				suggestion_status: "pending",
 			},
@@ -159,7 +167,7 @@ describe("suggestMerchantNames", () => {
 		// An answer with no usable name is remembered as an empty suggestion, not a pending one.
 		expect(
 			(await merchants()).find((m) => m.raw_name === "NOTHING USEFUL"),
-		).toMatchObject({ suggested_name: "", suggestion_status: "none" });
+		).toMatchObject({ names: [], suggestion_status: "none" });
 
 		const again = fakeAi();
 		expect(await suggestMerchantNames({ DB: db, AI: again })).toEqual({
@@ -175,7 +183,10 @@ describe("suggestMerchantNames", () => {
 				"INSERT INTO merchants (raw_name, display_name) VALUES ('NAMED BY PERSON', 'My place')",
 			),
 			db.prepare(
-				"INSERT INTO merchants (raw_name, suggestion_status, suggested_name) VALUES ('ALREADY PENDING', 'pending', 'Pending Place')",
+				"INSERT INTO merchants (raw_name, suggestion_status, names_asked) VALUES ('ALREADY PENDING', 'pending', 0)",
+			),
+			db.prepare(
+				"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES ('ALREADY PENDING', 0, 'Pending Place')",
 			),
 			db.prepare(
 				"INSERT INTO merchants (raw_name, suggestion_status) VALUES ('TURNED DOWN', 'rejected')",
@@ -382,7 +393,7 @@ describe("suggestMerchantNames", () => {
 		expect(await merchants()).toEqual([
 			{
 				raw_name: RAW,
-				suggested_name: "Blue Bottle Coffee",
+				names: ["Blue Bottle Coffee"],
 				display_name: null,
 				suggestion_status: "pending",
 			},
@@ -476,8 +487,8 @@ describe("suggestMerchantNames", () => {
 		).toEqual({ asked: 5, suggested: 3 });
 		logged.mockRestore();
 		// The candidate query, the names switch read at the start and again before the batch, then the batch's
-		// three writes: the merchants upsert, the failures upsert and the failures delete. 1 + 1 + 1 + 3 = 6.
-		expect(statements).toBeLessThanOrEqual(6);
+		// four writes: the merchants upsert, its names, the failures upsert and the failures delete. 1 + 1 + 1 + 4 = 7.
+		expect(statements).toBeLessThanOrEqual(7);
 		expect((await merchants()).map((m) => m.raw_name)).toEqual([
 			"FIVE",
 			"ONE",
@@ -824,8 +835,8 @@ describe("suggestTransactionNotes", () => {
 			}),
 		).toEqual({ asked: nameCallLimit, suggested: nameCallLimit });
 		// The switch read and the candidate query, then for every five calls a switch read, the batch's names read
-		// and its save: 2 + 20 × 3 = 62.
-		expect(statements).toBeLessThanOrEqual(62);
+		// and its three writes (the merchants upsert, its names, and the failures delete): 2 + 20 × 4 = 82.
+		expect(statements).toBeLessThanOrEqual(82);
 	});
 });
 
@@ -916,8 +927,9 @@ describe("suggestNightlyNames", () => {
 		expect(askedAbout(ai)).toEqual({ notes: 1, names: 99 });
 		// The probe (the switch read and the names query): 2. The notes' own two reads, then the note's batch (its
 		// switch read, the names it reads and its save): 5. The names' switch read and query, then for each of 20
-		// batches a switch read and three writes: 2 + 20 × 4 = 82. 2 + 5 + 82 = 89.
-		expect(statements).toBeLessThanOrEqual(89);
+		// batches a switch read and four writes (the merchants upsert, its names, the failures upsert and delete):
+		// 2 + 20 × 5 = 102. 2 + 5 + 102 = 109.
+		expect(statements).toBeLessThanOrEqual(109);
 		logged.mockRestore();
 		vi.restoreAllMocks();
 	});

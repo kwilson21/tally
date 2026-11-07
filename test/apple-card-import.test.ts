@@ -11,6 +11,7 @@ import { daysBefore } from "../src/dates";
 import { merchantsToAsk } from "../src/db/merchant-names";
 import { pendingForJev, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { merchantNames } from "./helpers/merchants";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -535,10 +536,11 @@ describe("importAppleCard: names", () => {
 		);
 		const suggested = await db
 			.prepare(
-				"SELECT suggested_name AS s, suggestion_status AS st FROM merchants WHERE raw_name = 'Pat Cafe'",
+				"SELECT suggestion_status AS st FROM merchants WHERE raw_name = 'Pat Cafe'",
 			)
-			.first<{ s: string | null; st: string | null }>();
-		expect(suggested).toEqual({ s: "Pat Cafe", st: "pending" });
+			.first<{ st: string | null }>();
+		expect(suggested).toEqual({ st: "pending" });
+		expect(await merchantNames(db, "Pat Cafe")).toEqual(["Pat Cafe"]);
 		const none = await db
 			.prepare("SELECT raw_name FROM merchants WHERE raw_name = 'CORNER SHOP'")
 			.first();
@@ -571,10 +573,11 @@ describe("importAppleCard: names", () => {
 		await uploadOk(csvOf(row()));
 		const named = await db
 			.prepare(
-				"SELECT display_name AS d, suggestion_status AS st, suggested_name AS s FROM merchants WHERE raw_name = 'Pat Cafe'",
+				"SELECT display_name AS d, suggestion_status AS st FROM merchants WHERE raw_name = 'Pat Cafe'",
 			)
-			.first<{ d: string; st: string; s: string | null }>();
-		expect(named).toEqual({ d: "Our Cafe", st: "none", s: null });
+			.first<{ d: string; st: string }>();
+		expect(named).toEqual({ d: "Our Cafe", st: "none" });
+		expect(await merchantNames(db, "Pat Cafe")).toEqual([]);
 	});
 
 	it("never asks Workers AI about an Apple row, including one with a blank Merchant", async () => {
