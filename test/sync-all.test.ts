@@ -122,7 +122,11 @@ describe("syncAllItems", () => {
 		const flagged = await addItem("needs_attention");
 		const fetchImpl = fakePlaid();
 
-		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+		expect(
+			await syncAllItems(enabledEnv, fetchImpl, Date.now, false, {
+				retryFlagged: true,
+			}),
+		).toEqual({
 			added: 3,
 			modified: 0,
 			changedIds: expect.any(Array),
@@ -151,7 +155,13 @@ describe("syncAllItems", () => {
 			.bind(id)
 			.run();
 
-		const result = await syncAllItems(enabledEnv, fakePlaid());
+		const result = await syncAllItems(
+			enabledEnv,
+			fakePlaid(),
+			Date.now,
+			false,
+			{ retryFlagged: true },
+		);
 
 		expect(result).toMatchObject({ synced: 1, failed: 0 });
 		expect(
@@ -182,7 +192,9 @@ describe("syncAllItems", () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
-		const result = await syncAllItems(enabledEnv, fetchImpl);
+		const result = await syncAllItems(enabledEnv, fetchImpl, Date.now, false, {
+			retryFlagged: true,
+		});
 
 		expect(result).toMatchObject({ synced: 0, failed: 1 });
 		expect(
@@ -216,6 +228,38 @@ describe("syncAllItems", () => {
 			skipped: 0,
 		});
 		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("skips a flagged Item in a manual Sync now: no Plaid call, and its flag and reminder stay", async () => {
+		const id = await addItem("needs_attention");
+		await env.DB.prepare(
+			"UPDATE plaid_items SET reconnect_emailed_at = '2026-10-06 04:00:00' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const fetchImpl = fakePlaid();
+
+		expect(await syncAllItems(enabledEnv, fetchImpl, Date.now, true)).toEqual({
+			added: 0,
+			modified: 0,
+			changedIds: [],
+			synced: 0,
+			skipped: 0,
+			busy: 0,
+			failed: 0,
+			failedBanks: [],
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare(
+				"SELECT status, reconnect_emailed_at FROM plaid_items WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({
+			status: "needs_attention",
+			reconnect_emailed_at: "2026-10-06 04:00:00",
+		});
 	});
 
 	it("leaves an ok Item's status and reminder as they were", async () => {

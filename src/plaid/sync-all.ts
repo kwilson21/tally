@@ -21,12 +21,17 @@ export type SyncAllResult = {
 	afterSyncFailed?: true;
 };
 
-/** Syncs each healthy Plaid Item in turn so one failure cannot stop the daily catch-up. */
+/**
+ * Syncs each healthy Plaid Item in turn so one failure cannot stop the daily catch-up.
+ * `retryFlagged` (the daily run only) also syncs a bank that needs attention (decision 173). Manual Sync now
+ * leaves it out, so a flagged bank still answers "Fix the connection first.".
+ */
 export async function syncAllItems(
 	env: SyncAllEnv,
 	fetchImpl?: typeof fetch,
 	now: () => number = Date.now,
 	respectCooldown = false,
+	{ retryFlagged = false }: { retryFlagged?: boolean } = {},
 ): Promise<SyncAllResult> {
 	const startedAt = now();
 	const result: SyncAllResult = {
@@ -44,10 +49,11 @@ export async function syncAllItems(
 		return result;
 	}
 
-	// A bank that needs attention is retried here too (decision 173): a sync that gets every page clears its flag.
-	// A bank that still fails stays flagged, and its reminder is not touched here.
+	// The daily run also retries a bank that needs attention (decision 173): a sync that gets every page clears its
+	// flag. A bank that still fails stays flagged, and its reminder is not touched here.
+	const liveStatuses = retryFlagged ? "('ok', 'needs_attention')" : "('ok')";
 	const { results: items } = await env.DB.prepare(
-		"SELECT id, institution_name FROM plaid_items WHERE status IN ('ok', 'needs_attention') AND disconnected_at IS NULL ORDER BY id",
+		`SELECT id, institution_name FROM plaid_items WHERE status IN ${liveStatuses} AND disconnected_at IS NULL ORDER BY id`,
 	).all<{ id: number; institution_name: string }>();
 
 	for (const [index, item] of items.entries()) {
@@ -77,8 +83,8 @@ export async function syncAllItems(
 			)
 				.bind(item.id)
 				.first<{ status: string }>();
-			// Gone or disconnected since the list was read: skip. Either live status is synced.
-			if (!current) {
+			// Gone, disconnected, or (for a manual run) flagged since the list was read: skip.
+			if (!current || (!retryFlagged && current.status !== "ok")) {
 				result.skipped += 1;
 				continue;
 			}

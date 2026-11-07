@@ -423,7 +423,7 @@ async function handlePlaidError(
 				seen !== null &&
 				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
 			) {
-				await markNeedsAttention(env.DB, itemRowId, { seen, lockId });
+				await markNeedsAttention(env.DB, itemRowId, "login", { seen, lockId });
 			}
 		}
 	}

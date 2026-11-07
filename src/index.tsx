@@ -118,7 +118,8 @@ export async function runScheduled(
 			categoryExample: true,
 		});
 	}
-	await syncAllItems(env, fetchImpl);
+	// The daily run also retries banks that need attention (decision 173).
+	await syncAllItems(env, fetchImpl, Date.now, false, { retryFlagged: true });
 	const night = utcDay(clockNow(time));
 	// The night's Workflow (decision 139): it sorts everything waiting, then clears the daily run's wait mark (production),
 	// then makes the night's names and new-category suggestions. It applies the merchant rules itself first, which also

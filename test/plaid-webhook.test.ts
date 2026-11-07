@@ -251,6 +251,46 @@ describe("Plaid webhook route", () => {
 		}
 	});
 
+	it("records an expiry warning as the expiring reason, so a sync keeps the flag (decision 173)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person')",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.run();
+		const sign = await signer();
+		const body = JSON.stringify({
+			item_id: "item-1",
+			webhook_type: "ITEM",
+			webhook_code: "PENDING_EXPIRATION",
+		});
+		const { token, jwk } = await sign(body);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
+		);
+		expect(
+			(
+				await app.request(
+					"http://tally.test/webhooks/plaid",
+					{
+						method: "POST",
+						body,
+						headers: {
+							"content-type": "application/json",
+							"Plaid-Verification": token,
+						},
+					},
+					env,
+				)
+			).status,
+		).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT status, attention_reason FROM plaid_items",
+			).first(),
+		).toEqual({ status: "needs_attention", attention_reason: "expiring" });
+	});
+
 	it.each([
 		["ITEM_LOGIN_REQUIRED", null, "ok"],
 		[

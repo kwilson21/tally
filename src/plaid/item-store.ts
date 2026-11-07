@@ -1,23 +1,29 @@
 import { next } from "../machines/next";
 import { plaidConnectionMachine } from "../machines/plaid-connection";
 
-// The only file that writes plaid_items.status or disconnected_at. Routes and sync code call the named operations
-// below; none of them writes those columns itself (test/plaid-item-writes.test.ts fails if one does).
+// The only file that writes plaid_items.status, attention_reason or disconnected_at. Routes and sync code call the
+// named operations below; none of them writes those columns itself (test/plaid-item-writes.test.ts fails if one does).
 //
 // Every operation takes the same steps, each in its own function:
-//   1. read the bank's state now, or use the `seen` state the caller read earlier
+//   1. read the bank's row now, or check the `seen` state the caller read earlier
 //   2. ask the machine (src/machines/plaid-connection.ts) what the event does from that state
-//   3. write the new state, but only if the row is still in the state read, and still held by the caller's lease
+//   3. write the new state, but only if the row still matches what was read, and is still held by the caller's lease
 //   4. say what happened: changed, unchanged, refused or lost-race
+//
+// The machine says only the state. Why a bank needs attention, and which events clear it, is the store's own rule
+// (decision 173): a login flag is cleared by a successful sync, and an expiry warning is cleared only by a relink.
 
 export type ConnectionState = "ok" | "needs_attention" | "disconnected";
 
+/** Why a bank needs attention: Plaid says its login is broken, or Plaid warns that the login is about to expire. */
+export type AttentionReason = "login" | "expiring";
+
 /**
  * What an operation did:
- * - changed: the bank moved to a new state and the row was written.
- * - unchanged: the machine allows the event, and the bank is already there, so nothing was written.
+ * - changed: the bank moved to a new state (or a new reason) and the row was written.
+ * - unchanged: the bank is already where the event leaves it, and the row still says so, so nothing was written.
  * - refused: the machine doesn't allow the event from this state, or there is no such bank.
- * - lost-race: the row changed, or the sync lost its lease, after the state was read; nothing was written.
+ * - lost-race: the row changed, or the sync lost its lease, after it was read; nothing was written.
  */
 export type ItemResult = "changed" | "unchanged" | "refused" | "lost-race";
 
@@ -28,28 +34,53 @@ export type ItemOptions = {
 	seen?: ConnectionState;
 	/** The sync's lease id. Without it, the write doesn't check a lease. */
 	lockId?: string;
+	/** Why the bank needs attention, for markNeedsAttention. */
+	reason?: AttentionReason;
 };
 
-/** The SET part of the write for each state a live bank can move to. Disconnect has its own statement below. */
-const LANDING: Record<"ok" | "needs_attention", string> = {
-	// Writing ok forgets the reminder email, so a bank that recovers is not reminded again on its next failure.
-	ok: "status = 'ok', reconnect_emailed_at = NULL",
-	needs_attention: "status = 'needs_attention'",
-};
+/** A bank's row as the store reads it: its state, and the reason when it needs attention. */
+type Current = { state: ConnectionState; reason: AttentionReason | null };
+
+/** What the write leaves the row as: ok, or flagged with a reason. */
+type Plan =
+	| { state: "ok" }
+	| { state: "needs_attention"; reason: AttentionReason };
+
+// The SET part of each write. The reason is one of two fixed words, so it is safe to put in the SQL text.
+const LANDING_OK =
+	// Writing ok forgets the reason and the reminder email, so a bank that recovers is not reminded on its next failure.
+	"status = 'ok', attention_reason = NULL, reconnect_emailed_at = NULL";
+const landingFlagged = (reason: AttentionReason) =>
+	`status = 'needs_attention', attention_reason = '${reason}'`;
 
 const DISCONNECTED_SET =
 	"disconnected_at = datetime('now'), access_token_encrypted = X'', sync_locked_until = NULL, sync_lock_id = NULL";
 
-/** Step 1: the bank's state from its row, or null when there is no such bank. */
+/** The bank's state from its row, or null when there is no such bank. */
 export async function readConnection(
 	db: D1Database,
 	itemId: number,
 ): Promise<ConnectionState | null> {
+	return (await readCurrent(db, itemId))?.state ?? null;
+}
+
+/** Step 1: the bank's state and reason from its row, or null when there is no such bank. */
+async function readCurrent(
+	db: D1Database,
+	itemId: number,
+): Promise<Current | null> {
 	const row = await db
-		.prepare("SELECT status, disconnected_at FROM plaid_items WHERE id = ?")
+		.prepare(
+			"SELECT status, disconnected_at, attention_reason FROM plaid_items WHERE id = ?",
+		)
 		.bind(itemId)
-		.first<{ status: string; disconnected_at: string | null }>();
-	return row ? connectionOf(row) : null;
+		.first<{
+			status: string;
+			disconnected_at: string | null;
+			attention_reason: AttentionReason | null;
+		}>();
+	if (!row) return null;
+	return { state: connectionOf(row), reason: row.attention_reason };
 }
 
 /** A row's state: disconnected once it has a disconnected_at, otherwise its status. */
@@ -71,16 +102,48 @@ function nextStateOf(
 }
 
 /**
- * The row must still be live, in the state we read, and (for a sync) held under the caller's lease. Each
- * condition and its value are pushed together, so the SQL and the values cannot fall out of step.
+ * What the write should leave the row as. The machine has given the state; these are the reason rules:
+ * - a successful sync clears a login flag, but leaves an expiry warning as it is (the bank still works);
+ * - a login error takes the flag, but an expiry warning never replaces a login flag already there.
  */
-function stillInState(
+function planFor(
+	event: Event,
+	current: Current,
+	to: "ok" | "needs_attention",
+	reason: AttentionReason | undefined,
+): Plan {
+	if (event === "SYNC_SUCCEEDED" && current.reason === "expiring") {
+		return { state: "needs_attention", reason: "expiring" };
+	}
+	if (to === "ok") return { state: "ok" };
+	if (current.reason === "login" && reason === "expiring") {
+		return { state: "needs_attention", reason: "login" };
+	}
+	return { state: "needs_attention", reason: reason ?? "login" };
+}
+
+/** True when the plan leaves the row exactly as it is, so the write can be skipped. */
+function leavesRowAsIs(plan: Plan, current: Current): boolean {
+	if (plan.state === "ok") return current.state === "ok";
+	return current.state === "needs_attention" && plan.reason === current.reason;
+}
+
+/**
+ * The row must still be live, in the state and with the reason we read, and (for a sync) held under the caller's
+ * lease. Each condition and its value are pushed together, so the SQL and the values cannot fall out of step.
+ */
+function stillAsRead(
 	itemId: number,
-	from: ConnectionState,
+	current: Current,
 	lockId: string | undefined,
 ) {
-	const conditions = ["id = ?", "disconnected_at IS NULL", "status = ?"];
-	const values: unknown[] = [itemId, from];
+	const conditions = [
+		"id = ?",
+		"disconnected_at IS NULL",
+		"status = ?",
+		"attention_reason IS ?",
+	];
+	const values: unknown[] = [itemId, current.state, current.reason];
 	if (lockId !== undefined) {
 		conditions.push("sync_lock_id = ?");
 		values.push(lockId);
@@ -88,24 +151,26 @@ function stillInState(
 	return { where: conditions.join(" AND "), values };
 }
 
-type Guard = ReturnType<typeof stillInState>;
+type Guard = ReturnType<typeof stillAsRead>;
 
 /** Step 3: the write itself. It lands only if the guard still holds; if not, the row moved on. */
-async function writeIfStillIn(
+async function writeIfStillAsRead(
 	db: D1Database,
 	guard: Guard,
-	to: "ok" | "needs_attention",
+	plan: Plan,
 ): Promise<ItemResult> {
+	const landing =
+		plan.state === "ok" ? LANDING_OK : landingFlagged(plan.reason);
 	const result = await db
-		.prepare(`UPDATE plaid_items SET ${LANDING[to]} WHERE ${guard.where}`)
+		.prepare(`UPDATE plaid_items SET ${landing} WHERE ${guard.where}`)
 		.bind(...guard.values)
 		.run();
 	return result.meta.changes === 1 ? "changed" : "lost-race";
 }
 
 /**
- * The no-write path, for a bank already where the event leaves it. A caller that read the state or holds a
- * lease still needs that to be true now, so this reads the row and answers lost-race when it isn't.
+ * The no-write path. The bank is already as the event leaves it, but the caller's answer was a read, so the read
+ * must still hold now: a webhook or a sync that landed since then answers lost-race.
  */
 async function stillTrue(db: D1Database, guard: Guard): Promise<ItemResult> {
 	const row = await db
@@ -122,34 +187,37 @@ async function change(
 	event: Event,
 	options: ItemOptions = {},
 ): Promise<ItemResult> {
-	// Step 1: the state the caller saw, or the row's state now.
-	const from = options.seen ?? (await readConnection(db, itemId));
-	if (from === null) return "refused";
-	// Step 2: the machine's answer.
-	const to = nextStateOf(from, event);
-	if (to === null) return "refused";
-	const guard = stillInState(itemId, from, options.lockId);
-	if (to === from) {
-		// Nothing to write. A caller that passed a seen state or a lease is checked; a fresh read is unchanged.
-		const checked = options.seen !== undefined || options.lockId !== undefined;
-		return checked ? stillTrue(db, guard) : "unchanged";
+	// Step 1: the row now. A caller's seen state must still be the state.
+	const current = await readCurrent(db, itemId);
+	if (current === null) return "refused";
+	if (options.seen !== undefined && options.seen !== current.state) {
+		return "lost-race";
 	}
-	// Only disconnectStatement moves a bank to disconnected, so no event here lands there.
-	if (to === "disconnected") return "refused";
+	// Step 2: the machine's answer. Only disconnectStatement moves a bank to disconnected, so no event here lands there.
+	const to = nextStateOf(current.state, event);
+	if (to === null || to === "disconnected") return "refused";
+	const plan = planFor(event, current, to, options.reason);
+	const guard = stillAsRead(itemId, current, options.lockId);
+	// Step 3, without a write: the bank is already as it should be, and the read is confirmed.
+	if (leavesRowAsIs(plan, current)) return stillTrue(db, guard);
 	// Steps 3 and 4: the guarded write, and what it did.
-	return writeIfStillIn(db, guard, to);
+	return writeIfStillAsRead(db, guard, plan);
 }
 
-/** Plaid says the login is broken: a webhook, or a sync that met a login error and confirmed it with Plaid. */
+/**
+ * Plaid says the login needs signing in (a sync that met a login error, or a login webhook), or Plaid warns that
+ * it is about to expire (`expiring`). Decision 173 keeps the two apart.
+ */
 export function markNeedsAttention(
 	db: D1Database,
 	itemId: number,
-	options?: ItemOptions,
+	reason: AttentionReason,
+	options?: Omit<ItemOptions, "reason">,
 ): Promise<ItemResult> {
-	return change(db, itemId, "LOGIN_BROKEN", options);
+	return change(db, itemId, "LOGIN_BROKEN", { ...options, reason });
 }
 
-/** The person fixed the login (routes/plaid.tsx). Writing ok also forgets the reminder email. */
+/** The person fixed the login (routes/plaid.tsx). Writing ok clears either reason and forgets the reminder email. */
 export function clearAttention(
 	db: D1Database,
 	itemId: number,
@@ -157,7 +225,10 @@ export function clearAttention(
 	return change(db, itemId, "RELINKED");
 }
 
-/** A sync got every page while it held its lease, so the login works (decision 173). */
+/**
+ * A sync got every page while it held its lease, so the login works (decision 173). It clears a login flag only;
+ * an expiry warning stays until a relink.
+ */
 export function markSyncSucceeded(
 	db: D1Database,
 	itemId: number,

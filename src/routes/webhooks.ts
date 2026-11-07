@@ -22,6 +22,8 @@ const attentionCodes = new Set([
 	"PENDING_DISCONNECT",
 	"USER_PERMISSION_REVOKED",
 ]);
+// Warnings that the login is about to expire: the bank still syncs until then (decision 173).
+const expiringCodes = new Set(["PENDING_EXPIRATION", "PENDING_DISCONNECT"]);
 const transientErrors = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
 export const webhooks = new Hono<App>();
@@ -90,14 +92,21 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	if (isAttentionWarning) {
 		// The store reads the bank's state now. If something moves the bank between that read and the write, the write
 		// is skipped and the state that is there stands (the later fact wins, decision 173).
-		await markNeedsAttention(c.env.DB, item.id);
+		const expiring =
+			typeof body.webhook_code === "string" &&
+			expiringCodes.has(body.webhook_code);
+		await markNeedsAttention(
+			c.env.DB,
+			item.id,
+			expiring ? "expiring" : "login",
+		);
 	}
 	if (isItemError) {
 		c.executionCtx.waitUntil(
 			(async () => {
 				if (await loginStillBroken(c.env, item.access_token_encrypted)) {
 					// The state this request read, so a repair made while Plaid was asked is not overwritten.
-					await markNeedsAttention(c.env.DB, item.id, {
+					await markNeedsAttention(c.env.DB, item.id, "login", {
 						seen: connectionOf(item),
 					});
 				}
