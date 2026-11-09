@@ -43,8 +43,12 @@ function registeredWrites(routes: { method: string; path: string }[]) {
 	const found = new Set<string>();
 	const problems: string[] = [];
 	for (const r of routes) {
-		if (WRITES.has(r.method)) found.add(key(r));
-		else if (r.method === "ALL" && !KNOWN_MIDDLEWARE.has(r.path))
+		if (WRITES.has(r.method)) {
+			// Two registrations of one route (an old handler left beside a new one) would count as one.
+			if (found.has(key(r)))
+				problems.push(`${key(r)} is registered more than once`);
+			found.add(key(r));
+		} else if (r.method === "ALL" && !KNOWN_MIDDLEWARE.has(r.path))
 			problems.push(
 				`${key(r)} takes every method; register each method on its own`,
 			);
@@ -229,6 +233,16 @@ describe("the write-handler ratchet", () => {
 			ratchetProblems(new Set(["POST /pay"]), one(pay, 0), src, stories),
 		).toEqual([
 			"POST /pay is converted but x.tsx does not contain the path /pay",
+		]);
+	});
+
+	it("fails when one write route is registered twice", () => {
+		const twice = [
+			{ method: "POST", path: "/x" },
+			{ method: "POST", path: "/x" },
+		];
+		expect(registeredWrites(twice).problems).toEqual([
+			"POST /x is registered more than once",
 		]);
 	});
 
