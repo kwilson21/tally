@@ -11,3 +11,6 @@ public/vendor/
 screenshots/
 screenshots-before/
 .claude/worktrees/
+# LemmaScript's generated Dafny (decision 188). Commit a module's .dfy only if it ever needs a hand-written proof.
+*.dfy
+*.dfy.gen

@@ -3,6 +3,8 @@ import {
 	type BudgetAmount,
 	budgetForMonth,
 	type CountedTransaction,
+	MAX_CENTS_PER_AMOUNT,
+	MAX_COUNTED_TRANSACTIONS,
 	statusSentence,
 	summarizeMonth,
 } from "../src/budget";
@@ -258,5 +260,78 @@ describe("statusSentence", () => {
 		[[cat("Groceries", 100)], 0, "Everything is on track."],
 	])("with overdue bills %#", (categories, overdueBills, sentence) => {
 		expect(statusSentence(categories, overdueBills)).toBe(sentence);
+	});
+});
+
+// The limits behind the verified rules in summarizeMonth (docs/verification.md, "Numbers"): within them every sum is exact
+// in a double, so the proof describes what runs; past them the month is refused instead of silently miscounted.
+describe("summarizeMonth limits", () => {
+	const month = (over: Partial<Parameters<typeof summarizeMonth>[0]> = {}) =>
+		summarizeMonth({
+			month: "2026-09",
+			categories: CATEGORIES,
+			amounts: AMOUNTS,
+			transactions: [],
+			unpaidDueBillsCents: 0,
+			...over,
+		});
+
+	it("adds up amounts exactly at the limit, positive or negative", () => {
+		const summary = month({
+			transactions: [
+				tx(1, MAX_CENTS_PER_AMOUNT),
+				tx(null, -MAX_CENTS_PER_AMOUNT),
+			],
+			unpaidDueBillsCents: MAX_CENTS_PER_AMOUNT,
+			savingsGoalCents: MAX_CENTS_PER_AMOUNT,
+			unpaidPlansCents: MAX_CENTS_PER_AMOUNT,
+		});
+		expect(summary.totalSpentCents).toBe(0);
+	});
+
+	it.each([
+		["a transaction", { transactions: [tx(1, MAX_CENTS_PER_AMOUNT + 1)] }],
+		["a refund", { transactions: [tx(1, -MAX_CENTS_PER_AMOUNT - 1)] }],
+		[
+			"a budget amount",
+			{
+				amounts: [
+					{
+						categoryId: 1,
+						effectiveMonth: "2026-04",
+						amountCents: MAX_CENTS_PER_AMOUNT + 1,
+					},
+				],
+			},
+		],
+		["unpaid bills", { unpaidDueBillsCents: MAX_CENTS_PER_AMOUNT + 1 }],
+		["the savings goal", { savingsGoalCents: MAX_CENTS_PER_AMOUNT + 1 }],
+		["unpaid plans", { unpaidPlansCents: MAX_CENTS_PER_AMOUNT + 1 }],
+		["a fractional amount", { transactions: [tx(1, 10.5)] }],
+		["a NaN amount", { transactions: [tx(1, Number.NaN)] }],
+	])("refuses %s past what can be added exactly", (_name, over) => {
+		expect(() => month(over)).toThrow(RangeError);
+	});
+
+	it("refuses more counted transactions than can be added exactly", () => {
+		const rows = Array.from({ length: MAX_COUNTED_TRANSACTIONS + 1 }, () =>
+			tx(1, 1),
+		);
+		expect(() => month({ transactions: rows })).toThrow(RangeError);
+		expect(() =>
+			month({ transactions: rows.slice(0, MAX_COUNTED_TRANSACTIONS) }),
+		).not.toThrow();
+	});
+
+	it("names no amount in its error, since transaction details are never logged", () => {
+		const secret = MAX_CENTS_PER_AMOUNT + 123456789;
+		let message = "";
+		try {
+			month({ transactions: [tx(1, secret)] });
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message).not.toBe("");
+		expect(message).not.toContain(String(secret));
 	});
 });

@@ -76,7 +76,7 @@ It means the TypeScript meets its contract for every input inside the stated bou
 
 | Module | Rule (one sentence) | Decision / issue |
 |---|---|---|
-| _none yet_ | | |
+| `src/budget.ts` `summarizeMonth` | Total spent, income and uncategorized (amount and count) are each exactly the sum over the transactions; each category row's spent is exactly its category's sum; Safe to spend is the stated sum. Bound: every amount at most 1e10 cents, at most 1e5 counted transactions and 1e4 categories, enforced by `assertWithinLimits`, which throws a `RangeError`. | Decision 189, #933 |
 
 ## Candidates, by area
 
@@ -84,7 +84,7 @@ Assessed from reading the code on 2026-11-09. "Fit" is the four-question test. U
 
 | Area | Fit | Why |
 |---|---|---|
-| `src/budget.ts` `summarizeMonth` | Yes | Spent, income and uncategorized each count a transaction once; category rows equal their category's sum; safe-to-spend is one identity. Proved in a spike. |
+| `src/budget.ts` `summarizeMonth` | Done (decision 189) | Spent, income and uncategorized each count a transaction once; category rows equal their category's sum; safe-to-spend is one identity. Proved in a spike. |
 | `src/transactions/split.ts` `parseSplit` | No, as written | It takes strings and parses each amount with `toCents`, and parsing stays with ordinary tests. Trusting `positiveCents` as `extern` would not change that. |
 | `src/transactions/split.ts`, a post-parse check (new) | Maybe | If the parts are already numbers, a small `partsAddUp(parts, parentCents)` can carry the rule "the parts add up exactly to the transaction and each has its sign". It needs that function extracted first, which is a refactor to agree on its own PR. |
 | `src/home-forecast.ts` `forecastMonth` | Maybe | Rounding to whole dollars; needs a check of how LemmaScript treats division first. |

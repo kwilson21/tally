@@ -28,6 +28,15 @@ jobs:
         env:
           WRANGLER_SEND_METRICS: "false"
       - run: npm run typecheck
+      # Decision 188: Dafny checks the contracts on the files in LemmaScript-files.txt. Pinned by version and checksum;
+      # the unpacked tool is dev-only and never part of the Worker.
+      - name: Install Dafny 4.9.0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/dafny.zip" https://github.com/dafny-lang/dafny/releases/download/v4.9.0/dafny-4.9.0-x64-ubuntu-20.04.zip
+          echo "b21575395f2fe3dbcaca09a8219fe29c99d248134e516e95dc3f0c3687d16c27  $RUNNER_TEMP/dafny.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/dafny.zip" -d "$RUNNER_TEMP/dafny-install"
+          echo "$RUNNER_TEMP/dafny-install/dafny" >> "$GITHUB_PATH"
+      - run: npx lsc check --backend=dafny
       - run: npm run lint
       - run: npm run test:feedback-integration
       - run: npm test
