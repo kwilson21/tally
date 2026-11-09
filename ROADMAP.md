@@ -16,6 +16,29 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 | Design system (track) | A catalog at `/design-system` built from the real components, the process every UI change follows, and the original app's components brought over one at a time ([#76](https://github.com/kwilson21/tally/issues/76)); from decisions 75 and 76, the quiet ledger form, quiet motion and squircle corners (label [`design-system`](https://github.com/kwilson21/tally/labels/design-system)) | The catalog is live on the demo, every existing component is in it at its tier, and the owner has signed off MoneyInput and the first flows there | milestone to come |
 | Onboarding (after the design system track) | What a first visit shows and teaches, in the demo and in the family's first week ([#95](https://github.com/kwilson21/tally/issues/95), decision 49) | Both first visits are designed on the proposals page and signed off, and they do Things to try's job and more | designed: the demo's is P124 A (decision 111), the family's first week is P125 E (decision 114); milestone to come |
 
+## Back-end cutover (decision 187)
+
+**Back-end cutover: 70 of 70 handlers remain**
+
+Every write route is listed in [docs/write-handlers.json](docs/write-handlers.json) as `legacy`, `converted` or `exempt`. CI fails if a write route is missing from the list, if the legacy count rises, or if a `converted` route has no rule module and stories test. Run `npm run cutover` to print these numbers. Exempt routes (8) are not counted.
+
+| Area | Remaining | Handlers |
+|---|---|---|
+| accounts | 4 | 4 |
+| bills | 10 | 10 |
+| budgets | 3 | 3 |
+| categories | 5 | 5 |
+| feedback | 1 | 1 |
+| organize | 3 | 3 |
+| plaid | 2 | 2 |
+| plans | 8 | 8 |
+| push | 1 | 1 |
+| settings | 9 | 9 |
+| setup | 5 | 5 |
+| sorting | 1 | 1 |
+| suggestions | 3 | 3 |
+| transactions | 15 | 15 |
+
 Phase 1 finished on 2026-09-25: the demo is live. Review: [docs/reviews/phase-1.md](docs/reviews/phase-1.md).
 
 The design system track runs alongside Phase 2 and comes before the audit details [#67](https://github.com/kwilson21/tally/issues/67)–[#74](https://github.com/kwilson21/tally/issues/74), which are built through its catalog. Non-UI Phase 2 work (Plaid, sync, Access) isn't blocked by it. [#92](https://github.com/kwilson21/tally/issues/92) moves Things to try, the demo's only onboarding today, from the top of Home to below the Budget list; #95 is where a proper onboarding replaces it.
