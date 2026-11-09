@@ -1,0 +1,558 @@
+{
+	"legacyBaseline": 71,
+	"handlers": [
+		{
+			"method": "POST",
+			"path": "/accounts/:itemId{[0-9]+}/disconnect",
+			"file": "accounts.tsx",
+			"area": "accounts",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/accounts/apple-card",
+			"file": "accounts.tsx",
+			"area": "accounts",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/accounts/apple-card/remove",
+			"file": "accounts.tsx",
+			"area": "accounts",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/accounts/sync",
+			"file": "accounts.tsx",
+			"area": "accounts",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/deactivate",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/link",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/occurrences/:period/price/accept",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/occurrences/:period/price/dismiss",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/occurrences/:period/unlink",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/reactivate",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/:id/undo-unlink",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/bills/find/:merchant/dismiss",
+			"file": "bills.tsx",
+			"area": "bills",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/budget/:id{[0-9]+}",
+			"file": "home.tsx",
+			"area": "budgets",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/budget/:id{[0-9]+}/nudge/:direction{up|down}",
+			"file": "home.tsx",
+			"area": "budgets",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/savings-goal",
+			"file": "home.tsx",
+			"area": "budgets",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/categories",
+			"file": "settings.tsx",
+			"area": "categories",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/categories/:id{[0-9]+}",
+			"file": "settings.tsx",
+			"area": "categories",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/categories/:id{[0-9]+}/archive",
+			"file": "settings.tsx",
+			"area": "categories",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/categories/:id{[0-9]+}/move/:direction{up|down}",
+			"file": "settings.tsx",
+			"area": "categories",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/categories/:id{[0-9]+}/restore",
+			"file": "settings.tsx",
+			"area": "categories",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/feedback",
+			"file": "feedback.tsx",
+			"area": "feedback",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/organize",
+			"file": "organize.tsx",
+			"area": "organize",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/organize/rule",
+			"file": "organize.tsx",
+			"area": "organize",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/organize/suggestion",
+			"file": "organize.tsx",
+			"area": "organize",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plaid/exchange",
+			"file": "plaid.tsx",
+			"area": "plaid",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plaid/items/:id/link-token",
+			"file": "plaid.tsx",
+			"area": "plaid",
+			"status": "exempt",
+			"reason": "asks Plaid for a one-time token and writes nothing"
+		},
+		{
+			"method": "POST",
+			"path": "/plaid/items/:id/repaired",
+			"file": "plaid.tsx",
+			"area": "plaid",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plaid/link-token",
+			"file": "plaid.tsx",
+			"area": "plaid",
+			"status": "exempt",
+			"reason": "asks Plaid for a one-time token and writes nothing"
+		},
+		{
+			"method": "POST",
+			"path": "/webhooks/plaid",
+			"file": "webhooks.ts",
+			"area": "plaid",
+			"status": "exempt",
+			"reason": "Plaid's signed webhook; Plaid calls it, no person's request"
+		},
+		{
+			"method": "POST",
+			"path": "/plans",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/:id",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/:id/delete",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/:id/drop",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/:id/link",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/:id/move",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/:id/unlink",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/plans/undo-delete",
+			"file": "plans.tsx",
+			"area": "plans",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/push/subscribe",
+			"file": "push.ts",
+			"area": "push",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/ai",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/bank-sign-in-emails",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/learned/change",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/learned/forget",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/learned/undo",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/merchant-rules/remove",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/never-suggest/remove",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/people",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/time-zone",
+			"file": "settings.tsx",
+			"area": "settings",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/first-page/bills",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "exempt",
+			"reason": "an old address that only redirects to /setup (or 404s in the demo)"
+		},
+		{
+			"method": "POST",
+			"path": "/first-page/budgets",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "exempt",
+			"reason": "an old address that only redirects to /setup (or 404s in the demo)"
+		},
+		{
+			"method": "POST",
+			"path": "/first-page/pay",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "exempt",
+			"reason": "an old address that only redirects to /setup (or 404s in the demo)"
+		},
+		{
+			"method": "POST",
+			"path": "/first-page/savings",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "exempt",
+			"reason": "an old address that only redirects to /setup (or 404s in the demo)"
+		},
+		{
+			"method": "POST",
+			"path": "/home/seen",
+			"file": "home.tsx",
+			"area": "setup",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/setup/bills",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/setup/budgets",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/setup/pay",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/setup/savings",
+			"file": "first-page.tsx",
+			"area": "setup",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/resort/undo",
+			"file": "resort.tsx",
+			"area": "sorting",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/names",
+			"file": "suggestions.tsx",
+			"area": "suggestions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/suggestions",
+			"file": "suggestions.tsx",
+			"area": "suggestions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/suggestions/:id{[0-9]+}/create",
+			"file": "settings.tsx",
+			"area": "suggestions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/settings/suggestions/:id{[0-9]+}/dismiss",
+			"file": "settings.tsx",
+			"area": "suggestions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/category/lock",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/delete",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/likely",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/likely/count",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/split",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/split/line",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/:id{[0-9]+}/split/remove",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/cash",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/rule-offer",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/rule-offer/dismiss",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/select/category",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/select/category/save",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/select/exclude",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		},
+		{
+			"method": "POST",
+			"path": "/transactions/undo-cash-delete",
+			"file": "transactions.tsx",
+			"area": "transactions",
+			"status": "legacy"
+		}
+	]
+}
