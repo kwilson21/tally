@@ -22,7 +22,7 @@ const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
 	import: "default",
 	eager: true,
 }) as Record<string, string>;
-const TESTS = import.meta.glob("./*.test.{ts,tsx}", {
+const TESTS = import.meta.glob("./**/*.test.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
@@ -34,6 +34,8 @@ const ROADMAP = import.meta.glob("../ROADMAP.md", {
 }) as Record<string, string>;
 
 const WRITES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+// The middleware the app registers for every method. Any other ALL route could take a write without being listed.
+const KNOWN_MIDDLEWARE = new Set(["/*", "/design-system/*"]);
 const key = (e: { method: string; path: string }) => `${e.method} ${e.path}`;
 
 /** Every write route the running app has registered, read from Hono's route table, as "METHOD path". */
@@ -42,13 +44,25 @@ function registeredWrites(routes: { method: string; path: string }[]) {
 	const problems: string[] = [];
 	for (const r of routes) {
 		if (WRITES.has(r.method)) found.add(key(r));
-		// app.use("*") middleware is "ALL" on a wildcard path. A named path with ALL could take a write unlisted.
-		else if (r.method === "ALL" && !r.path.endsWith("*"))
+		else if (r.method === "ALL" && !KNOWN_MIDDLEWARE.has(r.path))
 			problems.push(
 				`${key(r)} takes every method; register each method on its own`,
 			);
 	}
 	return { found, problems };
+}
+
+/** True when the text really imports the module (a "from" or import() specifier), not a comment or a longer sibling name. */
+function importsModule(text: string, name: string) {
+	const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+	for (const m of code.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)) {
+		const spec = (m[1] ?? "")
+			.replace(/^(\.{1,2}\/)+/, "")
+			.replace(/^src\//, "")
+			.replace(/\.tsx?$/, "");
+		if (spec === name) return true;
+	}
+	return false;
 }
 
 /** What is wrong with the list, as plain sentences. Empty means the ratchet holds. */
@@ -84,7 +98,7 @@ function ratchetProblems(
 					.replace(/^src\//, "")
 					.replace(/\.tsx?$/, "");
 				const handlerFile = sources[`../src/routes/${e.file}`] ?? "";
-				if (!handlerFile.includes(name))
+				if (!importsModule(handlerFile, name))
 					problems.push(
 						`${k} is converted but ${e.file} does not import ${name}`,
 					);
@@ -92,7 +106,7 @@ function ratchetProblems(
 					problems.push(
 						`${k} is converted but its stories test ${e.stories} is not in test/`,
 					);
-				else if (!stories.includes(name))
+				else if (!importsModule(stories, name))
 					problems.push(
 						`${k} is converted but ${e.stories} does not import ${name}`,
 					);
@@ -211,7 +225,23 @@ describe("the write-handler ratchet", () => {
 		).toHaveLength(1);
 		expect(
 			registeredWrites([{ method: "ALL", path: "/pay/*" }]).problems,
-		).toEqual([]);
+		).toHaveLength(1);
+		expect(registeredWrites([{ method: "ALL", path: "/*" }]).problems).toEqual(
+			[],
+		);
+	});
+
+	it("counts a module only when it is imported, not named in a comment or as a longer sibling", () => {
+		expect(
+			importsModule('import { a } from "../rules/pay";', "rules/pay"),
+		).toBe(true);
+		expect(importsModule('await import("../src/rules/pay")', "rules/pay")).toBe(
+			true,
+		);
+		expect(importsModule('// from "../rules/pay"', "rules/pay")).toBe(false);
+		expect(
+			importsModule('import { a } from "../rules/payment";', "rules/pay"),
+		).toBe(false);
 	});
 
 	it("shows the same countdown in ROADMAP.md as the list gives", () => {
@@ -219,6 +249,8 @@ describe("the write-handler ratchet", () => {
 		const todo = (handlers as List).handlers.filter(
 			(e) => e.status !== "exempt",
 		);
+		const exempt = (handlers as List).handlers.length - todo.length;
+		expect(text).toContain(`Exempt routes (${exempt}) are not counted`);
 		const left = todo.filter((e) => e.status === "legacy").length;
 		expect(text).toContain(
 			`Back-end cutover: ${left} of ${todo.length} handlers remain`,
