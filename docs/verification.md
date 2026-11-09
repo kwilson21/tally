@@ -4,7 +4,9 @@ Decision 188. Read this before adding or changing a `//@` contract, and before p
 
 ## In one sentence
 
-A verified rule is a plain statement about a pure money function ("the category rows plus uncategorized add up to total spending") that a prover checks for every possible input, not only the inputs a test happens to try.
+A verified rule is a plain statement about a pure money function ("each category row's spending equals the sum of that category's transactions") that a prover checks for every input inside a stated bound (see Numbers), not only the inputs a test happens to try.
+
+A rule must be true of the code as it really behaves. "Category rows plus uncategorized add up to total spending" is a tempting rule that is false here: a category with spending but no budget yet has no row, so its spending is in the total and in no row. A contract that states it would fail the proof, or need a precondition production inputs do not meet.
 
 ## What the tools are
 
@@ -50,9 +52,21 @@ Answer these four questions about one function. It earns a contract only if all 
 2. **A planted bug the prover rejects.** Before the PR, break the code on purpose in a scratch copy and confirm `lsc check` fails on that rule. Say which bug in the PR description. A contract that passes on broken code proves nothing.
 3. **A line in the module table below.**
 
+## Numbers: what "every input" covers
+
+LemmaScript models a TypeScript `number` as an unbounded mathematical integer. The Worker runs 64-bit floats, which hold whole numbers exactly only up to 2^53 − 1 (9,007,199,254,740,991 cents, about $90 trillion). Past that, a sum can round and the proof no longer describes what runs.
+
+So a green check covers inputs inside a bound, and each verified module must state it:
+
+- Write the bound as a `//@ requires` (for example, every `amountCents` is a safe integer with magnitude at most a named limit, and the row count is at most a named limit, so no running sum can reach 2^53).
+- Name the line that enforces it at the edge (a guard, or the parse that already rejects larger amounts). If nothing enforces it, add the guard in the same PR, or the module is not a fit.
+- Say in the module table which bound the proof assumes.
+
 ## What a green check does and does not mean
 
-It means the TypeScript meets its contract for every input. It does not mean:
+It means the TypeScript meets its contract for every input inside the stated bound. It does not mean:
+
+- The inputs are inside that bound at runtime. The proof assumes it; the edge guard makes it true.
 
 - The contract says the right thing. A wrong rule is proven just as happily. The owner reads the sentences.
 - The data fed in is right. If the SQL hands the function the wrong rows, the proof still holds and the number is still wrong.
@@ -71,7 +85,8 @@ Assessed from reading the code on 2026-11-09. "Fit" is the four-question test. U
 | Area | Fit | Why |
 |---|---|---|
 | `src/budget.ts` `summarizeMonth` | Yes | Spent, income and uncategorized each count a transaction once; category rows equal their category's sum; safe-to-spend is one identity. Proved in a spike. |
-| `src/transactions/split.ts` `parseSplit` | Yes | If it returns `ok`, the parts add up exactly to the transaction and each has the transaction's sign. Needs `positiveCents` as `extern`. |
+| `src/transactions/split.ts` `parseSplit` | No, as written | It takes strings and parses each amount with `toCents`, and parsing stays with ordinary tests. Trusting `positiveCents` as `extern` would not change that. |
+| `src/transactions/split.ts`, a post-parse check (new) | Maybe | If the parts are already numbers, a small `partsAddUp(parts, parentCents)` can carry the rule "the parts add up exactly to the transaction and each has its sign". It needs that function extracted first, which is a refactor to agree on its own PR. |
 | `src/home-forecast.ts` `forecastMonth` | Maybe | Rounding to whole dollars; needs a check of how LemmaScript treats division first. |
 | `src/bills/totals.ts`, `src/net-worth.ts`, `src/trends.ts`, `src/budgets/month-cause.ts`, `src/first-tally/budgets.ts`, `src/first-tally/pay.ts` | Unassessed | Pure and money-heavy by size; read each against the four questions before deciding. |
 | `src/transactions/refund-guards.ts` | No | One comparison; a test says it as clearly. |
@@ -86,7 +101,14 @@ This is a Tech Preview toolchain (LemmaScript 0.6.x). The decision stands only w
 - Upgrading LemmaScript or Dafny broke the check and needed more than a version bump to fix.
 - The annotations slowed a PR enough that a reviewer asked for them to go.
 
-Removing it means deleting `LemmaScript-files.txt`, the CI step and the `//@` comments, and adding a decision entry that supersedes 188.
+Removing it means deleting all of these, and adding a decision entry that supersedes 188:
+
+- the `lemmascript` devDependency and the lockfile entries;
+- `LemmaScript-files.txt` and any `lemmascript.json`;
+- every generated or hand-kept Dafny file next to a verified module (`*.dfy` and `*.dfy.gen`), including proof additions in them;
+- the Dafny install and cache step in CI, and the `lsc check` step;
+- the `//@` comments, and any `orZero`-style helper or field-by-field rewrite added only for the tool (keep a rewrite if the code reads better for it);
+- the rule line in CLAUDE.md and the rows in the module table.
 
 ## Quint
 
