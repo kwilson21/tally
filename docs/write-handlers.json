@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 71,
+	"legacyBaseline": 70,
 	"handlers": [
 		{
 			"method": "POST",
@@ -426,7 +426,8 @@
 			"path": "/settings/names",
 			"file": "suggestions.tsx",
 			"area": "suggestions",
-			"status": "legacy"
+			"status": "exempt",
+			"reason": "an old address that only redirects (303) to /settings/suggestions"
 		},
 		{
 			"method": "POST",

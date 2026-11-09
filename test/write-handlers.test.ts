@@ -98,6 +98,10 @@ function ratchetProblems(
 					.replace(/^src\//, "")
 					.replace(/\.tsx?$/, "");
 				const handlerFile = sources[`../src/routes/${e.file}`] ?? "";
+				if (!handlerFile.includes(e.path))
+					problems.push(
+						`${k} is converted but ${e.file} does not contain the path ${e.path}`,
+					);
 				if (!importsModule(handlerFile, name))
 					problems.push(
 						`${k} is converted but ${e.file} does not import ${name}`,
@@ -192,7 +196,8 @@ describe("the write-handler ratchet", () => {
 		);
 		const src = {
 			"../src/rules/x.ts": "",
-			"../src/routes/x.tsx": 'import { go } from "../rules/x";',
+			"../src/routes/x.tsx":
+				'import { go } from "../rules/x"; app.post("/x", go);',
 		};
 		expect(ratchetProblems(reg, list, src, {})[0]).toMatch(
 			/stories test test\/x-stories.test.ts is not in test\//,
@@ -212,7 +217,19 @@ describe("the write-handler ratchet", () => {
 				{ ...src, "../src/routes/x.tsx": "" },
 				{ "./x-stories.test.ts": 'from "../src/rules/x"' },
 			)[0],
-		).toMatch(/x.tsx does not import rules\/x/);
+		).toMatch(/x.tsx does not contain the path \/x/);
+		const pay = entry({
+			path: "/pay",
+			status: "converted",
+			rule: "src/rules/x.ts",
+			stories: "test/x-stories.test.ts",
+		});
+		const stories = { "./x-stories.test.ts": 'from "../src/rules/x"' };
+		expect(
+			ratchetProblems(new Set(["POST /pay"]), one(pay, 0), src, stories),
+		).toEqual([
+			"POST /pay is converted but x.tsx does not contain the path /pay",
+		]);
 	});
 
 	it("fails when an exempt entry has no reason, or a route takes every method", () => {
@@ -255,12 +272,16 @@ describe("the write-handler ratchet", () => {
 		expect(text).toContain(
 			`Back-end cutover: ${left} of ${todo.length} handlers remain`,
 		);
-		for (const area of new Set(todo.map((e) => e.area))) {
+		// The section's whole table, so a row left behind for a finished area fails too.
+		const section =
+			text.split("## Back-end cutover")[1]?.split("\n## ")[0] ?? "";
+		const shown = [
+			...section.matchAll(/^\| (\S+) \| (\d+) \| (\d+) \|$/gm),
+		].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
+		const expected = [...new Set(todo.map((e) => e.area))].map((area) => {
 			const mine = todo.filter((e) => e.area === area);
-			const mineLeft = mine.filter((e) => e.status === "legacy").length;
-			expect(text, area).toContain(
-				`| ${area} | ${mineLeft} | ${mine.length} |`,
-			);
-		}
+			return `${area} ${mine.filter((e) => e.status === "legacy").length} ${mine.length}`;
+		});
+		expect(shown.sort()).toEqual(expected.sort());
 	});
 });
