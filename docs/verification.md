@@ -81,15 +81,21 @@ It means the TypeScript meets its contract for every input inside the stated bou
 
 ## Candidates, by area
 
-Assessed from reading the code on 2026-11-09. "Fit" is the four-question test. Update this table as modules are done or ruled out.
+Assessed from reading the code on 2026-11-09, and again on 2026-11-10 (#935). "Fit" is the four-question test. Update this table as modules are done or ruled out.
 
 | Area | Fit | Why |
 |---|---|---|
 | `src/budget.ts` `summarizeMonth` | Done (decision 189) | Spent, income and uncategorized each count a transaction once; category rows equal their category's sum; safe-to-spend is one identity. Proved in a spike. |
 | `src/transactions/split.ts` `parseSplit` | No, as written | It takes strings and parses each amount with `toCents`, and parsing stays with ordinary tests. Trusting `positiveCents` as `extern` would not change that. |
 | `src/transactions/split.ts`, the post-parse check | Done (#934) | Extracted as `partsAddUp`; `parseSplit` itself stays with ordinary tests. |
-| `src/home-forecast.ts` `forecastMonth` | Maybe | Rounding to whole dollars; needs a check of how LemmaScript treats division first. |
-| `src/bills/totals.ts`, `src/net-worth.ts`, `src/trends.ts`, `src/budgets/month-cause.ts`, `src/first-tally/budgets.ts`, `src/first-tally/pay.ts` | Unassessed | Pure and money-heavy by size; read each against the four questions before deciding. |
+| `src/bills/totals.ts` `calculateBillTotals`, the set-aside | Yes, next | Pure; the rule is a sum with a counted-once partition: Safe to spend sets aside exactly the unpaid part of each distinct due or overdue occurrence due this month, the shown occurrence winning a tie. A miscount shows on Home. It is heavy (238 lines, five interacting decisions: 62, 122, 123, 127), so verify only the set-aside, after extracting it as a small function over the de-duplicated occurrences; the Map iteration and string keys need rewriting first. See #942. |
+| `src/bills/totals.ts` `monthlyBillShare` | Maybe | A rounding rule (`Math.floor((amount × n + d/2) / d)`); worth a contract that the share is within half a unit of the exact fraction, but only once we know how LemmaScript treats `Math.floor` and division (docs/DESIGN_NUMBERS.md in its repo). Check on the first module that uses it, not before. |
+| `src/net-worth.ts` `netWorthSeries` | Maybe | Fits the questions: each day's point is the sum of every counted account's latest balance, debt negative, and a wrong number shows as the headline. But it sorts, iterates a Map's values and uses `entries()` and `?.`, none of which the LemmaScript docs list as supported (unverified). Revisit once the bills set-aside shows how well Map-heavy code goes. `netWorthView` is words and chart points: No. |
+| `src/home-forecast.ts` `forecastMonth` | No | An estimate, not a stored or summed amount, and its rule is one rounding expression a test states as clearly. |
+| `src/bills/price-change.ts` `pickPriceOffer` | No | A pick and tie-break, not a sum or partition, and its result is an offer a person answers (nothing links by itself, decision 72), so a break cannot lose or miscount money. The rest of the file is SQL. |
+| `src/trends.ts` | No | Words, chart drawing and run counts; its one money rule, `averageMonthlyCents`, is a single rounding expression. |
+| `src/budgets/month-cause.ts` | No | Picks and words a cause line; a wrong word, not a lost amount, and it calls `wholeUnlessTiny` (`Intl`). |
+| `src/first-tally/budgets.ts`, `src/first-tally/pay.ts` | No | Setup words, cadence and form-value matching; no sum or partition rule, and the money is formatted with `Intl`. |
 | `src/transactions/refund-guards.ts` | No | One comparison; a test says it as clearly. |
 | `src/money.ts` | No | Regex and `toPrecision`; tests with edge cases instead. |
 | `src/plaid/*`, `src/db/*` | No | SQL. |
