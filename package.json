@@ -33,6 +33,7 @@
 		"@biomejs/biome": "^2.5.14",
 		"@cloudflare/vitest-plugin": "^1.6.0",
 		"@tailwindcss/cli": "^4.3.3",
+		"lemmascript": "0.6.6",
 		"playwright": "^1.63.0",
 		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2",
