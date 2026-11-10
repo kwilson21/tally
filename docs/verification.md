@@ -77,6 +77,7 @@ It means the TypeScript meets its contract for every input inside the stated bou
 | Module | Rule (one sentence) | Decision / issue |
 |---|---|---|
 | `src/budget.ts` `summarizeMonth` | Total spent, income and uncategorized (amount and count) are each exactly the sum over the transactions; each category row's spent is exactly its category's sum; Safe to spend is the stated sum. Bound: every amount at most 1e10 cents, at most 1e5 counted transactions and 1e4 categories, enforced by `assertWithinLimits`, which throws a `RangeError`. | Decision 189, #933 |
+| `src/transactions/split.ts` `partsAddUp` | It is true exactly when there are at least two parts, each non-zero with the transaction's sign, adding up to its amount. Bound: no part above 1e10 cents and at most 1,000 parts, enforced in `parseSplit`, which refuses a split past either in words; the transaction's amount is a safe integer. | #934 |
 
 ## Candidates, by area
 
@@ -86,7 +87,7 @@ Assessed from reading the code on 2026-11-09. "Fit" is the four-question test. U
 |---|---|---|
 | `src/budget.ts` `summarizeMonth` | Done (decision 189) | Spent, income and uncategorized each count a transaction once; category rows equal their category's sum; safe-to-spend is one identity. Proved in a spike. |
 | `src/transactions/split.ts` `parseSplit` | No, as written | It takes strings and parses each amount with `toCents`, and parsing stays with ordinary tests. Trusting `positiveCents` as `extern` would not change that. |
-| `src/transactions/split.ts`, a post-parse check (new) | Maybe | If the parts are already numbers, a small `partsAddUp(parts, parentCents)` can carry the rule "the parts add up exactly to the transaction and each has its sign". It needs that function extracted first, which is a refactor to agree on its own PR. |
+| `src/transactions/split.ts`, the post-parse check | Done (#934) | Extracted as `partsAddUp`; `parseSplit` itself stays with ordinary tests. |
 | `src/home-forecast.ts` `forecastMonth` | Maybe | Rounding to whole dollars; needs a check of how LemmaScript treats division first. |
 | `src/bills/totals.ts`, `src/net-worth.ts`, `src/trends.ts`, `src/budgets/month-cause.ts`, `src/first-tally/budgets.ts`, `src/first-tally/pay.ts` | Unassessed | Pure and money-heavy by size; read each against the four questions before deciding. |
 | `src/transactions/refund-guards.ts` | No | One comparison; a test says it as clearly. |
