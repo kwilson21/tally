@@ -376,9 +376,11 @@ describe("netWorthView, with a line to draw", () => {
 
 		if (view.kind !== "line") throw new Error("expected a line");
 
-		const coords = view.points
-			.split(" ")
-			.map((p) => p.split(",").map(Number) as [number, number]);
+		const coords = view.points.split(" ").map((p): [number, number] => {
+			const [x = Number.NaN, y = Number.NaN] = p.split(",").map(Number);
+
+			return [x, y];
+		});
 
 		expect(coords).toHaveLength(3);
 		expect(coords[0]?.[0]).toBe(0);

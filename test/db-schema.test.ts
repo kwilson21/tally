@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { sql } from "drizzle-orm";
+import { SQL, sql } from "drizzle-orm";
 import {
 	getTableConfig,
 	type Index,
@@ -81,24 +81,32 @@ function schemaDefault(column: SQLiteColumn): string | null {
 
 	if (value === undefined || value === null) return null;
 
-	if (typeof value === "string" || typeof value === "number")
-		return unwrapDefault(String(value));
+	if (isPlainDefault(value)) return unwrapDefault(String(value));
 
-	return unwrapDefault(dialect.sqlToQuery(value as never).sql);
+	if (value instanceof SQL) return unwrapDefault(dialect.sqlToQuery(value).sql);
+
+	throw new Error("a column default is neither a plain value nor SQL");
+}
+
+function isPlainDefault(value: unknown): value is string | number {
+	return typeof value === "string" || typeof value === "number";
 }
 
 /** The CHECK value lists in a CREATE TABLE statement: `col IN ('a', 'b')` and `col IN (0, 1)`, as text. */
-function liveChecks(createSql: string): Record<string, string[]> {
-	const found: Record<string, string[]> = {};
+function liveChecks(createSql: string) {
+	const found: [string, string[]][] = [];
 
 	for (const match of createSql.matchAll(/\b(\w+)\s+IN\s*\(([^)]*)\)/gi)) {
 		const column = match[1] ?? "";
-		found[column] = (match[2] ?? "")
-			.split(",")
-			.map((value) => value.trim().replace(/^'(.*)'$/, "$1"));
+		found.push([
+			column,
+			(match[2] ?? "")
+				.split(",")
+				.map((value) => value.trim().replace(/^'(.*)'$/, "$1")),
+		]);
 	}
 
-	return found;
+	return Object.fromEntries(found);
 }
 
 interface LiveIndex {

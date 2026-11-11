@@ -70,9 +70,7 @@ describe("the note state machine", () => {
 			const events = Object.keys(moves.on ?? {});
 
 			for (const event of events) {
-				expect(NOTE_EVENTS as readonly string[], `${state} ${event}`).toContain(
-					event,
-				);
+				expect(NOTE_EVENTS, `${state} ${event}`).toContain(event);
 			}
 		}
 	});
@@ -106,7 +104,7 @@ for (const state of NOTE_STATES)
 		"person_wrote",
 		"person_emptied",
 		"person_kept",
-	] as NoteEvent[]) {
+	] satisfies NoteEvent[]) {
 		WALK.push({ id: FIRST + index, state, event });
 		index += 1;
 	}
@@ -161,17 +159,18 @@ function expectMachine(
 	);
 }
 
-const edit = (over: Record<string, unknown>) =>
-	({
-		categoryId: null,
-		alwaysForMerchant: false,
-		displayName: null,
-		note: null,
-		excluded: false,
-		income: false,
-		creditReviewed: true,
-		...over,
-	}) as Parameters<typeof saveEdit>[2];
+type EditInput = Parameters<typeof saveEdit>[2];
+
+const edit = (over: Partial<EditInput>): EditInput => ({
+	categoryId: null,
+	alwaysForMerchant: false,
+	displayName: null,
+	note: null,
+	excluded: false,
+	income: false,
+	creditReviewed: true,
+	...over,
+});
 
 describe("every writer, from every state, stores what the machine says", () => {
 	beforeAll(async () => {

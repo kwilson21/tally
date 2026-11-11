@@ -7,20 +7,25 @@ import { vapidKeys } from "../src/push/keys";
 
 /** A real P-256 pair, in the two forms the secrets take: the public point and the private scalar `d`. */
 async function generatedPair() {
-	const pair = (await crypto.subtle.generateKey(
+	const generated = await crypto.subtle.generateKey(
 		{ name: "ECDSA", namedCurve: "P-256" },
 		true,
 		["sign", "verify"],
-	)) as CryptoKeyPair;
-
-	const publicRaw = new Uint8Array(
-		(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
 	);
 
-	const jwk = (await crypto.subtle.exportKey(
-		"jwk",
-		pair.privateKey,
-	)) as JsonWebKey;
+	if (!("publicKey" in generated)) throw new Error("expected a key pair");
+	const pair = generated;
+
+	const exportedPublic = await crypto.subtle.exportKey("raw", pair.publicKey);
+
+	if (!(exportedPublic instanceof ArrayBuffer))
+		throw new Error("expected the raw public point");
+	const publicRaw = new Uint8Array(exportedPublic);
+
+	const exportedPrivate = await crypto.subtle.exportKey("jwk", pair.privateKey);
+
+	if (exportedPrivate instanceof ArrayBuffer) throw new Error("expected a JWK");
+	const jwk = exportedPrivate;
 
 	if (!jwk.d) throw new Error("no private scalar");
 

@@ -8,6 +8,7 @@ import {
 	type NoteState,
 } from "../src/machines/note-state";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-10-01";
@@ -88,7 +89,7 @@ describe("the merge's note state, pair by pair", () => {
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
 
-		item = row?.id as number;
+		item = present(row?.id);
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = ? WHERE id = ?")
 			.bind(LOCK, item)

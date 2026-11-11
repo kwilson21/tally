@@ -3,16 +3,24 @@ import { describe, expect, it } from "vitest";
 import {
 	laterNoteState,
 	NOTE_RANK,
+	NOTE_STATES,
 	type NoteState,
 	noteRankSql,
 	noteStateMachine,
 	pendingNoteWinsSql,
 } from "../src/machines/note-state";
 
-const STATES = Object.keys(noteStateMachine.config.states ?? {}) as NoteState[];
+/** Whether a machine state is one of NOTE_STATES: a state the rank table must cover. */
+function isNoteState(value: string): value is NoteState {
+	return NOTE_STATES.some((state) => state === value);
+}
+
+const MACHINE_STATES = Object.keys(noteStateMachine.config.states ?? {});
+const STATES = MACHINE_STATES.filter(isNoteState);
 
 describe("the rank of each note state", () => {
 	it("gives every state of the machine exactly one rank, and no other", () => {
+		expect(STATES).toEqual(MACHINE_STATES);
 		expect(Object.keys(NOTE_RANK).sort()).toEqual([...STATES].sort());
 
 		for (const state of STATES) {

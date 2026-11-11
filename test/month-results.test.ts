@@ -63,7 +63,7 @@ describe("monthResults", () => {
 	it("gives null for a month with no budget, and nothing for a month not asked for", async () => {
 		const results = await monthResults(env.DB, ["2026-04", "2026-09"]);
 		expect(results["2026-04"]).toBeNull();
-		expect(typeof results["2026-09"]).toBe("number");
+		expect(results["2026-09"]).toEqual(expect.any(Number));
 		expect("2026-05" in results).toBe(false);
 	});
 

@@ -39,8 +39,12 @@ function postPlain(path: string, fields: Record<string, string>) {
 }
 
 /** The screen reader's words for a reply, from its HX-Trigger header. */
-function announced(res: Response): string {
-	return JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce as string;
+function announced(res: Response): string | undefined {
+	const trigger: { announce?: string } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
+
+	return trigger.announce;
 }
 
 /** The hidden fields of the rule offer's own form, as the page posts them back. */
@@ -900,8 +904,7 @@ describe("merchant category rule offer", () => {
 			excluded: "1",
 		});
 
-		const announce = JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}")
-			.announce as string;
+		const announce = announced(third.res);
 
 		// The save's words, the exclusion and then the question, in that order.
 		expect(announce).toBe(

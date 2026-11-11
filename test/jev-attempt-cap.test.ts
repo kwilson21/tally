@@ -20,6 +20,7 @@ import { next } from "../src/machines/next";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
+import { present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 182). Only a person's
@@ -464,13 +465,15 @@ describe("every writer agrees with the machine, state by state", () => {
 
 // The answer writer refuses a row that has given up, so the machine holds even where the sorting run never asks.
 describe("the answer writer refuses a row that has given up", () => {
-	const decision = (categoryId: number | null, confidence: number) =>
-		({
-			categoryId,
-			suggestedCategoryId: categoryId,
-			confidence,
-			flags: { transfer: false, reimbursement: false, income: false },
-		}) as Decision;
+	const decision = (
+		categoryId: number | null,
+		confidence: number,
+	): Decision => ({
+		categoryId,
+		suggestedCategoryId: categoryId,
+		confidence,
+		flags: { transfer: false, reimbursement: false, income: false },
+	});
 
 	it("leaves a gave-up row exactly as it was", async () => {
 		const id = await addRow("GIVEN UP");
@@ -618,13 +621,15 @@ describe("an unsure row whose income question keeps failing", () => {
 });
 
 // What the answer writer does to the retry columns of a row with no category, and to a row a person filed.
-const answerWith = (categoryId: number | null, confidence: number) =>
-	({
-		categoryId,
-		suggestedCategoryId: categoryId,
-		confidence,
-		flags: { transfer: false, reimbursement: false, income: false },
-	}) as Decision;
+const answerWith = (
+	categoryId: number | null,
+	confidence: number,
+): Decision => ({
+	categoryId,
+	suggestedCategoryId: categoryId,
+	confidence,
+	flags: { transfer: false, reimbursement: false, income: false },
+});
 
 describe("the answer writer and the failure columns", () => {
 	it("pins what it writes to a person-filed row: the person's category stays, and Jev's confidence is stored", async () => {
@@ -728,11 +733,13 @@ describe("the pending-to-posted merge and the failure count", () => {
 		lock += 1;
 		const key = `merge-${lock}`;
 
-		const item = (
-			await db
-				.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
-				.first<{ id: number }>()
-		)?.id as number;
+		const item = present(
+			(
+				await db
+					.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = ? WHERE id = ?")

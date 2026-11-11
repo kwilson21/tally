@@ -29,14 +29,17 @@ const ACME_DEPOSITS = [ACME_FIRST, ACME_SECOND];
 const ZETA = { date: "2026-09-18", cents: 90000 };
 const ZETA_DEPOSITS = [ZETA];
 
+/** A JSON value, as the first_tally record stores it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
 /** The record as a setup that drew every stroke leaves it, with the answers given. */
-const drawn = (over: Record<string, unknown> = {}) => ({
+const drawn = (over: { [key: string]: Json } = {}) => ({
 	strokes: { bank: DAY, pay: DAY, bills: DAY, budgets: DAY },
 	budgets: {},
 	...over,
 });
 
-async function writeRecord(record: unknown) {
+async function writeRecord(record: Json) {
 	await db
 		.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",

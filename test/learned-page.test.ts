@@ -18,31 +18,37 @@ async function get(path: string) {
 }
 
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
 	return { res, html: await res.text() };
 }
 
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: {
-			message: string;
-			type?: string;
-			undo?: string;
-			undoExpiresInMs?: number;
-			undoAction?: string;
-		};
-		announce?: string;
+/** The HX-Trigger payload the page sends: a toast and an announcement. */
+type HxTrigger = {
+	toast?: {
+		message: string;
+		type?: string;
+		undo?: string;
+		undoExpiresInMs?: number;
+		undoAction?: string;
 	};
+	announce?: string;
+};
+
+const trigger = (res: Response): HxTrigger =>
+	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 
 const textOf = (html: string) =>
 	html

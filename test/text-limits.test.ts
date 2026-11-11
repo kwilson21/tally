@@ -11,6 +11,7 @@ import {
 } from "../src/limits";
 import { parseCategory } from "../src/settings/category-form";
 import { parseCash } from "../src/transactions/cash";
+import { present } from "./helpers/present";
 
 // How long a typed text may be is written once, in src/limits.ts, and the form's maxlength and the server's check both read
 // it (audit finding 9). Two copies of a number drift: a form that lets 60 characters through to a server that refuses 40.
@@ -19,7 +20,7 @@ const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const APP = Object.entries(SOURCES).filter(
 	([file]) => !file.includes("/design-system/") && !file.endsWith("/limits.ts"),
@@ -114,7 +115,7 @@ describe("the text limits", () => {
 
 		for (const [file, text] of APP)
 			for (const match of codeLines(text).join("\n").matchAll(pattern))
-				found.push({ file: file.replace("../", ""), name: match[1] as string });
+				found.push({ file: file.replace("../", ""), name: present(match[1]) });
 
 		const unlisted = found.filter(
 			(f) => !OTHER_RULES.some((o) => o.file === f.file && o.name === f.name),

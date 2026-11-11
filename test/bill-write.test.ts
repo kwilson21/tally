@@ -13,6 +13,17 @@ import { resetDemo } from "../src/demo/reset";
 // The writes enforce "no two active bills share a name" themselves (spec §8.5), so two saves that
 // both passed the form's check can't both land. The demo has Streaming (1), Water (2), Electric (3),
 // Internet (5) and Soccer league (6) active, and Old phone plan (7) inactive.
+/** The bills columns the tests read back, as a SELECT * returns them. */
+type AddedBill = {
+	amount_cents: number;
+	due_day: number;
+	frequency: string;
+	anchor_month: string | null;
+	category_id: number | null;
+	merchant_raw_name: string;
+	active: number;
+};
+
 const fields = (over: Partial<BillFields> = {}): BillFields => ({
 	name: "Gym",
 	amountCents: 4250,
@@ -47,7 +58,7 @@ describe("bill writes", () => {
 
 			const added = await env.DB.prepare(
 				"SELECT * FROM bills WHERE name='Gym'",
-			).first<Record<string, unknown>>();
+			).first<AddedBill>();
 
 			expect(added).toMatchObject({
 				amount_cents: 4250,

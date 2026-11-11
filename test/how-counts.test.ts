@@ -8,18 +8,21 @@ import {
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
 const MONTH = "2026-09";
 
 const idOf = async (rawName: string) =>
-	(
-		await db
-			.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
-			.bind(rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+	present(
+		(
+			await db
+				.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
+				.bind(rawName)
+				.first<{ id: number }>()
+		)?.id,
+	);
 
 const countWhere = async (where: string) =>
 	(

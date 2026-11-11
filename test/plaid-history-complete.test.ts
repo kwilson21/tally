@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { present } from "./helpers/present";
 
 // Plaid's 90-day history (spec §5, §8.8, #581): history_complete_at is set in the same write as the last page of a sync
 // that ran after Plaid reported the history complete, from the webhook or from transactions_update_status.
@@ -18,7 +19,21 @@ const account = {
 	balances: { current: 12.34 },
 };
 
-const page = (overrides: Record<string, unknown> = {}) => ({
+type PlaidPage = {
+	added: object[];
+	modified: object[];
+	removed: object[];
+	next_cursor: string;
+	has_more: boolean;
+	transactions_update_status?: string;
+};
+
+type PlaidBody = PlaidPage | { accounts: object[] };
+
+/** The body of a /transactions/sync request, as sync.ts sends it. */
+type SyncRequest = { access_token: string; count: number; cursor?: string };
+
+const page = (overrides: Partial<PlaidPage> = {}): PlaidPage => ({
 	added: [],
 	modified: [],
 	removed: [],
@@ -27,7 +42,7 @@ const page = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const response = (body: unknown) =>
+const response = (body: PlaidBody) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json" },
@@ -35,7 +50,7 @@ const response = (body: unknown) =>
 
 /** The Plaid calls: accounts, then whatever the sync answers for each /transactions/sync page. */
 const plaidFetch = (
-	sync: (body: Record<string, unknown>) => Promise<Response> | Response,
+	sync: (body: SyncRequest) => Promise<Response> | Response,
 ) =>
 	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get"))
@@ -53,7 +68,7 @@ async function addItem() {
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return present(result?.id);
 }
 
 const historyAt = async (id: number) =>

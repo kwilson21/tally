@@ -35,7 +35,10 @@ const view = (over: Partial<SetupView> = {}): SetupView => ({
 	...over,
 });
 
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+/** Rendered markup: a JSX result, which is a string when it is rendered. */
+type Markup = { toString(): string };
+
+const html = (node: Markup) => String(node).replaceAll("&#39;", "'");
 
 const CHASE_IN: YourBank = {
 	id: 3,

@@ -72,14 +72,36 @@ describe("questionsOpen, one condition at a time", () => {
 	});
 });
 
+/** The columns a test may set on an imported row: the rest take the defaults in txn. */
+type TxnColumns = {
+	account_id: number;
+	plaid_transaction_id: string | null;
+	date: string;
+	amount_cents: number;
+	raw_name: string;
+	category_id: number | null;
+	category_source: string;
+	category_confidence: number;
+	income_confidence: number;
+	jev_category_id: number;
+	jev_failed_at: string;
+	flag_income: number;
+	excluded: number;
+	excluded_source: string;
+	note: string;
+	credit_reviewed: number;
+	credit_reviewed_by: string;
+	refund_of_id: number;
+};
+
 describe("countWaitingForJev", () => {
 	let n = 0;
 
 	/** Inserts one imported row on the test account, with `over` for the columns that differ. */
-	async function txn(over: Record<string, unknown> = {}) {
+	async function txn(over: Partial<TxnColumns> = {}) {
 		n += 1;
 
-		const row: Record<string, unknown> = {
+		const row = {
 			account_id: 1,
 			plaid_transaction_id: `gate-${n}`,
 			date: "2026-10-02",

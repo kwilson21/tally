@@ -318,7 +318,7 @@ describe("resortCandidates: the cap and the order", () => {
 			amountCents: 2900,
 			mixed: false,
 		});
-		expect(typeof found?.merchantKey).toBe("string");
+		expect(found?.merchantKey).toEqual(expect.any(String));
 	});
 
 	it("never calls Jev or Workers AI", async () => {

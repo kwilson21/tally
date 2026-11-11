@@ -10,6 +10,7 @@ import css from "../src/styles/app.css?raw";
 import { BottomSheet } from "../src/views/bottom-sheet";
 import { SAVED_TOAST_MS } from "../src/views/saved-tick";
 import { Switch } from "../src/views/switch";
+import { present } from "./helpers/present";
 
 // P74 A and P85 A (decisions 76, 79, 80): quiet motion in CSS only. Every duration is a token in
 // app.css, every move has its reduced-motion version, and the page and its components only name
@@ -19,7 +20,7 @@ const SOURCES = import.meta.glob(["../src/**/*.{ts,tsx}"], {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 type Rule = {
 	/** The at-rules around it, outermost first: "@media (prefers-reduced-motion: reduce)". */
@@ -363,7 +364,7 @@ describe("toasts", () => {
 			/^toast var\(--duration-toast\) ease-out both$/,
 		);
 		// The same animation for a drawing of a toast, which sits outside #toasts.
-		expect(selectorsOf(toast as Rule)).toContain(".toast-motion");
+		expect(selectorsOf(present(toast))).toContain(".toast-motion");
 		// toast.js writes no animation or transition. Its style writes set and clear two measured heights: the
 		// Select bar's, on #toasts, and the toasts' own, on the root element where --toast-top-room reads it. Its
 		// one other write is an Undo toast's remaining window, the only duration it sets, as a property (CSP refuses a style attribute).
@@ -508,16 +509,15 @@ describe("a sheet that is already open stays still", () => {
 		fields?: Record<string, string>,
 		headers: Record<string, string> = {},
 	) {
+		const sent = new Headers({ Origin: BASE, "HX-Request": "true" });
+
+		if (fields) sent.set("content-type", "application/x-www-form-urlencoded");
+
+		for (const [name, value] of Object.entries(headers)) sent.set(name, value);
+
 		const res = await exports.default.fetch(BASE + path, {
 			method: fields ? "POST" : "GET",
-			headers: {
-				Origin: BASE,
-				"HX-Request": "true",
-				...(fields
-					? { "content-type": "application/x-www-form-urlencoded" }
-					: {}),
-				...headers,
-			},
+			headers: sent,
 			body: fields ? new URLSearchParams(fields) : undefined,
 		});
 
@@ -543,11 +543,13 @@ describe("a sheet that is already open stays still", () => {
 	const STILL = { open: true, panel: false, fade: false };
 
 	const firstTransaction = async () =>
-		(
-			await env.DB.prepare(
-				"SELECT id FROM transactions WHERE parent_id IS NULL AND is_split = 0 AND flag_income = 0 AND amount_cents > 0 LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+		present(
+			(
+				await env.DB.prepare(
+					"SELECT id FROM transactions WHERE parent_id IS NULL AND is_split = 0 AND flag_income = 0 AND amount_cents > 0 LIMIT 1",
+				).first<{ id: number }>()
+			)?.id,
+		);
 
 	const addCash = async () => {
 		await send("/transactions/cash", {
@@ -558,11 +560,13 @@ describe("a sheet that is already open stays still", () => {
 			back: "/transactions",
 		});
 
-		return (
-			await env.DB.prepare(
-				"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Quiet market'",
-			).first<{ id: number }>()
-		)?.id as number;
+		return present(
+			(
+				await env.DB.prepare(
+					"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Quiet market'",
+				).first<{ id: number }>()
+			)?.id,
+		);
 	};
 
 	it("opens Home's budget sheet with the motion, and draws it still after a refused amount", async () => {

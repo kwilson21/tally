@@ -34,8 +34,8 @@ const TEXT: Partial<Record<NoteState, string>> = {
 	written: "Note",
 };
 
-const cases = (Object.keys(HELD) as (keyof typeof HELD)[]).flatMap((variant) =>
-	NOTE_STATES.map((state) => ({ variant, state })),
+const cases = Object.entries(HELD).flatMap(([variant, held]) =>
+	NOTE_STATES.map((state) => ({ variant, held, state })),
 );
 
 const idOf = (index: number) => FIRST + index;
@@ -54,8 +54,8 @@ describe("the flags a state implies", () => {
 				.bind(ACCOUNT),
 		]);
 
-		for (const [index, { variant, state }] of cases.entries()) {
-			const flags = flagsFor(state, HELD[variant]);
+		for (const [index, { held, state }] of cases.entries()) {
+			const flags = flagsFor(state, held);
 			await db
 				.prepare(
 					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, note, note_guessed, note_dismissed,

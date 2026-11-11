@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { isSetUp, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const db = env.DB;
+
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 const setupMigration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0057_first_tally_setup"),
@@ -50,13 +53,15 @@ describe("migration 0057 first_tally setup", () => {
 	it("counts a household with a budget as set up, with its five strokes as 0057 wrote them and no days (#582)", async () => {
 		if (!SETUP) throw new Error("Migration 0057 insert is missing");
 
-		const category = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const category = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await db
 			.prepare(
@@ -87,13 +92,15 @@ describe("migration 0057 first_tally setup", () => {
 	it("leaves a first_tally record that already exists alone", async () => {
 		if (!SETUP) throw new Error("Migration 0057 insert is missing");
 
-		const category = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const category = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await db
 			.prepare(
@@ -127,7 +134,7 @@ describe("migration 0061 first_tally four strokes", () => {
 		for (const query of fourStrokes.queries) await db.prepare(query).run();
 	};
 
-	const writeRecord = (value: unknown) =>
+	const writeRecord = (value: Json) =>
 		db
 			.prepare(
 				"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
@@ -145,13 +152,15 @@ describe("migration 0061 first_tally four strokes", () => {
 	it("takes the count stroke, the night and its sync out of a set-up household, and keeps the rest", async () => {
 		if (!SETUP) throw new Error("Migration 0057 insert is missing");
 
-		const category = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const category = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await db
 			.prepare(

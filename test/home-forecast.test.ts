@@ -5,6 +5,15 @@ import { homeForecastDays } from "../src/db/home-forecast";
 import { resetDemo } from "../src/demo/reset";
 import { FORECAST_START_DAY, forecastMonth } from "../src/home-forecast";
 import { HomeForecast } from "../src/views/home-forecast";
+import { isMethod } from "./helpers/present";
+
+/** True for a member the D1 binding has, so the Proxy above reads only members that exist. */
+function isDbKey(
+	target: D1Database,
+	property: string | symbol,
+): property is keyof D1Database {
+	return property in target;
+}
 
 describe("forecastMonth", () => {
 	it("projects everyday money-out independently of signed spending", () => {
@@ -347,8 +356,6 @@ describe("homeForecastDays query budget", () => {
 
 		const db = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
@@ -357,12 +364,14 @@ describe("homeForecastDays query budget", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				const value = isDbKey(target, property) ? target[property] : undefined;
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
 		const today = todayIn(DEFAULT_TIME_ZONE);
-		await homeForecastDays(db as D1Database, today.slice(0, 7), today);
+		await homeForecastDays(db, today.slice(0, 7), today);
 		expect(statements).toBe(1);
 		expect(forecastSql).toContain("t.date >= ? AND t.date < ? AND t.date <= ?");
 	});

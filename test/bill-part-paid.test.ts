@@ -6,7 +6,8 @@ import { occurrencePaid, partPaidSentence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
 import { linkPaymentSql, occurrenceUnpaidSql } from "../src/bills/unpaid";
 import { resetDemo } from "../src/demo/reset";
-import { type BillRowData, billStatusLine } from "../src/views/bill-row";
+import { billStatusLine } from "../src/views/bill-row";
+import { present } from "./helpers/present";
 
 // Partial bill payments (Phase 5, decision 101, #205): more than one payment can pay one occurrence, and an
 // occurrence is Paid once its payments reach 90% of its amount. Until then it is part paid.
@@ -97,7 +98,7 @@ describe("partial payments on one rent bill", () => {
 		await link(9601);
 		const row = await rentRow("2026-10-02");
 		expect(row).toMatchObject({ paidCents: 60000, status: "overdue" });
-		const totals = billTotalsForRows(MONTH, [row as NonNullable<typeof row>]);
+		const totals = billTotalsForRows(MONTH, [present(row)]);
 		expect(totals.soonCents).toBe(60000);
 		expect(totals.soonCount).toBe(1);
 		expect(totals.stillToPayCents).toBe(60000);
@@ -129,10 +130,10 @@ describe("partial payments on one rent bill", () => {
 		await link(9601);
 		const due = await rentRow("2026-10-05");
 		const overdue = await rentRow("2026-10-09");
-		expect(billStatusLine(due as BillRowData, "2026-10-05")).toBe(
+		expect(billStatusLine(present(due), "2026-10-05")).toBe(
 			"Part paid: $600 of $1,200",
 		);
-		expect(billStatusLine(overdue as BillRowData, "2026-10-09")).toBe(
+		expect(billStatusLine(present(overdue), "2026-10-09")).toBe(
 			"Part paid: $600 of $1,200",
 		);
 	});
@@ -145,9 +146,7 @@ describe("partial payments on one rent bill", () => {
 		).run();
 		const row = await rentRow("2026-10-05");
 		expect(row).toMatchObject({ paidCents: 0, status: "overdue" });
-		expect(billStatusLine(row as BillRowData, "2026-10-05")).toMatch(
-			/^Was due /,
-		);
+		expect(billStatusLine(present(row), "2026-10-05")).toMatch(/^Was due /);
 	});
 
 	it("a payment a bank corrected into a credit counts $0 in the Paid check: $1,100 with a $100 credit is Paid", async () => {

@@ -5,12 +5,13 @@ import { listTransactions, PAGE_SIZE } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { type Filters, SHOWS } from "../src/transactions/filters";
+import { envWith } from "./helpers/doubles";
 
 // The demo's "See it without AI" (spec §8.6, decisions 68, 73, 79; P44 A): two links under the
 // Transactions title switch the list between what Tally made of it and the bank's raw data (?raw=1).
 // Only the list changes. The family app shows no links and ignores ?raw=1.
 
-const family = { ...env, DEMO: "false" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
 
 async function demo(path: string) {
 	const res = await exports.default.fetch(`http://tally.test${path}`);

@@ -6,6 +6,7 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const MONTH = "2026-09";
@@ -37,7 +38,7 @@ describe("migration 0016: preserve historic credit decisions", () => {
 		const heldSpent = await spent();
 
 		expect(backfill).toBeDefined();
-		await db.prepare(backfill as string).run();
+		await db.prepare(present(backfill)).run();
 
 		expect(
 			await db
@@ -70,7 +71,7 @@ describe("migration 0016: preserve historic credit decisions", () => {
 			.run();
 
 		expect(backfill).toBeDefined();
-		await db.prepare(backfill as string).run();
+		await db.prepare(present(backfill)).run();
 		const beforeCorrection = await spent();
 
 		const plaidFetch = vi.fn(async (url: RequestInfo | URL) => {
@@ -107,7 +108,7 @@ describe("migration 0016: preserve historic credit decisions", () => {
 
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
-			item?.id as number,
+			present(item?.id),
 			plaidFetch,
 		);
 

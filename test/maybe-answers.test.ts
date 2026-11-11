@@ -6,6 +6,7 @@ import { merchantKeySql } from "../src/db/merchant-key";
 import { resetDemo } from "../src/demo/reset";
 import { answerPay, payMerchants } from "../src/first-tally/first-page";
 import { suggestions } from "../src/routes/suggestions";
+import { present } from "./helpers/present";
 
 // The answer record (decision 155, spec §5 and §8.6): each Yes or No on a "Maybe …" that changed a guess writes one
 // row with the kind, the guess's confidence, the answer and the household's day. No transaction, name or amount.
@@ -81,11 +82,21 @@ async function insertTransaction(fields: {
 	return row?.id ?? 0;
 }
 
+/** A maybe_answers row, as migration 0062 defines it. */
+type MaybeAnswerRow = {
+	id: number;
+	kind: "category" | "income" | "transfer";
+	confidence: number;
+	answer: "yes" | "no" | "something_else";
+	household_day: string;
+	created_at: string;
+};
+
 const records = async () =>
 	(
 		await db
 			.prepare("SELECT * FROM maybe_answers ORDER BY id")
-			.all<Record<string, unknown>>()
+			.all<MaybeAnswerRow>()
 	).results;
 
 beforeEach(async () => {
@@ -308,7 +319,7 @@ describe("maybe_answers: the first page's pay question", () => {
 		const merchant = (await payMerchants(db)).find((m) => m.ids.includes(id));
 		expect(merchant).toBeDefined();
 
-		return merchant as NonNullable<typeof merchant>;
+		return present(merchant);
 	}
 
 	it("records a pay Yes and a pay No on an income guess in the Maybe range, with the guess's confidence", async () => {

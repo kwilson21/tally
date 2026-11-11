@@ -18,6 +18,7 @@ import {
 	shortDay,
 } from "../src/dates";
 import { loadMonth } from "../src/db/month";
+import { present } from "./helpers/present";
 
 // Spec §6.1 rule 4 and §8.5 "Bill matching" (decision 67; P36 B, decision 72): an excluded payment can
 // pay a bill, and a payment from the same merchant outside ±10% is offered as "Price changed?" rather
@@ -29,17 +30,21 @@ const TODAY = "2026-10-15";
 
 const BASE = "http://tally.test";
 
-const post = (path: string, body: Record<string, string> = {}, htmx = true) =>
-	exports.default.fetch(BASE + path, {
+const post = (path: string, body: Record<string, string> = {}, htmx = true) => {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
+	return exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(body),
 	});
+};
 
 const get = async (path: string) =>
 	(await exports.default.fetch(BASE + path)).text();
@@ -250,9 +255,11 @@ describe("bill matching and price changes", () => {
 			// An early payment counts in the month the bank dated it (spec §6).
 			const month = paidOn.slice(0, 7);
 
-			const category = (await env.DB.prepare(
-				"SELECT id FROM categories ORDER BY id LIMIT 1",
-			).first<{ id: number }>()) as { id: number };
+			const category = present(
+				await env.DB.prepare(
+					"SELECT id FROM categories ORDER BY id LIMIT 1",
+				).first<{ id: number }>(),
+			);
 
 			await env.DB.batch([
 				env.DB.prepare("DELETE FROM budget_amounts"),

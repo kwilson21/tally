@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { keyboard, keysHref } from "../public/js/keyboard.js";
 
+/** The options a test's fake scrollIntoView records: the ones keyboard.js passes. */
+type ScrollRequest = { block?: string; inline?: string; behavior?: string };
+
 // keyboard.js is a module with no page of its own, so it runs against a small stand-in for the page, as
 // sheet-js.test.ts does: an element tree whose focus, clicks and inert ancestors the test can read.
 
@@ -30,7 +33,7 @@ class FakeNode {
 	hidden = false;
 	clicks = 0;
 	focusCount = 0;
-	scrolls: unknown[] = [];
+	scrolls: (ScrollRequest | undefined)[] = [];
 	doc: FakePage | null = null;
 	constructor(readonly tag: string) {}
 	get id() {
@@ -91,7 +94,7 @@ class FakeNode {
 		if (this.doc?.activeElement === this)
 			this.doc.activeElement = this.doc.body;
 	}
-	scrollIntoView(options: unknown) {
+	scrollIntoView(options?: ScrollRequest) {
 		this.scrolls.push(options);
 	}
 	getClientRects() {

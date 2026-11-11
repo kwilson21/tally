@@ -120,9 +120,15 @@ const reply = () =>
 		},
 	});
 
+/** The state Jev is sent for a bank line: the fields the tests read. */
+type JevState = {
+	bank_description: string;
+	learned_category?: { category: string; rule: boolean };
+};
+
 /** A fake Jev that records each request's body, so a test can read what Jev was told. */
 function fakeJev() {
-	const sent: { description: string; state: Record<string, unknown> }[] = [];
+	const sent: { description: string; state: JevState }[] = [];
 
 	const fetchImpl = async (_url: string, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body));

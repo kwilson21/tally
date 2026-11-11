@@ -3,12 +3,21 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // The day's Jev count (spec §8.6): one number per household date that every run, at a sync or
 // overnight, counts against, so a day never goes over the cap. A run reserves the calls it wants in
 // one step before it starts, and gives back what it didn't use when it ends.
 
 const db = env.DB;
+
+/** True for a member the D1 binding has, so the Proxy below reads only members that exist. */
+function isDbKey(
+	target: D1Database,
+	property: string | symbol,
+): property is keyof D1Database {
+	return property in target;
+}
 
 const rows = async () =>
 	(
@@ -114,19 +123,16 @@ describe("reserving Jev's calls for the day", () => {
 
 		const spied = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "batch")
-					return (statements: unknown[]) => {
+					return (statements: D1PreparedStatement[]) => {
 						batches.push(statements.length);
 
-						return (value as (s: unknown[]) => unknown).call(
-							target,
-							statements,
-						);
+						return target.batch(statements);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				const value = isDbKey(target, property) ? target[property] : undefined;
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 

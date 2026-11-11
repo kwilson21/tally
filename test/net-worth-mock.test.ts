@@ -48,9 +48,11 @@ describe("the catalog's net-worth examples", () => {
 	// The SVG points, in order: the weekly climb (22 points, May 1 to Sep 25), then a day each from Sep 28 to Oct 4, then
 	// today. So Sep 30 is the 25th point (index 24) and Oct 1, the account's first day, the one after it (index 25).
 	const pointsOf = (view: { points: string }) =>
-		view.points
-			.split(" ")
-			.map((p) => p.split(",").map(Number) as [number, number]);
+		view.points.split(" ").map((p): [number, number] => {
+			const [x = Number.NaN, y = Number.NaN] = p.split(",").map(Number);
+
+			return [x, y];
+		});
 
 	it("an account added steps the line down on its first day by what the card owes, and the sentence names the card", () => {
 		const view = NET_WORTH_VIEWS.cardAdded;
