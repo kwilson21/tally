@@ -121,6 +121,7 @@ export type NoteState =
 	| "dismissed";
 
 /** The states, in the machine's order. */
+// SAFETY: the machine's state keys are the NoteState names listed in its type, and a test checks that the runtime keys match that type.
 export const NOTE_STATES = Object.keys(
 	noteStateMachine.config.states ?? {},
 ) as NoteState[];

@@ -57,8 +57,11 @@ export function exportDollars(cents: number): string {
 	return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, "0")}`;
 }
 
+/** One CSV cell: the text, number, yes/no or empty value the export writes. */
+export type CsvValue = string | number | boolean | null | undefined;
+
 /** RFC 4180 permits bare fields, but commas, quotes and line breaks must be quoted. */
-export function csvField(value: unknown): string {
+export function csvField(value: CsvValue): string {
 	const text = value === null || value === undefined ? "" : String(value);
 
 	return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -101,7 +104,7 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 		)
 		.all<CsvRow>();
 
-	const rows: unknown[][] = [
+	const rows: CsvValue[][] = [
 		[
 			"date",
 			"bank name",

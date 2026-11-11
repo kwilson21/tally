@@ -15,15 +15,27 @@ type StateConfig = {
 	on?: Record<string, TransitionConfig | TransitionConfig[]>;
 };
 
+// True for a transition object whose target is a string. The diagrams need that target to draw the arrow.
+function hasStringTarget(
+	value: unknown,
+): value is TransitionConfig & { target: string } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"target" in value &&
+		typeof value.target === "string"
+	);
+}
+
+/** A machine as the diagrams read it: its start state, its states, and its arrows. */
+export type MachineGraph = { initial: string; nodes: Node[]; edges: Edge[] };
+
 /**
  * A machine as a list of states and arrows, read straight from its definition. The diagrams on How Tally works
  * and in the design-system catalog draw from this, so a picture cannot disagree with the rule it shows.
  */
-export function machineGraph(machine: AnyStateMachine): {
-	initial: string;
-	nodes: Node[];
-	edges: Edge[];
-} {
+export function machineGraph(machine: AnyStateMachine): MachineGraph {
+	// SAFETY: the machines drawn here are hand-written with only the StateConfig fields (type, description, on), so their config states match that shape.
 	const states = (machine.config.states ?? {}) as Record<string, StateConfig>;
 	const nodes: Node[] = [];
 	const edges: Edge[] = [];
@@ -37,11 +49,7 @@ export function machineGraph(machine: AnyStateMachine): {
 
 		for (const [event, raw] of Object.entries(state.on ?? {})) {
 			for (const transition of Array.isArray(raw) ? raw : [raw]) {
-				if (
-					typeof transition !== "object" ||
-					transition === null ||
-					typeof transition.target !== "string"
-				) {
+				if (!hasStringTarget(transition)) {
 					throw new Error(
 						`Machine "${machine.id}": ${key}.${event} must be an object with a string target`,
 					);

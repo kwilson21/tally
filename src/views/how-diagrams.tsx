@@ -153,15 +153,13 @@ export function BudgetDiagram(
 
 	const over = s.safeToSpendCents < 0;
 
-	const boxes: [string, number][] = [
+	const boxes: (readonly [string, number])[] = [
 		["Budget", s.totalBudgetCents],
 		["Spent", s.totalSpentCents],
-		...(billsCents > 0 ? [["Bills due", billsCents] as [string, number]] : []),
-		...(plannedCents > 0
-			? [["Planned", plannedCents] as [string, number]]
-			: []),
+		...(billsCents > 0 ? [["Bills due", billsCents] as const] : []),
+		...(plannedCents > 0 ? [["Planned", plannedCents] as const] : []),
 		...(savingsGoalCents > 0
-			? [["Savings goal", savingsGoalCents] as [string, number]]
+			? [["Savings goal", savingsGoalCents] as const]
 			: []),
 		["Safe to spend", s.safeToSpendCents],
 	];
@@ -265,14 +263,14 @@ export function ExclusionsDiagram({
 	const excluded = excludedTotal(breakdown);
 	const total = counted + excluded + heldForReview;
 
-	const kinds: [number, string, string][] = (
-		[
-			[heldForReview, "held for review", "held for review"],
-			[breakdown.transfer, "transfer", "transfers"],
-			[breakdown.reimbursement, "reimbursement", "reimbursements"],
-			[breakdown.byPerson, "by a person", "by a person"],
-		] as [number, string, string][]
-	).filter(([n]) => n > 0);
+	const allKinds: [number, string, string][] = [
+		[heldForReview, "held for review", "held for review"],
+		[breakdown.transfer, "transfer", "transfers"],
+		[breakdown.reimbursement, "reimbursement", "reimbursements"],
+		[breakdown.byPerson, "by a person", "by a person"],
+	];
+
+	const kinds = allKinds.filter(([n]) => n > 0);
 
 	// Each slice is at least 8 wide so a single exclusion stays visible. The slices shrink to fit
 	// beside the counted part, or fill the bar when nothing counts; tenths are rounded down, so
@@ -297,13 +295,15 @@ export function ExclusionsDiagram({
 		return at;
 	});
 
-	const said = kinds
-		.filter(([, one]) => one !== "held for review")
-		.map(([n, one, many]) =>
-			one === "by a person"
-				? `${n} excluded by a person`
-				: plural(n, one, many),
-		);
+	const said = kinds.flatMap(([n, one, many]) =>
+		one !== "held for review"
+			? [
+					one === "by a person"
+						? `${n} excluded by a person`
+						: plural(n, one, many),
+				]
+			: [],
+	);
 
 	const sentence =
 		said.length < 2
@@ -370,9 +370,10 @@ export function ExclusionsDiagram({
 			{(excluded > 0 || heldForReview > 0) && (
 				<text x={W} y="74" font-size="12" text-anchor="end" class="fill-muted">
 					{kinds
-						.filter(([n]) => n > 0)
-						.map(([n, one, many]) =>
-							one === "by a person" ? `${n} ${one}` : plural(n, one, many),
+						.flatMap(([n, one, many]) =>
+							n > 0
+								? [one === "by a person" ? `${n} ${one}` : plural(n, one, many)]
+								: [],
 						)
 						.join(" · ")}
 				</text>

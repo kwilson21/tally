@@ -125,21 +125,27 @@ export async function readFirstTally(
 	return row ? parseFirstTally(row.value) : null;
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+/** A parsed JSON value: what the stored first-week text holds. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** A field read from a stored object, which is absent when the object has no such key. */
+type StoredJson = Json | undefined;
+
+const isObject = (value: StoredJson): value is { [key: string]: Json } =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isCents = (value: unknown): value is number => Number.isInteger(value);
 const isText = (value: unknown): value is string => typeof value === "string";
 
-const textList = (value: unknown): string[] | undefined =>
+const textList = (value: StoredJson): string[] | undefined =>
 	Array.isArray(value) ? value.filter(isText) : undefined;
 
 /** Keeps the entries of an object that `keep` accepts, each as `keep` returns it; the rest are left out. */
 function pickEntries<T>(
-	value: unknown,
-	keep: (entry: unknown) => T | undefined,
-): Record<string, T> {
-	const kept: Record<string, T> = {};
+	value: StoredJson,
+	keep: (entry: StoredJson) => T | undefined,
+) {
+	const kept = {};
 
 	if (!isObject(value)) return kept;
 
@@ -159,7 +165,7 @@ function pickEntries<T>(
 	return kept;
 }
 
-function budgetAnswer(entry: unknown): BudgetAnswer | undefined {
+function budgetAnswer(entry: StoredJson): BudgetAnswer | undefined {
 	if (!isObject(entry)) return undefined;
 
 	if (entry.kind === "skipped")
@@ -174,7 +180,7 @@ function budgetAnswer(entry: unknown): BudgetAnswer | undefined {
 	return undefined;
 }
 
-function payDeposits(value: unknown): PayDeposits | undefined {
+function payDeposits(value: StoredJson): PayDeposits | undefined {
 	if (!isObject(value)) return undefined;
 
 	return pickEntries(value, (deposit) =>
@@ -184,7 +190,7 @@ function payDeposits(value: unknown): PayDeposits | undefined {
 	);
 }
 
-function payRecord(entry: unknown): PayRecord | undefined {
+function payRecord(entry: StoredJson): PayRecord | undefined {
 	if (!isObject(entry) || !isCents(entry.at)) return undefined;
 	const record: PayRecord = { at: entry.at };
 	const yes = payDeposits(entry.yes);
@@ -205,7 +211,7 @@ function payRecord(entry: unknown): PayRecord | undefined {
  * stored (an old shape is still in some of them, and `readReadyEmail` in src/first-tally/ready-email.tsx reads both).
  */
 export function parseFirstTally(value: string): FirstTally {
-	let parsed: unknown;
+	let parsed: Json;
 
 	try {
 		parsed = JSON.parse(value);
@@ -255,6 +261,7 @@ export function parseFirstTally(value: string): FirstTally {
 
 	if (isObject(parsed.heldReadyEmail))
 		record.heldReadyEmail = pickEntries(parsed.heldReadyEmail, (entry) =>
+			// SAFETY: a stored heldReadyEmail entry is an object written by the ready-email code, and readReadyEmail reads that shape.
 			isObject(entry) ? (entry as HeldReadyEmail) : undefined,
 		);
 

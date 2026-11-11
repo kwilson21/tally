@@ -36,14 +36,14 @@ type App = { Bindings: Env };
 export const resort = new Hono<App>();
 
 /** The pages a Create can land on, by their path: each one draws its own page again for the Undo answer. */
-const AGAIN: Record<
-	string,
-	(c: Context<App>, back: URL) => Response | Promise<Response>
-> = {
+const AGAIN = {
 	"/settings/suggestions": suggestionsAgain,
 	"/transactions/organize": organizeAgain,
 	"/settings/categories": categoriesAgain,
-};
+} satisfies Record<
+	string,
+	(c: Context<App>, back: URL) => Response | Promise<Response>
+>;
 
 /** A back address that stays on this site: one path that starts with a single slash, with no backslash (#842 review). */
 const SITE_BASE = "http://tally.invalid";
@@ -95,28 +95,23 @@ resort.get("/resort/progress", async (c) => {
 			})
 		: null;
 
+	// A key whose value is undefined is left out of the JSON header, so the toast carries only the keys its words call for.
 	c.header(
 		"HX-Trigger",
 		hxTrigger({
-			...(words
+			toast: words
 				? {
-						toast: {
-							message: words.message,
-							type: words.type,
-							// A background poll's toast never takes focus (toast.js, #821 owner feedback).
-							passive: true,
-							...(words.undo
-								? {
-										undo: runId,
-										undoExpiresInMs: UNDO_MS,
-										undoAction: "/resort/undo",
-										// The page the line sat on is the one Undo redraws (#842 round 2); an unknown key gets the default.
-										...(page ? { undoTarget: RECHECK_PAGES[page] } : {}),
-									}
-								: {}),
-						},
+						message: words.message,
+						type: words.type,
+						// A background poll's toast never takes focus (toast.js, #821 owner feedback).
+						passive: true,
+						undo: words.undo ? runId : undefined,
+						undoExpiresInMs: words.undo ? UNDO_MS : undefined,
+						undoAction: words.undo ? "/resort/undo" : undefined,
+						// The page the line sat on is the one Undo redraws (#842 round 2); an unknown key gets the default.
+						undoTarget: words.undo && page ? RECHECK_PAGES[page] : undefined,
 					}
-				: {}),
+				: undefined,
 			announce: words?.message ?? FINISHED_ANNOUNCEMENT,
 		}),
 	);
@@ -160,5 +155,9 @@ resort.post("/resort/undo", async (c) => {
 	const page =
 		known && target ? target : new URL("/settings/suggestions", SITE_BASE);
 
-	return (AGAIN[page.pathname] ?? suggestionsAgain)(c, page);
+	// SAFETY: a pathname that is not one of AGAIN's three keys reads undefined, and the ?? falls back to suggestionsAgain.
+	return (AGAIN[page.pathname as keyof typeof AGAIN] ?? suggestionsAgain)(
+		c,
+		page,
+	);
 });

@@ -122,6 +122,7 @@ function leap(year: number) {
 }
 
 function daysInMonth(year: number, month: number) {
+	// SAFETY: every caller passes a calendar month from 1 to 12, so month - 1 indexes one of the twelve lengths above.
 	return [31, leap(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][
 		month - 1
 	] as number;
@@ -236,6 +237,7 @@ function periodicOccurrences(bill: BillSchedule, today: string) {
 			occurrences.push(billOccurrenceForMonth(bill, year, month));
 		else if (bill.frequency === "monthly")
 			occurrences.push(billOccurrenceForMonth(bill, year, month));
+		// SAFETY: addMonth always returns a [year, month] pair of numbers.
 		[year, month] = addMonth(year, month) as [number, number];
 	}
 
@@ -247,17 +249,28 @@ function periodicOccurrences(bill: BillSchedule, today: string) {
  * which decide its status. `linked` holds the periods with any payment linked, which keep an occurrence due before
  * the bill was added in view (decision 99); it defaults to `paid`.
  */
+/** One occurrence of a bill, with the status a person sees for it. */
+export type BillOccurrence = {
+	dueDate: string;
+	period: string;
+	status: BillStatus;
+};
+
+// True for the "all periods" form of `paid` or `linked`: a plain yes or no rather than a set of periods.
+function isFlag(value: boolean | ReadonlySet<string>): value is boolean {
+	return typeof value === "boolean";
+}
+
 export function billOccurrence(
 	bill: BillSchedule,
 	today: string,
 	paid: boolean | ReadonlySet<string>,
 	linked: boolean | ReadonlySet<string> = paid,
-): { dueDate: string; period: string; status: BillStatus } {
+): BillOccurrence {
 	const isLinked = (period: string) =>
-		typeof linked === "boolean" ? linked : linked.has(period);
+		isFlag(linked) ? linked : linked.has(period);
 
-	const isPaid = (period: string) =>
-		typeof paid === "boolean" ? paid : paid.has(period);
+	const isPaid = (period: string) => (isFlag(paid) ? paid : paid.has(period));
 
 	// Left out before anything below judges them: an occurrence handled before its bill was added (decision 99).
 	const occurrences = periodicOccurrences(bill, today).filter(
@@ -271,6 +284,7 @@ export function billOccurrence(
 
 		if (index > 0 && occurrences[index]?.dueDate !== today) index--;
 
+		// SAFETY: the list has sixteen occurrences and index was clamped to its range just above, so this entry exists.
 		let current = occurrences[index] as ReturnType<
 			typeof billOccurrenceForMonth
 		>;
@@ -310,6 +324,7 @@ export function billOccurrence(
 
 	// Include the last missed occurrence until its successor enters the seven-day due window.
 	if (index > 0) index--;
+	// SAFETY: index was clamped to the list's range just above, and the list spans four years of occurrences, so it is not empty.
 	let current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
 
 	if (
@@ -317,6 +332,7 @@ export function billOccurrence(
 		current.dueDate.slice(0, 7) < today.slice(0, 7)
 	) {
 		index++;
+		// SAFETY: index was at most one below the last position before this increment (the step back above), so this entry exists.
 		current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
 	}
 

@@ -1,5 +1,10 @@
 import { type AnyStateMachine, initialTransition, transition } from "xstate";
 
+/** The row's own context for the guards: plain values, one per key. */
+export type MachineContext = {
+	readonly [key: string]: string | number | boolean | null;
+};
+
 // Asks a small state machine what it does next. Pure: no actors, no timers, no effects.
 // Tally's real writes are SQL compare-and-set guards; these machines describe the rules
 // so people can read them, and tests keep the two in step.
@@ -21,7 +26,7 @@ export function next(
 	machine: AnyStateMachine,
 	state: string,
 	event: string,
-	context?: Record<string, unknown>,
+	context?: MachineContext,
 ): string | null {
 	const current = restoreState(machine, state, context);
 
@@ -37,7 +42,7 @@ export function next(
 function restoreState(
 	machine: AnyStateMachine,
 	state: string,
-	context?: Record<string, unknown>,
+	context?: MachineContext,
 ) {
 	if (!isKnownState(machine, state)) {
 		throw new Error(`Unknown state "${state}" for machine "${machine.id}"`);

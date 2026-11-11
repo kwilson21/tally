@@ -364,6 +364,7 @@ function AddCash({ p, corners }: { p: string; corners?: string }) {
 // P116: a suggested amount in the budget sheet (question 62). Groceries, as the sheet is drawn in
 // October: $700 budgeted, $312 spent so far, September $636.
 
+// SAFETY: OCTOBER is a literal list of rows that always has a first entry (groceries), so index 0 is a row.
 const GROCERIES_ROW = OCTOBER[0] as (typeof OCTOBER)[number];
 const LAST_MONTH_CENTS = SEPTEMBER[0]?.spentCents ?? 0;
 

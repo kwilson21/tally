@@ -113,6 +113,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 					: "upcoming";
 
 	for (const billRows of byBill.values()) {
+		// SAFETY: byBill lists are created as [row] and only pushed to, so each list's first element is a DbBill row.
 		const b = billRows[0] as DbBill;
 		// An occurrence's amount is the one of its own month (decision 101); see src/bills/amount.ts.
 		const amountHistory = amounts.get(b.id) ?? [];
@@ -272,17 +273,17 @@ export function paidPeriodsOf(
 	paidByPeriod: ReadonlyMap<string, number>,
 ) {
 	return new Set(
-		[...paidByPeriod]
-			.filter(([period, cents]) =>
-				occurrencePaid(
-					cents,
-					amountForMonth(
-						history,
-						billPeriodMonth(countedBill(bill), period),
-						bill.amount_cents,
-					),
+		[...paidByPeriod].flatMap(([period, cents]) =>
+			occurrencePaid(
+				cents,
+				amountForMonth(
+					history,
+					billPeriodMonth(countedBill(bill), period),
+					bill.amount_cents,
 				),
 			)
-			.map(([period]) => period),
+				? [period]
+				: [],
+		),
 	);
 }

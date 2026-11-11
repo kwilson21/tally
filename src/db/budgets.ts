@@ -108,6 +108,7 @@ export async function budgetCategory(
 	id: number,
 	month: string,
 ): Promise<BudgetCategory | null> {
+	// SAFETY: db.batch returns one result per statement in the order listed: the categories SELECT first, then the budget_amounts SELECT.
 	const [category, amounts] = (await db.batch([
 		db
 			.prepare(

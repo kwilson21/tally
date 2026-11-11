@@ -364,6 +364,7 @@ export async function fileFeedbackIssue(
 	row: FeedbackRow | Record<string, unknown>,
 	fetchImpl: typeof fetch = fetch,
 ) {
+	// SAFETY: the callers pass a feedback row from a `SELECT * FROM feedback` query, so it holds every FeedbackRow column.
 	const item = row as FeedbackRow;
 
 	const claim = await db
@@ -441,6 +442,7 @@ export async function fileFeedbackIssue(
 		throw new FilingError(response.status);
 	}
 
+	// SAFETY: a successful GitHub create-issue response is a JSON object, and its number field is checked as an integer just below.
 	const issue = (await response.json()) as { number?: number };
 
 	if (!Number.isInteger(issue.number))

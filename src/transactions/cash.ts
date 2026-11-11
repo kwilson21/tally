@@ -94,8 +94,19 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * The one-time key an Add cash form carries (a UUID made when the form is drawn), in lower case, or
  * null when there isn't a usable one: then the post saves, as it always did, without the guard.
  */
-export function entryKeyOf(raw: unknown): string | null {
-	return typeof raw === "string" && UUID.test(raw) ? raw.toLowerCase() : null;
+/** What the form's entry_key field can hold (a form value, or nothing), plus any other value a caller passes. */
+export type EntryKeyInput =
+	| ReturnType<FormData["get"]>
+	| number
+	| null
+	| undefined;
+
+function isText(raw: EntryKeyInput): raw is string {
+	return typeof raw === "string";
+}
+
+export function entryKeyOf(raw: EntryKeyInput): string | null {
+	return isText(raw) && UUID.test(raw) ? raw.toLowerCase() : null;
 }
 
 /**

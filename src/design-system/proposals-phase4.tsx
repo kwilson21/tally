@@ -199,13 +199,13 @@ function TrendRows() {
 }
 
 /** Each category's monthly budget in cents (unchanged since May in the sample). */
-const BUDGET: Record<string, number> = {
+const BUDGET = {
 	Groceries: 90000,
 	"Eating Out": 30000,
 	Kids: 30000,
 	Gas: 20000,
 	Household: 15000,
-};
+} satisfies Record<Cat["name"], number>;
 
 /** The five full months (May to September) of a trend: this month isn't over, so it isn't judged. */
 const full = (t: Trend) => t.months.slice(0, 5);
@@ -252,6 +252,7 @@ function InsightRow({ t, line }: { t: Trend; line: string }) {
 	);
 }
 
+// SAFETY: TRENDS is the literal list of trends above, which has at least four entries, so these four destructured items exist.
 const [GROCERIES, EATING_OUT, KIDS, GAS] = TRENDS as [
 	Trend,
 	Trend,
@@ -1414,6 +1415,7 @@ const trendsEarly = (
 );
 
 /** Today's ruled space, with a line saying when the chart starts (AccountsTop's says "arrives later"). */
+// SAFETY: BANKS is a literal list with at least one bank, so index 0 holds one.
 const netEarly = (
 	<>
 		<AccountsWith

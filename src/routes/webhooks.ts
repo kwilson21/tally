@@ -9,6 +9,16 @@ import { enabled } from "./plaid";
 
 type App = { Bindings: Env & PlaidEnv };
 
+// True for a parsed JSON value that is an object: not null, not a number or string, and not an array.
+function isWebhookObject(value: unknown): value is Webhook {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// True for a value that is a string: a Plaid field that is only used when it holds text.
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
 type Webhook = {
 	item_id?: unknown;
 	webhook_type?: unknown;
@@ -62,13 +72,13 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		return c.body(null, 400);
 	}
 
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+	if (!isWebhookObject(parsed)) {
 		return c.body(null, 200);
 	}
 
-	const body = parsed as Webhook;
+	const body = parsed;
 
-	if (typeof body.item_id !== "string") return c.body(null, 200);
+	if (!isText(body.item_id)) return c.body(null, 200);
 
 	const item = await c.env.DB.prepare(
 		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held, connection_revision FROM plaid_items WHERE plaid_item_id = ?",
@@ -97,9 +107,9 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		c.executionCtx.waitUntil(
 			syncItemAndSort(c.env, item.id, undefined, {
 				historyComplete: body.historical_update_complete === true,
-			}).catch((error: unknown) => {
+			}).catch((cause: unknown) => {
 				const requestId =
-					error instanceof PlaidError ? error.request_id : undefined;
+					cause instanceof PlaidError ? cause.request_id : undefined;
 
 				console.error(`plaid webhook sync error ${requestId ?? ""}`.trim());
 			}),
@@ -113,11 +123,11 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const isItemError =
 		body.webhook_type === "ITEM" &&
 		body.webhook_code === "ERROR" &&
-		!(typeof itemError === "string" && transientErrors.has(itemError));
+		!(isText(itemError) && transientErrors.has(itemError));
 
 	const isRelinkWarning =
 		body.webhook_type === "ITEM" &&
-		typeof body.webhook_code === "string" &&
+		isText(body.webhook_code) &&
 		relinkCodes.has(body.webhook_code);
 
 	if (isRelinkWarning) {
@@ -156,9 +166,9 @@ webhooks.post("/webhooks/plaid", async (c) => {
 						);
 					}
 				}
-			})().catch((error: unknown) => {
+			})().catch((cause: unknown) => {
 				const requestId =
-					error instanceof PlaidError ? error.request_id : undefined;
+					cause instanceof PlaidError ? cause.request_id : undefined;
 
 				console.error(`plaid webhook item error ${requestId ?? ""}`.trim());
 			}),

@@ -112,6 +112,7 @@ export async function askJev(
 				: []),
 	].join(" ");
 
+	// A key whose value is undefined is left out of the JSON body, so each optional key is sent only when it applies.
 	const body = {
 		model: "jev-latest",
 		state: {
@@ -120,30 +121,26 @@ export async function askJev(
 			amount_cents: Math.abs(input.amountCents),
 			direction: input.amountCents >= 0 ? "money out" : "money in",
 			account_type: input.accountType,
-			...(input.plaidCategory ? { plaid_category: input.plaidCategory } : {}),
-			...(input.note ? { note: input.note } : {}),
-			...(input.kind ? { kind: input.kind } : {}),
-			...(input.forPerson ? { for_person: input.forPerson } : {}),
-			...(input.learnedCategory?.rule
+			plaid_category: input.plaidCategory || undefined,
+			note: input.note || undefined,
+			kind: input.kind || undefined,
+			for_person: input.forPerson || undefined,
+			learned_category: input.learnedCategory?.rule
 				? {
-						learned_category: {
-							category: input.learnedCategory.category,
-							rule: true,
-						},
+						category: input.learnedCategory.category,
+						rule: true,
 					}
 				: input.learnedCategory
 					? {
-							learned_category: {
-								category: input.learnedCategory.category,
-								from_answers: input.learnedCategory.answers,
-							},
+							category: input.learnedCategory.category,
+							from_answers: input.learnedCategory.answers,
 						}
-					: {}),
+					: undefined,
 		},
 		questions: {
-			...(categories.length > 0
-				? {
-						category: {
+			category:
+				categories.length > 0
+					? {
 							type: "choice",
 							instructions: categoryInstructions,
 							criteria: {
@@ -151,9 +148,15 @@ export async function askJev(
 								[NONE_FIT]:
 									"None of these categories fits this transaction, so a person should decide.",
 							},
-						},
-						mixed: { type: "noul", instructions: MIXED_QUESTION },
-						also_category: {
+						}
+					: undefined,
+			mixed:
+				categories.length > 0
+					? { type: "noul", instructions: MIXED_QUESTION }
+					: undefined,
+			also_category:
+				categories.length > 0
+					? {
 							type: "choice",
 							instructions: ALSO_CATEGORY_QUESTION,
 							criteria: {
@@ -161,44 +164,45 @@ export async function askJev(
 								[NONE_FIT]:
 									"No other category fits: the trip is all one category.",
 							},
-						},
-					}
-				: {}),
+						}
+					: undefined,
 			...Object.fromEntries(
 				Object.entries(FLAG_QUESTIONS).map(([flag, instructions]) => [
 					flag,
 					{ type: "noul", instructions },
 				]),
 			),
-			...(options.details
+			kind: options.details
 				? {
-						kind: {
-							type: "choice",
-							instructions:
-								"What kind of spending is this purchase? Choose one, or None of these.",
-							criteria: {
-								...KIND_CRITERIA,
-								"None of these": "The kind isn't clear.",
-							},
-						},
-						for_person: {
-							type: "choice",
-							instructions:
-								"Who was this purchase for? Choose the household person's id, or none if it is unclear.",
-							criteria: Object.fromEntries([
-								...(options.people ?? []).map((person) => [
-									`person:${person.id}`,
-									person.name,
-								]),
-								["none", "It isn't clear who this was for."],
-							]),
-						},
-						note_worth_writing: {
-							type: "noul",
-							instructions: NOTE_WORTH_QUESTION,
+						type: "choice",
+						instructions:
+							"What kind of spending is this purchase? Choose one, or None of these.",
+						criteria: {
+							...KIND_CRITERIA,
+							"None of these": "The kind isn't clear.",
 						},
 					}
-				: {}),
+				: undefined,
+			for_person: options.details
+				? {
+						type: "choice",
+						instructions:
+							"Who was this purchase for? Choose the household person's id, or none if it is unclear.",
+						criteria: Object.fromEntries([
+							...(options.people ?? []).map((person) => [
+								`person:${person.id}`,
+								person.name,
+							]),
+							["none", "It isn't clear who this was for."],
+						]),
+					}
+				: undefined,
+			note_worth_writing: options.details
+				? {
+						type: "noul",
+						instructions: NOTE_WORTH_QUESTION,
+					}
+				: undefined,
 		},
 	};
 
@@ -229,8 +233,9 @@ export async function askJev(
 		};
 
 	// A body that is not JSON is an unusable answer like any other: the result below is ok: false with this status.
+	// SAFETY: response.json() resolves to the JSON Jev sent, and parseAnswer checks every field it reads before using it.
 	const answer = parseAnswer(
-		await response.json().catch(() => null),
+		(await response.json().catch(() => null)) as JevJson | null,
 		categories.length ? [...categories, NONE_FIT] : [],
 		options.details ? [...TRANSACTION_KINDS, "None of these"] : [],
 		options.people
@@ -244,28 +249,41 @@ export async function askJev(
 		: { ok: false, status: response.status, requestId };
 }
 
+/** A parsed JSON value, as Jev's reply is read before any of it is checked. */
+type JevJson =
+	| string
+	| number
+	| boolean
+	| null
+	| JevJson[]
+	| { [key: string]: JevJson };
+
+/** A JSON object, such as Jev's answers or one answer. */
+type JevObject = { [key: string]: JevJson };
+
 /**
  * Reads the answers Jev documents: a choice with a confidence, and a yes-probability per flag.
  * A choice that wasn't one of the options offered is malformed, so it's never stored and can't
  * be mistaken for "None of these fit".
  */
 function parseAnswer(
-	data: unknown,
+	data: JevJson | null,
 	options: string[],
 	kinds: string[],
 	people: string[],
 	asksNote: boolean,
 ): JevAnswer | null {
-	const answers = (data as { answers?: Record<string, unknown> } | null)
-		?.answers;
+	// SAFETY: Jev's documented reply is an object whose answers, when present, is an object; every field read below is checked before use.
+	const answers = (data as { answers?: JevObject } | null)?.answers;
 
+	// SAFETY: Jev's category answer is an object with a choice and a confidence, or absent; both fields are checked below before they are used.
 	const category = answers?.category as
 		| { choice?: unknown; confidence?: unknown }
 		| undefined;
 
 	if (
 		category &&
-		(typeof category.choice !== "string" ||
+		(!isText(category.choice) ||
 			!options.includes(category.choice) ||
 			!isProbability(category.confidence))
 	) {
@@ -273,9 +291,12 @@ function parseAnswer(
 	}
 
 	if (!category && options.length > 0) return null;
+	// SAFETY: the loop below sets every Flag key, one per FLAG_QUESTIONS entry, before this object is returned.
 	const flags = {} as Record<Flag, number>;
 
+	// SAFETY: FLAG_QUESTIONS is a Record<Flag, string>, so its keys are exactly the Flag names.
 	for (const flag of Object.keys(FLAG_QUESTIONS) as Flag[]) {
+		// SAFETY: Jev's flag answer is an object with a noul probability, or absent; isProbability checks the value before it is stored.
 		const noul = (answers?.[flag] as { noul?: unknown } | undefined)?.noul;
 
 		if (!isProbability(noul)) return null;
@@ -283,13 +304,14 @@ function parseAnswer(
 	}
 
 	const choice = (key: string, allowed: string[]) => {
+		// SAFETY: Jev's answer for this key is an object with a choice and a confidence, or absent; both are checked before they are returned.
 		const item = answers?.[key] as
 			| { choice?: unknown; confidence?: unknown }
 			| undefined;
 
 		if (!item) return undefined;
 
-		return typeof item.choice === "string" &&
+		return isText(item.choice) &&
 			allowed.includes(item.choice) &&
 			isProbability(item.confidence)
 			? { label: item.choice, confidence: item.confidence }
@@ -305,6 +327,7 @@ function parseAnswer(
 	// The mixed-trip reading (#233) is kept only when its probability and the other category both came back; a
 	// missing or unknown one leaves it out and never fails the category answer, as the note answer does.
 	const alsoCategory = choice("also_category", options);
+	// SAFETY: Jev's mixed answer is an object with a noul probability, or absent; isProbability checks it before it is used.
 	const mixedNoul = (answers?.mixed as { noul?: unknown } | undefined)?.noul;
 
 	const mixed =
@@ -312,11 +335,13 @@ function parseAnswer(
 			? { probability: mixedNoul, also: alsoCategory.label }
 			: undefined;
 
+	// SAFETY: Jev's note answer is an object with a noul probability, or absent; isProbability checks it before it is used.
 	const noteWorth = (
 		answers?.note_worth_writing as { noul?: unknown } | undefined
 	)?.noul;
 
-	return {
+	// SAFETY: category is set only when its choice was checked as a string among the options and its confidence as a probability, above.
+	const answer: JevAnswer = {
 		category: category
 			? {
 					label: category.choice as string,
@@ -324,14 +349,21 @@ function parseAnswer(
 				}
 			: { label: NONE_FIT, confidence: 0 },
 		flags,
-		...(kind ? { kind } : {}),
-		...(forPerson ? { forPerson } : {}),
-		...(mixed ? { mixed } : {}),
-		...(asksNote && isProbability(noteWorth)
-			? { noteWorthWriting: noteWorth }
-			: {}),
 	};
+
+	if (kind) answer.kind = kind;
+
+	if (forPerson) answer.forPerson = forPerson;
+
+	if (mixed) answer.mixed = mixed;
+
+	if (asksNote && isProbability(noteWorth)) answer.noteWorthWriting = noteWorth;
+
+	return answer;
 }
 
 const isProbability = (n: unknown): n is number =>
 	typeof n === "number" && n >= 0 && n <= 1;
+
+// True for a value that is a string, such as a choice Jev made.
+const isText = (value: unknown): value is string => typeof value === "string";

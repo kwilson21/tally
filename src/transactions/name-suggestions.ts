@@ -25,12 +25,7 @@ export function parseSuggestedNames(
 	const named: [number, string][] = [];
 
 	for (const row of rows) {
-		if (
-			Array.isArray(row) &&
-			typeof row[0] === "number" &&
-			typeof row[1] === "string"
-		)
-			named.push([row[0], row[1].trim()]);
+		if (isNamedRow(row)) named.push([row[0], row[1].trim()]);
 	}
 
 	return named
@@ -40,14 +35,26 @@ export function parseSuggestedNames(
 		.slice(0, MAX_SUGGESTED_NAMES);
 }
 
+// True for one stored `[position, name]` pair: an array whose first item is a number and second a string.
+function isNamedRow(row: unknown): row is [number, string] {
+	return (
+		Array.isArray(row) &&
+		typeof row[0] === "number" &&
+		typeof row[1] === "string"
+	);
+}
+
 /**
  * The names to store for one merchant (the write rule of merchant_suggested_names): each trimmed, blank ones dropped, the
  * first three kept. Not de-duplicated: the AI path already removes repeats (src/ai/suggest-name.ts).
  */
 export function normaliseNames(names: readonly string[]): string[] {
 	return names
-		.map((name) => name.trim())
-		.filter((name) => name !== "")
+		.flatMap((name) => {
+			const trimmed = name.trim();
+
+			return trimmed !== "" ? [trimmed] : [];
+		})
 		.slice(0, MAX_SUGGESTED_NAMES);
 }
 
@@ -130,6 +137,12 @@ const repeatsShown = (name: string, key: string, tidied: string) =>
  * and, when it is the bank's, `fromBank` (no sparkles icon, P87 B), else the tidied bank text
  * (decision 46).
  */
+export type ShownName = {
+	name: string;
+	suggested: boolean;
+	fromBank: boolean;
+};
+
 export function shownName({
 	chosen,
 	ownName,
@@ -140,11 +153,7 @@ export function shownName({
 	/** A name given to this one transaction (decision 101), which wins over the merchant's. */
 	ownName?: string | null;
 	rawName: string;
-}): {
-	name: string;
-	suggested: boolean;
-	fromBank: boolean;
-} {
+}): ShownName {
 	if (ownName) return { name: ownName, suggested: false, fromBank: false };
 
 	if (chosen) return { name: chosen, suggested: false, fromBank: false };

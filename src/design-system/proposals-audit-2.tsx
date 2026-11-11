@@ -252,10 +252,7 @@ const SAMPLE_BUDGETS: BudgetRow[] = [
  * one. October is so far, so its spending is to date. August's spending is its budgeted rows ($1,556.48)
  * and the $277.11 in Needs a category, which Home counts toward its result too: it ends $134 over.
  */
-const MONTHS: Record<
-	string,
-	{ budgetCents: number; spentCents: number } | null
-> = {
+const MONTHS = {
 	"2026-04": null,
 	"2026-05": { budgetCents: 165000, spentCents: 134000 },
 	"2026-06": { budgetCents: 165000, spentCents: 155200 },
@@ -263,7 +260,7 @@ const MONTHS: Record<
 	"2026-08": { budgetCents: 170000, spentCents: 183359 },
 	"2026-09": { budgetCents: 170000, spentCents: 383447 },
 	"2026-10": { budgetCents: 394000, spentCents: 166531 },
-};
+} satisfies Record<string, { budgetCents: number; spentCents: number } | null>;
 
 const FIRST_MONTH = "2026-05";
 
@@ -311,7 +308,8 @@ function resultCents(rows: BudgetRow[], unbudgeted: Unbudgeted[]): number {
 
 /** A strip month's result in cents, or null for a month with no budgets. */
 function resultOf(item: string): number | null {
-	const month = MONTHS[item] ?? null;
+	// SAFETY: item is one of the STRIP_MONTHS, which are exactly MONTHS's keys; any other string reads undefined and the ?? null covers it.
+	const month = MONTHS[item as keyof typeof MONTHS] ?? null;
 
 	return month ? month.budgetCents - month.spentCents : null;
 }
@@ -765,13 +763,17 @@ function LedgerMonths({ opened }: { opened: boolean }) {
 
 	return (
 		<>
-			{STREAMING.filter((m) => m.status === "upcoming").map((m) => (
-				<LedgerMonth
-					href={`/bills/1/occurrences/${m.period}/link#payment-picker`}
-					month={m.month}
-					words={`Due ${m.due} · $2.99`}
-				/>
-			))}
+			{STREAMING.flatMap((m) =>
+				m.status === "upcoming"
+					? [
+							<LedgerMonth
+								href={`/bills/1/occurrences/${m.period}/link#payment-picker`}
+								month={m.month}
+								words={`Due ${m.due} · $2.99`}
+							/>,
+						]
+					: [],
+			)}
 			<LedgerDisclosure
 				month="October"
 				words="Paid Oct 15 · $2.99"
@@ -901,20 +903,22 @@ function YearStrip({ idPrefix }: { idPrefix: string }) {
 function YearMonths({ idPrefix }: { idPrefix: string }) {
 	return (
 		<>
-			{[...STREAMING]
-				.filter((m) => m.status !== "paid")
-				.map((m) => (
-					<LedgerRow
-						id={`${idPrefix}-${m.period}`}
-						period={m.period}
-						month={m.month}
-						detail={
-							m.status === "upcoming"
-								? `Due ${m.due} · $2.99`
-								: "Link a payment"
-						}
-					/>
-				))}
+			{[...STREAMING].flatMap((m) =>
+				m.status !== "paid"
+					? [
+							<LedgerRow
+								id={`${idPrefix}-${m.period}`}
+								period={m.period}
+								month={m.month}
+								detail={
+									m.status === "upcoming"
+										? `Due ${m.due} · $2.99`
+										: "Link a payment"
+								}
+							/>,
+						]
+					: [],
+			)}
 		</>
 	);
 }
@@ -1274,7 +1278,8 @@ function tokensCell(item: string, shown: boolean) {
  */
 function barsCell(item: string, shown: boolean) {
 	const state = stateOf(item);
-	const month = MONTHS[item] ?? null;
+	// SAFETY: item is one of the STRIP_MONTHS, which are exactly MONTHS's keys; any other string reads undefined and the ?? null covers it.
+	const month = MONTHS[item as keyof typeof MONTHS] ?? null;
 
 	const height = month
 		? Math.round(Math.min(month.spentCents / month.budgetCents, 1.2) * 25)

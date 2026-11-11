@@ -36,6 +36,11 @@ function AccountChip({ name, mask }: { name: string; mask: string | null }) {
 	);
 }
 
+/** True when a component rendered to text (a Promise from an async part would not be). */
+function isRenderedText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
 export function ReconnectEmail({
 	input,
 	timeZone,
@@ -90,7 +95,7 @@ export function renderReconnectEmail(
 		<ReconnectEmail input={input} timeZone={timeZone} />
 	).toString();
 
-	if (typeof html !== "string")
+	if (!isRenderedText(html))
 		throw new Error("The reconnect email must render without async parts");
 
 	return { subject, html, text };

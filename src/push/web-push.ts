@@ -86,6 +86,7 @@ function concat(...parts: Uint8Array[]): Uint8Array {
  */
 async function senderKeys(sender: SenderJwk | undefined) {
 	if (!sender) {
+		// SAFETY: P256 is an EC key-pair algorithm, so generateKey resolves to a CryptoKeyPair rather than a single key.
 		const pair = (await crypto.subtle.generateKey(P256, true, [
 			"deriveBits",
 		])) as CryptoKeyPair;
@@ -93,6 +94,7 @@ async function senderKeys(sender: SenderJwk | undefined) {
 		return {
 			privateKey: pair.privateKey,
 			publicPoint: new Uint8Array(
+				// SAFETY: exporting an EC public key in "raw" format resolves to an ArrayBuffer, never a JSON Web Key.
 				(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
 			),
 		};
@@ -147,6 +149,7 @@ export async function encrypt(
 		await crypto.subtle.deriveBits(
 			// The peer key's member is `public` (the spec and MDN). The generated Workers types name it `$public`, a reserved-word
 			// escape; the runtime reads `public`, and the Appendix A test checks that it does.
+			// SAFETY: the object is the ECDH algorithm (name "ECDH") with the receiver's imported P-256 key as its peer, the shape deriveBits takes.
 			{
 				name: "ECDH",
 				public: receiverKey,

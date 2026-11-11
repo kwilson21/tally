@@ -17,16 +17,15 @@ export function monthlyBillShare(
 	amountCents: number,
 	frequency: BillTotalFrequency,
 ) {
-	const [numerator, denominator] = {
-		monthly: [1, 1],
-		yearly: [1, 12],
-		weekly: [52, 12],
-		biweekly: [26, 12],
-		quarterly: [1, 3],
-	}[frequency] as Record<
-		BillTotalFrequency,
-		[number, number]
-	>[BillTotalFrequency];
+	const [numerator, denominator] = (
+		{
+			monthly: [1, 1],
+			yearly: [1, 12],
+			weekly: [52, 12],
+			biweekly: [26, 12],
+			quarterly: [1, 3],
+		} satisfies Record<BillTotalFrequency, [number, number]>
+	)[frequency];
 
 	return Math.floor((amountCents * numerator + denominator / 2) / denominator);
 }
@@ -189,6 +188,7 @@ export function calculateBillTotals({
 				!occurrence.dueDate.startsWith(month)
 			)
 				continue;
+			// SAFETY: this branch's status is not "paid", so it is overdue, due or upcoming, and each of those has its own *Cents key in groups.
 			groups[`${occurrence.status}Cents` as keyof typeof groups] += Math.max(
 				0,
 				occurrence.amountCents - occurrence.paidCents,

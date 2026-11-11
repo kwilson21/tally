@@ -183,6 +183,7 @@ function nextStateOf(
 	from: ConnectionState,
 	event: Event,
 ): ConnectionState | null {
+	// SAFETY: next returns a state name of plaidConnectionMachine or null, and ConnectionState lists exactly that machine's state names.
 	return next(plaidConnectionMachine, from, event) as ConnectionState | null;
 }
 

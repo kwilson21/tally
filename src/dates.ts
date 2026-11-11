@@ -33,6 +33,7 @@ function dateIn(timeZone: string, now: Date): string | null {
 
 /** The calendar date (YYYY-MM-DD) right now in `timeZone`. A zone Intl doesn't know falls back to Eastern. */
 export function todayIn(timeZone: string, now: Date = new Date()): string {
+	// SAFETY: DEFAULT_TIME_ZONE is the fixed, valid IANA zone "America/New_York" declared above, so dateIn cannot return null for it.
 	return dateIn(timeZone, now) ?? (dateIn(DEFAULT_TIME_ZONE, now) as string);
 }
 
