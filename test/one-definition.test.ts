@@ -12,19 +12,23 @@ describe("one definition of a rule", () => {
 		const definers = Object.entries(SOURCES)
 			.filter(([, text]) => /\bconst\s+NEEDS_CATEGORY(_SQL)?\s*=/.test(text))
 			.map(([file]) => file);
+
 		expect(definers).toEqual(["../src/db/transactions.ts"]);
 	});
 
 	it("writes a day's length in milliseconds, and the day number of a date, only in src/dates.ts", () => {
 		// SQL that turns julian days into milliseconds is a different conversion, so lines with julianday are left out.
 		const literal = /\b86_?400_?000\b/;
+
 		const copies = Object.entries(SOURCES).flatMap(([file, text]) =>
 			text
 				.split("\n")
 				.filter((line) => literal.test(line) && !line.includes("julianday"))
 				.map(() => file),
 		);
+
 		expect([...new Set(copies)]).toEqual(["../src/dates.ts"]);
+
 		const definers = Object.entries(SOURCES)
 			.filter(([, text]) =>
 				/\b(const|function)\s+(dayNumber|dateNumber|epochDay|calendarDay|fromNumber)\b/.test(
@@ -32,6 +36,7 @@ describe("one definition of a rule", () => {
 				),
 			)
 			.map(([file]) => file);
+
 		expect(definers).toEqual(["../src/dates.ts"]);
 	});
 
@@ -39,6 +44,7 @@ describe("one definition of a rule", () => {
 		const definers = Object.entries(SOURCES)
 			.filter(([, text]) => /\bconst\s+MAX_FAILURES_IN_A_ROW\s*=/.test(text))
 			.map(([file]) => file);
+
 		expect(definers).toHaveLength(1);
 	});
 
@@ -48,7 +54,9 @@ describe("one definition of a rule", () => {
 				/\bconst\s+BILL_AMOUNT_TOLERANCE_PERCENT\s*=/.test(text),
 			)
 			.map(([file]) => file);
+
 		expect(definers).toEqual(["../src/bills/status.ts"]);
+
 		// A rule that spells the percentage out again can drift from the others, so each of these must read the name.
 		for (const file of [
 			"../src/bills/match.ts",

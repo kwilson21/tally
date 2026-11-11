@@ -104,6 +104,7 @@ export type SyncSummary = {
 	 */
 	changedIds: number[];
 };
+
 export type SyncResult = SyncSummary | { skipped: true };
 
 /** Plaid's cleaned merchant name, or null when it sent none or a blank one (spec §5, decision 67). */
@@ -117,10 +118,13 @@ const merchantNameOf = (transaction: PlaidTransaction) =>
  */
 function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
 	const name = merchantNameOf(transaction);
+
 	if (!name) return null;
+
 	if (name === transaction.name || name === tidyName(transaction.name)) {
 		return null;
 	}
+
 	return name;
 }
 
@@ -195,7 +199,9 @@ const COPY_WINNERS = `WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'),
 const copyMerchantRowSql = (ownsLock: string) => {
 	const namedNow =
 		"merchants.display_name IS NOT NULL OR excluded.display_name IS NOT NULL";
+
 	const takeNew = `${suggestionPickSql("excluded.suggestion_status", "excluded.names_asked", namedNow)} < ${suggestionPickSql("merchants.suggestion_status", "merchants.names_asked", namedNow)}`;
+
 	return `${COPY_WINNERS}
 	 INSERT INTO merchants (raw_name, display_name, default_category_id, suggestion_status, names_asked, not_a_bill)
 	 SELECT w.k,
@@ -340,6 +346,7 @@ function splitBillStatements(
 ): D1PreparedStatement[] {
 	const purchase =
 		"(SELECT id FROM transactions WHERE plaid_transaction_id = ?1 AND is_split = 1 AND amount_cents != ?2)";
+
 	return [
 		env.DB.prepare(
 			`UPDATE transactions SET split_removed_bills = ${UNPAID_BILLS_SQL("transactions.id")}
@@ -391,6 +398,7 @@ function partsExclusion(
 	transaction: PlaidTransaction,
 ): D1PreparedStatement {
 	const category = transaction.personal_finance_category?.primary ?? null;
+
 	return env.DB.prepare(
 		`UPDATE transactions SET ${plaidTransferRuleSql("?", "transactions.amount_cents")}
 		 WHERE parent_id = (
@@ -409,6 +417,7 @@ function accountUpsert(
 		account.balances.current === null || account.balances.current === undefined
 			? null
 			: plaidAmountToCents(account.balances.current);
+
 	return env.DB.prepare(
 		`INSERT INTO accounts
 			(plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents)
@@ -448,7 +457,9 @@ function balanceSnapshots(
 ): D1PreparedStatement[] {
 	return accounts.flatMap((account) => {
 		const current = account.balances.current;
+
 		if (current === null || current === undefined) return [];
+
 		return env.DB.prepare(
 			`INSERT INTO balance_history (account_id, date, balance_cents)
 			 SELECT id, ?, ? FROM accounts WHERE plaid_account_id = ? AND ${OWNS_LOCK}
@@ -473,12 +484,14 @@ async function handlePlaidError(
 ): Promise<never> {
 	if (error instanceof PlaidError) {
 		console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
+
 		if (
 			error.error_type === "ITEM_ERROR" &&
 			!transient.has(error.error_code ?? "")
 		) {
 			// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
 			const seen = await readSeen(env.DB, itemRowId);
+
 			if (
 				seen !== null &&
 				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
@@ -487,6 +500,7 @@ async function handlePlaidError(
 			}
 		}
 	}
+
 	throw error;
 }
 
@@ -502,6 +516,7 @@ async function collectChangedIds(
 	into: Set<number>,
 ): Promise<void> {
 	if (plaidIds.length === 0) return;
+
 	try {
 		const { results } = await db
 			.prepare(
@@ -509,6 +524,7 @@ async function collectChangedIds(
 			)
 			.bind(JSON.stringify(plaidIds))
 			.all<{ id: number }>();
+
 		for (const row of results) into.add(row.id);
 	} catch {
 		console.error("plaid sync: couldn't list the changed rows");
@@ -528,19 +544,23 @@ export async function syncItem(
 	}: { runAfterSync?: boolean; historyComplete?: boolean } = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
+
 	const lock = await env.DB.prepare(
 		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+${SYNC_LEASE_MINUTES} minutes'), sync_lock_id = ?
 		 WHERE id = ? AND disconnected_at IS NULL AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
 	)
 		.bind(lockId, itemRowId)
 		.run();
+
 	if (lock.meta.changes === 0) {
 		const exists = await env.DB.prepare(
 			"SELECT id FROM plaid_items WHERE id = ?",
 		)
 			.bind(itemRowId)
 			.first();
+
 		if (!exists) throw new Error("Plaid Item not found");
+
 		return { skipped: true };
 	}
 
@@ -550,7 +570,9 @@ export async function syncItem(
 		)
 			.bind(itemRowId)
 			.first<ItemRow>();
+
 		if (!item) throw new Error("Plaid Item not found");
+
 		if (!env.TOKEN_ENCRYPTION_KEY)
 			throw new Error("TOKEN_ENCRYPTION_KEY is required");
 
@@ -558,7 +580,9 @@ export async function syncItem(
 			item.access_token_encrypted,
 			env.TOKEN_ENCRYPTION_KEY,
 		);
+
 		let accounts: PlaidAccount[];
+
 		try {
 			({ accounts } = await plaidPost<{ accounts: PlaidAccount[] }>(
 				env,
@@ -576,11 +600,13 @@ export async function syncItem(
 				fetchImpl,
 			);
 		}
+
 		const stored = await env.DB.prepare(
 			"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
 		)
 			.bind(itemRowId)
 			.all<{ plaid_account_id: string }>();
+
 		const knownAccounts = new Set([
 			...accounts.map((account) => account.account_id),
 			...stored.results.map((account) => account.plaid_account_id),
@@ -608,6 +634,7 @@ export async function syncItem(
 
 		for (;;) {
 			let page: SyncResponse;
+
 			try {
 				page = await plaidPost<SyncResponse>(
 					env,
@@ -639,6 +666,7 @@ export async function syncItem(
 					holdAt = null;
 					continue;
 				}
+
 				return await handlePlaidError(
 					env,
 					itemRowId,
@@ -653,6 +681,7 @@ export async function syncItem(
 				historyReported = true;
 			// Pending transactions are stored and counted like posted ones (decision 67).
 			const added = page.added;
+
 			if (
 				added.some((transaction) => !knownAccounts.has(transaction.account_id))
 			) {
@@ -667,7 +696,9 @@ export async function syncItem(
 					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(itemRowId, lockId),
 			];
+
 			const existingTransactionIds = new Set<string>();
+
 			if (added.length > 0) {
 				// One JSON array, read by json_each: a bind per row would pass D1's 100 values past 100 rows.
 				const existing = await env.DB.prepare(
@@ -679,14 +710,17 @@ export async function syncItem(
 						),
 					)
 					.all<{ plaid_transaction_id: string }>();
+
 				for (const row of existing.results) {
 					existingTransactionIds.add(row.plaid_transaction_id);
 				}
 			}
+
 			if (firstPage) {
 				for (const account of accounts) {
 					statements.push(accountUpsert(env, itemRowId, lockId, account));
 				}
+
 				// After the upserts, so a newly seen account already has its row to snapshot.
 				statements.push(
 					...balanceSnapshots(
@@ -698,11 +732,14 @@ export async function syncItem(
 					),
 				);
 			}
+
 			// Where each added transaction's statements sit in the batch, to read what they changed.
 			const addedAt: { upsert: number; rekey?: number }[] = [];
+
 			for (const transaction of added) {
 				const cents = plaidAmountToCents(transaction.amount);
 				let rekey: number | undefined;
+
 				// The bank posted a pending transaction under a new id (and drops the pending id). The pending
 				// row takes the posted id and stays the same row, so whatever a person or Tally attached to it
 				// (category, note, exclusion, income choice, bill payment, refund links both ways, split parts)
@@ -726,6 +763,7 @@ export async function syncItem(
 							lockId,
 						),
 					);
+
 					if (existingTransactionIds.has(transaction.transaction_id)) {
 						statements.push(
 							...mergePendingIntoPosted(
@@ -746,6 +784,7 @@ export async function syncItem(
 						);
 					}
 				}
+
 				// A corrected amount invalidates a person's parts; a date-only correction follows them.
 				statements.push(
 					env.DB.prepare(
@@ -842,6 +881,7 @@ export async function syncItem(
 				);
 				addedAt.push({ upsert: statements.length - 1, rekey });
 			}
+
 			for (const transaction of page.modified) {
 				const cents = plaidAmountToCents(transaction.amount);
 				// A corrected merchant takes its new rule, not the old merchant's (a person's or Jev's pick stays).
@@ -954,6 +994,7 @@ export async function syncItem(
 					),
 				);
 			}
+
 			// A corrected amount can leave a purchase refunded for more than it is worth (spec §8.5). Once this
 			// page's amounts are written, in the same batch, the refunds that no longer fit lose their link,
 			// newest first; a person can link them again. Only the purchases these transactions touch are checked.
@@ -967,11 +1008,13 @@ export async function syncItem(
 					),
 				);
 			}
+
 			// A payment the bank changed that no longer fits its plan's month unlinks the plan, which is set aside again
 			// (decision 82). One statement for the page's charges, after their amounts and dates are written in this batch.
 			const ids = [...added, ...page.modified].map(
 				(transaction) => transaction.transaction_id,
 			);
+
 			if (ids.length > 0) {
 				statements.push(
 					env.DB.prepare(
@@ -979,6 +1022,7 @@ export async function syncItem(
 					).bind(JSON.stringify(ids), itemRowId, lockId),
 				);
 			}
+
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
 			// starts from the rows saved under the bank texts it came with, if there are any: its name, rule and Not
 			// a bill come from the first text that has each, and its suggestion from one row (see copyMerchantRowSql).
@@ -987,14 +1031,17 @@ export async function syncItem(
 			// the bank text is cleared again below when Plaid's name is only that text (spec §7, decision 79).
 			// One statement for the page's charges.
 			const pairs = new Map<string, [string, string]>();
+
 			for (const transaction of [...added, ...page.modified]) {
 				const key = merchantNameOf(transaction);
+
 				if (!key || key === transaction.name) continue;
 				pairs.set(JSON.stringify([key, transaction.name]), [
 					key,
 					transaction.name,
 				]);
 			}
+
 			if (pairs.size > 0) {
 				// Read before the batch, so it sees only the rows of earlier pages and syncs: the names with no row yet.
 				// This run's copy and suggestBankNames make rows for this page's names, and pendingNameStatements
@@ -1002,11 +1049,13 @@ export async function syncItem(
 				// run makes is for a name read here or on an earlier page. A sync that resumes from a saved cursor is a
 				// separate run: it opens no names, and the rows an earlier run made are never filled.
 				const pairKeys = [...new Set([...pairs.values()].map(([key]) => key))];
+
 				const fresh = await env.DB.prepare(
 					"SELECT value FROM json_each(?) WHERE value NOT IN (SELECT raw_name FROM merchants)",
 				)
 					.bind(JSON.stringify(pairKeys))
 					.all<{ value: string }>();
+
 				for (const { value } of fresh.results) openMerchantKeys.add(value);
 				const open = pairKeys.filter((key) => openMerchantKeys.has(key));
 				// The names are copied first, from the state before this page (copyPlaidNamesSql); then the merchant rows, which
@@ -1035,16 +1084,20 @@ export async function syncItem(
 					),
 				);
 			}
+
 			// Plaid's cleaned name is the merchant's first suggested name, with no AI call (spec §8.6, decision 68). It
 			// is a fact the bank sent, so it doesn't depend on the AI switches. Only a merchant nobody has named or
 			// decided about takes it: a person's own name, and a suggestion they already accepted or turned down,
 			// are never touched, and a guess still waiting (Workers AI's, copied from the bank text's row) gives way
 			// to it. It is only a suggestion: nothing is renamed until a person chooses it.
 			const suggested = new Set<string>();
+
 			for (const transaction of [...added, ...page.modified]) {
 				const name = plaidNameToSuggest(transaction);
+
 				if (name) suggested.add(name);
 			}
+
 			if (suggested.size > 0) {
 				statements.push(
 					...suggestBankNames(env.DB, [...suggested], OWNS_LOCK, [
@@ -1053,31 +1106,37 @@ export async function syncItem(
 					]),
 				);
 			}
+
 			// A pending transaction the bank drops waits for the update's last page before it is deleted, because
 			// its posted twin can arrive on a later page (Plaid doesn't promise they share one) and must still
 			// find it. While any waits, the saved position stays at the page that dropped the first, so an
 			// update that stops partway sees the drop again. A posted transaction the bank removes goes at once,
 			// and so does a pending one whose posted twin is on this page, which took the row over above.
 			const drops = new Set(page.removed.map((gone) => gone.transaction_id));
+
 			if (page.has_more) {
 				const unsettled = [...drops].filter(
 					(id) => !added.some((twin) => twin.pending_transaction_id === id),
 				);
+
 				if (unsettled.length > 0) {
 					const pendingDrops = await env.DB.prepare(
 						"SELECT plaid_transaction_id FROM transactions WHERE pending = 1 AND plaid_transaction_id IN (SELECT value FROM json_each(?))",
 					)
 						.bind(JSON.stringify(unsettled))
 						.all<{ plaid_transaction_id: string }>();
+
 					for (const { plaid_transaction_id } of pendingDrops.results) {
 						waitingDrops.add(plaid_transaction_id);
 						drops.delete(plaid_transaction_id);
 					}
 				}
+
 				if (waitingDrops.size > 0) holdAt ??= { cursor };
 			} else {
 				for (const id of waitingDrops) drops.add(id);
 			}
+
 			for (const id of drops) {
 				statements.push(
 					env.DB.prepare(
@@ -1085,6 +1144,7 @@ export async function syncItem(
 					).bind(id, itemRowId, lockId),
 				);
 			}
+
 			// One bank text can come with different Plaid names, since Plaid's names change over time. Only the newest
 			// charge's name is suggested for it (decision 79), and that is settled here, once the page's writes and
 			// deletes are in, for every bank text the page touched: the texts of the charges it added or modified
@@ -1095,9 +1155,11 @@ export async function syncItem(
 			// suggests its name, which offers an older one again when the newer charge is gone, unless a person
 			// named or decided it. A pending drop waiting for a later page isn't in `drops`: it isn't deleted yet.
 			const textsOfCharges = new Set<string>();
+
 			for (const transaction of [...added, ...page.modified]) {
 				if (merchantNameOf(transaction)) textsOfCharges.add(transaction.name);
 			}
+
 			const changing = [
 				...drops,
 				...added.flatMap((transaction) =>
@@ -1107,6 +1169,7 @@ export async function syncItem(
 				),
 				...page.modified.map((transaction) => transaction.transaction_id),
 			];
+
 			if (changing.length > 0) {
 				const { results } = await env.DB.prepare(
 					`SELECT DISTINCT raw_name FROM transactions
@@ -1114,10 +1177,13 @@ export async function syncItem(
 				)
 					.bind(JSON.stringify(changing))
 					.all<{ raw_name: string }>();
+
 				for (const row of results) textsOfCharges.add(row.raw_name);
 			}
+
 			if (textsOfCharges.size > 0) {
 				const names = new Set<string>();
+
 				const current = await env.DB.prepare(
 					`SELECT DISTINCT merchant_name FROM transactions
 					 WHERE parent_id IS NULL AND raw_name IN (SELECT value FROM json_each(?))
@@ -1125,11 +1191,15 @@ export async function syncItem(
 				)
 					.bind(JSON.stringify([...textsOfCharges]))
 					.all<{ merchant_name: string }>();
+
 				for (const row of current.results) names.add(row.merchant_name);
+
 				for (const transaction of [...added, ...page.modified]) {
 					const name = merchantNameOf(transaction);
+
 					if (name) names.add(name);
 				}
+
 				if (names.size > 0) {
 					const related = await env.DB.prepare(
 						`SELECT DISTINCT raw_name FROM transactions
@@ -1137,13 +1207,16 @@ export async function syncItem(
 					)
 						.bind(JSON.stringify([...names]))
 						.all<{ raw_name: string }>();
+
 					for (const row of related.results) textsOfCharges.add(row.raw_name);
 				}
 			}
+
 			if (textsOfCharges.size > 0) {
 				const texts = JSON.stringify(
 					[...textsOfCharges].map((text) => [text, tidyName(text)]),
 				);
+
 				statements.push(
 					env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
 						texts,
@@ -1159,13 +1232,17 @@ export async function syncItem(
 					),
 				);
 			}
+
 			// A Plaid name that needs no suggestion (it is the bank's text, or that text tidied) leaves no guess
 			// behind on its merchant (see `clearStaleGuessesSql`).
 			const plain = new Set<string>();
+
 			for (const transaction of [...added, ...page.modified]) {
 				const name = merchantNameOf(transaction);
+
 				if (name && !plaidNameToSuggest(transaction)) plain.add(name);
 			}
+
 			if (plain.size > 0) {
 				statements.push(
 					env.DB.prepare(clearStaleGuessesSql(OWNS_LOCK)).bind(
@@ -1175,16 +1252,19 @@ export async function syncItem(
 					),
 				);
 			}
+
 			// The withdrawals above left their rows behind; the last name statement of the page removes them (sweepStaleNamesSql).
 			if (textsOfCharges.size > 0 || plain.size > 0)
 				statements.push(
 					env.DB.prepare(sweepStaleNamesSql(OWNS_LOCK)).bind(itemRowId, lockId),
 				);
+
 			// The last page's write also stamps the first sync that ran after Plaid said the history was in (#581): the same
 			// batch, so the stamp means the history's pages are in. COALESCE keeps the first stamp of all.
 			const lastPageStamp = historyReported
 				? ", last_synced_at = datetime('now'), history_complete_at = COALESCE(history_complete_at, datetime('now'))"
 				: ", last_synced_at = datetime('now')";
+
 			statements.push(
 				env.DB.prepare(
 					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : lastPageStamp}
@@ -1196,14 +1276,19 @@ export async function syncItem(
 				),
 			);
 			const results = await env.DB.batch(statements);
+
 			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
 			if (results[0]?.meta.changes === 0) {
 				throw new Error("Plaid sync lost its lock to a newer run");
 			}
+
 			let inserted = 0;
+
 			for (const [index, transaction] of added.entries()) {
 				const at = addedAt[index];
+
 				if (!at) continue;
+
 				// A posted transaction that took over a pending row isn't new: it counted when it arrived pending.
 				if (
 					at.rekey !== undefined &&
@@ -1211,6 +1296,7 @@ export async function syncItem(
 				)
 					continue;
 				const changed = results[at.upsert]?.meta.changes ?? 0;
+
 				if (
 					changed > 0 &&
 					(!existingTransactionIds.has(transaction.transaction_id) ||
@@ -1218,6 +1304,7 @@ export async function syncItem(
 				) {
 					inserted += 1;
 				}
+
 				if (
 					!existingTransactionIds.has(transaction.transaction_id) &&
 					changed > 0
@@ -1239,24 +1326,29 @@ export async function syncItem(
 			summary.added += inserted;
 			summary.modified += page.modified.length;
 			summary.removed += page.removed.length;
+
 			if (inserted + page.modified.length + page.removed.length > 0) {
 				console.log(
 					`plaid sync: added ${inserted}, modified ${page.modified.length}, removed ${page.removed.length}`,
 				);
 			}
+
 			if (!page.has_more) {
 				// Every page is in and this run still holds the lease, so the login works: a bank that needed attention is
 				// fine again (decision 173). The store retries a completion that loses only to a change of state, so a
 				// lost-race here means the lease was taken, or the bank kept changing through every try. Either way the
 				// sync does not report success: the bank's flags are left alone, and the next run tries again.
 				const completed = await markSyncSucceeded(env.DB, itemRowId, lockId);
+
 				if (completed === "lost-race") {
 					console.error(
 						`plaid sync could not record its completion for item ${itemRowId}`,
 					);
 					throw new Error("Plaid sync could not record its completion");
 				}
+
 				if (runAfterSync) await afterSync(env.DB);
+
 				return { ...summary, changedIds: [...changedIds] };
 			}
 		}

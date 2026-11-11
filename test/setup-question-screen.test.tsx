@@ -22,6 +22,7 @@ import { safeToSpendText } from "../src/views/home-top";
 // included.
 
 const EVERY_OTHER_FRIDAY = ["2026-09-11", "2026-09-25", "2026-10-09"];
+
 const PAY: PayMerchant = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
@@ -39,6 +40,7 @@ const charge = (name: string, amountCents: number, dueDay: number) =>
 		categoryId: 1,
 		chargeCount: 2,
 	}) as BillSuggestion;
+
 const KEEP = [charge("Netflix", 1549, 5), charge("Spotify", 1199, 9)];
 const WAITING = [charge("Gym", 4500, 3)];
 
@@ -46,6 +48,7 @@ const MONTHS = [
 	{ month: "2026-08", spentCents: 61000 },
 	{ month: "2026-09", spentCents: 67400 },
 ];
+
 const GROCERIES: BudgetAsk = {
 	id: 1,
 	name: "Groceries",
@@ -54,6 +57,7 @@ const GROCERIES: BudgetAsk = {
 	months: MONTHS,
 	suggestion: { amountCents: 65000, months: MONTHS },
 };
+
 const EATING: BudgetAsk = {
 	id: 2,
 	name: "Eating Out",
@@ -62,6 +66,7 @@ const EATING: BudgetAsk = {
 	months: MONTHS,
 	suggestion: { amountCents: 15000, months: MONTHS },
 };
+
 const GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
@@ -125,6 +130,7 @@ const render = (
 const h1Of = (markup: string) =>
 	markup.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/)?.[1]?.replaceAll("&#39;", "'") ??
 	null;
+
 /** Whether the screen's h1 takes focus. */
 const h1Focused = (markup: string) => /<h1\b[^>]*\sautofocus/.test(markup);
 
@@ -186,6 +192,7 @@ describe("questionScreen", () => {
 		const markup = render(
 			modelOf({ payAnswered: true, budgets: { done: true }, finish: FINISH }),
 		);
+
 		expect(markup).toContain('id="setup-screen"');
 		expect(h1Of(markup)).toBe(FINISH_HEADING);
 		expect(markup).toContain("Safe to spend in October");
@@ -206,6 +213,7 @@ describe("questionScreen", () => {
 				finish: FINISH,
 			}),
 		);
+
 		expect(h1Of(markup)).toBe(FINISH_HEADING);
 		expect(markup).not.toContain("Is this your pay?");
 		expect(markup).not.toContain('action="/setup/pay"');
@@ -231,6 +239,7 @@ describe("questionScreen", () => {
 			budgets: { done: true },
 			finish: FINISH,
 		});
+
 		expect(h1Focused(render(finish, true))).toBe(true);
 		expect(h1Focused(render(finish, false))).toBe(false);
 	});
@@ -242,6 +251,7 @@ describe("questionScreen", () => {
 				typed: "lots",
 			},
 		});
+
 		expect(h1Focused(refused)).toBe(false);
 		expect(refused).toMatch(/<input\b[^>]*\sautofocus/);
 		expect(refused).toContain('value="lots"');
@@ -254,6 +264,7 @@ describe("questionScreen", () => {
 				typed: "",
 			},
 		});
+
 		expect(markup).toContain(
 			"Enter an amount greater than $0, or choose Not now.",
 		);
@@ -284,6 +295,7 @@ describe("questionScreen", () => {
 				budgets: notDone({ asks: [GAS] }),
 			}),
 		);
+
 		expect(markup).toContain("Your bills");
 		expect(markup).toContain("1 more waits in");
 		expect(markup).toContain('href="/bills/find"');
@@ -295,6 +307,7 @@ describe("questionScreen", () => {
 				budgets: notDone({ asks: [], nothingAsked: "no-categories" }),
 			}),
 		);
+
 		expect(markup).toContain("Your pay");
 		expect(markup).toContain("Your bills");
 		expect(markup).toContain("No categories to budget yet.");
@@ -339,6 +352,7 @@ describe("questionHeading", () => {
 			payAnswered: true,
 			budgets: notDone({ asks: [GROCERIES, GAS], keepAllOpen: true }),
 		});
+
 		expect(questionHeading(model)).toBe(keepAllQuestion(1));
 		expect(h1Of(render(model))).toBe(keepAllQuestion(1));
 	});

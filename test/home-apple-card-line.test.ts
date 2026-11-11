@@ -14,14 +14,17 @@ const demo = { ...env, DEMO: "true" } as unknown as Env;
 
 async function page(path = "/", bindings: Env = family) {
 	const res = await home.request(path, {}, bindings);
+
 	return { res, html: await res.text() };
 }
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, " ").replaceAll("&#39;", "'");
 
 const FIRST = "First Harbor Bank";
 const LINE = "Apple Card hasn't been updated since";
+
 const setBank = (
 	name: string,
 	{ status, syncedAt }: { status?: string; syncedAt?: string | null },

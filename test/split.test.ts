@@ -74,6 +74,7 @@ describe("partsAddUp", () => {
 		const parts = Array.from({ length: MAX_SPLIT_PARTS }, () =>
 			part(MAX_SPLIT_CENTS),
 		);
+
 		expect(partsAddUp(parts, MAX_SPLIT_PARTS * MAX_SPLIT_CENTS)).toBe(true);
 		expect(partsAddUp(parts, MAX_SPLIT_PARTS * MAX_SPLIT_CENTS - 1)).toBe(
 			false,

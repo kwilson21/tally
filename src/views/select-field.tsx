@@ -45,6 +45,7 @@ export function SelectField({
 }: Props) {
 	const shape = VARIANT[variant];
 	const border = dashed ? "border-dashed border-ink" : "";
+
 	return (
 		<span
 			data-select-field=""

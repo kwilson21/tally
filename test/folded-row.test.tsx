@@ -10,6 +10,7 @@ describe("FoldedRow", () => {
 				<p>Chips</p>
 			</FoldedRow>,
 		);
+
 		expect(html).toMatch(/^<details class="group border-b border-rule"[^>]*>/);
 		expect(html).not.toMatch(/<details[^>]* open[ >=]/);
 		const summary = html.match(/<summary [^>]*>/)?.[0] ?? "";
@@ -31,6 +32,7 @@ describe("FoldedRow", () => {
 		const html = renderToString(
 			<FoldedRow label="Category" value={<span>Groceries</span>} />,
 		);
+
 		expect(html).toMatch(
 			/<span class="ml-auto flex min-w-0 items-center gap-2"><span>Groceries<\/span><\/span>/,
 		);
@@ -45,10 +47,12 @@ describe("FoldedRow", () => {
 				sub="Picked by Tally · 92% sure"
 			/>,
 		);
+
 		const summary = html.slice(
 			html.indexOf("<summary"),
 			html.indexOf("</summary>"),
 		);
+
 		const label = summary.indexOf("Category");
 		const choice = summary.indexOf("Groceries");
 		const line = summary.indexOf("Picked by Tally · 92% sure");
@@ -63,6 +67,7 @@ describe("FoldedRow", () => {
 				sub="CITY WATER AUTOPAY 0093 REF"
 			/>,
 		);
+
 		expect(html).toContain(
 			'<span class="truncate text-sm text-muted">CITY WATER AUTOPAY 0093 REF</span>',
 		);
@@ -89,6 +94,7 @@ describe("FoldedRow", () => {
 				<input name="category" value="gas" />
 			</FoldedRow>,
 		);
+
 		const summaryEnd = html.indexOf("</summary>");
 		const control = html.indexOf('name="category"');
 		expect(control).toBeGreaterThan(summaryEnd);

@@ -34,6 +34,7 @@ export function keepShown(
 	values: string[],
 ): BillSuggestion[] {
 	const shown = new Set(values);
+
 	return current.filter((suggestion) => shown.has(shownBillValue(suggestion)));
 }
 
@@ -44,17 +45,21 @@ export function keepShown(
  */
 export function keepReply(kept: number, changed: number): string {
 	if (changed === 0 && kept === 0) return "Nothing to keep.";
+
 	const keptWords =
 		kept === 0
 			? "Nothing kept."
 			: kept === 1
 				? "Kept 1 bill."
 				: `Kept ${kept} bills.`;
+
 	if (changed === 0) return keptWords;
+
 	const askedPart =
 		changed === 1
 			? "1 charge changed since the page drew, so it's asked again below."
 			: `${changed} charges changed since the page drew, so they're asked again below.`;
+
 	return `${keptWords} ${askedPart}`;
 }
 
@@ -65,6 +70,7 @@ export function splitKeepable(
 ): { keep: BillSuggestion[]; waiting: BillSuggestion[] } {
 	const keep: BillSuggestion[] = [];
 	const waiting: BillSuggestion[] = [];
+
 	for (const suggestion of suggestions) {
 		const collides =
 			suggestions.some(
@@ -73,13 +79,16 @@ export function splitKeepable(
 					sameBillName(other.displayName, suggestion.displayName),
 			) ||
 			activeNames.some((name) => sameBillName(name, suggestion.displayName));
+
 		const leftOut =
 			suggestion.displayName.trim() === "" ||
 			suggestion.categoryId === null ||
 			suggestion.amountCents > BIG_BILL_CENTS ||
 			collides;
+
 		(leftOut ? waiting : keep).push(suggestion);
 	}
+
 	return { keep, waiting };
 }
 
@@ -89,6 +98,7 @@ export function splitKeepable(
  */
 export function waitingWords(count: number): string | null {
 	if (count === 0) return null;
+
 	return count === 1 ? "1 more waits in" : `${count} more wait in`;
 }
 
@@ -105,17 +115,23 @@ export function keepHeading(count: number): string {
  */
 export function billsMutedLine(charges: BillSuggestion[]): string {
 	const total = charges.reduce((sum, charge) => sum + charge.amountCents, 0);
+
 	const named = charges
 		.slice(0, 3)
 		.map(
 			(charge) => `${charge.displayName} ${dollarsWords(charge.amountCents)}`,
 		);
+
 	const more = charges.length - named.length;
+
 	const list =
 		more > 0 ? `${named.join(", ")} and ${more} more` : named.join(", ");
+
 	const count = charges.length;
+
 	const noun =
 		count === 1 ? "charge that comes back" : "charges that come back";
+
 	return `Your bank shows ${count} ${noun} every month, about ${wholeDollars(total)} in all: ${list}.`;
 }
 

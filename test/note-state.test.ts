@@ -87,6 +87,7 @@ async function clean() {
 
 async function queued(ids: number[]) {
 	const rows = await transactionsNeedingNoteGuess(db, 100);
+
 	return rows.map((row) => row.id).filter((id) => ids.includes(id));
 }
 
@@ -205,12 +206,14 @@ describe("saveJevDetailsStatement sets the state from Jev's answer", () => {
 				note: null,
 			});
 		}
+
 		const statement = saveJevDetailsStatement(db, [
 			{ id: idOf(0), kind: null, forPersonId: null, noteWorthWriting: 1 },
 			{ id: idOf(1), kind: null, forPersonId: null, noteWorthWriting: 0 },
 			{ id: idOf(2), kind: null, forPersonId: null, noteWorthWriting: null },
 			{ id: idOf(3), kind: null, forPersonId: null, noteWorthWriting: 1 },
 		]);
+
 		if (!statement) throw new Error("no statement");
 		await statement.run();
 		expect((await stateOf(idOf(0)))?.state).toBe("queued");
@@ -309,9 +312,11 @@ describe("the pending-to-posted merge picks the later note state", () => {
 
 	beforeEach(async () => {
 		await resetDemo(db, TODAY);
+
 		const row = await db
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		item = row?.id as number;
 		lock += 1;
 		await db
@@ -365,6 +370,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 					s.state,
 				)
 				.run();
+
 		await insert(`pend-${key}`, 1, pending);
 		await insert(`post-${key}`, 0, posted);
 		await db.batch(
@@ -377,10 +383,12 @@ describe("the pending-to-posted merge picks the later note state", () => {
 				plaidCategory: null,
 			}),
 		);
+
 		const row = await db
 			.prepare("SELECT id FROM transactions WHERE plaid_transaction_id = ?")
 			.bind(`post-${key}`)
 			.first<{ id: number }>();
+
 		return stateOf(row?.id as number);
 	}
 
@@ -390,6 +398,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			{ state: "written", note: "Person" },
 			{ state: "guessed", note: "Machine", guessed: 1, tried: STAMP },
 		);
+
 		expect(row).toMatchObject({ state: "written", note: "Person", guessed: 0 });
 	});
 
@@ -399,6 +408,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			{ state: "guessed", note: "Cake", guessed: 1, tried: STAMP },
 			{ state: "dismissed", note: null, dismissed: 1, tried: STAMP },
 		);
+
 		expect(row).toMatchObject({
 			state: "dismissed",
 			note: null,
@@ -413,6 +423,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			{ state: "queued" },
 			{ state: "unasked", detailsAsked: 0, worth: null },
 		);
+
 		expect(row).toMatchObject({ state: "queued", worth: 1, detailsAsked: 1 });
 	});
 
@@ -422,6 +433,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			{ state: "failed", failed: STAMP },
 			{ state: "no_call", worth: 0 },
 		);
+
 		expect(row).toMatchObject({ state: "no_call", worth: 0 });
 	});
 
@@ -431,6 +443,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			{ state: "guessed", note: "Cake", guessed: 1, tried: STAMP },
 			{ state: "written", note: "Mine" },
 		);
+
 		expect(row).toMatchObject({ state: "written", note: "Mine" });
 	});
 
@@ -440,6 +453,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			{ state: "emptied_by_person", tried: STAMP },
 			{ state: "queued" },
 		);
+
 		expect(row).toMatchObject({ state: "emptied_by_person", note: null });
 	});
 });
@@ -457,6 +471,7 @@ describe("a save that reads a note's state before it writes", () => {
 
 	it("does not write the old state back over a guess stored between the read and the save", async () => {
 		await seed(20, "queued");
+
 		// Workers AI stores its guess after saveEdit has read the row and before its batch runs.
 		const racing = new Proxy(db, {
 			get(target, property) {
@@ -468,12 +483,16 @@ describe("a save that reads a note's state before it writes", () => {
 							[{ id: idOf(20), note: "Birthday cake" }],
 							[],
 						);
+
 						return target.batch(statements);
 					};
+
 				const value = Reflect.get(target, property);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		// A kind-only edit: the note is not changed, so the save must not rewrite the note's state.
 		await saveEdit(
 			racing as unknown as D1Database,
@@ -498,6 +517,7 @@ describe("a save that reads a note's state before it writes", () => {
 	});
 	it("does not mark a note kept when another save cleared the guess between the read and the batch", async () => {
 		await seed(21, "guessed", { note: "Birthday cake", guessed: 1 });
+
 		// A second save clears the guess after "Looks right" has read it and before its batch runs.
 		const racing = new Proxy(db, {
 			get(target, property) {
@@ -509,12 +529,16 @@ describe("a save that reads a note's state before it writes", () => {
 							)
 							.bind(idOf(21))
 							.run();
+
 						return target.batch(statements);
 					};
+
 				const value = Reflect.get(target, property);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		await saveEdit(
 			racing as unknown as D1Database,
 			idOf(21),

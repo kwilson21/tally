@@ -17,6 +17,7 @@ import { setupRoute } from "../src/routes/setup";
 const db = env.DB;
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
+
 /** plaid-routes.test.ts's token key: 32 bytes of seven, base64. */
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 
@@ -33,13 +34,18 @@ const bindings = {
 } as unknown as Env;
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 router.use("*", async (c, next) => {
 	c.set("actor", "person@example.com");
 	await next();
 });
+
 router.route("/", home);
+
 router.route("/", setupRoute);
+
 router.route("/", plaid);
+
 router.route("/", firstPage);
 
 const family = {
@@ -79,6 +85,7 @@ async function deposit(raw: string, cents: number) {
 	const category = await db
 		.prepare("SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1")
 		.first<{ id: number }>();
+
 	await db
 		.prepare(
 			`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, income_confidence, flag_income, plaid_category)
@@ -119,16 +126,21 @@ describe("the first week, from Home to the pay stroke", () => {
 		// Plaid's not-ready page, so the gate below is opened by hand.
 		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
 			const url = String(input);
+
 			if (url.endsWith("/item/public_token/exchange"))
 				return Response.json({
 					access_token: "access-private",
 					item_id: "item-1",
 				});
+
 			if (url.endsWith("/item/get"))
 				return Response.json({ item: { institution_id: "ins-1" } });
+
 			if (url.endsWith("/institutions/get_by_id"))
 				return Response.json({ institution: { name: "Chase" } });
+
 			if (url.endsWith("/accounts/get")) return Response.json({ accounts: [] });
+
 			if (url.endsWith("/transactions/sync"))
 				return Response.json({
 					added: [],
@@ -141,6 +153,7 @@ describe("the first week, from Home to the pay stroke", () => {
 			throw new Error(`unrouted Plaid call ${url}`);
 		});
 		const promises: Promise<unknown>[] = [];
+
 		const exchange = await family.fetch(
 			"/plaid/exchange",
 			{
@@ -155,6 +168,7 @@ describe("the first week, from Home to the pay stroke", () => {
 			},
 			(promise) => promises.push(promise),
 		);
+
 		expect(exchange.status).toBe(204);
 		await Promise.all(promises);
 		expect(
@@ -211,6 +225,7 @@ describe("the first week, from Home to the pay stroke", () => {
 				["answer", "yes"],
 			]).toString(),
 		});
+
 		expect(answer.status).toBe(200);
 		expect(
 			Object.keys(JSON.parse(answer.headers.get("HX-Trigger") ?? "{}")).sort(),

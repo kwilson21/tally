@@ -1,6 +1,7 @@
 import { formatCents, toCents } from "../money";
 
 export type SplitPart = { categoryId: number; amountCents: number };
+
 export type SplitResult =
 	| { ok: true; parts: SplitPart[] }
 	| { ok: false; error: string };
@@ -15,6 +16,7 @@ export const MAX_SPLIT_PARTS = 1_000;
 export function positiveCents(value: string): number | null {
 	try {
 		const cents = toCents(value);
+
 		return cents > 0 ? cents : null;
 	} catch {
 		return null;
@@ -30,7 +32,9 @@ export function splitStatus(parentCents: number, amounts: string[]) {
 		(sum, value) => sum + (positiveCents(value) ?? 0),
 		0,
 	);
+
 	const total = Math.abs(parentCents);
+
 	if (assigned === total)
 		return {
 			kind: "done" as const,
@@ -39,6 +43,7 @@ export function splitStatus(parentCents: number, amounts: string[]) {
 			figures: formatCents(total),
 			after: "",
 		};
+
 	if (assigned > total)
 		return {
 			kind: "over" as const,
@@ -47,6 +52,7 @@ export function splitStatus(parentCents: number, amounts: string[]) {
 			figures: formatCents(assigned - total),
 			after: " over",
 		};
+
 	return {
 		kind: "left" as const,
 		cents: total - assigned,
@@ -73,23 +79,28 @@ export function parseSplit(
 		categories.length !== amounts.length
 	)
 		return { ok: false, error: "Add at least two parts." };
+
 	if (categories.length > MAX_SPLIT_PARTS)
 		return { ok: false, error: `Use at most ${MAX_SPLIT_PARTS} parts.` };
 	const sign = parentCents < 0 ? -1 : 1;
 	const parts: SplitPart[] = [];
+
 	for (let i = 0; i < categories.length; i++) {
 		const categoryId = Number(categories[i]);
+
 		if (
 			!liveCategoryIds.includes(categoryId) &&
 			categoryId !== keptCategoryIds[i]
 		)
 			return { ok: false, error: `Pick a category for part ${i + 1}.` };
 		const cents = positiveCents(amounts[i] ?? "");
+
 		if (cents === null)
 			return {
 				ok: false,
 				error: `Enter an amount above $0 for part ${i + 1}.`,
 			};
+
 		if (cents > MAX_SPLIT_CENTS)
 			return {
 				ok: false,
@@ -97,11 +108,13 @@ export function parseSplit(
 			};
 		parts.push({ categoryId, amountCents: cents * sign });
 	}
+
 	if (!partsAddUp(parts, parentCents))
 		return {
 			ok: false,
 			error: "The parts must add up exactly to the transaction amount.",
 		};
+
 	return { ok: true, parts };
 }
 
@@ -121,6 +134,7 @@ export function partsAddUp(parts: SplitPart[], parentCents: number): boolean {
 	let sum = 0;
 	let signed = true;
 	let i = 0;
+
 	while (i < parts.length) {
 		//@ invariant 0 <= i && i <= parts.length
 		//@ invariant sum === partSumTo(parts, i)
@@ -128,6 +142,7 @@ export function partsAddUp(parts: SplitPart[], parentCents: number): boolean {
 		//@ decreases parts.length - i
 		const part = parts[i] as SplitPart;
 		sum = sum + part.amountCents;
+
 		if (
 			(parentCents < 0 && part.amountCents >= 0) ||
 			(parentCents >= 0 && part.amountCents <= 0)
@@ -135,6 +150,7 @@ export function partsAddUp(parts: SplitPart[], parentCents: number): boolean {
 			signed = false;
 		i = i + 1;
 	}
+
 	return parts.length >= 2 && signed && sum === parentCents;
 }
 
@@ -146,5 +162,6 @@ export function partSumTo(parts: SplitPart[], n: number): number {
 	//@ decreases n
 	if (n === 0) return 0;
 	const part = parts[n - 1] as SplitPart;
+
 	return partSumTo(parts, n - 1) + part.amountCents;
 }

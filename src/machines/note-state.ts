@@ -162,6 +162,7 @@ export function noteRankSql(expression: string): string {
 	const whens = NOTE_STATES.map(
 		(state) => `WHEN '${state}' THEN ${NOTE_RANK[state]}`,
 	).join(" ");
+
 	return `(CASE ${expression} ${whens} END)`;
 }
 
@@ -297,6 +298,7 @@ const STAMP_FALLBACK = "1970-01-01 00:00:00";
  */
 export function flagsFor(state: NoteState, held: FlagsHeld) {
 	const rule = FLAG_RULES[state];
+
 	return {
 		detailsAsked: rule.details === "keep" ? held.detailsAsked : rule.details,
 		worth: rule.worth === "keep" ? held.worth : rule.worth,
@@ -321,14 +323,17 @@ function flagCaseSql(
 ): string {
 	const whens = NOTE_STATES.map((state) => {
 		const rule = value(FLAG_RULES[state]);
+
 		const branch =
 			rule === "keep" || rule === "set"
 				? keep
 				: rule === null
 					? "NULL"
 					: String(rule);
+
 		return `WHEN '${state}' THEN ${branch}`;
 	}).join(" ");
+
 	return `(CASE ${picked} ${whens} END)`;
 }
 

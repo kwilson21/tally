@@ -94,8 +94,11 @@ export function retryStateOf(row: {
 	confidence: number | null;
 }): JevRetryState {
 	if (row.categoryId !== null) return "filed";
+
 	if (row.attempts >= JEV_ATTEMPT_CAP) return "gave_up";
+
 	if (row.confidence !== null) return "unsure";
+
 	return "waiting";
 }
 

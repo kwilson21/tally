@@ -46,12 +46,14 @@ for (const item of PLACEHOLDERS) {
 // More is a contents page (P122 A, decision 111): each place with its icon, what it holds and a live count.
 destinations.get("/more", async (c) => {
 	const demo = c.env.DEMO === "true";
+
 	const [banks, queue, today, appleCard] = await Promise.all([
 		accountsByBank(c.env.DB),
 		suggestionQueue(c.env.DB),
 		householdToday(c.env.DB),
 		appleCardAccount(c.env.DB),
 	]);
+
 	return c.html(
 		<Layout
 			title="More · Tally"

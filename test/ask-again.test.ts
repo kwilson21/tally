@@ -16,28 +16,37 @@ import { recordSorting } from "./record-sorting";
 // it), as for a note in decision 64. A transaction that already has a category asks nothing.
 
 const db = env.DB;
+
 recordSorting({ sort: true });
+
 let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
 const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
+
 /** The background work a save handed to waitUntil, finished. */
 const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
 
 type JevBody = { state: Record<string, unknown> };
+
 /** A fake Jev: every call is recorded, and answered with Eating Out at `confidence`. */
 function fakeJev(
 	answer: () => Response | Promise<Response> = () => reply(0.95),
 ) {
 	const bodies: JevBody[] = [];
+
 	const fetchImpl = vi.fn(
 		async (url: RequestInfo | URL, init?: RequestInit) => {
 			if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
 			bodies.push(JSON.parse(String(init?.body)));
+
 			return answer();
 		},
 	);
+
 	vi.stubGlobal("fetch", fetchImpl);
+
 	return { bodies, fetchImpl };
 }
+
 const reply = (confidence: number) =>
 	Response.json({
 		answers: {
@@ -67,12 +76,14 @@ async function save(
 		{ ...env, ...bindings },
 		ctx(),
 	);
+
 	return { response, html: await response.text() };
 }
 
 /** The re-guess note's review hook: Reviewed ticked hides it only while a linked purchase is ticked too (name-choices.tsx). */
 const REVIEW_HOLD =
 	"group-has-[input[name=creditReviewed]:checked]/edit:group-has-[.linked-purchase:checked]/edit:hidden";
+
 /** The opening tag of the input named `name` with `value` (the first one), or "" when the markup has none. */
 const inputTag = (html: string, name: string, value: string) =>
 	html
@@ -89,6 +100,7 @@ const rowOf = (id: number) =>
 		)
 		.bind(id)
 		.first();
+
 const idOf = async (rawName: string) =>
 	(
 		await db
@@ -96,6 +108,7 @@ const idOf = async (rawName: string) =>
 			.bind(rawName)
 			.first<{ id: number }>()
 	)?.id as number;
+
 const callsUsed = async () =>
 	Number(
 		(
@@ -105,6 +118,7 @@ const callsUsed = async () =>
 				.first<{ value: string }>()
 		)?.value ?? 0,
 	);
+
 /**
  * Makes the transaction a payment linked to bill 700, so it pays a bill. Link before Tally picks the category: the
  * link's trigger (migration 0035) gives a linked row the bill's category, source 'bill', which Tally never re-guesses.
@@ -133,6 +147,7 @@ const linkToPlan = (transactionId: number) =>
 		.run();
 
 let bakery: number;
+
 beforeEach(async () => {
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
@@ -152,11 +167,13 @@ beforeEach(async () => {
 describe("adding a note to a transaction that still needs a category", () => {
 	it("asks Jev again right away, telling it the note, and applies a sure answer", async () => {
 		const jev = fakeJev();
+
 		const { response } = await save(bakery, {
 			category: "",
 			merchant: "Local Bakery",
 			note: "Birthday cake for Sam",
 		});
+
 		expect(response.status).toBe(200);
 		expect(waitUntil).toHaveBeenCalledTimes(1);
 		await background();
@@ -196,15 +213,19 @@ describe("adding a note to a transaction that still needs a category", () => {
 
 	it("answers the save without waiting for Jev", async () => {
 		let release: (response: Response) => void = () => {};
+
 		const slow = new Promise<Response>((resolve) => {
 			release = resolve;
 		});
+
 		const jev = fakeJev(() => slow);
+
 		const { response } = await save(bakery, {
 			category: "",
 			merchant: "Local Bakery",
 			note: "Cake",
 		});
+
 		// The page has answered, saved, and Jev's call is still going.
 		expect(response.status).toBe(200);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -220,11 +241,13 @@ describe("adding a note to a transaction that still needs a category", () => {
 
 	it("leaves the save as it was when Jev is down, and leaves the transaction for the night", async () => {
 		const jev = fakeJev(() => new Response("{}", { status: 503 }));
+
 		const { response } = await save(bakery, {
 			category: "",
 			merchant: "Local Bakery",
 			note: "Cake",
 		});
+
 		await expect(background()).resolves.toBeDefined();
 		expect(response.status).toBe(200);
 		expect(jev.bodies).toHaveLength(1);
@@ -284,6 +307,7 @@ describe("adding a note to a transaction that still needs a category", () => {
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		const jev = fakeJev();
 		const before = await rowOf(categorized);
 		await save(categorized, {
@@ -425,11 +449,13 @@ describe("adding a clearer name to a transaction that still needs a category", (
 		expect(waitUntil).not.toHaveBeenCalled();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await callsUsed()).toBe(0);
+
 		const name = await db
 			.prepare(
 				"SELECT display_name FROM merchants WHERE display_name LIKE '%Bakery'",
 			)
 			.first<{ display_name: string }>();
+
 		expect(name?.display_name).toBe("Corner Bakery");
 	});
 
@@ -463,6 +489,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 	const pickedByTally = (categoryId: number) =>
 		db
 			.prepare(
@@ -470,6 +497,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			)
 			.bind(categoryId, bakery)
 			.run();
+
 	/** The edit panel as the browser gets it, with the bindings it is served under. */
 	const panel = async (bindings: Record<string, unknown>) =>
 		(
@@ -505,12 +533,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
@@ -561,6 +591,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			name_pick: "own",
@@ -570,6 +601,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			always_was: "0",
 			rule_category_was: "",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -583,12 +615,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 				)
 				.first(),
 		).toMatchObject({ default_category_id: category });
+
 		const categoryName = (
 			await db
 				.prepare("SELECT name FROM categories WHERE id = ?")
 				.bind(category)
 				.first<{ name: string }>()
 		)?.name;
+
 		const trigger = JSON.parse(response.headers.get("HX-Trigger") ?? "{}");
 		expect(trigger.announce).toBe(`Saved. Dog bed is now ${categoryName}.`);
 		expect(trigger.announce).not.toContain("guesses its category again");
@@ -605,13 +639,17 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	it("puts the note under the edit form's named group, so picking another control folds it away", async () => {
 		await pickedByTally(await firstCategory());
 		const html = await panel({ JEV_API_KEY: "jev-key" });
+
 		const editForm = html
 			.split("<form")
 			.find((part) => part.includes(`action="/transactions/${bakery}"`));
+
 		expect(editForm?.slice(0, editForm.indexOf(">"))).toContain("group/edit");
+
 		const note = html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
+
 		expect(note).toContain(
 			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 		);
@@ -624,9 +662,11 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	it("hides the note while Always for this merchant is ticked, since ticking it keeps the category", async () => {
 		await pickedByTally(await firstCategory());
 		const html = await panel({ JEV_API_KEY: "jev-key" });
+
 		const note = html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
+
 		expect(note).toContain(
 			"group-has-[input[name=always]:checked]/edit:hidden",
 		);
@@ -635,6 +675,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 
 	it("folds the note on a 422 redraw that posts another category, since the save keeps that one, and Tally's category brings it back", async () => {
 		const category = await firstCategory();
+
 		const other = (
 			await db
 				.prepare(
@@ -643,19 +684,24 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 				.bind(category)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		await pickedByTally(category);
 		fakeJev();
+
 		const { response, html } = await save(bakery, {
 			category: String(other),
 			name_pick: "own",
 			merchant: "",
 			name_scope: "one",
 		});
+
 		expect(response.status).toBe(422);
+
 		// The note is drawn so that picking Tally's category again can reveal it; the chip folds it while the other one is ticked.
 		const note = html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
+
 		expect(note).toContain(
 			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 		);
@@ -666,12 +712,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev();
+
 		const { response, html } = await save(bakery, {
 			category: String(category),
 			name_pick: "own",
 			merchant: "",
 			name_scope: "one",
 		});
+
 		expect(response.status).toBe(422);
 		expect(html).toContain("Tally guesses its category again.");
 	});
@@ -680,6 +728,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev();
+
 		const { response, html } = await save(bakery, {
 			category: String(category),
 			name_pick: "own",
@@ -689,6 +738,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			always_was: "0",
 			rule_category_was: "",
 		});
+
 		expect(response.status).toBe(422);
 		expect(html).toMatch(/<input[^>]*name="always"[^>]*checked/);
 		expect(html).toContain(
@@ -746,6 +796,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 		expect(await panel({})).not.toContain("Tally guesses its category again.");
 	});
+
 	/** The row behind a pending new-category suggestion, as a none-fit answer leaves it: Jev was sure, and no category was chosen. */
 	const behindSuggestion = async () => {
 		await db
@@ -763,6 +814,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.bind(bakery)
 			.run();
 	};
+
 	const answerColumns = (id: number) =>
 		db
 			.prepare(
@@ -770,6 +822,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			)
 			.bind(id)
 			.first<Record<string, unknown>>();
+
 	/** The ids of the rows the Settings page lists behind pending suggestions. */
 	const listedRows = async () =>
 		(await pendingSuggestions(db)).flatMap((suggestion) =>
@@ -914,6 +967,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			details_action: "keep",
@@ -921,6 +975,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
@@ -933,12 +988,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev();
+
 		const { response } = await save(bakery, {
 			details_action: "keep",
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
@@ -961,12 +1018,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.run();
 		await pickedByTally(category);
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -988,11 +1047,13 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.run();
 		await pickedByTally(category);
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			name_pick: "store",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -1019,11 +1080,13 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.run();
 		await pickedByTally(category);
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			name_pick: "s:Bakery Lane",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -1051,6 +1114,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			)
 			.bind(bakery)
 			.run();
+
 		const part = await db
 			.prepare(
 				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, category_id, category_source, category_confidence)
@@ -1058,6 +1122,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			)
 			.bind(`part-${crypto.randomUUID()}`, bakery, category)
 			.first<{ id: number }>();
+
 		const partId = part?.id as number;
 		const jev = fakeJev(() => reply(0.2));
 		await save(partId, {
@@ -1102,10 +1167,12 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	/** The re-guess note as the panel draws it, with its classes. */
 	/** The note's hooks, one token per hook, so a hook is matched whole (the review hook contains a link hook inside it). */
 	const folds = (html: string) => noteClass(html).split(" ");
+
 	const noteClass = (html: string) =>
 		html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1] ?? "";
+
 	/** Makes the bakery row a credit (negative), linked to a purchase of the household's, or unlinked. */
 	const creditLinked = async (linked: boolean) => {
 		const purchase = await db
@@ -1114,6 +1181,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			)
 			.bind(bakery)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET amount_cents = -650, refund_of_id = ?, credit_reviewed = 0 WHERE id = ?",
@@ -1162,12 +1230,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		expect(folds(html)).toContain(
 			"group-has-[.linked-purchase:checked]/edit:hidden",
 		);
+
 		const purchaseId = (
 			await db
 				.prepare("SELECT refund_of_id AS id FROM transactions WHERE id = ?")
 				.bind(bakery)
 				.first<{ id: number }>()
 		)?.id;
+
 		expect(inputTag(html, "refund_of", String(purchaseId))).toContain(
 			"linked-purchase",
 		);
@@ -1179,6 +1249,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	// note stays drawn for the person to reveal by unlinking or unticking Reviewed.
 	it("keeps the note on a refund that follows a purchase whose category differs from the row's, since the disabled category can't block it", async () => {
 		const category = await firstCategory();
+
 		const other = (
 			await db
 				.prepare(
@@ -1187,6 +1258,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 				.bind(category)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		await pickedByTally(category);
 		await creditLinked(true);
 		await db
@@ -1236,12 +1308,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.bind(bakery)
 			.run();
 		const html = await panel({ JEV_API_KEY: "jev-key" });
+
 		const purchaseId = (
 			await db
 				.prepare("SELECT refund_of_id AS id FROM transactions WHERE id = ?")
 				.bind(bakery)
 				.first<{ id: number }>()
 		)?.id;
+
 		expect(inputTag(html, "refund_of", String(purchaseId))).not.toContain(
 			"linked-purchase",
 		);
@@ -1261,6 +1335,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.bind(bakery)
 			.run();
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: String(category),
 			refund_of: "",
@@ -1272,6 +1347,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			creditReviewedVisible: "1",
 			creditReviewed_was: "0",
 		});
+
 		await background();
 		expect(response.status).toBe(200);
 		expect(jev.bodies).toHaveLength(1);
@@ -1303,9 +1379,11 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.bind(bakery)
 			.run();
 		const html = await panel({ JEV_API_KEY: "jev-key" });
+
 		const radio = html
 			.split("<input")
 			.find((part) => part.includes('value="s:Bakery Lane"'));
+
 		expect(radio).toContain("name-same");
 		expect(noteClass(html)).toContain(
 			"group-has-[.name-same:checked]/edit:hidden",
@@ -1379,11 +1457,13 @@ describe("asking again honors what everything else does", () => {
 		});
 		await background();
 		expect(jev.bodies).toHaveLength(1);
+
 		const waiting = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL AND category_confidence IS NULL AND is_split = 0 AND excluded = 0 AND flag_income = 0",
 			)
 			.first<{ n: number }>();
+
 		expect(waiting?.n).toBeGreaterThan(5);
 	});
 });
@@ -1399,6 +1479,7 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 	/** The bakery row as Tally picked its category, with `extra` columns changed too. */
 	const pickedByTally = (categoryId: number, extra = "") =>
 		db
@@ -1407,6 +1488,7 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			)
 			.bind(categoryId, bakery)
 			.run();
+
 	const panelHtml = async () =>
 		(
 			await transactions.request(
@@ -1448,6 +1530,7 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			const category = await firstCategory();
 			await pickedByTally(category, extra);
 			const jev = fakeJev(() => reply(0.2));
+
 			const { response } = await save(bakery, {
 				category: "",
 				name_pick: "own",
@@ -1455,6 +1538,7 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 				name_scope: "one",
 				...fields,
 			});
+
 			await background();
 			expect(jev.bodies).toHaveLength(0);
 			expect(await rowOf(bakery)).toMatchObject({
@@ -1465,30 +1549,37 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 				JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 			).toBe("Saved Dog bed.");
 			const html = await panelHtml();
+
 			if (hook === null) {
 				expect(html).not.toContain("Tally guesses its category again.");
+
 				return;
 			}
+
 			const note = html.match(
 				/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 			)?.[1];
+
 			expect(note).toContain(hook);
 		},
 	);
 
 	it("keeps Tally's category for a refund that follows its included purchase", async () => {
 		const category = await firstCategory();
+
 		const purchase = await db
 			.prepare(
 				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name)
 				 VALUES (1, '2026-09-10', 650, 'SQ *LOCAL BAKERY 4432', 'Local Bakery') RETURNING id`,
 			)
 			.first<{ id: number }>();
+
 		await pickedByTally(
 			category,
 			`, amount_cents = -650, refund_of_id = ${purchase?.id}, credit_reviewed = 1, credit_reviewed_by = 'user'`,
 		);
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: "",
 			name_pick: "own",
@@ -1499,6 +1590,7 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			creditReviewed: "1",
 			creditReviewed_was: "1",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -1539,12 +1631,14 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		await linkToBill(bakery);
 		await pickedByTally(category, ", excluded = 1, excluded_source = 'user'");
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: "",
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(1);
 		expect(
@@ -1557,12 +1651,14 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		await linkToPlan(bakery);
 		await pickedByTally(category, ", excluded = 1, excluded_source = 'user'");
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: "",
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(1);
 		expect(
@@ -1576,9 +1672,11 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			await firstCategory(),
 			", excluded = 1, excluded_source = 'user'",
 		);
+
 		const note = (await panelHtml()).match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
+
 		expect(note).toBeDefined();
 		expect(note).not.toContain("input[name=excluded]");
 	});
@@ -1587,12 +1685,14 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		const category = await firstCategory();
 		await pickedByTally(category, ", excluded = 1, excluded_source = 'user'");
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			category: "",
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(1);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -1616,6 +1716,7 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 	/** The bakery row as a bank credit that Plaid excluded (or, with `source`, someone else did), its category picked by Tally. */
 	const excludedCredit = (categoryId: number, source = "plaid") =>
 		db
@@ -1624,6 +1725,7 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 			)
 			.bind(source, categoryId, bakery)
 			.run();
+
 	/** The panel's fields for a one-off name under This one only, with the exclusion chip (`exclude`, Exclude on by default) and the review chip as given. */
 	const renamed = (
 		review: "0" | "1",
@@ -1639,6 +1741,7 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 		creditReviewed: review,
 		creditReviewed_was: "0",
 	});
+
 	const panelHtml = async () =>
 		(
 			await transactions.request(
@@ -1656,9 +1759,11 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 				/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 			)?.[1] ?? ""
 		).split(" ");
+
 	/** Exclude hides the note only while Reviewed is unticked, where the review lifts Plaid's exclusion (reviewLifts). */
 	const EXCLUDE_UNLESS_REVIEWED =
 		"group-has-[input[name=excluded]:checked]/edit:group-has-[input[name=creditReviewed]:not(:checked)]/edit:hidden";
+
 	/** Exclude hides the note while it is ticked, where the review doesn't lift the exclusion. */
 	const EXCLUDE_PLAIN = "group-has-[input[name=excluded]:checked]/edit:hidden";
 
@@ -1722,11 +1827,13 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 		const category = await firstCategory();
 		await excludedCredit(category);
 		const jev = fakeJev(() => reply(0.2));
+
 		const { response } = await save(bakery, {
 			...renamed("0"),
 			income: "1",
 			income_was: "0",
 		});
+
 		await background();
 		expect(jev.bodies).toHaveLength(0);
 		expect(await rowOf(bakery)).toMatchObject({
@@ -1741,10 +1848,12 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 	it("draws the note on a 422 redraw that posts the review, with Exclude's hook stepping aside while Reviewed is ticked (#428)", async () => {
 		await excludedCredit(await firstCategory());
 		fakeJev();
+
 		const { response, html } = await save(bakery, {
 			...renamed("1"),
 			merchant: "",
 		});
+
 		expect(response.status).toBe(422);
 		expect(html).toContain("Tally guesses its category again.");
 		const folds = foldsOf(html);
@@ -1815,16 +1924,20 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 	it("draws the note on a redraw with Exclude off, and the review alone doesn't fold it while Exclude is off", async () => {
 		await excludedCredit(await firstCategory());
 		fakeJev();
+
 		const { response, html } = await save(bakery, {
 			...renamed("0", {}),
 			merchant: "",
 		});
+
 		expect(response.status).toBe(422);
 		expect(html).toContain("Tally guesses its category again.");
 		expect(inputTag(html, "excluded", "1")).not.toContain("checked");
+
 		const reviewTokens = foldsOf(html).filter((token) =>
 			token.includes("input[name=creditReviewed]"),
 		);
+
 		expect(reviewTokens).toHaveLength(2);
 		expect(reviewTokens).toEqual(
 			expect.arrayContaining([REVIEW_HOLD, EXCLUDE_UNLESS_REVIEWED]),

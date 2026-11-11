@@ -34,6 +34,7 @@ const CATS = {
 	dateNight: { name: "Date Night", icon: "date-night", color: "cat-plum" },
 	health: { name: "Health", icon: "health", color: "cat-slate" },
 } as const;
+
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 /** A small terracotta "Why?" (P33 A), 44px tall, with its own name for screen readers. */
@@ -83,6 +84,7 @@ const SOME_OFF = [true, true, true, false];
 
 export const OFF_MEANS =
 	"Off means your rules and choices only. Nothing already decided changes.";
+
 const ALL_OFF = "Tally sorts by your rules and choices only.";
 
 /**
@@ -177,6 +179,7 @@ export function SwitchRow({
 	needs?: string;
 }) {
 	const greyed = needs !== undefined;
+
 	return (
 		<li>
 			<label class="group flex min-h-11 cursor-pointer items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
@@ -639,6 +642,7 @@ function pet(id: number, name: string, cents: number): ListRow {
 		categoryColor: null,
 	};
 }
+
 const PET_ROWS = [
 	pet(1, "Chewy", 6412),
 	pet(2, "Banfield Pet Hospital", 18900),
@@ -775,6 +779,7 @@ function Strokes({ n }: { n: number }) {
 /** A count drawn as tally marks: a full TallyMark for every five, then the strokes left over. */
 function Marks({ n }: { n: number }) {
 	const rest = n % 5;
+
 	return (
 		<span class="mt-1 flex flex-wrap items-center gap-1 text-ink">
 			{Array.from({ length: Math.floor(n / 5) }, () => (
@@ -923,6 +928,7 @@ const WITHOUT_LINE =
 function ViewLinks({ current }: { current: "made" | "bank" }) {
 	const link = "inline-flex min-h-11 items-center";
 	const here = `${link} font-semibold text-ink no-underline`;
+
 	return (
 		<nav aria-label="View" class="flex flex-wrap items-center gap-x-2">
 			<a

@@ -8,20 +8,28 @@ import {
 
 const form = (fields: Record<string, string>) => {
 	const f = new FormData();
+
 	for (const [k, v] of Object.entries(fields)) f.set(k, v);
+
 	return f;
 };
+
 const CATEGORIES = [1, 2, 3, 4, 5];
 
 describe("parseEdit and the Name row's choice (decision 101)", () => {
 	const read = (fields: Record<string, string>) => {
 		const result = parseEdit(form(fields), CATEGORIES);
+
 		if (!result.ok) throw new Error("expected ok");
+
 		return result.value;
 	};
+
 	const refuse = (fields: Record<string, string>) => {
 		const result = parseEdit(form(fields), CATEGORIES);
+
 		if (result.ok) throw new Error("expected errors");
+
 		return result.errors;
 	};
 
@@ -153,6 +161,7 @@ describe("parseEdit", () => {
 			form({ merchant: "", note: "birthday" }),
 			CATEGORIES,
 		);
+
 		expect(result).toMatchObject({
 			ok: true,
 			value: { categoryId: null, displayName: null, note: "birthday" },
@@ -229,6 +238,7 @@ describe("safeBack", () => {
 
 describe("followsPurchaseAfterSave: whether a linked credit counts with its purchase once saved", () => {
 	const PURCHASE_ID = 9001;
+
 	// A linked, reviewed credit that is not income, as the panel first drew it.
 	const stored = {
 		amountCents: -2000,
@@ -238,6 +248,7 @@ describe("followsPurchaseAfterSave: whether a linked credit counts with its purc
 		creditReviewed: true,
 		creditReviewedByUser: true,
 	};
+
 	// The panel's answers when nothing was changed.
 	const unchanged = {
 		refundOfId: PURCHASE_ID,
@@ -353,6 +364,7 @@ describe("excludedAfterSave: whether a row is excluded once saved, with a review
 		income: false,
 		creditReviewedByUser: false,
 	};
+
 	// The panel's answers when nothing was changed.
 	const unchanged = {
 		excluded: true,

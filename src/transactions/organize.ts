@@ -12,23 +12,27 @@ const NEEDS_CATEGORY_UPDATE = `category_id IS NULL AND ${INCLUDED_ROW} AND is_sp
 const KEY = merchantKeySql("t");
 const KEY_UPDATE = merchantKeySql("transactions");
 const CHUNK_SIZE = 90;
+
 /**
  * Every charge in a saved list (a JSON array of ids) still exists and holds the category as a person's choice
  * (#353). Its binds, in order, are `savedStillHoldArgs`.
  */
 export const SAVED_STILL_HOLD_SQL = `(SELECT COUNT(DISTINCT value) FROM json_each(?)) = (SELECT COUNT(*) FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user')`;
+
 /** The binds for SAVED_STILL_HOLD_SQL's `?`s: the saved list, the saved list again, then the category. */
 export const savedStillHoldArgs = (savedIds: string, categoryId: number) => [
 	savedIds,
 	savedIds,
 	categoryId,
 ];
+
 /**
  * Every saved charge's key still shows the name the question offered (#353): its display name, or with none, its
  * tidied key, as organizeOffer names it (an empty display name is none, as `||` reads it). Only compared, never
  * written. A key with no `merchants` row has no name either. Its binds, in order, are `savedStillNamedArgs`.
  */
 export const SAVED_STILL_NAMED_SQL = `NOT EXISTS (SELECT 1 FROM transactions s2 LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("s2")} WHERE s2.id IN (SELECT value FROM json_each(?)) AND CASE WHEN NULLIF(m.display_name, '') IS NULL THEN ${merchantKeySql("s2")} NOT IN (SELECT value FROM json_each(?)) ELSE m.display_name != ? END)`;
+
 /**
  * The binds for SAVED_STILL_NAMED_SQL's `?`s: the saved list, the tidied keys (a JSON array of the saved keys whose
  * tidied name is the question's), then the name the question offered.
@@ -76,6 +80,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			totalCents: number;
 			shownName: string | null;
 		}>();
+
 	const byKey = new Map<
 		string,
 		{
@@ -85,6 +90,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			bankTexts: Map<string, number>;
 		}
 	>();
+
 	for (const row of results) {
 		const key = byKey.get(row.merchantKey) ?? {
 			count: 0,
@@ -92,9 +98,11 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			shownNames: new Map<string, number>(),
 			bankTexts: new Map<string, number>(),
 		};
+
 		key.bankTexts.set(row.rawName, row.count);
 		key.count += row.count;
 		key.totalCents += row.totalCents;
+
 		if (row.shownName)
 			key.shownNames.set(
 				row.shownName,
@@ -102,11 +110,14 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			);
 		byKey.set(row.merchantKey, key);
 	}
+
 	const groups = new Map<string, OrganizeGroup>();
 	const bankTextCounts = new Map<string, Map<string, number>>();
+
 	for (const [merchantKey, key] of byKey) {
 		const shown = [...key.shownNames].sort(byCountThenName)[0]?.[0];
 		const name = shown ?? tidyName(merchantKey);
+
 		const group = groups.get(name) ?? {
 			name,
 			count: 0,
@@ -114,20 +125,25 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 			merchantKeys: [],
 			bankTexts: [],
 		};
+
 		group.count += key.count;
 		group.totalCents += key.totalCents;
 		group.merchantKeys.push(merchantKey);
 		const counts = bankTextCounts.get(name) ?? new Map<string, number>();
+
 		for (const [text, count] of key.bankTexts)
 			counts.set(text, (counts.get(text) ?? 0) + count);
 		bankTextCounts.set(name, counts);
 		groups.set(name, group);
 	}
+
 	for (const [name, counts] of bankTextCounts) {
 		const group = groups.get(name);
+
 		if (group)
 			group.bankTexts = [...counts].sort(byCountThenName).map(([text]) => text);
 	}
+
 	return [...groups.values()].sort(
 		(a, b) =>
 			b.totalCents - a.totalCents ||
@@ -150,23 +166,29 @@ export async function saveOrganizeGroup(
 	updatedBy: string,
 ): Promise<number[]> {
 	const names = [...new Set(merchantKeys)];
+
 	if (names.length === 0) return [];
 	let saved = 0;
+
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
 		const marks = chunk.map(() => "?").join(", ");
+
 		const count = await db
 			.prepare(
 				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND ${KEY} IN (${marks})`,
 			)
 			.bind(...chunk)
 			.first<{ n: number }>();
+
 		saved += count?.n ?? 0;
 	}
+
 	// A stale form files nothing after another request categorized the group.
 	if (saved === 0) return [];
 
 	const updates: D1PreparedStatement[] = [];
+
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
 		const marks = chunk.map(() => "?").join(", ");
@@ -181,6 +203,7 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
+
 	// A merchant's row is written only while one of its charges still needs a category when this batch starts, so a
 	// group another save filed first keeps its name. The checks run ahead of the updates that file the charges.
 	// The guessed names a person keeps are logged in this batch, in one statement ahead of every merchant's settling
@@ -188,11 +211,13 @@ export async function saveOrganizeGroup(
 	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
 	const today = displayName ? await householdToday(db) : null;
 	const settles: D1PreparedStatement[] = [];
+
 	const kept = displayName
 		? names.filter(
 				(merchantKey) => nameSource([displayName], merchantKey) === "tally",
 			)
 		: [];
+
 	if (kept.length > 0)
 		settles.push(
 			db
@@ -201,6 +226,7 @@ export async function saveOrganizeGroup(
 				)
 				.bind(today, JSON.stringify(kept), displayName),
 		);
+
 	for (const merchantKey of names) {
 		settles.push(
 			db
@@ -214,7 +240,9 @@ export async function saveOrganizeGroup(
 				.bind(merchantKey, displayName, merchantKey, displayName),
 		);
 	}
+
 	const results = await db.batch([...settles, ...updates]);
+
 	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
 	return results
 		.slice(settles.length)
@@ -234,17 +262,21 @@ export async function groupHasRule(
 ): Promise<boolean> {
 	const names = [...new Set(merchantKeys)];
 	let ruled = 0;
+
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
 		const marks = chunk.map(() => "?").join(", ");
+
 		const row = await db
 			.prepare(
 				`SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (${marks})`,
 			)
 			.bind(categoryId, ...chunk)
 			.first<{ n: number }>();
+
 		ruled += row?.n ?? 0;
 	}
+
 	return ruled === names.length;
 }
 
@@ -269,8 +301,10 @@ export async function setOrganizeRule(
 	actor: string,
 ): Promise<string[]> {
 	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
+
 	// Nothing is asked about a trip that looks mixed (decision 113), so a Yes on a question that went stale makes no rule either.
 	if (await jevSaysMixedAmong(db, JSON.parse(savedIds) as number[])) return [];
+
 	// SQL can't tidy a name, so the saved keys that tidy to the offered name are read here, once, and the guard that
 	// uses them stays inside both statements below. An empty list (no saved key tidies to it) fails a cleared key.
 	const { results: keyRows } = await db
@@ -279,11 +313,13 @@ export async function setOrganizeRule(
 		)
 		.bind(savedIds)
 		.all<{ merchantKey: string }>();
+
 	const tidyKeys = JSON.stringify(
 		keyRows
 			.map((row) => row.merchantKey)
 			.filter((key) => tidyName(key) === merchant),
 	);
+
 	// Two statements whatever the group's size, and both carry the guard, so the rules and the charges they name
 	// move together or not at all.
 	const rule = db
@@ -300,6 +336,7 @@ export async function setOrganizeRule(
 			...savedStillHoldArgs(savedIds, categoryId),
 			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
 		);
+
 	const apply = db
 		.prepare(
 			`${applyMerchantRuleSql(`IN (SELECT ${merchantKeySql("s")} FROM ${savedRows})`)} AND ${SAVED_STILL_HOLD_SQL} AND ${SAVED_STILL_NAMED_SQL}`,
@@ -312,8 +349,10 @@ export async function setOrganizeRule(
 			...savedStillHoldArgs(savedIds, categoryId),
 			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
 		);
+
 	// Only the rule's statement returns rows: the keys it wrote.
 	const [written] = await db.batch([rule, apply]);
+
 	return ((written?.results ?? []) as { raw_name: string }[]).map(
 		(row) => row.raw_name,
 	);
@@ -351,15 +390,20 @@ export async function organizeOffer(
 	categoryId: number,
 ): Promise<Omit<GroupOffer, "store"> | null> {
 	const ids = [...new Set(savedIds)];
+
 	if (ids.length === 0) return null;
+
 	const category = await db
 		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
 		.bind(categoryId)
 		.first<{ id: number; name: string }>();
+
 	if (!category) return null;
+
 	// Nothing is asked about a trip that looks mixed (decision 113), so a reload of the question shows none either.
 	if (await jevSaysMixedAmong(db, ids)) return null;
 	const savedJson = JSON.stringify(ids);
+
 	// No rows come back unless every saved charge still holds the category, so one query decides both.
 	const { results } = await db
 		.prepare(
@@ -369,15 +413,20 @@ export async function organizeOffer(
 		)
 		.bind(savedJson, ...savedStillHoldArgs(savedJson, categoryId))
 		.all<{ merchantKey: string; shownName: string | null }>();
+
 	const names = [
 		...new Set(
 			results.map((row) => storeNameOf(row.shownName, row.merchantKey)),
 		),
 	];
+
 	const merchant = names[0];
+
 	if (names.length !== 1 || merchant === undefined) return null;
 	const merchantKeys = results.map((row) => row.merchantKey);
+
 	if (await groupHasRule(db, merchantKeys, categoryId)) return null;
+
 	return {
 		savedIds: ids,
 		merchant,
@@ -401,6 +450,7 @@ export async function storeRowOf(
 		)
 		.bind(JSON.stringify(savedIds))
 		.first<{ id: number }>();
+
 	return row?.id ?? null;
 }
 
@@ -422,8 +472,10 @@ export async function storeChargeIds(
 		)
 		.bind(storeRow)
 		.first<{ key: string; displayName: string | null }>();
+
 	if (!seed) return [];
 	const name = storeNameOf(seed.displayName, seed.key);
+
 	const { results: keyRows } = await db
 		.prepare(
 			`SELECT DISTINCT ${KEY} AS merchantKey, ${merchantColumnSql("t", "display_name")} AS shownName
@@ -431,16 +483,20 @@ export async function storeChargeIds(
 		)
 		.bind(categoryId)
 		.all<{ merchantKey: string; shownName: string | null }>();
+
 	const merchantKeys = keyRows
 		.filter((row) => storeNameOf(row.shownName, row.merchantKey) === name)
 		.map((row) => row.merchantKey);
+
 	if (merchantKeys.length === 0) return [];
+
 	const { results } = await db
 		.prepare(
 			`SELECT t.id AS id FROM transactions t WHERE ${KEY} IN (SELECT value FROM json_each(?)) AND t.category_id = ? AND t.category_source = 'user' ORDER BY t.id`,
 		)
 		.bind(JSON.stringify(merchantKeys), categoryId)
 		.all<{ id: number }>();
+
 	return results.map((row) => row.id);
 }
 
@@ -462,7 +518,9 @@ export async function storeOffer(
 	)
 		return null;
 	const ids = await storeChargeIds(db, storeRow, categoryId);
+
 	if (ids.length === 0) return null;
 	const offer = await organizeOffer(db, ids, categoryId);
+
 	return offer && { ...offer, store: storeRow };
 }

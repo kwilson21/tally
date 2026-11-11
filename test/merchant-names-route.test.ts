@@ -16,8 +16,10 @@ const LUPITA = "SQ *LUPITAS TAQ 2210";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
+
 async function post(
 	path: string,
 	fields: Record<string, string>,
@@ -33,13 +35,16 @@ async function post(
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
+
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;
 	};
+
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
@@ -57,6 +62,7 @@ async function charges(rawName: string, count: number, merchantName?: string) {
 			.bind(`plaid-${crypto.randomUUID()}`, rawName, merchantName ?? null)
 			.run();
 }
+
 /** A suggestion waiting for a person; no names is an empty answer (asked, nothing usable), which is status none. */
 const suggest = (key: string, names: string[], status = "pending") =>
 	seedMerchant(db, {
@@ -65,6 +71,7 @@ const suggest = (key: string, names: string[], status = "pending") =>
 		names,
 		namesAsked: names.length === 0,
 	});
+
 const merchant = (key: string) =>
 	db
 		.prepare(
@@ -111,6 +118,7 @@ async function ownNames(rawName: string, count: number) {
 		)
 		.bind(rawName, count)
 		.all<{ id: number }>();
+
 	for (const { id } of results)
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
@@ -150,6 +158,7 @@ describe("namesToReview", () => {
 		await ownNames(BLUE, 2);
 		const [blue] = await namesToReview(db);
 		expect(blue).toMatchObject({ key: BLUE, count: 3, owned: 2 });
+
 		// A split part's own name is not counted: its purchase is the top-level row.
 		const purchase = await db
 			.prepare(
@@ -157,6 +166,7 @@ describe("namesToReview", () => {
 			)
 			.bind(BLUE)
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
 			.bind(purchase?.id)
@@ -295,11 +305,13 @@ describe("the names switch and the Band on the contents page (#606)", () => {
 
 	it("announces that the Band took its suggestions away when the switch is saved off, and draws no Band on the AI page", async () => {
 		await twoMerchants();
+
 		const { res, html } = await post(
 			"/settings/ai",
 			{ categories: "on", income: "on" },
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(html).toContain('id="ai-suggestions"');
 		expect(html).not.toContain('href="/settings/suggestions"');
@@ -309,21 +321,25 @@ describe("the names switch and the Band on the contents page (#606)", () => {
 	it("announces the count when the switch is saved on again", async () => {
 		await twoMerchants();
 		await saveAiSwitches(db, { names: false });
+
 		const { res } = await post(
 			"/settings/ai",
 			{ names: "on", categories: "on", income: "on" },
 			true,
 		);
+
 		expect(trigger(res).announce).toContain("2 suggestions to check.");
 	});
 
 	it("says nothing about the Band when a save doesn't change it", async () => {
 		await twoMerchants();
+
 		const { res } = await post(
 			"/settings/ai",
 			{ names: "on", categories: "on" },
 			true,
 		);
+
 		expect(trigger(res).announce).not.toMatch(/merchant name/);
 	});
 
@@ -407,8 +423,10 @@ describe("Settings", () => {
 
 	it("has a Suggest store names switch in the AI suggestions group, on to start", async () => {
 		const { html } = await get("/settings/ai");
+
 		const group =
 			html.split('id="ai-suggestions"')[1]?.split("</section>")[0] ?? "";
+
 		const first = group.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";
 		expect(first).toContain('name="names"');
 		expect(first).toMatch(/\schecked/);

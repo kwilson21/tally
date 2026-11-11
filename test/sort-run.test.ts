@@ -39,6 +39,7 @@ async function addWaiting(n: number): Promise<number[]> {
 				.bind(TODAY, -500 - i, `SORT RUN ${i}`),
 		),
 	);
+
 	return results.map((result) =>
 		Number((result.results[0] as { id: number }).id),
 	);
@@ -54,7 +55,9 @@ const categoryOf = async (id: number) =>
 
 const categorizedIn = async (ids: number[]) => {
 	let n = 0;
+
 	for (const id of ids) if ((await categoryOf(id)) !== null) n += 1;
+
 	return n;
 };
 
@@ -139,9 +142,11 @@ describe("sorting in groups of 25, in one process", () => {
 				runId: "run-demo-cap",
 			},
 		);
+
 		const asks = (group: number) =>
 			fake.steps.filter((step) => step.name.startsWith(`group-${group}-ask-`))
 				.length;
+
 		expect(asks(1)).toBe(25);
 		expect(asks(2)).toBe(15);
 	});
@@ -171,6 +176,7 @@ describe("sorting in groups of 25, in one process", () => {
 					await db.prepare("DROP TRIGGER sort_test_fail").run();
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
@@ -184,11 +190,13 @@ describe("sorting in groups of 25, in one process", () => {
 	it("a write retried after its batch committed changes nothing again", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps({ replayAfter: ["group-1-write"] });
+
 		const fetchImpl = vi
 			.fn()
 			.mockResolvedValueOnce(reply(0.9))
 			.mockResolvedValueOnce(new Response("nope", { status: 503 }))
 			.mockImplementation(async () => reply(0.9));
+
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
@@ -196,24 +204,30 @@ describe("sorting in groups of 25, in one process", () => {
 		});
 		// One answer, one failure (a 503): 2 calls used of the 3 reserved, and the unused one given back once.
 		expect(await callsUsed()).toBe(2);
+
 		const logged = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM ai_log WHERE kind = 'category' AND transaction_id IN (SELECT value FROM json_each(?))",
 			)
 			.bind(JSON.stringify(ids))
 			.first<{ n: number }>();
+
 		expect(logged?.n).toBe(1);
 	});
 
 	it("switches are read once a group: turning categories and income off mid-group applies nothing and starts no new group", async () => {
 		const ids = await addWaiting(30);
 		let calls = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			calls += 1;
+
 			if (calls === 3)
 				await saveAiSwitches(db, { categories: false, income: false });
+
 			return reply(0.9);
 		});
+
 		await categorizePending(withKey, fetchImpl, { onlyIds: ids });
 		expect(fetchImpl).toHaveBeenCalledTimes(25);
 		expect(await categorizedIn(ids)).toBe(0);
@@ -222,11 +236,15 @@ describe("sorting in groups of 25, in one process", () => {
 	it("sort right away turned off mid-group (a sync's run) applies nothing of that group", async () => {
 		const ids = await addWaiting(30);
 		let calls = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			calls += 1;
+
 			if (calls === 3) await saveAiSwitches(db, { sortOnArrival: false });
+
 			return reply(0.9);
 		});
+
 		await categorizePending(withKey, fetchImpl, { onlyIds: ids, bySync: true });
 		expect(fetchImpl).toHaveBeenCalledTimes(25);
 		expect(await categorizedIn(ids)).toBe(0);
@@ -258,6 +276,7 @@ describe("sorting in groups of 25, in one process", () => {
 			)
 			.bind(JSON.stringify(value))
 			.run();
+
 		const done = await categorizePending(
 			withKey,
 			vi.fn(async () => reply(0.9)),
@@ -265,6 +284,7 @@ describe("sorting in groups of 25, in one process", () => {
 				onlyIds: ids,
 			},
 		);
+
 		expect(done.asked).toBe(2);
 		expect(await turnRow()).toBeNull();
 	});
@@ -273,14 +293,17 @@ describe("sorting in groups of 25, in one process", () => {
 		const ids = await addWaiting(25);
 		const second = vi.fn(async () => reply(0.9));
 		let started = false;
+
 		const first = vi.fn(async () => {
 			if (!started) {
 				started = true;
 				const done = await categorizePending(withKey, second, { onlyIds: ids });
 				expect(done.asked).toBe(0);
 			}
+
 			return reply(0.9);
 		});
+
 		await categorizePending(withKey, first, { onlyIds: ids });
 		expect(first).toHaveBeenCalledTimes(25);
 		expect(second).not.toHaveBeenCalled();
@@ -295,14 +318,17 @@ describe("sorting in groups of 25, in one process", () => {
 		"Jev down (%s) on the 3rd call stops the run: 2 answers saved, 3 calls counted, the turn released",
 		async (_name, failing) => {
 			const ids = await addWaiting(25);
+
 			const fetchImpl = vi
 				.fn()
 				.mockResolvedValueOnce(reply(0.9))
 				.mockResolvedValueOnce(reply(0.9))
 				.mockImplementationOnce(failing);
+
 			const done = await categorizePending(withKey, fetchImpl, {
 				onlyIds: ids,
 			});
+
 			expect(done.asked).toBe(3);
 			expect(fetchImpl).toHaveBeenCalledTimes(3);
 			expect(await categorizedIn(ids)).toBe(2);
@@ -313,21 +339,25 @@ describe("sorting in groups of 25, in one process", () => {
 
 	it("one bad transaction (a 400) is marked and not asked again in a later group of the run", async () => {
 		const ids = await addWaiting(60);
+
 		const fetchImpl = vi
 			.fn()
 			.mockResolvedValueOnce(reply(0.9))
 			.mockResolvedValueOnce(reply(0.9))
 			.mockResolvedValueOnce(new Response("bad", { status: 400 }))
 			.mockImplementation(async () => reply(0.9));
+
 		await categorizePending(withKey, fetchImpl, { onlyIds: ids });
 		expect(fetchImpl).toHaveBeenCalledTimes(60);
 		expect(await categorizedIn(ids)).toBe(59);
+
 		const failed = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE id IN (SELECT value FROM json_each(?)) AND jev_failed_at IS NOT NULL",
 			)
 			.bind(JSON.stringify(ids))
 			.first<{ n: number }>();
+
 		expect(failed?.n).toBe(1);
 	});
 
@@ -336,11 +366,15 @@ describe("sorting in groups of 25, in one process", () => {
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(25);
 		let calls = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			calls += 1;
+
 			if (calls === 3) vi.setSystemTime(new Date("2026-09-23T15:00:00Z"));
+
 			return reply(0.9);
 		});
+
 		await categorizePending(withKey, fetchImpl, { onlyIds: ids });
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(await categorizedIn(ids)).toBe(3);
@@ -352,17 +386,23 @@ describe("sorting in groups of 25, in one process", () => {
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(25);
 		let calls = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			calls += 1;
+
 			if (calls === 4) vi.setSystemTime(new Date("2026-09-22T15:03:00Z"));
+
 			return reply(0.9);
 		});
+
 		let callsAtSecondGroup = -1;
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				if (name === "group-2-read") callsAtSecondGroup = calls;
 			},
 		});
+
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,

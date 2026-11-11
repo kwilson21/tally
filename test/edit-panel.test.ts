@@ -12,6 +12,7 @@ const BASE = "http://tally.test";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -26,6 +27,7 @@ async function post(path: string, fields: Record<string, string>) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -36,12 +38,14 @@ const panelOf = (html: string) => html.slice(html.indexOf('id="edit-title"'));
 function categoryBlock(html: string) {
 	const start = html.indexOf('id="edit-category"');
 	const end = html.indexOf('name="always"', start);
+
 	return html.slice(start, end);
 }
 
 /** The Exclude switch's muted line: the text its span holds, from its id to the span's close. */
 function excludeHintOf(html: string) {
 	const start = html.indexOf(">", html.indexOf('id="edit-exclude-hint"')) + 1;
+
 	return html.slice(start, html.indexOf("</span>", start));
 }
 
@@ -49,10 +53,12 @@ function excludeHintOf(html: string) {
 function inputTag(html: string, name: string) {
 	const at = html.indexOf(`name="${name}"`);
 	const start = html.lastIndexOf("<input", at);
+
 	return html.slice(start, html.indexOf(">", at) + 1);
 }
 
 let bakery: number;
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	await saveAiSwitches(env.DB, { details: false });
@@ -100,9 +106,11 @@ describe("the edit panel's head (P120 B)", () => {
 		expect(h2).toContain("font-serif text-3xl font-semibold tracking-tight");
 		expect(h2).not.toContain("text-4xl");
 		const panel = panelOf(html);
+
 		const amount = panel.indexOf(
 			'<span class="text-lg font-semibold tabular-nums text-ink">',
 		);
+
 		expect(amount).toBeGreaterThan(0);
 		expect(panel.indexOf("font-serif text-4xl")).toBe(-1);
 		expect(amount).toBeLessThan(panel.indexOf("· "));
@@ -118,23 +126,29 @@ describe("the category leads the panel (P120 B)", () => {
 		expect(block).toContain("<fieldset");
 		expect(block).toContain('class="grid grid-cols-2 gap-2"');
 		expect(block).not.toContain("<details");
+
 		const values = [...block.matchAll(/name="category" value="([^"]+)"/g)].map(
 			(m) => m[1],
 		);
+
 		expect(values.at(-1)).toBe("new");
 	});
 
 	it("folds a categorized transaction's category into one closed row, named and sourced", async () => {
 		await pickedByTally();
 		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
+
 		const details =
 			block.match(/<details class="group border-b border-rule"[^>]*>/)?.[0] ??
 			"";
+
 		expect(details).not.toContain(" open");
+
 		const summary = block.slice(
 			block.indexOf("<summary"),
 			block.indexOf("</summary>"),
 		);
+
 		// One phrase, in order: the name, the choice, then its source (a screen reader's order too).
 		const label = summary.indexOf("Category");
 		const choice = summary.indexOf("Groceries");
@@ -148,39 +162,48 @@ describe("the category leads the panel (P120 B)", () => {
 
 	it("names the saved category's source only while the posted choice is that category", async () => {
 		await pickedByTally();
+
 		const ids = await env.DB.prepare(
 			"SELECT (SELECT id FROM categories WHERE name = 'Gas') AS gas, (SELECT id FROM categories WHERE name = 'Groceries') AS groceries",
 		).first<{ gas: number; groceries: number }>();
+
 		// Another choice posted (a redraw after a refused save): the row shows it, and says nothing about the saved pick.
 		const other = await post(`/transactions/${bakery}/category/lock`, {
 			category: String(ids?.gas),
 			back: "/transactions",
 		});
+
 		expect(other.html).toContain("Gas");
 		expect(other.html).not.toContain("Picked by Tally");
+
 		// The saved category posted again keeps its source line.
 		const same = await post(`/transactions/${bakery}/category/lock`, {
 			category: String(ids?.groceries),
 			back: "/transactions",
 		});
+
 		expect(same.html).toContain("Picked by Tally · 92% sure");
 	});
 
 	it("opens the folded row when New category is chosen", async () => {
 		await pickedByTally();
+
 		const { html } = await post(`/transactions/${bakery}/category/lock`, {
 			category: "new",
 			new_category_name: "",
 			back: "/transactions",
 		});
+
 		const details =
 			html.match(/<details class="group border-b border-rule"[^>]*>/)?.[0] ??
 			"";
+
 		expect(details).toContain(" open");
 	});
 
 	it("never hides a category error inside a closed row", async () => {
 		await pickedByTally();
+
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "99",
 			name_pick: "own",
@@ -190,9 +213,11 @@ describe("the category leads the panel (P120 B)", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		expect(res.status).toBe(422);
 		const block = categoryBlock(html);
 		expect(block).toContain('id="category-error" role="alert"');
+
 		for (const tag of block.match(/<details[^>]*>/g) ?? []) {
 			expect(tag).toContain(" open");
 		}
@@ -200,14 +225,17 @@ describe("the category leads the panel (P120 B)", () => {
 
 	it("opens the category row when a save posts a category archived since the panel opened", async () => {
 		await pickedByTally();
+
 		const groceriesId = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Groceries'",
 			).first<{ id: number }>()
 		)?.id as number;
+
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE name = 'Groceries'",
 		).run();
+
 		// The panel was opened before the archive, so it posts the archived category explicitly.
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: String(groceriesId),
@@ -218,29 +246,36 @@ describe("the category leads the panel (P120 B)", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		expect(res.status).toBe(422);
 		const block = categoryBlock(html);
 		expect(block).toContain('id="category-error" role="alert"');
 		expect(block).toContain("Pick a category from the list.");
 		expect(block).toContain('<details class="group border-b border-rule"');
+
 		const detailsTag =
 			block.match(/<details class="group border-b border-rule"[^>]*>/)?.[0] ??
 			"";
+
 		expect(detailsTag).toContain(" open");
 		// The row's close is past the merchant rule tick, so search the panel from the category block on.
 		const from = html.indexOf('id="edit-category"');
+
 		const detailsAt = html.indexOf(
 			'<details class="group border-b border-rule"',
 			from,
 		);
+
 		const alertAt = html.indexOf('id="category-error"', from);
 		expect(alertAt).toBeGreaterThan(detailsAt);
 		expect(alertAt).toBeLessThan(html.indexOf("</details>", detailsAt));
+
 		const row = await env.DB.prepare(
 			"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
 		)
 			.bind(bakery)
 			.first<{ categoryId: number | null }>();
+
 		expect(row?.categoryId).toBe(groceriesId);
 	});
 
@@ -252,16 +287,19 @@ describe("the category leads the panel (P120 B)", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		const groceries = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Groceries'",
 			).first<{ id: number }>()
 		)?.id;
+
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
 		)
 			.bind(merchantKey, groceries)
 			.run();
+
 		// The rule tick was drawn with the store's rule (always_was), so a redraw keeps naming it by its category.
 		const { html } = await post(`/transactions/${bakery}/category/lock`, {
 			category: String(groceries),
@@ -270,6 +308,7 @@ describe("the category leads the panel (P120 B)", () => {
 			rule_category_was: String(groceries),
 			back: "/transactions",
 		});
+
 		expect(html).toContain(
 			"Local Bakery is always Groceries. Untick it and save to remove the rule.",
 		);
@@ -283,14 +322,18 @@ describe("the category leads the panel (P120 B)", () => {
 		).run();
 		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
 		expect(block).toContain('<details class="group border-b border-rule"');
+
 		const details =
 			block.match(/<details class="group border-b border-rule"[^>]*>/)?.[0] ??
 			"";
+
 		expect(details).not.toContain(" open");
+
 		const summary = block.slice(
 			block.indexOf("<summary"),
 			block.indexOf("</summary>"),
 		);
+
 		const label = summary.indexOf("Category");
 		const choice = summary.indexOf("Groceries");
 		const source = summary.indexOf("Picked by Tally · 92% sure");
@@ -304,22 +347,27 @@ describe("the category leads the panel (P120 B)", () => {
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE name = 'Groceries'",
 		).run();
+
 		const groceries = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Groceries'",
 			).first<{ id: number }>()
 		)?.id;
+
 		// No category posts: the archived one isn't offered, so the save leaves the transaction's category as it is.
 		const { res } = await post(`/transactions/${bakery}`, {
 			note: "Kept as Groceries",
 			back: "/transactions",
 		});
+
 		expect(res.status).toBe(200);
+
 		const row = await env.DB.prepare(
 			"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
 		)
 			.bind(bakery)
 			.first<{ categoryId: number | null }>();
+
 		expect(row?.categoryId).toBe(groceries);
 	});
 });
@@ -340,6 +388,7 @@ describe("Exclude and Count as income are switches (P120 B)", () => {
 
 	it("says on Exclude's line that a bill payment counts, excluded or not", async () => {
 		await payBill();
+
 		for (const excluded of [0, 1]) {
 			await env.DB.prepare("UPDATE transactions SET excluded = ? WHERE id = ?")
 				.bind(excluded, bakery)
@@ -354,6 +403,7 @@ describe("Exclude and Count as income are switches (P120 B)", () => {
 
 	it("says on Exclude's line that a planned expense's payment counts, excluded or not", async () => {
 		await payPlan();
+
 		for (const excluded of [0, 1]) {
 			await env.DB.prepare("UPDATE transactions SET excluded = ? WHERE id = ?")
 				.bind(excluded, bakery)
@@ -402,11 +452,13 @@ describe("Reviewed as a refund is a switch (decision 111)", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const groceries = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Groceries'",
 			).first<{ id: number }>()
 		)?.id;
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: String(groceries),
 			name_pick: "own",
@@ -419,6 +471,7 @@ describe("Reviewed as a refund is a switch (decision 111)", () => {
 			creditReviewedVisible: "1",
 			creditReviewed_was: "0",
 		});
+
 		expect(res.status).toBeLessThan(400);
 		expect(
 			await env.DB.prepare(
@@ -436,6 +489,7 @@ describe("Organize's category sheet uses the same grid (#498)", () => {
 			ids: String(bakery),
 			back: "/transactions?month=all",
 		});
+
 		const sheet = html.slice(html.indexOf('id="select-category-title"'));
 		expect(sheet).toContain('class="grid grid-cols-2 gap-2"');
 		expect(sheet).not.toContain("flex flex-wrap gap-2");
@@ -445,9 +499,12 @@ describe("Organize's category sheet uses the same grid (#498)", () => {
 /** A closed detail row's summary: its label, its source line when it has one, and its value. */
 const summaryOf = (html: string, id: string) => {
 	const start = html.indexOf(`data-detail-row="${id}"`);
+
 	return html.slice(start, html.indexOf("</summary>", start));
 };
+
 const SOURCE_WORDS = /Tally&#39;s guess|From your bank|Your choice/;
+
 const setDetails = (fields: string) =>
 	env.DB.prepare(`UPDATE transactions SET ${fields} WHERE id = ?`)
 		.bind(bakery)
@@ -464,10 +521,12 @@ describe("a category's line says only what Tally did (#688)", () => {
 			.bind(source, bakery)
 			.run();
 		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
+
 		const summary = block.slice(
 			block.indexOf("<summary"),
 			block.indexOf("</summary>"),
 		);
+
 		expect(summary).toContain("Groceries");
 		expect(summary).not.toContain("text-sm text-muted");
 		expect(block).not.toContain("Your choice");
@@ -500,6 +559,7 @@ describe("an empty detail has no source line (#688)", () => {
 			"note = NULL, note_guessed = 0, kind = NULL, kind_guessed = 0, for_person_id = NULL, for_person_guessed = 0",
 		);
 		const html = (await get(`/transactions/${bakery}`)).html;
+
 		for (const id of ["detail-note", "detail-kind", "detail-for"]) {
 			const summary = summaryOf(html, id);
 			expect(summary).toContain(">Add</span>");
@@ -510,10 +570,12 @@ describe("an empty detail has no source line (#688)", () => {
 
 	it("draws For's placeholder with no source line while there is one household person", async () => {
 		await setDetails("for_person_id = NULL, for_person_guessed = 0");
+
 		const summary = summaryOf(
 			(await get(`/transactions/${bakery}`)).html,
 			"detail-for",
 		);
+
 		expect(summary).toContain("Add the people in your household");
 		expect(summary).not.toMatch(SOURCE_WORDS);
 		expect(summary).not.toContain("text-sm text-muted");
@@ -522,10 +584,12 @@ describe("an empty detail has no source line (#688)", () => {
 	it("draws For's placeholder with no source line while there are no household people", async () => {
 		await setDetails("for_person_id = NULL, for_person_guessed = 0");
 		await env.DB.prepare("DELETE FROM household_people").run();
+
 		const summary = summaryOf(
 			(await get(`/transactions/${bakery}`)).html,
 			"detail-for",
 		);
+
 		expect(summary).toContain("Add the people in your household");
 		expect(summary).not.toMatch(SOURCE_WORDS);
 		expect(summary).not.toContain("text-sm text-muted");
@@ -545,10 +609,12 @@ describe("an empty detail has no source line (#688)", () => {
 		await setDetails(
 			"note = 'Coffee with a friend', note_guessed = 1, note_state = 'guessed'",
 		);
+
 		const summary = summaryOf(
 			(await get(`/transactions/${bakery}`)).html,
 			"detail-note",
 		);
+
 		expect(summary).toContain("Tally&#39;s guess");
 		expect(summary).toContain("decoration-dashed");
 	});
@@ -561,6 +627,7 @@ describe("an empty detail has no source line (#688)", () => {
 			"note = 'Dinner claim', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
 		);
 		const html = (await get(`/transactions/${bakery}`)).html;
+
 		for (const id of ["detail-note", "detail-kind", "detail-for"]) {
 			const summary = summaryOf(html, id);
 			expect(summary).toContain(">Add</span>");
@@ -575,15 +642,18 @@ describe("an empty detail has no source line (#688)", () => {
 		)
 			.bind("Lupita's Taqueria")
 			.first<{ id: number }>();
+
 		await seedMerchant(env.DB, {
 			key: "Lupita's Taqueria",
 			status: "pending",
 			names: ["Lupita's Taqueria"],
 		});
+
 		const summary = summaryOf(
 			(await get(`/transactions/${row?.id}`)).html,
 			"detail-name",
 		);
+
 		expect(summary).toContain("From your bank");
 	});
 
@@ -591,6 +661,7 @@ describe("an empty detail has no source line (#688)", () => {
 		await setDetails(
 			"note = 'Coffee with a friend', note_guessed = 0, note_state = 'written'",
 		);
+
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "99",
 			name_pick: "own",
@@ -600,6 +671,7 @@ describe("an empty detail has no source line (#688)", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		expect(res.status).toBe(422);
 		const summary = summaryOf(html, "detail-note");
 		expect(summary).toContain(">Add</span>");
@@ -617,6 +689,7 @@ describe("an empty detail has no source line (#688)", () => {
 				"note = 'Coffee', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
 			);
 		};
+
 		/** A save the category refuses, so the panel is drawn again with what was posted. */
 		const refused = (fields: Record<string, string>) =>
 			post(`/transactions/${bakery}`, {
@@ -631,6 +704,7 @@ describe("an empty detail has no source line (#688)", () => {
 
 		it("draws a guess the person changed as Your choice with no dashes", async () => {
 			await guessedDetails();
+
 			const { res, html } = await refused({
 				note: "Coffee with Sam",
 				note_was: "Coffee",
@@ -639,7 +713,9 @@ describe("an empty detail has no source line (#688)", () => {
 				for_person_id: "2",
 				for_person_id_was: "1",
 			});
+
 			expect(res.status).toBe(422);
+
 			for (const id of ["detail-note", "detail-kind", "detail-for"]) {
 				const summary = summaryOf(html, id);
 				expect(summary).toContain("Your choice");
@@ -650,6 +726,7 @@ describe("an empty detail has no source line (#688)", () => {
 
 		it("keeps Tally's guess and its dashes when the refused save left each guess as it was", async () => {
 			await guessedDetails();
+
 			const { html } = await refused({
 				note: "Coffee",
 				note_was: "Coffee",
@@ -658,6 +735,7 @@ describe("an empty detail has no source line (#688)", () => {
 				for_person_id: "1",
 				for_person_id_was: "1",
 			});
+
 			for (const id of ["detail-note", "detail-kind", "detail-for"]) {
 				const summary = summaryOf(html, id);
 				expect(summary).toContain("Tally&#39;s guess");
@@ -667,6 +745,7 @@ describe("an empty detail has no source line (#688)", () => {
 
 		it("draws a guess the person emptied (Not known, No one, no note) as Add with no dashes", async () => {
 			await guessedDetails();
+
 			const { html } = await refused({
 				note: "",
 				note_was: "Coffee",
@@ -675,6 +754,7 @@ describe("an empty detail has no source line (#688)", () => {
 				for_person_id: "",
 				for_person_id_was: "1",
 			});
+
 			for (const id of ["detail-note", "detail-kind", "detail-for"]) {
 				const summary = summaryOf(html, id);
 				expect(summary).toContain(">Add</span>");

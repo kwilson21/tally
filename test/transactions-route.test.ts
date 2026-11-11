@@ -14,6 +14,7 @@ async function get(path: string, headers: Record<string, string> = {}) {
 	const res = await exports.default.fetch(`http://tally.test${path}`, {
 		headers,
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -27,6 +28,7 @@ async function post(path: string, fields: Record<string, string>) {
 		},
 		body: new URLSearchParams(fields),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -47,6 +49,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 		await env.DB.prepare(
 			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99004, 1, '2026-10-01', -100, 'RULE NEW ROUTE', 'RULE NEW ROUTE', 1, 'jev'), (99005, 1, '2026-10-02', -100, 'RULE NEW ROUTE', 'RULE NEW ROUTE', NULL, NULL)",
 		).run();
+
 		const { res } = await post("/transactions/99004", {
 			back: "/transactions",
 			category: "4",
@@ -61,6 +64,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 			creditReviewed: "1",
 			creditReviewedVisible: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -81,6 +85,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 		await env.DB.prepare(
 			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99006, 1, '2026-10-01', -100, 'RULE NOTE ROUTE', 'RULE NOTE ROUTE', 3, 'user'), (99007, 1, '2026-10-02', -100, 'RULE NOTE ROUTE', 'RULE NOTE ROUTE', 2, 'merchant_rule')",
 		).run();
+
 		const { res } = await post("/transactions/99006", {
 			back: "/transactions",
 			category: "3",
@@ -94,6 +99,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 			creditReviewed: "1",
 			creditReviewedVisible: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -114,6 +120,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 		await env.DB.prepare(
 			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99001, 1, '2026-10-01', -100, 'RULE ROUTE', 'RULE ROUTE', 1, 'merchant_rule'), (99002, 1, '2026-10-02', -100, 'RULE ROUTE', 'RULE ROUTE', 1, 'merchant_rule')",
 		).run();
+
 		const { res } = await post("/transactions/99001", {
 			back: "/transactions",
 			category: "3",
@@ -128,6 +135,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 			creditReviewed: "1",
 			creditReviewedVisible: "1",
 		});
+
 		expect(res.status).toBe(200);
 		// The ticked row says "Use this category ... from now on", so the picked category becomes the rule, and the
 		// store's other transactions that a person hasn't chosen follow it, as a fresh tick does.
@@ -158,6 +166,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 		await env.DB.prepare(
 			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (99003, 1, '2026-10-01', -100, 'RULE PAUSED ROUTE', 'RULE PAUSED ROUTE', 1, 'merchant_rule')",
 		).run();
+
 		const { res } = await post("/transactions/99003", {
 			back: "/transactions",
 			category: "",
@@ -172,6 +181,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 			creditReviewed: "1",
 			creditReviewedVisible: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -191,6 +201,7 @@ function optionsOf(html: string, id: string) {
 	const select = html.match(
 		new RegExp(`<select id="${id}"[^>]*>([\\s\\S]*?)</select>`),
 	)?.[1];
+
 	return [...(select ?? "").matchAll(/<option([^>]*)>([^<]*)<\/option>/g)].map(
 		(m) => ({
 			text: (m[2] ?? "").replaceAll("&amp;", "&"),
@@ -344,8 +355,10 @@ describe("GET /transactions", () => {
 		const { html } = await get("/transactions?q=sign-in");
 		const open = html.match(/<p id="result-count"[^>]*>/)?.[0] ?? "";
 		expect(open).not.toContain("tabular-nums");
+
 		const inner =
 			html.match(/<p id="result-count"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? "";
+
 		const n = inner.match(/<span class="tabular-nums">(\d+)<\/span>/)?.[1];
 		expect(n).toBeDefined();
 		expect(countOf(html)?.replaceAll("&quot;", '"')).toMatch(
@@ -354,9 +367,11 @@ describe("GET /transactions", () => {
 		expect(inner).toContain(
 			`<span class="tabular-nums">${n}</span> transactions matching &quot;sign-in&quot;`,
 		);
+
 		const tabular = [
 			...inner.matchAll(/<span class="tabular-nums">([^<]*)<\/span>/g),
 		].map((m) => m[1]);
+
 		expect(tabular).toEqual([n]);
 	});
 
@@ -366,14 +381,18 @@ describe("GET /transactions", () => {
 			.slice(0, 7)
 			.split("-")
 			.map(Number) as [number, number];
+
 		const last =
 			m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+
 		const a = countOf(
 			(await get(`/transactions?month=${last}&category=1`)).html,
 		);
+
 		const b = countOf(
 			(await get(`/transactions?month=${last}&category=3`)).html,
 		);
+
 		expect(a).toMatch(/^3 transactions in Groceries, /);
 		expect(b).toMatch(/^3 transactions in Gas, /);
 	});
@@ -407,6 +426,7 @@ describe("GET /transactions", () => {
 		// Target refund is not (it counts in September with its purchase), 34 in all.
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-20T15:00:00Z"));
+
 		try {
 			await resetDemo(env.DB, "2026-10-20");
 			const first = (await get("/transactions")).html;
@@ -449,6 +469,7 @@ describe("GET /transactions", () => {
 				/<span class="text-sm text-muted">\s*Page \d+ of \d+\s*<\/span><span class="justify-self-end">/,
 			);
 		}
+
 		// The words meet the rule's ends: the page links cancel their own 8px inset, keeping the 44px target.
 		const { html } = await get("/transactions?month=all&page=2");
 		expect(html).toMatch(
@@ -464,8 +485,10 @@ describe("GET /transactions", () => {
 		expect(html).toMatch(
 			/<div class="flex items-center justify-between gap-3 lg:max-w-3xl"><h1 id="transactions-title"/,
 		);
+
 		const title =
 			html.match(/<h1[^>]*id="transactions-title"[^>]*>/)?.[0] ?? "";
+
 		expect(title).toMatch(/class="[^"]*\bmin-w-0\b[^"]*\bwrap-anywhere\b/);
 		const select = html.match(/<a[^>]*id="select-toggle"[^>]*>/)?.[0] ?? "";
 		// -mr-2 cancels the text button's 8px inset; px-2 and min-h-11 stay, so the target is still 44px.
@@ -474,8 +497,10 @@ describe("GET /transactions", () => {
 
 	it("lines Organize by merchant up with the count above it", async () => {
 		const { html } = await get("/transactions?uncategorized=1");
+
 		const organize =
 			html.match(/<a[^>]*href="\/transactions\/organize"[^>]*>/)?.[0] ?? "";
+
 		expect(organize).toMatch(/class="[^"]*\bmin-h-11\b[^"]*\bpx-2\b[^"]*-ml-2/);
 	});
 
@@ -519,27 +544,34 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 	const THIS = today.slice(0, 7);
 	const THIS_NAME = monthLabel(THIS, today);
 	const [year, monthNumber] = THIS.split("-").map(Number) as [number, number];
+
 	const LAST =
 		monthNumber === 1
 			? `${year - 1}-12`
 			: `${year}-${String(monthNumber - 1).padStart(2, "0")}`;
+
 	/** htmx's headers for a request made from the page at `from`. */
 	const fromPage = (from: string) => ({
 		"HX-Request": "true",
 		"HX-Current-URL": `http://tally.test${from}`,
 	});
+
 	/** The count's text, with the quotes Hono escapes put back. */
 	const countText = (html: string) => countOf(html)?.replaceAll("&quot;", '"');
+
 	/** The transaction ids in the list, in order. */
 	const rowIds = (html: string) =>
 		[...html.matchAll(/<li data-transaction="(\d+)"/g)].map((m) =>
 			Number(m[1]),
 		);
+
 	const selectedMonth = (html: string) =>
 		optionsOf(html, "month").find((option) => option.selected)?.value;
+
 	/** The "Only …" link under the count, as its text and address. */
 	const onlyLink = (html: string) => {
 		const match = html.match(/<a ([^>]*)>(Only [^<]+)<\/a>/);
+
 		return match
 			? {
 					text: match[2],
@@ -555,6 +587,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?q=trader&month=${THIS}`,
 			fromPage("/transactions"),
 		);
+
 		expect(countText(html)).toMatch(
 			/^\d+ transactions? matching "trader" in all months$/,
 		);
@@ -574,6 +607,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?q=trader&month=${THIS}&select=1`,
 			fromPage("/transactions"),
 		);
+
 		expect(res.headers.get("HX-Push-Url")).toBe(
 			"/transactions?q=trader&month=all&select=1",
 		);
@@ -584,6 +618,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?q=trader&month=${LAST}`,
 			fromPage("/transactions?q=trad&month=all"),
 		);
+
 		expect(countText(html)).toMatch(
 			new RegExp(
 				`^\\d+ transactions? matching "trader" in ${monthLabel(LAST, today)}$`,
@@ -600,6 +635,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?q=costco&month=${THIS}`,
 			fromPage(`/transactions?q=&month=${THIS}`),
 		);
+
 		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
 		expect(selectedMonth(html)).toBe(THIS);
 		expect(res.headers.get("HX-Push-Url")).toBeNull();
@@ -611,11 +647,14 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?category=1&month=${THIS}`,
 			fromPage("/transactions"),
 		);
+
 		expect(res.headers.get("HX-Push-Url")).toBe("/transactions?category=1");
+
 		const { html } = await get(
 			`/transactions?q=trader&month=${THIS}&category=1`,
 			fromPage("/transactions?category=1"),
 		);
+
 		expect(selectedMonth(html)).toBe("all");
 	});
 
@@ -624,6 +663,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?q=trader&month=${THIS}`,
 			fromPage("/transactions?q=trader&month=all"),
 		);
+
 		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
 		expect(selectedMonth(html)).toBe(THIS);
 		expect(onlyLink(html)).toBeNull();
@@ -634,6 +674,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?month=${LAST}`,
 			fromPage("/transactions?q=trader&month=all"),
 		);
+
 		expect(countText(html)).toMatch(new RegExp(`in ${THIS_NAME}$`));
 		expect(selectedMonth(html)).toBe(THIS);
 		expect(res.headers.get("HX-Push-Url")).toBe("/transactions");
@@ -646,6 +687,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?focus=1&saved=1&saved-at=${Date.now()}&month=${LAST}`,
 			fromPage("/transactions?q=trader&month=all"),
 		);
+
 		expect(res.headers.get("HX-Push-Url")).toBe("/transactions");
 	});
 
@@ -654,6 +696,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			"/transactions?month=all&category=1",
 			fromPage("/transactions?month=all"),
 		);
+
 		expect(countText(html)).toMatch(
 			/^\d+ transactions? in Groceries, all months$/,
 		);
@@ -675,6 +718,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			"/transactions?month=all",
 			fromPage("/transactions?month=all"),
 		);
+
 		expect(onlyLink(html)).toBeNull();
 		expect(countText(html)).toMatch(/ in all months$/);
 	});
@@ -690,6 +734,7 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			"/transactions?q=trader&month=all",
 			fromPage("/transactions?q=trader&month=all"),
 		);
+
 		const link = html.match(/<a ([^>]*)>Only [^<]+<\/a>/)?.[1] ?? "";
 		expect(link).toContain("focus=count");
 		expect(link).toContain('hx-push-url="/transactions?q=trader"');
@@ -701,15 +746,18 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 			`/transactions?q=trader&month=${THIS}&focus=count`,
 			fromPage("/transactions?q=trader&month=all"),
 		);
+
 		expect(html).toMatch(
 			/<p id="result-count"[^>]*tabindex="-1"[^>]*autofocus/,
 		);
+
 		const plain = (
 			await get(
 				`/transactions?q=trader&month=${THIS}`,
 				fromPage("/transactions?q=trader&month=all"),
 			)
 		).html;
+
 		expect(plain).not.toMatch(/<p id="result-count"[^>]*autofocus/);
 	});
 
@@ -722,10 +770,12 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99331, 1, '${THIS}-02', -4250, 'BIG PURCHASE', 1)`,
 			),
 		]);
+
 		const mixed = await get(
 			`/transactions?q=42&month=${THIS}`,
 			fromPage("/transactions"),
 		);
+
 		// Typed into an empty box on this month, so every month is searched. The demo's own rows may match
 		// too, so only the note is pinned: no amount, since STORE 42 CAFE matched by its name.
 		expect(countText(mixed.html)).toMatch(
@@ -735,10 +785,12 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 		await env.DB.prepare(
 			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99332, 1, '${THIS}-03', -913750, 'NINE ROW', 1)`,
 		).run();
+
 		const amountsOnly = await get(
 			`/transactions?q=9137&month=${THIS}`,
 			fromPage("/transactions"),
 		);
+
 		expect(countText(amountsOnly.html)).toBe(
 			'1 transaction matching "9137" (amounts $9,137.00 to $9,137.99) in all months',
 		);
@@ -753,30 +805,36 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99311, 1, '${THIS}-01', -1200, 'ZEBRA SHOP', 1)`,
 			),
 		]);
+
 		const merchantOnly = await get(
 			"/transactions?q=zebra&month=all",
 			fromPage("/transactions?q=zebra&month=all"),
 		);
+
 		expect(countText(merchantOnly.html)).toBe(
 			'1 transaction matching "zebra" in all months',
 		);
 		await env.DB.prepare(
 			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99312, 1, '${THIS}-02', -1300, 'NOT THE NAME', 99310)`,
 		).run();
+
 		const byCategory = await get(
 			"/transactions?q=zebra&month=all",
 			fromPage("/transactions?q=zebra&month=all"),
 		);
+
 		expect(countText(byCategory.html)).toBe(
 			'2 transactions matching "zebra" (category) in all months',
 		);
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 99310",
 		).run();
+
 		const archived = await get(
 			"/transactions?q=zebra&month=all",
 			fromPage("/transactions?q=zebra&month=all"),
 		);
+
 		expect(countText(archived.html)).toBe(
 			'2 transactions matching "zebra" (category) in all months',
 		);
@@ -791,17 +849,21 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id) VALUES (99321, 1, '${LAST}-02', -4222, 'COSTCO ROWTEST SEP', 1)`,
 			),
 		]);
+
 		const everyMonth = await get(
 			`/transactions?q=costco&month=${THIS}`,
 			fromPage("/transactions"),
 		);
+
 		expect(rowIds(everyMonth.html)).toEqual(
 			expect.arrayContaining([99320, 99321]),
 		);
+
 		const onlyOctober = await get(
 			`/transactions?q=costco&month=${THIS}`,
 			fromPage("/transactions?q=costco&month=all"),
 		);
+
 		expect(rowIds(onlyOctober.html)).toContain(99320);
 		expect(rowIds(onlyOctober.html)).not.toContain(99321);
 	});
@@ -901,6 +963,7 @@ describe("GET /transactions: Account and Show", () => {
 
 	it("draws all four choices with the FilterSelect the catalog shows", async () => {
 		const { html } = await get("/transactions?month=all&account=4&show=income");
+
 		const drawn = (
 			id: string,
 			name: string,
@@ -917,6 +980,7 @@ describe("GET /transactions: Account and Show", () => {
 					selected,
 				}),
 			);
+
 		// The Show choice is the one whose options the page fully decides.
 		expect(html).toContain(
 			drawn(
@@ -927,6 +991,7 @@ describe("GET /transactions: Account and Show", () => {
 				"income",
 			),
 		);
+
 		for (const [id, label] of [
 			["month", "Month"],
 			["category", "Category"],
@@ -967,11 +1032,13 @@ describe("GET /transactions: Account and Show", () => {
 		const { html } = await get("/transactions?account=999");
 		expect(countOf(html)).toMatch(/^0 transactions in account 999, /);
 		expect(html).toContain("No transactions match these filters.");
+
 		// The choice shows the filter the list is using, not "All accounts".
 		const choice = html.slice(
 			html.indexOf('<select id="account"'),
 			html.indexOf("</select>", html.indexOf('<select id="account"')),
 		);
+
 		expect(choice).toMatch(
 			/<option value="999" selected[^>]*>account 999<\/option>/,
 		);
@@ -1042,6 +1109,7 @@ describe("GET /transactions: Account and Show", () => {
 
 	it("announces a change of type or account even when the number stays the same", async () => {
 		const texts = new Set<string | undefined>();
+
 		for (const query of [
 			"month=all&account=4",
 			"month=all&account=4&show=spending",
@@ -1049,6 +1117,7 @@ describe("GET /transactions: Account and Show", () => {
 		]) {
 			texts.add(countOf((await get(`/transactions?${query}`)).html));
 		}
+
 		expect(texts.size).toBe(3);
 	});
 
@@ -1075,6 +1144,7 @@ describe("GET /transactions: Account and Show", () => {
 		).run();
 		const done = (await get("/transactions?uncategorized=1")).html;
 		expect(done).toContain("Every transaction has a category.");
+
 		for (const query of ["show=spending", "show=excluded", "account=3"]) {
 			const { html } = await get(`/transactions?uncategorized=1&${query}`);
 			expect(html, query).toContain("No transactions match these filters.");

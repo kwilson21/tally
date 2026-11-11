@@ -225,6 +225,7 @@ function Tabs({ current }: { current: NavKey }) {
 		...SIDEBAR_ITEMS.slice(0, 4),
 		{ key: "more", label: "More", icon: "more" as IconName },
 	];
+
 	return (
 		<nav class="absolute inset-x-0 bottom-0 border-t border-rule bg-paper">
 			<ul class="grid grid-cols-5">

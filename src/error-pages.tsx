@@ -21,16 +21,21 @@ export function retryHref(
 ): string | undefined {
 	const here = new URL(url);
 	let from = here;
+
 	if (method !== "GET") {
 		if (!referer) return undefined;
+
 		try {
 			from = new URL(referer);
 		} catch {
 			return undefined;
 		}
+
 		if (from.origin !== here.origin) return undefined;
 	}
+
 	if (from.pathname.startsWith("//")) return undefined;
+
 	return from.pathname + from.search;
 }
 
@@ -49,6 +54,7 @@ const isKeysRequest = (c: Context<App>) =>
 /** The app's own 404: any address nothing answers, and any route that reports a missing record. */
 export const notFoundPage: NotFoundHandler<App> = (c) => {
 	const keys = isKeysRequest(c);
+
 	if (isHtmx(c) && !keys) {
 		// The toast and the announcer say it (CLAUDE.md's HTMX feedback rule); the page stays as it was.
 		const message = "This page isn't here.";
@@ -57,8 +63,10 @@ export const notFoundPage: NotFoundHandler<App> = (c) => {
 			"HX-Trigger",
 			hxTrigger({ toast: { message, type: "error" }, announce: message }),
 		);
+
 		return c.body(null, 404);
 	}
+
 	return c.html(
 		<Layout
 			title="Page not found · Tally"
@@ -80,8 +88,10 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 	// An exception that carries its own response, such as the 403 for a form post from another site.
 	if (err instanceof HTTPException) {
 		const res = err.getResponse();
+
 		return c.newResponse(res.body, res);
 	}
+
 	console.error(
 		`error: ${err instanceof Error ? err.name : "unknown"} ${c.req.method} ${routePath(c, -1)}`,
 	);
@@ -89,10 +99,13 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 	// No toast from here: toast.js shows "Couldn't save" or "Couldn't load" for a 500 itself.
 	// A keys request gets the page, not an empty 500: htmx doesn't swap a 500, and the page behind already shows this one.
 	const keys = isKeysRequest(c);
+
 	if (isHtmx(c) && !keys) {
 		c.header("HX-Reswap", "none");
+
 		return c.body(null, 500);
 	}
+
 	return c.html(
 		<Layout
 			title="Something went wrong · Tally"

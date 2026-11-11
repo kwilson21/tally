@@ -20,9 +20,11 @@ const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
 	import: "default",
 	eager: true,
 }) as Record<string, string>;
+
 const APP = Object.entries(SOURCES).filter(
 	([file]) => !file.includes("/design-system/") && !file.endsWith("/limits.ts"),
 );
+
 // Every number the limits file holds, so a changed limit stays covered; the feedback message is also spelled "2,000".
 const LIMITS = [
 	...new Set([
@@ -58,6 +60,7 @@ describe("the text limits", () => {
 
 	it("are written as numbers only in src/limits.ts: no maxlength, length check or message spells one out", () => {
 		const offenders: string[] = [];
+
 		for (const [file, text] of APP)
 			for (const line of codeLines(text)) {
 				if (
@@ -73,6 +76,7 @@ describe("the text limits", () => {
 						`${file.replace("../", "")}: ${line.trim().slice(0, 90)}`,
 					);
 			}
+
 		expect(offenders).toEqual([]);
 	});
 
@@ -100,22 +104,29 @@ describe("the text limits", () => {
 				why: "a push subscription's endpoint URL, not typed text",
 			},
 		];
+
 		const pattern = new RegExp(
 			`\\bconst\\s+((?=[A-Z0-9_]*(?:MAX|LIMIT|LENGTH|LEN|CHARS))[A-Z][A-Z0-9_]*)\\s*=\\s*(?:${LIMITS})\\s*;`,
 			"g",
 		);
+
 		const found: { file: string; name: string }[] = [];
+
 		for (const [file, text] of APP)
 			for (const match of codeLines(text).join("\n").matchAll(pattern))
 				found.push({ file: file.replace("../", ""), name: match[1] as string });
+
 		const unlisted = found.filter(
 			(f) => !OTHER_RULES.some((o) => o.file === f.file && o.name === f.name),
 		);
+
 		expect(unlisted.map((f) => `${f.file}: ${f.name}`)).toEqual([]);
+
 		// A listed constant that no longer exists is removed from the list.
 		const stale = OTHER_RULES.filter(
 			(o) => !found.some((f) => f.file === o.file && f.name === o.name),
 		);
+
 		expect(stale.map((o) => `${o.file}: ${o.name}`)).toEqual([]);
 	});
 
@@ -132,9 +143,11 @@ describe("the text limits", () => {
 			"MAX_OWN_NAME",
 			"MAX_STORE_KEY",
 		];
+
 		const definers = APP.filter(([, text]) =>
 			new RegExp(`\\bconst\\s+(?:${names.join("|")})\\s*=`).test(text),
 		).map(([file]) => file);
+
 		expect(definers).toEqual([]);
 	});
 });
@@ -143,6 +156,7 @@ describe("the server checks use the limits", () => {
 	const category = (name: string) => {
 		const form = new FormData();
 		form.set("name", name);
+
 		return parseCategory(form, [], null);
 	};
 
@@ -162,11 +176,14 @@ describe("the server checks use the limits", () => {
 				"2026-09-22",
 				[1],
 			);
+
 		const ok = cash("m".repeat(CASH_MERCHANT_MAX), "n".repeat(NOTE_MAX));
 		expect(JSON.stringify(ok)).not.toContain("characters or fewer");
+
 		const long = JSON.stringify(
 			cash("m".repeat(CASH_MERCHANT_MAX + 1), "n".repeat(NOTE_MAX + 1)),
 		);
+
 		expect(long).toContain(`Use ${CASH_MERCHANT_MAX} characters or fewer.`);
 		expect(long).toContain(`Use ${NOTE_MAX} characters or fewer.`);
 	});

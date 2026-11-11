@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { transactionsNeedingNoteGuess } from "../src/db/transactions";
 
 const db = env.DB;
+
 const migration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0049_note_tried_reset"),
 );
@@ -22,6 +23,7 @@ const D = 9784; // Jev never answered whether a note is worth writing: stays sta
 const E = 9785; // Jev said no: stays stamped
 const F = 9786; // a note with text: stays stamped
 const IDS = [A, B, C, D, E, F];
+
 // The state migration 0068 gives each row after this reset: the queue (transactionsNeedingNoteGuess) reads it.
 const STATE_AFTER_RESET: Record<number, string> = {
 	[A]: "queued",
@@ -102,6 +104,7 @@ async function stateOf(id: number) {
 /** The transaction ids Workers AI would be asked about now, limited to this file's rows. */
 async function askedIds() {
 	const rows = await transactionsNeedingNoteGuess(db, 100);
+
 	return rows.map((row) => row.id).filter((id) => IDS.includes(id));
 }
 

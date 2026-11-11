@@ -30,10 +30,13 @@ import { suggestionQueue } from "./suggestions-queue";
  */
 export async function queueTransactionIds(db: D1Database): Promise<number[]> {
 	const queue = await suggestionQueue(db);
+
 	return queue.flatMap((item) => {
 		if (item.kind === "name") return [];
+
 		if (item.kind === "new_category")
 			return item.rows.map((row) => row.transactionId);
+
 		return [item.transactionId];
 	});
 }
@@ -48,7 +51,9 @@ export async function runningRecheck(
 	now: number = Date.now(),
 ): Promise<RecheckRun | null> {
 	const run = await readRun(db);
+
 	if (!run || !isRunning(run, now)) return null;
+
 	return { id: run.id, done: run.done, total: run.total };
 }
 
@@ -83,8 +88,10 @@ async function orphanRun(
 	owed: string | null,
 ): Promise<string | null> {
 	if (owed !== null) return owed;
+
 	try {
 		const run = await readRun(db);
+
 		return run?.status === "running" && run.startedAt === now ? run.id : null;
 	} catch {
 		return null;
@@ -109,12 +116,15 @@ export async function startResortFor(
 ): Promise<string | null> {
 	// The run this call added instances to, while its own instance is still owed.
 	const owed: { runId: string | null } = { runId: null };
+
 	try {
 		return await startFor(env, db, { filedId, excludeIds, now }, owed);
 	} catch (error) {
 		console.error(`resort: couldn't start ${errorName(error)}`);
 		const runId = await orphanRun(db, now, owed.runId);
+
 		if (runId !== null) await endUnstarted(db, runId);
+
 		return null;
 	}
 }
@@ -131,21 +141,27 @@ async function startFor(
 	owed: { runId: string | null },
 ): Promise<string | null> {
 	if (!env.JEV_API_KEY) return null;
+
 	if (!(await readAiSwitches(db)).categories) return null;
+
 	const filed = await db
 		.prepare(
 			"SELECT category_id AS categoryId, jev_category_id AS cameFrom FROM transactions WHERE id = ?",
 		)
 		.bind(filedId)
 		.first<{ categoryId: number | null; cameFrom: number | null }>();
+
 	if (!filed || filed.categoryId === null) return null;
+
 	const category = await db
 		.prepare("SELECT id, name FROM categories WHERE id = ?")
 		.bind(filed.categoryId)
 		.first<{ id: number; name: string }>();
+
 	if (!category) return null;
 
 	const skip = new Set<number>([...excludeIds, filedId]);
+
 	const candidates = (
 		await resortCandidates(db, {
 			filedId,
@@ -154,6 +170,7 @@ async function startFor(
 			queueIds: await queueTransactionIds(db),
 		})
 	).filter((candidate) => !skip.has(candidate.id));
+
 	if (candidates.length === 0) return null;
 
 	const started = await startOrJoinRun(db, {
@@ -162,12 +179,15 @@ async function startFor(
 		categoryName: category.name,
 		now,
 	});
+
 	if (started.runId === null) return null;
+
 	if (started.newIds.length === 0) return started.runId;
 
 	// Owed from here until the instance is created: a failure now, or a refused start, ends the run.
 	owed.runId = started.runId;
 	const fresh = new Set(started.newIds);
+
 	const ok = await startSorting(env, {
 		bySync: false,
 		rulesApplied: true,
@@ -177,9 +197,12 @@ async function startFor(
 			clusters: buildClusters(candidates.filter((c) => fresh.has(c.id))),
 		},
 	});
+
 	owed.runId = null;
+
 	if (ok) return started.runId;
 	// A refused start: no instance is coming for the rows this call added, so the run is ended here.
 	await endUnstarted(db, started.runId);
+
 	return null;
 }

@@ -8,6 +8,7 @@ const input = {
 	amountCents: 1200,
 	accountType: "credit",
 };
+
 const categories = ["Groceries", "Eating Out", "Gas"];
 
 type Call = { url: string; init: RequestInit };
@@ -15,10 +16,13 @@ type Call = { url: string; init: RequestInit };
 /** A fake fetch that records each call and answers with the given response. */
 function fakeFetch(respond: () => Response | Promise<Response>) {
 	const calls: Call[] = [];
+
 	const fetchImpl = async (url: string, init?: RequestInit) => {
 		calls.push({ url, init: init ?? {} });
+
 		return respond();
 	};
+
 	return { calls, fetchImpl };
 }
 
@@ -59,6 +63,7 @@ describe("askJev", () => {
 					},
 				}),
 			);
+
 			expect(
 				await askJev(input, categories, "k", fetchImpl, {
 					details: true,
@@ -110,6 +115,7 @@ describe("askJev", () => {
 			NONE_FIT,
 		]);
 		expect(body.questions.category.criteria[NONE_FIT]).toMatch(/none/i);
+
 		for (const flag of ["transfer", "reimbursement", "income"]) {
 			expect(body.questions[flag].type).toBe("noul");
 		}
@@ -234,9 +240,11 @@ describe("askJev", () => {
 		);
 		await askJev({ ...input, note: "" }, categories, "k", fetchImpl);
 		await askJev({ ...input, note: null }, categories, "k", fetchImpl);
+
 		const states = calls.map(
 			(call) => JSON.parse(String(call.init.body)).state,
 		);
+
 		expect(states[0].note).toBe("Birthday cake for Sam");
 		expect(states[1]).not.toHaveProperty("note");
 		expect(states[2]).not.toHaveProperty("note");
@@ -275,6 +283,7 @@ describe("askJev", () => {
 						headers: { "x-typesafe-request-id": "req_123" },
 					}),
 			);
+
 			expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
 				ok: false,
 				status,
@@ -287,6 +296,7 @@ describe("askJev", () => {
 		const { fetchImpl } = fakeFetch(() => {
 			throw new DOMException("The operation timed out.", "TimeoutError");
 		});
+
 		expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
 			ok: false,
 			status: null,
@@ -335,6 +345,7 @@ describe("askJev", () => {
 			const { fetchImpl } = fakeFetch(() => {
 				throw new DOMException("The operation timed out.", "TimeoutError");
 			});
+
 			const result = await askJev(input, categories, "k", fetchImpl);
 			expect(result).not.toHaveProperty("retryAfterMs");
 		});
@@ -347,6 +358,7 @@ describe("askJev", () => {
 						headers: { "retry-after": "5" },
 					}),
 			);
+
 			const result = await askJev(input, categories, "k", fetchImpl);
 			expect(result).not.toHaveProperty("retryAfterMs");
 		});
@@ -368,6 +380,7 @@ describe("askJev", () => {
 				},
 			}),
 		);
+
 		expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
 			ok: false,
 			status: 200,
@@ -385,6 +398,7 @@ describe("askJev", () => {
 				},
 			}),
 		);
+
 		const result = await askJev(input, categories, "k", fetchImpl);
 		expect(result.ok && result.answer.category.label).toBe(NONE_FIT);
 	});
@@ -393,6 +407,7 @@ describe("askJev", () => {
 		const { fetchImpl } = fakeFetch(() =>
 			ok({ answers: { category: { type: "choice", choice: 3 } } }),
 		);
+
 		expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
 			ok: false,
 			status: 200,
@@ -424,6 +439,7 @@ describe("askJev", () => {
 			for_person: { type: "choice", choice: "none", confidence: 0.9 },
 			note_worth_writing: { type: "noul", noul: 0.91 },
 		};
+
 		const people = [{ id: 4, name: "Morgan" }];
 
 		it("reads the yes-probability with the detail answers", async () => {
@@ -452,10 +468,12 @@ describe("askJev", () => {
 						answers: { ...detailAnswers, note_worth_writing: worth },
 					}),
 				);
+
 				const result = await askJev(input, categories, "k", fetchImpl, {
 					details: true,
 					people,
 				});
+
 				expect(result).toMatchObject({
 					ok: true,
 					answer: {
@@ -520,6 +538,7 @@ describe("askJev", () => {
 					},
 				}),
 			);
+
 			expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
 				ok: true,
 				answer: {
@@ -545,6 +564,7 @@ describe("askJev", () => {
 					},
 				}),
 			);
+
 			const result = await askJev(input, categories, "k", fetchImpl);
 			expect(result.ok && result.answer.mixed).toEqual({
 				probability: 0.1,
@@ -567,22 +587,26 @@ describe("askJev", () => {
 					},
 				}),
 			);
+
 			const unknownResult = await askJev(
 				input,
 				categories,
 				"k",
 				unknownOther.fetchImpl,
 			);
+
 			expect(unknownResult.ok && "mixed" in unknownResult.answer).toBe(false);
 			expect(unknownResult.ok).toBe(true);
 
 			const missing = fakeFetch(() => ok(goodBody));
+
 			const missingResult = await askJev(
 				input,
 				categories,
 				"k",
 				missing.fetchImpl,
 			);
+
 			expect(missingResult.ok && "mixed" in missingResult.answer).toBe(false);
 			expect(missingResult.ok).toBe(true);
 		});

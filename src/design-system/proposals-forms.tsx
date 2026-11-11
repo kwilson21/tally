@@ -22,23 +22,28 @@ import { Specimen } from "./specimen";
 // Sample data, in the demo's style.
 
 type Cat = { name: string; icon: string; color: string };
+
 const GROCERIES: Cat = {
 	name: "Groceries",
 	icon: "groceries",
 	color: "cat-blue",
 };
+
 const EATING_OUT: Cat = {
 	name: "Eating Out",
 	icon: "eating-out",
 	color: "cat-plum",
 };
+
 const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
 const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
+
 const HOUSEHOLD: Cat = {
 	name: "Household",
 	icon: "household",
 	color: "cat-brown",
 };
+
 /** The demo's five categories in their order (src/demo/seed.ts), as the forms list them. */
 export const CATEGORIES = [GROCERIES, EATING_OUT, GAS, KIDS, HOUSEHOLD];
 
@@ -89,6 +94,7 @@ const DAYCARE: Bill = {
 	category: KIDS,
 	paidTo: "LITTLE SPROUTS DAYCARE",
 };
+
 const SWIM: Bill = {
 	...DAYCARE,
 	name: "Swim lessons",
@@ -96,6 +102,7 @@ const SWIM: Bill = {
 	often: "biweekly",
 	on: "2026-10-09",
 };
+
 const WATER: Bill = {
 	...DAYCARE,
 	name: "Water",
@@ -136,6 +143,7 @@ const MONTH_NAMES = [
 	"November",
 	"December",
 ];
+
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 
 const money = (amount: string) => formatCents(toCents(amount));
@@ -265,6 +273,7 @@ export function LedgerField({
 	const describedBy =
 		[hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(" ") ||
 		undefined;
+
 	return (
 		<div class="flex flex-col gap-1">
 			<label for={id} class={hideLabel ? "sr-only" : "text-sm text-muted"}>
@@ -314,6 +323,7 @@ export function LedgerField({
 // least, the chevron turns when it opens, no script.
 export const summaryRow =
 	"flex min-h-12 cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden";
+
 export const Chevron = ({ push }: { push?: boolean }) => (
 	<span
 		class={`${push ? "ml-auto " : ""}shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none`}
@@ -444,6 +454,7 @@ export function DueRow({
 	const size = big ? "text-2xl" : "text-lg";
 	const select = `min-h-11 border-b border-muted bg-transparent px-1 ${size}`;
 	const often = bill.often ?? (bill.month ? "yearly" : "monthly");
+
 	// The sentence reads the same way for every schedule: when, then how often (spec §5: a weekly
 	// bill's due_day is its weekday; an every-two-weeks one counts from one date, anchor_date).
 	return (
@@ -585,6 +596,7 @@ function BillA({ id, bill, open }: { id: string; bill: Bill; open?: boolean }) {
 /** Add cash in the same pattern: the amount, where, the date on lines; Category and a note as rows. */
 function CashA() {
 	const id = "p72-a-cash";
+
 	return (
 		<TallSheet behind={transactionsBehind} footer={<Footer save="Add" />}>
 			<h2 class="font-serif text-2xl font-semibold tracking-tight">Add cash</h2>
@@ -763,6 +775,7 @@ const cashStep = (
 // Every blank in the sentence: serif like the sentence, on a muted line, 44px tall.
 const blank =
 	"min-h-11 border-b border-muted bg-transparent px-1 font-serif text-2xl font-semibold";
+
 // A typed blank is as wide as its words (`field-sizing`), so the comma or "at" after it sits against
 // it instead of floating past a fixed-width box; `size` is its width where a browser can't do that.
 const typed = `${blank} field-sizing-content min-w-16 max-w-full`;
@@ -884,6 +897,7 @@ function BillC({ id, bill }: { id: string; bill: Bill }) {
 /** Add cash as a sentence, with the note on its own line under it. */
 function CashC() {
 	const id = "p72-c-cash";
+
 	return (
 		<TallSheet fit behind={transactionsBehind}>
 			<h2 class="font-serif text-4xl font-semibold tracking-tight">Add cash</h2>
@@ -970,6 +984,7 @@ function CashC() {
  */
 function BillToday() {
 	const id = "p72-today";
+
 	return (
 		<TallSheet behind={billsBehind} gap="gap-3">
 			<h2 class="font-serif text-4xl font-semibold tracking-tight">

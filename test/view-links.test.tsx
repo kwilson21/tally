@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { ViewLinks } from "../src/views/view-links";
 
 const props = { madeHref: "/transactions", bankHref: "/transactions?raw=1" };
+
 const nav = (current: "made" | "bank", extra: object = {}) =>
 	String(ViewLinks({ ...props, current, ...extra }));
+
 const links = (html: string) =>
 	[...html.matchAll(/<a [^>]*>[^<]*<\/a>/g)].map((m) => m[0]);
 
@@ -65,6 +67,7 @@ const SRC = import.meta.glob(["../src/**/*.{ts,tsx,css}"], {
 describe("the link names in src", () => {
 	it("appear in no source file under the old words", () => {
 		expect(Object.keys(SRC).length).toBeGreaterThan(100);
+
 		for (const [file, text] of Object.entries(SRC)) {
 			expect(text.toLowerCase(), file).not.toContain("tidied by tally");
 			expect(text.toLowerCase(), file).not.toContain("straight from the bank");

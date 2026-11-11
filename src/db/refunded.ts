@@ -69,6 +69,7 @@ export async function refundLeftCents(
 		)
 		.bind(purchaseId, refundId)
 		.first<{ purchaseCents: number; refundedCents: number }>();
+
 	return row ? leftToRefundCents(row.purchaseCents, row.refundedCents) : 0;
 }
 

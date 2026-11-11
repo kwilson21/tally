@@ -20,6 +20,7 @@ describe("isUniqueViolation", () => {
 			"Failed query: insert into category_suggestions values (?, ?)",
 			new Error("UNIQUE constraint failed: category_suggestions.name"),
 		);
+
 		expect(isUniqueViolation(error)).toBe(true);
 	});
 
@@ -48,12 +49,14 @@ describe("isUniqueViolation", () => {
 			"Failed query: outer",
 			wrap("Failed query: middle", new Error("UNIQUE constraint failed: x")),
 		);
+
 		expect(isUniqueViolation(error)).toBe(true);
 	});
 
 	it("stops after five levels of cause", () => {
 		// The error itself, then five causes: the fifth cause is searched, the sixth is not.
 		let deepest: Error = new Error("UNIQUE constraint failed: far");
+
 		for (let i = 0; i < 4; i++) deepest = wrap("Failed query", deepest);
 		const fifth = wrap("Failed query", deepest); // UNIQUE is 5 causes below this error
 		expect(isUniqueViolation(fifth)).toBe(true);

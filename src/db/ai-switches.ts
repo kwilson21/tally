@@ -71,9 +71,11 @@ export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
 			KEYS.sortOnArrival,
 		)
 		.all<{ key: string; value: string }>();
+
 	const off = new Set(
 		results.filter((row) => row.value === "off").map((row) => row.key),
 	);
+
 	return {
 		names: !off.has(KEYS.names),
 		details: !off.has(KEYS.details),
@@ -96,6 +98,7 @@ export async function saveAiSwitches(
 	const given = (Object.keys(KEYS) as (keyof AiSwitches)[]).filter(
 		(name) => switches[name] !== undefined,
 	);
+
 	if (given.length === 0) return;
 	await db.batch([
 		...given.map((name) =>

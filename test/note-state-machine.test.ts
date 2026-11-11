@@ -68,6 +68,7 @@ describe("the note state machine", () => {
 			noteStateMachine.config.states ?? {},
 		)) {
 			const events = Object.keys(moves.on ?? {});
+
 			for (const event of events) {
 				expect(NOTE_EVENTS as readonly string[], `${state} ${event}`).toContain(
 					event,
@@ -90,8 +91,10 @@ describe("the note state machine", () => {
 // The writers' SQL is run from every state, and each stored state must be the machine's answer: the legal target,
 // or the state unchanged when the machine refuses the event.
 type Walk = { id: number; state: NoteState; event: NoteEvent };
+
 const WALK: Walk[] = [];
 let index = 0;
+
 for (const state of NOTE_STATES)
 	for (const event of [
 		"jev_worth",
@@ -107,6 +110,7 @@ for (const state of NOTE_STATES)
 		WALK.push({ id: FIRST + index, state, event });
 		index += 1;
 	}
+
 const LAST = FIRST + index;
 
 async function clean() {
@@ -185,15 +189,18 @@ describe("every writer, from every state, stores what the machine says", () => {
 		for (const walk of WALK.filter((w) => w.event.startsWith("jev_"))) {
 			// Every state, unasked or not, with details_asked 0: the writer's guard lets only the unasked ones through.
 			await insert(walk.id, walk.state, null, 0);
+
 			const worth =
 				walk.event === "jev_worth"
 					? 1
 					: walk.event === "jev_not_worth"
 						? 0
 						: null;
+
 			const statement = saveJevDetailsStatement(db, [
 				{ id: walk.id, kind: null, forPersonId: null, noteWorthWriting: worth },
 			]);
+
 			await statement?.run();
 			expectMachine(walk.id, walk, await stored(walk.id));
 		}
@@ -202,6 +209,7 @@ describe("every writer, from every state, stores what the machine says", () => {
 	it("Workers AI's answer (saveNoteAttempts)", async () => {
 		for (const walk of WALK.filter((w) => w.event.startsWith("ai_"))) {
 			await insert(walk.id, walk.state, null);
+
 			if (walk.event === "ai_guessed")
 				await saveNoteAttempts(
 					db,
@@ -219,12 +227,14 @@ describe("every writer, from every state, stores what the machine says", () => {
 	it("a person's edit of the note (saveEdit)", async () => {
 		for (const walk of WALK.filter((w) => w.event.startsWith("person_"))) {
 			await insert(walk.id, walk.state, "Typed");
+
 			const over =
 				walk.event === "person_wrote"
 					? { note: "Other" }
 					: walk.event === "person_emptied"
 						? { note: null }
 						: { note: "Typed", keepDetails: true };
+
 			await saveEdit(db, walk.id, edit(over), "user@example.com");
 			expectMachine(walk.id, walk, await stored(walk.id));
 		}

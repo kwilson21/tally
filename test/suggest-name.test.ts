@@ -113,16 +113,19 @@ describe("suggestNames", () => {
 		const ai = fakeAi(async () => ({
 			response: "Blue Bottle Coffee\nBlue Bottle",
 		}));
+
 		const result = await suggestNames(ai, RAW);
 		expect(result).toEqual({
 			ok: true,
 			names: ["Blue Bottle Coffee", "Blue Bottle"],
 		});
 		expect(ai.run).toHaveBeenCalledTimes(1);
+
 		const [model, input] = ai.run.mock.calls[0] as [
 			string,
 			{ messages: { role: string; content: string }[] },
 		];
+
 		expect(model).toBe(NAME_MODEL);
 		const sent = JSON.stringify(input);
 		expect(sent).toContain(RAW);
@@ -146,6 +149,7 @@ describe("suggestNames", () => {
 		const boom = fakeAi(async () => {
 			throw new Error("AiError: 3040: capacity temporarily exceeded");
 		});
+
 		expect(await suggestNames(boom, RAW)).toEqual({ ok: false });
 		const empty = fakeAi(async () => ({}));
 		expect(await suggestNames(empty, RAW)).toEqual({ ok: false });
@@ -158,9 +162,11 @@ describe("suggestNames", () => {
 
 	it("logs the error's name only, never the bank's text or the model's words", async () => {
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const ai = fakeAi(async () => {
 			throw Object.assign(new Error(`failed for ${RAW}`), { name: "AiError" });
 		});
+
 		await suggestNames(ai, RAW);
 		expect(logged).toHaveBeenCalledTimes(1);
 		const line = String(logged.mock.calls[0]?.join(" "));
@@ -173,9 +179,11 @@ describe("suggestNames", () => {
 		const ai = fakeAi(async () => ({ response: "Blue Bottle Coffee" }));
 		await suggestNames(ai, RAW);
 		await suggestNames(ai, RAW);
+
 		const signals = ai.run.mock.calls.map(
 			(call) => (call[2] as { signal?: AbortSignal } | undefined)?.signal,
 		);
+
 		expect(signals[0]).toBeInstanceOf(AbortSignal);
 		expect(signals[1]).toBeInstanceOf(AbortSignal);
 		// A fresh one each call, so a signal that ran out for one request isn't handed to the next.

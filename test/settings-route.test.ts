@@ -6,10 +6,13 @@ import { resetDemo } from "../src/demo/reset";
 import { seedMerchant } from "./helpers/merchants";
 
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 async function post(path: string, fields: Record<string, string>, htmx = true) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
@@ -21,17 +24,22 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
+
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string };
 		announce?: string;
 	};
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, "").replaceAll("&#39;", "'");
+
 const THIS_MONTH = () => monthName(todayIn(DEFAULT_TIME_ZONE).slice(0, 7));
+
 /** The names in the Categories list, in order. */
 const rowNames = (html: string) =>
 	[
@@ -99,10 +107,12 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('BANK CAFE 1234', 'Café', 1), ('OLD SHOP', 'Zed Chosen', 1)",
 		).run();
+
 		const extra = Array.from(
 			{ length: 21 },
 			(_, i) => `('EXTRA RULE ${i}', 'Extra Rule ${i}', 1)`,
 		).join(",");
+
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${extra}`,
 		).run();
@@ -111,13 +121,16 @@ describe("GET /settings", () => {
 		expect(rules.indexOf("Local Bakery")).toBeLessThan(
 			rules.indexOf("Zed Chosen"),
 		);
+
 		for (const query of ["CAFÉ", "café", "cafe", "Cafe"]) {
 			const searched = (
 				await get(`/settings/rules?rules_search=${encodeURIComponent(query)}`)
 			).html;
+
 			expect(searched).toContain("Café");
 			expect(searched).not.toContain("Zed Chosen");
 		}
+
 		const byBank = (await get("/settings/rules?rules_search=BAKERY")).html;
 		expect(byBank).toContain("Local Bakery");
 	});
@@ -140,11 +153,13 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE Costco', 'Costco', 1)",
 		).run();
+
 		const twenty = Array.from(
 			{ length: 19 },
 			(_, i) =>
 				`('RULE ${String(i).padStart(2, "0")}', 'Merchant ${String(i).padStart(2, "0")}', 2)`,
 		).join(",");
+
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${twenty}`,
 		).run();
@@ -159,9 +174,11 @@ describe("GET /settings", () => {
 		expect(twentyOne.html).toContain(
 			'<span class="tabular-nums">21</span> merchants, A to Z',
 		);
+
 		const countLine = twentyOne.html.match(
 			/<p id="merchant-rules-count"[^>]*>/,
 		)?.[0];
+
 		expect(countLine).toBeDefined();
 		expect(countLine).not.toContain("tabular-nums");
 		const narrowed = await get("/settings/rules?rules_search=co");
@@ -190,45 +207,57 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",
 		).run();
+
 		const values = Array.from(
 			{ length: 300 },
 			(_, i) =>
 				`('RULE LOAD ${String(i).padStart(3, "0")}', 'Load Merchant ${String(i).padStart(3, "0")}', 1)`,
 		).join(",");
+
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${values}`,
 		).run();
+
 		for (let start = 0; start < 1200; start += 100) {
 			const transactions = Array.from({ length: 100 }, (_, offset) => {
 				const i = (start + offset) % 300;
+
 				return `(1, '2026-09-01', -100, 'LOAD BANK TEXT ${start + offset}', 'RULE LOAD ${String(i).padStart(3, "0")}')`;
 			}).join(",");
+
 			await env.DB.prepare(
 				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES ${transactions}`,
 			).run();
 		}
+
 		const prepared: { sql: string; values: unknown[] }[] = [];
+
 		const db = new Proxy(env.DB, {
 			get(target, property) {
 				if (property !== "prepare")
 					return Reflect.get(target, property, target);
+
 				return (sql: string) => {
 					const captured = { sql, values: [] as unknown[] };
 					prepared.push(captured);
 					const statement = target.prepare(sql);
+
 					return new Proxy(statement, {
 						get(query, method) {
 							if (method === "bind")
 								return (...bound: unknown[]) => {
 									captured.values = bound;
+
 									return query.bind(...bound);
 								};
+
 							return Reflect.get(query, method, query);
 						},
 					});
 				};
 			},
 		}) as D1Database;
+
 		const result = await merchantRules(db, false, "Load Merchant 007");
 		expect(result.rules).toHaveLength(1);
 		expect(result.rules[0]?.transactions).toBe(4);
@@ -244,9 +273,11 @@ describe("GET /settings", () => {
 		expect(prepared).toHaveLength(3);
 		const allCounts = prepared.find(({ sql }) => sql.includes("json_each"));
 		expect(JSON.parse(String(allCounts?.values[0]))).toHaveLength(300);
+
 		const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${allCounts?.sql}`)
 			.bind(...(allCounts?.values ?? []))
 			.all<{ detail: string }>();
+
 		expect(plan.results.map(({ detail }) => detail).join(" ")).toContain(
 			"transactions_merchant_history",
 		);
@@ -262,11 +293,13 @@ describe("GET /settings", () => {
 		)
 			.bind(merchant)
 			.run();
+
 		const transaction = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source) VALUES (1, '2026-09-14', -1200, ?, ?, 1, 'merchant_rule') RETURNING id",
 		)
 			.bind(merchant, merchant)
 			.first<{ id: number }>();
+
 		const { res } = await post("/settings/merchant-rules/remove", { merchant });
 		expect(res.status).toBe(200);
 		expect(trigger(res).announce).toBe(
@@ -295,23 +328,29 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE FOCUS A', 'Focus A', 1), ('RULE FOCUS B', 'Focus B', 1), ('RULE FOCUS C', 'Focus C', 1)",
 		).run();
+
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS B",
 		});
+
 		const rules = html.slice(html.indexOf('id="merchant-rules"'));
 		expect(rules).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Focus C/,
 		);
+
 		const last = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS C",
 		});
+
 		const remaining = last.html.slice(last.html.indexOf('id="merchant-rules"'));
 		expect(remaining).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Focus A/,
 		);
+
 		const empty = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS A",
 		});
+
 		expect(empty.html).toMatch(
 			/<h2 id="merchant-rules-always" tabindex="-1" autofocus/,
 		);
@@ -342,9 +381,11 @@ describe("GET /settings", () => {
 			names: ["Mango"],
 			defaultCategoryId: 1,
 		});
+
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS RAW B",
 		});
+
 		expect(html).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Mango/,
 		);
@@ -375,9 +416,11 @@ describe("GET /settings", () => {
 			names: ["Mango"],
 			defaultCategoryId: 1,
 		});
+
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FOCUS RAW A",
 		});
+
 		const rules = html.slice(html.indexOf('id="merchant-rules"'));
 		expect(rules).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Rule focus raw b/,
@@ -415,17 +458,21 @@ describe("GET /settings", () => {
 			names: ["Other"],
 			defaultCategoryId: 1,
 		});
+
 		const otherRules = Array.from(
 			{ length: 21 },
 			(_, i) => `('RULE FILTER OTHER ${i}', 'Other ${i}', 1)`,
 		).join(",");
+
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${otherRules}`,
 		).run();
+
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE FILTER RAW B",
 			rules_search: "Match",
 		});
+
 		expect(html).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Mango Match/,
 		);
@@ -436,18 +483,22 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",
 		).run();
+
 		const rows = Array.from(
 			{ length: 21 },
 			(_, i) =>
 				`('RULE SEARCH ${String(i).padStart(2, "0")}', 'Merchant ${String(i).padStart(2, "0")}', 1)`,
 		).join(",");
+
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${rows}`,
 		).run();
+
 		const { html } = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE SEARCH 00",
 			rules_search: "Merchant 00",
 		});
+
 		const rules = html.slice(html.indexOf('id="merchant-rules"'));
 		expect(rules).not.toContain('name="rules_search"');
 		expect(rules).toMatch(
@@ -459,6 +510,7 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",
 		).run();
+
 		const rows = [
 			...Array.from(
 				{ length: 22 },
@@ -469,6 +521,7 @@ describe("GET /settings", () => {
 				(name) => `('RULE MATCH ${name}', 'Match ${name}', 1)`,
 			),
 		].join(",");
+
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${rows}`,
 		).run();
@@ -477,6 +530,7 @@ describe("GET /settings", () => {
 			merchant: "RULE MATCH B",
 			rules_search: "Match",
 		});
+
 		expect(middle.html).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Match C/,
 		);
@@ -488,6 +542,7 @@ describe("GET /settings", () => {
 			merchant: "RULE MATCH C",
 			rules_search: "Match",
 		});
+
 		expect(last.html).toMatch(
 			/<button[^>]*autofocus[^>]*>Remove<span class="sr-only"> Match B/,
 		);
@@ -499,6 +554,7 @@ describe("GET /settings", () => {
 			merchant: "RULE MATCH ONLY",
 			rules_search: "Unique",
 		});
+
 		expect(only.html).toMatch(
 			/<h2 id="merchant-rules-always" tabindex="-1" autofocus/,
 		);
@@ -508,6 +564,7 @@ describe("GET /settings", () => {
 		const invalid = await post("/settings/merchant-rules/remove", {
 			merchant: "",
 		});
+
 		expect(invalid.res.status).toBe(400);
 		expect(invalid.html).toMatch(
 			/<section id="merchant-rules"[\s\S]*role="alert"[^>]*>Choose a merchant to remove\.<\/p>/,
@@ -517,6 +574,7 @@ describe("GET /settings", () => {
 		const missing = await post("/settings/merchant-rules/remove", {
 			merchant: "RULE THAT DOES NOT EXIST",
 		});
+
 		expect(missing.res.status).toBe(200);
 		expect(trigger(missing.res).announce).toBe("Merchant rules list updated.");
 		expect(missing.html).toMatch(/<section id="merchant-rules"/);
@@ -553,6 +611,7 @@ describe("saving a category", () => {
 		const { res, html } = await post("/settings/categories/1", {
 			name: "Food at home",
 		});
+
 		expect(res.status).toBe(200);
 		expect(rowNames(html)[0]).toBe("Food at home");
 		expect(trigger(res)).toMatchObject({
@@ -565,6 +624,7 @@ describe("saving a category", () => {
 		const { res, html } = await post("/settings/categories/1", {
 			name: "gas",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/role="alert"[^>]*>That name is taken\./);
 		expect(html).toMatch(/<details[^>]*data-row="1"[^>]*\bopen/);
@@ -577,6 +637,7 @@ describe("saving a category", () => {
 			{ name: "Groceries" },
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/settings/categories");
 	});
@@ -585,6 +646,7 @@ describe("saving a category", () => {
 		const { res } = await post("/settings/categories/999", {
 			name: "X",
 		});
+
 		expect(res.status).toBe(404);
 	});
 
@@ -592,6 +654,7 @@ describe("saving a category", () => {
 		const { html } = await post("/settings/categories/3", {
 			name: "Fuel",
 		});
+
 		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
 	});
 });
@@ -605,9 +668,11 @@ describe("a page left open while someone else changed a category", () => {
 		"shows the current list with a message on %s, instead of emptying the section",
 		async (_, path) => {
 			await post("/settings/categories/2/archive", {});
+
 			const { res, html } = await post(path, {
 				name: "Eating Out",
 			});
+
 			expect(res.status).toBe(404);
 			expect(html).toMatch(/<section id="categories"/);
 			expect(html).toMatch(/role="alert"[^>]*>That category was changed/);
@@ -643,20 +708,25 @@ describe("household people", () => {
 			await env.DB.prepare(
 				"INSERT INTO household_people(name) VALUES ('Person A'),('Person B')",
 			).run();
+
 			const person = await env.DB.prepare(
 				"SELECT id FROM household_people WHERE name='Person A'",
 			).first<{ id: number }>();
+
 			const { res, html } = await post("/settings/people", {
 				action: "rename",
 				person_id: String(person?.id),
 				name,
 			});
+
 			expect(res.status).toBe(422);
 			const people = html.slice(html.indexOf('id="household-people"'));
+
 			const row = people.slice(
 				people.indexOf(`id="person-${person?.id}"`) - 300,
 				people.indexOf('id="person-3"'),
 			);
+
 			expect(row).toContain('role="alert"');
 			expect(
 				people.slice(people.indexOf('id="person-3"')).match(/role="alert"/g) ??
@@ -669,20 +739,25 @@ describe("household people", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_people(name) VALUES ('Person A'),('Person B')",
 		).run();
+
 		const a = await env.DB.prepare(
 			"SELECT id FROM household_people WHERE name='Person A'",
 		).first<{ id: number }>();
+
 		const { res, html } = await post("/settings/people", {
 			action: "rename",
 			person_id: String(a?.id),
 			name: "Everyone",
 		});
+
 		expect(res.status).toBe(422);
 		const people = html.slice(html.indexOf('id="household-people"'));
+
 		const b = people.slice(
 			people.indexOf('id="person-3"'),
 			people.indexOf('id="person-new"'),
 		);
+
 		expect(b).not.toContain("That name is already in your household.");
 		expect(people.slice(people.indexOf('id="person-new"'))).not.toContain(
 			"That name is already in your household.",
@@ -703,9 +778,11 @@ describe("a name taken by someone else at the same moment", () => {
 		await env.DB.prepare(
 			"CREATE TRIGGER sneak BEFORE INSERT ON categories BEGIN INSERT INTO categories (name, icon, color) VALUES ('travel', 'tag', 'cat-blue'); END",
 		).run();
+
 		const { res, html } = await post("/settings/categories", {
 			name: "Travel",
 		});
+
 		await env.DB.prepare("DROP TRIGGER sneak").run();
 		expect(res.status).toBe(422);
 		expect(html).toContain("That name is taken.");
@@ -728,12 +805,15 @@ describe("a name that differs only in accented capitals, saved at the same momen
 		await env.DB.prepare(
 			"CREATE TRIGGER sneak_rename BEFORE UPDATE OF name ON categories WHEN NEW.name = 'CAFÉ' BEGIN INSERT INTO categories (name, name_key, icon, color) VALUES ('Café', 'café', 'tag', 'cat-blue'); END",
 		).run();
+
 		const gas = await env.DB.prepare(
 			"SELECT id FROM categories WHERE name = 'Gas'",
 		).first<{ id: number }>();
+
 		const { res, html } = await post(`/settings/categories/${gas?.id}`, {
 			name: "CAFÉ",
 		});
+
 		await env.DB.prepare("DROP TRIGGER sneak_rename").run();
 		expect(res.status).toBe(422);
 		expect(html).toContain("That name is taken.");
@@ -745,13 +825,16 @@ describe("adding a category", () => {
 		const { res, html } = await post("/settings/categories", {
 			name: "Travel",
 		});
+
 		expect(res.status).toBe(200);
 		expect(rowNames(html).at(-1)).toBe("Travel");
 		expect(textOf(html)).toContain("No budget");
+
 		// Focus lands on the new row, not back at the top of the page.
 		const travel = await env.DB.prepare(
 			"SELECT id FROM categories WHERE name = 'Travel'",
 		).first<{ id: number }>();
+
 		expect(html).toMatch(
 			new RegExp(`<summary data-category="${travel?.id}"[^>]*autofocus`),
 		);
@@ -763,6 +846,7 @@ describe("adding a category", () => {
 		const { res, html } = await post("/settings/categories", {
 			name: "None of these fit",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/<details[^>]*data-row="new"[^>]*\bopen/);
 		expect(html).toContain("That name is reserved for Tally. Pick another.");

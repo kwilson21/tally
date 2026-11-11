@@ -11,10 +11,12 @@ type RequestEvent = {
 	defaultPrevented: boolean;
 	preventDefault: () => void;
 };
+
 type RequestListener = (event: RequestEvent) => void;
 
 function fakeDocument(visibilityState: string) {
 	const listeners = new Map<string, RequestListener[]>();
+
 	const document = {
 		visibilityState,
 		addEventListener: vi.fn((name: string, listener: RequestListener) => {
@@ -29,11 +31,14 @@ function fakeDocument(visibilityState: string) {
 					event.defaultPrevented = true;
 				},
 			};
+
 			for (const listener of listeners.get("htmx:before:request") ?? [])
 				listener(event);
+
 			return event;
 		},
 	};
+
 	return document;
 }
 
@@ -56,6 +61,7 @@ describe("home-seen.js: a tab that isn't on screen counts as away (decision 149)
 		for (const state of ["hidden", "visible"]) {
 			const document = fakeDocument(state);
 			setupHomeSeen({ document });
+
 			const others = [
 				{ id: "your-banks" },
 				{ id: "setup-next" },
@@ -63,6 +69,7 @@ describe("home-seen.js: a tab that isn't on screen counts as away (decision 149)
 				{},
 				undefined,
 			];
+
 			for (const other of others)
 				expect(document.beforeRequest(other).defaultPrevented).toBe(false);
 		}

@@ -111,6 +111,7 @@ describe("the Plaid connection write guard", () => {
 			.flatMap(([path, text]) =>
 				protectedWrites(text).map((clause) => `${path}: SET ${clause.trim()}`),
 			);
+
 		expect(offenders).toEqual([]);
 	});
 });

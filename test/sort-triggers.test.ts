@@ -46,8 +46,10 @@ describe("a sync hands all of its rows to one Workflow instance", () => {
 	it("3,000 changed rows are still one create, and its params stay under 1 MiB", async () => {
 		await sortAfterSync(sortEnv(), { changedIds: ids(3000) });
 		expect(create).toHaveBeenCalledTimes(1);
+
 		const params = (create.mock.calls[0] as unknown as [{ params: unknown }])[0]
 			.params;
+
 		expect(JSON.stringify(params).length).toBeLessThan(1_048_576);
 	});
 
@@ -93,17 +95,20 @@ describe("ask again hands its rows to one Workflow instance, with no cap", () =>
 				),
 			)
 		).map((result) => Number((result.results[0] as { id: number }).id));
+
 		await askAgainMany(sortEnv(), rows);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect(create).toHaveBeenCalledWith({
 			params: { ids: rows, bySync: false, rulesApplied: false },
 		});
+
 		const marked = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE id IN (SELECT value FROM json_each(?)) AND category_confidence IS NOT NULL",
 			)
 			.bind(JSON.stringify(rows))
 			.first<{ n: number }>();
+
 		expect(marked?.n).toBe(0);
 	});
 

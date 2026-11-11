@@ -8,8 +8,10 @@ export type Guard<T> = (value: unknown) => value is T;
 
 export const isNumber: Guard<number> = (value): value is number =>
 	typeof value === "number" && Number.isFinite(value);
+
 export const isString: Guard<string> = (value): value is string =>
 	typeof value === "string";
+
 export const isBoolean: Guard<boolean> = (value): value is boolean =>
 	typeof value === "boolean";
 
@@ -54,10 +56,12 @@ export const isShape =
 /** The stored text as a T, or null when it is not JSON or is not shaped like T. The caller decides what null means. */
 export function readStored<T>(text: string, guard: Guard<T>): T | null {
 	let value: unknown;
+
 	try {
 		value = JSON.parse(text);
 	} catch {
 		return null;
 	}
+
 	return guard(value) ? value : null;
 }

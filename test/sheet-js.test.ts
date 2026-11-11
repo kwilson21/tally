@@ -14,8 +14,11 @@ let activeDocument: { activeElement: unknown } | null = null;
 function matchesSimple(node: FakeNode, selector: string) {
 	const [, tag = "", conditions = ""] =
 		selector.trim().match(/^(\w*)((?:\[[^\]]+\])*)$/) ?? [];
+
 	if (!tag && !conditions) return false;
+
 	if (tag && node.tag !== tag) return false;
+
 	return [...conditions.matchAll(/\[([^=\]]+)(?:=([^\]]+))?\]/g)].every(
 		([, name = "", value]) =>
 			node.attrs.has(name) &&
@@ -53,7 +56,9 @@ class FakeNode extends EventTarget {
 	}
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
+
 		if (name === "id") this.id = value;
+
 		if (name === "tabindex") this.tabIndex = Number(value);
 	}
 	getAttribute(name: string) {
@@ -64,6 +69,7 @@ class FakeNode extends EventTarget {
 	}
 	removeAttribute(name: string) {
 		this.attrs.delete(name);
+
 		if (name === "tabindex") this.tabIndex = defaultTabIndex(this.tag);
 	}
 	/** Whether the node is the given one or holds it, as a real node's contains() does. */
@@ -79,6 +85,7 @@ class FakeNode extends EventTarget {
 	}
 	remove() {
 		const parent = this.parentElement;
+
 		if (parent) parent.children.splice(parent.children.indexOf(this), 1);
 		this.parentElement = null;
 	}
@@ -88,6 +95,7 @@ class FakeNode extends EventTarget {
 	}
 	querySelectorAll(selector: string): FakeNode[] {
 		const parts = selector.split(",");
+
 		return this.descendants().filter((node) =>
 			parts.some((part) => matchesSimple(node, part)),
 		);
@@ -100,6 +108,7 @@ class FakeNode extends EventTarget {
 		for (let node: FakeNode | null = this; node; node = node.parentElement) {
 			if (matchesSimple(node, selector)) return node;
 		}
+
 		return null;
 	}
 	/** As a browser does: a click on a link or button runs its handler, which a test counts. */
@@ -116,8 +125,10 @@ class FakeNode extends EventTarget {
 
 function el(tag: string, attrs: Record<string, string> = {}) {
 	const node = new FakeNode(tag);
+
 	for (const [name, value] of Object.entries(attrs))
 		node.setAttribute(name, value);
+
 	return node;
 }
 
@@ -128,6 +139,7 @@ function radio(form: FakeNode | null, name: string, checked = false) {
 	node.name = name;
 	node.form = form;
 	node.checked = checked;
+
 	return node;
 }
 
@@ -141,15 +153,18 @@ function drawSheet(
 	{ autofocus = false, titleId = "sheet-title" } = {},
 ) {
 	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
+
 	const section = el("section", {
 		"data-sheet": "",
 		"aria-labelledby": titleId,
 	});
+
 	const title = el("h2", { id: titleId, tabindex: "-1" });
 	const field = el("input", autofocus ? { autofocus: "" } : {});
 	const save = el("button");
 	section.append(title, field, save);
 	sheetSlot.append(backdrop, section);
+
 	return { backdrop, section, title, field, save };
 }
 
@@ -160,15 +175,18 @@ function drawRadioSheet(
 	radios: FakeNode[],
 ) {
 	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
+
 	const section = el("section", {
 		"data-sheet": "",
 		"aria-labelledby": "sheet-title",
 	});
+
 	const title = el("h2", { id: "sheet-title", tabindex: "-1" });
 	const save = el("button");
 	form.append(...radios);
 	section.append(title, form, save);
 	sheetSlot.append(backdrop, section);
+
 	return { backdrop, section, title, save };
 }
 
@@ -211,9 +229,11 @@ function drawPage({
 	const announcer = el("div", { id: "announcer" });
 	body.append(skip, frame, tabs, feedback, toasts, announcer);
 	const drawn = sheet ? drawSheet(sheetSlot, { autofocus }) : null;
+
 	const drawingSheet = drawing
 		? drawSheet(drawingFrame, { titleId: "drawing-title" })
 		: null;
+
 	return {
 		documentElement,
 		body,
@@ -256,6 +276,7 @@ async function sheetPage(
 		autofocus: options.autofocus,
 		drawing: options.drawing,
 	});
+
 	const doc = Object.assign(new EventTarget(), {
 		body: parts.body,
 		documentElement: parts.documentElement,
@@ -266,11 +287,13 @@ async function sheetPage(
 		getElementById: (id: string) =>
 			parts.body.descendants().find((node) => node.id === id) ?? null,
 	});
+
 	vi.stubGlobal("document", doc);
 	activeDocument = doc;
 	options.beforeScript?.(doc);
 	vi.resetModules();
 	await load?.();
+
 	return { ...parts, document: doc };
 }
 
@@ -278,6 +301,7 @@ async function sheetPage(
 function redrawSheet(parts: Page, options: { autofocus?: boolean } = {}) {
 	parts.drawn?.backdrop.remove();
 	parts.drawn?.section.remove();
+
 	return drawSheet(parts.sheetSlot, options);
 }
 
@@ -306,7 +330,9 @@ function keydown(
 		shiftKey: init.shiftKey ?? false,
 		isComposing: init.isComposing ?? false,
 	});
+
 	doc.dispatchEvent(event);
+
 	return event;
 }
 
@@ -320,6 +346,7 @@ describe("sheet.js: an open sheet is a modal", () => {
 		const parts = await sheetPage();
 		const section = parts.drawn?.section;
 		expect(section?.getAttribute("aria-modal")).toBe("true");
+
 		for (const outside of [
 			parts.skip,
 			parts.aside,
@@ -330,6 +357,7 @@ describe("sheet.js: an open sheet is a modal", () => {
 		]) {
 			expect(outside.hasAttribute("inert")).toBe(true);
 		}
+
 		for (const kept of [
 			section,
 			parts.drawn?.backdrop,
@@ -479,6 +507,7 @@ describe("sheet.js: Escape", () => {
 			beforeScript: (doc) =>
 				doc.addEventListener("keydown", (event) => event.preventDefault()),
 		});
+
 		keydown(parts.document, "Escape");
 		expect(parts.drawn?.backdrop.clicks).toBe(0);
 	});
@@ -618,6 +647,7 @@ describe("sheet.js: a radio group is one Tab stop", () => {
 		const { save } = drawRadioSheet(parts.sheetSlot, form, [r1, r2, r3]);
 		settle(parts.document);
 		parts.undo.hidden = true;
+
 		return { ...parts, r1, r2, r3, save };
 	}
 
@@ -714,6 +744,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 		const drawing = parts.drawingSheet as Drawing;
 		expect(parts.drawn?.section.getAttribute("aria-modal")).toBe("true");
 		expect(drawing.section.hasAttribute("aria-modal")).toBe(false);
+
 		for (const outside of [
 			parts.skip,
 			parts.aside,
@@ -724,6 +755,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 		]) {
 			expect(outside.hasAttribute("inert")).toBe(true);
 		}
+
 		// The drawing's frame was inert before the script ran, so sync leaves it as it is.
 		const frame = drawing.backdrop.parentElement as FakeNode;
 		expect(frame.hasAttribute("inert")).toBe(true);

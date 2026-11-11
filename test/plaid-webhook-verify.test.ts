@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyPlaidWebhook } from "../src/plaid/webhook-verify";
 
 const encoder = new TextEncoder();
+
 const b64 = (bytes: Uint8Array) =>
 	btoa(String.fromCharCode(...bytes))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
+
 const json64 = (value: unknown) => b64(encoder.encode(JSON.stringify(value)));
 
 async function fixture(
@@ -22,12 +24,16 @@ async function fixture(
 		true,
 		["sign", "verify"],
 	)) as CryptoKeyPair;
+
 	const body = JSON.stringify({ item_id: "item-1", webhook_type: "ITEM" });
+
 	const hash = new Uint8Array(
 		await crypto.subtle.digest("SHA-256", encoder.encode(body)),
 	);
+
 	const kid = crypto.randomUUID();
 	const header = json64({ alg: "ES256", kid, ...overrides.header });
+
 	const claims = json64({
 		iat: Math.floor(Date.now() / 1000),
 		request_body_sha256: Array.from(hash, (byte) =>
@@ -35,7 +41,9 @@ async function fixture(
 		).join(""),
 		...overrides.claims,
 	});
+
 	const signed = `${header}.${claims}`;
+
 	const signature = new Uint8Array(
 		await crypto.subtle.sign(
 			{ name: "ECDSA", hash: "SHA-256" },
@@ -43,6 +51,7 @@ async function fixture(
 			encoder.encode(signed),
 		),
 	);
+
 	const fetchImpl = vi.fn(async () =>
 		Response.json(
 			{
@@ -54,6 +63,7 @@ async function fixture(
 			{ status: overrides.fetchStatus ?? 200 },
 		),
 	);
+
 	return {
 		body,
 		token: `${signed}.${b64(signature)}`,
@@ -80,8 +90,10 @@ describe("verifyPlaidWebhook", () => {
 	const freezeClock = () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(Math.floor(Date.now() / 1000) * 1000);
+
 		return Date.now() / 1000;
 	};
+
 	afterEach(() => {
 		vi.useRealTimers();
 	});
@@ -145,9 +157,11 @@ describe("verifyPlaidWebhook", () => {
 		const value = await fixture();
 		const parts = value.token.split(".");
 		const signature = parts[2] as string;
+
 		// 64 bytes encode to 86 characters; the last holds 4 data bits and 2 unused ones.
 		const alphabet =
 			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
 		const last = alphabet.indexOf(signature.at(-1) as string);
 		parts[2] = `${signature.slice(0, -1)}${alphabet[last | 1]}`;
 		expect(
@@ -180,10 +194,12 @@ describe("verifyPlaidWebhook", () => {
 
 	it("coalesces concurrent lookups for the same new kid", async () => {
 		const value = await fixture();
+
 		const [first, second] = await Promise.all([
 			verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
 			verifyPlaidWebhook(env, value.body, value.token, value.fetchImpl),
 		]);
+
 		expect([first, second]).toEqual(["valid", "valid"]);
 		expect(value.fetchImpl).toHaveBeenCalledOnce();
 	});
@@ -205,8 +221,10 @@ describe("verifyPlaidWebhook", () => {
 	it("caps failed kid entries at 32 and evicts the oldest", async () => {
 		const value = await fixture({ fetchStatus: 500 });
 		const parts = value.token.split(".");
+
 		const tokenFor = (kid: string) =>
 			`${json64({ alg: "ES256", kid })}.${parts[1]}.${parts[2]}`;
+
 		for (let index = 0; index < 33; index += 1) {
 			await verifyPlaidWebhook(
 				env,
@@ -215,6 +233,7 @@ describe("verifyPlaidWebhook", () => {
 				value.fetchImpl,
 			);
 		}
+
 		await verifyPlaidWebhook(
 			env,
 			value.body,

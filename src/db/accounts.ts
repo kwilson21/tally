@@ -52,6 +52,7 @@ type LabelInput = {
 /** An account's name as the lists name it: "Chase Card ••9921", or just the name when the bank gives no digits. The Cash account reads "Cash". */
 function baseLabel(account: LabelInput): string {
 	if (account.type === "cash") return "Cash";
+
 	return account.mask ? `${account.name} ••${account.mask}` : account.name;
 }
 
@@ -63,13 +64,16 @@ function baseLabel(account: LabelInput): string {
  */
 export function uniqueAccountLabels(accounts: LabelInput[]): string[] {
 	const bases = accounts.map(baseLabel);
+
 	// What each account's label becomes at each step; an account with no bank has nothing to add.
 	const steps: ((a: LabelInput, base: string) => string)[] = [
 		(a, base) => (a.bank ? `${base} (${a.bank})` : base),
 		(a, base) =>
 			a.bank ? `${base} (${a.bank}, ${a.subtype ?? a.type})` : base,
 	];
+
 	let labels = bases;
+
 	for (const step of steps) {
 		const current = labels;
 		labels = current.map((label, i) =>
@@ -78,19 +82,25 @@ export function uniqueAccountLabels(accounts: LabelInput[]): string[] {
 				: label,
 		);
 	}
+
 	// Still alike: number every one after the first, skipping a number another account already wears.
 	const used = new Set(labels);
 	const seen = new Set<string>();
+
 	return labels.map((label) => {
 		if (!seen.has(label)) {
 			seen.add(label);
+
 			return label;
 		}
+
 		let n = 2;
+
 		while (used.has(`${label} (${n})`)) n++;
 		const numbered = `${label} (${n})`;
 		used.add(numbered);
 		seen.add(numbered);
+
 		return numbered;
 	});
 }
@@ -123,7 +133,9 @@ export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 			bank: string | null;
 			disconnected_at: string | null;
 		}>();
+
 	const labels = uniqueAccountLabels(results);
+
 	return results.map((a, i) => ({
 		id: a.id,
 		label: labels[i] as string,
@@ -164,6 +176,7 @@ export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
 			last_synced_at: string | null;
 			disconnected_at: string | null;
 		}>();
+
 	return results.map((row) => ({
 		id: row.id,
 		name: row.institution_name,
@@ -179,6 +192,7 @@ export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
  */
 export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 	const { results } = await banksStatement(db).all<BankRow>();
+
 	return banksFromRows(results);
 }
 
@@ -199,8 +213,10 @@ export function banksStatement(db: D1Database): D1PreparedStatement {
 /** The banks `banksStatement` read, with their accounts. */
 export function banksFromRows(results: BankRow[]): Bank[] {
 	const banks: Bank[] = [];
+
 	for (const row of results) {
 		let bank = banks.at(-1);
+
 		if (bank?.id !== row.bank_id) {
 			bank = {
 				id: row.bank_id,
@@ -212,6 +228,7 @@ export function banksFromRows(results: BankRow[]): Bank[] {
 			};
 			banks.push(bank);
 		}
+
 		if (row.id === null) continue;
 		bank.accounts.push({
 			id: row.id,
@@ -223,6 +240,7 @@ export function banksFromRows(results: BankRow[]): Bank[] {
 			...(row.disconnected_at !== null ? { connected: false } : {}),
 		});
 	}
+
 	return banks;
 }
 
@@ -271,6 +289,7 @@ export function appleCardFromRow(
 	row: AppleCardRow | null | undefined,
 ): AppleCardAccount | null {
 	if (!row) return null;
+
 	return {
 		id: row.id,
 		balanceCents: row.balance_cents,
@@ -302,6 +321,7 @@ export async function appleCardUpload(
 			"SELECT uploaded_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
 		)
 		.first<{ uploaded_on: string | null; removed_at: string | null }>();
+
 	return row
 		? { uploadedOn: row.uploaded_on, removedAt: row.removed_at }
 		: null;
@@ -316,6 +336,7 @@ export function countedAccounts(
 	appleCard: AppleCardAccount | null,
 ): Account[] {
 	const accounts = banks.flatMap((bank) => bank.accounts);
+
 	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
 		accounts.push({
 			id: appleCard.id,
@@ -325,5 +346,6 @@ export function countedAccounts(
 			balanceCents: appleCard.balanceCents,
 			isLiability: true,
 		});
+
 	return accounts;
 }

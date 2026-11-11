@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 const db = env.DB;
+
 const migration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0044_bill_amount_history"),
 );
@@ -14,6 +15,7 @@ const BACKFILL = (migration?.queries ?? []).find((query) =>
 );
 
 const IDS = [9401, 9402, 9403];
+
 // The migration's "this month": UTC less twelve hours (see the migration's comment).
 const thisMonth = new Date(Date.now() - 12 * 3_600_000)
 	.toISOString()
@@ -35,6 +37,7 @@ async function rowsOf(billId: number) {
 		)
 		.bind(billId)
 		.all<{ effectiveMonth: string; amountCents: number }>();
+
 	return results;
 }
 

@@ -6,24 +6,31 @@ import { resetDemo } from "../src/demo/reset";
 
 // Home's Adjust mode (#94, decision 48): − and + on every budgeted row, each tap to the next round $10.
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 async function post(path: string, htmx = true) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
 		headers: { Origin: BASE, ...(htmx ? { "HX-Request": "true" } : {}) },
 	});
+
 	return { res, html: await res.text() };
 }
+
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;
 	};
+
 const THIS_MONTH = () => todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 const groceriesBudget = async () =>
 	(await env.DB.prepare(
 		"SELECT amount_cents, effective_month FROM budget_amounts WHERE category_id = 1 ORDER BY effective_month DESC LIMIT 1",

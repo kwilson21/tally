@@ -34,36 +34,46 @@ function parse(text: string, path: string[] = []): Rule[] {
 	const rules: Rule[] = [];
 	let i = 0;
 	let start = 0;
+
 	while (i < text.length) {
 		const ch = text[i];
+
 		if (ch === ";") {
 			start = i + 1;
 			i++;
 		} else if (ch === "{") {
 			let depth = 1;
 			let j = i + 1;
+
 			while (depth > 0 && j < text.length) {
 				if (text[j] === "{") depth++;
 				else if (text[j] === "}") depth--;
 				j++;
 			}
+
 			// A selector the formatter broke over two lines is the same selector.
 			const prelude = text.slice(start, i).trim().replace(/\s+/g, " ");
 			const inner = text.slice(i + 1, j - 1);
+
 			if (inner.includes("{")) rules.push(...parse(inner, [...path, prelude]));
 			else {
 				const decls = new Map<string, string>();
+
 				for (const part of inner.split(";")) {
 					const colon = part.indexOf(":");
+
 					if (colon < 0) continue;
 					decls.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
 				}
+
 				rules.push({ path, selector: prelude, decls });
 			}
+
 			i = j;
 			start = j;
 		} else i++;
 	}
+
 	return rules;
 }
 
@@ -75,6 +85,7 @@ const inKeyframes = (r: Rule) => r.path.some((p) => p.startsWith("@keyframes"));
 const inTheme = (r: Rule) => r.selector.startsWith("@theme");
 
 const selectorsOf = (r: Rule) => r.selector.split(",").map((s) => s.trim());
+
 const rule = (selector: string, within?: (r: Rule) => boolean) =>
 	rules.filter(
 		(r) =>
@@ -82,34 +93,45 @@ const rule = (selector: string, within?: (r: Rule) => boolean) =>
 			!inKeyframes(r) &&
 			(within ? within(r) : !inReduce(r)),
 	);
+
 /** A declaration of a selector, from whichever of its rules sets it (outside reduce). */
 const decl = (selector: string, prop: string) =>
 	rule(selector)
 		.map((r) => r.decls.get(prop))
 		.find((value) => value !== undefined);
+
 const keyframes = (name: string) =>
 	rules.filter((r) => r.path.includes(`@keyframes ${name}`));
 
 /** "150ms" or "4s", in milliseconds. */
 function ms(time: string | undefined): number {
 	const match = time?.match(/^(\d*\.?\d+)(ms|s)$/);
+
 	if (!match?.[1]) throw new Error(`not a time: ${time}`);
+
 	return Number(match[1]) * (match[2] === "s" ? 1000 : 1);
 }
+
 const token = (name: string) => {
 	const theme = rules.find(inTheme);
+
 	return theme?.decls.get(`--duration-${name}`);
 };
 
 /** A rule that starts an animation or a transition (not one that only sets its length). */
 function startsMotion(r: Rule): "animation" | "transition" | null {
 	if (inKeyframes(r) || inTheme(r) || r.selector.startsWith("@")) return null;
+
 	const on = (prop: string) => {
 		const value = r.decls.get(prop);
+
 		return value !== undefined && !/^none\b/.test(value);
 	};
+
 	if (on("animation") || on("animation-name")) return "animation";
+
 	if (on("transition") || on("transition-property")) return "transition";
+
 	return null;
 }
 
@@ -141,16 +163,21 @@ describe("the duration tokens", () => {
 	it("writes no length into a rule: every animation and transition time is a token", () => {
 		const TIMING =
 			/^(animation|animation-duration|animation-delay|transition|transition-duration|transition-delay)$/;
+
 		const literal: string[] = [];
+
 		for (const r of rules) {
 			if (inKeyframes(r) || inTheme(r)) continue;
+
 			for (const [prop, value] of r.decls) {
 				if (!TIMING.test(prop)) continue;
 				const bare = value.replace(/var\([^)]*\)/g, "");
+
 				if (/(^|[\s(*/+-])-?\d*\.?\d+m?s\b/.test(bare))
 					literal.push(`${r.selector} { ${prop}: ${value} }`);
 			}
 		}
+
 		expect(literal).toEqual([]);
 	});
 
@@ -163,6 +190,7 @@ describe("the duration tokens", () => {
 					.match(/(^|[\s"'`:])(duration|delay)-(\d+|\[)[^\s"'`]*/gm) ?? []
 			).map((u) => `${file}: ${u.trim()}`),
 		);
+
 		expect(found).toEqual([]);
 	});
 });
@@ -185,7 +213,9 @@ describe("reduced motion", () => {
 		rules.forEach((r, i) => {
 			if (inReduce(r)) return;
 			const kind = startsMotion(r);
+
 			if (!kind) return;
+
 			for (const selector of selectorsOf(r)) {
 				const stilled = rules.some(
 					(o, j) =>
@@ -196,6 +226,7 @@ describe("reduced motion", () => {
 							(REDUCE_HOLDS.includes(selector) &&
 								/\bstep-end\b/.test(o.decls.get(kind) ?? ""))),
 				);
+
 				if (!stilled) missing.push(`${selector} (${kind})`);
 			}
 		});
@@ -206,6 +237,7 @@ describe("reduced motion", () => {
 		const moving = new Set(
 			rules.filter((r) => !inReduce(r) && startsMotion(r)).flatMap(selectorsOf),
 		);
+
 		for (const selector of [
 			".fade-in",
 			".sheet-rise",
@@ -230,15 +262,18 @@ describe("reduced motion", () => {
 	it("stills the desktop panel's slide, and the sheet's rise at every width", () => {
 		const reduce = (selector: string) =>
 			rules.filter((r) => inReduce(r) && selectorsOf(r).includes(selector))[0];
+
 		expect(reduce(".sheet-slide")?.decls.get("animation")).toBe("none");
 		expect(reduce(".sheet-rise")?.decls.get("animation")).toBe("none");
 		// BottomSheet's own class rises on a phone and slides at desktop width (Tailwind's lg).
 		expect(reduce(".sheet-panel")?.decls.get("animation")).toBe("none");
+
 		const desktop = rules.find(
 			(r) =>
 				selectorsOf(r).includes(".sheet-panel") &&
 				r.path.some((p) => /^@media[^{]*min-width:\s*64rem/.test(p)),
 		);
+
 		expect(desktop?.decls.get("animation-name")).toBe("sheet-slide");
 	});
 
@@ -250,6 +285,7 @@ describe("reduced motion", () => {
 		expect(decl(links, "transition")).toBe(
 			"opacity var(--duration-pause) step-end",
 		);
+
 		for (const button of [
 			".selection-list.htmx-request #set-category-selection",
 			".selection-list.htmx-request #exclude-selection",
@@ -267,6 +303,7 @@ describe("pages", () => {
 		const viewTransition = rules.filter((r) =>
 			r.selector.startsWith("@view-transition"),
 		);
+
 		expect(viewTransition).toHaveLength(1);
 		expect(viewTransition[0]?.decls.get("navigation")).toBe("auto");
 		expect(viewTransition[0]?.path.some((p) => NO_PREFERENCE.test(p))).toBe(
@@ -280,6 +317,7 @@ describe("pages", () => {
 				selectorsOf(r).includes("::view-transition-group(root)") &&
 				!inReduce(r),
 		);
+
 		expect(group?.decls.get("animation-duration")).toBe(
 			"var(--duration-confirm)",
 		);
@@ -289,15 +327,20 @@ describe("pages", () => {
 	it("keeps htmx's transitions setting off, so a filter or an Adjust tap never fades the page", async () => {
 		const res = await exports.default.fetch("http://tally.test/");
 		const html = await res.text();
+
 		const config = html.match(
 			/<meta name="htmx-config" content="([^"]*)"/,
 		)?.[1];
+
 		expect(config).toBeDefined();
+
 		const settings = JSON.parse(
 			(config ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&"),
 		);
+
 		expect(settings.transitions ?? false).toBe(false);
 		expect(html).not.toMatch(/transition:\s*true/);
+
 		for (const [file, text] of Object.entries(SOURCES))
 			expect(text, file).not.toMatch(/hx-swap[^\n]*transition:\s*true/);
 	});
@@ -364,10 +407,13 @@ describe("toasts", () => {
 			at: (Number.parseFloat(r.selector) * DISPLAY_MS) / 100,
 			opacity: r.decls.get("opacity"),
 		}));
+
 		const fadeOutFrom = stops.filter((stop) => stop.opacity === "1").at(-1);
+
 		const gone = stops.find(
 			(stop) => stop.opacity === "0" && stop.at > (fadeOutFrom?.at ?? 0),
 		);
+
 		expect((gone?.at ?? 0) - (fadeOutFrom?.at ?? 0)).toBeCloseTo(
 			ms(token("confirm")),
 		);
@@ -404,6 +450,7 @@ describe("the sheet and the switch", () => {
 		const out = String(
 			BottomSheet({ labelledBy: "t", closeHref: "/", children: "x" }),
 		);
+
 		expect(out).toMatch(/<a [^>]*class="[^"]*\bfade-in\b[^"]*"/);
 		expect(out).toMatch(/<section [^>]*class="[^"]*\bsheet-panel\b[^"]*"/);
 		expect(out).not.toMatch(/\sstyle=|<script/);
@@ -428,6 +475,7 @@ describe("the sheet and the switch", () => {
 			);
 			expect(decl(part, "transition-timing-function"), part).toBe("ease-out");
 		}
+
 		expect(decl(".switch-track", "transition-property")).toBe(
 			"background-color",
 		);
@@ -440,6 +488,7 @@ describe("the sheet and the switch", () => {
 		const out = String(
 			Switch({ id: "s", name: "s", label: "Income", checked: true }),
 		);
+
 		expect(out).toMatch(/class="[^"]*\bswitch-track\b/);
 		expect(out).toMatch(/class="[^"]*\bswitch-knob\b/);
 		expect(out).not.toMatch(/duration-|motion-reduce:transition/);
@@ -471,20 +520,25 @@ describe("a sheet that is already open stays still", () => {
 			},
 			body: fields ? new URLSearchParams(fields) : undefined,
 		});
+
 		return { res, html: await res.text() };
 	}
+
 	/** Whether the page has a sheet, and which of its two arrival classes it carries. */
 	function sheetIn(html: string) {
 		const sheet = html.match(/<section [^>]*role="dialog"[^>]*>/)?.[0];
+
 		const backdrop = html.match(
 			/<a [^>]*aria-label="Close"[^>]*bg-ink\/30[^>]*>/,
 		)?.[0];
+
 		return {
 			open: sheet !== undefined && backdrop !== undefined,
 			panel: /\bsheet-panel\b/.test(sheet ?? ""),
 			fade: /\bfade-in\b/.test(backdrop ?? ""),
 		};
 	}
+
 	const PLAYS = { open: true, panel: true, fade: true };
 	const STILL = { open: true, panel: false, fade: false };
 
@@ -494,6 +548,7 @@ describe("a sheet that is already open stays still", () => {
 				"SELECT id FROM transactions WHERE parent_id IS NULL AND is_split = 0 AND flag_income = 0 AND amount_cents > 0 LIMIT 1",
 			).first<{ id: number }>()
 		)?.id as number;
+
 	const addCash = async () => {
 		await send("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
@@ -502,6 +557,7 @@ describe("a sheet that is already open stays still", () => {
 			category: "1",
 			back: "/transactions",
 		});
+
 		return (
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Quiet market'",
@@ -518,12 +574,14 @@ describe("a sheet that is already open stays still", () => {
 
 	it("opens Add cash with the motion, and draws it still after a field's error", async () => {
 		expect(sheetIn((await send("/transactions/cash/new")).html)).toEqual(PLAYS);
+
 		const refused = await send("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "",
 			merchant: "",
 			category: "1",
 		});
+
 		expect(refused.res.status).toBe(422);
 		expect(sheetIn(refused.html)).toEqual(STILL);
 	});
@@ -531,31 +589,39 @@ describe("a sheet that is already open stays still", () => {
 	it("opens the edit panel with the motion, and draws it still after a field's error", async () => {
 		const id = await firstTransaction();
 		expect(sheetIn((await send(`/transactions/${id}`)).html)).toEqual(PLAYS);
+
 		const refused = await send(`/transactions/${id}`, {
 			name_pick: "own",
 			merchant: "x".repeat(200),
 			back: "/transactions",
 		});
+
 		expect(refused.res.status).toBe(422);
 		expect(sheetIn(refused.html)).toEqual(STILL);
 	});
 
 	it("draws the edit panel still for the delete question, and again when Keep it brings the panel back", async () => {
 		const id = await addCash();
+
 		const question = await send(`/transactions/${id}/delete`, {
 			back: "/transactions",
 		});
+
 		expect(question.html).toContain("Delete Quiet market, $20.45?");
 		expect(sheetIn(question.html)).toEqual(STILL);
+
 		// Keep it is a GET of the panel's own address, from the page that already shows it.
 		const keep = await send(`/transactions/${id}`, undefined, {
 			"HX-Current-URL": `${BASE}/transactions/${id}?month=all`,
 		});
+
 		expect(sheetIn(keep.html)).toEqual(STILL);
+
 		// A tap on the row, from the list, is the panel opening.
 		const open = await send(`/transactions/${id}`, undefined, {
 			"HX-Current-URL": `${BASE}/transactions`,
 		});
+
 		expect(sheetIn(open.html)).toEqual(PLAYS);
 		// Without the header (a link, a reload) the panel arrives like any page.
 		const reload = await exports.default.fetch(`${BASE}/transactions/${id}`);
@@ -567,15 +633,18 @@ describe("a sheet that is already open stays still", () => {
 		expect(sheetIn((await send(`/transactions/${id}/split`)).html)).toEqual(
 			PLAYS,
 		);
+
 		const parts = {
 			back: "/transactions",
 			part_category: "1",
 			part_amount: "1.00",
 		};
+
 		const added = await send(`/transactions/${id}/split`, {
 			...parts,
 			add: "1",
 		});
+
 		expect(added.res.status).toBe(200);
 		expect(sheetIn(added.html)).toEqual(STILL);
 		const refused = await send(`/transactions/${id}/split`, parts);
@@ -585,27 +654,33 @@ describe("a sheet that is already open stays still", () => {
 
 	it("opens a bill's sheet with the motion, and draws it still after a field's error", async () => {
 		expect(sheetIn((await send("/bills/new")).html)).toEqual(PLAYS);
+
 		const refused = await send("/bills", {
 			name: "",
 			amount: "",
 			due_day: "",
 			frequency: "monthly",
 		});
+
 		expect(refused.html).toContain("Enter a name.");
 		expect(sheetIn(refused.html)).toEqual(STILL);
 	});
 
 	it("opens Set category with the motion, and draws it still when its Save is refused", async () => {
 		const id = await firstTransaction();
+
 		const open = await send("/transactions/select/category", {
 			ids: String(id),
 			back: "/transactions",
 		});
+
 		expect(sheetIn(open.html)).toEqual(PLAYS);
+
 		const refused = await send("/transactions/select/category/save", {
 			ids: String(id),
 			back: "/transactions",
 		});
+
 		expect(refused.res.status).toBe(422);
 		expect(sheetIn(refused.html)).toEqual(STILL);
 	});
@@ -620,6 +695,7 @@ describe("the proposals page's drawings", () => {
 				.flatMap((s) => [...s.matchAll(/\.(proposal-[a-z0-9-]+)/g)])
 				.map((m) => m[1]),
 		);
+
 		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), P118 and
 		// P119's saved-row replays (the tick, the let-go press and the toast), and P125's replays of a family's
 		// first week (the headline and status lines, the promises and found lines, the strikes, the pencil and ink, the strokes,
@@ -668,6 +744,7 @@ describe("the proposals page's drawings", () => {
 				"proposal-slide-out",
 			].sort(),
 		);
+
 		for (const gone of [
 			"proposal-fade",
 			"proposal-rise",
@@ -687,6 +764,7 @@ describe("the proposals page's drawings", () => {
 			"../src/design-system/proposals-details.tsx",
 		]) {
 			const text = SOURCES[file] ?? "";
+
 			for (const gone of [
 				"proposal-fade",
 				"proposal-rise",
@@ -699,7 +777,9 @@ describe("the proposals page's drawings", () => {
 			])
 				expect(text.includes(gone), `${file} ${gone}`).toBe(false);
 		}
+
 		const motion = SOURCES["../src/design-system/proposals-motion.tsx"] ?? "";
+
 		for (const real of ["sheet-rise", "fade-in", "toast-motion"])
 			expect(motion.includes(real), real).toBe(true);
 		expect(
@@ -715,6 +795,7 @@ describe("the proposals page's drawings", () => {
 				r.selector.startsWith(".proposal-loop :is(") &&
 				r.decls.get("animation-iteration-count") === "infinite",
 		);
+
 		expect(replay).toBeDefined();
 		expect(replay?.selector).toContain(".sheet-rise");
 		expect(replay?.selector).toContain(".sheet-slide");
@@ -733,6 +814,7 @@ describe("the proposals page's drawings", () => {
 		expect(rule(".proposal-saved-loop")[0]?.decls.get("--loop")).toBe(
 			"calc(var(--duration-toast) * 1.25)",
 		);
+
 		for (const part of [
 			".proposal-saved-tick",
 			".proposal-saved-chevron",
@@ -768,6 +850,7 @@ describe("the proposals page's drawings", () => {
 					selectorsOf(r).map((s) => [s, r.decls] as const),
 				),
 			);
+
 		expect([...stops("replay-tick").keys()]).toEqual([
 			"0%",
 			"3%",
@@ -815,6 +898,7 @@ describe("the proposals page's drawings", () => {
 					selectorsOf(r).map((s) => [s, r.decls] as const),
 				),
 			);
+
 		// The answer: full strength and ink until 18%, then 40% in muted words from 20.5% (150 ms).
 		expect([...stops("replay-first-answer").keys()]).toEqual([
 			"0%",
@@ -905,14 +989,17 @@ describe("the proposals page's drawings", () => {
 		const replay = rules.find((r) =>
 			r.selector.startsWith(".proposal-loop :is("),
 		);
+
 		for (const part of [".switch-knob", ".switch-track"]) {
 			expect(replay?.selector, part).toContain(part);
+
 			const named = rules.find(
 				(r) =>
 					!inReduce(r) &&
 					r.selector === `.proposal-loop ${part}` &&
 					r.decls.has("animation-name"),
 			);
+
 			const from = keyframes(named?.decls.get("animation-name") ?? "")[0];
 			expect(from?.selector, part).toBe("from");
 			expect(
@@ -925,6 +1012,7 @@ describe("the proposals page's drawings", () => {
 				`${part} under reduced motion`,
 			).toBe(true);
 		}
+
 		expect(
 			keyframes(
 				rules
@@ -932,15 +1020,19 @@ describe("the proposals page's drawings", () => {
 					?.decls.get("animation-name") ?? "",
 			)[0]?.decls.get("translate"),
 		).toBe("1.375rem");
+
 		// Off at rest, so what the loop settles on (and a still capture shows) is the move's end.
 		const res = await exports.default.fetch(
 			"http://tally.test/design-system/proposals",
 		);
+
 		const html = await res.text();
+
 		for (const look of ["quiet", "more", "none"]) {
 			const input = html.match(
 				new RegExp(`<input [^>]*id="p74-${look}-switch"[^>]*>`),
 			)?.[0];
+
 			expect(input, look).toBeDefined();
 			expect(input, look).not.toMatch(/\schecked\b/);
 			// A tap can't turn the pictured switch On while the loop keeps showing it turning off.
@@ -959,8 +1051,10 @@ describe("the catalog and DESIGN.md", () => {
 		const start = html.indexOf(`<section id="${id}"`);
 		expect(start, id).toBeGreaterThan(-1);
 		const next = html.indexOf("<section ", start + 1);
+
 		return html.slice(start, next < 0 ? undefined : next);
 	};
+
 	const text = (html: string) =>
 		html.replace(/<[^>]*>/g, " ").replace(/&#39;|&apos;/g, "'");
 
@@ -968,6 +1062,7 @@ describe("the catalog and DESIGN.md", () => {
 		const res = await exports.default.fetch("http://tally.test/design-system");
 		const html = await res.text();
 		const motion = text(section(html, "motion"));
+
 		for (const t of DURATION_TOKENS)
 			expect(motion).toContain(`duration-${t.name}`);
 		// The Switch, the sheet and the toast: each use spec's Motion row, with its length.
@@ -1022,6 +1117,7 @@ describe("the catalog and DESIGN.md", () => {
 describe("the saved row's tick", () => {
 	const stop = (name: string, percent: string) =>
 		keyframes(name).find((r) => selectorsOf(r).includes(percent));
+
 	const animationOf = (selector: string) => decl(selector, "animation") ?? "";
 
 	it("draws the tick in the confirmation's 150 ms, then holds it for the toast's own stay", () => {
@@ -1087,6 +1183,7 @@ describe("the saved row's tick", () => {
 			const reduce = rules.find(
 				(r) => inReduce(r) && selectorsOf(r).includes(selector),
 			);
+
 			expect(reduce?.decls.get("animation"), selector).toMatch(/step-end/);
 			expect(reduce?.decls.get("animation"), selector).not.toContain(
 				"saved-draw",
@@ -1099,6 +1196,7 @@ describe("the saved row's tick", () => {
 			rules
 				.find((r) => inReduce(r) && selectorsOf(r).includes(selector))
 				?.decls.get("animation") ?? "";
+
 		expect(reduceAnimation(".row-saved .saved-arrow")).toContain(
 			"saved-arrow-still",
 		);
@@ -1126,6 +1224,7 @@ describe("the saved row's tick", () => {
 		expect(stop("saved-arrow-undo-still", "98.5%")?.decls.get("opacity")).toBe(
 			"1",
 		);
+
 		// The first stop the tick hides at is the first stop the arrow shows at, for both stays.
 		const firstAt = (name: string, opacity: string) =>
 			Math.min(
@@ -1134,6 +1233,7 @@ describe("the saved row's tick", () => {
 					.flatMap(selectorsOf)
 					.map((percent) => Number.parseFloat(percent)),
 			);
+
 		expect(firstAt("saved-tick", "0")).toBe(firstAt("saved-arrow-still", "1"));
 		expect(firstAt("saved-tick-undo", "0")).toBe(
 			firstAt("saved-arrow-undo-still", "1"),

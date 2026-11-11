@@ -8,6 +8,7 @@ const MAX_CAUSE_DEPTH = 5;
 
 export function isUniqueViolation(error: unknown): boolean {
 	let current: unknown = error;
+
 	for (
 		let depth = 0;
 		depth <= MAX_CAUSE_DEPTH && current instanceof Error;
@@ -16,5 +17,6 @@ export function isUniqueViolation(error: unknown): boolean {
 		if (UNIQUE.test(current.message)) return true;
 		current = current.cause;
 	}
+
 	return false;
 }

@@ -8,8 +8,11 @@ import { keyboard, keysHref } from "../public/js/keyboard.js";
 function matchesSimple(node: FakeNode, selector: string) {
 	const [, tag = "", conditions = ""] =
 		selector.trim().match(/^(\w*)((?:\[[^\]]+\])*)$/) ?? [];
+
 	if (!tag && !conditions) return false;
+
 	if (tag && node.tag !== tag) return false;
+
 	return [...conditions.matchAll(/\[([^=\]]+)(?:=([^\]]+))?\]/g)].every(
 		([, name = "", value]) =>
 			node.attrs.has(name) &&
@@ -52,18 +55,22 @@ class FakeNode {
 			this.children.push(node);
 			node.attachTo(this.doc);
 		}
+
 		return this;
 	}
 	attachTo(doc: FakePage | null) {
 		this.doc = doc;
 		doc?.nodes.push(this);
+
 		for (const child of this.children) child.attachTo(doc);
 	}
 	/** The node and its ancestors, nearest first. */
 	ancestry(): FakeNode[] {
 		const chain: FakeNode[] = [];
+
 		for (let node: FakeNode | null = this; node; node = node.parentElement)
 			chain.push(node);
+
 		return chain;
 	}
 	closest(selector: string): FakeNode | null {
@@ -77,6 +84,7 @@ class FakeNode {
 	}
 	focus() {
 		this.focusCount += 1;
+
 		if (this.doc) this.doc.activeElement = this;
 	}
 	blur() {
@@ -107,6 +115,7 @@ class FakePage {
 	}
 	add(node: FakeNode, parent: FakeNode = this.body) {
 		parent.append(node);
+
 		return node;
 	}
 }
@@ -118,9 +127,11 @@ function el(
 	parent?: FakeNode,
 ) {
 	const node = new FakeNode(tag);
+
 	for (const [name, value] of Object.entries(attrs))
 		node.setAttribute(name, value);
 	page.add(node, parent);
+
 	return node;
 }
 
@@ -144,8 +155,10 @@ function windowFor(search = "", hash = "") {
  */
 function remove(page: FakePage, node: FakeNode) {
 	const parent = node.parentElement;
+
 	if (parent) parent.children.splice(parent.children.indexOf(node), 1);
 	page.nodes.splice(page.nodes.indexOf(node), 1);
+
 	if (page.activeElement.ancestry().includes(node))
 		page.activeElement = page.body;
 }
@@ -171,6 +184,7 @@ function press(key: string, modifiers: Partial<Record<string, boolean>> = {}) {
  */
 function requestEvent(target: FakeNode | null, from?: string) {
 	const headers = from === undefined ? {} : { "HX-Current-URL": from };
+
 	return {
 		detail: { ctx: { target, request: { headers } } },
 		preventDefault: vi.fn(),
@@ -202,6 +216,7 @@ function finishEvent(
 /** The keyboard for a page and window, with the page's own keydown, htmx settle, finish and request events as the browser sends them. */
 function setup(page: FakePage, win = windowFor()) {
 	const keys = keyboard(page, win);
+
 	return {
 		win,
 		keydown: (event: ReturnType<typeof press>) => keys.keydown(event),
@@ -254,10 +269,12 @@ describe("keysHref (the address of the keys sheet)", () => {
 describe("/ (search)", () => {
 	it("focuses the page's search field, and stops the browser's own quick find", () => {
 		const page = new FakePage();
+
 		const search = el(page, "input", {
 			id: "q",
 			"aria-keyshortcuts": "/",
 		});
+
 		const { keydown, win } = setup(page);
 		const event = press("/");
 		keydown(event);
@@ -277,10 +294,12 @@ describe("/ (search)", () => {
 
 	it("takes Shift as part of / on a layout where / needs it, such as German", () => {
 		const page = new FakePage();
+
 		const search = el(page, "input", {
 			id: "q",
 			"aria-keyshortcuts": "/",
 		});
+
 		const { keydown, win } = setup(page);
 		const event = press("/", { shiftKey: true });
 		keydown(event);
@@ -573,10 +592,12 @@ describe("? (the keys sheet)", () => {
 		const { keydown, responded, ended } = setup(page, win);
 		keydown(press("?", { shiftKey: true }));
 		win.location.search = "?month=2026-10";
+
 		const event = requestEvent(
 			region,
 			"http://localhost/transactions?month=2026-09",
 		);
+
 		responded(event);
 		expect(event.preventDefault).toHaveBeenCalled();
 		ended(finishEvent(region, "issuing"));
@@ -759,8 +780,10 @@ describe("a keys request that ends (htmx:finally:request)", () => {
 			page.activeElement = second;
 			keydown(press("?", { shiftKey: true }));
 			const sheet = el(page, "section", { "data-sheet": "" }, region);
+
 			if (order === "before") ended(finishEvent(region, "swapped"));
 			settled(settleEvent(region));
+
 			if (order === "after") ended(finishEvent(region, "swapped"));
 			remove(page, sheet);
 			win.location.hash = "";
@@ -868,10 +891,12 @@ describe("a keys response that comes after another sheet opened or the address m
 		keydown(press("?", { shiftKey: true }));
 		// A Transactions filter that finished first pushed its own address; the keys response is for the one before it.
 		win.location.search = "?month=2026-10";
+
 		const event = requestEvent(
 			region,
 			"http://localhost/transactions?month=2026-09",
 		);
+
 		responded(event);
 		expect(event.preventDefault).toHaveBeenCalled();
 	});
@@ -888,10 +913,12 @@ describe("a keys response that comes after another sheet opened or the address m
 		// ? blurred Undo, so focus is on nothing while the keys load.
 		expect(page.activeElement).toBe(page.body);
 		win.location.search = "?month=2026-10";
+
 		const event = requestEvent(
 			region,
 			"http://localhost/transactions?month=2026-09",
 		);
+
 		responded(event);
 		expect(event.preventDefault).toHaveBeenCalled();
 		// The drop leaves the return to ended(), which gives focus back to Undo when the request finishes.
@@ -911,10 +938,12 @@ describe("a keys response that comes after another sheet opened or the address m
 		const { keydown, responded, settled } = setup(page, win);
 		page.activeElement = first;
 		keydown(press("?", { shiftKey: true }));
+
 		const event = requestEvent(
 			region,
 			"http://localhost/transactions?month=2026-09",
 		);
+
 		responded(event);
 		expect(event.preventDefault).not.toHaveBeenCalled();
 		// The sheet arrives, and its close swaps it away: focus goes back to the row that opened it.
@@ -932,10 +961,12 @@ describe("a keys response that comes after another sheet opened or the address m
 		const { keydown, responded } = setup(page, win);
 		keydown(press("?", { shiftKey: true }));
 		win.location.hash = "#budget";
+
 		const event = requestEvent(
 			region,
 			"http://localhost/transactions?month=2026-09#row-1",
 		);
+
 		responded(event);
 		expect(event.preventDefault).not.toHaveBeenCalled();
 	});
@@ -978,11 +1009,14 @@ describe("a keys response that comes after another sheet opened or the address m
 			page.activeElement = first;
 			keydown(press("?", { shiftKey: true }));
 			const otherSheet = el(page, "section", { "data-sheet": "" }, sheetRegion);
+
 			if (moved) win.location.search = "?month=2026-10";
+
 			const event = requestEvent(
 				region,
 				moved ? "http://localhost/transactions?month=2026-09" : undefined,
 			);
+
 			responded(event);
 			expect(event.preventDefault).toHaveBeenCalled();
 			// The other sheet closes before the request ends, so ended() would give focus back to the row if the return survived.
@@ -1287,14 +1321,17 @@ describe("e (opens the focused row)", () => {
 describe("← and → (the months on Home)", () => {
 	it("follow the previous and next month links", () => {
 		const page = new FakePage();
+
 		const previous = el(page, "a", {
 			href: "/?month=2026-08",
 			"aria-keyshortcuts": "ArrowLeft",
 		});
+
 		const next = el(page, "a", {
 			href: "/?month=2026-10",
 			"aria-keyshortcuts": "ArrowRight",
 		});
+
 		const { keydown } = setup(page);
 		const left = press("ArrowLeft");
 		keydown(left);
@@ -1306,10 +1343,12 @@ describe("← and → (the months on Home)", () => {
 
 	it("leave the arrows to a sideways scroll region, which scrolls as the browser does", () => {
 		const page = new FakePage();
+
 		const previous = el(page, "a", {
 			href: "/?month=2026-08",
 			"aria-keyshortcuts": "ArrowLeft",
 		});
+
 		const region = el(page, "div", { "data-sideways": "" });
 		const inside = el(page, "div", { tabindex: "0" }, region);
 		page.activeElement = inside;
@@ -1387,6 +1426,7 @@ describe("the guards", () => {
 			expect(first.focusCount).toBe(0);
 			expect(field.focusCount).toBe(0);
 		}
+
 		const page = new FakePage();
 		const editable = el(page, "div", { contenteditable: "true" });
 		const [first] = list(page);
@@ -1414,10 +1454,12 @@ describe("the guards", () => {
 		const [first] = list(page);
 		setup(page).keydown(press("J", { shiftKey: true }));
 		expect(first.focusCount).toBe(0);
+
 		const sideways = el(page, "a", {
 			href: "/?month=2026-08",
 			"aria-keyshortcuts": "ArrowLeft",
 		});
+
 		setup(page).keydown(press("ArrowLeft", { shiftKey: true }));
 		expect(sideways.clicks).toBe(0);
 	});

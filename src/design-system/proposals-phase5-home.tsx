@@ -51,6 +51,7 @@ const CATS = {
 	shopping: { name: "Shopping", icon: "shopping", color: "cat-plum" },
 	dateNight: { name: "Date Night", icon: "date-night", color: "cat-blue" },
 } as const;
+
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 const row = (cat: Cat, spentCents: number, budgetCents: number): Row => ({
@@ -86,11 +87,14 @@ const BUDGET_CENTS = sum(OCTOBER.map((r) => r.budgetCents));
 const IN_BUDGETS_CENTS = sum(OCTOBER.map((r) => r.spentCents));
 const NO_BUDGET_CENTS = sum(NOT_BUDGETED.map((c) => c.spentCents));
 const SPENT_CENTS = IN_BUDGETS_CENTS + NO_BUDGET_CENTS + UNCATEGORIZED.cents;
+
 // Spec §6: the whole budget, minus all counted spending, bills due and unpaid, and the savings goal.
 const SAFE_CENTS =
 	BUDGET_CENTS - SPENT_CENTS - BILLS_DUE_CENTS - SAVINGS_GOAL_CENTS;
+
 /** What the budget rows have left between them ($916): more than Safe to spend (gap B2). */
 const LEFT_IN_BUDGETS_CENTS = BUDGET_CENTS - IN_BUDGETS_CENTS;
+
 /** P50: Safe to spend over the days left, rounded down to the cent. */
 const PER_DAY = formatCents(Math.floor(SAFE_CENTS / DAYS_LEFT));
 
@@ -104,6 +108,7 @@ const summaries = (rows: Row[]): CategorySummary[] =>
 		leftCents: r.budgetCents - r.spentCents,
 		over: r.spentCents > r.budgetCents,
 	}));
+
 const STATUS = statusSentence(summaries(OCTOBER));
 
 const BAND = {
@@ -258,6 +263,7 @@ function ProtoRow({
 	const over = r.spentCents > r.budgetCents;
 	const { fillPct } = barGeometry(r.spentCents, r.budgetCents);
 	const Box = href ? "a" : "div";
+
 	return (
 		<li>
 			<Box
@@ -359,7 +365,9 @@ export const SEPTEMBER: Row[] = [
 	row(CATS.household, 21000, 25000),
 	row(CATS.utilities, 41000, 45000),
 ];
+
 const SEPTEMBER_NO_BUDGET_CENTS = 3000;
+
 /** How September ended: its budget minus everything it counted ($86). */
 const SEPTEMBER_LEFT_CENTS =
 	sum(SEPTEMBER.map((r) => r.budgetCents)) -
@@ -369,8 +377,10 @@ const SEPTEMBER_LEFT_CENTS =
 /** A finished month's sentence, in the past tense, written from its rows. */
 function endedSentence(rows: Row[]) {
 	const over = rows.filter((r) => r.spentCents > r.budgetCents);
+
 	if (over.length === 0) return "Every category stayed under its budget.";
 	const [first] = over as [Row];
+
 	return over.length === 1
 		? `${first.name} finished ${dollars(first.spentCents - first.budgetCents)} over. Everything else stayed under.`
 		: `${over.map((r) => r.name).join(" and ")} finished over. Everything else stayed under.`;
@@ -529,9 +539,11 @@ const OVER: Row[] = [
 	row(CATS.household, 16200, 25000),
 	row(CATS.utilities, 44000, 45000),
 ];
+
 // Every transaction has a category in this month, so there's no Band.
 const OVER_BY_CENTS =
 	sum(OVER.map((r) => r.spentCents)) + BILLS_DUE_CENTS - BUDGET_CENTS;
+
 const OVER_STATUS = statusSentence(summaries(OVER));
 
 /** A brick line with the alert icon: status in color, icon and word. */
@@ -888,6 +900,7 @@ const olderLink = olderHome(
 // P53: from a budget row to its transactions (gap B8, beta feedback #39).
 
 const EATING_OUT = OCTOBER[1] as Row;
+
 /** What Eating Out spent in September, for the money input's "Last month" chip. */
 const LAST_MONTH_CENTS =
 	SEPTEMBER.find((r) => r.name === EATING_OUT.name)?.spentCents ?? 0;

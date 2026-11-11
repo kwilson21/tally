@@ -93,15 +93,19 @@ const replyWithDetails = () =>
 /** Jev's answers in call order, the last one repeated. */
 function fakeJev(...responses: (() => Response | Promise<Response>)[]) {
 	let calls = 0;
+
 	const fetchImpl = vi.fn(async () => {
 		const respond = responses[Math.min(calls, responses.length - 1)];
 		calls += 1;
+
 		return await (respond as () => Response | Promise<Response>)();
 	});
+
 	return { fetchImpl, calls: () => calls };
 }
 
 let seq = 0;
+
 type Seed = {
 	date?: string;
 	/** The bank's raw text; a row's default is unique, so it never groups with another. */
@@ -117,6 +121,7 @@ type Seed = {
 /** Inserts one purchase, unique in its name and Plaid id, and returns its id. */
 async function addRow(seed: Seed = {}): Promise<number> {
 	seq += 1;
+
 	const row = await db
 		.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_confidence, category_id, category_source, note, plaid_transaction_id)
@@ -133,6 +138,7 @@ async function addRow(seed: Seed = {}): Promise<number> {
 			seed.plaid === undefined ? `plaid-row-${seq}` : seed.plaid,
 		)
 		.first<{ id: number }>();
+
 	return Number(row?.id);
 }
 
@@ -144,6 +150,7 @@ async function snapshotOf(id: number): Promise<ResortSnapshot> {
 		.prepare(`SELECT ${COLUMNS} FROM transactions WHERE id = ?`)
 		.bind(id)
 		.first<ResortSnapshot>();
+
 	return row as ResortSnapshot;
 }
 
@@ -198,12 +205,14 @@ async function categoryIdByName(name: string): Promise<number> {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return Number(row?.id);
 }
 
 /** The candidates the run holds for these rows, in this order: the identity and text each row has now. */
 async function candidatesOf(ids: number[]): Promise<ResortCandidate[]> {
 	const candidates: ResortCandidate[] = [];
+
 	for (const id of ids) {
 		// The identity the run stores is the one the row has now: its Plaid id and amount, read with its snapshot.
 		const row = await db
@@ -218,6 +227,7 @@ async function candidatesOf(ids: number[]): Promise<ResortCandidate[]> {
 				rawName: string;
 				note: string | null;
 			}>();
+
 		candidates.push({
 			id,
 			date: row?.date ?? TODAY,
@@ -230,6 +240,7 @@ async function candidatesOf(ids: number[]): Promise<ResortCandidate[]> {
 			snapshot: await snapshotOf(id),
 		});
 	}
+
 	return candidates;
 }
 
@@ -245,7 +256,9 @@ async function startRun(ids: number[]): Promise<string> {
 		categoryName: "Eating Out",
 		now: Date.now(),
 	});
+
 	if (started.runId === null) throw new Error("no run started");
+
 	return started.runId;
 }
 
@@ -288,23 +301,27 @@ describe("a re-ask asks only the run's rows", () => {
 	it("asks the run's rows only, in the order given, 25 a group", async () => {
 		const others = [await addRow(), await addRow(), await addRow()];
 		const ids: number[] = [];
+
 		for (let i = 0; i < 27; i++) ids.push(await addRow());
 		// Oldest id first: pendingForJev would give the newest first, so this checks the run's order is kept.
 		const order = [...ids];
 		const runId = await startRun(order);
 		const fake = fakeSteps();
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			bySync: true,
 			runId: "reask-order",
 			reask: { runId, ids: order },
 		});
+
 		const asks = fake.names().filter((name) => name.includes("-ask-"));
 		expect(asks).toEqual([
 			...order.slice(0, 25).map((id) => `group-1-ask-${id}`),
 			...order.slice(25).map((id) => `group-2-ask-${id}`),
 		]);
+
 		for (const id of others)
 			expect(asks.some((name) => name.endsWith(`-${id}`))).toBe(false);
 		expect(done.asked).toBe(27);
@@ -319,14 +336,18 @@ describe("a Maybe row is cleared, asked again, and kept or filed by the answer",
 		const b = await addRow({ date: "2026-09-21", confidence: 0.55 });
 		const runId = await startRun([a, b]);
 		const seenAtAsk: (number | null)[] = [];
+
 		const jev = fakeJev(
 			() => reply(0.9),
 			() => reply(0.6),
 		);
+
 		const fetchImpl = vi.fn(async () => {
 			seenAtAsk.push(await confOf(a));
+
 			return jev.fetchImpl();
 		});
+
 		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-maybe",
@@ -348,20 +369,25 @@ describe("a Maybe row is cleared, asked again, and kept or filed by the answer",
 describe("rows that are not Maybes are never cleared or asked", () => {
 	it("leaves a row at 0.80 or above, and a decided row, untouched and unasked", async () => {
 		const confident = await addRow({ confidence: 0.85 });
+
 		const decided = await addRow({
 			categoryId: await categoryIdByName("Groceries"),
 			categorySource: "user",
 		});
+
 		const ruled = await addRow({
 			categoryId: await categoryIdByName("Groceries"),
 			categorySource: "merchant_rule",
 		});
+
 		const waiting = await addRow();
+
 		const before = [
 			await rowState(confident),
 			await rowState(decided),
 			await rowState(ruled),
 		];
+
 		const runId = await startRun([confident, decided, ruled, waiting]);
 		const fake = fakeSteps();
 		await sortGroups(
@@ -406,6 +432,7 @@ describe("no other sort path is affected", () => {
 		const runId = await startRun([a, b]);
 		const normalFetch = vi.fn(async () => reply(0.9));
 		let markDuringAsk: number | null | undefined;
+
 		const fetchImpl = vi.fn(async () => {
 			markDuringAsk = await confOf(a);
 			// The re-ask holds the turn here, so a normal sort's read finds it busy and asks nothing.
@@ -413,8 +440,10 @@ describe("no other sort path is affected", () => {
 				rulesApplied: true,
 				runId: "normal-during",
 			});
+
 			return reply(0.6);
 		});
+
 		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-holds",
@@ -429,11 +458,13 @@ describe("no other sort path is affected", () => {
 		const runId = await startRun([a]);
 		expect(await takeSortingTurn(db, "other-group:1")).toBe(true);
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-busy",
 			reask: { runId, ids: [a] },
 		});
+
 		expect(done.asked).toBe(0);
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(await confOf(a)).toBe(0.55);
@@ -448,6 +479,7 @@ describe("a person's answer during the run wins", () => {
 		const changed = await addRow({ date: "2026-09-20", confidence: 0.55 });
 		const runId = await startRun([first, decided, changed]);
 		const groceries = await categoryIdByName("Groceries");
+
 		const jev = fakeJev(
 			async () => {
 				// A person files one row and edits another while the run asks.
@@ -461,11 +493,13 @@ describe("a person's answer during the run wins", () => {
 					.prepare("UPDATE transactions SET note = 'edited' WHERE id = ?")
 					.bind(changed)
 					.run();
+
 				return reply(0.9);
 			},
 			() => reply(0.9),
 			() => reply(0.9),
 		);
+
 		await sortGroups(withKey, fakeSteps().runStep, jev.fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-person",
@@ -537,6 +571,7 @@ describe("the ask is category-only", () => {
 describe("progress, finish and restore", () => {
 	it("counts the rows handled, never past the total, and finishes the run once", async () => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < 4; i++) ids.push(await addRow({ confidence: 0.55 }));
 		const runId = await startRun(ids);
 		await categorizePending(
@@ -557,6 +592,7 @@ describe("progress, finish and restore", () => {
 
 	it("restores the marks of rows the run never reached (the daily cap ran out)", async () => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < 6; i++) ids.push(await addRow({ confidence: 0.55 }));
 		const runId = await startRun(ids);
 		// 37 of the demo's 40 calls are used today, so the group may ask 3.
@@ -572,24 +608,30 @@ describe("progress, finish and restore", () => {
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(await callsUsed()).toBe(40);
+
 		// Not reached: the mark is back, in this group's own save, before any other sort can read the rows.
 		for (const id of ids.slice(3)) expect(await confOf(id)).toBe(0.55);
 		expect(await confOf(ids[0] as number)).toBe(0.9);
 		expect((await readRun(db))?.status).toBe("running");
 		await finishRun(db, { runId, now: Date.now() });
 		expect(await callsUsed()).toBe(40);
+
 		for (const id of ids.slice(3)) expect(await confOf(id)).toBe(0.55);
+
 		const record = JSON.parse((await movedRow(runId))?.value ?? "{}") as {
 			rows: unknown[];
 		};
+
 		expect(record.rows).toHaveLength(3);
 	});
 
 	it("the first 25 rows all decided by a person meanwhile do not stop the run", async () => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < 27; i++) ids.push(await addRow({ confidence: 0.55 }));
 		const runId = await startRun(ids);
 		const groceries = await categoryIdByName("Groceries");
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name !== "group-1-read" || attempt !== 1) return;
@@ -601,12 +643,15 @@ describe("progress, finish and restore", () => {
 					.run();
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-decided",
 			reask: { runId, ids },
 		});
+
 		expect(done.asked).toBe(2);
 		expect(fake.names().filter((name) => name.includes("-ask-"))).toEqual([
 			`group-1-ask-${ids[25]}`,
@@ -617,9 +662,11 @@ describe("progress, finish and restore", () => {
 
 	it("a normal sort between groups never asks the rows a group has not reached", async () => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < 27; i++) ids.push(await addRow({ confidence: 0.55 }));
 		const runId = await startRun(ids);
 		const normalFetch = vi.fn(async () => reply(0.9));
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name !== "group-2-read" || attempt !== 1) return;
@@ -630,6 +677,7 @@ describe("progress, finish and restore", () => {
 				});
 			},
 		});
+
 		await sortGroups(
 			withKey,
 			fake.runStep,
@@ -647,10 +695,12 @@ describe("progress, finish and restore", () => {
 		const a = await addRow({ date: "2026-09-22", confidence: 0.55 });
 		const b = await addRow({ date: "2026-09-21", confidence: 0.55 });
 		const runId = await startRun([a, b]);
+
 		const jev = fakeJev(
 			() => new Response("{}", { status: 400 }),
 			() => reply(0.9),
 		);
+
 		await categorizePending(
 			{ DB: db, JEV_API_KEY: "test-key", DEMO: env.DEMO },
 			jev.fetchImpl,
@@ -668,10 +718,12 @@ describe("progress, finish and restore", () => {
 		const b = await addRow({ date: "2026-09-21", confidence: 0.55 });
 		const c = await addRow({ date: "2026-09-20", confidence: 0.55 });
 		const runId = await startRun([a, b, c]);
+
 		const jev = fakeJev(
 			() => reply(0.9),
 			() => new Response("{}", { status: 503 }),
 		);
+
 		await categorizePending(
 			{ DB: db, JEV_API_KEY: "test-key", DEMO: env.DEMO },
 			jev.fetchImpl,
@@ -688,11 +740,13 @@ describe("progress, finish and restore", () => {
 		const a = await addRow({ confidence: 0.55 });
 		const runId = await startRun([a]);
 		const fake = fakeSteps();
+
 		const params: SortParams = {
 			bySync: false,
 			rulesApplied: true,
 			reask: { runId, ids: [a] },
 		};
+
 		await runSortInstance(
 			{ DB: db, JEV_API_KEY: "test-key", DEMO: env.DEMO },
 			fake.runStep,
@@ -711,6 +765,7 @@ describe("progress, finish and restore", () => {
 	it("a sort that throws still finishes the run in-process", async () => {
 		const a = await addRow({ confidence: 0.55 });
 		const runId = await startRun([a]);
+
 		// Only the merchant-rules step's write fails, so the sort throws before its groups; the finish still runs.
 		const flaky = new Proxy(db, {
 			get(target, key) {
@@ -721,12 +776,16 @@ describe("progress, finish and restore", () => {
 							sql.includes("merchant_rule")
 						)
 							throw new Error("rules broke");
+
 						return target.prepare(sql);
 					};
+
 				const value = Reflect.get(target, key);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		await expect(
 			categorizePending(
 				{ DB: flaky, JEV_API_KEY: "test-key", DEMO: env.DEMO },
@@ -786,11 +845,14 @@ describe("a re-ask writes only while its run is still running (#828)", () => {
 	it("a run force-finalized while its group asks: the answer is not written", async () => {
 		const maybe = await addRow({ confidence: 0.55 });
 		const runId = await startRun([maybe]);
+
 		const fetchImpl = vi.fn(async () => {
 			// Forced finalize (no instance key) while the row's ask is in flight.
 			await finishRun(db, { runId, now: Date.now() });
+
 			return reply(0.9);
 		});
+
 		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-forced",
@@ -821,13 +883,16 @@ describe("a failed re-ask stamps only the row it asked about (identity, #831 rou
 		const original = await addRow({ date: TODAY, confidence: 0.55 });
 		const control = await addRow({ date: "2026-09-21", confidence: 0.55 });
 		const runId = await startRun([original, control]);
+
 		const fetchImpl = vi.fn(async () => {
 			if (fetchImpl.mock.calls.length === 1) {
 				await reuseId(original, { plaid: "other-plaid", amount: 999 });
 			}
+
 			// 400 fails this one ask, not the service: it is marked, and the run goes on.
 			return new Response("{}", { status: 400 });
 		});
+
 		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-reused-failure",
@@ -853,6 +918,7 @@ describe("a re-ask that a person edits mid-ask leaves its mark cleared (#831 rou
 			.prepare("INSERT INTO household_settings (key, value) VALUES (?, '39')")
 			.bind(`jev_calls_${await householdToday(db)}`)
 			.run();
+
 		const fetchImpl = vi.fn(async () => {
 			// A person edits the candidate's note while its ask is in flight.
 			await db
@@ -861,8 +927,10 @@ describe("a re-ask that a person edits mid-ask leaves its mark cleared (#831 rou
 				)
 				.bind(edited)
 				.run();
+
 			return reply(0.9);
 		});
+
 		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: "reask-edited",
@@ -887,18 +955,22 @@ describe("a re-ask writes only to the row it asked about (identity, #831)", () =
 		["a different Plaid id and amount", 999],
 		["the same amount and a different Plaid id", 1234],
 	];
+
 	for (const [label, amount] of cases) {
 		it(`a stale answer does not reach a replacement row with ${label}; the run's other row is still answered`, async () => {
 			const original = await addRow({ date: TODAY, confidence: 0.55 });
 			const control = await addRow({ date: "2026-09-21", confidence: 0.55 });
 			const runId = await startRun([original, control]);
+
 			const fetchImpl = vi.fn(async () => {
 				if (fetchImpl.mock.calls.length === 1) {
 					// The original is deleted and its id reused while its ask is in flight.
 					await reuseId(original, { plaid: "other-plaid", amount });
 				}
+
 				return reply(0.9);
 			});
+
 			await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 				rulesApplied: true,
 				runId: "reask-reused-id",
@@ -1004,6 +1076,7 @@ describe("restore of a cleared mark, and updated_at", () => {
 describe("a re-ask sends the learned line that applies (decision 156)", () => {
 	it("sends the line of its cleaned text as category only, and files the answer category-only", async () => {
 		const eatingOut = await categoryIdByName("Eating Out");
+
 		for (const day of ["01", "02"])
 			await db
 				.prepare(
@@ -1011,10 +1084,12 @@ describe("a re-ask sends the learned line that applies (decision 156)", () => {
 				)
 				.bind(`2026-08-${day}`, eatingOut)
 				.run();
+
 		const purchase = await addRow({
 			rawName: "RESORT LINE SHOP",
 			confidence: 0.55,
 		});
+
 		const runId = await startRun([purchase]);
 		const sent: { state: Record<string, unknown> }[] = [];
 		await sortGroups(
@@ -1022,6 +1097,7 @@ describe("a re-ask sends the learned line that applies (decision 156)", () => {
 			fakeSteps().runStep,
 			vi.fn(async (_url: string, init?: RequestInit) => {
 				sent.push(JSON.parse(String(init?.body)));
+
 				return reply(0.9);
 			}),
 			{
@@ -1044,6 +1120,7 @@ describe("a re-ask sends the learned line that applies (decision 156)", () => {
 describe("a plan a deploy read before learned lines", () => {
 	it("sends no line for its row and does not throw", async () => {
 		const eatingOut = await categoryIdByName("Eating Out");
+
 		for (const day of ["01", "02"])
 			await db
 				.prepare(
@@ -1051,35 +1128,43 @@ describe("a plan a deploy read before learned lines", () => {
 				)
 				.bind(`2026-08-${day}`, eatingOut)
 				.run();
+
 		const purchase = await addRow({
 			rawName: "OLD PLAN SHOP",
 			confidence: 0.55,
 		});
+
 		const runId = await startRun([purchase]);
 		const fake = fakeSteps();
 		// The read a deploy made before learned lines: histories, no learned.
 		let patched = false;
+
 		const runStep = (async (
 			name: string,
 			config: unknown,
 			fn: () => Promise<unknown>,
 		) => {
 			const result = await fake.runStep(name, config as never, fn as never);
+
 			const plan = (result as { plan?: Record<string, unknown> } | undefined)
 				?.plan;
+
 			if (name === "group-1-read" && plan) {
 				delete plan.learned;
 				plan.histories = {};
 				patched = true;
 			}
+
 			return result;
 		}) as unknown as typeof fake.runStep;
+
 		const sent: { state: Record<string, unknown> }[] = [];
 		await sortGroups(
 			withKey,
 			runStep,
 			vi.fn(async (_url: string, init?: RequestInit) => {
 				sent.push(JSON.parse(String(init?.body)));
+
 				return reply(0.9);
 			}),
 			{
@@ -1109,11 +1194,13 @@ describe("the daily cap counts a re-ask like any sort", () => {
 			},
 		);
 		const afterNormal = await callsUsed();
+
 		const reaskRows = [
 			await addRow({ confidence: 0.55 }),
 			await addRow({ confidence: 0.55 }),
 			await addRow({ confidence: 0.55 }),
 		];
+
 		const runId = await startRun(reaskRows);
 		await sortGroups(
 			withKey,
@@ -1134,8 +1221,10 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 	/** `count` waiting rows with the same bank text and amount: one cluster, in this order. */
 	const cluster = async (count: number, text = "SAME SHOP") => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < count; i++)
 			ids.push(await addRow({ confidence: 0.55, rawName: text }));
+
 		return ids;
 	};
 
@@ -1146,11 +1235,13 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		steps = fakeSteps(),
 	) {
 		const runId = await startRun(ids);
+
 		const done = await sortGroups(withKey, steps.runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: `cluster-${runId}`,
 			reask: { runId, ids, clusters: await clustersOf(ids) },
 		});
+
 		return { runId, steps, done };
 	}
 
@@ -1165,6 +1256,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		]);
 		expect(done.asked).toBe(1);
 		expect(await callsUsed()).toBe(1);
+
 		for (const id of ids) {
 			expect(await field(id, "category_id")).toBe(eatingOut);
 			expect(await field(id, "category_source")).toBe("jev");
@@ -1174,14 +1266,18 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 
 	it("the moved record lists every follower the leader's answer filed, so Undo covers them", async () => {
 		const ids = await cluster(4);
+
 		const { runId } = await reaskClusters(
 			ids,
 			vi.fn(async () => replyFor("Eating Out", 0.9)),
 		);
+
 		await finishRun(db, { runId, now: Date.now() });
+
 		const record = JSON.parse((await movedRow(runId))?.value ?? "{}") as {
 			rows: { id: number }[];
 		};
+
 		expect(record.rows.map((row) => row.id).sort((a, b) => a - b)).toEqual(
 			[...ids].sort((a, b) => a - b),
 		);
@@ -1196,6 +1292,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		],
 		["a leader that fits none", () => replyFor("None of these fit", 0.9)],
 	];
+
 	for (const [label, respond] of unsure) {
 		it(`${label}: no follower is applied or asked, and each gets its mark back`, async () => {
 			const ids = await cluster(4);
@@ -1205,6 +1302,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 			expect(steps.names().filter((name) => name.includes("-ask-"))).toEqual([
 				`group-1-ask-${ids[0]}`,
 			]);
+
 			for (const id of ids.slice(1)) {
 				expect(await field(id, "category_id")).toBeNull();
 				expect(await field(id, "category_source")).toBeNull();
@@ -1219,10 +1317,13 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		const { runId } = await reaskClusters(ids, jev.fetchImpl);
 		expect(jev.calls()).toBe(1);
 		expect(await field(ids[0] as number, "jev_failed_at")).not.toBeNull();
+
 		for (const id of ids) expect(await confOf(id)).toBe(0.55);
+
 		for (const id of ids.slice(1))
 			expect(await field(id, "jev_failed_at")).toBeNull();
 		await finishRun(db, { runId, now: Date.now() });
+
 		for (const id of ids) expect(await confOf(id)).toBe(0.55);
 	});
 
@@ -1231,6 +1332,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		const jev = fakeJev(() => new Response("{}", { status: 503 }));
 		const { runId } = await reaskClusters(ids, jev.fetchImpl);
 		expect(jev.calls()).toBe(1);
+
 		for (const id of ids) expect(await confOf(id)).toBe(0.55);
 		await finishRun(db, { runId, now: Date.now() });
 		expect((await readRun(db))?.status).toBe("done");
@@ -1242,6 +1344,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 			...(await cluster(4, "SHOP B")),
 			...(await cluster(4, "SHOP C")),
 		];
+
 		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
 		await reaskClusters(ids, fetchImpl);
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
@@ -1254,6 +1357,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 			...(await cluster(4, "SHOP B")),
 			...(await cluster(4, "SHOP C")),
 		];
+
 		// 37 of the demo's 40 calls are used, so exactly three leaders fit.
 		await db
 			.prepare("INSERT INTO household_settings (key, value) VALUES (?, '37')")
@@ -1263,12 +1367,14 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		await reaskClusters(ids, fetchImpl);
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(await callsUsed()).toBe(40);
+
 		for (const id of ids) expect(await confOf(id)).toBe(0.9);
 	});
 
 	it("a follower a person categorised meanwhile is not written; the others take the answer", async () => {
 		const ids = await cluster(4);
 		const groceries = await categoryIdByName("Groceries");
+
 		const fetchImpl = vi.fn(async () => {
 			await db
 				.prepare(
@@ -1276,11 +1382,14 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 				)
 				.bind(groceries, ids[1])
 				.run();
+
 			return replyFor("Eating Out", 0.9);
 		});
+
 		await reaskClusters(ids, fetchImpl);
 		expect(await field(ids[1] as number, "category_id")).toBe(groceries);
 		expect(await field(ids[1] as number, "category_source")).toBe("user");
+
 		for (const id of [ids[0], ids[2], ids[3]] as number[]) {
 			expect(await field(id, "category_source")).toBe("jev");
 		}
@@ -1288,13 +1397,16 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 
 	it("a follower whose note changed meanwhile is not written and keeps its cleared mark", async () => {
 		const ids = await cluster(4);
+
 		const fetchImpl = vi.fn(async () => {
 			await db
 				.prepare("UPDATE transactions SET note = 'edited' WHERE id = ?")
 				.bind(ids[2])
 				.run();
+
 			return replyFor("Eating Out", 0.9);
 		});
+
 		const { runId } = await reaskClusters(ids, fetchImpl);
 		expect(await field(ids[2] as number, "category_id")).toBeNull();
 		expect(await confOf(ids[2] as number)).toBeNull();
@@ -1306,10 +1418,13 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 
 	it("a follower whose id was reused by another transaction is not written", async () => {
 		const ids = await cluster(4);
+
 		const fetchImpl = vi.fn(async () => {
 			await reuseId(ids[3] as number, { plaid: "other-plaid", amount: 999 });
+
 			return replyFor("Eating Out", 0.9);
 		});
+
 		await reaskClusters(ids, fetchImpl);
 		expect(await field(ids[3] as number, "raw_name")).toBe("REPLACEMENT ROW");
 		expect(await field(ids[3] as number, "category_id")).toBeNull();
@@ -1331,6 +1446,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		]);
 		expect(done.asked).toBe(2);
 		expect(await callsUsed()).toBe(2);
+
 		for (const id of ids) expect(await confOf(id)).toBe(0.9);
 	});
 
@@ -1343,17 +1459,21 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 			.prepare("INSERT INTO household_settings (key, value) VALUES (?, '39')")
 			.bind(`jev_calls_${await householdToday(db)}`)
 			.run();
+
 		const { runId } = await reaskClusters(
 			ids,
 			vi.fn(async () => replyFor("Eating Out", 0.9)),
 		);
+
 		const run = await readRun(db);
 		expect(run?.done).toBe(4);
 		expect(run?.done).toBeLessThanOrEqual(run?.total ?? 0);
+
 		// The second cluster's leader was never asked, so its followers were restored, not counted.
 		for (const id of second) expect(await confOf(id)).toBe(0.55);
 		await finishRun(db, { runId, now: Date.now() });
 		expect((await readRun(db))?.done).toBeLessThanOrEqual(8);
+
 		for (const id of second) expect(await confOf(id)).toBe(0.55);
 	});
 
@@ -1362,10 +1482,12 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		const runId = await startRun(ids);
 		expect(await takeSortingTurn(db, "cut-off:cluster")).toBe(true);
 		const marks = [];
+
 		for (const id of ids) marks.push(await markAt(id, 0.55));
 		await db.batch([reaskClearStatement(db, marks, "cut-off:cluster")]);
 		await releaseSortingTurn(db, "cut-off:cluster");
 		await finishRun(db, { runId, now: Date.now() });
+
 		for (const id of ids) expect(await confOf(id)).toBe(0.55);
 	});
 
@@ -1384,6 +1506,7 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		const ids = await cluster(2);
 		await saveAiSwitches(db, { details: true });
 		const follower = ids[1] as number;
+
 		const touched = [
 			"category_id",
 			"category_source",
@@ -1394,16 +1517,19 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 			"jev_also_category_id",
 			"updated_at",
 		];
+
 		const before = (await rowState(follower)) ?? {};
 		await reaskClusters(
 			ids,
 			vi.fn(async () => reply(0.9, { transfer: 0.99 })),
 		);
 		const after = (await rowState(follower)) ?? {};
+
 		for (const key of Object.keys(before)) {
 			if (touched.includes(key) || key === "c") continue;
 			expect(after[key], key).toEqual(before[key]);
 		}
+
 		expect(await field(follower, "category_source")).toBe("jev");
 		expect(await field(follower, "category_id")).toBe(
 			await categoryIdByName("Eating Out"),
@@ -1414,8 +1540,10 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 describe("a follower takes its leader's answer only when the leader itself was filed (decision 158)", () => {
 	const cluster = async (count: number, text = "SAME SHOP") => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < count; i++)
 			ids.push(await addRow({ confidence: 0.55, rawName: text }));
+
 		return ids;
 	};
 
@@ -1429,6 +1557,7 @@ describe("a follower takes its leader's answer only when the leader itself was f
 			runId: `leader-${runId}`,
 			reask: { runId, ids, clusters: await clustersOf(ids) },
 		});
+
 		return { runId };
 	}
 
@@ -1442,13 +1571,16 @@ describe("a follower takes its leader's answer only when the leader itself was f
 
 	it("a leader edited mid-ask is not filed, so its followers are restored and not filed; the leader stays cleared", async () => {
 		const ids = await cluster(4);
+
 		const fetchImpl = vi.fn(async () => {
 			await db
 				.prepare("UPDATE transactions SET note = 'edited' WHERE id = ?")
 				.bind(ids[0])
 				.run();
+
 			return replyFor("Eating Out", 0.9);
 		});
+
 		const { runId } = await reaskClusters(ids, fetchImpl);
 		expect(await field(ids[0] as number, "category_id")).toBeNull();
 		expect(await confOf(ids[0] as number)).toBeNull();
@@ -1469,6 +1601,7 @@ describe("a follower takes its leader's answer only when the leader itself was f
 				)
 				.bind(groceries, ids[0])
 				.run();
+
 			return replyFor("Eating Out", 0.9);
 		});
 		expect(await field(ids[0] as number, "category_source")).toBe("user");
@@ -1479,6 +1612,7 @@ describe("a follower takes its leader's answer only when the leader itself was f
 		const ids = await cluster(3);
 		await reaskClusters(ids, async () => {
 			await reuseId(ids[0] as number, { plaid: "other-plaid", amount: 999 });
+
 			return replyFor("Eating Out", 0.9);
 		});
 		expect(await field(ids[0] as number, "raw_name")).toBe("REPLACEMENT ROW");
@@ -1494,6 +1628,7 @@ describe("a follower takes its leader's answer only when the leader itself was f
 				replyFor("Eating Out", 0.9, { probability: 0.9, also: "Eating Out" }),
 			),
 		);
+
 		for (const id of ids)
 			expect(await field(id, "category_source")).toBe("jev");
 	});
@@ -1506,6 +1641,7 @@ describe("a follower takes its leader's answer only when the leader itself was f
 				replyFor("Eating Out", 0.9, { probability: 0.7, also: "Groceries" }),
 			),
 		);
+
 		for (const id of ids)
 			expect(await field(id, "category_source")).toBe("jev");
 	});
@@ -1514,8 +1650,10 @@ describe("a follower takes its leader's answer only when the leader itself was f
 describe("a cluster's followers are logged, and a decided leader hands its cluster to the next waiting row (decision 158)", () => {
 	const cluster = async (count: number, text = "SAME SHOP") => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < count; i++)
 			ids.push(await addRow({ confidence: 0.55, rawName: text }));
+
 		return ids;
 	};
 
@@ -1532,12 +1670,14 @@ describe("a cluster's followers are logged, and a decided leader hands its clust
 				reask: { runId, ids, clusters: await clustersOf(ids) },
 			},
 		);
+
 		const logged = await db
 			.prepare(
 				"SELECT COUNT(*) AS n, COUNT(DISTINCT transaction_id) AS distinct_n FROM ai_log WHERE kind = 'category' AND transaction_id IN (SELECT value FROM json_each(?))",
 			)
 			.bind(JSON.stringify(ids))
 			.first<{ n: number; distinct_n: number }>();
+
 		expect(logged?.n).toBe(4);
 		expect(logged?.distinct_n).toBe(4);
 	});
@@ -1546,6 +1686,7 @@ describe("a cluster's followers are logged, and a decided leader hands its clust
 		const ids = await cluster(4);
 		const groceries = await categoryIdByName("Groceries");
 		const runId = await startRun(ids);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name !== "group-1-read" || attempt !== 1) return;
@@ -1557,22 +1698,27 @@ describe("a cluster's followers are logged, and a decided leader hands its clust
 					.run();
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: `promote-${runId}`,
 			reask: { runId, ids, clusters: await clustersOf(ids) },
 		});
+
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		expect(fake.names().filter((name) => name.includes("-ask-"))).toEqual([
 			`group-1-ask-${ids[1]}`,
 		]);
 		expect(done.asked).toBe(1);
 		expect(await field(ids[0] as number, "category_source")).toBe("user");
+
 		for (const id of ids.slice(1)) {
 			expect(await field(id, "category_source")).toBe("jev");
 			expect(await confOf(id)).toBe(0.9);
 		}
+
 		// The person-decided row is not counted by the sort, as before (#820): done is the rows the sort handled.
 		expect((await readRun(db))?.done).toBe(3);
 	});
@@ -1585,8 +1731,10 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 		note: string | null = null,
 	) => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < count; i++)
 			ids.push(await addRow({ confidence: 0.55, rawName: text, note }));
+
 		return ids;
 	};
 
@@ -1598,26 +1746,31 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 	) {
 		const clusters = await clustersOf(ids);
 		const runId = await startRun(ids);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name !== "group-1-read" || attempt !== 1) return;
 				await change(ids);
 			},
 		});
+
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			runId: `revalidate-${runId}`,
 			reask: { runId, ids, clusters },
 		});
+
 		return { fake };
 	}
 
 	it("a follower renamed to other text before the read is not filed; the leader is asked once and the other followers are filed", async () => {
 		const ids = await cluster(4);
+
 		const jev = fakeJev(
 			() => replyFor("Eating Out", 0.9),
 			() => replyFor("Groceries", 0.6),
 		);
+
 		const { fake } = await reaskAfterChange(
 			ids,
 			async ([, renamed]) => {
@@ -1630,6 +1783,7 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 			},
 			jev.fetchImpl,
 		);
+
 		const [leader, renamed, ...others] = ids as [number, number, ...number[]];
 		// The leader is asked once in its group. The renamed row is no longer its follower, so it gets its own ask later.
 		expect(fake.names().filter((name) => name.includes("-ask-"))).toEqual([
@@ -1640,6 +1794,7 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 		expect(await field(renamed, "category_id")).toBeNull();
 		expect(await field(renamed, "category_source")).toBeNull();
 		expect(await confOf(renamed)).toBe(0.6);
+
 		for (const id of others)
 			expect(await field(id, "category_source")).toBe("jev");
 	});
@@ -1647,10 +1802,12 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 	it("a follower whose note changed on a vague text before the read is not filed", async () => {
 		const ids = await cluster(4, "apple.com/bill cupertino", "same note");
 		expect((await clustersOf(ids)).map((c) => c.length)).toEqual([4]);
+
 		const jev = fakeJev(
 			() => replyFor("Eating Out", 0.9),
 			() => replyFor("Groceries", 0.6),
 		);
+
 		await reaskAfterChange(
 			ids,
 			async ([, , changed]) => {
@@ -1667,6 +1824,7 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 		const changed = ids[2] as number;
 		expect(await field(changed, "category_source")).toBeNull();
 		expect(await confOf(changed)).toBe(0.6);
+
 		for (const id of [ids[1], ids[3]] as number[]) {
 			expect(await field(id, "category_source")).toBe("jev");
 		}
@@ -1688,6 +1846,7 @@ describe("a follower that no longer belongs to its leader's cluster at read time
 		expect(await field(broken, "category_source")).toBeNull();
 		// Still waiting: a NULL or a Maybe confidence is asked again later.
 		expect([0.55, null]).toContain(await confOf(broken));
+
 		for (const id of ids.slice(1, 3) as number[]) {
 			expect(await field(id, "category_source")).toBe("jev");
 		}

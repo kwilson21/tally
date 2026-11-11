@@ -19,10 +19,13 @@ import { recordSorting } from "./record-sorting";
 recordSorting({ sort: true });
 
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, "").replaceAll("&#39;", "'");
@@ -135,8 +138,10 @@ describe("GET /accounts", () => {
 
 	it("redraws the chart with the rest of Accounts, since it sits inside the summary a sync swaps", async () => {
 		const response = await accounts.request("/accounts", {}, plaidEnabled);
+
 		const summary =
 			(await response.text()).split('id="accounts-summary"')[1] ?? "";
+
 		expect(summary).toContain('data-chart="line"');
 	});
 
@@ -184,9 +189,11 @@ describe("GET /accounts", () => {
 		)
 			.bind(today, typed, today)
 			.run();
+
 		const card = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE subtype = 'apple_card'",
 		).first<{ id: number }>();
+
 		for (const date of [typed, today])
 			await env.DB.prepare(
 				"INSERT INTO balance_history (account_id, date, balance_cents) VALUES (?, ?, ?)",
@@ -268,17 +275,20 @@ describe("POST /accounts/sync", () => {
 				headers: { Origin: BASE },
 			}),
 		);
+
 		expect(response.status).toBe(404);
 	});
 
 	it("does not sync again within a minute and preserves the focus target", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
+
 		const response = await accounts.request(
 			"/accounts/sync",
 			{ method: "POST", headers: { "HX-Request": "true" } },
 			plaidEnabled,
 		);
+
 		expect(response.status).toBe(200);
 		expect(fetchSpy).not.toHaveBeenCalled();
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
@@ -293,22 +303,26 @@ describe("POST /accounts/sync", () => {
 
 	it("redirects a native form submission back to Accounts", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		const response = await accounts.request(
 			"/accounts/sync",
 			{ method: "POST" },
 			plaidEnabled,
 		);
+
 		expect(response.status).toBe(303);
 		expect(response.headers.get("location")).toBe("/accounts");
 	});
 
 	it("omits drifting sync times from the demo", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		const response = await accounts.request(
 			"/accounts",
 			{},
 			{ ...plaidEnabled, DEMO: "true" },
 		);
+
 		const html = await response.text();
 		expect(html).not.toMatch(/synced/i);
 	});
@@ -361,15 +375,19 @@ describe("POST /accounts/sync feedback", () => {
 		const fetchImpl = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				if (String(url) === JEV_URL) return jev();
+
 				const { access_token } = JSON.parse(String(init?.body)) as {
 					access_token: string;
 				};
+
 				const bank = access_token.replace("token-", "");
+
 				if (failing.includes(bank))
 					return Response.json(
 						{ error_type: "API_ERROR", request_id: "request-safe" },
 						{ status: 500 },
 					);
+
 				if (String(url).endsWith("/accounts/get"))
 					return Response.json({
 						accounts: [
@@ -381,6 +399,7 @@ describe("POST /accounts/sync feedback", () => {
 							},
 						],
 					});
+
 				return Response.json({
 					added: (added[bank] ?? []).map((name, i) => ({
 						transaction_id: `tx-${bank}-${i}`,
@@ -397,7 +416,9 @@ describe("POST /accounts/sync feedback", () => {
 				});
 			},
 		);
+
 		vi.stubGlobal("fetch", fetchImpl);
+
 		return fetchImpl;
 	}
 
@@ -408,7 +429,9 @@ describe("POST /accounts/sync feedback", () => {
 			{ ...plaidEnabled, SORT: env.SORT, ...bindings },
 			ctx(),
 		);
+
 		const trigger = response.headers.get("HX-Trigger");
+
 		return {
 			response,
 			trigger: trigger ? JSON.parse(trigger) : null,
@@ -459,6 +482,7 @@ describe("POST /accounts/sync feedback", () => {
 				"CREATE TRIGGER fail_rules BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'nope'); END",
 			),
 		]);
+
 		try {
 			const { response, trigger, html } = await sync();
 			expect(response.status).toBe(200);
@@ -473,9 +497,11 @@ describe("POST /accounts/sync feedback", () => {
 	it("still sorts with merchant rules when every bank is busy", async () => {
 		await addBank("Chase", { attemptedNow: true });
 		stubPlaid({});
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO accounts (id, name, type, balance_cents) VALUES (900, 'Checking', 'depository', 0)",
@@ -489,9 +515,11 @@ describe("POST /accounts/sync feedback", () => {
 		]);
 		const { trigger } = await sync();
 		expect(trigger).toEqual(said("Already synced a moment ago.", "info"));
+
 		const row = await env.DB.prepare(
 			"SELECT category_id, category_source FROM transactions WHERE raw_name = 'SHOP'",
 		).first<{ category_id: number; category_source: string }>();
+
 		expect(row).toEqual({
 			category_id: category?.id,
 			category_source: "merchant_rule",
@@ -501,9 +529,11 @@ describe("POST /accounts/sync feedback", () => {
 	it("still sorts with merchant rules when every bank needs attention", async () => {
 		await addBank("Chase", { status: "needs_attention" });
 		stubPlaid({});
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO accounts (id, name, type, balance_cents) VALUES (901, 'Checking', 'depository', 0)",
@@ -516,21 +546,25 @@ describe("POST /accounts/sync feedback", () => {
 			).bind(category?.id),
 		]);
 		await sync();
+
 		const row = await env.DB.prepare(
 			"SELECT category_source FROM transactions WHERE raw_name = 'CAFE'",
 		).first<{ category_source: string }>();
+
 		expect(row?.category_source).toBe("merchant_rule");
 	});
 
 	it("shows the failure on the Accounts page when the form posts without htmx", async () => {
 		await addBank("Chase");
 		stubPlaid({}, ["Chase"]);
+
 		const response = await accounts.request(
 			"/accounts/sync",
 			{ method: "POST" },
 			plaidEnabled,
 			ctx(),
 		);
+
 		expect(response.status).toBe(200);
 		const html = await response.text();
 		expect(html).toContain("<html");
@@ -564,8 +598,10 @@ describe("POST /accounts/sync feedback", () => {
 
 	const jevCalls = (fetchImpl: ReturnType<typeof stubPlaid>) =>
 		fetchImpl.mock.calls.filter(([url]) => String(url) === JEV_URL);
+
 	/** The background work Sync now handed to waitUntil, finished. */
 	const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
+
 	/** Jev answers Eating Out, no flags. */
 	const jevSays = (confidence: number) => () =>
 		Response.json({
@@ -576,6 +612,7 @@ describe("POST /accounts/sync feedback", () => {
 				income: { type: "noul", noul: 0.01 },
 			},
 		});
+
 	const categoryOf = (name: string) =>
 		env.DB.prepare(
 			"SELECT category_source, category_confidence FROM transactions WHERE raw_name = ?",
@@ -587,12 +624,14 @@ describe("POST /accounts/sync feedback", () => {
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT OR REPLACE INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULED SHOP', 'Ruled Shop', ?)",
 		)
 			.bind(category?.id)
 			.run();
 		await addBank("Chase");
+
 		const fetchImpl = stubPlaid(
 			{ Chase: ["RULED SHOP", "UNKNOWN SHOP"] },
 			[],
@@ -601,9 +640,11 @@ describe("POST /accounts/sync feedback", () => {
 
 		const { trigger } = await sync({ JEV_API_KEY: "jev-key" });
 		expect(trigger).toEqual(said("2 new transactions"));
+
 		const ruled = await env.DB.prepare(
 			"SELECT category_id, category_source FROM transactions WHERE raw_name = 'RULED SHOP'",
 		).first();
+
 		expect(ruled).toEqual({
 			category_id: category?.id,
 			category_source: "merchant_rule",
@@ -654,9 +695,11 @@ describe("POST /accounts/sync feedback", () => {
 	it("answers without waiting for Jev", async () => {
 		await addBank("Chase");
 		let release: (r: Response) => void = () => {};
+
 		const slow = new Promise<Response>((resolve) => {
 			release = resolve;
 		});
+
 		const fetchImpl = stubPlaid({ Chase: ["SHOP"] }, [], () => slow);
 		const { trigger } = await sync({ JEV_API_KEY: "jev-key" });
 		// The answer is out while Jev's call is still going.
@@ -734,6 +777,7 @@ describe("POST /accounts/sync feedback", () => {
 			),
 		]);
 		const fetchImpl = stubPlaid({ Chase: ["SHOP"] }, [], jevSays(0.95));
+
 		try {
 			const { html } = await sync({ JEV_API_KEY: "jev-key" });
 			await expect(background()).resolves.toBeDefined();
@@ -751,6 +795,7 @@ describe("POST /accounts/sync feedback", () => {
 
 const PLAID_LINK_SCRIPT =
 	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+
 const plaidEnabled = {
 	...env,
 	DEMO: "false",
@@ -771,6 +816,7 @@ describe("Link a bank", () => {
 			{},
 			plaidEnabled,
 		);
+
 		const enabledHtml = await enabledResponse.text();
 		expect(enabledHtml).toContain("data-fix-connection");
 		expect(enabledHtml).toMatch(/data-item-id="\d+"/);
@@ -782,6 +828,7 @@ describe("Link a bank", () => {
 			{},
 			{ ...plaidEnabled, DEMO: "true" },
 		);
+
 		const demoHtml = await demoResponse.text();
 		expect(demoHtml).toContain("Fix connection");
 		expect(demoHtml).toContain("Fixing…");

@@ -4,6 +4,7 @@ import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
 
 function randomKey(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
+
 	return btoa(String.fromCharCode(...bytes));
 }
 
@@ -30,9 +31,11 @@ describe("Plaid token encryption", () => {
 	it("rejects every tampered IV or ciphertext byte", async () => {
 		const key = randomKey();
 		const encrypted = await encryptToken("access-token", key);
+
 		for (let index = 1; index < encrypted.byteLength; index++) {
 			const tampered = encrypted.slice();
 			const byte = tampered[index];
+
 			if (byte === undefined) throw new Error("Missing encrypted byte");
 			tampered[index] = byte ^ 0x01;
 			await expect(decryptToken(tampered, key)).rejects.toThrow();
@@ -59,6 +62,7 @@ describe("Plaid token encryption", () => {
 			const error = await encryptToken("access-token", invalidKey).catch(
 				(reason: unknown) => reason,
 			);
+
 			expect(error).toEqual(
 				new Error("TOKEN_ENCRYPTION_KEY must be 32 bytes, base64"),
 			);
@@ -76,9 +80,11 @@ describe("Plaid token encryption", () => {
 		await env.DB.prepare("INSERT INTO token_crypto_test (encrypted) VALUES (?)")
 			.bind(encrypted)
 			.run();
+
 		const row = await env.DB.prepare(
 			"SELECT encrypted FROM token_crypto_test",
 		).first<{ encrypted: number[] }>();
+
 		if (!row) throw new Error("Missing encrypted token row");
 		expect(Array.isArray(row.encrypted)).toBe(true);
 		expect(await decryptToken(row.encrypted, key)).toBe("database-token");

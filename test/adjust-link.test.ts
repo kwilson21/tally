@@ -23,6 +23,7 @@ describe("AdjustLink (#94)", () => {
 			adjusting: false,
 			attrs: { "hx-get": "/?adjust=1" },
 		}).toString()) as string;
+
 		expect(html).toContain('hx-get="/?adjust=1"');
 	});
 });

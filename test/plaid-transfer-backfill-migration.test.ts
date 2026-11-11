@@ -175,12 +175,14 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			add(9031, "LOAN_PAYMENTS"),
 			pay(9100, "2026-09", 9031),
 		]);
+
 		const spent = async () =>
 			summarizeMonth({
 				month: "2026-09",
 				...(await loadMonth(db, "2026-09")),
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
+
 		const before = await spent();
 
 		await run();
@@ -205,12 +207,14 @@ describe("migration 0020: exclude the transfers already stored (decision 67)", (
 			add(9043, null, { parent: 9041 }),
 			pay(9100, "2026-09", 9041),
 		]);
+
 		const spent = async () =>
 			summarizeMonth({
 				month: "2026-09",
 				...(await loadMonth(db, "2026-09")),
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
+
 		const before = await spent();
 		// The two parts are 50.00 each in this test's rows, and they count while the parent is included.
 		expect(before).toBeGreaterThan(0);

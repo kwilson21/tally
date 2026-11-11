@@ -10,8 +10,10 @@ import {
 } from "../src/transactions/cash-undo";
 
 const BASE = "http://tally.test";
+
 const request = async (path: string, init?: RequestInit) => {
 	const res = await exports.default.fetch(BASE + path, init);
+
 	return { res, html: await res.text() };
 };
 
@@ -21,20 +23,26 @@ async function cashEntry() {
 	const row = await env.DB.prepare(
 		"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",
 	).first<{ id: number }>();
+
 	if (!row) throw new Error("cash seed missing");
+
 	return row.id;
 }
 
 function countingDb() {
 	let statements = 0;
+
 	const db = new Proxy(env.DB, {
 		get(target, property) {
 			const value = Reflect.get(target, property);
+
 			if (property === "prepare")
 				return (sql: string) => {
 					statements++;
+
 					return target.prepare(sql);
 				};
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -43,12 +51,16 @@ function countingDb() {
 }
 
 type TestApp = { Bindings: Env; Variables: { actor: string } };
+
 const deleteRoute = new Hono<TestApp>();
+
 deleteRoute.use("*", async (c, next) => {
 	c.set("actor", "demo");
 	await next();
 });
+
 deleteRoute.route("/", transactions as unknown as Hono<TestApp>);
+
 const deleteRequest = async (id: number, db: D1Database) =>
 	deleteRoute.request(
 		`/transactions/${id}/delete`,
@@ -69,20 +81,26 @@ describe("cash delete undo", () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account) throw new Error("cash account missing");
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1250, 'Latest cash', 'test')",
 		)
 			.bind(account.id)
 			.run();
+
 		const originalId = Number(inserted.meta.last_row_id);
 		const token = await holdCashDelete(env.DB, originalId, "Latest cash");
+
 		if (!token) throw new Error("cash delete token missing");
+
 		const replacement = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 500, 'New cash', 'test')",
 		)
 			.bind(account.id)
 			.run();
+
 		expect(Number(replacement.meta.last_row_id)).toBe(originalId);
 
 		expect(await restoreCashDelete(env.DB, token)).toMatchObject({
@@ -105,51 +123,65 @@ describe("cash delete undo", () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		const bank = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		const bill = await env.DB.prepare(
 			"SELECT id FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account || !bank || !bill) throw new Error("undo fixture missing");
+
 		const purchaseInsert = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, 'Collision purchase', 'test')",
 		)
 			.bind(bank.id)
 			.run();
+
 		const purchaseId = Number(purchaseInsert.meta.last_row_id);
+
 		const parentInsert = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1000, 'Collision parent', 'test')",
 		)
 			.bind(account.id)
 			.run();
+
 		const oldParentId = Number(parentInsert.meta.last_row_id);
 		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
 			.bind(oldParentId)
 			.run();
+
 		const partInsert = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-06', -200, 'Collision refund', ?, ?, 'test')",
 		)
 			.bind(account.id, oldParentId, purchaseId)
 			.run();
+
 		const oldPartId = Number(partInsert.meta.last_row_id);
 		await env.DB.prepare(
 			"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?, '2026-10', ?, 'user', 'linked')",
 		)
 			.bind(bill.id, oldParentId)
 			.run();
+
 		// A real Undo token is a random UUID, and sometimes it holds the old id's digits (#487). Make this one do so.
 		const tokenSpy = vi
 			.spyOn(crypto, "randomUUID")
 			.mockReturnValueOnce(
 				`${String(oldParentId).padStart(8, "0")}-0000-4000-8000-000000000000`,
 			);
+
 		const deleted = await deleteRequest(oldParentId, env.DB);
 		tokenSpy.mockRestore();
+
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+
 		// Guard: the stub took, so the Undo token really holds the old id's digits.
 		expect(token).toContain(String(oldParentId));
+
 		const replacements = await env.DB.batch(
 			["Reuse parent id", "Reuse part id"].map((raw_name) =>
 				env.DB.prepare(
@@ -157,6 +189,7 @@ describe("cash delete undo", () => {
 				).bind(account.id, raw_name),
 			),
 		);
+
 		expect(replacements.map((row) => Number(row.meta.last_row_id))).toEqual([
 			oldParentId,
 			oldPartId,
@@ -171,12 +204,15 @@ describe("cash delete undo", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		const parent = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name='Collision parent'",
 		).first<{ id: number }>();
+
 		const part = await env.DB.prepare(
 			"SELECT id, parent_id, refund_of_id FROM transactions WHERE raw_name='Collision refund'",
 		).first<{ id: number; parent_id: number; refund_of_id: number }>();
+
 		expect(parent?.id).not.toBe(oldParentId);
 		expect(part).toEqual({
 			id: expect.any(Number),
@@ -213,15 +249,19 @@ describe("cash delete undo", () => {
 			const account = await env.DB.prepare(
 				"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 			).first<{ id: number }>();
+
 			const bill = await env.DB.prepare(
 				"SELECT id, name FROM bills WHERE id NOT IN (SELECT bill_id FROM bill_payments WHERE period IN ('2026-10', '2026-11') AND status='linked') LIMIT 1",
 			).first<{ id: number; name: string }>();
+
 			if (!account || !bill) throw new Error("undo fixture missing");
+
 			const inserted = await env.DB.prepare(
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1250, 'Remapped payment', 'test')",
 			)
 				.bind(account.id)
 				.run();
+
 			const originalId = Number(inserted.meta.last_row_id);
 			await env.DB.prepare(
 				"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?, '2026-10', ?, 'user', 'linked')",
@@ -229,13 +269,16 @@ describe("cash delete undo", () => {
 				.bind(bill.id, originalId)
 				.run();
 			const deleted = await deleteRequest(originalId, env.DB);
+
 			const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 				.undo as string;
+
 			const replacement = await env.DB.prepare(
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 500, 'Replacement', 'test')",
 			)
 				.bind(account.id)
 				.run();
+
 			expect(Number(replacement.meta.last_row_id)).toBe(originalId);
 			await env.DB.prepare(
 				"INSERT INTO bill_payments (bill_id,period,transaction_id,matched_by,status) VALUES (?, ?, ?, 'user', 'linked')",
@@ -252,14 +295,17 @@ describe("cash delete undo", () => {
 				},
 				body: new URLSearchParams({ token, back: "/transactions" }),
 			});
+
 			const restoredRow = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Remapped payment'",
 			).first<{ id: number }>();
+
 			const payments = await env.DB.prepare(
 				"SELECT period, transaction_id FROM bill_payments WHERE bill_id=? AND status='linked' ORDER BY period",
 			)
 				.bind(bill.id)
 				.all<{ period: string; transaction_id: number }>();
+
 			expect(restoredRow?.id).not.toBe(originalId);
 			expect(payments.results).toContainEqual({
 				period: linkedPeriod,
@@ -274,18 +320,23 @@ describe("cash delete undo", () => {
 
 	it("restores a cash payment beside a bank payment already linked in the same month", async () => {
 		const id = await cashEntry();
+
 		const bank = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		const bill = await env.DB.prepare(
 			"SELECT id, name FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
 		).first<{ id: number; name: string }>();
+
 		if (!bank || !bill) throw new Error("bill seed missing");
+
 		const bankPayment = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-02', 60000, 'Bank rent', 'test')",
 		)
 			.bind(bank.id)
 			.run();
+
 		await env.DB.prepare(
 			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
 		)
@@ -310,26 +361,33 @@ describe("cash delete undo", () => {
 
 	it("sends the remaining server deadline computed from the stored hold time", async () => {
 		const id = await cashEntry();
+
 		const delayedDb = new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						const result = await target.batch(statements);
+
 						const hold = await env.DB.prepare(
 							"SELECT token FROM cash_delete_holds ORDER BY rowid DESC LIMIT 1",
 						).first<{ token: string }>();
+
 						if (hold)
 							await env.DB.prepare(
 								"UPDATE cash_delete_holds SET created_at=? WHERE token=?",
 							)
 								.bind(Date.now() - 3000, hold.token)
 								.run();
+
 						return result;
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as D1Database;
+
 		const deleted = await deleteRequest(id, delayedDb);
 		const feedback = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}");
 		expect(feedback.toast.undoExpiresInMs).toBeLessThanOrEqual(7000);
@@ -339,9 +397,12 @@ describe("cash delete undo", () => {
 	it("says the restored entry is already back when its Undo token is reused", async () => {
 		const id = await cashEntry();
 		const deleted = await deleteRequest(id, env.DB);
+
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+
 		const body = new URLSearchParams({ token, back: "/transactions" });
+
 		let response = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -351,6 +412,7 @@ describe("cash delete undo", () => {
 			},
 			body,
 		});
+
 		response = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -368,6 +430,7 @@ describe("cash delete undo", () => {
 
 	it("restores an entry whose For person was removed during the Undo window, with no person", async () => {
 		const id = await cashEntry();
+
 		const entry = await env.DB.prepare(
 			"SELECT raw_name, date, amount_cents, account_id FROM transactions WHERE id = ?",
 		)
@@ -378,10 +441,13 @@ describe("cash delete undo", () => {
 				amount_cents: number;
 				account_id: number;
 			}>();
+
 		if (!entry) throw new Error("cash entry missing");
+
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people (name) VALUES ('Sam')",
 		).run();
+
 		const personId = Number(person.meta.last_row_id);
 		await env.DB.prepare(
 			"UPDATE transactions SET for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
@@ -389,8 +455,10 @@ describe("cash delete undo", () => {
 			.bind(personId, id)
 			.run();
 		const deleted = await deleteRequest(id, env.DB);
+
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+
 		const removed = await request("/settings/people", {
 			method: "POST",
 			headers: {
@@ -403,6 +471,7 @@ describe("cash delete undo", () => {
 				person_id: String(personId),
 			}),
 		});
+
 		expect(removed.res.status).toBe(200);
 
 		const restored = await request("/transactions/undo-cash-delete", {
@@ -414,6 +483,7 @@ describe("cash delete undo", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		const feedback = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}");
 		expect(feedback.announce).toMatch(/ is back\.$/);
 		expect(feedback.toast.message).not.toBe(
@@ -433,9 +503,12 @@ describe("cash delete undo", () => {
 	it("clears undo holds on demo reset and leaves the deleted entry expired", async () => {
 		const id = await cashEntry();
 		const deleted = await deleteRequest(id, env.DB);
+
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -445,6 +518,7 @@ describe("cash delete undo", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		const feedback = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}");
 		expect(feedback.toast.message).toBe(
 			"Undo expired. The cash entry stays deleted.",
@@ -467,14 +541,18 @@ describe("cash delete undo", () => {
 
 	it("snapshots parts added immediately before the atomic delete batch", async () => {
 		const id = await cashEntry();
+
 		const cashAccount = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash'",
 		).first<{ id: number }>();
+
 		if (!cashAccount) throw new Error("cash account missing");
 		let added = false;
+
 		const interleavedDb = new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						if (!added) {
@@ -485,12 +563,16 @@ describe("cash delete undo", () => {
 								.bind(cashAccount.id, id)
 								.run();
 						}
+
 						return target.batch(statements);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as D1Database;
+
 		const token = await holdCashDelete(interleavedDb, id, "Market");
+
 		if (!token) throw new Error("cash delete token missing");
 
 		await restoreCashDelete(env.DB, token);
@@ -503,18 +585,23 @@ describe("cash delete undo", () => {
 
 	it("restores only the first of two individually fitting refunds when their sum exceeds the purchase", async () => {
 		const id = await cashEntry();
+
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash'",
 		).first<{ id: number }>();
+
 		const bankAccount = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account || !bankAccount) throw new Error("account seed missing");
+
 		const purchase = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, 'Purchase', 'test')",
 		)
 			.bind(bankAccount.id)
 			.run();
+
 		const purchaseId = Number(purchase.meta.last_row_id);
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,updated_by) VALUES (?, '2026-10-01', -500, 'Existing refund', ?, 'test')",
@@ -532,8 +619,10 @@ describe("cash delete undo", () => {
 			),
 		);
 		const deleted = await deleteRequest(id, env.DB);
+
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -543,6 +632,7 @@ describe("cash delete undo", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		expect(
 			JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}").toast.message,
 		).toBe(
@@ -568,19 +658,25 @@ describe("cash delete undo", () => {
 		"restores $expected deleted refund links when $left cents remain",
 		async ({ left, amounts, expected }) => {
 			const id = await cashEntry();
+
 			const account = await env.DB.prepare(
 				"SELECT id FROM accounts WHERE type='cash'",
 			).first<{ id: number }>();
+
 			const bankAccount = await env.DB.prepare(
 				"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 			).first<{ id: number }>();
+
 			if (!account || !bankAccount) throw new Error("account seed missing");
+
 			const purchase = await env.DB.prepare(
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-01', 1000, 'Purchase', 'test')",
 			)
 				.bind(bankAccount.id)
 				.run();
+
 			const purchaseId = Number(purchase.meta.last_row_id);
+
 			if (left < 1000)
 				await env.DB.prepare(
 					"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,updated_by) VALUES (?, '2026-10-01', ?, 'Existing refund', ?, 'test')",
@@ -604,6 +700,7 @@ describe("cash delete undo", () => {
 				),
 			);
 			const token = await holdCashDelete(env.DB, id, "Market");
+
 			if (!token) throw new Error("cash delete token missing");
 			await restoreCashDelete(env.DB, token);
 			expect(
@@ -629,6 +726,7 @@ describe("cash delete undo", () => {
 		)
 			.bind(id)
 			.run();
+
 		const before = {
 			parent: await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
 				.bind(id)
@@ -641,22 +739,27 @@ describe("cash delete undo", () => {
 					.all()
 			).results,
 		};
+
 		const token = await holdCashDelete(env.DB, id, "Market");
 		expect(token).toBeTruthy();
 		expect(await restoreCashDelete(env.DB, token as string)).not.toBeNull();
+
 		const restoredParent = await env.DB.prepare(
 			"SELECT * FROM transactions WHERE note='parent note'",
 		).first<Record<string, unknown>>();
+
 		const restoredParts = (
 			await env.DB.prepare(
 				"SELECT * FROM transactions WHERE note='part note' ORDER BY raw_name",
 			).all<Record<string, unknown>>()
 		).results;
+
 		const withoutIds = ({
 			id: _id,
 			parent_id: _parentId,
 			...row
 		}: Record<string, unknown>) => row;
+
 		expect(restoredParent).not.toBeNull();
 		expect(withoutIds(restoredParent as Record<string, unknown>)).toEqual(
 			withoutIds(before.parent as Record<string, unknown>),
@@ -671,9 +774,11 @@ describe("cash delete undo", () => {
 
 	it("restores a bill payment so the bill occurrence is paid again", async () => {
 		const id = await cashEntry();
+
 		const bill = await env.DB.prepare(
 			"SELECT id, name FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
 		).first<{ id: number; name: string }>();
+
 		if (!bill) throw new Error("bill seed missing");
 		// The cash entry pays the bill in full, so the occurrence is Paid rather than part paid (decision 101).
 		await env.DB.prepare(
@@ -704,19 +809,25 @@ describe("cash delete undo", () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account) throw new Error("cash account missing");
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1500, 'Car registration cash', 'test') RETURNING id",
 		)
 			.bind(account.id)
 			.first<{ id: number }>();
+
 		const id = inserted?.id ?? 0;
+
 		const plan = await env.DB.prepare(
 			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 1500, '2026-10', ?, 'demo') RETURNING id",
 		)
 			.bind(id)
 			.first<{ id: number }>();
+
 		const token = await holdCashDelete(env.DB, id, "Car registration cash");
+
 		if (!token) throw new Error("cash delete token missing");
 		// The delete sets the plan aside again, as a bank drop does, until the entry comes back.
 		expect(
@@ -728,6 +839,7 @@ describe("cash delete undo", () => {
 		).toEqual({ t: null });
 
 		const restored = await restoreCashDelete(env.DB, token);
+
 		if (!restored || restored.alreadyRestored)
 			throw new Error("cash restore failed");
 		expect(
@@ -743,19 +855,25 @@ describe("cash delete undo", () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account) throw new Error("cash account missing");
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1500, 'Car registration cash', 'test') RETURNING id",
 		)
 			.bind(account.id)
 			.first<{ id: number }>();
+
 		const id = inserted?.id ?? 0;
+
 		const plan = await env.DB.prepare(
 			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 1500, '2026-10', ?, 'demo') RETURNING id",
 		)
 			.bind(id)
 			.first<{ id: number }>();
+
 		const token = await holdCashDelete(env.DB, id, "Car registration cash");
+
 		if (!token) throw new Error("cash delete token missing");
 		// August accepts only August and September payments, so the October entry no longer pays it. (September would
 		// still accept October, since a plan's payment may fall in its month or the next.)
@@ -766,6 +884,7 @@ describe("cash delete undo", () => {
 			.run();
 
 		const restored = await restoreCashDelete(env.DB, token);
+
 		if (!restored || restored.alreadyRestored)
 			throw new Error("cash restore failed");
 		expect(
@@ -787,12 +906,15 @@ describe("cash delete undo", () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account) throw new Error("cash account missing");
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,is_split,updated_by) VALUES (?, '2026-10-06', 3000, 'Split cash', 1, 'test') RETURNING id",
 		)
 			.bind(account.id)
 			.first<{ id: number }>();
+
 		const id = inserted?.id ?? 0;
 		await env.DB.batch([
 			env.DB.prepare(
@@ -802,28 +924,36 @@ describe("cash delete undo", () => {
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,category_id,updated_by) SELECT account_id,date,2000,'Split cash part',id,1,'test' FROM transactions WHERE id=?",
 			).bind(id),
 		]);
+
 		const parts = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id=? ORDER BY id",
 		)
 			.bind(id)
 			.all<{ id: number }>();
+
 		const secondPart = parts.results[1]?.id ?? 0;
+
 		const plan = await env.DB.prepare(
 			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Lawn service', 2000, '2026-10', ?, 'demo') RETURNING id",
 		)
 			.bind(secondPart)
 			.first<{ id: number }>();
+
 		const token = await holdCashDelete(env.DB, id, "Split cash");
+
 		if (!token) throw new Error("cash delete token missing");
 		// The restored parts take new ids, and the plan must follow the second part to its new id.
 		const restored = await restoreCashDelete(env.DB, token);
+
 		if (!restored || restored.alreadyRestored)
 			throw new Error("cash restore failed");
+
 		const restoredParts = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id=? ORDER BY id",
 		)
 			.bind(restored.id)
 			.all<{ id: number }>();
+
 		expect(
 			await env.DB.prepare(
 				"SELECT transaction_id AS t FROM planned_expenses WHERE id=?",
@@ -838,30 +968,39 @@ describe("cash delete undo", () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account) throw new Error("cash account missing");
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1500, 'Car registration cash', 'test') RETURNING id",
 		)
 			.bind(account.id)
 			.first<{ id: number }>();
+
 		const id = inserted?.id ?? 0;
+
 		const paid = await env.DB.prepare(
 			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 1500, '2026-10', ?, 'demo') RETURNING id",
 		)
 			.bind(id)
 			.first<{ id: number }>();
+
 		const token = await holdCashDelete(env.DB, id, "Car registration cash");
+
 		if (!token) throw new Error("cash delete token missing");
 		// Within the entry's ten seconds the paid plan is deleted and another is planned: the new plan must not take its id.
 		await env.DB.prepare("DELETE FROM planned_expenses WHERE id=?")
 			.bind(paid?.id)
 			.run();
+
 		const later = await env.DB.prepare(
 			"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Lawn service', 2000, '2026-10', 'demo') RETURNING id",
 		).first<{ id: number }>();
+
 		expect(later?.id).not.toBe(paid?.id);
 
 		const restored = await restoreCashDelete(env.DB, token);
+
 		if (!restored || restored.alreadyRestored)
 			throw new Error("cash restore failed");
 		expect(
@@ -878,10 +1017,13 @@ describe("cash delete undo", () => {
 	it("rolls back restored rows when consuming the token fails", async () => {
 		const id = await cashEntry();
 		const token = await holdCashDelete(env.DB, id, "Market");
+
 		if (!token) throw new Error("cash delete token missing");
+
 		const failingDb = new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) =>
 						target.prepare(
@@ -889,6 +1031,7 @@ describe("cash delete undo", () => {
 								? "UPDATE missing_cash_delete_holds SET restore_marker"
 								: sql,
 						);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as D1Database;
@@ -916,12 +1059,14 @@ describe("cash delete undo", () => {
 			.bind(id)
 			.run();
 		const token = await holdCashDelete(env.DB, id, "Market");
+
 		if (!token) throw new Error("cash delete token missing");
 
 		const results = await Promise.all([
 			restoreCashDelete(env.DB, token),
 			restoreCashDelete(env.DB, token),
 		]);
+
 		expect(results.filter(Boolean)).toHaveLength(1);
 		expect(results.filter((result) => result === null)).toHaveLength(1);
 		expect(
@@ -940,15 +1085,18 @@ describe("cash delete undo", () => {
 
 	it("names an omitted refund link when its purchase row is gone", async () => {
 		const id = await cashEntry();
+
 		const bank = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE type!='cash') AND amount_cents>0 LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!bank) throw new Error("bank transaction seed missing");
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents=-500, raw_name='Missing partner refund', refund_of_id=? WHERE id=?",
 		)
 			.bind(bank.id, id)
 			.run();
+
 		const deleted = await request(`/transactions/${id}/delete`, {
 			method: "POST",
 			headers: {
@@ -958,11 +1106,14 @@ describe("cash delete undo", () => {
 			},
 			body: "back=%2Ftransactions&confirm=1",
 		});
+
 		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.undo as string;
+
 		await env.DB.prepare("DELETE FROM transactions WHERE id=?")
 			.bind(bank.id)
 			.run();
+
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -972,8 +1123,10 @@ describe("cash delete undo", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.message as string;
+
 		expect(message).toContain("Missing partner refund");
 		expect(
 			(
@@ -986,13 +1139,17 @@ describe("cash delete undo", () => {
 
 	it("restores only split refund links that still fit", async () => {
 		const id = await cashEntry();
+
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash'",
 		).first<{ id: number }>();
+
 		const bankAccount = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account || !bankAccount) throw new Error("account seed missing");
+
 		const purchases = await env.DB.batch(
 			["Reduced purchase", "Still fits purchase", "Deleted purchase"].map(
 				(raw_name) =>
@@ -1001,14 +1158,19 @@ describe("cash delete undo", () => {
 					).bind(bankAccount.id, raw_name),
 			),
 		);
+
 		const purchaseIds = purchases.map((purchase) =>
 			Number(purchase.meta.last_row_id),
 		);
+
 		const purchaseId = (index: number) => {
 			const value = purchaseIds[index];
+
 			if (value === undefined) throw new Error("purchase insert missing");
+
 			return value;
 		};
+
 		for (let index = 0; index < purchaseIds.length; index++) {
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,refund_of_id,updated_by) VALUES (?, '2026-10-02', -200, ?, ?, ?, 'test')",
@@ -1016,18 +1178,22 @@ describe("cash delete undo", () => {
 				.bind(account.id, `Split refund ${index + 1}`, id, purchaseId(index))
 				.run();
 		}
+
 		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
 			.bind(id)
 			.run();
 		const deleted = await deleteRequest(id, env.DB);
+
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+
 		await env.DB.prepare("UPDATE transactions SET amount_cents=100 WHERE id=?")
 			.bind(purchaseId(0))
 			.run();
 		await env.DB.prepare("DELETE FROM transactions WHERE id=?")
 			.bind(purchaseId(2))
 			.run();
+
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -1037,11 +1203,14 @@ describe("cash delete undo", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.message as string;
+
 		const parts = await env.DB.prepare(
 			"SELECT raw_name, refund_of_id FROM transactions WHERE raw_name LIKE 'Split refund %' ORDER BY raw_name",
 		).all<{ raw_name: string; refund_of_id: number | null }>();
+
 		expect(parts.results).toEqual([
 			{ raw_name: "Split refund 1", refund_of_id: null },
 			{ raw_name: "Split refund 2", refund_of_id: purchaseId(1) },
@@ -1053,12 +1222,15 @@ describe("cash delete undo", () => {
 
 	it("uses a fixed number of statements for 30 split parts, 30 refund links and 3 payments", async () => {
 		const id = await cashEntry();
+
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash'",
 		).first<{ id: number }>();
+
 		const bankAccount = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account || !bankAccount) throw new Error("account seed missing");
 		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
 			.bind(id)
@@ -1073,9 +1245,11 @@ describe("cash delete undo", () => {
 			SELECT ?, '2026-10-01', -100, 'Refund '||i, ?, 'test' FROM n`)
 			.bind(bankAccount.id, id)
 			.run();
+
 		const bill = await env.DB.prepare("SELECT id FROM bills LIMIT 1").first<{
 			id: number;
 		}>();
+
 		if (!bill) throw new Error("bill seed missing");
 		await env.DB.batch(
 			[0, 1, 2].map((i) =>
@@ -1096,14 +1270,17 @@ describe("cash delete undo", () => {
 				).first<{ n: number }>()
 			)?.n,
 		).toBe(30);
+
 		const small = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT id,'2026-10-06',100,'Small undo' FROM accounts WHERE type='cash' LIMIT 1",
 		).run();
+
 		const smallToken = await holdCashDelete(
 			env.DB,
 			Number(small.meta.last_row_id),
 			"Small undo",
 		);
+
 		const smallCount = countingDb();
 		await restoreCashDelete(smallCount.db, smallToken as string);
 		expect(smallCount.statements()).toBe(6);
@@ -1114,12 +1291,15 @@ describe("cash delete undo", () => {
 
 	it("deletes a cash entry with 30 parts, links, and 3 payments in a fixed number of statements", async () => {
 		const id = await cashEntry();
+
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash'",
 		).first<{ id: number }>();
+
 		const bankAccount = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		if (!account || !bankAccount) throw new Error("account seed missing");
 		await env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?")
 			.bind(id)
@@ -1134,9 +1314,11 @@ describe("cash delete undo", () => {
 			SELECT ?, '2026-10-01', -100, 'Refund '||i, ?, 'test' FROM n`)
 			.bind(bankAccount.id, id)
 			.run();
+
 		const bill = await env.DB.prepare("SELECT id FROM bills LIMIT 1").first<{
 			id: number;
 		}>();
+
 		if (!bill) throw new Error("bill seed missing");
 		await env.DB.batch(
 			[0, 1, 2].map((i) =>
@@ -1155,6 +1337,7 @@ describe("cash delete undo", () => {
 		const small = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name) SELECT id,'2026-10-06',100,'Small delete' FROM accounts WHERE type='cash' LIMIT 1",
 		).run();
+
 		const smallCount = countingDb();
 		await deleteRequest(Number(small.meta.last_row_id), smallCount.db);
 		expect(smallCount.statements()).toBe(16);
@@ -1177,10 +1360,13 @@ describe("where focus goes after Undo (#397)", () => {
 			},
 			body: new URLSearchParams({ token, back }),
 		});
+
 	const tokenOf = (response: Response) =>
 		JSON.parse(response.headers.get("HX-Trigger") ?? "{}").toast.undo as string;
+
 	const feedbackOf = (response: Response) =>
 		JSON.parse(response.headers.get("HX-Trigger") ?? "{}");
+
 	/** A cash entry dated today, so the default list shows it; its id is the newest. */
 	async function todayCash(name: string) {
 		const inserted = await env.DB.prepare(
@@ -1188,8 +1374,10 @@ describe("where focus goes after Undo (#397)", () => {
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE), name)
 			.run();
+
 		return Number(inserted.meta.last_row_id);
 	}
+
 	const idNamed = async (name: string) =>
 		(
 			await env.DB.prepare("SELECT id FROM transactions WHERE raw_name=?")
@@ -1239,6 +1427,7 @@ describe("where focus goes after Undo (#397)", () => {
 			},
 			body: new URLSearchParams({ back: "/transactions" }),
 		});
+
 		expect(feedbackOf(refused.res).toast.undoDone).toBeUndefined();
 		expect(feedbackOf(refused.res).toast.message).toBe(
 			"Undo expired. The cash entry stays deleted.",

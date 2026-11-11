@@ -31,6 +31,7 @@ it("migration 0069 backfills every existing flagged bank as held and leaves ok b
 		.filter((line) => !line.startsWith("--"))
 		.join("\n")
 		.replaceAll(/\bplaid_items\b/g, "pre0069_plaid_items");
+
 	for (const statement of sql
 		.split(";")
 		.map((s) => s.trim())
@@ -42,6 +43,7 @@ it("migration 0069 backfills every existing flagged bank as held and leaves ok b
 			"SELECT id, status, attention_login, attention_held FROM pre0069_plaid_items ORDER BY id",
 		)
 		.all();
+
 	expect(results).toEqual([
 		{ id: 1, status: "ok", attention_login: 0, attention_held: 0 },
 		{ id: 2, status: "needs_attention", attention_login: 0, attention_held: 1 },

@@ -7,6 +7,7 @@ import {
 } from "../src/views/how-diagrams";
 
 const render = async (el: unknown) => String(await el);
+
 /** Everything a person sees or hears: the visible text plus the title and description. */
 const words = (html: string) =>
 	html
@@ -26,6 +27,7 @@ function expectLabelled(html: string) {
 	// Scales to the screen: the hand-drawn pictures by class, a Pele picture by app.css's .pele rule.
 	expect(svg).toMatch(/w-full|class="pele /);
 }
+
 /** The Budget boxes' picture (decision 115, extended by #600): one role="img" wrapper, labelled and described by sr-only text. */
 function expectLabelledPicture(html: string, id: string) {
 	const wrapper = html.match(/<div role="img"[^>]*>/)?.[0] ?? "";
@@ -39,8 +41,10 @@ function expectLabelledPicture(html: string, id: string) {
 		new RegExp(`<span id="${id}-desc" class="sr-only">[^<]+</span>`),
 	);
 }
+
 const desc = (html: string) =>
 	(html.match(/<desc[^>]*>([^<]+)</)?.[1] ?? "").replaceAll("&#39;", "'");
+
 const pictureDesc = (html: string) =>
 	(
 		html.match(/<span id="[^"]*-desc" class="sr-only">([^<]+)</)?.[1] ?? ""
@@ -70,6 +74,7 @@ describe("BudgetDiagram", () => {
 		const html = await render(
 			BudgetDiagram({ ...demo, safeToSpendCents: 12206 }),
 		);
+
 		expect(words(html)).toContain(
 			"Budget $1,650.00 − Spent $1,385.94 − Bills due $142.00 = Safe to spend $122.06",
 		);
@@ -85,6 +90,7 @@ describe("BudgetDiagram", () => {
 				safeToSpendCents: 29800,
 			}),
 		);
+
 		expect(words(html)).toContain(
 			"Budget $1,400.00 − Spent $460.00 − Bills due $142.00 − Savings goal $500.00 = Safe to spend $298.00",
 		);
@@ -101,6 +107,7 @@ describe("BudgetDiagram", () => {
 				totalSpentCents: 170000,
 			}),
 		);
+
 		expect(words(html)).toContain("Safe to spend -$50.00");
 		expect(html).toContain("stroke-over");
 		expect(html).not.toContain("stroke-ok");
@@ -128,6 +135,7 @@ describe("TransactionsDiagram", () => {
 				needsCategory: 10,
 			}),
 		);
+
 		expectLabelled(html);
 		const text = words(html);
 		expect(text).toContain("− 3 excluded − 2 held for review");
@@ -149,6 +157,7 @@ describe("TransactionsDiagram", () => {
 				needsCategory: 0,
 			}),
 		);
+
 		expect(words(html)).toContain(
 			"This month · 1 Counted · 1 Needs a category · 0",
 		);
@@ -168,6 +177,7 @@ describe("ExclusionsDiagram", () => {
 				breakdown: { transfer: 1, reimbursement: 1, byPerson: 1 },
 			}),
 		);
+
 		expectLabelled(html);
 		expect(words(html)).toContain(
 			"32 counted 2 held · 3 excluded 2 held for review · 1 transfer · 1 reimbursement · 1 by a person",
@@ -187,7 +197,9 @@ describe("ExclusionsDiagram", () => {
 				breakdown: { transfer: 30, reimbursement: 1, byPerson: 1 },
 			}),
 		);
+
 		const width = Number(html.match(/viewBox="0 0 (\d+)/)?.[1]);
+
 		for (const rect of html.match(/<rect [^>]*stroke-dasharray[^>]*>/g) ?? []) {
 			const x = Number(rect.match(/ x="([\d.]+)"/)?.[1]);
 			const w = Number(rect.match(/ width="([\d.]+)"/)?.[1]);
@@ -204,6 +216,7 @@ describe("ExclusionsDiagram", () => {
 				breakdown: { transfer: 0, reimbursement: 0, byPerson: 0 },
 			}),
 		);
+
 		expect(words(html)).toContain("5 counted Nothing excluded");
 		expect(html).not.toContain("stroke-dasharray");
 		expect(desc(html)).toBe(
@@ -219,6 +232,7 @@ describe("ExclusionsDiagram", () => {
 				breakdown: { transfer: 0, reimbursement: 0, byPerson: 0 },
 			}),
 		);
+
 		expect(html).toContain('viewBox="0 0 360 84"');
 		expect(words(html)).toContain("2 held for review");
 	});
@@ -237,6 +251,7 @@ describe("CategoriesDiagram", () => {
 				threshold: "80%",
 			}),
 		);
+
 		const text = words(html);
 		expect(text.indexOf("Waits for a person")).toBeGreaterThan(-1);
 		expect(text.indexOf("+ 6 income")).toBeGreaterThan(
@@ -259,6 +274,7 @@ describe("CategoriesDiagram", () => {
 				ai: "Jev",
 			}),
 		);
+
 		expectLabelled(html);
 		expect(words(html)).toContain(
 			"1 A person's choice · 1 2 A merchant rule · 0 3 A bill · 3 4 Jev, if 80% or more sure · 19 5 Waits for a person · 10 + 2 income, which needs no category",
@@ -283,6 +299,7 @@ describe("CategoriesDiagram", () => {
 				ai: "Tally",
 			}),
 		);
+
 		expect(html).not.toMatch(/jev/i);
 		expect(words(html)).toContain("4 Tally, if 80% or more sure · 4");
 		expect(desc(html)).toContain("Tally 4");
@@ -300,6 +317,7 @@ describe("CategoriesDiagram", () => {
 				threshold: "80%",
 			}),
 		);
+
 		expect(words(html)).not.toContain("income");
 		expect(desc(html)).not.toContain("income");
 	});

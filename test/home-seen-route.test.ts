@@ -22,11 +22,14 @@ const family = { DB: env.DB, DEMO: "false" } as unknown as Env;
 const demo = { DB: env.DB, DEMO: "true" } as unknown as Env;
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 router.use("*", sameOrigin);
+
 router.use("*", async (c, next) => {
 	c.set("actor", PERSON);
 	await next();
 });
+
 router.route("/", home);
 
 /** The check-in as a form post. `step` is the step Home's page shows (Home's check-in only); none is the questions page's. */
@@ -76,6 +79,7 @@ const openingTag = (html: string, id: string) =>
 /** The HX-Trigger header's announce, or null when the answer carries none. */
 const announced = (res: Response) => {
 	const header = res.headers.get("HX-Trigger");
+
 	return header ? (JSON.parse(header) as { announce?: string }).announce : null;
 };
 
@@ -274,10 +278,12 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 	it("a poll with the list's own URL, sent after that check-in, announces nothing: the step was announced once (decision 146)", async () => {
 		await sorting();
 		const html = await (await checkIn(family, ORIGIN, "reading")).text();
+
 		const url =
 			/hx-get="([^"]+)"/
 				.exec(openingTag(html, "your-banks"))?.[1]
 				?.replaceAll("&amp;", "&") ?? "";
+
 		expect(url).toContain("/setup/banks?");
 		const poll = await setupRoute.request(url, {}, family);
 		expect(poll.status).toBe(200);

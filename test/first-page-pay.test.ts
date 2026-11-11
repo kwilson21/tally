@@ -272,6 +272,7 @@ describe("shownPayValues and payShown", () => {
 			[245000, 245000, 260000],
 		),
 	};
+
 	const shown = shownPayValues(merchant);
 
 	it("gives one value per deposit, pairing each id with its deposit", () => {
@@ -307,6 +308,7 @@ describe("shownPayValues and payShown", () => {
 			ids: [...merchant.ids, 14],
 			deposits: [...merchant.deposits, { date: "2026-08-28", cents: 245000 }],
 		};
+
 		expect(payShown(later, shown)).toBe(false);
 	});
 
@@ -321,6 +323,7 @@ describe("shownPayValues and payShown", () => {
 				i === 0 ? { ...d, cents: 250000 } : d,
 			),
 		};
+
 		expect(payShown(changed, shown)).toBe(false);
 	});
 
@@ -331,6 +334,7 @@ describe("shownPayValues and payShown", () => {
 				i === 1 ? { ...d, date: "2026-08-01" } : d,
 			),
 		};
+
 		expect(payShown(changed, shown)).toBe(false);
 	});
 
@@ -340,6 +344,7 @@ describe("shownPayValues and payShown", () => {
 			ids: merchant.ids.slice(1),
 			deposits: merchant.deposits.slice(1),
 		};
+
 		expect(payShown(fewer, shown)).toBe(false);
 	});
 
@@ -421,6 +426,7 @@ describe("latestDeposits", () => {
 			["2026-09-11", "2026-10-09", "2026-07-17", "2026-09-25", "2026-08-14"],
 			245000,
 		);
+
 		const { shown, earlier } = latestDeposits(shuffled);
 		expect(shown.map((deposit) => deposit.date)).toEqual([
 			"2026-10-09",

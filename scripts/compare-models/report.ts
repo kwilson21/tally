@@ -37,13 +37,17 @@ const cell = (text: string) => text.replace(/\|/g, "\\|");
 
 function answerCell(row: Row | undefined): string {
 	if (!row) return "—";
+
 	if (!row.answer) return cell(row.outcome);
 	const a = row.answer;
+
 	const set = Object.entries(a.flags)
 		.filter(([, outcome]) => outcome === "hit" || outcome === "false alarm")
 		.map(([flag]) => flag);
+
 	const check = a.applied ? " ✓" : "";
 	const flags = set.length > 0 ? `, flags: ${set.join(", ")}` : "";
+
 	return cell(`${a.pick} ${pct(a.confidence)}${check}${flags}`);
 }
 
@@ -51,7 +55,9 @@ function summaryRow(name: string, s: Summary): string {
 	const confidence = s.confidence
 		? `${pct(s.confidence.low)} / ${pct(s.confidence.middle)} / ${pct(s.confidence.high)}`
 		: "—";
+
 	const time = s.ms ? `${Math.round(s.ms.middle)} / ${s.ms.slowest}` : "—";
+
 	return `| ${name} | ${s.worked} of ${s.total} | ${s.right} | ${s.rightPickAnyConfidence} | ${s.wrong} | ${s.leftNoneFit} / ${s.leftUnsure} | ${s.appliedNoRight} | ${s.flags.hit} / ${s.flags.falseAlarm} / ${s.flags.missed} | ${s.mixedAndNote} | ${confidence} | ${time} |`;
 }
 
@@ -64,12 +70,14 @@ function listSection(list: ReportList, cases: Case[]): string[] {
 		...list.models.map((m) => summaryRow(m.name, summarize(m.rows))),
 		"",
 	];
+
 	if (list.id === "fifty") {
 		lines.push(
 			"Some of the 50 names fit these stores as well as the demo's own category does, so read the picks, not just the count.",
 			"",
 		);
 	}
+
 	lines.push(
 		"| Raw name | Direction | The demo's category | " +
 			list.models.map((m) => m.name).join(" | ") +
@@ -82,6 +90,7 @@ function listSection(list: ReportList, cases: Case[]): string[] {
 		);
 	});
 	lines.push("");
+
 	return lines;
 }
 
@@ -92,11 +101,15 @@ function notesSection(notes: ModelNote[]): string[] {
 			note.unreadable !== undefined ||
 			note.usage !== undefined,
 	);
+
 	if (shown.length === 0) return [];
 	const lines = ["## What each model sent back", ""];
+
 	for (const note of shown) {
 		lines.push(`### ${note.name}`, "");
+
 		if (note.error !== undefined) lines.push(`First error: ${note.error}`, "");
+
 		if (note.unreadable !== undefined)
 			lines.push(
 				"First unreadable body:",
@@ -106,6 +119,7 @@ function notesSection(notes: ModelNote[]): string[] {
 				"```",
 				"",
 			);
+
 		if (note.usage !== undefined)
 			lines.push(
 				"First usage:",
@@ -116,6 +130,7 @@ function notesSection(notes: ModelNote[]): string[] {
 				"",
 			);
 	}
+
 	return lines;
 }
 
@@ -130,9 +145,12 @@ export function formatReport(input: ReportInput): string {
 		"Times are measured from this machine through wrangler dev.",
 		"",
 	];
+
 	for (const list of input.lists) {
 		lines.push(...listSection(list, input.cases));
 	}
+
 	lines.push(...notesSection(input.notes));
+
 	return `${lines.join("\n")}\n`;
 }

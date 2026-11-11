@@ -54,11 +54,14 @@ export const CANDIDATES = {
 		id: "@cf/openai/gpt-oss-20b",
 	},
 } as const;
+
 export type CandidateKey = keyof typeof CANDIDATES;
+
 const KEYS = Object.keys(CANDIDATES) as CandidateKey[];
 
 /** What production allows an answer (suggest-name.ts): the default budget to compare against. */
 const PRODUCTION_TOKENS = 60;
+
 /** Production's own limit (suggest-name.ts): a model slower than this is unusable there, so it fails here too. */
 const TIMEOUT_MS = 15_000;
 
@@ -99,7 +102,9 @@ export function bankTexts(seed: Seed, limit?: number): string[] {
 	]
 		.map((text) => text.trim())
 		.filter(Boolean);
+
 	const unique = [...new Set(all)];
+
 	return limit === undefined ? unique : unique.slice(0, limit);
 }
 
@@ -121,23 +126,30 @@ const nonEmpty = (value: unknown): string | null =>
 export function replyOf(answer: unknown): Reply {
 	if (typeof answer === "string")
 		return { text: nonEmpty(answer), shape: "response" };
+
 	if (answer === null || typeof answer !== "object")
 		return { text: null, shape: "unknown" };
 	const body = answer as Record<string, unknown>;
+
 	if (typeof body.response === "string")
 		return { text: nonEmpty(body.response), shape: "response" };
+
 	const choice = Array.isArray(body.choices)
 		? (body.choices[0] as Record<string, unknown> | undefined)
 		: undefined;
+
 	if (choice) {
 		const message = (choice.message ?? {}) as Record<string, unknown>;
 		const text = nonEmpty(message.content);
+
 		const finish =
 			typeof choice.finish_reason === "string"
 				? choice.finish_reason
 				: undefined;
+
 		const thought =
 			nonEmpty(message.reasoning_content) ?? nonEmpty(message.reasoning);
+
 		return {
 			text,
 			shape: "chat",
@@ -148,24 +160,31 @@ export function replyOf(answer: unknown): Reply {
 			...(text !== null && finish === "length" ? { truncated: true } : {}),
 		};
 	}
+
 	if (typeof body.output_text === "string" || Array.isArray(body.output)) {
 		const items = Array.isArray(body.output) ? (body.output as unknown[]) : [];
+
 		const parts = items
 			.filter((item) => (item as { type?: string })?.type === "message")
 			.flatMap((item) => {
 				const content = (item as { content?: unknown }).content;
+
 				return Array.isArray(content) ? content : [];
 			})
 			.map((part) => nonEmpty((part as { text?: unknown })?.text))
 			.filter((part): part is string => part !== null);
+
 		const text = nonEmpty(body.output_text) ?? (parts.join("\n") || null);
+
 		const incomplete = (
 			body.incomplete_details as { reason?: unknown } | null | undefined
 		)?.reason;
+
 		const thoughtOnly =
 			text === null &&
 			incomplete === "max_output_tokens" &&
 			items.some((item) => (item as { type?: string })?.type === "reasoning");
+
 		return {
 			text,
 			shape: "responses",
@@ -175,6 +194,7 @@ export function replyOf(answer: unknown): Reply {
 				: {}),
 		};
 	}
+
 	return { text: null, shape: "unknown" };
 }
 
@@ -200,6 +220,7 @@ export async function askNames(
 	tokens: number,
 ): Promise<NameResult> {
 	const started = Date.now();
+
 	try {
 		const answer = await ai.run(
 			modelId as keyof AiModels,
@@ -213,8 +234,10 @@ export async function askNames(
 			} as never,
 			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
 		);
+
 		const reply = replyOf(answer);
 		const ms = Date.now() - started;
+
 		if (reply.text === null)
 			return {
 				text,
@@ -224,6 +247,7 @@ export async function askNames(
 				finish: reply.finish,
 				thoughtOnly: reply.thoughtOnly,
 			};
+
 		return {
 			text,
 			ok: true,
@@ -246,6 +270,7 @@ export async function askNames(
 
 /** What a run asks: the name prompt, the "what it was" note, or a category name for a purchase. */
 export type Task = "names" | "notes" | "categories";
+
 const TASKS: Task[] = ["names", "notes", "categories"];
 
 /**
@@ -272,6 +297,7 @@ export async function askOther(
 ): Promise<NameResult> {
 	const started = Date.now();
 	const candidate = withModel(ai, modelId);
+
 	const value =
 		task === "notes"
 			? await suggestNote(candidate, text).then((r) =>
@@ -289,7 +315,9 @@ export async function askOther(
 				).then((r) =>
 					r.ok ? { ok: true as const, value: r.name } : { ok: false as const },
 				);
+
 	const ms = Date.now() - started;
+
 	if (!value.ok)
 		return {
 			text,
@@ -298,6 +326,7 @@ export async function askOther(
 			ms,
 			shape: "unknown",
 		};
+
 	return {
 		text,
 		ok: true,
@@ -322,11 +351,13 @@ export async function runNamesComparison(
 ): Promise<string> {
 	const keys = slice.models ?? KEYS;
 	const unknown = keys.filter((key) => !KEYS.includes(key as CandidateKey));
+
 	if (unknown.length > 0)
 		throw new Error(
 			`Unknown model ${unknown.join(", ")}. Choose from ${KEYS.join(", ")}.`,
 		);
 	const task = slice.task ?? "names";
+
 	if (!TASKS.includes(task as Task))
 		throw new Error(`Unknown task ${task}. Choose from ${TASKS.join(", ")}.`);
 	const tokens = slice.tokens ?? PRODUCTION_TOKENS;
@@ -334,8 +365,10 @@ export async function runNamesComparison(
 	const texts = bankTexts(seed, slice.limit);
 	const categories = demoCategories(seed);
 	const models: ReportModel[] = [];
+
 	for (const key of keys as CandidateKey[]) {
 		const results: NameResult[] = [];
+
 		for (const text of texts) {
 			results.push(
 				task === "names"
@@ -349,13 +382,16 @@ export async function runNamesComparison(
 						),
 			);
 		}
+
 		console.log(`compare-names ${key} done`);
 		models.push({ key, results });
 	}
+
 	return formatNamesReport({ today, tokens, models, task: task as Task });
 }
 
 export type ReportModel = { key: string; results: NameResult[] };
+
 export type ReportInput = {
 	today: string;
 	tokens: number;
@@ -376,12 +412,17 @@ const cell = (value: string) =>
 /** What a result shows in the side-by-side table. */
 function show(result: NameResult | undefined): string {
 	if (!result) return "—";
+
 	if (result.error) return cell(`⚠ ${result.error}`);
+
 	if (result.thoughtOnly) return "⚠ ran out of tokens while thinking";
+
 	if (!result.ok) return "⚠ no text in the answer";
+
 	if (!result.names || result.names.length === 0)
 		return "(nothing passed the name check)";
 	const names = cell(result.names.join(" / "));
+
 	return result.truncated ? `${names} ⚠ cut off at the token limit` : names;
 }
 
@@ -389,8 +430,10 @@ function show(result: NameResult | undefined): string {
 export function formatNamesReport(input: ReportInput): string {
 	const label = (key: string) =>
 		(CANDIDATES as Record<string, { label: string }>)[key]?.label ?? key;
+
 	const idOf = (key: string) =>
 		(CANDIDATES as Record<string, { id: string }>)[key]?.id ?? key;
+
 	const lines = [
 		HEADINGS[input.task ?? "names"],
 		"",
@@ -401,46 +444,61 @@ export function formatNamesReport(input: ReportInput): string {
 		"| Model | Id | Texts | Named | Empty after check | Failed | Ran out of tokens | Cut off mid-answer | Avg ms |",
 		"|---|---|---|---|---|---|---|---|---|",
 	];
+
 	for (const { key, results } of input.models) {
 		const named = results.filter(
 			(r) => r.ok && (r.names?.length ?? 0) > 0,
 		).length;
+
 		const empty = results.filter(
 			(r) => r.ok && (r.names?.length ?? 0) === 0,
 		).length;
+
 		const failed = results.filter((r) => !r.ok && !r.thoughtOnly).length;
 		const thought = results.filter((r) => r.thoughtOnly).length;
 		const cutOff = results.filter((r) => r.truncated).length;
+
 		const avg = results.length
 			? Math.round(results.reduce((sum, r) => sum + r.ms, 0) / results.length)
 			: 0;
+
 		lines.push(
 			`| ${label(key)} | ${idOf(key)} | ${results.length} | ${named} | ${empty} | ${failed} | ${thought} | ${cutOff} | ${avg} |`,
 		);
 	}
+
 	const shapes = input.models.map(
 		({ key, results }) =>
 			`- ${label(key)}: ${[...new Set(results.map((r) => r.shape))].join(", ")}`,
 	);
+
 	const isNames = (input.task ?? "names") === "names";
+
 	if (isNames) lines.push("", "Answer shapes seen:", ...shapes);
+
 	const noFinish = input.models
 		.filter(({ results }) => results.some((r) => r.shape === "response"))
 		.map(({ key }) => label(key));
+
 	if (isNames && noFinish.length > 0)
 		lines.push(
 			"",
 			`The \`response\` shape (${noFinish.join(", ")}) carries no finish reason, so "Cut off mid-answer" is always 0 for it. Check its names for a last name that stops short.`,
 		);
+
 	const failures = input.models.flatMap(({ key, results }) => {
 		const first = results.find((r) => r.error);
+
 		return first ? [`- ${label(key)}: ${first.error}`] : [];
 	});
+
 	if (failures.length > 0)
 		lines.push("", "First error per model:", ...failures);
+
 	const texts = [
 		...new Set(input.models.flatMap((m) => m.results.map((r) => r.text))),
 	];
+
 	lines.push(
 		"",
 		"## Side by side",
@@ -448,12 +506,15 @@ export function formatNamesReport(input: ReportInput): string {
 		`| Bank text | ${input.models.map((m) => label(m.key)).join(" | ")} |`,
 		`|---|${input.models.map(() => "---").join("|")}|`,
 	);
+
 	for (const text of texts) {
 		const row = input.models.map((m) =>
 			show(m.results.find((r) => r.text === text)),
 		);
+
 		lines.push(`| ${cell(text)} | ${row.join(" | ")} |`);
 	}
+
 	return `${lines.join("\n")}\n`;
 }
 
@@ -461,29 +522,35 @@ export function formatNamesReport(input: ReportInput): string {
 const numberOf = (name: string, value: string | null): number | undefined => {
 	if (value === null) return undefined;
 	const parsed = Number(value);
+
 	if (!Number.isInteger(parsed) || parsed < 1)
 		throw new Error(
 			`${name} must be a whole number above zero, got "${value}".`,
 		);
+
 	return parsed;
 };
 
 export default {
 	async fetch(request: Request, env: CompareEnv): Promise<Response> {
 		const url = new URL(request.url);
+
 		// Every run is billed, so only GET / starts one: not a favicon fetch, a health probe or a HEAD.
 		if (url.pathname !== "/") return new Response("Not found", { status: 404 });
+
 		if (request.method !== "GET")
 			return new Response("GET only", { status: 405 });
 		// A browser marks a request made for another page (an image tag, a link) with Sec-Fetch-Site or Origin.
 		// Refuse those, so a page you visit can't start a billed run. curl, and typing the address, send neither.
 		const site = request.headers.get("sec-fetch-site");
+
 		if ((site !== null && site !== "none") || request.headers.has("origin"))
 			return new Response(
 				"Run this with curl, or by typing the address, not from another page.",
 				{ status: 403 },
 			);
 		const models = url.searchParams.get("models");
+
 		try {
 			const report = await runNamesComparison(env, {
 				// Only a missing parameter means every model; an empty one is refused as an unknown model.
@@ -494,6 +561,7 @@ export default {
 				// A missing task is the name prompt; an unknown one is refused before any call.
 				task: url.searchParams.get("task") ?? undefined,
 			});
+
 			return new Response(report, {
 				headers: { "content-type": "text/markdown; charset=utf-8" },
 			});

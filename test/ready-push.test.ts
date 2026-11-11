@@ -28,9 +28,12 @@ const NEW_DEVICE = "https://fcm.googleapis.com/send/dana-new";
 // and signs for real and only the push service is faked.
 const UA_PUBLIC =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+
 const AUTH = "BTBZMqHH6r4Tts7J_aSIgg";
+
 const AS_PUBLIC =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
 const scheduledWith = handler as unknown as {
@@ -64,20 +67,27 @@ function fakeFetch({
 } = {}) {
 	const pushed: string[] = [];
 	const resent: string[] = [];
+
 	const fetchImpl = vi.fn(
 		async (url: RequestInfo | URL, init?: RequestInit) => {
 			const target = String(url);
+
 			if (target.startsWith("https://api.resend.com")) {
 				resent.push((JSON.parse(String(init?.body)) as { to: string }).to);
+
 				return new Response("{}", { status: resendStatus });
 			}
+
 			pushed.push(target);
 			await beforeAnswer?.(target);
 			const status = answer(target);
+
 			if (status === "throw") throw new TypeError("network down");
+
 			return new Response(null, { status });
 		},
 	);
+
 	return { fetchImpl, pushed, resent };
 }
 
@@ -167,9 +177,12 @@ function failingOn(needle: string): D1Database {
 			if (prop === "prepare")
 				return (sql: string) => {
 					if (sql.includes(needle)) throw new Error("boom");
+
 					return target.prepare(sql);
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -182,9 +195,12 @@ function countingDb(counter: { statements: number }): D1Database {
 			if (prop === "prepare")
 				return (sql: string) => {
 					counter.statements += 1;
+
 					return target.prepare(sql);
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -197,9 +213,12 @@ function recordingDb(statements: string[]): D1Database {
 			if (prop === "prepare")
 				return (sql: string) => {
 					statements.push(sql.trim());
+
 					return target.prepare(sql);
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -239,6 +258,7 @@ async function heldKeyOf(email: string) {
 		"SHA-256",
 		new TextEncoder().encode(email.toLowerCase()),
 	);
+
 	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
@@ -261,7 +281,9 @@ async function idOf(endpoint: string) {
 	)
 		.bind(endpoint)
 		.first<{ id: number }>();
+
 	if (!row) throw new Error("no device stored for that endpoint");
+
 	return row.id;
 }
 
@@ -272,10 +294,12 @@ async function devicesOf(email: string) {
 	)
 		.bind(email)
 		.all<{ endpoint: string }>();
+
 	return results.map((row) => row.endpoint);
 }
 
 beforeEach(async () => resetDemo(env.DB, "2026-10-07"));
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
@@ -458,6 +482,7 @@ describe("the ready push: how each answer counts", () => {
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(DANA, LAPTOP);
+
 		const { fetchImpl } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? 410 : 201),
 			beforeAnswer: async (endpoint) => {
@@ -465,6 +490,7 @@ describe("the ready push: how each answer counts", () => {
 				if (endpoint === PHONE) await addDevice(DANA, NEW_DEVICE);
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(await devicesOf(DANA)).toEqual([LAPTOP, NEW_DEVICE]);
 	});
@@ -483,6 +509,7 @@ describe("the ready push: how each answer counts", () => {
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		const phoneId = await idOf(PHONE);
+
 		const { fetchImpl } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? 410 : 201),
 			beforeAnswer: async (endpoint) => {
@@ -499,6 +526,7 @@ describe("the ready push: how each answer counts", () => {
 				]);
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(await devicesOf(RILEY)).toEqual([SPARE]);
 	});
@@ -509,10 +537,12 @@ describe("the ready push: how each answer counts", () => {
 		await addDevice(DANA, PHONE);
 		await addDevice(DANA, LAPTOP);
 		await addDevice(DANA, SPARE);
+
 		const first = fakeFetch({
 			answer: (endpoint) =>
 				endpoint === PHONE ? "throw" : endpoint === LAPTOP ? 429 : 503,
 		});
+
 		await runReadyPush(pushing(), { fetchImpl: first.fetchImpl });
 		expect(first.pushed).toHaveLength(3);
 		expect(await pushedList()).toEqual([]);
@@ -539,9 +569,11 @@ describe("the ready push: how each answer counts", () => {
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(DANA, LAPTOP);
+
 		const { fetchImpl, pushed } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? "throw" : 201),
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(pushed).toEqual([PHONE, LAPTOP]);
 		expect(await pushedList()).toEqual([DANA]);
@@ -564,9 +596,11 @@ describe("the ready push: how each answer counts", () => {
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(DANA, LAPTOP);
+
 		const { fetchImpl, pushed } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? 410 : 201),
 		});
+
 		await runReadyPush(
 			pushing({ DB: failingOn("DELETE FROM push_subscriptions") }),
 			{ fetchImpl },
@@ -587,9 +621,11 @@ describe("the ready push: how each answer counts", () => {
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(DANA, LAPTOP);
+
 		const { fetchImpl } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? 410 : 201),
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		const text = JSON.stringify(logs);
 		expect(text).toContain("ready push: 1 sent, 1 failed");
@@ -604,6 +640,7 @@ describe("the ready push: at most 5 devices per person (decision 149, spec §10)
 		await openHousehold();
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addMember(RILEY, { seen: "-180 seconds" });
+
 		// Seven devices for Dana, one per day: the two oldest are not read at all.
 		for (let n = 1; n <= 7; n++) {
 			await addDevice(
@@ -612,6 +649,7 @@ describe("the ready push: at most 5 devices per person (decision 149, spec §10)
 				`2026-10-0${n} 09:00:00`,
 			);
 		}
+
 		await addDevice(RILEY, SPARE, "2026-10-01 09:00:00");
 		const { fetchImpl, pushed } = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl });
@@ -640,13 +678,17 @@ describe("the ready push: every read comes before a claim", () => {
 			fetchImpl,
 		});
 		expect(pushed).toEqual([PHONE, SPARE]);
+
 		const isDeviceRead = (sql: string) =>
 			isRead(sql) && sql.includes("push_subscriptions");
+
 		expect(statements.filter(isDeviceRead)).toHaveLength(1);
 		const deviceRead = statements.findIndex(isDeviceRead);
+
 		const claims = statements.flatMap((sql, index) =>
 			isPushClaimOrRelease(sql) ? [index] : [],
 		);
+
 		expect(claims).toHaveLength(2);
 		const [firstClaim, secondClaim] = claims as [number, number];
 		expect(deviceRead).toBeLessThan(firstClaim);
@@ -664,12 +706,14 @@ describe("the ready push: every read comes before a claim", () => {
 		await addMember(RILEY, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(RILEY, SPARE);
+
 		// A new bank is linked while Dana's push is out, and its history is still loading: the gate closes after the first push.
 		const { fetchImpl, pushed } = fakeFetch({
 			beforeAnswer: async (endpoint) => {
 				if (endpoint === PHONE) await addBank(2, "Amex", { history: false });
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(pushed).toEqual([PHONE]);
 		expect(await pushedList()).toEqual([DANA]);
@@ -681,6 +725,7 @@ describe("the ready push: every read comes before a claim", () => {
 		await addMember(RILEY, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(RILEY, SPARE);
+
 		const { fetchImpl, pushed } = fakeFetch({
 			beforeAnswer: async (endpoint) => {
 				if (endpoint !== PHONE) return;
@@ -691,6 +736,7 @@ describe("the ready push: every read comes before a claim", () => {
 					.run();
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(pushed).toEqual([PHONE]);
 		expect(await pushedList()).toEqual([DANA]);
@@ -724,9 +770,11 @@ describe("the ready push: every read comes before a claim", () => {
 		await addMember(RILEY, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(RILEY, SPARE);
+
 		const { fetchImpl, pushed } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? 503 : 201),
 		});
+
 		await expect(
 			runReadyPush(pushing({ DB: failingOn(PUSH_RELEASE_SQL) }), {
 				fetchImpl,
@@ -742,6 +790,7 @@ describe("the ready push holds the email while it is in flight, and after each a
 		await addMember(DANA, { seen: "-25 minutes" });
 		await addDevice(DANA, PHONE);
 		const claims: number[] = [];
+
 		const { fetchImpl } = fakeFetch({
 			beforeAnswer: async () => {
 				// The email's own claim (CLAIM_SQL), made while the push to the phone is still out. The person is away 25 minutes and
@@ -749,9 +798,11 @@ describe("the ready push holds the email while it is in flight, and after each a
 				const claim = await env.DB.prepare(CLAIM_SQL)
 					.bind(DANA, await heldKeyOf(DANA))
 					.run();
+
 				claims.push(claim.meta.changes);
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(claims).toEqual([0]);
 		expect((await readFirstTally(env.DB))?.readyEmailedTo).toBeUndefined();
@@ -762,6 +813,7 @@ describe("the ready push holds the email while it is in flight, and after each a
 		await addMember(DANA, { seen: "-25 minutes" });
 		await addDevice(DANA, PHONE);
 		const seen: { list?: string[]; stamp?: string } = {};
+
 		const { fetchImpl } = fakeFetch({
 			beforeAnswer: async () => {
 				const record = await readFirstTally(env.DB);
@@ -769,6 +821,7 @@ describe("the ready push holds the email while it is in flight, and after each a
 				seen.stamp = record?.readyPushedAt?.[await heldKeyOf(DANA)];
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(seen.list).toEqual([DANA]);
 		expect(seen.stamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
@@ -779,6 +832,7 @@ describe("the ready push holds the email while it is in flight, and after each a
 		await addMember(DANA, { seen: "-25 minutes" });
 		await addDevice(DANA, PHONE);
 		let overlapped = false;
+
 		const { fetchImpl, pushed } = fakeFetch({
 			beforeAnswer: async () => {
 				if (overlapped) return;
@@ -787,6 +841,7 @@ describe("the ready push holds the email while it is in flight, and after each a
 				await runReadyPush(pushing(), { fetchImpl });
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(pushed).toEqual([PHONE]);
 	});
@@ -827,12 +882,14 @@ describe("the ready push holds the email while it is in flight, and after each a
 		await openHousehold();
 		await addMember(DANA, { seen: "-25 minutes" });
 		await addDevice(DANA, PHONE);
+
 		const { fetchImpl, resent } = fakeFetch({
 			// The stamp the claim wrote is set 30 minutes back, so only the delivery's own refresh can hold the email.
 			beforeAnswer: async () => {
 				await pushedAt(DANA, "-30 minutes");
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		const stamp = await storedPushedAt(DANA);
 		expect(Date.now() - Date.parse(stamp ?? "")).toBeLessThan(60_000);
@@ -897,9 +954,11 @@ describe("the ready email waits 8 minutes after a push that reached a device (de
 		await addMember(DANA, { seen: "-25 minutes" });
 		await addDevice(DANA, PHONE);
 		await addDevice(DANA, LAPTOP);
+
 		const { fetchImpl, resent } = fakeFetch({
 			answer: (endpoint) => (endpoint === PHONE ? 201 : 503),
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(await storedPushedAt(DANA)).toMatch(
 			/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
@@ -978,10 +1037,12 @@ describe("the ready email still goes", () => {
 		// (a concurrent run), and Riley's kept try is already there. A transient answer then releases Dana's push claim, which
 		// must not touch either kept try: only RELEASE_SQL rewrites heldReadyEmail, and that would wipe Dana's.
 		const rileysKey = await heldKeyOf(RILEY);
+
 		const held = {
 			[await heldKeyOf(DANA)]: keptEmail("kept for dana"),
 			[rileysKey]: keptEmail("kept for riley"),
 		};
+
 		await openHousehold({
 			strokes: { bank: STROKE_ONE },
 			budgets: {},
@@ -989,6 +1050,7 @@ describe("the ready email still goes", () => {
 		});
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
+
 		const { fetchImpl } = fakeFetch({
 			answer: () => 503,
 			beforeAnswer: async () => {
@@ -999,6 +1061,7 @@ describe("the ready email still goes", () => {
 					.run();
 			},
 		});
+
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(await pushedList()).toEqual([]);
 		expect((await readFirstTally(env.DB))?.heldReadyEmail).toEqual(held);

@@ -53,6 +53,7 @@ export function HouseholdPeople({
 				{people.map((person, index) => {
 					const mark =
 						index > 0 && saved?.id === person.id ? saved.mark : undefined;
+
 					return (
 						<li>
 							<details

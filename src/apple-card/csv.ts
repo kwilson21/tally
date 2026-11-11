@@ -13,6 +13,7 @@ export const APPLE_COLUMNS = [
 	"Type",
 	"Amount (USD)",
 ];
+
 const PURCHASED_BY = "Purchased By";
 
 export const NOT_APPLE =
@@ -62,8 +63,10 @@ function records(text: string): {
 	let closed = false;
 	// Nothing has been read for the field yet, so a quote here opens it.
 	let atStart = true;
+
 	for (let i = 0; i < text.length; i++) {
 		const char = text.charAt(i);
+
 		if (quoted) {
 			if (char === '"') {
 				if (text.charAt(i + 1) === '"') {
@@ -86,6 +89,7 @@ function records(text: string): {
 			field = "";
 			closed = false;
 			atStart = true;
+
 			if (char === "\r" && text.charAt(i + 1) === "\n") i++;
 		} else {
 			if (atStart && char === '"') quoted = true;
@@ -93,23 +97,30 @@ function records(text: string): {
 				if (closed || char === '"') malformed.add(out.length);
 				field += char;
 			}
+
 			atStart = false;
 		}
 	}
+
 	if (quoted) return { out, open: out.length + 1, malformed };
+
 	if (field !== "" || record.length > 0) {
 		record.push(field);
 		out.push(record);
 	}
+
 	return { out, open: null, malformed };
 }
 
 /** Integer cents for Apple's amount text, or null. A dollar sign is refused, and so is anything toCents rejects. */
 function centsOf(text: string): number | null {
 	if (text.includes("$")) return null;
+
 	try {
 		const cents = toCents(text);
+
 		if (!Number.isSafeInteger(cents)) return null;
+
 		return cents === 0 ? 0 : cents;
 	} catch {
 		// toCents names the text it refused. That text is money, so it is dropped here, never rethrown or logged.
@@ -122,14 +133,19 @@ const DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 /** Apple's M/D/YYYY, month first, as YYYY-MM-DD when it is a real calendar day; null otherwise. */
 function isoDate(text: string): string | null {
 	const match = DATE.exec(text);
+
 	if (!match) return null;
 	const month = Number(match[1]);
 	const day = Number(match[2]);
+
 	if (month < 1 || month > 12) return null;
+
 	const daysInMonth = new Date(
 		Date.UTC(Number(match[3]), month, 0),
 	).getUTCDate();
+
 	if (day < 1 || day > daysInMonth) return null;
+
 	return `${match[3]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -142,9 +158,12 @@ function unreadableWords(line: number): string {
 
 function readRow(fields: string[], line: number, width: number): RowResult {
 	const unreadable = { ok: false as const, error: unreadableWords(line) };
+
 	if (fields.length !== width) return unreadable;
+
 	// A U+FFFD means the file was re-saved in another encoding; a field over the cap can't be stored safely.
 	if (fields.some((field) => field.includes("�"))) return unreadable;
+
 	const [
 		transactionText = "",
 		clearingText = "",
@@ -154,29 +173,37 @@ function readRow(fields: string[], line: number, width: number): RowResult {
 		typeText = "",
 		amountText = "",
 	] = fields.map(cleanText);
+
 	if (fields.some((field) => cleanText(field).length > MAX_FIELD))
 		return unreadable;
 
 	const amountCents = centsOf(amountText);
+
 	const amountError = {
 		ok: false as const,
 		error: `Row ${line}'s amount can't be read. Nothing was added.`,
 	};
+
 	if (amountCents === null) return amountError;
 
 	const dateError = {
 		ok: false as const,
 		error: `Row ${line}'s date can't be read. Nothing was added.`,
 	};
+
 	const transactionDate = isoDate(transactionText);
+
 	if (transactionDate === null) return dateError;
 	let clearingDate: string | null = null;
+
 	if (clearingText !== "") {
 		clearingDate = isoDate(clearingText);
+
 		if (clearingDate === null) return dateError;
 	}
 
 	if (descriptionText === "" || typeText === "") return unreadable;
+
 	return {
 		ok: true,
 		row: {
@@ -205,28 +232,36 @@ export function parseAppleCsv(
 	const { out: all, open, malformed } = records(text.replace(/^﻿/, ""));
 	const header = (all[0] ?? []).map(cleanText);
 	const withPurchasedBy = [...APPLE_COLUMNS, PURCHASED_BY];
+
 	const isApple =
 		!malformed.has(0) &&
 		((header.length === APPLE_COLUMNS.length &&
 			header.every((name, i) => name === APPLE_COLUMNS[i])) ||
 			(header.length === withPurchasedBy.length &&
 				header.every((name, i) => name === withPurchasedBy[i])));
+
 	if (!isApple) return { ok: false, error: NOT_APPLE };
 
 	const rows: AppleRow[] = [];
+
 	for (let index = 1; index < all.length; index++) {
 		const fields = all[index] ?? [];
+
 		// A malformed record is refused before the blank check, so a malformed record of empty-looking fields isn't skipped.
 		if (malformed.has(index))
 			return { ok: false, error: unreadableWords(index + 1) };
+
 		// A blank record, or one of empty fields (a spreadsheet's re-save can leave those), is skipped, not refused.
 		if (fields.every((field) => cleanText(field) === "")) continue;
 		const result = readRow(fields, index + 1, header.length);
+
 		if (!result.ok) return { ok: false, error: result.error };
 		rows.push(result.row);
 	}
+
 	// A quote still open at the end of the text took the rest of the file into its record, so that record can't be read,
 	// even when its fields count right (its last field is the one left open).
 	if (open !== null) return { ok: false, error: unreadableWords(open) };
+
 	return { ok: true, rows };
 }

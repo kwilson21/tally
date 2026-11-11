@@ -21,6 +21,7 @@ describe("peleSvg", () => {
 			title: "t",
 			desc: "A $142.00 bill $1 $&",
 		});
+
 		expect(svg).toContain('<desc id="d-desc">A $142.00 bill $1 $&amp;</desc>');
 	});
 
@@ -30,6 +31,7 @@ describe("peleSvg", () => {
 			title: "<script>x</script>",
 			desc: `a "b" & <i>`,
 		});
+
 		expect(svg).not.toContain("<script");
 		expect(svg).toContain("&lt;script&gt;");
 		expect(svg).toContain("&amp;");
@@ -60,11 +62,13 @@ describe("peleSvg", () => {
 			"--_fm",
 			"--_w",
 		]);
+
 		for (const source of [
 			SOURCE,
 			`stateDiagram-v2\n  [*] --> a\n  a --> a: loop\n  a --> [*]`,
 		]) {
 			const svg = peleSvg(source, { id: "d", title: "t", desc: "d" });
+
 			for (const [, name] of svg.matchAll(/var\((--_[a-z]+)/g))
 				expect(defined.has(name as string)).toBe(true);
 		}
@@ -75,6 +79,7 @@ describe("peleSvg", () => {
 			`flowchart TB\n  a["<img src=x onerror=alert(1)>"] --> b["<script>1</script>"]`,
 			{ id: "d", title: "t", desc: "d" },
 		);
+
 		expect(svg).not.toContain("<img");
 		expect(svg).not.toContain("<script");
 	});

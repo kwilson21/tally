@@ -16,6 +16,7 @@ const WEEKDAYS = [
 	"Friday",
 	"Saturday",
 ] as const;
+
 const weekdayOf = (date: string) =>
 	WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 
@@ -33,22 +34,32 @@ export const dollarsWords = (cents: number) =>
  */
 export function cadenceOf(dates: string[]): string | null {
 	const sorted = [...new Set(dates)].sort();
+
 	if (sorted.length < 2) return null;
+
 	const gaps = sorted
 		.slice(1)
 		.map((date, i) => dayNumber(date) - dayNumber(sorted[i] as string));
+
 	const every = (low: number, high: number) =>
 		gaps.every((gap) => gap >= low && gap <= high);
+
 	const latest = sorted[sorted.length - 1] as string;
+
 	const oneWeekday = sorted.every(
 		(date) => weekdayOf(date) === weekdayOf(latest),
 	);
+
 	if (every(6, 8))
 		return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
+
 	if (every(13, 15))
 		return oneWeekday ? `every other ${weekdayOf(latest)}` : "every other week";
+
 	if (every(12, 19)) return "twice a month";
+
 	if (every(BILL_FIND_MIN_DAYS, BILL_FIND_MAX_DAYS)) return "every month";
+
 	return null;
 }
 
@@ -57,6 +68,7 @@ export function amountWords(deposits: PayDeposit[]): string {
 	const cents = deposits.map((deposit) => deposit.cents);
 	const low = Math.min(...cents);
 	const high = Math.max(...cents);
+
 	return low === high
 		? dollarsWords(low)
 		: `${dollarsWords(low)} to ${dollarsWords(high)}`;
@@ -79,11 +91,14 @@ export function paySentence({
 	const since = shortDay(first, latest);
 	const count = deposits.length;
 	const cents = deposits.map((deposit) => deposit.cents);
+
 	if (count === 1)
 		return `Your bank shows ${bankText} paying ${amountWords(deposits)}, once, on ${since}.`;
+
 	if (Math.min(...cents) !== Math.max(...cents))
 		return `Your bank shows ${bankText} paying ${amountWords(deposits)}, ${count} times since ${since}.`;
 	const cadence = cadenceOf(dates);
+
 	return `Your bank shows ${bankText} paying ${amountWords(deposits)}${cadence ? ` ${cadence}` : ""}, ${count} times since ${since}.`;
 }
 
@@ -97,6 +112,7 @@ export function payLedgerLine({
 }): string {
 	const dates = deposits.map((deposit) => deposit.date).sort();
 	const cadence = cadenceOf(dates);
+
 	return `Pay · ${name}, ${amountWords(deposits)}${cadence ? ` ${cadence}` : ""}`;
 }
 
@@ -120,9 +136,11 @@ export function payCadenceLine(deposits: PayDeposit[]): string {
 	const dates = deposits.map((deposit) => deposit.date).sort();
 	const first = dates[0] as string;
 	const latest = dates[dates.length - 1] as string;
+
 	if (deposits.length === 1) return `Once, on ${shortDay(first, latest)}`;
 	const cadence = cadenceOf(dates);
 	const since = `${deposits.length} times since ${shortDay(first, latest)}`;
+
 	return cadence
 		? `${cadence.charAt(0).toUpperCase()}${cadence.slice(1)} · ${since}`
 		: since;
@@ -136,6 +154,7 @@ export function latestDeposits(deposits: PayDeposit[]): {
 	earlier: number;
 } {
 	const newest = [...deposits].sort((a, b) => b.date.localeCompare(a.date));
+
 	return {
 		shown: newest.slice(0, 3),
 		earlier: Math.max(0, newest.length - 3),
@@ -181,6 +200,7 @@ export function payShown(
 ): boolean {
 	const current = shownPayValues(merchant);
 	const submitted = new Set(values);
+
 	return (
 		submitted.size === current.length &&
 		current.every((value) => submitted.has(value))

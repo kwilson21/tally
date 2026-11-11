@@ -16,6 +16,7 @@ import { merchantNames } from "./helpers/merchants";
 const db = env.DB;
 const TODAY = "2026-09-22";
 const BY = "pat@example.test";
+
 const HEADER =
 	"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By";
 
@@ -47,7 +48,9 @@ async function upload(
 	options: { today?: string; balanceCents?: number | null } = {},
 ) {
 	const parsed = parseAppleCsv(text);
+
 	if (!parsed.ok) throw new Error(parsed.error);
+
 	return importAppleCard(db, parsed.rows, {
 		by: BY,
 		today: options.today ?? TODAY,
@@ -60,7 +63,9 @@ async function uploadOk(
 	options: { today?: string; balanceCents?: number | null } = {},
 ): Promise<ImportResult> {
 	const result = await upload(text, options);
+
 	if (!result.ok) throw new Error(result.error);
+
 	return result;
 }
 
@@ -156,11 +161,13 @@ describe("importAppleCard: the account", () => {
 		await uploadOk(csvOf(row({ desc: "OTHER CAFE", merchant: "Other Cafe" })));
 		const again = await card();
 		expect(again?.id).toBe(first?.id);
+
 		const count = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM accounts WHERE subtype = 'apple_card'",
 			)
 			.first<{ n: number }>();
+
 		expect(count?.n).toBe(1);
 	});
 });
@@ -170,6 +177,7 @@ describe("importAppleCard: a stored row", () => {
 		const result = await uploadOk(
 			csvOf(row(), row({ clear: "", tx: "09/23/2026", desc: "UNCLEARED" })),
 		);
+
 		expect(result.notCleared).toBe(1);
 		const [stored] = await cardRows();
 		expect(stored).toMatchObject({
@@ -274,6 +282,7 @@ describe("importAppleCard: a stored row", () => {
 			"plaid",
 			null,
 		]);
+
 		const counted = await db
 			.prepare(
 				`SELECT COALESCE(SUM(t.amount_cents), 0) AS total FROM transactions t
@@ -281,6 +290,7 @@ describe("importAppleCard: a stored row", () => {
 				 WHERE a.subtype = 'apple_card' AND t.excluded = 0`,
 			)
 			.first<{ total: number }>();
+
 		// The money-in REVERSAL row counts by its sign: -$8.00, not left out with the pair.
 		expect(counted?.total).toBe(-800);
 	});
@@ -292,6 +302,7 @@ describe("importAppleCard: nothing counted twice", () => {
 			row(),
 			row({ desc: "OTHER CAFE", merchant: "Other Cafe" }),
 		);
+
 		expect((await uploadOk(text)).added).toBe(2);
 		const again = await uploadOk(text);
 		expect(again).toMatchObject({ added: 0, already: 2 });
@@ -303,6 +314,7 @@ describe("importAppleCard: nothing counted twice", () => {
 			row(),
 			row({ desc: "OTHER CAFE", merchant: "Other Cafe" }),
 		);
+
 		const [a, b] = await Promise.all([uploadOk(text), uploadOk(text)]);
 		expect(a.added + b.added).toBe(2);
 		expect(await countCardRows()).toBe(2);
@@ -328,12 +340,15 @@ describe("importAppleCard: nothing counted twice", () => {
 			),
 		);
 		const [parent] = await cardRows();
+
 		const categories = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 			)
 			.all<{ id: number }>();
+
 		const [first, second] = categories.results;
+
 		const split = await saveSplit(
 			db,
 			Number(parent?.id),
@@ -343,7 +358,9 @@ describe("importAppleCard: nothing counted twice", () => {
 			],
 			BY,
 		);
+
 		expect(split.saved).toBe(true);
+
 		const again = await uploadOk(
 			csvOf(
 				row({
@@ -354,11 +371,14 @@ describe("importAppleCard: nothing counted twice", () => {
 				}),
 			),
 		);
+
 		expect(again).toMatchObject({ added: 0, already: 1 });
+
 		const children = await db
 			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?")
 			.bind(parent?.id)
 			.first<{ n: number }>();
+
 		expect(children?.n).toBe(2);
 	});
 
@@ -370,6 +390,7 @@ describe("importAppleCard: nothing counted twice", () => {
 			type: "Payment",
 			amount: "-50.00",
 		});
+
 		await uploadOk(csvOf(payment));
 		const [stored] = await cardRows();
 		await db
@@ -398,9 +419,11 @@ describe("importAppleCard: a removed card reopens", () => {
 			)
 			.bind("2026-09-22", before?.id)
 			.run();
+
 		const again = await uploadOk(
 			csvOf(row(), row({ desc: "OTHER CAFE", merchant: "Other Cafe" })),
 		);
+
 		expect(again).toMatchObject({ added: 0, already: 2 });
 		const reopened = await card();
 		expect(reopened).toMatchObject({ id: before?.id, removed_at: null });
@@ -471,6 +494,7 @@ describe("importAppleCard: all or nothing", () => {
 describe("importAppleCard: the balance", () => {
 	it("saves a typed balance, its day's balance_history row, and replaces that row on a second upload the same day", async () => {
 		await uploadOk(csvOf(row()), { today: "2026-09-22", balanceCents: 124018 });
+
 		const day = (date: string) =>
 			db
 				.prepare(
@@ -478,6 +502,7 @@ describe("importAppleCard: the balance", () => {
 				)
 				.bind(date)
 				.first<{ cents: number }>();
+
 		expect(await card()).toMatchObject({
 			balance_cents: 124018,
 			balance_on: "2026-09-22",
@@ -534,16 +559,20 @@ describe("importAppleCard: names", () => {
 				}),
 			),
 		);
+
 		const suggested = await db
 			.prepare(
 				"SELECT suggestion_status AS st FROM merchants WHERE raw_name = 'Pat Cafe'",
 			)
 			.first<{ st: string | null }>();
+
 		expect(suggested).toEqual({ st: "pending" });
 		expect(await merchantNames(db, "Pat Cafe")).toEqual(["Pat Cafe"]);
+
 		const none = await db
 			.prepare("SELECT raw_name FROM merchants WHERE raw_name = 'CORNER SHOP'")
 			.first();
+
 		expect(none).toBeNull();
 	});
 
@@ -557,11 +586,13 @@ describe("importAppleCard: names", () => {
 				}),
 			),
 		);
+
 		const padded = await db
 			.prepare(
 				"SELECT raw_name FROM merchants WHERE raw_name = '  Padded Shop  '",
 			)
 			.first();
+
 		expect(padded).toBeNull();
 	});
 
@@ -576,9 +607,11 @@ describe("importAppleCard: names", () => {
 				}),
 			),
 		);
+
 		const none = await db
 			.prepare("SELECT raw_name FROM merchants WHERE raw_name = 'Harbor deli'")
 			.first();
+
 		expect(none).toBeNull();
 	});
 
@@ -589,11 +622,13 @@ describe("importAppleCard: names", () => {
 			)
 			.run();
 		await uploadOk(csvOf(row()));
+
 		const named = await db
 			.prepare(
 				"SELECT display_name AS d, suggestion_status AS st FROM merchants WHERE raw_name = 'Pat Cafe'",
 			)
 			.first<{ d: string; st: string }>();
+
 		expect(named).toEqual({ d: "Our Cafe", st: "none" });
 		expect(await merchantNames(db, "Pat Cafe")).toEqual([]);
 	});
@@ -657,6 +692,7 @@ describe("importAppleCard: a held row after the history start moves past it", ()
 				merchant: "Held Cafe",
 			}),
 		);
+
 		// The seed's bank history isn't complete yet, so the start is 90 days back and the Jul 1 row is stored.
 		const first = await uploadOk(text);
 		expect(first).toMatchObject({ added: 1, beforeHistory: 0 });
@@ -705,14 +741,17 @@ describe("importAppleCard: size", () => {
 
 	function countingDb() {
 		const insertStatements: string[] = [];
+
 		const wrapped = {
 			prepare: (sql: string) => {
 				if (sql.startsWith("INSERT INTO transactions"))
 					insertStatements.push(sql);
+
 				return db.prepare(sql);
 			},
 			batch: (statements: D1PreparedStatement[]) => db.batch(statements),
 		};
+
 		return { wrapped: wrapped as unknown as D1Database, insertStatements };
 	}
 
@@ -726,6 +765,7 @@ describe("importAppleCard: size", () => {
 				balanceCents: null,
 			},
 		);
+
 		if (!result.ok) throw new Error(result.error);
 		expect(result.added).toBe(250);
 		expect(result.addedIds).toHaveLength(250);
@@ -734,6 +774,7 @@ describe("importAppleCard: size", () => {
 
 	it("stores 1,001 rows in at least three statements, and gathers every id", async () => {
 		const { wrapped, insertStatements } = countingDb();
+
 		const result = await importAppleCard(
 			wrapped,
 			bulk(1001, (i) => `SHOP ${i}`),
@@ -743,6 +784,7 @@ describe("importAppleCard: size", () => {
 				balanceCents: null,
 			},
 		);
+
 		if (!result.ok) throw new Error(result.error);
 		expect(insertStatements.length).toBeGreaterThanOrEqual(3);
 		expect(result.addedIds).toHaveLength(1001);
@@ -751,13 +793,16 @@ describe("importAppleCard: size", () => {
 
 	it("splits rows by size as well as by count: 500 long rows need at least two statements", async () => {
 		const { wrapped, insertStatements } = countingDb();
+
 		const long = (i: number) =>
 			`${"L".repeat(990)}${String(i).padStart(4, "0")}`;
+
 		const result = await importAppleCard(wrapped, bulk(500, long), {
 			by: BY,
 			today: TODAY,
 			balanceCents: null,
 		});
+
 		if (!result.ok) throw new Error(result.error);
 		expect(insertStatements.length).toBeGreaterThanOrEqual(2);
 		expect(result.added).toBe(500);
@@ -770,12 +815,14 @@ describe("importAppleCard: the day it starts", () => {
 		await db
 			.prepare("UPDATE plaid_items SET history_complete_at = datetime('now')")
 			.run();
+
 		const result = await uploadOk(
 			csvOf(
 				row({ clear: "09/25/2026" }),
 				row({ clear: "01/05/2020", desc: "OLD CAFE", merchant: "Old Cafe" }),
 			),
 		);
+
 		expect(result.historyStart).toBe(start);
 		expect(result).toMatchObject({ added: 1, beforeHistory: 1 });
 	});

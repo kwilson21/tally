@@ -55,13 +55,16 @@ export function decide(
 		answer.category.label === NONE_FIT || !categoriesOn
 			? undefined
 			: categories.find((c) => c.name === answer.category.label);
+
 	const confident = meetsConfidenceThreshold(
 		answer.category.confidence,
 		threshold,
 	);
+
 	// The mixed-trip reading belongs to the categories switch, as the category answer does (#233). Absent when
 	// Jev gave none, so a decision without one reads as it always did.
 	const mixed = categoriesOn ? answer.mixed : undefined;
+
 	return {
 		noneFit: answer.category.label === NONE_FIT && categoriesOn,
 		...(mixed

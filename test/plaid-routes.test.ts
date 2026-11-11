@@ -12,6 +12,7 @@ recordSorting({ sort: true });
 const BASE = "http://tally.test";
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const encoder = new TextEncoder();
+
 const encode = (value: unknown) =>
 	btoa(String.fromCharCode(...encoder.encode(JSON.stringify(value))))
 		.replaceAll("+", "-")
@@ -19,10 +20,12 @@ const encode = (value: unknown) =>
 		.replace(/=+$/, "");
 
 let identityNumber = 0;
+
 async function accessIdentity() {
 	identityNumber += 1;
 	const team = `plaid-route-${identityNumber}.cloudflareaccess.com`;
 	Object.assign(env, { ACCESS_TEAM_DOMAIN: team });
+
 	const pair = (await crypto.subtle.generateKey(
 		{
 			name: "RSASSA-PKCS1-v1_5",
@@ -33,14 +36,18 @@ async function accessIdentity() {
 		true,
 		["sign", "verify"],
 	)) as CryptoKeyPair;
+
 	const header = encode({ alg: "RS256", kid: "plaid-route-key" });
+
 	const claims = encode({
 		aud: ["plaid-aud"],
 		iss: `https://${team}`,
 		exp: Math.floor(Date.now() / 1000) + 300,
 		email: "Family.Member@Example.com",
 	});
+
 	const signed = `${header}.${claims}`;
+
 	const signature = new Uint8Array(
 		await crypto.subtle.sign(
 			"RSASSA-PKCS1-v1_5",
@@ -48,6 +55,7 @@ async function accessIdentity() {
 			encoder.encode(signed),
 		),
 	);
+
 	return {
 		jwt: `${signed}.${btoa(String.fromCharCode(...signature))
 			.replaceAll("+", "-")
@@ -92,13 +100,17 @@ function routePlaid(jwk: object, answers: Record<string, unknown>) {
 		"/transactions/sync": NOT_READY_PAGE,
 		...answers,
 	};
+
 	return async (input: string | URL | Request) => {
 		const url = String(input);
+
 		if (url.includes("cloudflareaccess.com"))
 			return Response.json({ keys: [jwk] });
 		const ending = Object.keys(routes).find((path) => url.endsWith(path));
+
 		if (ending === undefined) throw new Error(`unrouted Plaid call ${url}`);
 		const answer = routes[ending];
+
 		return answer instanceof Response ? answer : Response.json(answer);
 	};
 }
@@ -106,6 +118,7 @@ function routePlaid(jwk: object, answers: Record<string, unknown>) {
 /** Posts a public token to the real app, collecting the waitUntil promises its first sync starts (spec §10). */
 async function exchange(jwt: string, body: string) {
 	const promises: Promise<unknown>[] = [];
+
 	const response = await app.request(
 		`${BASE}/plaid/exchange`,
 		{
@@ -124,6 +137,7 @@ async function exchange(jwt: string, body: string) {
 			props: {},
 		},
 	);
+
 	return { response, promises };
 }
 
@@ -161,11 +175,13 @@ describe("Plaid routes", () => {
 
 	it("creates an update-mode token from the decrypted item token without products or email", async () => {
 		const { jwt, jwk } = await accessIdentity();
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'family.member@example.com', 'needs_attention') RETURNING id",
 		)
 			.bind(await encryptToken("access-private", KEY))
 			.first<{ id: number }>();
+
 		const requests: Array<Record<string, unknown>> = [];
 		vi.stubGlobal(
 			"fetch",
@@ -175,6 +191,7 @@ describe("Plaid routes", () => {
 				requests.push(
 					JSON.parse(String(init?.body)) as Record<string, unknown>,
 				);
+
 				return Response.json({ link_token: "update-link" });
 			},
 		);
@@ -196,11 +213,13 @@ describe("Plaid routes", () => {
 		async (route) => {
 			const { jwt, jwk } = await accessIdentity();
 			vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
+
 			for (const id of ["999999", "not-a-number"]) {
 				expect((await post(`/plaid/items/${id}/${route}`, jwt)).status).toBe(
 					404,
 				);
 			}
+
 			Object.assign(env, { DEMO: "true" });
 			expect((await post(`/plaid/items/1/${route}`, jwt)).status).toBe(404);
 			Object.assign(env, { DEMO: "false", PLAID_SECRET: undefined });
@@ -212,11 +231,13 @@ describe("Plaid routes", () => {
 		"returns 404 from the %s route for a disconnected item",
 		async (route) => {
 			const { jwt, jwk } = await accessIdentity();
+
 			const item = await env.DB.prepare(
 				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES (?, 'Old Bank', 'person', datetime('now')) RETURNING id",
 			)
 				.bind(await encryptToken("token", KEY))
 				.first<{ id: number }>();
+
 			vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
 			expect(
 				(await post(`/plaid/items/${item?.id}/${route}`, jwt)).status,
@@ -231,6 +252,7 @@ describe("Plaid routes", () => {
 				`${BASE}/plaid/items/1/${route}`,
 				{ method: "POST", headers: { Origin: "https://evil.example" } },
 			);
+
 			expect(response.status).toBe(403);
 		},
 	);
@@ -245,22 +267,29 @@ describe("Plaid routes", () => {
 		 */
 		function raceBeforeRelink(before: string): D1Database {
 			let raced = false;
+
 			return new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop !== "prepare") {
 						const value = Reflect.get(target, prop);
+
 						return typeof value === "function" ? value.bind(target) : value;
 					}
+
 					return (sql: string) => {
 						const statement = target.prepare(sql);
+
 						if (raced || !RELINK_WRITE.test(sql)) return statement;
 						raced = true;
+
 						return {
 							bind: (...values: unknown[]) => {
 								const bound = statement.bind(...values);
+
 								return {
 									run: async () => {
 										await target.prepare(before).bind(values[0]).run();
+
 										return bound.run();
 									},
 								};
@@ -275,9 +304,11 @@ describe("Plaid routes", () => {
 			const waitUntil = vi.fn((promise: Promise<unknown>) => {
 				void promise.catch(() => {});
 			});
+
 			vi.stubGlobal("fetch", async () =>
 				Response.json({ item: { institution_id: "ins-1", error: null } }),
 			);
+
 			return plaid.request(
 				`http://tally.test/plaid/items/${id}/repaired`,
 				{ method: "POST", headers: { Origin: BASE } },
@@ -296,11 +327,13 @@ describe("Plaid routes", () => {
 					status === "needs_attention" ? 1 : 0,
 				)
 				.first<{ id: number }>();
+
 			return row?.id as number;
 		}
 
 		it("still answers the success path when a sync cleared the flag first", async () => {
 			const id = await insertBank("needs_attention");
+
 			const response = await relinkWith(
 				raceBeforeRelink(
 					"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?",
@@ -320,6 +353,7 @@ describe("Plaid routes", () => {
 
 		it("answers not found when the bank was disconnected in that window, since the retry sees no bank to fix", async () => {
 			const id = await insertBank("needs_attention");
+
 			const response = await relinkWith(
 				raceBeforeRelink(
 					"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
@@ -344,12 +378,15 @@ describe("Plaid routes", () => {
 		)
 			.bind(await encryptToken("never-return-this", KEY))
 			.first<{ id: number }>();
+
 		const waitUntil = vi.fn((promise: Promise<unknown>) => {
 			void promise.catch(() => {});
 		});
+
 		vi.stubGlobal("fetch", async () =>
 			Response.json({ item: { institution_id: "ins-1", error: null } }),
 		);
+
 		const response = await plaid.request(
 			`http://tally.test/plaid/items/${inserted?.id}/repaired`,
 			{ method: "POST", headers: { Origin: BASE } },
@@ -382,19 +419,23 @@ describe("Plaid routes", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM accounts"),
 		]);
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status) VALUES (?, 'First Bank', 'member@example.com', 'needs_attention') RETURNING id",
 		)
 			.bind(await encryptToken("repaired-token", KEY))
 			.first<{ id: number }>();
+
 		const promises: Promise<unknown>[] = [];
 		const asked: string[] = [];
 		vi.stubGlobal(
 			"fetch",
 			async (input: string | URL | Request, init?: RequestInit) => {
 				const url = String(input);
+
 				if (url === "https://api.typesafe.ai/v1/systemone") {
 					asked.push(JSON.parse(String(init?.body)).state.bank_description);
+
 					return Response.json({
 						answers: {
 							category: {
@@ -408,8 +449,10 @@ describe("Plaid routes", () => {
 						},
 					});
 				}
+
 				if (url.endsWith("/item/get"))
 					return Response.json({ item: { institution_id: "ins-1" } });
+
 				if (url.endsWith("/accounts/get"))
 					return Response.json({
 						accounts: [
@@ -421,6 +464,7 @@ describe("Plaid routes", () => {
 							},
 						],
 					});
+
 				return Response.json({
 					added: [
 						{
@@ -451,6 +495,7 @@ describe("Plaid routes", () => {
 				props: {},
 			},
 		);
+
 		expect(response.status).toBe(204);
 		await Promise.all(promises);
 
@@ -476,9 +521,11 @@ describe("Plaid routes", () => {
 		)
 			.bind(await encryptToken("healthy-private-token", KEY))
 			.first<{ id: number }>();
+
 		const waitUntil = vi.fn((promise: Promise<unknown>) => {
 			void promise.catch(() => {});
 		});
+
 		vi.stubGlobal("fetch", async () =>
 			Response.json({ item: { institution_id: "ins-1" } }),
 		);
@@ -505,6 +552,7 @@ describe("Plaid routes", () => {
 		)
 			.bind(await encryptToken("unhealthy-private-token", KEY))
 			.first<{ id: number }>();
+
 		const waitUntil = vi.fn();
 		vi.stubGlobal("fetch", async () =>
 			Response.json({
@@ -540,6 +588,7 @@ describe("Plaid routes", () => {
 		)
 			.bind(await encryptToken("never-log-or-return-this", KEY))
 			.first<{ id: number }>();
+
 		const waitUntil = vi.fn();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.stubGlobal("fetch", async () =>
@@ -555,6 +604,7 @@ describe("Plaid routes", () => {
 			env,
 			{ waitUntil, passThroughOnException() {}, props: {} },
 		);
+
 		const body = await response.text();
 
 		expect(response.status).toBe(502);
@@ -573,11 +623,13 @@ describe("Plaid routes", () => {
 
 	it("shows a generic update-token failure and never logs its token", async () => {
 		const { jwt, jwk } = await accessIdentity();
+
 		const inserted = await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (?, 'First Bank', 'member@example.com') RETURNING id",
 		)
 			.bind(await encryptToken("never-log-update-token", KEY))
 			.first<{ id: number }>();
+
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.stubGlobal("fetch", async (input: string | URL | Request) =>
 			String(input).includes("cloudflareaccess.com")
@@ -608,12 +660,14 @@ describe("Plaid routes", () => {
 			"fetch",
 			async (input: string | URL | Request, init?: RequestInit) => {
 				const url = String(input);
+
 				if (url.includes("cloudflareaccess.com"))
 					return Response.json({ keys: [jwk] });
 				requests.push({
 					url,
 					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
 				});
+
 				return Response.json({ link_token: "link-value" });
 			},
 		);
@@ -642,6 +696,7 @@ describe("Plaid routes", () => {
 
 	it("starts the new bank's first sync in waitUntil, so Plaid's webhooks begin (spec §10)", async () => {
 		const { jwt, jwk } = await accessIdentity();
+
 		const route = routePlaid(jwk, {
 			"/item/public_token/exchange": {
 				access_token: "access-private",
@@ -650,6 +705,7 @@ describe("Plaid routes", () => {
 			"/item/get": { item: { institution_id: "ins-1" } },
 			"/institutions/get_by_id": { institution: { name: "First Bank" } },
 		});
+
 		const syncBodies: Record<string, unknown>[] = [];
 		vi.stubGlobal(
 			"fetch",
@@ -658,6 +714,7 @@ describe("Plaid routes", () => {
 					syncBodies.push(
 						JSON.parse(String(init?.body)) as Record<string, unknown>,
 					);
+
 				return route(input);
 			},
 		);
@@ -754,10 +811,12 @@ describe("Plaid routes", () => {
 				"/institutions/get_by_id": { institution: { name: "First Bank" } },
 			}),
 		);
+
 		const { response, promises } = await exchange(
 			jwt,
 			new URLSearchParams({ public_token: "public-private" }).toString(),
 		);
+
 		await Promise.all(promises);
 		expect(response.status).toBe(204);
 		expect(JSON.stringify([...response.headers])).not.toMatch(/private/);
@@ -771,6 +830,7 @@ describe("Plaid routes", () => {
 			},
 			announce: "First Bank is linked. Tally's reading your last 90 days.",
 		});
+
 		const row = await env.DB.prepare(
 			"SELECT access_token_encrypted, institution_name, linked_by, plaid_item_id FROM plaid_items",
 		).first<{
@@ -779,13 +839,16 @@ describe("Plaid routes", () => {
 			linked_by: string;
 			plaid_item_id: string;
 		}>();
+
 		expect(row?.institution_name).toBe("First Bank");
 		expect(row?.linked_by).toBe("family.member@example.com");
 		expect(row?.plaid_item_id).toBe("item-1");
+
 		// Linking draws stroke one on the household's day, in the same batch (spec §8.8).
 		const record = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(JSON.parse(record?.value ?? "null")?.strokes.bank).toBe(
 			todayIn(DEFAULT_TIME_ZONE),
 		);
@@ -828,12 +891,15 @@ describe("Plaid routes", () => {
 			jwt,
 			new URLSearchParams({ public_token: "public-private" }).toString(),
 		);
+
 		await Promise.all(promises);
 
 		expect(response.status).toBe(204);
+
 		const record = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(JSON.parse(record?.value ?? "null")).toEqual({
 			strokes: {
 				bank: "2026-10-10",
@@ -874,6 +940,7 @@ describe("Plaid routes", () => {
 			jwt,
 			new URLSearchParams({ public_token: "public-private" }).toString(),
 		);
+
 		await Promise.all(promises);
 
 		expect(response.status).toBe(204);
@@ -884,12 +951,14 @@ describe("Plaid routes", () => {
 			},
 			announce: "Your bank is linked. Tally's reading your last 90 days.",
 		});
+
 		const row = await env.DB.prepare(
 			"SELECT access_token_encrypted, institution_name FROM plaid_items",
 		).first<{
 			access_token_encrypted: ArrayBuffer;
 			institution_name: string;
 		}>();
+
 		expect(row?.institution_name).toBe("Your bank");
 		expect(
 			await decryptToken(row?.access_token_encrypted as ArrayBuffer, KEY),
@@ -918,11 +987,13 @@ describe("Plaid routes", () => {
 						{ status: 400 },
 					),
 		);
+
 		const response = await post(
 			"/plaid/exchange",
 			jwt,
 			new URLSearchParams({ public_token: "never-log-this" }).toString(),
 		);
+
 		expect(response.status).toBe(502);
 		expect(await response.text()).toContain(
 			'<p role="alert">Couldn&#39;t link the bank. Try again.</p>',
@@ -948,7 +1019,9 @@ describe("Plaid routes", () => {
 			if (String(input).includes("cloudflareaccess.com")) {
 				return Response.json({ keys: [jwk] });
 			}
+
 			plaidFetch(input);
+
 			return Response.json({ access_token: "must-not-exist" });
 		});
 
@@ -961,8 +1034,10 @@ describe("Plaid routes", () => {
 	it("removes the Plaid item when storing its exchanged token fails", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const plaidRequests: Array<{ url: string; body: Record<string, unknown> }> =
 			[];
+
 		await env.DB.exec(
 			"CREATE TRIGGER fail_plaid_insert BEFORE INSERT ON plaid_items BEGIN SELECT RAISE(ABORT, 'failed insert'); END",
 		);
@@ -972,19 +1047,23 @@ describe("Plaid routes", () => {
 				if (String(input).includes("cloudflareaccess.com")) {
 					return Response.json({ keys: [jwk] });
 				}
+
 				plaidRequests.push({
 					url: String(input),
 					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
 				});
+
 				if (String(input).endsWith("/item/public_token/exchange")) {
 					return Response.json({
 						access_token: "access-private",
 						item_id: "item-1",
 					});
 				}
+
 				if (String(input).endsWith("/item/get")) {
 					return Response.json({ item: {} });
 				}
+
 				return Response.json({ request_id: "req-remove" });
 			},
 		);
@@ -993,6 +1072,7 @@ describe("Plaid routes", () => {
 			jwt,
 			"public_token=single-use",
 		);
+
 		await env.DB.exec("DROP TRIGGER fail_plaid_insert");
 
 		expect(response.status).toBe(502);
@@ -1026,24 +1106,30 @@ describe("Plaid routes", () => {
 			if (String(input).includes("cloudflareaccess.com")) {
 				return Response.json({ keys: [jwk] });
 			}
+
 			plaidRequests.push(String(input));
+
 			if (String(input).endsWith("/item/public_token/exchange")) {
 				return Response.json({
 					access_token: "access-private",
 					item_id: "item-first-week",
 				});
 			}
+
 			if (String(input).endsWith("/item/get")) {
 				return Response.json({ item: {} });
 			}
+
 			return Response.json({ request_id: "req-remove" });
 		});
+
 		try {
 			const response = await post(
 				"/plaid/exchange",
 				jwt,
 				"public_token=single-use",
 			);
+
 			expect(response.status).toBe(502);
 			expect(plaidRequests.at(-1)).toBe(
 				"https://sandbox.plaid.com/item/remove",
@@ -1070,27 +1156,33 @@ describe("Plaid routes", () => {
 		)
 			.bind(new Uint8Array([1, 2, 3]))
 			.run();
+
 		const plaidRequests: Array<{ url: string; body: Record<string, unknown> }> =
 			[];
+
 		vi.stubGlobal(
 			"fetch",
 			async (input: string | URL | Request, init?: RequestInit) => {
 				if (String(input).includes("cloudflareaccess.com")) {
 					return Response.json({ keys: [jwk] });
 				}
+
 				plaidRequests.push({
 					url: String(input),
 					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
 				});
+
 				if (String(input).endsWith("/item/public_token/exchange")) {
 					return Response.json({
 						access_token: "access-second",
 						item_id: "item-duplicate",
 					});
 				}
+
 				if (String(input).endsWith("/item/get")) {
 					return Response.json({ item: {} });
 				}
+
 				return Response.json({ request_id: "req-remove-duplicate" });
 			},
 		);
@@ -1123,6 +1215,7 @@ describe("Plaid routes", () => {
 	it("returns 415 for malformed JSON request bodies", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		vi.stubGlobal("fetch", async () => Response.json({ keys: [jwk] }));
+
 		const response = await exports.default.fetch(`${BASE}/plaid/exchange`, {
 			method: "POST",
 			headers: {
@@ -1132,6 +1225,7 @@ describe("Plaid routes", () => {
 			},
 			body: "{malformed",
 		});
+
 		expect(response.status).toBe(415);
 		expect(await response.text()).toContain("Couldn&#39;t link the bank");
 	});
@@ -1143,7 +1237,9 @@ describe("Plaid routes", () => {
 			if (String(input).includes("cloudflareaccess.com")) {
 				return Response.json({ keys: [jwk] });
 			}
+
 			plaidFetch(input);
+
 			return Response.json({ access_token: "must-not-exist" });
 		});
 
@@ -1168,7 +1264,9 @@ describe("Plaid routes", () => {
 			if (String(input).includes("cloudflareaccess.com")) {
 				return Response.json({ keys: [jwk] });
 			}
+
 			plaidFetch(input);
+
 			return Response.json({ link_token: "must-not-exist" });
 		});
 
@@ -1191,7 +1289,9 @@ describe("Plaid routes", () => {
 			if (String(input).includes("cloudflareaccess.com")) {
 				return Response.json({ keys: [jwk] });
 			}
+
 			plaidFetch(input);
+
 			return Response.json({ access_token: "must-not-exist" });
 		});
 
@@ -1225,6 +1325,7 @@ describe("Plaid routes", () => {
 			method: "POST",
 			headers: { Origin: "https://evil.example" },
 		});
+
 		expect(crossSite.status).toBe(403);
 		expect((await post("/plaid/link-token")).status).toBe(403);
 	});

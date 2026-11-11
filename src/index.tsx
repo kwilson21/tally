@@ -49,7 +49,9 @@ type AppEnv = Env & {
 		}): Promise<unknown>;
 	};
 };
+
 type App = { Bindings: AppEnv; Variables: { actor: string } };
+
 type ScheduledEnv = PlaidEnv & {
 	DB: D1Database;
 	DEMO?: string;
@@ -72,10 +74,12 @@ type ScheduledEnv = PlaidEnv & {
 };
 
 export { SortWorkflow } from "./sort-workflow";
+
 export const app = new Hono<App>();
 
 // The app's own 404 and 500 pages (spec §8.5, decision 72); Hono's plain-text ones never show.
 app.notFound(notFoundPage);
+
 app.onError(serverErrorPage);
 
 /**
@@ -113,11 +117,13 @@ export async function runScheduled(
 	await env.DB.prepare("DELETE FROM cash_delete_holds WHERE created_at <= ?")
 		.bind(Date.now() - DAY_MS)
 		.run();
+
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE), {
 			categoryExample: true,
 		});
 	}
+
 	// The daily run also retries banks that need attention (decision 173).
 	await syncAllItems(env, fetchImpl, Date.now, false, { retryFlagged: true });
 	const night = utcDay(clockNow(time));
@@ -153,9 +159,12 @@ async function runStep(label: string, step: () => Promise<void>) {
 }
 
 app.use("*", security);
+
 app.use("*", sameOrigin);
+
 app.use("*", async (c, next) => {
 	const path = new URL(c.req.url).pathname;
+
 	const publicPath =
 		path === "/webhooks/plaid" ||
 		path === "/design-system" ||
@@ -165,18 +174,24 @@ app.use("*", async (c, next) => {
 		path.startsWith("/vendor/") ||
 		path.startsWith("/js/") ||
 		path === "/favicon.svg";
+
 	if (publicPath) return next();
+
 	if (c.env.DEMO === "true") {
 		c.set("actor", "demo");
+
 		return next();
 	}
+
 	const identity = await verifiedAccessIdentity(c.req.raw, {
 		ACCESS_TEAM_DOMAIN: (c.env as Env & { ACCESS_TEAM_DOMAIN?: string })
 			.ACCESS_TEAM_DOMAIN,
 		ACCESS_AUD: (c.env as Env & { ACCESS_AUD?: string }).ACCESS_AUD,
 	});
+
 	if (!identity) return c.text("Sign in through Cloudflare Access.", 403);
 	c.set("actor", identity.email);
+
 	if (c.env.DEMO !== "true" && path !== "/feedback") {
 		try {
 			await noteHouseholdMember(c.env.DB, identity.email, identity.issuedAt);
@@ -184,13 +199,17 @@ app.use("*", async (c, next) => {
 			console.error("household member bookkeeping failed");
 		}
 	}
+
 	return next();
 });
+
 // Only inject the first-party, opt-in diagnostics collector when an operator enables it.
 // It performs no network requests and stores only a generic error name in sessionStorage.
 app.use("*", async (c, next) => {
 	await next();
+
 	if (!c.res) return;
+
 	if (
 		c.env.DEMO === "true" ||
 		c.env.FEEDBACK_DIAGNOSTICS_ENABLED !== "true" ||
@@ -201,14 +220,17 @@ app.use("*", async (c, next) => {
 	const html = await response.text();
 	const headers = new Headers(response.headers);
 	headers.delete("content-length");
+
 	if (!html.includes("</body>")) {
 		c.res = new Response(html, {
 			status: response.status,
 			statusText: response.statusText,
 			headers,
 		});
+
 		return;
 	}
+
 	c.res = new Response(injectDiagnosticsScript(html, true), {
 		status: response.status,
 		statusText: response.statusText,
@@ -217,24 +239,43 @@ app.use("*", async (c, next) => {
 });
 
 app.route("/", health);
+
 app.route("/", home);
+
 app.route("/", setupRoute);
+
 app.route("/", howItWorks);
+
 app.route("/", plaid);
+
 app.route("/", organize);
+
 app.route("/", transactions);
+
 app.route("/", trends);
+
 app.route("/", suggestions);
+
 app.route("/", resort);
+
 app.route("/", settings);
+
 app.route("/", accounts);
+
 app.route("/", bills);
+
 app.route("/", plans);
+
 app.route("/", destinations);
+
 app.route("/", feedback);
+
 app.route("/", firstPage);
+
 app.route("/", designSystem);
+
 app.route("/", webhooks);
+
 app.route("/", push);
 
 export default {

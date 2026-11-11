@@ -116,6 +116,7 @@ describe("pendingForJev", () => {
 				)
 				.bind(id)
 				.run();
+
 			return id;
 		};
 
@@ -166,9 +167,11 @@ describe("pendingForJev", () => {
 					)
 					.bind(id)
 					.run();
+
 				const withoutCategories = await pendingForJev(db, 40, {
 					categories: false,
 				});
+
 				expect(withoutCategories).toContainEqual(
 					expect.objectContaining({
 						id,
@@ -228,6 +231,7 @@ describe("a split purchase's category from before its split", () => {
 			source: "bill",
 			splitRemoved: 4200,
 		});
+
 		const plain = await insertRow({ splitRemoved: 4200 });
 		const parent = await insertRow({ isSplit: 1 });
 		await applyMerchantRules(db);
@@ -252,6 +256,7 @@ describe("a split purchase's category from before its split", () => {
 			source: "jev",
 			splitRemoved: 4200,
 		});
+
 		expect(
 			await saveJevResult(db, restored, decision({ categoryId: GROCERIES })),
 		).toBe(false);
@@ -267,11 +272,13 @@ describe("a split purchase's category from before its split", () => {
 			source: "jev",
 			splitRemoved: 4200,
 		});
+
 		const parent = await insertRow({
 			categoryId: EATING_OUT,
 			source: "jev",
 			isSplit: 1,
 		});
+
 		const edited = await insertRow({});
 		const uncategorized = await insertRow({});
 		await saveEdit(
@@ -315,6 +322,7 @@ describe("a split purchase's category from before its split", () => {
 			source: "jev",
 			splitRemoved: 4200,
 		});
+
 		await saveEdit(
 			db,
 			restored,
@@ -334,6 +342,7 @@ describe("a split purchase's category from before its split", () => {
 			source: "jev",
 			splitRemoved: 4200,
 		});
+
 		await saveEdit(
 			db,
 			restored,
@@ -899,6 +908,7 @@ describe("a credit whose category Jev answered unsure, asked for its income (dec
 			)
 			.bind(GROCERIES, GAS, id)
 			.run();
+
 	// The twelve columns a catch-up save keeps as they are: Jev's category answer, its transfer answer and exclusion.
 	const categoryAnswer = (id: number) =>
 		db
@@ -909,11 +919,13 @@ describe("a credit whose category Jev answered unsure, asked for its income (dec
 			)
 			.bind(id)
 			.first<Record<string, unknown>>();
+
 	const incomeSourceOf = (id: number) =>
 		db
 			.prepare("SELECT income_source FROM transactions WHERE id = ?")
 			.bind(id)
 			.first<{ income_source: string | null }>();
+
 	const ALL_CATEGORIES = [
 		{ id: GROCERIES, name: "Groceries" },
 		{ id: EATING_OUT, name: "Eating Out" },

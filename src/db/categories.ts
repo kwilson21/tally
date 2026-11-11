@@ -50,10 +50,12 @@ export async function settingsCategories(
 		D1Result<Row>,
 		D1Result<Parameters<typeof budgetForMonth>[0][number]>,
 	];
+
 	const withBudget = ({ archived: _, ...c }: Row): SettingsCategory => ({
 		...c,
 		budgetCents: budgetForMonth(amounts.results, c.id, month),
 	});
+
 	return {
 		active: categories.results.filter((c) => !c.archived).map(withBudget),
 		archived: categories.results.filter((c) => c.archived).map(withBudget),
@@ -72,6 +74,7 @@ export async function categoryNames(
 			"SELECT id, name, archived FROM categories ORDER BY archived, sort_order, id",
 		)
 		.all<{ id: number; name: string; archived: number }>();
+
 	return results.map((c) => ({ ...c, archived: c.archived === 1 }));
 }
 
@@ -91,6 +94,7 @@ export async function addCategory(
 			"SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS last FROM categories",
 		)
 		.first<{ n: number; last: number }>();
+
 	const inserted = await db
 		.prepare(
 			`INSERT INTO categories (name, name_key, icon, color, sort_order) SELECT ?, ?, 'tag', ?, ? WHERE ${ROOM}`,
@@ -102,6 +106,7 @@ export async function addCategory(
 			(count?.last ?? 0) + 1,
 		)
 		.run();
+
 	return inserted.meta.changes ? Number(inserted.meta.last_row_id) : null;
 }
 
@@ -115,14 +120,17 @@ export async function makeCategory(
 ): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
 	try {
 		const id = await addCategory(db, value);
+
 		if (id !== null) return { ok: true, id };
 	} catch (error) {
 		// The unique name indexes settle two saves at once (migrations 0005 and 0052).
 		if (!(error instanceof Error && /UNIQUE/i.test(error.message))) throw error;
 	}
+
 	const taken = (await categoryNames(db)).some((category) =>
 		sameName(category.name, value.name),
 	);
+
 	return {
 		ok: false,
 		error: taken ? "That name is taken." : fullMessage("add"),
@@ -205,6 +213,7 @@ export async function setArchived(
 					)
 					.bind(on, id, id),
 	]);
+
 	// False when a restore found the category already active, or the list already full.
 	return (results[0]?.meta.changes ?? 0) > 0;
 }
@@ -220,9 +229,11 @@ export async function moveCategory(
 			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		)
 		.all<{ id: number }>();
+
 	const order = results.map((c) => c.id);
 	const from = order.indexOf(id);
 	const to = direction === "up" ? from - 1 : from + 1;
+
 	if (from === -1 || to < 0 || to >= order.length) return;
 	[order[from], order[to]] = [order[to] as number, order[from] as number];
 	await db.batch(

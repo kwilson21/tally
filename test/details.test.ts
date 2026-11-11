@@ -10,8 +10,11 @@ import { seedMerchant } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
+
 recordSorting({ sort: true });
+
 const BASE = "http://tally.test";
+
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
@@ -20,6 +23,7 @@ const textOf = (html: string) =>
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -34,6 +38,7 @@ async function post(path: string, fields: Record<string, string>) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -41,6 +46,7 @@ async function noteRows() {
 	const { results } = await db
 		.prepare("SELECT note, note_guessed FROM transactions ORDER BY id")
 		.all<{ note: string | null; note_guessed: number }>();
+
 	return results;
 }
 
@@ -50,6 +56,7 @@ async function charge() {
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, '2026-10-01', 1299, 'COFFEE SHOP') RETURNING id",
 		)
 		.first<{ id: number }>();
+
 	return row?.id as number;
 }
 
@@ -70,24 +77,29 @@ describe("transaction detail guesses", () => {
 			(1,'2026-10-03',100,'NEWEST C', 1, 1, 'queued'),(1,'2026-09-01',100,'OLDER', 1, 1, 'queued')`)
 			.run();
 		const asked: string[] = [];
+
 		const ai = {
 			run: vi.fn(
 				async (_model: string, input: { messages: { content: string }[] }) => {
 					asked.push(
 						input.messages[1]?.content.replace("Bank text: ", "") ?? "",
 					);
+
 					return { response: "" };
 				},
 			),
 		} as unknown as Ai;
+
 		await suggestTransactionNotes({ DB: db, AI: ai }, 3);
 		await suggestTransactionNotes({ DB: db, AI: ai }, 1);
 		expect(asked).toEqual(["NEWEST C", "NEWEST B", "NEWEST A", "OLDER"]);
+
 		const tried = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'NEWEST %' AND note_tried_at IS NOT NULL",
 			)
 			.first<{ n: number }>();
+
 		expect(tried?.n).toBe(3);
 	});
 
@@ -100,20 +112,26 @@ describe("transaction detail guesses", () => {
 			)
 			.run();
 		let statements = 0;
+
 		const counted = new Proxy(db, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Coffee purchase" })),
 		} as unknown as Ai;
+
 		await suggestTransactionNotes({ DB: counted as D1Database, AI: ai });
 		expect(statements).toBeLessThanOrEqual(45);
 	});
@@ -126,10 +144,13 @@ describe("transaction detail guesses", () => {
 			 SELECT 1, '2026-09-20', 500, 'COFFEE SHOP ' || i, 1, 1, 'queued' FROM n`,
 			)
 			.run();
+
 		const run = vi.fn(async () => {
 			await saveAiSwitches(db, { details: false });
+
 			return { response: "Coffee purchase" };
 		});
+
 		const ai = { run } as unknown as Ai;
 		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
 			asked: 5,
@@ -138,11 +159,13 @@ describe("transaction detail guesses", () => {
 		expect(run).toHaveBeenCalledTimes(5);
 		// After the first callback flips the switch, no more than five additional names may be sent.
 		expect(run.mock.calls.length - 1).toBeLessThanOrEqual(5);
+
 		const { results } = await db
 			.prepare(
 				"SELECT note FROM transactions WHERE raw_name LIKE 'COFFEE SHOP %'",
 			)
 			.all<{ note: string | null }>();
+
 		expect(results).toHaveLength(100);
 		expect(results.every((row) => row.note === null)).toBe(true);
 	});
@@ -158,9 +181,11 @@ describe("transaction detail guesses", () => {
 			        (1, '2026-09-20', 900, 'RACE NOTE', NULL, 1, 1, 'queued')`,
 			)
 			.run();
+
 		const run = vi.fn(
 			async (_model: string, input: { messages: { content: string }[] }) => {
 				const rawName = input.messages[1]?.content.replace("Bank text: ", "");
+
 				if (rawName === "RACE NOTE")
 					await db
 						.prepare(
@@ -168,15 +193,19 @@ describe("transaction detail guesses", () => {
 						)
 						.bind(rawName)
 						.run();
+
 				return { response: `Guess for ${rawName}` };
 			},
 		);
+
 		const ai = { run } as unknown as Ai;
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
+
 		const { results } = await db
 			.prepare("SELECT raw_name, note FROM transactions ORDER BY id")
 			.all<{ raw_name: string; note: string | null }>();
+
 		expect(results).toEqual([
 			{ raw_name: "EMPTY STRING", note: "Guess for EMPTY STRING" },
 			{ raw_name: "WHITESPACE NOTE", note: "Guess for WHITESPACE NOTE" },
@@ -188,11 +217,13 @@ describe("transaction detail guesses", () => {
 
 	it("stores the note, kind, and person as guesses without making them a person's choices", async () => {
 		const id = await charge();
+
 		const person = await db
 			.prepare(
 				"INSERT INTO household_people (name) VALUES ('Morgan') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		const fakeJev = async () =>
 			new Response(
 				JSON.stringify({
@@ -208,6 +239,7 @@ describe("transaction detail guesses", () => {
 				}),
 				{ status: 200 },
 			);
+
 		await categorizePending({ DB: db, JEV_API_KEY: "test-key" }, fakeJev, {
 			onlyIds: [id],
 		});
@@ -220,12 +252,14 @@ describe("transaction detail guesses", () => {
 			},
 			1,
 		);
+
 		const { results } = await db
 			.prepare(
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
 			.all<Record<string, unknown>>();
+
 		expect(results[0]).toMatchObject({
 			note: "Coffee with a friend",
 			note_guessed: 1,
@@ -238,11 +272,13 @@ describe("transaction detail guesses", () => {
 
 	it("treats a missing what-it-was answer as a no and keeps the rest of Jev's answer", async () => {
 		const id = await charge();
+
 		const person = await db
 			.prepare(
 				"INSERT INTO household_people (name) VALUES ('Morgan') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		// Jev's answer has no note_worth_writing at all, as when it leaves the question out.
 		const fakeJev = async () =>
 			new Response(
@@ -258,22 +294,28 @@ describe("transaction detail guesses", () => {
 				}),
 				{ status: 200 },
 			);
+
 		await categorizePending({ DB: db, JEV_API_KEY: "test-key" }, fakeJev, {
 			onlyIds: [id],
 		});
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Coffee with a friend" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
+
 		const eatingOut = await db
 			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
 			.first<{ id: number }>();
+
 		const row = await db
 			.prepare(
 				"SELECT category_id, category_source, kind, kind_guessed, for_person_id, for_person_guessed, details_asked, note_worth_writing, note FROM transactions WHERE id = ?",
 			)
 			.bind(id)
 			.first<Record<string, unknown>>();
+
 		expect(row).toMatchObject({
 			category_id: eatingOut?.id,
 			category_source: "jev",
@@ -287,10 +329,12 @@ describe("transaction detail guesses", () => {
 		});
 		expect(ai.run).not.toHaveBeenCalled();
 		const panel = (await get(`/transactions/${id}`)).html;
+
 		const whatItWas =
 			panel
 				.split(">What it was</span>")[1]
 				?.split('<span class="block font-medium">')[0] ?? "";
+
 		expect(whatItWas).toContain('<span class="truncate">Add</span>');
 	});
 
@@ -306,9 +350,11 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
 			),
 		]);
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Uber Eats order" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([
 			{ note: "Uber Eats order", note_guessed: 1 },
@@ -327,9 +373,11 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
 			),
 		]);
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Uber Eats order" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([{ note: null, note_guessed: 0 }]);
 	});
@@ -347,9 +395,11 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'UBER *TRIP', 1, 1, 'queued')",
 			),
 		]);
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Uber Eats order" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([
 			{ note: "Uber Eats order", note_guessed: 1 },
@@ -369,9 +419,11 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing, note_state) VALUES (1, '2026-10-01', 1299, 'HBR HDWR #88', 'Harbor Hardware', 1, 1, 'queued')",
 			),
 		]);
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Harbor Hardware purchase" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([{ note: null, note_guessed: 0 }]);
 	});
@@ -394,15 +446,20 @@ describe("transaction detail guesses", () => {
 				(1, '2026-10-02', 1299, 'BL BTTL COF', 'BLUE BTL CO', 1, 1, 'queued')`,
 			),
 		]);
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Blue Bottle Coffee purchase" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
+
 		const asked = ai.run.mock.calls.map(
 			([, input]) =>
 				(input as { messages: { content: string }[] }).messages[1]?.content,
 		);
+
 		expect(asked).toEqual(["Bank text: BL BTTL COF", "Bank text: BL BTTL COF"]);
+
 		const { results } = await db
 			.prepare(
 				"SELECT note, note_guessed, note_tried_at FROM transactions ORDER BY id",
@@ -412,6 +469,7 @@ describe("transaction detail guesses", () => {
 				note_guessed: number;
 				note_tried_at: string | null;
 			}>();
+
 		expect(results).toEqual([
 			{ note: null, note_guessed: 0, note_tried_at: expect.any(String) },
 			{ note: null, note_guessed: 0, note_tried_at: expect.any(String) },
@@ -428,6 +486,7 @@ describe("transaction detail guesses", () => {
 					.bind(rawName, merchantName)
 					.first<{ id: number }>()
 			)?.id as number;
+
 		const cvs = await purchase("CVS PHARMACY #1234", "CVS Pharmacy");
 		const apple = await purchase("APPLE.COM/BILL", "Apple");
 		// A row Jev answered before this question existed: its note is never asked for.
@@ -436,12 +495,15 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, details_asked) VALUES (1, '2026-09-01', 500, 'OLD SHOP', 1)",
 			)
 			.run();
+
 		const fakeJev = async (_url: string, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body)) as {
 				state: { bank_description: string };
 			};
+
 			const worth =
 				body.state.bank_description === "APPLE.COM/BILL" ? 0.95 : 0.1;
+
 			return new Response(
 				JSON.stringify({
 					answers: {
@@ -457,15 +519,18 @@ describe("transaction detail guesses", () => {
 				{ status: 200 },
 			);
 		};
+
 		await categorizePending({ DB: db, JEV_API_KEY: "test-key" }, fakeJev, {
 			onlyIds: [cvs, apple],
 		});
+
 		const stored = await db
 			.prepare(
 				"SELECT id, note_worth_writing FROM transactions WHERE id IN (?, ?) ORDER BY id",
 			)
 			.bind(cvs, apple)
 			.all<{ id: number; note_worth_writing: number }>();
+
 		expect(stored.results).toEqual([
 			{ id: cvs, note_worth_writing: 0 },
 			{ id: apple, note_worth_writing: 1 },
@@ -474,24 +539,31 @@ describe("transaction detail guesses", () => {
 		const ai = {
 			run: vi.fn(async () => ({ response: "App or iCloud subscription" })),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await suggestTransactionNotes({ DB: db, AI: ai });
+
 		const asked = ai.run.mock.calls.map(
 			([, input]) =>
 				(input as { messages: { content: string }[] }).messages[1]?.content,
 		);
+
 		expect(asked).toEqual(["Bank text: APPLE.COM/BILL"]);
 		// The panel's What it was row for the no says Add, as it does for any empty detail.
 		const cvsPanel = (await get(`/transactions/${cvs}`)).html;
+
 		const whatItWas =
 			cvsPanel
 				.split(">What it was</span>")[1]
 				?.split('<span class="block font-medium">')[0] ?? "";
+
 		expect(whatItWas).toContain('<span class="truncate">Add</span>');
+
 		const notes = await db
 			.prepare(
 				"SELECT raw_name, note, note_guessed FROM transactions ORDER BY id",
 			)
 			.all<Record<string, unknown>>();
+
 		expect(notes.results).toEqual([
 			{ raw_name: "CVS PHARMACY #1234", note: null, note_guessed: 0 },
 			{
@@ -513,6 +585,7 @@ describe("transaction detail guesses", () => {
 			.run();
 		const { html: guessed } = await get(`/transactions/${id}`);
 		const words = textOf(guessed);
+
 		for (const label of ["Name", "What it was", "Kind", "For", "Looks right"])
 			expect(words).toContain(label);
 		expect(guessed).toContain("Tally&#39;s guess");
@@ -582,9 +655,11 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET category_confidence=0.5, kind='subscription', for_person_id=1 WHERE id=?",
@@ -622,7 +697,9 @@ describe("transaction detail guesses", () => {
 			{ DB: db, JEV_API_KEY: "test-key" },
 			async () => {
 				calls += 1;
+
 				if (calls === 2) await saveAiSwitches(db, { details: false });
+
 				return Response.json({
 					answers: {
 						category: { choice: "Eating Out", confidence: 0.5 },
@@ -637,23 +714,28 @@ describe("transaction detail guesses", () => {
 			},
 			{ onlyIds: ids },
 		);
+
 		const rows = await db
 			.prepare("SELECT details_asked FROM transactions WHERE id IN (?,?)")
 			.bind(...ids)
 			.all<{ details_asked: number }>();
+
 		expect(rows.results.map((row) => row.details_asked)).toEqual([0, 0]);
 	});
 
 	it("loads household choices from the next group if details become enabled during a categorization pass", async () => {
 		// 26 rows make two groups of 25 and 1 (decision 139): the switches are read once a group.
 		const ids: number[] = [];
+
 		for (let i = 0; i < 26; i++) ids.push(await charge());
 		await db
 			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
 			.first<{ id: number }>();
+
 		await saveAiSwitches(db, { details: false });
 		let calls = 0;
 		const questions: (Record<string, unknown> | undefined)[] = [];
@@ -663,8 +745,10 @@ describe("transaction detail guesses", () => {
 				calls += 1;
 				const body = JSON.parse(String(init?.body));
 				questions.push(body.questions);
+
 				if (calls === 1) await saveAiSwitches(db, { details: true });
 				const detailsAsked = body.questions?.for_person !== undefined;
+
 				return Response.json({
 					answers: {
 						category: { choice: "Eating Out", confidence: 0.5 },
@@ -690,9 +774,11 @@ describe("transaction detail guesses", () => {
 		expect(
 			questions.slice(1, 25).some((q) => q?.for_person !== undefined),
 		).toBe(false);
+
 		const later = questions[25] as {
 			for_person: { criteria: Record<string, unknown> };
 		};
+
 		expect(later.for_person.criteria[`person:${person?.id}`]).toBe("Morgan");
 		expect(
 			await db
@@ -750,6 +836,7 @@ describe("transaction detail guesses", () => {
 			merchant: "Coffee shop",
 			note: "",
 		});
+
 		const row = await db
 			.prepare(
 				"SELECT note,note_guessed,note_tried_at FROM transactions WHERE id=?",
@@ -760,11 +847,14 @@ describe("transaction detail guesses", () => {
 				note_guessed: number;
 				note_tried_at: string | null;
 			}>();
+
 		expect(row).toMatchObject({ note: null, note_guessed: 0 });
 		expect(row?.note_tried_at).not.toBeNull();
+
 		const ai = {
 			run: vi.fn(async () => ({ response: "Another guess" })),
 		} as unknown as Ai;
+
 		await suggestTransactionNotes({ DB: db, AI: ai }, 1);
 		expect(ai.run).not.toHaveBeenCalled();
 	});
@@ -774,15 +864,18 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name = 'Morgan'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
 			)
 			.bind(person?.id, id)
 			.run();
+
 		const corrected = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "Coffee shop",
@@ -791,13 +884,16 @@ describe("transaction detail guesses", () => {
 			kind: "bill",
 			for_person_id: String(person?.id),
 		});
+
 		expect(corrected.res.status).toBe(200);
+
 		let row = await db
 			.prepare(
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
 			.first<Record<string, unknown>>();
+
 		expect(row).toMatchObject({
 			note: "Dinner",
 			note_guessed: 1,
@@ -818,6 +914,7 @@ describe("transaction detail guesses", () => {
 				sentState = (
 					JSON.parse(String(init?.body)) as { state: Record<string, unknown> }
 				).state;
+
 				return new Response(
 					JSON.stringify({
 						answers: {
@@ -861,9 +958,11 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET note='Dinner',note_guessed=1, note_state = 'guessed',kind='one_off',kind_guessed=1,for_person_id=?,for_person_guessed=1 WHERE id=?",
@@ -871,6 +970,7 @@ describe("transaction detail guesses", () => {
 			.bind(person?.id, id)
 			.run();
 		await saveAiSwitches(db, { details: false });
+
 		const saved = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",
@@ -880,6 +980,7 @@ describe("transaction detail guesses", () => {
 			for_person_id: "",
 			details_visible: "0",
 		});
+
 		expect(saved.res.status).toBe(200);
 		await saveAiSwitches(db, { details: true });
 		expect(
@@ -916,10 +1017,12 @@ describe("transaction detail guesses", () => {
 			.bind(guessed)
 			.run();
 		await saveAiSwitches(db, { details: false });
+
 		const rows = await listTransactions(
 			db,
 			parseFilters(new URLSearchParams(), "2026-10"),
 		);
+
 		expect(rows.rows.find((row) => row.id === written)?.note).toBe("Written");
 		expect(rows.rows.find((row) => row.id === guessed)?.note).toBeNull();
 	});
@@ -936,15 +1039,18 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name = 'Morgan'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1 WHERE id = ?",
 			)
 			.bind(person?.id, id)
 			.run();
+
 		const kept = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",
@@ -956,6 +1062,7 @@ describe("transaction detail guesses", () => {
 			for_person_id: String(person?.id),
 			details_action: "keep",
 		});
+
 		expect(kept.res.status).toBe(200);
 		expect(
 			await db
@@ -964,12 +1071,14 @@ describe("transaction detail guesses", () => {
 				)
 				.first(),
 		).toEqual({ display_name: "Corner Coffee", suggestion_status: "accepted" });
+
 		let row = await db
 			.prepare(
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
 			.first<Record<string, unknown>>();
+
 		expect(row).toMatchObject({
 			note: "Dinner",
 			note_guessed: 0,
@@ -991,6 +1100,7 @@ describe("transaction detail guesses", () => {
 			{ DB: db, JEV_API_KEY: "test-key" },
 			async () => {
 				calls += 1;
+
 				return new Response(
 					JSON.stringify({
 						answers: {
@@ -1034,9 +1144,11 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('Morgan')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name='Morgan'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET note='Old guess',note_guessed=1, note_state = 'guessed',kind='subscription',kind_guessed=1,for_person_id=1,for_person_guessed=1 WHERE id=?",
@@ -1076,6 +1188,7 @@ describe("transaction detail guesses", () => {
 			status: "pending",
 			names: ["Corner Coffee"],
 		});
+
 		const saved = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "",
@@ -1083,6 +1196,7 @@ describe("transaction detail guesses", () => {
 			note: "",
 			details_action: "keep",
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await db
@@ -1097,9 +1211,11 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('Last person')")
 			.run();
+
 		const old = await db
 			.prepare("SELECT id FROM household_people WHERE name='Last person'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("DELETE FROM household_people WHERE id=?")
 			.bind(old?.id)
@@ -1107,9 +1223,11 @@ describe("transaction detail guesses", () => {
 		await db
 			.prepare("INSERT INTO household_people (name) VALUES ('New person')")
 			.run();
+
 		const next = await db
 			.prepare("SELECT id FROM household_people WHERE name='New person'")
 			.first<{ id: number }>();
+
 		expect(next?.id).not.toBe(old?.id);
 	});
 
@@ -1120,6 +1238,7 @@ describe("transaction detail guesses", () => {
 				"INSERT INTO merchants (raw_name, display_name, suggestion_status) VALUES ('COFFEE SHOP', 'My Coffee Shop', 'accepted')",
 			)
 			.run();
+
 		const saved = await post(`/transactions/${id}`, {
 			back: "/transactions",
 			merchant_was: "My Coffee Shop",
@@ -1127,6 +1246,7 @@ describe("transaction detail guesses", () => {
 			note: "",
 			details_action: "keep",
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await db
@@ -1148,10 +1268,12 @@ describe("transaction detail guesses", () => {
 			)
 			.run();
 		const { html } = await get(`/transactions/${id}`);
+
 		const forRow =
 			html
 				.split('<legend class="sr-only">For</legend>')[1]
 				?.split("</fieldset>")[0] ?? "";
+
 		expect(forRow).toContain("Everyone");
 		expect(forRow).toContain('name="for_person_id" value=""');
 		expect(forRow).toContain("No one");
@@ -1175,14 +1297,17 @@ describe("transaction detail guesses", () => {
 					string,
 					unknown
 				>;
+
 				const person = (
 					request.questions as {
 						for_person: { criteria: Record<string, unknown> };
 					}
 				).for_person.criteria;
+
 				const idChoice = Object.keys(person).find(
 					(key) => person[key] === "Not sure",
 				);
+
 				return Response.json({
 					answers: {
 						category: { choice: "Eating Out", confidence: 0.99 },
@@ -1211,23 +1336,28 @@ describe("transaction detail guesses", () => {
 describe("household people and details switch", () => {
 	it("keeps rejected add and rename values in the redisplayed fields", async () => {
 		const tooLong = "x".repeat(41);
+
 		const add = await post("/settings/people", {
 			action: "add",
 			name: tooLong,
 		});
+
 		expect(add.res.status).toBe(422);
 		expect(add.html).toContain(`value="${tooLong}"`);
 		await db
 			.prepare("INSERT INTO household_people(name) VALUES('Existing')")
 			.run();
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name='Existing'")
 			.first<{ id: number }>();
+
 		const duplicate = await post("/settings/people", {
 			action: "rename",
 			person_id: String(person?.id),
 			name: "Everyone",
 		});
+
 		expect(duplicate.res.status).toBe(422);
 		expect(duplicate.html).toContain('value="Everyone"');
 	});
@@ -1242,32 +1372,40 @@ describe("household people and details switch", () => {
 		const { html } = await get("/settings/people");
 		expect(textOf(html)).toContain("People");
 		expect(textOf(html)).toContain("Add a person");
+
 		const added = await post("/settings/people", {
 			action: "add",
 			name: "Kids",
 		});
+
 		expect(added.res.status).toBe(200);
 		expect(textOf(added.html)).toContain("Kids");
+
 		const person = await db
 			.prepare("SELECT id FROM household_people WHERE name = 'Kids'")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE transactions SET for_person_id = ? WHERE id = ?")
 			.bind(person?.id, tx)
 			.run();
+
 		const renamed = await post("/settings/people", {
 			action: "rename",
 			person_id: String(person?.id),
 			name: "Children",
 		});
+
 		expect(renamed.res.status).toBe(200);
 		expect(textOf(renamed.html)).toContain("Children");
+
 		const removed = await post("/settings/people", {
 			action: "rename",
 			remove: "1",
 			person_id: String(person?.id),
 			name: "Children",
 		});
+
 		expect(removed.res.status).toBe(200);
 		expect(removed.res.headers.get("HX-Trigger")).toContain(
 			"1 purchase for Children now say no one.",

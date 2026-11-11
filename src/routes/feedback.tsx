@@ -16,7 +16,9 @@ type FeedbackEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	APP_VERSION?: string;
 };
+
 type App = { Bindings: FeedbackEnv; Variables: { actor: string } };
+
 export const feedback = new Hono<App>();
 
 type FeedbackRow = {
@@ -31,6 +33,7 @@ type FeedbackRow = {
 };
 
 const TYPES = new Set(["Bug", "Idea", "Question", "Other"]);
+
 const FEELINGS = new Set([
 	"Frustrated",
 	"Confused",
@@ -43,6 +46,7 @@ function safePath(value: string | null, navigation = false) {
 	try {
 		const url = new URL(value ?? "/", "http://tally.invalid");
 		const normalized = url.pathname;
+
 		return url.origin === "http://tally.invalid" &&
 			(normalized === "/" || /^\/[^/\\]/.test(normalized))
 			? navigation
@@ -55,14 +59,18 @@ function safePath(value: string | null, navigation = false) {
 }
 
 const FEEDBACK_LIMIT_COOKIE = "__Host-tally-feedback-limit";
+
 const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function feedbackLimitId(cookieHeader: string | undefined) {
 	const pair = cookieHeader
 		?.split(";")
 		.map((part) => part.trim())
 		.find((part) => part.startsWith(`${FEEDBACK_LIMIT_COOKIE}=`));
+
 	const token = pair?.slice(FEEDBACK_LIMIT_COOKIE.length + 1) ?? "";
+
 	return UUID.test(token) ? token : null;
 }
 
@@ -72,6 +80,7 @@ function setFeedbackLimitCookie(response: Response, token: string) {
 		"Set-Cookie",
 		`${FEEDBACK_LIMIT_COOKIE}=${token}; Max-Age=3600; Path=/; Secure; HttpOnly; SameSite=Strict`,
 	);
+
 	return new Response(response.body, {
 		status: response.status,
 		statusText: response.statusText,
@@ -112,9 +121,11 @@ function view(
 feedback.get("/feedback", async (c) => {
 	let source: string | undefined;
 	const referer = c.req.header("referer");
+
 	// A Referer that is not a URL is no page to come from, so the form comes from Home.
 	if (referer && URL.canParse(referer)) {
 		const url = new URL(referer);
+
 		if (url.origin === new URL(c.req.url).origin)
 			// On /feedback itself, the sidebar's current item carries the page the form came from.
 			source =
@@ -122,9 +133,11 @@ feedback.get("/feedback", async (c) => {
 					? c.req.query("return_to")
 					: `${url.pathname}${url.search}`;
 	}
+
 	const from = source ? sanitizeFeedbackRoute(source) : "/";
 	const returnTo = source ? safePath(source, true) : "/";
 	const existingToken = feedbackLimitId(c.req.header("cookie"));
+
 	const response = c.html(
 		view(
 			{ type: "Bug", feeling: "Okay", message: "", from, returnTo },
@@ -135,7 +148,9 @@ feedback.get("/feedback", async (c) => {
 			},
 		),
 	);
+
 	if (c.env.DEMO === "true") return response;
+
 	return existingToken
 		? response
 		: setFeedbackLimitCookie(await response, crypto.randomUUID());
@@ -147,6 +162,7 @@ feedback.post("/feedback", async (c) => {
 	const rawType = String(data.get("type") ?? "");
 	const rawFeeling = String(data.get("feeling") ?? "");
 	const rawMessage = String(data.get("message") ?? "").replace(/\r\n/g, "\n");
+
 	const values = {
 		type: TYPES.has(rawType) ? rawType : "Other",
 		feeling: FEELINGS.has(rawFeeling) ? rawFeeling : "Okay",
@@ -157,7 +173,9 @@ feedback.post("/feedback", async (c) => {
 			true,
 		),
 	};
+
 	const limitId = feedbackLimitId(c.req.header("cookie"));
+
 	if (!limitId) {
 		const response = await c.html(
 			view(values, false, {
@@ -167,8 +185,10 @@ feedback.post("/feedback", async (c) => {
 			}),
 			400,
 		);
+
 		return setFeedbackLimitCookie(response, crypto.randomUUID());
 	}
+
 	if (
 		!rawMessage.trim() ||
 		rawMessage.length > FEEDBACK_MESSAGE_MAX ||
@@ -185,6 +205,7 @@ feedback.post("/feedback", async (c) => {
 			422,
 		);
 	}
+
 	if (
 		String(data.get("message_reviewed") ?? "") !== values.message ||
 		data.get("confirm_review") !== "yes"
@@ -197,8 +218,10 @@ feedback.post("/feedback", async (c) => {
 			}),
 		);
 	}
+
 	const diagnosticsOn = diagnosticsEnabled(c.env);
 	let clientContext: ReturnType<typeof normalizeFeedbackContext> = null;
+
 	if (diagnosticsOn && data.get("include_diagnostics") === "yes") {
 		try {
 			clientContext = normalizeFeedbackContext(
@@ -209,10 +232,13 @@ feedback.post("/feedback", async (c) => {
 			clientContext = null;
 		}
 	}
+
 	const columns = diagnosticsOn
 		? ", client_context, app_version"
 		: ", app_version";
+
 	const placeholders = diagnosticsOn ? ", ?, ?" : ", ?";
+
 	const device =
 		String(data.get("device_category")) === "Mobile browser"
 			? "Mobile browser"
@@ -221,6 +247,7 @@ feedback.post("/feedback", async (c) => {
 				: String(data.get("device_category")) === "Desktop browser"
 					? "Desktop browser"
 					: "Unknown";
+
 	const params: (string | null)[] = [
 		limitId,
 		values.type,
@@ -229,10 +256,12 @@ feedback.post("/feedback", async (c) => {
 		values.from,
 		device,
 	];
+
 	if (diagnosticsOn)
 		params.push(clientContext ? JSON.stringify(clientContext) : null);
 	params.push(c.env.APP_VERSION || null);
 	params.push(limitId);
+
 	const result = await c.env.DB.prepare(
 		`INSERT INTO feedback (actor, type, feeling, message, page, device${columns})
 		 SELECT ?, ?, ?, ?, ?, ?${placeholders}
@@ -240,6 +269,7 @@ feedback.post("/feedback", async (c) => {
 	)
 		.bind(...params)
 		.run();
+
 	if (result.meta.changes === 0) {
 		return c.html(
 			view(values, false, {
@@ -249,10 +279,12 @@ feedback.post("/feedback", async (c) => {
 			429,
 		);
 	}
+
 	if (c.env.FEEDBACK_GITHUB_TOKEN) {
 		const row = await c.env.DB.prepare("SELECT * FROM feedback WHERE id = ?")
 			.bind(result.meta.last_row_id)
 			.first<FeedbackRow>();
+
 		if (row)
 			c.executionCtx.waitUntil(
 				fileFeedbackIssue(c.env.DB, c.env.FEEDBACK_GITHUB_TOKEN, row).catch(
@@ -260,8 +292,10 @@ feedback.post("/feedback", async (c) => {
 				),
 			);
 	}
+
 	const back = new URL(values.returnTo, "http://tally.invalid");
 	back.searchParams.set("sent", "feedback");
+
 	return c.redirect(`${back.pathname}${back.search}${back.hash}`, 303);
 });
 
@@ -279,8 +313,10 @@ const READY =
 /** The longest run of backticks, counted without spreading, so any length of text is safe. */
 function longestBacktickRun(text: string): number {
 	let longest = 0;
+
 	for (const run of text.match(/`+/g) ?? [])
 		longest = Math.max(longest, run.length);
+
 	return longest;
 }
 
@@ -288,6 +324,7 @@ function longestBacktickRun(text: string): number {
 function codeSpan(text: string): string {
 	const longest = longestBacktickRun(text);
 	const ticks = "`".repeat(longest + 1);
+
 	return `${ticks} ${text} ${ticks}`;
 }
 
@@ -295,17 +332,20 @@ function codeSpan(text: string): string {
 function fenced(text: string): string {
 	const longest = longestBacktickRun(text);
 	const fence = "`".repeat(Math.max(3, longest + 1));
+
 	return `${fence}\n${text}\n${fence}`;
 }
 
 function diagnosticLines(item: FeedbackRow) {
 	const lines: string[] = [];
+
 	if (item.client_context) {
 		try {
 			const context = normalizeFeedbackContext(
 				JSON.parse(item.client_context),
 				item.page,
 			);
+
 			if (context)
 				lines.push(
 					`Route: ${codeSpan(context.route)}\nDevice category: ${context.deviceCategory}${context.errorName ? `\nRecent error category: ${context.errorName}` : ""}`,
@@ -314,6 +354,7 @@ function diagnosticLines(item: FeedbackRow) {
 			// Ignore malformed or legacy context; never file its raw contents.
 		}
 	}
+
 	return lines;
 }
 
@@ -324,17 +365,20 @@ export async function fileFeedbackIssue(
 	fetchImpl: typeof fetch = fetch,
 ) {
 	const item = row as FeedbackRow;
+
 	const claim = await db
 		.prepare(
 			`UPDATE feedback SET filing_at = CURRENT_TIMESTAMP, attempts = attempts + 1 WHERE id = ? AND ${READY}`,
 		)
 		.bind(item.id)
 		.run();
+
 	if (claim.meta.changes === 0) return;
 	const safeMessage = sanitizeFeedbackMessage(item.message).trim();
 	const safeType = TYPES.has(item.type) ? item.type : "Other";
 	const safeFeeling = FEELINGS.has(item.feeling) ? item.feeling : "Okay";
 	const safePage = sanitizeFeedbackRoute(item.page);
+
 	const safeDevice = [
 		"Desktop browser",
 		"Mobile browser",
@@ -342,10 +386,13 @@ export async function fileFeedbackIssue(
 	].includes(item.device)
 		? item.device
 		: "Unknown";
+
 	const titleMessage = Array.from(safeMessage.replace(/\s+/g, " ").trim())
 		.slice(0, 60)
 		.join("");
+
 	let response: Response;
+
 	try {
 		response = await fetchImpl(
 			"https://api.github.com/repos/kwilson21/tally-feedback/issues",
@@ -377,7 +424,9 @@ export async function fileFeedbackIssue(
 			.run();
 		throw error;
 	}
+
 	console.info(`Feedback GitHub status ${response.status}`);
+
 	if (!response.ok) {
 		await db
 			.prepare(
@@ -391,7 +440,9 @@ export async function fileFeedbackIssue(
 			.run();
 		throw new FilingError(response.status);
 	}
+
 	const issue = (await response.json()) as { number?: number };
+
 	if (!Number.isInteger(issue.number))
 		throw new Error("Feedback GitHub response had no issue number");
 	await db
@@ -407,9 +458,11 @@ export async function retryFeedback(
 	fetchImpl: typeof fetch = fetch,
 ) {
 	if (env.DEMO === "true" || !env.FEEDBACK_GITHUB_TOKEN) return;
+
 	const rows = await env.DB.prepare(
 		`SELECT * FROM feedback WHERE ${READY} AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20`,
 	).all<FeedbackRow>();
+
 	for (const row of rows.results) {
 		try {
 			await fileFeedbackIssue(

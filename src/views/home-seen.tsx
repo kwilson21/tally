@@ -41,6 +41,7 @@ export function HomeSeenCheckIn({
 		"data-waits-for-link": true,
 		...(step ? { "hx-vals": JSON.stringify({ step }) } : {}),
 	};
+
 	return (
 		<div
 			id={HOME_SEEN_ID}

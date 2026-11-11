@@ -11,14 +11,17 @@ import { resetDemo } from "../src/demo/reset";
 const BASE = "http://tally.test";
 const db = env.DB;
 const today = todayIn(DEFAULT_TIME_ZONE);
+
 // The guess line, as HTML: Hono escapes the apostrophe in "Tally's" to &#39;.
 const GUESS_LINE = /Tally(?:'|&#39;)s guess: Groceries and Household/;
+
 // The list behind the sheet has its own "Tally's guess: " words (an sr-only mark on a row), so a negative check
 // looks for this split's categories in the guess line, not the bare words.
 const ANY_GUESS = GUESS_LINE;
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -36,6 +39,7 @@ async function postSplit(id: number, fields: [string, string][]) {
 			...fields,
 		]).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -56,6 +60,7 @@ async function postLine(id: number, fields: [string, string][]) {
 			]).toString(),
 		},
 	);
+
 	return { res, html: await res.text() };
 }
 
@@ -71,6 +76,7 @@ const categoryId = async (name: string) =>
 async function mixedTrip(over: Record<string, unknown> = {}): Promise<number> {
 	const groceries = await categoryId("Groceries");
 	const household = await categoryId("Household");
+
 	const values: Record<string, unknown> = {
 		category_id: null,
 		category_source: null,
@@ -80,6 +86,7 @@ async function mixedTrip(over: Record<string, unknown> = {}): Promise<number> {
 		jev_also_category_id: household,
 		...over,
 	};
+
 	const columns = [
 		"account_id",
 		"date",
@@ -88,6 +95,7 @@ async function mixedTrip(over: Record<string, unknown> = {}): Promise<number> {
 		"merchant_name",
 		...Object.keys(values),
 	];
+
 	const row = await db
 		.prepare(
 			`INSERT INTO transactions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) RETURNING id`,
@@ -101,6 +109,7 @@ async function mixedTrip(over: Record<string, unknown> = {}): Promise<number> {
 			...Object.values(values),
 		)
 		.first<{ id: number }>();
+
 	return row?.id as number;
 }
 
@@ -126,11 +135,13 @@ describe("the edit panel's line (#233)", () => {
 
 	it("shows no line once a person has chosen the trip's category", async () => {
 		const groceries = await categoryId("Groceries");
+
 		const id = await mixedTrip({
 			category_id: groceries,
 			category_source: "user",
 			category_confidence: null,
 		});
+
 		const { html } = await get(`/transactions/${id}`);
 		expect(html).not.toContain("This trip looks like");
 	});
@@ -145,16 +156,20 @@ describe("the edit panel's line (#233)", () => {
 	it("draws the line after a folded category row, outside it, so it shows with the row closed", async () => {
 		// Jev picked Groceries (no person has), so the category is set and folds to its row.
 		const groceries = await categoryId("Groceries");
+
 		const id = await mixedTrip({
 			category_id: groceries,
 			category_source: "jev",
 			category_confidence: 0.9,
 		});
+
 		const { html } = await get(`/transactions/${id}`);
+
 		const panel = html.slice(
 			html.indexOf('id="edit-title"'),
 			html.indexOf('id="edit-save"'),
 		);
+
 		const row = panel.indexOf('<details class="group border-b border-rule"');
 		const rowEnd = panel.indexOf("</details>", row);
 		expect(row).toBeGreaterThan(-1);
@@ -167,15 +182,18 @@ describe("the edit panel's line (#233)", () => {
 	it("keeps the line inside the open category, before the New category name, while none is chosen", async () => {
 		const id = await mixedTrip();
 		const { html } = await get(`/transactions/${id}`);
+
 		const panel = html.slice(
 			html.indexOf('id="edit-title"'),
 			html.indexOf('id="edit-save"'),
 		);
+
 		// Only the category's own span is checked: the detail rows below it are ruled rows too.
 		const category = panel.slice(
 			panel.indexOf('id="edit-category"'),
 			panel.indexOf('id="new-category-name"'),
 		);
+
 		expect(category).not.toContain("<details");
 		expect(category).toContain("This trip looks like Groceries and Household.");
 		expect(category).toContain("Split this one?");
@@ -185,9 +203,11 @@ describe("the edit panel's line (#233)", () => {
 describe("the split form with Tally's guessed parts (#233)", () => {
 	it("opens with the two categories dashed, amounts empty and the guess line", async () => {
 		const id = await mixedTrip();
+
 		const { html } = await get(
 			`/transactions/${id}/split?back=%2Ftransactions`,
 		);
+
 		expect(html).toMatch(GUESS_LINE);
 		expect(html).toMatch(/id="part-category-0"[^>]*border-dashed/);
 		expect(html).toMatch(/id="part-category-1"[^>]*border-dashed/);
@@ -201,16 +221,20 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			jev_mixed: 0.2,
 			jev_also_category_id: null,
 		});
+
 		const { html } = await get(
 			`/transactions/${plain}/split?back=%2Ftransactions`,
 		);
+
 		expect(html).not.toMatch(ANY_GUESS);
 		expect(html).not.toMatch(/id="part-category-0"[^>]*border-dashed/);
 
 		const mixed = await mixedTrip();
+
 		const again = await get(
 			`/transactions/${mixed}/split?back=%2Ftransactions`,
 		);
+
 		expect(again.html).not.toMatch(/name="part_amount"[^>]*value="[1-9]/);
 	});
 
@@ -218,6 +242,7 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const typed = await postSplit(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -226,6 +251,7 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			["part_amount", "144.36"],
 			["part_amount", ""],
 		]);
+
 		expect(typed.res.status).toBe(422);
 		// The typed part is solid, and its guess marker is empty for good; the untyped one is still Tally's guess, and the
 		// guess line stays for the whole split.
@@ -236,10 +262,12 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			`value="${household}"`,
 		);
 		expect(typed.html).toMatch(/id="part-category-1"[^>]*border-dashed/);
+
 		const still = await db
 			.prepare("SELECT is_split FROM transactions WHERE id = ?")
 			.bind(id)
 			.first<{ is_split: number }>();
+
 		expect(still?.is_split).toBe(0);
 	});
 
@@ -247,6 +275,7 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const saved = await postSplit(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -255,13 +284,16 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			["part_amount", "144.36"],
 			["part_amount", "70.00"],
 		]);
+
 		expect(saved.res.status).toBe(200);
+
 		const parts = await db
 			.prepare(
 				"SELECT category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(id)
 			.all<{ categoryId: number; amountCents: number }>();
+
 		expect(parts.results.map((p) => [p.categoryId, p.amountCents])).toEqual([
 			[groceries, 14436],
 			[household, 7000],
@@ -272,6 +304,7 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const saved = await postSplit(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -280,6 +313,7 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			["part_amount", "144.36"],
 			["part_amount", "70.00"],
 		]);
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await db
@@ -294,10 +328,12 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 
 	it("ignores a posted guess on a trip that doesn't look mixed", async () => {
 		const groceries = await categoryId("Groceries");
+
 		const plain = await mixedTrip({
 			jev_mixed: null,
 			jev_also_category_id: null,
 		});
+
 		const { html } = await postSplit(plain, [
 			["part_category", String(groceries)],
 			["part_category", String(groceries)],
@@ -306,6 +342,7 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			["part_amount", ""],
 			["part_amount", ""],
 		]);
+
 		expect(html).not.toMatch(ANY_GUESS);
 		expect(html).not.toMatch(/id="part-category-0"[^>]*border-dashed/);
 	});
@@ -332,6 +369,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const { res, html } = await postLine(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -340,6 +378,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", "144.36"],
 			["part_amount", ""],
 		]);
+
 		expect(res.status).toBe(200);
 		const first = elementWithId(html, "part-category-0", "select");
 		expect(first).toContain('hx-swap-oob="outerHTML"');
@@ -364,6 +403,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const { html } = await postLine(id, [
 			["part_category", String(household)],
 			["part_category", String(household)],
@@ -372,6 +412,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", ""],
 			["part_amount", ""],
 		]);
+
 		const first = elementWithId(html, "part-category-0", "select");
 		expect(first).not.toContain("border-dashed");
 		expect(first).toMatch(new RegExp(`<option value="${household}" selected`));
@@ -386,6 +427,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const both = await postLine(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -394,6 +436,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", "144.36"],
 			["part_amount", "70.00"],
 		]);
+
 		expect(both.html).not.toContain('id="split-guess"');
 	});
 
@@ -401,6 +444,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const refused = await postSplit(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -409,6 +453,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", "144.36"],
 			["part_amount", "10.00"],
 		]);
+
 		expect(refused.res.status).toBe(422);
 		expect(refused.html).toMatch(GUESS_LINE);
 	});
@@ -425,6 +470,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", "144.36"],
 			["part_amount", ""],
 		]);
+
 		// The browser now posts part 0's cleared marker, with its amount empty again.
 		const cleared = await postLine(id, [
 			["part_category", String(groceries)],
@@ -434,7 +480,9 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", ""],
 			["part_amount", ""],
 		]);
+
 		expect(cleared.html).not.toContain("border-dashed");
+
 		const added = await postSplit(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -444,6 +492,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", ""],
 			["add", "1"],
 		]);
+
 		expect(
 			elementWithId(added.html, "part-category-0", "select"),
 		).not.toContain("border-dashed");
@@ -454,6 +503,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const away = await postLine(id, [
 			["part_category", String(household)],
 			["part_category", String(household)],
@@ -462,10 +512,12 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", ""],
 			["part_amount", ""],
 		]);
+
 		expect(elementWithId(away.html, "part-category-0", "select")).not.toContain(
 			"border-dashed",
 		);
 		expect(openingTagWithId(away.html, "part-guess-0")).toContain('value=""');
+
 		const back = [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -474,6 +526,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", ""],
 			["part_amount", ""],
 		] as [string, string][];
+
 		const again = await postLine(id, back);
 		expect(again.html).not.toContain("border-dashed");
 		const full = await postSplit(id, back);
@@ -486,6 +539,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
+
 		const stale = await postLine(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -494,15 +548,18 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", ""],
 			["part_amount", ""],
 		]);
+
 		expect(stale.html).not.toContain("hx-swap-oob");
 	});
 
 	it("draws no out-of-band parts on a trip that doesn't look mixed", async () => {
 		const groceries = await categoryId("Groceries");
+
 		const plain = await mixedTrip({
 			jev_mixed: null,
 			jev_also_category_id: null,
 		});
+
 		const { res, html } = await postLine(plain, [
 			["part_category", String(groceries)],
 			["part_category", String(groceries)],
@@ -511,6 +568,7 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", "10.00"],
 			["part_amount", ""],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(html).toContain("left to assign");
 		expect(html).not.toContain("hx-swap-oob");

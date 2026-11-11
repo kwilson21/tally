@@ -14,15 +14,18 @@ import { formatCents } from "./money";
 
 /** How many months Trends draws: the five before this one, and this one so far. */
 export const TREND_MONTHS = 6;
+
 /** Months in a row a category must be under budget, or up, to be Going well or Worth a look. */
 export const RUN_MONTHS = 3;
 
 /** The positive, whole-cent average of exactly three finished months; halves round up. */
 export function averageMonthlyCents(months: number[]): number | null {
 	if (months.length !== 3) return null;
+
 	const average = Math.floor(
 		(months.reduce((sum, cents) => sum + cents, 0) * 2 + 3) / 6,
 	);
+
 	return average > 0 && average <= MAX_BUDGET_CENTS ? average : null;
 }
 
@@ -80,6 +83,7 @@ export function sameDays(today: string) {
 	const lastMonth = monthsBefore(month, 1);
 	const day = Number(today.slice(8, 10));
 	const lastDay = Math.min(day, daysInMonth(lastMonth));
+
 	return {
 		month,
 		lastMonth,
@@ -93,8 +97,10 @@ export function sameDays(today: string) {
 /** "Oct 1–5 against Sep 1–5": the two ranges the numbers cover. */
 export function sameDaysCaption(today: string): string {
 	const { month, lastMonth, day, lastDay } = sameDays(today);
+
 	const range = (m: string, d: number) =>
 		`${shortMonthName(m)} ${d === 1 ? "1" : `1–${d}`}`;
+
 	return `${range(month, day)} against ${range(lastMonth, lastDay)}`;
 }
 
@@ -106,8 +112,10 @@ export function compareSentence(
 ): string {
 	const gap = nowCents - thenCents;
 	const by = `by this time in ${monthName(lastMonth)}`;
+
 	// Whole dollars would read "$0 less"; under a dollar is the same, in words.
 	if (Math.abs(gap) < 100) return `About the same as ${by}.`;
+
 	return `${trendsAmount(Math.abs(gap))} ${gap < 0 ? "less" : "more"} than ${by}.`;
 }
 
@@ -119,7 +127,9 @@ export function changeWords(
 	thenCents: number,
 ): { direction: Direction; words: string } {
 	const gap = nowCents - thenCents;
+
 	if (gap === 0) return { direction: "same", words: "No change" };
+
 	return gap > 0
 		? { direction: "up", words: `Up ${trendsAmount(gap)}` }
 		: { direction: "down", words: `Down ${trendsAmount(-gap)}` };
@@ -135,22 +145,27 @@ export function underBudgetRun(
 	budgets: (number | null)[],
 ): number {
 	let run = 0;
+
 	for (let i = cents.length - 1; i >= 0; i--) {
 		const budget = budgets[i];
+
 		if (budget === null || budget === undefined || (cents[i] ?? 0) > budget)
 			break;
 		run += 1;
 	}
+
 	return run;
 }
 
 /** The months in a row, ending with the latest, that spending went up on the month before. Oldest first. */
 export function risingRun(cents: number[]): number {
 	let run = 0;
+
 	for (let i = cents.length - 1; i >= 1; i--) {
 		if ((cents[i] ?? 0) <= (cents[i - 1] ?? 0)) break;
 		run += 1;
 	}
+
 	return run;
 }
 
@@ -160,9 +175,11 @@ export function risingRun(cents: number[]): number {
  */
 export function shownMonths(today: string, startMonth: string): string[] {
 	const thisMonth = today.slice(0, 7);
+
 	const months = Array.from({ length: TREND_MONTHS }, (_, i) =>
 		monthsBefore(thisMonth, TREND_MONTHS - 1 - i),
 	).filter((m) => m >= startMonth);
+
 	return months.includes(thisMonth) ? months : [thisMonth];
 }
 
@@ -172,8 +189,10 @@ export function monthsLabel(points: MonthPoint[], subject: string): string {
 		const started = p.part
 			? ` (from ${shortDay(p.part.from, p.part.from)})`
 			: "";
+
 		return `${monthName(p.month)}${p.partial ? " so far" : ""}${started} ${trendsAmount(p.cents)}`;
 	});
+
 	return `${subject} by month: ${parts.join(", ")}.`;
 }
 
@@ -198,11 +217,13 @@ export type MiniBar = {
 export function miniBars(cents: number[], partIndex = -1): MiniBar[] {
 	const max = Math.max(0, ...cents);
 	const offset = Math.max(0, TREND_MONTHS - cents.length);
+
 	return cents.map((c, i) => {
 		const height = Math.max(
 			1,
 			max > 0 ? round1((30 * Math.max(c, 0)) / max) : 0,
 		);
+
 		return {
 			x: (i + offset) * 16 + 3,
 			y: round1(31 - height),
@@ -243,11 +264,13 @@ export function monthBars(points: MonthPoint[]): MonthBar[] {
 	const max = Math.max(0, ...points.map((p) => p.cents));
 	const slot = width / TREND_MONTHS;
 	const offset = Math.max(0, TREND_MONTHS - points.length);
+
 	return points.map((p, i) => {
 		const height = Math.max(
 			2,
 			max > 0 ? round1(((bottom - top) * Math.max(p.cents, 0)) / max) : 0,
 		);
+
 		return {
 			x: round1((i + offset) * slot + slot * 0.2),
 			y: round1(bottom - height),
@@ -356,6 +379,7 @@ const NEEDS_A_CATEGORY = { name: "Needs a category", icon: "list", color: "" };
  */
 export function buildTrends(input: TrendsInput): TrendsPage {
 	const { firstDate } = input;
+
 	if (firstDate === null) return { kind: "empty" };
 	const thisMonth = input.today.slice(0, 7);
 	const { lastMonth } = sameDays(input.today);
@@ -366,6 +390,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	// is there. A part month is drawn (striped) but never judged, compared or put in a run.
 	const startIsPart = firstMonthIsPart(firstDate, startMonth);
 	const months = shownMonths(input.today, startMonth);
+
 	const judged = months.filter(
 		(m) =>
 			m < thisMonth && (m > startMonth || (m === startMonth && !startIsPart)),
@@ -373,14 +398,18 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 
 	const spent = new Map<string, number>();
 	const totals = new Map<string, number>();
+
 	for (const row of input.spend) {
 		const key = `${row.month}|${row.categoryId ?? ""}`;
 		spent.set(key, (spent.get(key) ?? 0) + row.cents);
 		totals.set(row.month, (totals.get(row.month) ?? 0) + row.cents);
 	}
+
 	const cents = (month: string, id: number | null) =>
 		spent.get(`${month}|${id ?? ""}`) ?? 0;
+
 	const total = (month: string) => totals.get(month) ?? 0;
+
 	// One month of a series; the part month says so, and from when.
 	const point = (m: string, monthCents: number): MonthPoint => ({
 		month: m,
@@ -388,8 +417,10 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 		partial: m === thisMonth,
 		...(startIsPart && m === startMonth ? { part: { from: firstDate } } : {}),
 	});
+
 	const points = (id: number | null): MonthPoint[] =>
 		months.map((m) => point(m, cents(m, id)));
+
 	const allPoints = months.map((m) => point(m, total(m)));
 
 	if (judged.length === 0) {
@@ -404,6 +435,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	}
 
 	const before = new Map<number | null, number>();
+
 	for (const row of input.sameDays)
 		before.set(row.categoryId, (before.get(row.categoryId) ?? 0) + row.cents);
 
@@ -411,6 +443,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	// last month's compared days. A purchase and its refund in different halves of last month net
 	// $0 for the month but not for those days, and the changes must still add up to the comparison.
 	const hasSpending = (id: number) => points(id).some((p) => p.cents !== 0);
+
 	const shown = input.categories.filter(
 		(c) => !c.archived || hasSpending(c.id) || (before.get(c.id) ?? 0) !== 0,
 	);
@@ -418,8 +451,10 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	const goingWell: TrendRowData[] = [];
 	const worthALook: TrendRowData[] = [];
 	const others: TrendRowData[] = [];
+
 	for (const c of shown) {
 		const series = points(c.id);
+
 		const row = (
 			line: string,
 			run = 0,
@@ -435,12 +470,15 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 			months: series,
 			label: monthsLabel(series, "Spending"),
 		});
+
 		const judgedCents = judged.map((m) => cents(m, c.id));
 		const rising = risingRun(judgedCents);
+
 		const under = underBudgetRun(
 			judgedCents,
 			judged.map((m) => budgetForMonth(input.amounts, c.id, m)),
 		);
+
 		if (!c.archived && rising >= RUN_MONTHS) {
 			// Also under budget three months running: it would be Going well, so say it still is.
 			worthALook.push(
@@ -468,6 +506,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 		.map((c, order) => {
 			const nowCents = cents(thisMonth, c.id);
 			const thenCents = before.get(c.id) ?? 0;
+
 			return { c, order, nowCents, thenCents };
 		})
 		.filter((e) => e.nowCents !== 0 || e.thenCents !== 0)
@@ -491,6 +530,7 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 
 	const soFarCents = total(thisMonth);
 	const thenTotal = input.sameDays.reduce((sum, row) => sum + row.cents, 0);
+
 	return {
 		kind: "full",
 		monthName: monthName(thisMonth),

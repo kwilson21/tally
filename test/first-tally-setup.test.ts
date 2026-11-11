@@ -15,6 +15,7 @@ import { flaggedBanks, homeBankNotice } from "../src/stale-bank";
 
 // Home's setup (P125 E, spec §8.8): what the first week shows, from the record, the banks and what Jev still owes.
 const TODAY = "2026-10-14";
+
 /** Noon on TODAY, in UTC: the clock the sort's "recent" and "over an hour" are read against. */
 const NOW = Date.parse("2026-10-14T12:00:00Z");
 
@@ -30,31 +31,40 @@ function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
 				if (prop === "bind") {
 					return (...values: unknown[]) => racing(target.bind(...values));
 				}
+
 				if (prop === "run") {
 					return async () => {
 						await hook();
+
 						return target.run();
 					};
 				}
+
 				const value = Reflect.get(target, prop, target);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 	return new Proxy(env.DB, {
 		get(target, prop) {
 			if (prop === "prepare") {
 				return (sql: string) => {
 					const statement = target.prepare(sql);
+
 					return sql.startsWith("INSERT INTO household_settings")
 						? racing(statement)
 						: statement;
 				};
 			}
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
 }
+
 const BANK = {
 	id: 1,
 	name: "Chase",
@@ -62,8 +72,10 @@ const BANK = {
 	lastSyncedAt: "2026-10-13",
 	historyCompleteAt: "2026-10-13",
 };
+
 /** A bank whose history came in half an hour before NOW: the sort is recent. */
 const RECENT = { ...BANK, historyCompleteAt: "2026-10-14 11:30:00" };
+
 /** Set up (decision 148): all four strokes drawn, with no days (as migration 0057 leaves them). */
 const ALL_DRAWN: FirstTally = {
 	strokes: { bank: null, pay: null, bills: null, budgets: null },
@@ -97,11 +109,13 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 			total: 1500,
 			sortOnArrival: false,
 		});
+
 		expect(slow?.phase).toBe("reading");
 		expect(slow?.sorting).toBe(true);
 		expect(slow?.waitsForRun).toBe(true);
 		expect(slow?.slow).toBe(false);
 		expect(slow?.refreshes).toBe(false);
+
 		// The same history an hour and a half before NOW: a sort that is not slow would refresh, so only the wait stops it.
 		const recent = view({
 			record: READING,
@@ -110,6 +124,7 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 			total: 1500,
 			sortOnArrival: false,
 		});
+
 		expect(recent?.waitsForRun).toBe(true);
 		expect(recent?.refreshes).toBe(false);
 		expect(
@@ -131,8 +146,10 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 			total: 1500,
 			sortOnArrival: true,
 		});
+
 		expect(marked?.waitsForRun).toBe(true);
 		expect(marked?.refreshes).toBe(false);
+
 		const unmarked = view({
 			record: READING,
 			banks: [RECENT],
@@ -140,6 +157,7 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 			total: 1500,
 			sortOnArrival: true,
 		});
+
 		expect(unmarked?.waitsForRun).toBe(false);
 		expect(unmarked?.sorting).toBe(true);
 		expect(unmarked?.refreshes).toBe(true);
@@ -153,6 +171,7 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 			total: 1500,
 			sortOnArrival: false,
 		};
+
 		// Nothing waiting: the questions are open.
 		expect(view({ ...waiting, waiting: 0 })?.phase).toBe("ready");
 		expect(view({ ...waiting, waiting: 0 })?.waitsForRun).toBe(false);
@@ -161,11 +180,13 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 		// No bank yet.
 		expect(view({ ...waiting, banks: [] })?.phase).toBe("before");
 		expect(view({ ...waiting, banks: [] })?.waitsForRun).toBe(false);
+
 		// A history still coming in: nothing is sorting yet, so there is no wait.
 		const loading = view({
 			...waiting,
 			banks: [{ ...RECENT, historyCompleteAt: null }],
 		});
+
 		expect(loading?.phase).toBe("reading");
 		expect(loading?.waitsForRun).toBe(false);
 		expect(loading?.sorting).toBe(false);
@@ -210,10 +231,12 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("reads the import while the questions are shut, on the day stroke one is drawn", () => {
 		const record: FirstTally = { strokes: { bank: TODAY }, budgets: {} };
+
 		const reading = view({
 			record,
 			banks: [{ ...BANK, historyCompleteAt: null }],
 		});
+
 		expect(reading?.phase).toBe("reading");
 		expect(reading?.historyIn).toBe(false);
 		expect(reading?.bankName).toBe("Chase");
@@ -221,12 +244,14 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("is sorting once every history is in and something waits, counting the sorted ones (decision 146)", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const sorting = view({
 			record,
 			banks: [RECENT],
 			waiting: 500,
 			total: 1500,
 		});
+
 		expect(sorting?.phase).toBe("reading");
 		expect(sorting?.sorting).toBe(true);
 		expect(sorting?.slow).toBe(false);
@@ -237,12 +262,14 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("is slow once the newest bank's history came in over an hour ago, and then stops refreshing", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const slow = view({
 			record,
 			banks: [{ ...RECENT, historyCompleteAt: "2026-10-14 10:30:00" }],
 			waiting: 500,
 			total: 1500,
 		});
+
 		expect(slow?.sorting).toBe(true);
 		expect(slow?.slow).toBe(true);
 		expect(slow?.refreshes).toBe(false);
@@ -250,6 +277,7 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("refreshes while a bank was linked in the last hour, even with its history still coming", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const linking = view({
 			record,
 			banks: [
@@ -257,6 +285,7 @@ describe("setupView: which setup state Home shows", () => {
 			],
 			total: 10,
 		});
+
 		expect(linking?.phase).toBe("reading");
 		expect(linking?.sorting).toBe(false);
 		expect(linking?.refreshes).toBe(true);
@@ -264,6 +293,7 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("stops refreshing once nothing has been linked or read for an hour", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const quiet = view({
 			record,
 			banks: [
@@ -271,32 +301,39 @@ describe("setupView: which setup state Home shows", () => {
 			],
 			total: 10,
 		});
+
 		expect(quiet?.refreshes).toBe(false);
 	});
 
 	it("never counts a missing or unreadable time as recent", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const unknown = view({
 			record,
 			banks: [{ ...BANK, linkedAt: null, historyCompleteAt: null }],
 			total: 10,
 		});
+
 		expect(unknown?.refreshes).toBe(false);
+
 		const garbled = view({
 			record,
 			banks: [{ ...BANK, linkedAt: "last Tuesday", historyCompleteAt: null }],
 			total: 10,
 		});
+
 		expect(garbled?.refreshes).toBe(false);
 	});
 
 	it("does not refresh for a recent bank that is still loading when it is flagged, since nothing is moving (decision 146)", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const loading = {
 			...BANK,
 			linkedAt: "2026-10-14 11:30:00",
 			historyCompleteAt: null,
 		};
+
 		// Each bank's flag is the one the caller read for its row (flagged, by id): the same bank, flagged or not.
 		const needsSignIn = view({
 			record,
@@ -304,14 +341,17 @@ describe("setupView: which setup state Home shows", () => {
 			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
+
 		expect(needsSignIn?.phase).toBe("reading");
 		expect(needsSignIn?.refreshes).toBe(false);
+
 		const stopped = view({
 			record,
 			banks: [{ ...loading, lastSyncedAt: "2026-10-10" }],
 			flagged: [{ id: 1, name: "Chase", reason: "stale", since: "2026-10-10" }],
 			total: 10,
 		});
+
 		expect(stopped?.refreshes).toBe(false);
 		// The same bank, nothing flagging it: it refreshes.
 		expect(view({ record, banks: [loading], total: 10 })?.refreshes).toBe(true);
@@ -319,27 +359,32 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("refreshes while one bank is flagged and another is still loading and healthy", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const loading = {
 			...BANK,
 			linkedAt: "2026-10-14 11:30:00",
 			historyCompleteAt: null,
 		};
+
 		const both = view({
 			record,
 			banks: [loading, { ...loading, id: 2, name: "Wells Fargo" }],
 			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
+
 		expect(both?.refreshes).toBe(true);
 	});
 
 	it("refreshes for a healthy bank still loading when a flagged bank has the same name: each bank's flag is its own (decision 146)", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const loading = {
 			...BANK,
 			linkedAt: "2026-10-14 11:30:00",
 			historyCompleteAt: null,
 		};
+
 		// Two banks named Chase: the flag is the first row's, so the second, healthy and still loading, refreshes.
 		const twoChases = view({
 			record,
@@ -347,7 +392,9 @@ describe("setupView: which setup state Home shows", () => {
 			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
+
 		expect(twoChases?.refreshes).toBe(true);
+
 		// The flag on the second row alone: the first, healthy and still loading, refreshes.
 		const flaggedSecond = view({
 			record,
@@ -355,7 +402,9 @@ describe("setupView: which setup state Home shows", () => {
 			flagged: [{ id: 2, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
+
 		expect(flaggedSecond?.refreshes).toBe(true);
+
 		// Both flagged: nothing is moving, so nothing refreshes.
 		const bothFlagged = view({
 			record,
@@ -366,11 +415,13 @@ describe("setupView: which setup state Home shows", () => {
 			],
 			total: 10,
 		});
+
 		expect(bothFlagged?.refreshes).toBe(false);
 	});
 
 	it("refreshes while the sort runs once every history is in, even with a flagged bank (decision 146)", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const sorting = view({
 			record,
 			banks: [
@@ -381,6 +432,7 @@ describe("setupView: which setup state Home shows", () => {
 			waiting: 500,
 			total: 1500,
 		});
+
 		expect(sorting?.sorting).toBe(true);
 		expect(sorting?.slow).toBe(false);
 		expect(sorting?.refreshes).toBe(true);
@@ -395,6 +447,7 @@ describe("setupView: which setup state Home shows", () => {
 
 	it("promises no time while any connected bank's history is still coming, even when another bank's is in", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const second = {
 			id: 2,
 			name: "Northline",
@@ -402,24 +455,28 @@ describe("setupView: which setup state Home shows", () => {
 			lastSyncedAt: "2026-10-13",
 			historyCompleteAt: null,
 		};
+
 		const reading = view({
 			record,
 			banks: [BANK, second],
 			waiting: 500,
 			total: 1500,
 		});
+
 		expect(reading?.phase).toBe("reading");
 		expect(reading?.historyIn).toBe(false);
 	});
 
 	it("counts the connected banks and names the first one's, not the second's", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+
 		const two = view({
 			record,
 			banks: [BANK, { ...BANK, id: 2, name: "Northline" }],
 			waiting: 0,
 			total: 10,
 		});
+
 		expect(two?.bankCount).toBe(2);
 		expect(two?.bankName).toBe("Chase");
 		expect(view({ record, banks: [BANK] })?.bankCount).toBe(1);
@@ -482,27 +539,33 @@ describe("readSetup", () => {
 
 	it("draws stroke one today for a connected bank that has none (linked before the first week shipped)", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+
 		const setup = await readSetup(env.DB, {
 			today: TODAY,
 			flagged: [],
 		});
+
 		// Stroke one is drawn today, but the setup is reading, not set up: the connected banks' 90-day history isn't in yet
 		// (the demo seed's banks carry no history mark), so the questions stay shut until it is.
 		expect(setup?.phase).toBe("reading");
+
 		const stored = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(JSON.parse(stored?.value ?? "null")?.strokes.bank).toBe(TODAY);
 	});
 
 	it("leaves stroke one undrawn when the last bank goes between the read and the repair's write", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+
 		// The banks are read as connected; then every bank goes before the repair writes.
 		const racing = raceBeforeBankStroke(() =>
 			env.DB.prepare(
 				"UPDATE plaid_items SET disconnected_at = datetime('now')",
 			).run(),
 		);
+
 		await readSetup(racing, { today: TODAY, flagged: [] });
 		expect((await readFirstTally(env.DB))?.strokes.bank).toBeUndefined();
 	});
@@ -514,6 +577,7 @@ describe("readSetup", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 		]);
+
 		for (const [i, status] of statuses.entries()) {
 			await env.DB.prepare(
 				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id, status, last_synced_at, created_at) VALUES (?, 'Chase', 'person@example.com', ?, ?, '2026-10-13 09:00:00', datetime('now'))",
@@ -521,6 +585,7 @@ describe("readSetup", () => {
 				.bind(new Uint8Array([1, 2, 3]), `item-chase-${i}`, status)
 				.run();
 		}
+
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
 		)
@@ -533,34 +598,41 @@ describe("readSetup", () => {
 
 	it("refreshes for a healthy bank still loading when another bank with the same name needs signing in (each row's own flag)", async () => {
 		await twoChases(["needs_attention", "ok"]);
+
 		const setup = await readSetup(env.DB, {
 			today: TODAY,
 			flagged: await homeFlags(),
 		});
+
 		expect(setup?.phase).toBe("reading");
 		expect(setup?.refreshes).toBe(true);
 	});
 
 	it("stops refreshing when the only bank still loading needs signing in", async () => {
 		await twoChases(["needs_attention"]);
+
 		const setup = await readSetup(env.DB, {
 			today: TODAY,
 			flagged: await homeFlags(),
 		});
+
 		expect(setup?.phase).toBe("reading");
 		expect(setup?.refreshes).toBe(false);
 	});
 
 	it("decides refreshes from the flags it is given, not the row: a list that flags the bank stops Home refreshing, and its notice names the bank", async () => {
 		await twoChases(["ok"]);
+
 		const id = (
 			await env.DB.prepare("SELECT id FROM plaid_items ORDER BY id").first<{
 				id: number;
 			}>()
 		)?.id;
+
 		const flagged = [
 			{ id: id ?? 0, name: "Chase", reason: "sign-in" as const },
 		];
+
 		const setup = await readSetup(env.DB, { today: TODAY, flagged });
 		expect(setup?.refreshes).toBe(false);
 		expect(homeBankNotice(flagged, TODAY)?.words).toEqual([
@@ -609,6 +681,7 @@ describe("readSetup: the daily run's wait (decision 150)", () => {
 			readSetup(env.DB, { today: TODAY, flagged: [] }).then(
 				(setup) => setup?.waitsForRun,
 			);
+
 		await saveAiSwitches(env.DB, {
 			...AI_SWITCHES_ALL_ON,
 			details: false,
@@ -638,6 +711,7 @@ describe("takeBackBankStrokes", () => {
 		)
 			.bind(JSON.stringify(value))
 			.run();
+
 	const read = async () =>
 		JSON.parse(
 			(
@@ -648,6 +722,7 @@ describe("takeBackBankStrokes", () => {
 				}>()
 			)?.value ?? "null",
 		) as FirstTally | null;
+
 	const lastBank = async () =>
 		(
 			await env.DB.prepare(
@@ -660,12 +735,14 @@ describe("takeBackBankStrokes", () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
 		).run();
+
 		const onlyId =
 			(
 				await env.DB.prepare("SELECT MIN(id) AS id FROM plaid_items").first<{
 					id: number;
 				}>()
 			)?.id ?? 0;
+
 		// Setup not done: no budgets stroke yet, so the last bank going takes the strokes back.
 		await store({
 			strokes: {

@@ -33,7 +33,9 @@ describe("MachineDiagram", () => {
 				nodes.length,
 			);
 			expect(html.match(/<dt /g)).toHaveLength(edges.length);
+
 			for (const edge of edges) expect(html).toContain(`${edge.words}.`);
+
 			for (const node of nodes) expect(html).toContain(`>${labels[node.key]}<`);
 		}
 	});
@@ -43,6 +45,7 @@ describe("MachineDiagram", () => {
 			merchantSuggestionMachine,
 			MERCHANT_SUGGESTION_LABELS,
 		);
+
 		expect(source).toContain("none --> pending: bank name, names");
 		expect(source).toContain("pending --> pending: bank name");
 	});
@@ -69,6 +72,7 @@ describe("MachineDiagram", () => {
 			const height = Number(frame?.[2]);
 			expect(width).toBeGreaterThan(0);
 			expect(width).toBeLessThanOrEqual(520);
+
 			for (const word of html.matchAll(
 				/<text[^>]* x="([-\d.]+)" y="([-\d.]+)"/g,
 			)) {

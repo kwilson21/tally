@@ -12,6 +12,7 @@ import { suggestions } from "../src/routes/suggestions";
 
 const db = env.DB;
 const BASE = "http://tally.test";
+
 const COLUMNS = [
 	"answer",
 	"confidence",
@@ -22,10 +23,12 @@ const COLUMNS = [
 ];
 
 const screen = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 screen.use("*", async (c, next) => {
 	c.set("actor", "test@example.com");
 	await next();
 });
+
 screen.route("/", suggestions);
 
 async function answerOn(fields: Record<string, string>) {
@@ -56,6 +59,7 @@ async function insertTransaction(fields: {
 	const account = await db
 		.prepare("SELECT id FROM accounts ORDER BY id LIMIT 1")
 		.first<{ id: number }>();
+
 	const row = await db
 		.prepare(
 			`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name,
@@ -73,6 +77,7 @@ async function insertTransaction(fields: {
 			fields.categoryConfidence ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -95,17 +100,21 @@ beforeEach(async () => {
 describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 	it("records an income Yes and an income No, each with its kind, confidence, answer and the household's day", async () => {
 		const day = await householdToday(db);
+
 		const yes = await insertTransaction({
 			raw: "VENMO YES",
 			amount: -250000,
 			incomeConfidence: 0.6,
 		});
+
 		await answerOn({ id: `income-${yes}`, answer: "yes" });
+
 		const no = await insertTransaction({
 			raw: "VENMO NO",
 			amount: -250000,
 			incomeConfidence: 0.55,
 		});
+
 		await answerOn({ id: `income-${no}`, answer: "no" });
 		expect(await records()).toEqual([
 			{
@@ -129,17 +138,21 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 
 	it("records a transfer Yes and a transfer No", async () => {
 		const day = await householdToday(db);
+
 		const yes = await insertTransaction({
 			raw: "CHASE PAY YES",
 			amount: 20000,
 			transferConfidence: 0.7,
 		});
+
 		await answerOn({ id: `transfer-${yes}`, answer: "yes" });
+
 		const no = await insertTransaction({
 			raw: "CHASE PAY NO",
 			amount: 20000,
 			transferConfidence: 0.45,
 		});
+
 		await answerOn({ id: `transfer-${no}`, answer: "no" });
 		expect(await records()).toMatchObject([
 			{ kind: "transfer", confidence: 0.7, answer: "yes", household_day: day },
@@ -149,27 +162,33 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 
 	it("records a category Yes and a category Something else, with the category guess's confidence", async () => {
 		const day = await householdToday(db);
+
 		const eatingOut = await db
 			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
 			.first<{ id: number }>();
+
 		const other = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 AND name <> 'Eating Out' ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		const yes = await insertTransaction({
 			raw: "CAFE YES",
 			amount: 2300,
 			jevCategoryId: eatingOut?.id,
 			categoryConfidence: 0.5,
 		});
+
 		await answerOn({ id: `category-${yes}`, answer: "yes" });
+
 		const elsewhere = await insertTransaction({
 			raw: "CAFE ELSE",
 			amount: 2300,
 			jevCategoryId: eatingOut?.id,
 			categoryConfidence: 0.42,
 		});
+
 		await answerOn({
 			id: `category-${elsewhere}`,
 			answer: "else",
@@ -188,31 +207,37 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 
 	it("Something else on the guess itself records yes, and on another category records something_else", async () => {
 		const day = await householdToday(db);
+
 		const eatingOut = await db
 			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
 			.first<{ id: number }>();
+
 		const other = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 AND name <> 'Eating Out' ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		const same = await insertTransaction({
 			raw: "CAFE SAME GUESS",
 			amount: 2300,
 			jevCategoryId: eatingOut?.id,
 			categoryConfidence: 0.5,
 		});
+
 		await answerOn({
 			id: `category-${same}`,
 			answer: "else",
 			category: String(eatingOut?.id),
 		});
+
 		const elsewhere = await insertTransaction({
 			raw: "CAFE OTHER GUESS",
 			amount: 2300,
 			jevCategoryId: eatingOut?.id,
 			categoryConfidence: 0.45,
 		});
+
 		await answerOn({
 			id: `category-${elsewhere}`,
 			answer: "else",
@@ -235,6 +260,7 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 			amount: 20000,
 			transferConfidence: 0.5,
 		});
+
 		await answerOn({ id: `transfer-${id}`, answer: "yes" });
 		const [row] = await records();
 		expect(Object.keys(row ?? {}).sort()).toEqual(COLUMNS);
@@ -247,12 +273,15 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 			amount: 20000,
 			transferConfidence: 0.95,
 		});
+
 		await answerOn({ id: `transfer-${sure}`, answer: "yes" });
+
 		const asked = await insertTransaction({
 			raw: "ASKED TRANSFER",
 			amount: 20000,
 			transferConfidence: 0.5,
 		});
+
 		await answerOn({ id: `transfer-${asked}`, answer: "skip" });
 		expect(await records()).toEqual([]);
 	});
@@ -278,16 +307,19 @@ describe("maybe_answers: the first page's pay question", () => {
 	async function payMerchantOf(id: number) {
 		const merchant = (await payMerchants(db)).find((m) => m.ids.includes(id));
 		expect(merchant).toBeDefined();
+
 		return merchant as NonNullable<typeof merchant>;
 	}
 
 	it("records a pay Yes and a pay No on an income guess in the Maybe range, with the guess's confidence", async () => {
 		const day = await householdToday(db);
+
 		const yes = await insertTransaction({
 			raw: "PAY SETUP YES",
 			amount: -245000,
 			incomeConfidence: 0.6,
 		});
+
 		expect(
 			await answerPay(
 				db,
@@ -296,11 +328,13 @@ describe("maybe_answers: the first page's pay question", () => {
 				"person@example.com",
 			),
 		).toBe(1);
+
 		const no = await insertTransaction({
 			raw: "PAY SETUP NO",
 			amount: -245000,
 			incomeConfidence: 0.4,
 		});
+
 		expect(
 			await answerPay(db, await payMerchantOf(no), "no", "person@example.com"),
 		).toBe(1);
@@ -322,25 +356,30 @@ describe("maybe_answers: the first page's pay question", () => {
 				amount: -245000,
 				incomeConfidence: confidence,
 			});
+
 			const row = await db
 				.prepare(
 					`SELECT ${merchantKeySql("t")} AS key, t.date AS date, -t.amount_cents AS cents FROM transactions t WHERE t.id = ?`,
 				)
 				.bind(id)
 				.first<{ key: string; date: string; cents: number }>();
+
 			const shown = {
 				key: row?.key ?? "",
 				name: raw,
 				deposits: [{ date: row?.date ?? "", cents: row?.cents ?? 0 }],
 				ids: [id],
 			};
+
 			expect(await answerPay(db, shown, "yes", "person@example.com")).toBe(0);
 		}
+
 		// Money marked income with no guess is asked (flag_income = 1), and answered, but it is not a Maybe.
 		const flagged = await insertTransaction({
 			raw: "PAY FLAGGED",
 			amount: -245000,
 		});
+
 		await db
 			.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(flagged)
@@ -362,6 +401,7 @@ describe("maybe_answers: the first page's pay question", () => {
 			amount: -245000,
 			incomeConfidence: 0.6,
 		});
+
 		const merchant = await payMerchantOf(id);
 		expect(
 			await answerPay(db, merchant, "yes", "person@example.com"),
@@ -376,6 +416,7 @@ describe("maybe_answers: the first page's pay question", () => {
 			amount: -245000,
 			incomeConfidence: 0.6,
 		});
+
 		const read = await payMerchantOf(corrected);
 		await db
 			.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")

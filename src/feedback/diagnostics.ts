@@ -6,6 +6,7 @@ const DEVICE_CATEGORIES = new Set([
 	"Tablet browser",
 	"Unknown",
 ]);
+
 const ERROR_NAMES = new Set([
 	"AbortError",
 	"Error",
@@ -23,6 +24,7 @@ const ERROR_NAMES = new Set([
 export function normalizeFeedbackContext(value: unknown, from: string) {
 	if (!value || typeof value !== "object") return null;
 	const input = value as Record<string, unknown>;
+
 	return {
 		route: sanitizeFeedbackRoute(from),
 		deviceCategory:
@@ -49,6 +51,7 @@ export function screenshotPreviewEnabled(env: {
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 }) {
 	const PIXEL_CANARY_ACCEPTANCE_COMPLETE = false;
+
 	return (
 		PIXEL_CANARY_ACCEPTANCE_COMPLETE &&
 		env.FEEDBACK_SCREENSHOT_PREVIEW_ENABLED === "true"
@@ -62,6 +65,7 @@ export function replayLinksEnabled() {
 
 export function injectDiagnosticsScript(html: string, enabled: boolean) {
 	if (!enabled || !html.includes("</body>")) return html;
+
 	return html.replace(
 		"</body>",
 		'<script type="module" src="/js/feedback-diagnostics.js"></script></body>',

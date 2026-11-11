@@ -4,6 +4,7 @@ import { PlaidError, plaidPost } from "../src/plaid/client";
 describe("plaidPost", () => {
 	it("turns network timeouts into bodyless Plaid errors", async () => {
 		let options: RequestInit | undefined;
+
 		const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
 			options = init;
 			throw new DOMException("upstream details", "TimeoutError");
@@ -64,12 +65,14 @@ describe("plaidPost", () => {
 				{ status: 500 },
 			),
 		);
+
 		const error = await plaidPost(
 			{ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" },
 			"/test",
 			{ public_token: "public-secret" },
 			fetch,
 		).catch((caught) => caught as PlaidError);
+
 		expect(error).toBeInstanceOf(PlaidError);
 		expect(error).toMatchObject({
 			error_type: "API_ERROR",

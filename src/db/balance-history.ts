@@ -36,6 +36,7 @@ type HistoryRow = {
  */
 function balanceRowsStatement(db: D1Database, today: string) {
 	const from = chartStart(today);
+
 	return db
 		.prepare(
 			`SELECT h.account_id, h.date, h.balance_cents, a.is_liability
@@ -71,12 +72,14 @@ function accountSources(
 					.map((account) => account.id),
 			}),
 		);
+
 	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
 		sources.push({
 			name: "Apple Card",
 			verb: "added",
 			accountIds: [appleCard.id],
 		});
+
 	return sources;
 }
 
@@ -103,13 +106,17 @@ export async function accountsWithHistory(
 		balanceRowsStatement(db, today),
 		appleCardStatement(db),
 	]);
+
 	const banks = banksFromRows((bankResult?.results ?? []) as BankRow[]);
+
 	const appleCard = appleCardFromRow(
 		((cardResult?.results ?? []) as AppleCardRow[])[0],
 	);
+
 	const accountIds = countedAccounts(banks, appleCard)
 		.filter((account) => account.connected !== false)
 		.map((account) => account.id);
+
 	const rows: BalanceRow[] = (
 		(balanceResult?.results ?? []) as HistoryRow[]
 	).map((r) => ({
@@ -118,7 +125,9 @@ export async function accountsWithHistory(
 		balanceCents: r.balance_cents,
 		isLiability: r.is_liability === 1,
 	}));
+
 	const points = netWorthSeries(rows, chartStart(today), accountIds);
+
 	return {
 		banks,
 		points,

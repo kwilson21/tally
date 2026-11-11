@@ -8,6 +8,7 @@ export type Node = { key: string; final: boolean; words: string };
 
 // The parts of a state's definition the diagrams read; the machines here are written by hand with just these.
 type TransitionConfig = { target?: unknown; description?: string };
+
 type StateConfig = {
 	type?: string;
 	description?: string;
@@ -26,12 +27,14 @@ export function machineGraph(machine: AnyStateMachine): {
 	const states = (machine.config.states ?? {}) as Record<string, StateConfig>;
 	const nodes: Node[] = [];
 	const edges: Edge[] = [];
+
 	for (const [key, state] of Object.entries(states)) {
 		nodes.push({
 			key,
 			final: state.type === "final",
 			words: state.description ?? key,
 		});
+
 		for (const [event, raw] of Object.entries(state.on ?? {})) {
 			for (const transition of Array.isArray(raw) ? raw : [raw]) {
 				if (
@@ -43,6 +46,7 @@ export function machineGraph(machine: AnyStateMachine): {
 						`Machine "${machine.id}": ${key}.${event} must be an object with a string target`,
 					);
 				}
+
 				edges.push({
 					from: key,
 					to: transition.target,
@@ -52,5 +56,6 @@ export function machineGraph(machine: AnyStateMachine): {
 			}
 		}
 	}
+
 	return { initial: String(machine.config.initial), nodes, edges };
 }

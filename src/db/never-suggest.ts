@@ -10,6 +10,7 @@ export const NEVER_SUGGEST_KINDS = [
 	"income",
 	"transfer",
 ] as const;
+
 export type NeverSuggestKind = (typeof NEVER_SUGGEST_KINDS)[number];
 
 export type NeverSuggestRule = {
@@ -62,6 +63,7 @@ export async function neverSuggestRules(
 			ORDER BY r.decided_on DESC, r.id DESC`,
 		)
 		.all<Row>();
+
 	return results.map(toRule);
 }
 
@@ -88,6 +90,7 @@ export async function addNeverSuggest(
 		)
 		.bind(merchantKey, kind, decidedOn)
 		.run();
+
 	return result.meta.changes > 0;
 }
 
@@ -103,13 +106,16 @@ export async function removeNeverSuggest(
 	{ id, merchantKey, kind }: { id: number; merchantKey: string; kind: string },
 ): Promise<{ rule: NeverSuggestRule; removedCount: number } | null> {
 	if (!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind)) return null;
+
 	const rule = await db
 		.prepare(
 			`${RULE_SELECT} WHERE r.id = ? AND r.merchant_key = ? AND r.kind = ?`,
 		)
 		.bind(id, merchantKey, kind)
 		.first<Row>();
+
 	if (!rule) return null;
+
 	const result = await db
 		.prepare(
 			`WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
@@ -118,6 +124,7 @@ export async function removeNeverSuggest(
 		)
 		.bind(rule.merchantKey, rule.kind)
 		.run();
+
 	return result.meta.changes > 0
 		? { rule: toRule(rule), removedCount: result.meta.changes }
 		: null;

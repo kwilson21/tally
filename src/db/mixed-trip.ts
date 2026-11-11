@@ -54,7 +54,9 @@ export function mixedCategories(tx: MixedTrip): {
 		tx.income === true
 	)
 		return null;
+
 	if (!looksMixed(tx.jevSaysMixed, tx.categorySource)) return null;
+
 	if (
 		tx.suggestedCategoryId === null ||
 		tx.suggestedCategoryName === null ||
@@ -62,6 +64,7 @@ export function mixedCategories(tx: MixedTrip): {
 		tx.alsoCategoryName === null
 	)
 		return null;
+
 	return {
 		first: { id: tx.suggestedCategoryId, name: tx.suggestedCategoryName },
 		second: { id: tx.alsoCategoryId, name: tx.alsoCategoryName },
@@ -77,11 +80,13 @@ export async function jevSaysMixedAmong(
 	ids: number[],
 ): Promise<boolean> {
 	if (ids.length === 0) return false;
+
 	const row = await db
 		.prepare(
 			`SELECT 1 AS hit FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${jevSaysMixedSql("t")} LIMIT 1`,
 		)
 		.bind(JSON.stringify(ids))
 		.first<{ hit: number }>();
+
 	return row !== null;
 }

@@ -28,6 +28,7 @@ async function addBank(
 ): Promise<number> {
 	const login = options.login ?? status === "needs_attention";
 	const held = options.held ?? false;
+
 	const row = await env.DB.prepare(
 		`INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, status, reconnect_emailed_at, sync_lock_id, attention_login, attention_held)
 		 VALUES (?, ?, 'person@example.com', ?, ?, ?, ?, ?) RETURNING id`,
@@ -42,6 +43,7 @@ async function addBank(
 			held ? 1 : 0,
 		)
 		.first<{ id: number }>();
+
 	return row?.id as number;
 }
 
@@ -176,6 +178,7 @@ describe("clearAttention", () => {
 			reminded: REMINDED,
 			held: true,
 		});
+
 		expect(await clearAttention(env.DB, id)).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "ok",
@@ -213,12 +216,14 @@ describe("clearAttention", () => {
 
 	it("retries a relink that races a webhook's flag, so the relink still lands", async () => {
 		const id = await addBank("ok");
+
 		// A relink on an ok bank is a completion: it writes the revision, and that write is where the race lands.
 		const db = raceBefore(
 			"UPDATE plaid_items SET connection_revision = connection_revision + 1",
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
 			id,
 		);
+
 		expect(await clearAttention(db, id)).toBe("changed");
 		expect((await rowOf(id))?.status).toBe("ok");
 	});
@@ -230,6 +235,7 @@ describe("markSyncSucceeded", () => {
 			reminded: REMINDED,
 			lockId: LOCK,
 		});
+
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "ok",
@@ -259,6 +265,7 @@ describe("markSyncSucceeded", () => {
 			reminded: REMINDED,
 			lockId: "newer-run",
 		});
+
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("lost-race");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
@@ -282,10 +289,12 @@ describe("readConnection", () => {
 	it("reads each state, and null for no bank", async () => {
 		const ok = await addBank("ok");
 		const login = await addBank("needs_attention");
+
 		const held = await addBank("needs_attention", {
 			login: false,
 			held: true,
 		});
+
 		const gone = await addBank("ok");
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
@@ -327,12 +336,14 @@ describe("disconnectStatement", () => {
 
 	it("runs inside a db.batch, as the last statement whose change count the disconnect route reads", async () => {
 		const id = await addBank("ok", { reminded: REMINDED });
+
 		const results = await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE plaid_items SET reconnect_emailed_at = NULL WHERE id = ?",
 			).bind(id),
 			disconnectStatement(env.DB, id),
 		]);
+
 		expect(results.map((result) => result.meta.changes)).toEqual([1, 1]);
 		expect((await rowOf(id))?.disconnected_at).not.toBeNull();
 	});
@@ -351,29 +362,38 @@ function raceBefore(
 ): D1Database {
 	const fired = options.fired ?? { count: 0 };
 	const times = options.times ?? 1;
+
 	const fire = async (target: D1Database) => {
 		fired.count += 1;
 		await target.prepare(before).bind(id).run();
 	};
+
 	return new Proxy(env.DB, {
 		get(target, prop) {
 			if (prop !== "prepare") {
 				const value = Reflect.get(target, prop);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			}
+
 			return (sql: string) => {
 				const statement = target.prepare(sql);
+
 				if (!sql.startsWith(prefix) || fired.count >= times) return statement;
+
 				return {
 					bind: (...values: unknown[]) => {
 						const bound = statement.bind(...values);
+
 						return {
 							run: async () => {
 								await fire(target);
+
 								return bound.run();
 							},
 							first: async () => {
 								await fire(target);
+
 								return bound.first();
 							},
 						};
@@ -386,6 +406,7 @@ function raceBefore(
 
 const WRITE_LOGIN_AND_NEEDS_RELINK =
 	"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 1";
+
 const WRITE_OK =
 	"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?";
 
@@ -405,11 +426,13 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	it("a login error racing a relink ends flagged for the login problem alone", async () => {
 		// The bank reads needs_relink. A relink makes it ok before the write; the retry sees ok and writes a login error.
 		const id = await addBank("needs_attention", { login: false, held: true });
+
 		const db = raceBefore(
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 1",
 			"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL WHERE id = ?",
 			id,
 		);
+
 		expect(await markNeedsAttention(db, id, "login")).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
@@ -421,6 +444,7 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	it("three consecutive lost races end in lost-race, after exactly three attempts", async () => {
 		const id = await addBank("ok");
 		const fired = { count: 0 };
+
 		// Every write loses: the held flag is flipped ahead of each attempt's guarded write.
 		const db = raceBefore(
 			"UPDATE plaid_items SET status = 'needs_attention'",
@@ -428,6 +452,7 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 			id,
 			{ times: 3, fired },
 		);
+
 		expect(await markNeedsAttention(db, id, "relink")).toBe("lost-race");
 		expect(fired.count).toBe(3);
 	});
@@ -435,12 +460,14 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	it("a caller that passed seen is not retried: its lost race comes back at once", async () => {
 		const id = await addBank("ok");
 		const fired = { count: 0 };
+
 		const db = raceBefore(
 			"UPDATE plaid_items SET status = 'needs_attention'",
 			"UPDATE plaid_items SET attention_held = 1 WHERE id = ?",
 			id,
 			{ times: 3, fired },
 		);
+
 		expect(
 			await markNeedsAttention(db, id, "relink", {
 				seen: { state: "ok", revision: 0 },
@@ -452,12 +479,14 @@ describe("a lost race is retried against the latest state (decision 173)", () =>
 	it("a sync holding its lease is not retried either", async () => {
 		const id = await addBank("needs_attention", { lockId: LOCK });
 		const fired = { count: 0 };
+
 		const db = raceBefore(
 			"UPDATE plaid_items SET status = 'ok'",
 			"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
 			id,
 			{ times: 3, fired },
 		);
+
 		expect(await markSyncSucceeded(db, id, LOCK)).toBe("lost-race");
 		// One attempt only: the lease is gone, so the store does not read and write again.
 		expect(fired.count).toBe(1);
@@ -468,11 +497,13 @@ describe("a sync's completion that loses a race (decision 173)", () => {
 	// The sync read an ok bank under its lease. A webhook or a relink changes the bank before the completion write.
 	it("a login error that lands before the completion is superseded: the bank ends ok, and the revision moves", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
+
 		const db = raceBefore(
 			"UPDATE plaid_items SET",
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
 			id,
 		);
+
 		expect(await markSyncSucceeded(db, id, LOCK)).toBe("changed");
 		expect(await rowOf(id)).toMatchObject({
 			status: "ok",
@@ -484,11 +515,13 @@ describe("a sync's completion that loses a race (decision 173)", () => {
 
 	it("a needs-relink flag that lands before the completion survives it, and stays flagged for a relink", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
+
 		const db = raceBefore(
 			"UPDATE plaid_items SET",
 			"UPDATE plaid_items SET status = 'needs_attention', attention_login = 0, attention_held = 1 WHERE id = ?",
 			id,
 		);
+
 		expect(await markSyncSucceeded(db, id, LOCK)).toBe("unchanged");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
@@ -501,12 +534,14 @@ describe("a sync's completion that loses a race (decision 173)", () => {
 	it("a lost lease in that window writes nothing, and the result is lost-race", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
 		const fired = { count: 0 };
+
 		const db = raceBefore(
 			"UPDATE plaid_items SET",
 			"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
 			id,
 			{ fired },
 		);
+
 		expect(await markSyncSucceeded(db, id, LOCK)).toBe("lost-race");
 		expect(fired.count).toBe(1);
 		expect(await rowOf(id)).toMatchObject({
@@ -519,6 +554,7 @@ describe("a sync's completion that loses a race (decision 173)", () => {
 	it("three consecutive state changes end lost-race after exactly three writes", async () => {
 		const id = await addBank("ok", { lockId: LOCK });
 		const fired = { count: 0 };
+
 		// Every completion write loses: the held flag is flipped just ahead of each attempt's write.
 		const db = raceBefore(
 			"UPDATE plaid_items SET",
@@ -526,6 +562,7 @@ describe("a sync's completion that loses a race (decision 173)", () => {
 			id,
 			{ times: 3, fired },
 		);
+
 		expect(await markSyncSucceeded(db, id, LOCK)).toBe("lost-race");
 		expect(fired.count).toBe(3);
 	});
@@ -552,6 +589,7 @@ describe("the connection revision (decision 173)", () => {
 			reminded: REMINDED,
 			lockId: LOCK,
 		});
+
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
@@ -581,6 +619,7 @@ describe("USER_PERMISSION_REVOKED is a relink, not a login problem (decision 173
 			reminded: REMINDED,
 			lockId: LOCK,
 		});
+
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",
@@ -657,6 +696,7 @@ describe("the two attention flags (decision 173)", () => {
 			reminded: REMINDED,
 			lockId: LOCK,
 		});
+
 		expect(await markSyncSucceeded(env.DB, id, LOCK)).toBe("unchanged");
 		expect(await rowOf(id)).toMatchObject({
 			status: "needs_attention",

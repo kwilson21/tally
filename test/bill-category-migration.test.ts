@@ -22,25 +22,30 @@ describe("migration 0026: bill categories", () => {
 		const paymentsKeep = `${payments}_keep`;
 		const suggestions = "bc_guard_category_suggestions";
 		const pre26 = env.TEST_MIGRATIONS;
+
 		const clean = (sql: string) =>
 			sql
 				.split("\n")
 				.filter((line) => !line.trim().startsWith("--"))
 				.join("\n")
 				.trim();
+
 		const pre17Rebuild =
 			/^(CREATE TABLE (transactions|bill_payments|bills)\b|ALTER TABLE (transactions|bills)\b|CREATE (UNIQUE )?INDEX \w+ ON (transactions|bill_payments)\b)/;
+
 		const prefixPre17 = (sql: string) =>
 			sql.replaceAll(
 				/\b(transactions|bill_payments|bills)(_\w+)?\b/g,
 				"bc_guard_$1$2",
 			);
+
 		const before17 = pre26
 			.filter((item) => item.name < "0017")
 			.flatMap((item) => item.queries)
 			.map(clean)
 			.filter((sql) => pre17Rebuild.test(sql))
 			.map(prefixPre17);
+
 		const through25 = pre26
 			.filter((item) =>
 				["0017", "0019", "0020", "0021", "0024", "0025"].some((version) =>
@@ -52,6 +57,7 @@ describe("migration 0026: bill categories", () => {
 			.map((sql) =>
 				prefixPre17(sql).replaceAll("category_suggestions", suggestions),
 			);
+
 		const transform = (sql: string) =>
 			sql
 				.replaceAll(/\btransactions_([a-z_]+)\b/g, `${tx}_$1`)
@@ -66,7 +72,9 @@ describe("migration 0026: bill categories", () => {
 				.replaceAll(/\bbill_payments\b/g, payments)
 				.replaceAll(/\bbills\b/g, bills)
 				.replaceAll("category_suggestions", suggestions);
+
 		const statement = (sql: string) => sql.replace(/;\s*$/, "");
+
 		const masterSql = async (type: string, name: string) =>
 			(
 				await env.DB.prepare(
@@ -75,15 +83,19 @@ describe("migration 0026: bill categories", () => {
 					.bind(type, name)
 					.first<{ sql: string }>()
 			)?.sql;
+
 		const accountId = (
 			await env.DB.prepare("SELECT id FROM accounts LIMIT 1").first<{
 				id: number;
 			}>()
 		)?.id;
+
 		expect(accountId).toBeDefined();
 		let sourceIndexes: { name: string; sql: string }[] = [];
+
 		const snapshot = async () => {
 			const tableSql = await masterSql("table", tx);
+
 			const indexes = (
 				await env.DB.prepare(
 					"SELECT name,sql FROM sqlite_master WHERE type='index' AND tbl_name=? ORDER BY name",
@@ -94,6 +106,7 @@ describe("migration 0026: bill categories", () => {
 				name,
 				sql: sql?.replaceAll('"', ""),
 			}));
+
 			const triggers = (
 				await env.DB.prepare(
 					"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name IN (?,?) ORDER BY name",
@@ -101,11 +114,14 @@ describe("migration 0026: bill categories", () => {
 					.bind(tx, payments)
 					.all()
 			).results;
+
 			const columns = (await env.DB.prepare(`PRAGMA table_info('${tx}')`).all())
 				.results;
+
 			const foreignKeys = (
 				await env.DB.prepare(`PRAGMA foreign_key_list('${tx}')`).all()
 			).results;
+
 			return {
 				tableSql: tableSql?.replaceAll('"', ""),
 				indexes,
@@ -114,6 +130,7 @@ describe("migration 0026: bill categories", () => {
 				foreignKeys,
 			};
 		};
+
 		const seed = [
 			env.DB.prepare(
 				`INSERT INTO ${bills}(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9950,'Guard bill',1000,10,'monthly',5,'GUARD BILL')`,
@@ -136,6 +153,7 @@ describe("migration 0026: bill categories", () => {
 					user_category: "user_category",
 					plain: "plain",
 				}[values];
+
 				const fields =
 					extra === "is_split"
 						? ",is_split"
@@ -150,6 +168,7 @@ describe("migration 0026: bill categories", () => {
 										: extra === "user_category"
 											? ",category_id,category_source"
 											: "";
+
 				const valueSql =
 					values === "is_split"
 						? ",1"
@@ -164,6 +183,7 @@ describe("migration 0026: bill categories", () => {
 										: values === "user_category"
 											? ",5,'user'"
 											: "";
+
 				return env.DB.prepare(
 					`INSERT INTO ${tx}(id,account_id,date,amount_cents,raw_name${fields}) VALUES(${id},${accountId},'2026-09-10',1000,'${raw}'${valueSql})`,
 				);
@@ -172,6 +192,7 @@ describe("migration 0026: bill categories", () => {
 				`INSERT INTO ${payments}(bill_id,period,transaction_id,matched_by,status) VALUES(9950,'2026-09',9956,'user','linked')`,
 			),
 		];
+
 		try {
 			await env.DB.batch(
 				[...before17, ...through25].map((sql) =>
@@ -187,21 +208,27 @@ describe("migration 0026: bill categories", () => {
 			).results;
 			await env.DB.batch(seed);
 			const before = await snapshot();
+
 			const rowsBefore = (
 				await env.DB.prepare(`SELECT * FROM ${tx} ORDER BY id`).all()
 			).results;
+
 			const migrationStatements = env.TEST_MIGRATIONS.find((item) =>
 				item.name.startsWith("0026_bill_category"),
 			)?.queries;
+
 			expect(migrationStatements).toBeDefined();
 			const statements = (migrationStatements ?? []).map(transform);
 			await env.DB.batch(statements.map((sql) => env.DB.prepare(sql)));
 			const after = await snapshot();
+
 			const rowsAfter = (
 				await env.DB.prepare(`SELECT * FROM ${tx} ORDER BY id`).all()
 			).results;
+
 			const normalizedTable = (sql: string) =>
 				sql.replaceAll(/\s+/g, "").replaceAll('"', "");
+
 			expect(normalizedTable(after.tableSql as string)).toBe(
 				normalizedTable(before.tableSql as string).replace(
 					"'user','merchant_rule','jev'",
@@ -253,6 +280,7 @@ describe("migration 0026: bill categories", () => {
 		const schema = await env.DB.prepare(
 			"SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'",
 		).first<{ sql: string }>();
+
 		expect(schema?.sql).toContain("'bill'");
 		expect(schema?.sql).toContain("jev_none_fit");
 		expect(schema?.sql).toContain("category_suggestion_id");
@@ -275,6 +303,7 @@ describe("migration 0026: bill categories", () => {
 		const backfill = migration.match(
 			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
 		)?.[0];
+
 		const triggers = [
 			migration.match(
 				/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
@@ -283,6 +312,7 @@ describe("migration 0026: bill categories", () => {
 				/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
 			)?.[0],
 		];
+
 		expect(backfill).toBeDefined();
 		expect(triggers.every(Boolean)).toBe(true);
 		await env.DB.batch([
@@ -313,6 +343,7 @@ describe("migration 0026: bill categories", () => {
 				"INSERT INTO bill_payments(id,bill_id,period,transaction_id,matched_by,status) VALUES(9920,9920,'2026-09',9920,'user','linked'),(9921,9920,'2026-10',9921,'user','linked'),(9922,9920,'2026-11',9922,'user','linked'),(9923,9920,'2026-12',9923,'user','linked'),(9924,9920,'2027-01',9924,'user','dismissed'),(9925,9921,'2026-09',9925,'user','linked')",
 			),
 		]);
+
 		try {
 			await env.DB.prepare(backfill as string).run();
 			expect(
@@ -348,7 +379,9 @@ describe("migration 0026: bill categories", () => {
 		const backfill = migration.match(
 			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
 		)?.[0];
+
 		expect(backfill).toBeDefined();
+
 		const categoryTriggers = [
 			migration.match(
 				/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
@@ -357,8 +390,10 @@ describe("migration 0026: bill categories", () => {
 				/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
 			)?.[0],
 		];
+
 		expect(categoryTriggers.every(Boolean)).toBe(true);
 		const sources = [null, "jev", "user", "merchant_rule"] as const;
+
 		const cells = sources.flatMap((source, sourceIndex) =>
 			[false, true].flatMap((linked) =>
 				[false, true].map((billHasCategory) => ({
@@ -373,6 +408,7 @@ describe("migration 0026: bill categories", () => {
 				})),
 			),
 		);
+
 		const inserts = cells.map(({ id, source }) =>
 			env.DB.prepare(
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source,category_confidence,jev_category_id,jev_none_fit,category_suggestion_id) SELECT ?,id,'2026-09-10',1000,?,?,?,0.75,3,1,9930 FROM accounts LIMIT 1",
@@ -383,7 +419,9 @@ describe("migration 0026: bill categories", () => {
 				source,
 			),
 		);
+
 		const linkedCells = cells.filter((cell) => cell.linked);
+
 		try {
 			await env.DB.batch([
 				env.DB.prepare("DROP TRIGGER bill_payment_category"),
@@ -407,15 +445,18 @@ describe("migration 0026: bill categories", () => {
 				),
 			]);
 			await env.DB.prepare(backfill as string).run();
+
 			const actual = (
 				await env.DB.prepare(
 					"SELECT id,category_id AS categoryId,category_source AS categorySource,category_confidence AS categoryConfidence,jev_category_id AS jevCategoryId,jev_none_fit AS jevNoneFit,category_suggestion_id AS categorySuggestionId FROM transactions WHERE id BETWEEN 9930 AND 9945 ORDER BY id",
 				).all()
 			).results;
+
 			expect(actual).toEqual(
 				cells.map(({ id, source, linked, billHasCategory }) => {
 					const changed =
 						linked && billHasCategory && (source === null || source === "jev");
+
 					return {
 						id,
 						categoryId: changed
@@ -453,12 +494,15 @@ describe("migration 0026: bill categories", () => {
 		const table = migration.match(
 			/CREATE TABLE transactions_new \([\s\S]*?\n\);/,
 		)?.[0];
+
 		const transactionCopy = migration.match(
 			/INSERT INTO transactions_new \([\s\S]*?FROM transactions;/,
 		)?.[0];
+
 		const paymentCopy = migration.match(
 			/INSERT INTO bill_payments \(id, bill_id, period, transaction_id, matched_by, status, created_at\)[\s\S]*?FROM bill_payments_keep;/,
 		)?.[0];
+
 		expect(table).toBeDefined();
 		expect(transactionCopy).toBeDefined();
 		expect(paymentCopy).toBeDefined();
@@ -467,13 +511,16 @@ describe("migration 0026: bill categories", () => {
 		const targetName = "bill_category_migration_target";
 		const sourcePayments = "bill_category_migration_source_payments";
 		const targetPayments = "bill_category_migration_target_payments";
+
 		const oldTable = (table as string)
 			.replaceAll("transactions_new", sourceName)
 			.replace("'jev', 'bill'", "'jev'");
+
 		const newTable = (table as string).replaceAll(
 			"transactions_new",
 			targetName,
 		);
+
 		const newPayments = (name: string, txTable: string) =>
 			`CREATE TABLE ${name} (id INTEGER PRIMARY KEY, bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE, period TEXT NOT NULL, transaction_id INTEGER NOT NULL REFERENCES ${txTable}(id) ON DELETE CASCADE, matched_by TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL)`;
 

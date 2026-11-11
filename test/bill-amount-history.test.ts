@@ -26,6 +26,7 @@ const post = (path: string, body: Record<string, string>) =>
 		},
 		body: new URLSearchParams(body),
 	});
+
 const get = async (path: string) =>
 	(await exports.default.fetch(BASE + path)).text();
 
@@ -46,6 +47,7 @@ async function amountRows() {
 	)
 		.bind(BILL)
 		.all<{ effectiveMonth: string; amountCents: number }>();
+
 	return results;
 }
 
@@ -176,14 +178,17 @@ describe("a bill's amount history", () => {
 			category_id: String(categoryId),
 			merchant_raw_name: "GYM CO",
 		});
+
 		const gym = await env.DB.prepare(
 			"SELECT id FROM bills WHERE name='Gym'",
 		).first<{ id: number }>();
+
 		const rows = await env.DB.prepare(
 			"SELECT effective_month AS effectiveMonth, amount_cents AS amountCents FROM bill_amounts WHERE bill_id=?",
 		)
 			.bind(gym?.id ?? 0)
 			.all();
+
 		expect(rows.results).toEqual([
 			{ effectiveMonth: "2026-10", amountCents: 4000 },
 		]);
@@ -197,11 +202,13 @@ describe("a bill's amount history", () => {
 			),
 		]);
 		await matchBillPayments(env.DB, TODAY);
+
 		const linked = await env.DB.prepare(
 			"SELECT period, transaction_id AS transactionId FROM bill_payments WHERE bill_id=? AND status='linked' ORDER BY period",
 		)
 			.bind(BILL)
 			.all();
+
 		expect(linked.results).toEqual([
 			{ period: "2026-09", transactionId: 9501 },
 			{ period: "2026-10", transactionId: 9502 },
@@ -221,6 +228,7 @@ describe("the demo's Netflix price history", () => {
 		const netflix = await env.DB.prepare(
 			"SELECT id FROM bills WHERE name='Netflix'",
 		).first<{ id: number }>();
+
 		const id = netflix?.id ?? 0;
 		expect(await get(`/bills/${id}`)).not.toContain("Price went");
 		// The sheet names what earlier months keep: the demo's $15.49 from its first month.
@@ -232,6 +240,7 @@ describe("the demo's Netflix price history", () => {
 		const offer = (await loadPriceOffers(env.DB, rows.rows)).get(id);
 		expect(row).toBeDefined();
 		expect(offer).toBeDefined();
+
 		const res = await post(
 			`/bills/${id}/occurrences/${row?.period ?? ""}/price/accept`,
 			{
@@ -241,6 +250,7 @@ describe("the demo's Netflix price history", () => {
 				current_cents: "1549",
 			},
 		);
+
 		expect(res.headers.get("HX-Trigger")).toContain("Bill updated to $17.99");
 		expect(await get(`/bills/${id}`)).toContain(
 			"Price went up to $17.99 in October",
@@ -265,6 +275,7 @@ const snapshot = async () => ({
 
 describe("the writes keep a bill's amount rows with the bill", () => {
 	let categoryId = 0;
+
 	const rowsOf = async (billId: number) =>
 		(
 			await env.DB.prepare(
@@ -273,12 +284,14 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 				.bind(billId)
 				.all<{ effectiveMonth: string; amountCents: number }>()
 		).results;
+
 	const amountOf = async (billId: number) =>
 		(
 			await env.DB.prepare("SELECT amount_cents FROM bills WHERE id=?")
 				.bind(billId)
 				.first<{ amount_cents: number }>()
 		)?.amount_cents;
+
 	const fields = (over: Partial<BillFields> = {}): BillFields => ({
 		name: "Netflix",
 		amountCents: 1549,
@@ -346,9 +359,11 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 				"2026-10-01",
 			),
 		).toBe(true);
+
 		const added = await env.DB.prepare(
 			"SELECT id FROM bills WHERE name='Old phone plan' AND active=1",
 		).first<{ id: number }>();
+
 		expect(await rowsOf(added?.id ?? 0)).toEqual([
 			{ effectiveMonth: "2026-10", amountCents: 3000 },
 		]);
@@ -371,12 +386,16 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 								"INSERT INTO bill_amounts(bill_id,effective_month,amount_cents) VALUES(?,'2026-10',1799)",
 							).bind(BILL),
 						]);
+
 						return env.DB.batch(statements);
 					};
+
 				const value = Reflect.get(target, prop);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as unknown as D1Database;
+
 		expect(
 			await updateBill(racing, BILL, fields({ dueDay: 5 }), false, "2026-10"),
 		).toBe(true);
@@ -415,12 +434,14 @@ describe("a price that moved after September went overdue", () => {
 	// Netflix: $100.00 in September, $120.00 from October on. Its September charge of $115.00 is unpaid,
 	// due September 28, and today is October 10, so September is the occurrence Bills shows, overdue.
 	const SEPT = "2026-09";
+
 	const offer = {
 		transactionId: 9601,
 		date: "2026-09-30",
 		amountCents: 11500,
 		merchant: "Netflix",
 	};
+
 	const linksOf = async () =>
 		(
 			await env.DB.prepare(
@@ -429,12 +450,14 @@ describe("a price that moved after September went overdue", () => {
 				.bind(BILL)
 				.all()
 		).results;
+
 	const amountOf = async () =>
 		(
 			await env.DB.prepare("SELECT amount_cents FROM bills WHERE id=?")
 				.bind(BILL)
 				.first<{ amount_cents: number }>()
 		)?.amount_cents;
+
 	const rowsOf = async () =>
 		(
 			await env.DB.prepare(
@@ -443,6 +466,7 @@ describe("a price that moved after September went overdue", () => {
 				.bind(BILL)
 				.all()
 		).results;
+
 	const accept = (currentCents: string) =>
 		post(`/bills/${BILL}/occurrences/${SEPT}/price/accept`, {
 			transaction_id: String(offer.transactionId),
@@ -456,12 +480,14 @@ describe("a price that moved after September went overdue", () => {
 		vi.setSystemTime(new Date("2026-10-10T16:00:00Z"));
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.prepare("DELETE FROM bills").run();
+
 		const categoryId =
 			(
 				await env.DB.prepare(
 					"SELECT id FROM categories WHERE archived=0 ORDER BY id LIMIT 1",
 				).first<{ id: number }>()
 			)?.id ?? 0;
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(?,'Netflix',12000,28,'monthly',?,'NETFLIX.COM')",
@@ -526,9 +552,11 @@ describe("a price that moved after September went overdue", () => {
 	it("shows the monthly share at the bill's current amount, and the overdue total at September's", async () => {
 		const page = await get("/bills");
 		expect(page).toContain("$120 a month in bills");
+
 		const overdueGroup =
 			page.split("<section").find((part) => part.includes(">Overdue</h2>")) ??
 			"";
+
 		expect(overdueGroup).toContain(
 			'<span class="ml-auto shrink-0 tabular-nums">$100.00',
 		);

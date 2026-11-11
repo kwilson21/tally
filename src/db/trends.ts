@@ -42,6 +42,7 @@ const TREND_SPEND_LEG = (
 		FROM transactions t
 		${COUNTED_JOINS}
 		WHERE ${where} AND ${COUNTED_SPENDING} AND ${COUNTED_MONTH} BETWEEN ?1 AND ?2`;
+
 export const TREND_SPEND_SQL = `SELECT month, categoryId, SUM(cents) AS cents FROM (
 		${TREND_SPEND_LEG("t.date >= ?3")}
 		UNION ALL
@@ -60,6 +61,7 @@ export async function loadTrends(
 ): Promise<TrendsInput> {
 	const days = sameDays(today);
 	const from = monthsBefore(days.month, TREND_MONTHS - 1);
+
 	// db.batch()'s return type is D1Result[], so the destructured elements are possibly undefined to
 	// noUncheckedIndexedAccess; the list below guarantees all five.
 	const [categories, amounts, spend, same, first] = (await db.batch([

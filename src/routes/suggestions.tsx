@@ -104,15 +104,20 @@ export function reviewAddress(
 	more?: number,
 ): string {
 	const query = new URLSearchParams();
+
 	for (const id of skipped) query.append("skip", id);
+
 	for (const id of again) query.append("again", id);
+
 	if (more !== undefined) query.set("more", String(more));
+
 	return query.size ? `${PATH}?${query}` : PATH;
 }
 
 /** The `more` address key as a purchase id, or undefined when it isn't one (an id only, never bank text). */
 function moreFrom(value: string | undefined): number | undefined {
 	if (value === undefined || !/^\d{1,15}$/.test(value)) return undefined;
+
 	return Number(value);
 }
 
@@ -123,6 +128,7 @@ function requestedKeys(
 	ids: Set<string>,
 ): string[] {
 	const requested = queryOf(url).getAll(key);
+
 	return [...new Set(requested)].filter(
 		(id) => QUEUE_ID.test(id) && ids.has(id),
 	);
@@ -151,6 +157,7 @@ function requestedReview(
 	const ids = new Set(queue.map((item) => item.id));
 	const skipped = requestedKeys(url, "skip", ids);
 	const skippedSet = new Set(skipped);
+
 	return {
 		skipped,
 		again: requestedKeys(url, "again", ids).filter((id) => skippedSet.has(id)),
@@ -187,7 +194,9 @@ async function storeLabels(
 	keys: string[],
 ): Promise<Map<string, string>> {
 	const labels = new Map(keys.map((key) => [key, tidyName(key)]));
+
 	if (keys.length === 0) return labels;
+
 	const { results } = await db
 		.prepare(
 			`SELECT raw_name AS key, display_name AS name FROM merchants
@@ -195,7 +204,9 @@ async function storeLabels(
 		)
 		.bind(JSON.stringify(keys))
 		.all<{ key: string; name: string }>();
+
 	for (const row of results) labels.set(row.key, row.name);
+
 	return labels;
 }
 
@@ -222,9 +233,12 @@ export async function writeNeverSuggest(
 		)
 		.bind(input.id, input.kind, input.today, JSON.stringify(input.stores))
 		.all<{ merchant_key: string }>();
+
 	const written = new Set(results.map((row) => row.merchant_key));
 	const known = input.stores.filter((store) => written.has(store));
+
 	if (known.length === 0) return null;
+
 	return joinStores([...(await storeLabels(db, known)).values()]);
 }
 
@@ -253,8 +267,10 @@ export async function askedStores(
 		.prepare(`SELECT key FROM (${neverSuggestAskedSql("new_category")})`)
 		.bind(id)
 		.all<{ key: string }>();
+
 	const keys = results.map((row) => row.key);
 	const labels = await storeLabels(db, keys);
+
 	return keys.map((key) => ({
 		merchantKey: key,
 		label: labels.get(key) ?? key,
@@ -302,24 +318,30 @@ function Screen({
 		more,
 		recheck,
 	} = input;
+
 	const skippedSet = new Set(skipped);
 	const againSet = new Set(again);
 	// The items not set aside come first. Then the skipped ones come back in queue order, and a second Skip
 	// on one of them sets it aside for good, so "You skipped the rest." shows once they are all set aside.
 	const firstPass = queue.filter((item) => !skippedSet.has(item.id));
+
 	const returned = queue.filter(
 		(item) => skippedSet.has(item.id) && !againSet.has(item.id),
 	);
+
 	const current =
 		(values && queue.find((item) => item.id === values.id)) ||
 		firstPass[0] ||
 		returned[0];
+
 	const position = current
 		? queue.findIndex((item) => item.id === current.id) + 1
 		: 0;
+
 	const total = queue.length;
 	// Every form posts to this screen's address, so the skips it was drawn with carry over.
 	const action = reviewAddress(skipped, again);
+
 	return (
 		<Layout
 			title="Suggestions · Tally"
@@ -440,17 +462,21 @@ async function renderScreen(
 ) {
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
+
 	const { skipped, again } = requestedReview(
 		options.reviewUrl ?? c.req.url,
 		queue,
 	);
+
 	const more =
 		options.more === undefined ? null : await moreLikeThis(db, options.more);
+
 	const categories = await db
 		.prepare(
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		)
 		.all<{ id: number; name: string }>();
+
 	if (options.toast) {
 		c.header(
 			"HX-Trigger",
@@ -463,6 +489,7 @@ async function renderScreen(
 			}),
 		);
 	}
+
 	return c.html(
 		<Screen
 			demo={c.env.DEMO === "true"}
@@ -523,11 +550,13 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 	const { skipped, again } = requestedReview(c.req.url, queue);
 	const id = c.req.query("id") ?? "";
 	const item = queue.find((candidate) => candidate.id === id);
+
 	// An answered or unknown item gets nothing: the name is read from the item here, never from the address.
 	if (item?.kind !== "category") return c.body(null);
 	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
 	const ai = (c.env as Env & { AI?: Ai }).AI;
 	const name = await suggestedCategoryName(db, ai, item);
+
 	// The name is asked and kept as it was (decision 161); a name that is the guess itself draws nothing (decision 166),
 	// the same empty answer as no name.
 	if (!name || isTheGuess(name, item.category)) return c.body(null);
@@ -543,6 +572,7 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 				: `Tally suggests a new category: ${name}`,
 		}),
 	);
+
 	return c.html(
 		<NewCategoryRow
 			action={reviewAddress(skipped, again)}
@@ -556,6 +586,7 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 
 // The names review it replaces: its address goes to the screen (the names it held are in the queue now).
 suggestions.get("/settings/names", (c) => c.redirect(PATH, 303));
+
 suggestions.post("/settings/names", (c) => c.redirect(PATH, 303));
 
 suggestions.post(PATH, async (c) => {
@@ -566,14 +597,17 @@ suggestions.post(PATH, async (c) => {
 	const who = actor(c as Context<App> & { env: Env & { DEMO: string } });
 	const today = await householdToday(db);
 	const queue = await suggestionQueue(db);
+
 	// A new category row (decision 156) posts to the screen's bare address, so its skips come from the page it was
 	// answered on (htmx sends that address as HX-Current-URL). Every other answer posts to the page's own address.
 	const reviewUrl =
 		answer === "create"
 			? (c.req.header("HX-Current-URL") ?? c.req.url)
 			: c.req.url;
+
 	const { skipped, again } = requestedReview(reviewUrl, queue);
 	const next = reviewAddress(skipped, again);
+
 	// `extra` is one more sentence for the announcer, such as what a create left out; the toast keeps its words.
 	// `more` is the purchase a create just filed: its "N more look like this" card, when others look like it (decision 157).
 	const done = (
@@ -584,6 +618,7 @@ suggestions.post(PATH, async (c) => {
 	) => {
 		if (!c.req.header("HX-Request"))
 			return c.redirect(reviewAddress(skipped, again, more), 303);
+
 		return renderScreen(c, {
 			reviewUrl,
 			more,
@@ -595,9 +630,12 @@ suggestions.post(PATH, async (c) => {
 			},
 		});
 	};
+
 	const stale = async () => {
 		const message = "That one was already answered.";
+
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
 		return renderScreen(c, {
 			reviewUrl,
 			focus: true,
@@ -608,6 +646,7 @@ suggestions.post(PATH, async (c) => {
 	// The question after a No: Yes writes one line per store, Not now writes nothing (decision 101).
 	if (answer === "ask_yes" || answer === "ask_not_now") {
 		const kind = form.get("kind")?.toString() ?? "";
+
 		// Each store once, however often the form repeats it (#440).
 		const stores = [
 			...new Set(
@@ -619,34 +658,43 @@ suggestions.post(PATH, async (c) => {
 					),
 			),
 		];
+
 		if (
 			!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind) ||
 			stores.length === 0
 		)
 			return stale();
+
 		if (answer === "ask_not_now") {
 			const message = "Kept it as it is.";
+
 			if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
 			return renderScreen(c, {
 				focus: true,
 				toast: { message, type: "info", announce: `${message} ${left(queue)}` },
 			});
 		}
+
 		// Only the question's own stores get a line, and only while the question is still current (decision 101): the
 		// check sits inside the INSERT, so a No that changes under this write writes nothing (#440). The statement
 		// returns the stores it wrote, so the toast names only those.
 		const found = /^(income|transfer|new)-(\d+)$/.exec(id);
+
 		if (!found || (found[1] === "new" ? "new_category" : found[1]) !== kind)
 			return stale();
+
 		const labels = await writeNeverSuggest(db, {
 			kind: kind as NeverSuggestKind,
 			id: Number(found[2]),
 			stores,
 			today,
 		});
+
 		if (labels === null) return stale();
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
+
 		return done(neverSuggestedMessage(kind as NeverSuggestKind, labels), after);
 	}
 
@@ -655,15 +703,19 @@ suggestions.post(PATH, async (c) => {
 	// the group as it is now: the ids posted are checked against it, never trusted.
 	if (answer === "more_skip") {
 		const message = "Left them as they are.";
+
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
 		return renderScreen(c, {
 			focus: true,
 			toast: { message, type: "info", announce: `${message} ${left(queue)}` },
 		});
 	}
+
 	if (answer === "more_add") {
 		const filedId = moreFrom(form.get("more")?.toString());
 		const category = moreFrom(form.get("category")?.toString());
+
 		const result =
 			filedId === undefined || category === undefined
 				? ({ ok: false, reason: "gone" } as const)
@@ -676,10 +728,13 @@ suggestions.post(PATH, async (c) => {
 							.filter(Number.isSafeInteger),
 						who,
 					});
+
 		if (!result.ok && result.reason === "changed") {
 			// The card was drawn before the purchase moved to another category: nothing moved, and the next screen shows.
 			const message = MORE_CHANGED;
+
 			if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
 			return renderScreen(c, {
 				reviewUrl,
 				focus: true,
@@ -690,16 +745,21 @@ suggestions.post(PATH, async (c) => {
 				},
 			});
 		}
+
 		if (!result.ok) return stale();
 		const after = await suggestionQueue(db);
 		const { skipped: decided } = result;
+
 		const changed =
 			decided === 0
 				? ""
 				: ` ${decided} ${decided === 1 ? "was" : "were"} changed somewhere else, so ${decided === 1 ? "it was" : "they were"} left alone.`;
+
 		if (result.moved === 0) {
 			const message = `Nothing moved.${changed}`;
+
 			if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
 			return renderScreen(c, {
 				reviewUrl,
 				focus: true,
@@ -710,10 +770,12 @@ suggestions.post(PATH, async (c) => {
 				},
 			});
 		}
+
 		return done(`Moved ${result.moved} to ${result.name}.${changed}`, after);
 	}
 
 	const item = queue.find((candidate) => candidate.id === id);
+
 	if (!item) return stale();
 
 	switch (item.kind) {
@@ -735,10 +797,13 @@ suggestions.post(PATH, async (c) => {
 						)
 						.bind(1, who, item.transactionId),
 				]);
+
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
+
 				return done(`Counted ${item.label} as income.`, after);
 			}
+
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
 				const [, result] = await db.batch([
@@ -756,7 +821,9 @@ suggestions.post(PATH, async (c) => {
 						)
 						.bind(item.transactionId),
 				]);
+
 				if ((result?.meta.changes ?? 0) === 0) return stale();
+
 				return askScreen(c, {
 					kind: "income",
 					id: item.id,
@@ -764,8 +831,10 @@ suggestions.post(PATH, async (c) => {
 					check: "Not counted as income",
 				});
 			}
+
 			break;
 		}
+
 		case "transfer": {
 			if (answer === "yes") {
 				const [, result] = await db.batch([
@@ -784,10 +853,13 @@ suggestions.post(PATH, async (c) => {
 						)
 						.bind(who, item.transactionId),
 				]);
+
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
+
 				return done(`Left ${item.label} out of the budget.`, after);
 			}
+
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
 				const [, result] = await db.batch([
@@ -805,7 +877,9 @@ suggestions.post(PATH, async (c) => {
 						)
 						.bind(item.transactionId),
 				]);
+
 				if ((result?.meta.changes ?? 0) === 0) return stale();
+
 				return askScreen(c, {
 					kind: "transfer",
 					id: item.id,
@@ -813,8 +887,10 @@ suggestions.post(PATH, async (c) => {
 					check: "Kept in the budget",
 				});
 			}
+
 			break;
 		}
+
 		case "category": {
 			if (answer === "yes") {
 				const [, result] = await db.batch([
@@ -833,19 +909,24 @@ suggestions.post(PATH, async (c) => {
 						)
 						.bind(who, item.transactionId, item.categoryId),
 				]);
+
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
+
 				return done(`Set ${item.label} to ${item.category}.`, after);
 			}
+
 			// The suggested new category, opened in place (decision 156): the typed name is checked as the category form
 			// checks it, a name the family already has files the purchase in that one, and the create and the filing are
 			// one batch. Nothing is made without this answer.
 			if (answer === "create") {
 				const typed = String(form.get("new_name") ?? "");
 				const target = newCategoryTarget(typed, await categoryNames(db));
+
 				if (!target.ok) {
 					// The limit is the card's message; a refused name is named by its own field (aria-invalid).
 					const limit = target.error === FULL_NEW_CATEGORY;
+
 					return renderScreen(c, {
 						reviewUrl,
 						values: {
@@ -858,14 +939,17 @@ suggestions.post(PATH, async (c) => {
 						focus: true,
 					});
 				}
+
 				const result = await fileInNewCategory(db, {
 					transactionId: item.transactionId,
 					target,
 					today,
 					who,
 				});
+
 				if (!result.ok) {
 					if (result.reason === "gone") return stale();
+
 					return renderScreen(c, {
 						reviewUrl,
 						values: { id, newName: typed },
@@ -874,6 +958,7 @@ suggestions.post(PATH, async (c) => {
 						focus: true,
 					});
 				}
+
 				// Only a new category starts the re-check (decision 157): an Add to changes nothing the run would sort.
 				// The card's same-text peers (the "N more look like this" offer) are read before the run starts and kept out of
 				// it, so the card still offers them to the person (#842 round 2).
@@ -885,7 +970,9 @@ suggestions.post(PATH, async (c) => {
 							).map((row) => row.id),
 						})
 					: null;
+
 				const after = await suggestionQueue(db);
+
 				return done(
 					result.created
 						? `Made ${result.name} and set ${item.label} to it.`
@@ -895,8 +982,10 @@ suggestions.post(PATH, async (c) => {
 					item.transactionId,
 				);
 			}
+
 			if (answer === "else") {
 				const chosen = Number(form.get("category")?.toString() ?? "");
+
 				const category = Number.isInteger(chosen)
 					? await db
 							.prepare(
@@ -905,6 +994,7 @@ suggestions.post(PATH, async (c) => {
 							.bind(chosen)
 							.first<{ id: number; name: string }>()
 					: null;
+
 				if (!category)
 					return renderScreen(c, {
 						values: { id },
@@ -912,6 +1002,7 @@ suggestions.post(PATH, async (c) => {
 						status: 422,
 						focus: true,
 					});
+
 				const [, result] = await db.batch([
 					db
 						.prepare(
@@ -931,36 +1022,46 @@ suggestions.post(PATH, async (c) => {
 						)
 						.bind(category.id, who, item.transactionId, category.id),
 				]);
+
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
+
 				return done(`Set ${item.label} to ${category.name}.`, after);
 			}
+
 			break;
 		}
+
 		case "new_category": {
 			if (answer === "yes") {
 				// Only the rows this question shows can be filed, whatever an older form posted (decision 101).
 				const asked = new Set(item.rows.map((row) => row.transactionId));
+
 				const shown = form
 					.getAll("shown")
 					.map((value) => Number(value.toString()))
 					.filter((n) => Number.isInteger(n) && asked.has(n));
+
 				const ticked = form
 					.getAll("ticked")
 					.map((value) => Number(value.toString()))
 					.filter((n) => Number.isInteger(n) && asked.has(n));
+
 				// The note under an unticked purchase is kept with the answer, as Settings keeps it (decision 120).
 				const notes = Object.fromEntries(
 					shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
 				);
+
 				const result = await createFromSuggestion(
 					db,
 					item.suggestionId,
 					{ ticked, shown, notes },
 					who,
 				);
+
 				if (!result.ok) {
 					if (result.reason === "gone") return stale();
+
 					return renderScreen(c, {
 						values: { id, ticked, notes },
 						error:
@@ -970,6 +1071,7 @@ suggestions.post(PATH, async (c) => {
 						focus: true,
 					});
 				}
+
 				await askAgainLeftOut(
 					c.env as Env & { JEV_API_KEY?: string },
 					result.leftOut,
@@ -978,6 +1080,7 @@ suggestions.post(PATH, async (c) => {
 				// Only a new category starts the re-check (decision 157): a restore or an Add to changes nothing it would sort.
 				const created = !result.attached && !result.restored;
 				const [filedId] = result.filed;
+
 				const rechecking =
 					created && filedId !== undefined
 						? await startResortFor(
@@ -989,12 +1092,15 @@ suggestions.post(PATH, async (c) => {
 								},
 							)
 						: null;
+
 				const after = await suggestionQueue(db);
+
 				const message = result.restored
 					? `Restored ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`
 					: result.attached
 						? `Added ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"} to ${result.name}.`
 						: `Made ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`;
+
 				return done(
 					message,
 					after,
@@ -1006,9 +1112,12 @@ suggestions.post(PATH, async (c) => {
 						.join(" "),
 				);
 			}
+
 			if (answer === "no") {
 				const dismissed = await dismissSuggestion(db, item.suggestionId);
+
 				if (!dismissed) return stale();
+
 				return askScreen(c, {
 					kind: "new_category",
 					id: item.id,
@@ -1019,44 +1128,57 @@ suggestions.post(PATH, async (c) => {
 					})),
 				});
 			}
+
 			break;
 		}
+
 		case "name": {
 			const review = item.review;
 			// A charge with its own name keeps it when the merchant is named, so only the others change (decision 101).
 			const changed = review.count - review.owned;
+
 			if (answer === "yes") {
 				const value: NameChoice = {
 					kind: "name",
 					name: review.names[0] ?? review.tidied,
 				};
+
 				const settled = await settleSuggestion(db, item.merchantKey, value);
+
 				if (!settled) return stale();
 				const after = await suggestionQueue(db);
+
 				return done(savedMessage(value, changed), after);
 			}
+
 			if (answer === "else") {
 				const picked = form.get("name_pick")?.toString() ?? null;
 				const own = form.get("merchant")?.toString().trim() ?? "";
 				const choice = readChoice(review, picked, own);
+
 				if (!choice.ok)
 					return renderScreen(c, {
 						values: { id, picked, own },
 						error: choice.error,
 						status: 422,
 					});
+
 				const settled = await settleSuggestion(
 					db,
 					item.merchantKey,
 					choice.value,
 				);
+
 				if (!settled) return stale();
 				const after = await suggestionQueue(db);
+
 				return done(savedMessage(choice.value, changed), after);
 			}
+
 			break;
 		}
 	}
+
 	return stale();
 });
 
@@ -1080,16 +1202,21 @@ function readChoice(
 	if (picked === OWN_VALUE) {
 		if (own === "")
 			return { ok: false, error: "Type a name here, or pick one above." };
+
 		if (own.length > DISPLAY_NAME_MAX)
 			return {
 				ok: false,
 				error: `Keep the name under ${DISPLAY_NAME_MAX} characters.`,
 			};
+
 		return { ok: true, value: { kind: "name", name: own } };
 	}
+
 	if (picked === STORE_VALUE) return { ok: true, value: { kind: "keep" } };
 	const name = review.names.find((n) => pickValue(n) === picked);
+
 	if (name) return { ok: true, value: { kind: "name", name } };
+
 	return {
 		ok: false,
 		error: picked
@@ -1104,10 +1231,12 @@ function readChoice(
  */
 function savedMessage(choice: NameChoice, changed: number): string {
 	const word = changed === 1 ? "transaction" : "transactions";
+
 	if (changed === 0)
 		return choice.kind === "keep"
 			? "Kept the bank's name for the transactions that come later"
 			: `Saved ${choice.name} for the transactions that come later`;
+
 	return choice.kind === "keep"
 		? `Kept the bank's name for ${changed} ${word}`
 		: `Renamed ${changed} ${word} to ${choice.name}`;

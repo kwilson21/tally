@@ -8,9 +8,11 @@ import { buildTrends, TREND_MONTHS } from "../src/trends";
 
 const db = env.DB;
 const TODAY = "2026-10-05";
+
 const MONTHS = Array.from({ length: TREND_MONTHS }, (_, i) =>
 	monthsBefore("2026-10", TREND_MONTHS - 1 - i),
 );
+
 const GROCERIES = 1;
 const EATING_OUT = 2;
 const GAS = 3;
@@ -18,22 +20,27 @@ const KIDS = 4;
 const HOUSEHOLD = 5;
 
 type Spend = { month: string; categoryId: number | null; cents: number };
+
 const key = (r: { month: string; categoryId: number | null }) =>
 	`${r.month}|${r.categoryId ?? "none"}`;
+
 const byKey = (rows: Spend[]) =>
 	Object.fromEntries(rows.map((r) => [key(r), r.cents]));
 
 /** Home's spending per category and month: loadMonth's rows, income left out (home.tsx's `spent`). */
 async function homeSpending(): Promise<Record<string, number>> {
 	const spent: Record<string, number> = {};
+
 	for (const month of MONTHS) {
 		const { transactions } = await loadMonth(db, month);
+
 		for (const t of transactions) {
 			if (t.income) continue;
 			const k = key({ month, categoryId: t.categoryId });
 			spent[k] = (spent[k] ?? 0) + t.amountCents;
 		}
 	}
+
 	return spent;
 }
 
@@ -117,9 +124,11 @@ describe("loadTrends counts spending as Home does", () => {
 
 		it("counts last month's days 1 to today's, by the date a transaction is dated", async () => {
 			const { sameDays } = await loadTrends(db, TODAY);
+
 			const byCategory = Object.fromEntries(
 				sameDays.map((r) => [String(r.categoryId), r.cents]),
 			);
+
 			// Sep 3 ($10) and Sep 5 ($5) in Groceries, not Sep 6 or Sep 20; the split's parts and the
 			// reviewed credit (Sep 4); not the late bill, dated Oct 2 though counted in September; not
 			// the refund, which counts in August.
@@ -205,6 +214,7 @@ describe("the six-month window's edge", () => {
 		const data = await loadTrends(db, TODAY);
 		expect(data.sameDays).toEqual([{ categoryId: HOUSEHOLD, cents: 5000 }]);
 		const page = buildTrends(data);
+
 		if (page.kind !== "full")
 			throw new Error(`expected full, got ${page.kind}`);
 		expect(page.changes.find((c) => c.name === "Household")).toMatchObject({
@@ -219,9 +229,11 @@ describe("the six-month window's edge", () => {
 
 	it("counts a refund dated before the window whose purchase counts in it, as Home does", async () => {
 		const { spend } = await loadTrends(db, TODAY);
+
 		const may = spend.find(
 			(r) => r.month === "2026-05" && r.categoryId === KIDS,
 		);
+
 		expect(may?.cents).toBe(8000);
 		// Moving the refund's date further back changes nothing: it follows its purchase.
 		await db
@@ -237,6 +249,7 @@ describe("the six-month window's edge", () => {
 			.prepare(`EXPLAIN QUERY PLAN ${TREND_SPEND_SQL}`)
 			.bind("2026-05", "2026-10", "2026-05-01")
 			.all<{ detail: string }>();
+
 		const plan = results.map((r) => r.detail).join("\n");
 		expect(plan).toMatch(/SEARCH t USING (COVERING )?INDEX transactions_date/);
 		expect(plan).toMatch(

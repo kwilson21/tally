@@ -30,6 +30,7 @@ describe("withScreenshots", () => {
 	it("replaces only the marked section, keeping text before and after", () => {
 		const body =
 			"Intro\n\n<!-- screenshots:start -->\nold\n<!-- screenshots:end -->\n\nOutro";
+
 		expect(withScreenshots(body, SECTION)).toBe(`Intro\n\n${SECTION}\n\nOutro`);
 	});
 });
@@ -37,6 +38,7 @@ describe("withScreenshots", () => {
 describe("PAGES", () => {
 	it("covers every navigation destination plus More", () => {
 		const paths = PAGES.map((p) => p.path);
+
 		for (const item of SIDEBAR_ITEMS) expect(paths).toContain(item.href);
 		expect(paths).toContain("/more");
 	});
@@ -210,6 +212,7 @@ describe("shownFiles", () => {
 
 	it("stores exactly the images the description links", () => {
 		const raw = "https://raw.example/pr-9/abc1234";
+
 		const changes = [
 			{ before: ["settings-phone.png"], after: ["settings-phone.png"] },
 			{ before: [], after: ["feedback-desktop.png"] },
@@ -221,21 +224,26 @@ describe("shownFiles", () => {
 				],
 			},
 		];
+
 		const section = screenshotSection({
 			sha: "abc1234def",
 			raw,
 			changes,
 		});
+
 		const linked = [...section.matchAll(/src="([^"]+)"/g)]
 			.map((match) => match[1])
 			.sort();
+
 		const shown = shownFiles(changes);
+
 		const stored = [
 			...shown.after,
 			...shown.before.map((file) => `before/${file}`),
 		]
 			.map((path) => `${raw}/${path}`)
 			.sort();
+
 		expect(linked).toEqual(stored);
 	});
 });
@@ -250,8 +258,10 @@ describe("pixelsAlike", () => {
 		height = 10,
 	) => {
 		const data = new Uint8Array(width * height * channels);
+
 		for (let i = 0; i < data.length; i++)
 			data[i] = value(Math.floor(i / channels), i % channels);
+
 		return { width, height, channels, data };
 	};
 
@@ -268,6 +278,7 @@ describe("pixelsAlike", () => {
 		const b = picture(3, (pixel, channel) =>
 			pixel === 0 && channel === 0 ? 99 : 50,
 		);
+
 		expect(
 			pixelsAlike(
 				picture(3, () => 50),
@@ -280,6 +291,7 @@ describe("pixelsAlike", () => {
 		const b = picture(3, (pixel, channel) =>
 			pixel === 0 && channel === 0 ? 98 : 50,
 		);
+
 		expect(
 			pixelsAlike(
 				picture(3, () => 50),
@@ -345,6 +357,7 @@ describe("pixelsAlike", () => {
 		const b = picture(4, (pixel, channel) =>
 			pixel === 0 && channel === 3 ? 99 : 50,
 		);
+
 		expect(
 			pixelsAlike(
 				picture(4, () => 50),
@@ -409,6 +422,7 @@ describe("screenshotSection", () => {
 				},
 			],
 		});
+
 		expect(section).toContain("## Before and after");
 		expect(section).toContain(
 			'<img src="https://raw.example/pr-9/abc1234/before/transaction-edit-phone.png"',
@@ -426,6 +440,7 @@ describe("screenshotSection", () => {
 			...base,
 			changes: [{ before: [], after: ["settings-desktop.png"] }],
 		});
+
 		expect(section).toMatch(/`\/settings` \(desktop\) \| New page \|/);
 	});
 
@@ -481,6 +496,7 @@ describe("screenshotSection for a page taken in slices (#580)", () => {
 				},
 			],
 		});
+
 		expect(section).toContain(
 			'| `/design-system/proposals` (phone, part 2) | <img src="https://raw.example/pr-9/abc1234/before/design-system-proposals-phone-02.png" width="180"',
 		);
@@ -489,8 +505,10 @@ describe("screenshotSection for a page taken in slices (#580)", () => {
 
 describe("screenshotSection when a page's capture changed shape (#580)", () => {
 	const base = { sha: "abc1234def", raw: "https://raw.example/pr-9/abc1234" };
+
 	const img = (path: string, alt: string) =>
 		`<img src="https://raw.example/pr-9/abc1234/${path}" width="180" alt="${alt}">`;
+
 	const changedRows = (changes: { before: string[]; after: string[] }[]) =>
 		screenshotSection({ ...base, changes });
 
@@ -504,6 +522,7 @@ describe("screenshotSection when a page's capture changed shape (#580)", () => {
 				],
 			},
 		]);
+
 		expect(section).toContain(
 			`| \`/design-system/proposals\` (phone)<br>Taken differently: whole on \`main\`, in 2 parts in this PR. | ${img("before/design-system-proposals-phone.png", "design-system-proposals-phone.png, before")} | ${img("design-system-proposals-phone-01.png", "design-system-proposals-phone-01.png, after")}<br>${img("design-system-proposals-phone-02.png", "design-system-proposals-phone-02.png, after")} |`,
 		);
@@ -521,6 +540,7 @@ describe("screenshotSection when a page's capture changed shape (#580)", () => {
 				after: ["design-system-proposals-phone.png"],
 			},
 		]);
+
 		expect(section).toContain(
 			`| \`/design-system/proposals\` (phone)<br>Taken differently: in 2 parts on \`main\`, whole in this PR. | ${img("before/design-system-proposals-phone-01.png", "design-system-proposals-phone-01.png, before")}<br>${img("before/design-system-proposals-phone-02.png", "design-system-proposals-phone-02.png, before")} | ${img("design-system-proposals-phone.png", "design-system-proposals-phone.png, after")} |`,
 		);
@@ -536,6 +556,7 @@ describe("screenshotSection when a page's capture changed shape (#580)", () => {
 				],
 			},
 		]);
+
 		expect(section.split("New page")).toHaveLength(2);
 		expect(section).toContain(
 			`| \`/design-system/proposals\` (phone) | New page | ${img("design-system-proposals-phone-01.png", "design-system-proposals-phone-01.png, after")}<br>${img("design-system-proposals-phone-02.png", "design-system-proposals-phone-02.png, after")} |`,
@@ -551,6 +572,7 @@ describe("screenshotSection when there's nothing to compare", () => {
 			changes: [],
 			unavailable: "The screenshots of `main` didn't finish.",
 		});
+
 		expect(section).toContain(
 			"No before-and-after this time: The screenshots of `main` didn't finish.",
 		);

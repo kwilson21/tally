@@ -44,11 +44,13 @@ const words = (text: string) =>
 function strip(word: string): string {
 	let depth = 0;
 	let start = 0;
+
 	for (let i = 0; i < word.length; i++) {
 		if (word[i] === "[") depth++;
 		else if (word[i] === "]") depth--;
 		else if (word[i] === ":" && depth === 0) start = i + 1;
 	}
+
 	return word.slice(start).replace(/^!/, "");
 }
 
@@ -57,9 +59,11 @@ const utilities = (text: string) => words(text).map(strip).filter(Boolean);
 
 const PALETTE =
 	"white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
+
 const COLOR_UTILITY = new RegExp(
 	`^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-((${PALETTE})(-\\d+)?(/\\d+)?|\\[(#|rgb|hsl|oklch|color|var).*|\\[[a-z]+\\](/\\d+)?)$`,
 );
+
 const RADIUS = /^-?rounded(-(t|r|b|l|s|e|tl|tr|br|bl|ss|se|es|ee))?(-(.+))?$/;
 const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
 
@@ -99,6 +103,7 @@ const CORNER_SHAPE =
 function cornerShapeProblems(file: string, text: string): string[] {
 	if (file in CORNER_SHAPE_EXCEPTIONS) return [];
 	const found = stripComments(text).match(CORNER_SHAPE)?.[0];
+
 	return found ? [`${found}: only the squircle rule in app.css sets it`] : [];
 }
 
@@ -113,10 +118,13 @@ function cssRules(text: string): CssRule[] {
 	const rules: CssRule[] = [];
 	const open: { header: string; start: number; leaf: boolean }[] = [];
 	let boundary = 0;
+
 	for (let i = 0; i < text.length; i++) {
 		const c = text[i];
+
 		if (c === "{") {
 			const parent = open[open.length - 1];
+
 			if (parent) parent.leaf = false;
 			open.push({
 				header: text.slice(boundary, i).replace(/\s+/g, " ").trim(),
@@ -126,6 +134,7 @@ function cssRules(text: string): CssRule[] {
 			boundary = i + 1;
 		} else if (c === "}") {
 			const block = open.pop();
+
 			if (block?.leaf)
 				rules.push({
 					selector: block.header,
@@ -135,6 +144,7 @@ function cssRules(text: string): CssRule[] {
 			boundary = i + 1;
 		} else if (c === ";") boundary = i + 1;
 	}
+
 	return rules;
 }
 
@@ -152,15 +162,18 @@ function squircleSelectors(rule: CssRule | undefined) {
 	const classes: string[] = [];
 	const variants: string[] = [];
 	const unreadable: string[] = [];
+
 	for (const selector of (rule?.selector ?? "")
 		.split(",")
 		.map((x) => x.trim())) {
 		const asClass = selector.match(/^\.([a-z-]+)$/);
 		const asVariant = selector.match(/^\[class\*="(:[a-z-]+)"\]$/);
+
 		if (asClass?.[1]) classes.push(asClass[1]);
 		else if (asVariant?.[1]) variants.push(asVariant[1]);
 		else unreadable.push(selector);
 	}
+
 	return { classes, variants, unreadable };
 }
 
@@ -170,6 +183,7 @@ function squircleSelectors(rule: CssRule | undefined) {
  */
 function reaches(classAttr: string): boolean {
 	const { classes, variants } = squircleSelectors(cornerRules[0]);
+
 	return (
 		classes.some((c) => classAttr.split(/\s+/).includes(c)) ||
 		variants.some((v) => classAttr.includes(v))
@@ -194,7 +208,9 @@ const SIDES = [
 	"-br",
 	"-bl",
 ];
+
 const TOKEN_NAMES = ["control", "sheet"];
+
 /**
  * Variants as Tailwind writes them in front of a class, from none to a stack and arbitrary ones. Only
  * variants that keep the radius on the element carrying the class: the selector sets corner-shape on
@@ -234,6 +250,7 @@ function variantsOf(word: string): string[] {
 	const parts: string[] = [];
 	let depth = 0;
 	let start = 0;
+
 	for (let i = 0; i < word.length; i++) {
 		if (word[i] === "[") depth++;
 		else if (word[i] === "]") depth--;
@@ -242,6 +259,7 @@ function variantsOf(word: string): string[] {
 			start = i + 1;
 		}
 	}
+
 	return parts;
 }
 
@@ -283,6 +301,7 @@ function pillsMadeSquircle(text: string): string[] {
 		const ws = literal.slice(1, -1).split(/\s+/);
 		const pills = ws.filter((w) => strip(w) === "rounded-full");
 		const tokens = ws.filter((w) => TOKEN_RADIUS.test(strip(w)));
+
 		return (
 			pills.length > 0 &&
 			tokens.length > 0 &&
@@ -294,19 +313,25 @@ function pillsMadeSquircle(text: string): string[] {
 function problems(file: string, text: string): string[] {
 	const allowed = EXCEPTIONS[file] ?? [];
 	const found: string[] = [];
+
 	for (const word of words(text)) {
 		// An exception names the exact class, variant and all, so the same corner elsewhere still fails.
 		if (allowed.includes(word)) continue;
 		const u = strip(word);
+
 		if (!u) continue;
+
 		if (COLOR_UTILITY.test(u)) found.push(`${u}: colors come from tokens`);
 		const radius = u.match(RADIUS);
+
 		// "rounded" alone must also be a class here, not part of a word like "roundedUp".
 		if (radius && !TOKEN_RADII.has(radius[4] ?? ""))
 			found.push(`${u}: radii are rounded-control, -sheet or -full`);
+
 		if (/^(drop-|inset-|text-)?shadow(-|$)/.test(u))
 			found.push(`${u}: no shadows except toasts`);
 	}
+
 	return found;
 }
 
@@ -316,6 +341,7 @@ describe("design tokens (DESIGN.md)", () => {
 			({ selector, body }) =>
 				selector === "html" && body.includes("scroll-padding-bottom"),
 		);
+
 		expect(scrollRules).toHaveLength(1);
 		const rule = scrollRules[0];
 		expect(
@@ -342,6 +368,7 @@ describe("design tokens (DESIGN.md)", () => {
 		const footRules = cssRules(stripCssComments(css)).filter(
 			({ selector }) => selector === "html:has(#setup-foot)",
 		);
+
 		expect(footRules).toHaveLength(1);
 		const rule = footRules[0];
 		expect(rule?.within).toContain("@media (max-width: 63.999rem)");
@@ -359,6 +386,7 @@ describe("design tokens (DESIGN.md)", () => {
 		const all = Object.entries(SOURCES).flatMap(([file, text]) =>
 			problems(file, text).map((p) => `${file}: ${p}`),
 		);
+
 		expect(all).toEqual([]);
 	});
 
@@ -392,23 +420,29 @@ describe("design tokens (DESIGN.md)", () => {
 
 		it("reaches every class the two tokens produce, with any variant in front that keeps the radius on the element", () => {
 			const missed: string[] = [];
+
 			for (const name of TOKEN_NAMES)
 				for (const side of SIDES)
 					for (const variant of VARIANTS) {
 						const cls = `${variant}rounded${side}-${name}`;
+
 						if (!reaches(cls)) missed.push(cls);
+
 						// Next to other classes, as in a real class attribute.
 						if (!reaches(`flex ${cls} px-4`)) missed.push(`flex ${cls} px-4`);
 					}
+
 			expect(missed).toEqual([]);
 		});
 
 		it("reaches every rounded-control and rounded-sheet class used in src/ and public/js/", () => {
 			const used = new Set<string>();
+
 			for (const text of Object.values(SOURCES))
 				for (const word of words(text))
 					if (/(^|:)!?rounded(-[a-z]{1,2})?-(control|sheet)!?$/.test(word))
 						used.add(word);
+
 			// The scan sees the plain, side and variant forms the app uses.
 			for (const name of [
 				"rounded-control",
@@ -461,6 +495,7 @@ describe("design tokens (DESIGN.md)", () => {
 					cls,
 					true,
 				]);
+
 			for (const cls of [
 				"rounded-control",
 				"lg:rounded-l-sheet",
@@ -473,10 +508,12 @@ describe("design tokens (DESIGN.md)", () => {
 				"placeholder-shown:rounded-control",
 			])
 				expect([cls, movesRadiusElsewhere(cls)]).toEqual([cls, []]);
+
 			// Read from source, where an arbitrary variant keeps its ">" and its brackets.
 			const found = usedTokenClasses(
 				'<div class="flex [&>*]:rounded-control px-2"><p class={`flex [&_p]:rounded-t-sheet`}>',
 			);
+
 			expect(found).toEqual(["[&>*]:rounded-control", "[&_p]:rounded-t-sheet"]);
 			expect(found.every((cls) => movesRadiusElsewhere(cls).length > 0)).toBe(
 				true,
@@ -492,6 +529,7 @@ describe("design tokens (DESIGN.md)", () => {
 						`${file}: ${literal}: the squircle rule matches at every width and state, so a pill paired with a token radius in a variant is a squircle; use one or the other`,
 				),
 			);
+
 			expect(found).toEqual([]);
 		});
 
@@ -503,6 +541,7 @@ describe("design tokens (DESIGN.md)", () => {
 				"<span class={`flex rounded-full sm:rounded-t-sheet px-2`}>",
 			])
 				expect(pillsMadeSquircle(text)).toHaveLength(1);
+
 			for (const text of [
 				'<span class="rounded-full px-2">',
 				'<span class="lg:rounded-l-sheet bg-band">',
@@ -530,6 +569,7 @@ describe("design tokens (DESIGN.md)", () => {
 				expect([cls, reaches(cls)]).toEqual([cls, false]);
 			// Every rounded-full in the code, in any variant, is one the rule doesn't reach.
 			const full = new Set<string>();
+
 			for (const text of Object.values(SOURCES))
 				for (const word of words(text))
 					if (strip(word) === "rounded-full") full.add(word);
@@ -541,6 +581,7 @@ describe("design tokens (DESIGN.md)", () => {
 			const html = String(
 				Chip({ type: "radio", name: "category", value: "1", children: "Gas" }),
 			);
+
 			const label = html.match(/<label class="([^"]*)"/)?.[1] ?? "";
 			expect(label.split(/\s+/)).toContain("rounded-full");
 			expect(reaches(label)).toBe(false);
@@ -550,7 +591,9 @@ describe("design tokens (DESIGN.md)", () => {
 			const all = Object.entries(SOURCES).flatMap(([file, text]) =>
 				cornerShapeProblems(file, text).map((p) => `${file}: ${p}`),
 			);
+
 			expect(all).toEqual([]);
+
 			// Each exception has a reason and still uses the property, so a stale one is removed.
 			for (const [file, reason] of Object.entries(CORNER_SHAPE_EXCEPTIONS)) {
 				expect(reason.length).toBeGreaterThan(20);
@@ -593,6 +636,7 @@ describe("design tokens (DESIGN.md)", () => {
 		const tokens = new Set(
 			[...css.matchAll(/--color-([\w-]+):/g)].map(([, name]) => name),
 		);
+
 		/**
 		 * Words after a color prefix that aren't colors: sizes, alignment, wrapping, sides, line
 		 * styles, background size, position, repeat and attachment, the transparent, current and
@@ -604,6 +648,7 @@ describe("design tokens (DESIGN.md)", () => {
 				" ",
 			),
 		);
+
 		/**
 		 * Families of utilities that aren't colors, each only after its own prefix:
 		 * "bg-blend-multiply", "bg-repeat-x", "border-spacing-2", "divide-x-reverse".
@@ -613,30 +658,40 @@ describe("design tokens (DESIGN.md)", () => {
 			border: /^spacing(-|$)/,
 			divide: /^(x|y)(-|$)/,
 		};
+
 		/** Prefixes whose next word is a color of its own: "ring-offset-paper", "text-shadow-sm". */
 		const COLOR_AFTER: Record<string, string> = {
 			ring: "offset-",
 			outline: "offset-",
 			text: "shadow-",
 		};
+
 		const SHADOW_SIZES = new Set(["xs", "sm", "md", "lg", "none"]);
+
 		const NAMED =
 			/^(bg|text|border(-[trblxyse])?|fill|stroke|ring|outline|divide|decoration|placeholder|caret|accent|from|via|to)-([a-z][a-z-]*?)(\/\d+)?$/;
+
 		const offToken = (u: string) => {
 			const match = u.match(NAMED);
+
 			if (!match?.[1] || !match[3]) return false;
 			const prefix = match[1].startsWith("border") ? "border" : match[1];
 			const inner = COLOR_AFTER[prefix];
+
 			const name =
 				inner && match[3].startsWith(inner)
 					? match[3].slice(inner.length)
 					: match[3];
+
 			if (NOT_COLOR_FAMILIES[prefix]?.test(name)) return false;
+
 			// A text shadow's size: "text-shadow-md" (only there; "bg-md" is no color).
 			if (inner === "shadow-" && name !== match[3] && SHADOW_SIZES.has(name))
 				return false;
+
 			return !tokens.has(name) && !NOT_COLORS.has(name);
 		};
+
 		expect(
 			[
 				"text-error",
@@ -685,11 +740,13 @@ describe("design tokens (DESIGN.md)", () => {
 				"text-shadow-md",
 			].filter(offToken),
 		).toEqual([]);
+
 		const found = Object.entries(SOURCES).flatMap(([file, text]) =>
 			utilities(text)
 				.filter(offToken)
 				.map((u) => `${file}: ${u}`),
 		);
+
 		expect(found).toEqual([]);
 	});
 
@@ -754,6 +811,7 @@ describe("design tokens (DESIGN.md)", () => {
 				),
 			).toEqual([]);
 		}
+
 		expect(
 			problems("x.tsx", 'primary: "min-h-11 rounded bg-ink"'),
 		).toHaveLength(1);
@@ -779,6 +837,7 @@ describe("design tokens (DESIGN.md)", () => {
 				/--color-([\w-]+):\s*(#[0-9a-f]{6}|color-mix\([^;]*\))\s*;/gi,
 			),
 		].map(([, name, value]) => [name, (value ?? "").toLowerCase()]);
+
 		expect(theme.length).toBeGreaterThan(10);
 		expect(COLOR_TOKENS.map((t) => [t.name, t.hex.toLowerCase()])).toEqual(
 			theme,
@@ -789,6 +848,7 @@ describe("design tokens (DESIGN.md)", () => {
 		const theme = [...css.matchAll(/--duration-([\w-]+):\s*([\d.]+m?s)/g)].map(
 			([, name, value]) => [name, value],
 		);
+
 		expect(theme.length).toBeGreaterThan(5);
 		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
 	});
@@ -830,6 +890,7 @@ describe("the press token and the rows that open (P118 A)", () => {
 	it("holds the press token once in DESIGN.md and app.css, with the proposal's wording gone from DESIGN.md, app.css and tokens.ts", () => {
 		expect(design.match(/^\| press\b/gm)).toHaveLength(1);
 		expect(css.match(/--color-press:/g)).toHaveLength(1);
+
 		for (const source of [design, css, tokensSource]) {
 			expect(source).not.toContain("proposed in P118");
 			expect(source).not.toContain("not used by the app yet");
@@ -860,6 +921,7 @@ describe("tabular figures (decision 128)", () => {
 	it("sets no tabular figures on html, so hyphenated words and prose keep Inter's normal figures", () => {
 		const roots = cssRules(css).filter(({ selector }) => selector === "html");
 		expect(roots.length).toBeGreaterThan(0);
+
 		for (const rule of roots)
 			expect(rule.body).not.toContain("font-variant-numeric");
 	});

@@ -26,9 +26,12 @@ import { questionsOpen, readGateInputs } from "./gate";
 import { EMAIL_AFTER_PUSH_MS, EMAIL_AWAY_AFTER_MS } from "./home-seen";
 
 const SUBJECT = "Three questions to finish setting up";
+
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
+
 const BUTTON = "Finish setting up";
+
 /**
  * Setup (decision 148): the ready email's button and the ready push's link open it, and it moves on to the questions once
  * they're open (setup's route, src/routes/setup.tsx).
@@ -133,12 +136,14 @@ type LegacyTry = { line: string; at: string };
 /** The kept tries still stored as only a read line, by the address's hash (none in a record that keeps whole emails). */
 function legacyTriesOf(record: FirstTally | null): [string, LegacyTry][] {
 	const tries: [string, LegacyTry][] = [];
+
 	for (const [hash, entry] of Object.entries(record?.heldReadyEmail ?? {})) {
 		const { mail, line, at } = entry as {
 			mail?: unknown;
 			line?: unknown;
 			at?: unknown;
 		};
+
 		if (
 			mail === undefined &&
 			typeof line === "string" &&
@@ -146,6 +151,7 @@ function legacyTriesOf(record: FirstTally | null): [string, LegacyTry][] {
 		)
 			tries.push([hash, { line, at }]);
 	}
+
 	return tries;
 }
 
@@ -159,6 +165,7 @@ async function keepLegacyTries(
 	record: FirstTally | null,
 ): Promise<void> {
 	const tries = legacyTriesOf(record);
+
 	if (tries.length === 0) return;
 	await db.batch(
 		tries.map(([hash, { line, at }]) =>
@@ -201,6 +208,7 @@ async function sha256Hex(text: string): Promise<string> {
 		"SHA-256",
 		new TextEncoder().encode(text),
 	);
+
 	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
@@ -224,17 +232,24 @@ async function keptTryOf(
 	address: string,
 ): Promise<KeptTry | null> {
 	const row = await db.prepare(HELD_SQL).first<{ held: string | null }>();
+
 	if (!row?.held) return null;
+
 	const entry = (JSON.parse(row.held) as Record<string, unknown>)[
 		await addressHashOf(address)
 	];
+
 	if (typeof entry !== "object" || entry === null) return null;
 	const { mail, line, at } = entry as Record<string, unknown>;
+
 	if (typeof at !== "string") return null;
+
 	if (mail === undefined && typeof line === "string")
 		return { mail: renderReadyEmail(line), at };
+
 	if (typeof mail !== "object" || mail === null) return null;
 	const { subject, html, text } = mail as Record<string, unknown>;
+
 	return typeof subject === "string" &&
 		typeof html === "string" &&
 		typeof text === "string"
@@ -248,6 +263,7 @@ async function keptTryOf(
  */
 function keptTooOld(kept: KeptTry, nowMs: number): boolean {
 	const since = Date.parse(kept.at);
+
 	return !Number.isFinite(since) || nowMs - since > HELD_DROP_AFTER_MS;
 }
 
@@ -259,9 +275,11 @@ export function readLine(banks: { name: string }[], total: number): string {
 	const names = [...new Set(banks.map((bank) => bank.name))];
 	const from = names.length > 3 ? `${banks.length} banks` : andList(names);
 	let sorted = "";
+
 	if (total === 1) sorted = " and sorted 1 transaction";
 	else if (total > 1)
 		sorted = ` and sorted all ${total.toLocaleString("en-US")} transactions`;
+
 	return `Tally has read your last 90 days from ${from}${sorted}.`;
 }
 
@@ -293,8 +311,10 @@ export function renderReadyEmail(read: string): Mail {
 	const text = `${SUBJECT}\n\n${read}\n\n${NEXT}\n\n${BUTTON}: ${LINK}\n\n${FOOT}`;
 	// The component has no async parts, so its JSX node renders synchronously to a string.
 	const html = (<ReadyEmail read={read} />).toString();
+
 	if (typeof html !== "string")
 		throw new Error("The ready email must render without async parts");
+
 	return { subject: SUBJECT, html, text };
 }
 
@@ -309,6 +329,7 @@ export async function openRead(
 ): Promise<string | null> {
 	if (anyQuestionAnswered(record)) return null;
 	const { banks, waiting } = await readGateInputs(db);
+
 	if (
 		!questionsOpen({
 			strokeOneDay: record?.strokes.bank ?? null,
@@ -317,8 +338,10 @@ export async function openRead(
 		})
 	)
 		return null;
+
 	const total =
 		(await db.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
+
 	return readLine(banks, total);
 }
 
@@ -351,21 +374,26 @@ export async function runReadyEmail(
 	// fixed whatever this minute does (decision 147); a record without one writes nothing here.
 	const record = await readFirstTally(env.DB);
 	await keepLegacyTries(env.DB, record);
+
 	// A family whose questions are answered (or set up before this shipped), or with no stroke one day (which questionsOpen
 	// needs, so nothing could be sent), stops here. Everyone else costs one read each minute.
 	if (anyQuestionAnswered(record) || (record?.strokes.bank ?? null) === null)
 		return;
+
 	if ((await currentRead(env)) === null) return;
 	const recipients = (await reconnectRecipients(env.DB)).results;
 	let claimedCount = 0;
 	let sentCount = 0;
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
+
 	for (const { email: recipient } of recipients) {
 		const read = await currentRead(env);
+
 		if (read === null) break;
 		const hash = await addressHashOf(recipient);
 		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient, hash).run();
+
 		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, its
 		// person is still on a first-week page, or their readyPushedAt stamp is under EMAIL_AFTER_PUSH_MS old (a push in flight, one
 		// that reached a device, or a claim whose stamp could not be removed). Each is skipped.
@@ -375,6 +403,7 @@ export async function runReadyEmail(
 		// The kept try for this address, if a try Resend may hold kept one (decision 146). Its stored email is sent again, through
 		// Resend only; otherwise this read's email goes out, and a failure that Resend may not hold keeps nothing (RELEASE_SQL).
 		const kept = await keptTryOf(env.DB, recipient);
+
 		if (kept && keptTooOld(kept, Date.now())) {
 			// Resend keeps the key for a day, so a later try could be a new send: nothing more is sent. The address stays reached.
 			await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
@@ -382,9 +411,11 @@ export async function runReadyEmail(
 			failureKinds.add(HELD_OVER_A_DAY);
 			continue;
 		}
+
 		// One Mail for this address: its words give the key and are the body Resend is sent. A kept try's stored Mail is that
 		// email, so its key never changes with the code.
 		const mail = kept ? kept.mail : renderReadyEmail(read);
+
 		const outcome = await deliver(
 			env,
 			recipient,
@@ -394,21 +425,28 @@ export async function runReadyEmail(
 			await readyEmailKey(recipient, mail),
 			{ onlyResend: kept !== null },
 		);
+
 		if (outcome.delivered) {
 			sentCount += 1;
+
 			// Reached: its kept try is no longer needed.
 			if (kept) await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
 			continue;
 		}
+
 		failedCount += 1;
+
 		for (const kind of outcome.kinds) failureKinds.add(kind);
+
 		// A try Resend may hold keeps its whole email and the time of its first such try, which a later held try never moves. Any
 		// other failure keeps nothing.
 		const keep = outcome.held
 			? JSON.stringify({ mail, at: kept?.at ?? isoSecond(Date.now()) })
 			: null;
+
 		await env.DB.prepare(RELEASE_SQL).bind(recipient, hash, keep).run();
 	}
+
 	if (claimedCount > 0)
 		logDeliveries("ready email", sentCount, failedCount, failureKinds);
 }

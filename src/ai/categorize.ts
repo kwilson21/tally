@@ -59,6 +59,7 @@ export type JevResult =
  */
 function retryAfter(response: Response): { retryAfterMs?: number } {
 	const seconds = response.headers.get("retry-after") ?? "";
+
 	return /^\d+$/.test(seconds) ? { retryAfterMs: Number(seconds) * 1000 } : {};
 }
 
@@ -76,6 +77,7 @@ const NOTE_WORTH_QUESTION =
  */
 const MIXED_QUESTION =
 	"Does this trip look like it spans more than one of these categories, such as a store trip for groceries and household items?";
+
 const ALSO_CATEGORY_QUESTION =
 	"If this trip spans more than one of these categories, which other one is it, besides the category you picked? Choose none if the trip is all one category.";
 
@@ -109,6 +111,7 @@ export async function askJev(
 					]
 				: []),
 	].join(" ");
+
 	const body = {
 		model: "jev-latest",
 		state: {
@@ -200,6 +203,7 @@ export async function askJev(
 	};
 
 	let response: Response;
+
 	try {
 		response = await fetchImpl(JEV_URL, {
 			method: "POST",
@@ -215,6 +219,7 @@ export async function askJev(
 	}
 
 	const requestId = response.headers.get("x-typesafe-request-id");
+
 	if (!response.ok)
 		return {
 			ok: false,
@@ -233,6 +238,7 @@ export async function askJev(
 			: [],
 		Boolean(options.details),
 	);
+
 	return answer
 		? { ok: true, answer }
 		: { ok: false, status: response.status, requestId };
@@ -252,9 +258,11 @@ function parseAnswer(
 ): JevAnswer | null {
 	const answers = (data as { answers?: Record<string, unknown> } | null)
 		?.answers;
+
 	const category = answers?.category as
 		| { choice?: unknown; confidence?: unknown }
 		| undefined;
+
 	if (
 		category &&
 		(typeof category.choice !== "string" ||
@@ -263,39 +271,51 @@ function parseAnswer(
 	) {
 		return null;
 	}
+
 	if (!category && options.length > 0) return null;
 	const flags = {} as Record<Flag, number>;
+
 	for (const flag of Object.keys(FLAG_QUESTIONS) as Flag[]) {
 		const noul = (answers?.[flag] as { noul?: unknown } | undefined)?.noul;
+
 		if (!isProbability(noul)) return null;
 		flags[flag] = noul;
 	}
+
 	const choice = (key: string, allowed: string[]) => {
 		const item = answers?.[key] as
 			| { choice?: unknown; confidence?: unknown }
 			| undefined;
+
 		if (!item) return undefined;
+
 		return typeof item.choice === "string" &&
 			allowed.includes(item.choice) &&
 			isProbability(item.confidence)
 			? { label: item.choice, confidence: item.confidence }
 			: undefined;
 	};
+
 	const kind = choice("kind", kinds);
 	const forPerson = choice("for_person", people);
+
 	if (kinds.length && !kind) return null;
+
 	if (people.length && !forPerson) return null;
 	// The mixed-trip reading (#233) is kept only when its probability and the other category both came back; a
 	// missing or unknown one leaves it out and never fails the category answer, as the note answer does.
 	const alsoCategory = choice("also_category", options);
 	const mixedNoul = (answers?.mixed as { noul?: unknown } | undefined)?.noul;
+
 	const mixed =
 		alsoCategory && isProbability(mixedNoul)
 			? { probability: mixedNoul, also: alsoCategory.label }
 			: undefined;
+
 	const noteWorth = (
 		answers?.note_worth_writing as { noul?: unknown } | undefined
 	)?.noul;
+
 	return {
 		category: category
 			? {

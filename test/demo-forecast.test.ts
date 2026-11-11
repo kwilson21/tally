@@ -27,6 +27,7 @@ async function homeOn(today: string): Promise<string> {
 	vi.setSystemTime(new Date(`${today}T12:00:00Z`));
 	await resetDemo(env.DB, today);
 	const res = await exports.default.fetch("http://tally.test/");
+
 	return res.text();
 }
 
@@ -35,7 +36,9 @@ function forecastOf(html: string): { direction: string; cents: number } {
 	const match = html.match(
 		/where it ends at this pace: \$([\d,]+) (under|over) the /,
 	);
+
 	if (!match) throw new Error("Home shows no forecast");
+
 	return {
 		direction: match[2] ?? "",
 		cents: Number((match[1] ?? "0").replaceAll(",", "")) * 100,
@@ -50,7 +53,9 @@ function safeToSpendOf(html: string): number {
 	const match = html.match(
 		/Safe to spend[\s\S]*?<\/p><p[^>]*><span class="whitespace-nowrap">(−?)\$([\d,]+)(?:\.(\d{2}))?/,
 	);
+
 	if (!match) throw new Error("Home shows no Safe to spend");
+
 	return (
 		(match[1] === "−" ? -1 : 1) *
 		(Number((match[2] ?? "0").replaceAll(",", "")) * 100 +
@@ -64,14 +69,18 @@ async function categoryOn(
 	name: string,
 ): Promise<{ spentCents: number; budgetCents: number; leftCents: number }> {
 	const data = await loadMonth(env.DB, month);
+
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents: 0,
 		savingsGoalCents: data.savingsGoalCents,
 	});
+
 	const category = summary.categories.find((c) => c.name === name);
+
 	if (!category) throw new Error(`${name} has no budget`);
+
 	return category;
 }
 
@@ -83,22 +92,27 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 		async (month) => {
 			const last = daysInMonth(month);
 			const failures: string[] = [];
+
 			for (let day = 7; day <= last; day++) {
 				const today = `${month}-${String(day).padStart(2, "0")}`;
 				const html = await homeOn(today);
 				const forecast = forecastOf(html);
 				const overage = -(await categoryOn(month, "Eating Out")).leftCents;
+
 				// Whole dollars, as the forecast is shown: an "over" may not exceed Eating Out's overage rounded up.
 				const agrees =
 					forecast.direction === "under" ||
 					(overage > 0 && forecast.cents <= Math.ceil(overage / 100) * 100);
+
 				if (!agrees)
 					failures.push(
 						`${today}: forecast ${forecast.direction} $${forecast.cents / 100}, Eating Out over $${Math.max(0, overage) / 100}`,
 					);
 				const safe = safeToSpendOf(html);
+
 				if (safe < 0) failures.push(`${today}: Safe to spend $${safe / 100}`);
 			}
+
 			expect(failures).toEqual([]);
 		},
 		60_000,
@@ -110,6 +124,7 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 			const html = await homeOn(
 				`${month}-${String(daysInMonth(month)).padStart(2, "0")}`,
 			);
+
 			expect(html).not.toContain("Over budget this month");
 			expect(html).toMatch(/text-lg italic">[^<]*(on track|over)\./);
 			expect(
@@ -121,19 +136,26 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 
 	it("tells the story's dates: Eating Out over from the 13th, Gas near its limit from the 20th", async () => {
 		const month = "2026-10";
+
 		const onDay = async (day: number) => {
 			await homeOn(`${month}-${String(day).padStart(2, "0")}`);
+
 			return categoryOn(month, "Eating Out");
 		};
+
 		const gasOn = async (day: number) => {
 			await homeOn(`${month}-${String(day).padStart(2, "0")}`);
+
 			return categoryOn(month, "Gas");
 		};
+
 		expect((await onDay(12)).leftCents).toBeGreaterThanOrEqual(0);
 		expect((await onDay(13)).leftCents).toBeLessThan(0);
+
 		const near = (gas: { spentCents: number; budgetCents: number }) =>
 			gas.spentCents <= gas.budgetCents &&
 			gas.spentCents * 5 >= gas.budgetCents * 4;
+
 		expect(near(await gasOn(19))).toBe(false);
 		expect(near(await gasOn(20))).toBe(true);
 	});

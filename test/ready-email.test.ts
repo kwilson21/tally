@@ -21,8 +21,10 @@ import type { Mail } from "../src/reconnect/deliver";
 
 const STROKE_ONE = "2026-10-13";
 const SUBJECT = "Three questions to finish setting up";
+
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
+
 const FOOT = "Tally sends this once, to everyone in your family who uses it.";
 const LINK = "https://tally.thesuperhuman.us/setup";
 const DANA = "dana@example.com";
@@ -43,6 +45,7 @@ const keyOf = (init: RequestInit | undefined) =>
 function resendFake(status = 200) {
 	const sent: Sent[] = [];
 	const keys: (string | null)[] = [];
+
 	const fetchImpl = vi.fn(
 		async (_url: RequestInfo | URL, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body)) as Sent;
@@ -53,9 +56,11 @@ function resendFake(status = 200) {
 				text: body.text,
 			});
 			keys.push(keyOf(init));
+
 			return new Response("{}", { status });
 		},
 	);
+
 	return { fetchImpl, sent, keys };
 }
 
@@ -75,16 +80,20 @@ async function keyFor(address: string, mail: Mail) {
 			]),
 		),
 	);
+
 	const hex = [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
+
 	return `ready-email-${hex}`;
 }
 
 /** The first email Resend was sent, which a test takes its words from. */
 function firstMail(sent: Sent[]): Mail {
 	const mail = sent[0];
+
 	if (!mail) throw new Error("Resend was sent no email");
+
 	return mail;
 }
 
@@ -131,11 +140,13 @@ async function addBank(
 			disconnected ? "2026-10-13 10:00:00" : null,
 		)
 		.run();
+
 	const account = await env.DB.prepare(
 		"INSERT INTO accounts (plaid_item_id, name, mask, type, balance_cents) VALUES (?, 'Checking', '4521', 'depository', 0)",
 	)
 		.bind(id)
 		.run();
+
 	return Number(account.meta.last_row_id);
 }
 
@@ -200,7 +211,9 @@ async function openHousehold({
 	const accountId = await addBank(1, "Chase");
 	await saveAiSwitches(env.DB, { categories: false, income: false });
 	await writeRecord(record);
+
 	for (const email of members) await addMember(email);
+
 	return accountId;
 }
 
@@ -211,9 +224,12 @@ function failingOn(needle: string): D1Database {
 			if (prop === "prepare")
 				return (sql: string) => {
 					if (sql.includes(needle)) throw new Error("boom");
+
 					return target.prepare(sql);
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -227,6 +243,7 @@ async function hashOf(address: string) {
 		"SHA-256",
 		new TextEncoder().encode(address.toLowerCase()),
 	);
+
 	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
@@ -245,6 +262,7 @@ async function stampAgo(when: string): Promise<string> {
 	)
 		.bind(when)
 		.first<{ t: string }>();
+
 	return row?.t ?? "";
 }
 
@@ -256,6 +274,7 @@ describe("the ready email: who gets it, and when", () => {
 		const { fetchImpl, sent } = resendFake();
 		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
+
 		for (const mail of sent) {
 			expect(mail.subject).toBe(SUBJECT);
 			expect(mail.html).toContain(`>${SUBJECT}<`);
@@ -274,6 +293,7 @@ describe("the ready email: who gets it, and when", () => {
 			expect(mail.text).toContain(`Finish setting up: ${LINK}`);
 			expect(mail.text).toContain(FOOT);
 		}
+
 		expect(await storedList()).toEqual([DANA, RILEY]);
 	});
 
@@ -288,15 +308,18 @@ describe("the ready email: who gets it, and when", () => {
 	it("claims each address before its email is sent, so a send that is underway already shows as reached", async () => {
 		await openHousehold({ members: [DANA] });
 		const reachedAtSend: boolean[] = [];
+
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
 				reachedAtSend.push(
 					((await readFirstTally(env.DB))?.readyEmailedTo ?? []).includes(to),
 				);
+
 				return new Response("{}", { status: 200 });
 			},
 		);
+
 		await runReadyEmail(production(), fetchImpl);
 		expect(reachedAtSend).toEqual([true]);
 	});
@@ -416,17 +439,22 @@ describe("the ready email: who is still there (decision 146)", () => {
 	/** A database whose prepared statements are counted, so a run's reads can be counted. */
 	function countingDb() {
 		const statements: string[] = [];
+
 		const db = new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop === "prepare")
 					return (sql: string) => {
 						statements.push(sql);
+
 						return target.prepare(sql);
 					};
+
 				const value = Reflect.get(target, prop, target);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		return { db, statements };
 	}
 
@@ -577,15 +605,19 @@ describe("the ready email: a run that overlaps another", () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const second = resendFake();
 		const first = resendFake();
+
 		// While the first run sends to Dana, a second run reads the list (Dana is claimed, Riley is not) and sends to Riley.
 		// The first run then reaches Riley from its own, older list: the claim must refuse her, so she is sent it once.
 		const firstFetch = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
+
 				if (to === DANA) await runReadyEmail(production(), second.fetchImpl);
+
 				return first.fetchImpl(url, init);
 			},
 		);
+
 		await runReadyEmail(production(), firstFetch);
 		expect(second.sent.map((mail) => mail.to)).toEqual([RILEY]);
 		expect(first.sent.map((mail) => mail.to)).toEqual([DANA]);
@@ -597,14 +629,18 @@ describe("the ready email: a question answered during a run", () => {
 	it("sends nothing more once a question is answered: the address being sent to is kept, and the next is not sent", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const { fetchImpl, sent } = resendFake();
+
 		// While the email to Dana is delivered, the family answers the pay question. Riley is then never sent to, nor reached.
 		const answeredDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
+
 				if (to === DANA) await markStroke(env.DB, "pay", "2026-10-14");
+
 				return fetchImpl(url, init);
 			},
 		);
+
 		await runReadyEmail(production(), answeredDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
@@ -649,14 +685,18 @@ describe("the ready email: the gate and the members, checked before each address
 	it("stops once a bank is linked whose history is not in yet: the next address is not sent", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const { fetchImpl, sent } = resendFake();
+
 		// While the email to Dana is delivered, a bank is linked and its 90-day history is still loading.
 		const linkedDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
+
 				if (to === DANA) await addBank(2, "Ally", { history: false });
+
 				return fetchImpl(url, init);
 			},
 		);
+
 		await runReadyEmail(production(), linkedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
@@ -665,13 +705,17 @@ describe("the ready email: the gate and the members, checked before each address
 	it("sends the next address the words of the banks as they are then, when a bank is linked with its history in", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const { fetchImpl, sent } = resendFake();
+
 		const linkedDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
+
 				if (to === DANA) await addBank(2, "Ally");
+
 				return fetchImpl(url, init);
 			},
 		);
+
 		await runReadyEmail(production(), linkedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
 		expect(sent[0]?.text).toContain("from Chase.");
@@ -682,19 +726,23 @@ describe("the ready email: the gate and the members, checked before each address
 	it("never sends to a member removed while an earlier send was waiting, and never records her as reached", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const { fetchImpl, sent } = resendFake();
+
 		// While the email to Dana is delivered, Riley leaves the family in Settings. Her turn is then skipped.
 		const removedDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
+
 				if (to === DANA)
 					await env.DB.prepare(
 						"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
 					)
 						.bind(RILEY)
 						.run();
+
 				return fetchImpl(url, init);
 			},
 		);
+
 		await runReadyEmail(production(), removedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
@@ -720,9 +768,11 @@ describe("the ready email: the gate and the members, checked before each address
 describe("the ready push's claim holds the email in the same write (decision 149)", () => {
 	it("the push's claim takes the person and stamps the time in one write, so the email's claim changes no row straight after", async () => {
 		await openHousehold();
+
 		const push = await env.DB.prepare(PUSH_CLAIM_SQL)
 			.bind(DANA, await hashOf(DANA))
 			.run();
+
 		expect(push.meta.changes).toBe(1);
 		const record = await readFirstTally(env.DB);
 		expect(record?.readyPushedTo).toEqual([DANA]);
@@ -830,11 +880,13 @@ describe("the ready email: delivery", () => {
 
 	it("releases the address when neither provider delivers, so the next minute sends it again", async () => {
 		await openHousehold();
+
 		const email = {
 			send: vi.fn(async () => {
 				throw new Error("down");
 			}),
 		};
+
 		await runReadyEmail(
 			production({ EMAIL: email }),
 			resendFake(500).fetchImpl,
@@ -848,12 +900,15 @@ describe("the ready email: delivery", () => {
 
 	it("keeps only the delivered address when one of two fails, and the next run sends only to the other", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
+
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
+
 				return new Response("{}", { status: to === DANA ? 500 : 200 });
 			},
 		);
+
 		await runReadyEmail(production(), fetchImpl);
 		expect(await storedList()).toEqual([RILEY]);
 		const next = resendFake();
@@ -865,9 +920,11 @@ describe("the ready email: delivery", () => {
 	it("releases the address when Resend times out and no Cloudflare binding is set", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const timedOut = vi.fn(async () => {
 			throw new Error("timeout");
 		});
+
 		await runReadyEmail(production(), timedOut);
 		expect(await storedList()).toEqual([]);
 		expect(log).toHaveBeenCalledWith(
@@ -900,13 +957,16 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 	it("releases the address on a timeout even with Cloudflare's email set, so no fallback sends and the next minute retries with the same key", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+
 			const timedOut = vi.fn(
 				async (_url: RequestInfo | URL, _init?: RequestInit) => {
 					throw new Error("timeout");
 				},
 			);
+
 			await runReadyEmail(production({ EMAIL: { send } }), timedOut);
 			expect(send).not.toHaveBeenCalled();
 			expect(await storedList()).toEqual([]);
@@ -925,13 +985,16 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 	it("a retry with the same words is answered with Resend's record of the first send, so the email is not sent twice and Cloudflare's email sends nothing", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+
 			const first = vi.fn(
 				async (_url: RequestInfo | URL, _init?: RequestInit) => {
 					throw new Error("timeout");
 				},
 			);
+
 			await runReadyEmail(production({ EMAIL: { send } }), first);
 			const again = resendFake(200);
 			await runReadyEmail(production({ EMAIL: { send } }), again.fetchImpl);
@@ -946,6 +1009,7 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 	it("tries again on a 409 concurrent_idempotent_requests: the first send may still fail, so nothing is kept reached and nothing is sent by Cloudflare", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
 			await runReadyEmail(
@@ -995,6 +1059,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			"SHA-256",
 			new TextEncoder().encode(address.toLowerCase()),
 		);
+
 		return [...new Uint8Array(digest)]
 			.map((byte) => byte.toString(16).padStart(2, "0"))
 			.join("");
@@ -1079,7 +1144,9 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 	describe("a kept try goes through Resend only, for up to a day (decision 146)", () => {
 		const HELD_LINE =
 			"Tally has read your last 90 days from Chase and sorted 5 transactions.";
+
 		const HOUR_MS = 3_600_000;
+
 		const EMAIL_SENDER = () =>
 			vi.fn(async (_message: Record<string, unknown>) => ({}));
 
@@ -1096,6 +1163,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 					},
 				},
 			});
+
 			return firstHeld;
 		}
 
@@ -1139,6 +1207,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 				html: "<p>Words as first tried</p>",
 				text: "Words as first tried",
 			};
+
 			await openKept(stored, HOUR_MS);
 			const next = resendFake();
 			await runReadyEmail(production(), next.fetchImpl);
@@ -1347,9 +1416,11 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 
 			it("turns only the legacy entries into their emails, and leaves the other kept tries and the rest of the record as they are", async () => {
 				const at = timeAgo(HOUR_MS);
+
 				const other = renderReadyEmail(
 					"Tally has read your last 90 days from Chase.",
 				);
+
 				await openHousehold({
 					members: [DANA],
 					record: {
@@ -1386,17 +1457,22 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 					.bind(DANA)
 					.run();
 				const writes: string[] = [];
+
 				const db = new Proxy(env.DB, {
 					get(target, prop) {
 						if (prop === "prepare")
 							return (sql: string) => {
 								if (/^\s*UPDATE/.test(sql)) writes.push(sql);
+
 								return target.prepare(sql);
 							};
+
 						const value = Reflect.get(target, prop, target);
+
 						return typeof value === "function" ? value.bind(target) : value;
 					},
 				});
+
 				await runReadyEmail(production({ DB: db }), resendFake().fetchImpl);
 				expect(writes.filter((sql) => sql.includes("heldReadyEmail"))).toEqual(
 					[],
@@ -1458,12 +1534,14 @@ describe("the ready email: one Idempotency-Key per address and its words (Resend
 	it("tries a timed-out send again next minute with the same key, so Resend answers the first send instead of sending twice", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			const timedOut = vi.fn(
 				async (_url: RequestInfo | URL, _init?: RequestInit) => {
 					throw new Error("timeout");
 				},
 			);
+
 			await runReadyEmail(production(), timedOut);
 			const next = resendFake();
 			await runReadyEmail(production(), next.fetchImpl);
@@ -1492,14 +1570,18 @@ describe("the ready email: the words", () => {
 		await writeRecord({ strokes: { bank: STROKE_ONE }, budgets: {} });
 		await addMember(DANA);
 		await saveAiSwitches(env.DB, { categories: false, income: false });
+
 		for (const [index, bank] of banks.entries()) {
 			const accountId = await addBank(bank.id, bank.name, {
 				disconnected: bank.disconnected,
 			});
+
 			await addTransactions(accountId, counts[index] ?? 0);
 		}
+
 		const { fetchImpl, sent } = resendFake();
 		await runReadyEmail(production(), fetchImpl);
+
 		return sent[0]?.text ?? "";
 	};
 
@@ -1511,6 +1593,7 @@ describe("the ready email: the words", () => {
 			],
 			[300, 198],
 		);
+
 		expect(text).toContain(
 			"Tally has read your last 90 days from Chase and American Express and sorted all 498 transactions.",
 		);
@@ -1525,6 +1608,7 @@ describe("the ready email: the words", () => {
 			],
 			[1, 1, 1],
 		);
+
 		expect(text).toContain(
 			"from Chase, American Express and Wells Fargo and sorted all 3 transactions.",
 		);
@@ -1540,6 +1624,7 @@ describe("the ready email: the words", () => {
 			],
 			[1, 1, 1, 1],
 		);
+
 		expect(text).toContain("from 4 banks and sorted all 4 transactions.");
 	});
 
@@ -1551,6 +1636,7 @@ describe("the ready email: the words", () => {
 			],
 			[1, 1],
 		);
+
 		expect(text).toContain("from Chase and sorted all 2 transactions.");
 	});
 
@@ -1562,6 +1648,7 @@ describe("the ready email: the words", () => {
 			],
 			[1, 5],
 		);
+
 		expect(text).toContain("from Chase and sorted 1 transaction.");
 		expect(text).not.toContain("American Express");
 	});
@@ -1589,9 +1676,11 @@ describe("the ready email: the words", () => {
 		)
 			.bind(accountId)
 			.run();
+
 		const parent = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (?, '2026-10-01', -200, 'SHOP PART', ?)",
 		)
@@ -1621,11 +1710,13 @@ describe("the ready email: the log", () => {
 	it("logs the provider kinds that failed, and never an address", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const email = {
 			send: vi.fn(async () => {
 				throw new Error("down");
 			}),
 		};
+
 		await runReadyEmail(
 			production({ EMAIL: email }),
 			resendFake(500).fetchImpl,
@@ -1657,10 +1748,12 @@ describe("the ready email: the log", () => {
 describe("the 10:00 run", () => {
 	it("sends the ready email, after the reconnect reminders", async () => {
 		await openHousehold();
+
 		const fetchStub = vi.fn(
 			async (_url: RequestInfo | URL, _init?: RequestInit) =>
 				new Response("{}", { status: 200 }),
 		);
+
 		vi.stubGlobal("fetch", fetchStub);
 		await scheduledWith.scheduled(
 			{ cron: "0 10 * * *" },

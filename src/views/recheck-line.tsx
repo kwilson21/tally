@@ -48,6 +48,7 @@ export const RECHECK_PAGES = {
 	organize: "#organize-page",
 	categories: "#categories",
 } as const;
+
 export type RecheckPage = keyof typeof RECHECK_PAGES;
 
 /** The page a poll's `p` names, or undefined for a key that is not on the list (never an element it was not given). */
@@ -74,6 +75,7 @@ export function RecheckSentence({
 }) {
 	const done = recheckDone(run);
 	const milestone = recheckMilestone(done, run.total);
+
 	return (
 		<p
 			{...(polls ? { id: "recheck-line" } : {})}
@@ -107,6 +109,7 @@ export function RecheckSentence({
  */
 export function RecheckMilestoneSwap({ run }: { run: RecheckRun }) {
 	const done = recheckDone(run);
+
 	return (
 		<span id="recheck-milestone" hx-swap-oob="innerHTML">
 			{recheckMilestoneText(recheckMilestone(done, run.total), done, run.total)}
@@ -127,6 +130,7 @@ export function RecheckLine({
 	if (!run) return null;
 	const done = recheckDone(run);
 	const milestone = recheckMilestone(done, run.total);
+
 	return (
 		<div {...(polls ? { id: "recheck" } : {})} class="mt-4">
 			<RecheckSentence run={run} polls={polls} page={page} />

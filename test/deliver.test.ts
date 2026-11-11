@@ -17,6 +17,7 @@ const headersOf = (fetchImpl: ReturnType<typeof resendOk>) =>
 describe("deliver: Resend's Idempotency-Key", () => {
 	it("sends the reconnect email with no Idempotency-Key", async () => {
 		const fetchImpl = resendOk();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key" },
 			"reader@example.com",
@@ -24,6 +25,7 @@ describe("deliver: Resend's Idempotency-Key", () => {
 			fetchImpl,
 			timeout,
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(headersOf(fetchImpl)["Idempotency-Key"]).toBeUndefined();
 		expect(headersOf(fetchImpl).Authorization).toBe("Bearer test-key");
@@ -44,11 +46,13 @@ describe("deliver: Resend's Idempotency-Key", () => {
 
 	it("never sends the key to Cloudflare's email, which has no key", async () => {
 		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, _init?: RequestInit) => {
 				return new Response("{}", { status: 500 });
 			},
 		);
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: { send } },
 			"reader@example.com",
@@ -57,6 +61,7 @@ describe("deliver: Resend's Idempotency-Key", () => {
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(send).toHaveBeenCalledOnce();
 		expect(JSON.stringify(send.mock.calls[0]?.[0])).not.toContain(
@@ -82,6 +87,7 @@ const timedOut = () =>
 
 const cloudflareEmail = () => {
 	const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+
 	return { send };
 };
 
@@ -89,6 +95,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 	it("falls back to Cloudflare's email on a 409 invalid_idempotent_request: Resend's docs say the key was used with a different payload, so this body was never sent under it, and the fallback delivers it", async () => {
 		const fetchImpl = resendAnswer(409, "invalid_idempotent_request");
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -97,6 +104,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(fetchImpl).toHaveBeenCalledOnce();
 		expect(email.send).toHaveBeenCalledOnce();
@@ -105,6 +113,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 	it("does not fall back on any other 409, whatever its name: the answer doesn't say the send didn't go", async () => {
 		const fetchImpl = resendAnswer(409, "some_later_conflict");
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -113,6 +122,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(false);
 		expect(outcome.kinds).toEqual(["resend 409"]);
 		expect(email.send).not.toHaveBeenCalled();
@@ -123,7 +133,9 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			async (_url: RequestInfo | URL, _init?: RequestInit) =>
 				new Response("not json", { status: 409 }),
 		);
+
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -132,6 +144,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(false);
 		expect(email.send).not.toHaveBeenCalled();
 	});
@@ -142,7 +155,9 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 				throw new TypeError("network");
 			},
 		);
+
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -151,6 +166,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(false);
 		expect(outcome.kinds).toEqual(["resend timeout or error"]);
 		expect(email.send).not.toHaveBeenCalled();
@@ -159,6 +175,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 	it("does not fall back on a 409 concurrent_idempotent_requests: the first send may still fail, so the try is failed and released", async () => {
 		const fetchImpl = resendAnswer(409, "concurrent_idempotent_requests");
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -167,6 +184,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(false);
 		expect(outcome.kinds).toEqual(["resend 409"]);
 		expect(email.send).not.toHaveBeenCalled();
@@ -175,6 +193,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 	it("does not fall back after a timeout: Resend may have accepted the send, so the try is failed with no fallback", async () => {
 		const fetchImpl = timedOut();
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -183,6 +202,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(false);
 		expect(outcome.kinds).toEqual(["resend timeout or error"]);
 		expect(email.send).not.toHaveBeenCalled();
@@ -191,6 +211,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 	it("still falls back on a 500, which Resend did not accept", async () => {
 		const fetchImpl = resendAnswer(500);
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -199,6 +220,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(email.send).toHaveBeenCalledOnce();
 	});
@@ -206,6 +228,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 	it("still falls back on a 4xx other than 409", async () => {
 		const fetchImpl = resendAnswer(422, "validation_error");
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -214,6 +237,7 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(email.send).toHaveBeenCalledOnce();
 	});
@@ -223,6 +247,7 @@ describe("deliver: the reconnect email (no key) is unchanged", () => {
 	it("falls back to Cloudflare's email after a Resend timeout, as it always has", async () => {
 		const fetchImpl = timedOut();
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -230,6 +255,7 @@ describe("deliver: the reconnect email (no key) is unchanged", () => {
 			fetchImpl,
 			timeout,
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(email.send).toHaveBeenCalledOnce();
 	});
@@ -237,6 +263,7 @@ describe("deliver: the reconnect email (no key) is unchanged", () => {
 	it("falls back on a 409, which means nothing without a key", async () => {
 		const fetchImpl = resendAnswer(409, "invalid_idempotent_request");
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -244,6 +271,7 @@ describe("deliver: the reconnect email (no key) is unchanged", () => {
 			fetchImpl,
 			timeout,
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(email.send).toHaveBeenCalledOnce();
 	});
@@ -276,6 +304,7 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 		"holds %s, and never sends it through Cloudflare's email",
 		async (_label, answer) => {
 			const email = cloudflareEmail();
+
 			const outcome = await deliver(
 				{ RESEND_API_KEY: "test-key", EMAIL: email },
 				"reader@example.com",
@@ -285,6 +314,7 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 				"ready-email-abc",
 				{ onlyResend: true },
 			);
+
 			expect(outcome.delivered).toBe(false);
 			expect(outcome.held).toBe(true);
 			expect(email.send).not.toHaveBeenCalled();
@@ -294,6 +324,7 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 	it("delivers through Resend when it answers with success, and sends the key", async () => {
 		const fetchImpl = resendOk();
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ RESEND_API_KEY: "test-key", EMAIL: email },
 			"reader@example.com",
@@ -303,6 +334,7 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 			"ready-email-abc",
 			{ onlyResend: true },
 		);
+
 		expect(outcome.delivered).toBe(true);
 		expect(outcome.held).toBeUndefined();
 		expect(headersOf(fetchImpl)["Idempotency-Key"]).toBe("ready-email-abc");
@@ -311,6 +343,7 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 
 	it("holds it with no Resend key, since no answer can show it was never sent, and never uses Cloudflare's email", async () => {
 		const email = cloudflareEmail();
+
 		const outcome = await deliver(
 			{ EMAIL: email },
 			"reader@example.com",
@@ -320,6 +353,7 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 			"ready-email-abc",
 			{ onlyResend: true },
 		);
+
 		expect(outcome.delivered).toBe(false);
 		expect(outcome.held).toBe(true);
 		expect(outcome.kinds).toEqual(["no provider configured"]);

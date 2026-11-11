@@ -15,6 +15,7 @@ export function unsureBounds(threshold = JEV_THRESHOLD): {
 	below: number;
 } {
 	const below = confidenceBasisPoints(threshold);
+
 	return { above: BASIS_POINTS - below, below };
 }
 
@@ -35,6 +36,7 @@ export type MaybeKind = "category" | "income" | "transfer";
  */
 export function askedBounds(kind: MaybeKind): { above: number; below: number } {
 	if (kind === "income") return unsureBounds();
+
 	return {
 		above: confidenceBasisPoints(MAYBE_FLOOR) - 1,
 		below: confidenceBasisPoints(JEV_THRESHOLD),
@@ -45,6 +47,7 @@ export function askedBounds(kind: MaybeKind): { above: number; below: number } {
 export function isUnsure(confidence: number, kind: MaybeKind): boolean {
 	const basis = confidenceBasisPoints(confidence);
 	const { above, below } = askedBounds(kind);
+
 	return basis < below && basis > above;
 }
 

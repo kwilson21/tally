@@ -14,14 +14,17 @@ const demo = { ...env, DEMO: "true" } as unknown as Env;
 
 async function page(bindings: Env = family) {
 	const res = await home.request("/", {}, bindings);
+
 	return { res, html: await res.text() };
 }
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, " ").replaceAll("&#39;", "'");
 
 const FIRST = "First Harbor Bank";
 const SECOND = "Northline Card Services";
+
 const setBank = (
 	name: string,
 	{ status, syncedAt }: { status?: string; syncedAt?: string | null },
@@ -74,10 +77,12 @@ describe("bankSyncs", () => {
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES (X'00', 'Old Bank', 'person', datetime('now'))",
 		).run();
 		const syncs = await bankSyncs(env.DB);
+
 		// Each bank carries its plaid_items id, which its flag is matched by (readSetup).
 		const ids = await env.DB.prepare(
 			"SELECT id FROM plaid_items ORDER BY id",
 		).all<{ id: number }>();
+
 		expect(syncs.map((bank) => bank.id)).toEqual(
 			ids.results.map((row) => row.id),
 		);

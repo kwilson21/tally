@@ -14,11 +14,13 @@ describe("EmptyState", () => {
 				sentence: "Nothing here.",
 				hint: "Try later.",
 			});
+
 			expect(html).toContain('aria-hidden="true"');
 			expect(html).toContain("Nothing here.");
 			expect(html).toContain("Try later.");
 			expect(html).toContain('<p class="mt-3 text-lg">');
 			expect(html).toContain('class="mt-1 max-w-xs text-muted"');
+
 			if (kind === "search") {
 				expect(html).toContain("<circle");
 				expect(html).not.toContain("M36 44 L42 50 L55 35");
@@ -35,6 +37,7 @@ describe("EmptyState", () => {
 			sentence: "No matches.",
 			action: { href: "/transactions", label: "Clear filters" },
 		});
+
 		expect(withAction).toMatch(
 			/<a[^>]*href="\/transactions"[^>]*>Clear filters<\/a>/,
 		);
@@ -50,6 +53,7 @@ describe("EmptyState", () => {
 			sentence: "Everything is finished.",
 			hint: "New work appears here.",
 		});
+
 		expect(html).not.toContain("<button");
 		expect(html).not.toContain("<a");
 	});
@@ -78,6 +82,7 @@ describe("EmptyState, the add kind (decision 55)", () => {
 				),
 			}),
 		);
+
 		expect(html).toMatch(
 			/<div class="mt-6"><button type="button" data-link-bank[^>]*>Link a bank<\/button><\/div>/,
 		);

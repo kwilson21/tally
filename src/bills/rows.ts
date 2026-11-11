@@ -38,6 +38,7 @@ export type DbBill = {
 function previousMonth(today: string) {
 	const year = Number(today.slice(0, 4));
 	const month = Number(today.slice(5, 7));
+
 	return month === 1
 		? `${year - 1}-12`
 		: `${year}-${String(month - 1).padStart(2, "0")}`;
@@ -62,6 +63,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			`${Number(today.slice(0, 4)) - 1}-Q1`,
 		)
 		.all<DbBill>();
+
 	const result: (BillRowData & {
 		active: boolean;
 		/** The bill's own current amount (`bills.amount_cents`), which its monthly share reads. */
@@ -87,13 +89,18 @@ export async function loadBillRows(db: D1Database, today: string) {
 		merchantRawName: string;
 		merchantRawText: number;
 	})[] = [];
+
 	const byBill = new Map<number, DbBill[]>();
+
 	for (const row of rows.results) {
 		const list = byBill.get(row.id);
+
 		if (list) list.push(row);
 		else byBill.set(row.id, [row]);
 	}
+
 	const amounts = await amountRowsByBill(db);
+
 	// An occurrence's status in the month's totals: paid once its payments reach 90%, else overdue, due within seven
 	// days, or upcoming. A part-paid occurrence keeps the status its date gives it (decision 101).
 	const occurrenceStatus = (dueDate: string, paid: boolean): BillStatus =>
@@ -104,26 +111,34 @@ export async function loadBillRows(db: D1Database, today: string) {
 				: dueDate <= daysBefore(today, -7)
 					? "due"
 					: "upcoming";
+
 	for (const billRows of byBill.values()) {
 		const b = billRows[0] as DbBill;
 		// An occurrence's amount is the one of its own month (decision 101); see src/bills/amount.ts.
 		const amountHistory = amounts.get(b.id) ?? [];
+
 		const amountOf = (dueDate: string) =>
 			amountForMonth(amountHistory, dueDate.slice(0, 7), b.amount_cents);
+
 		// The latest payment's date, which a Paid occurrence's row shows.
 		const payments = new Map<string, string>();
+
 		for (const row of billRows) {
 			if (!row.payment_period || !row.payment_date) continue;
+
 			if ((payments.get(row.payment_period) ?? "") < row.payment_date)
 				payments.set(row.payment_period, row.payment_date);
 		}
+
 		const paymentsByPeriod = paidByPeriodOf(
 			billRows.map((row) => ({
 				period: row.payment_period,
 				amount_cents: row.payment_amount_cents,
 			})),
 		);
+
 		const paidPeriods = paidPeriodsOf(b, amountHistory, paymentsByPeriod);
+
 		const occurrence = billOccurrence(
 			{
 				frequency: b.frequency,
@@ -136,6 +151,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			paidPeriods,
 			new Set(payments.keys()),
 		);
+
 		const totalOccurrences = [
 			{
 				dueDate: occurrence.dueDate,
@@ -144,6 +160,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 				paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
 			},
 		];
+
 		const monthOccurrences = billOccurrencesForMonth(
 			{
 				frequency: b.frequency,
@@ -154,6 +171,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			Number(today.slice(0, 4)),
 			Number(today.slice(5, 7)),
 		);
+
 		for (const current of monthOccurrences)
 			if (
 				!handledBeforeAdded(
@@ -173,12 +191,15 @@ export async function loadBillRows(db: D1Database, today: string) {
 					paidCents: paymentsByPeriod.get(current.period) ?? 0,
 				});
 			}
+
 		// A weekly or every-two-weeks bill's next occurrence is due soon once it falls due, even when it is in next
 		// month (an unpaid Friday on Oct 30 with Nov 6 due in a week). Safe to spend sets it aside only in its own
 		// month (decision 123). Only that one is needed beyond the month.
 		const stepDays =
 			b.frequency === "weekly" ? 7 : b.frequency === "biweekly" ? 14 : 0;
+
 		const nextDue = stepDays ? daysBefore(occurrence.dueDate, -stepDays) : "";
+
 		const nextOccurrence =
 			nextDue && !nextDue.startsWith(today.slice(0, 7))
 				? {
@@ -188,6 +209,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 						paidCents: paymentsByPeriod.get(nextDue) ?? 0,
 					}
 				: undefined;
+
 		result.push({
 			id: b.id,
 			name: b.name,
@@ -213,6 +235,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			nextOccurrence,
 		});
 	}
+
 	return { today, rows: result };
 }
 
@@ -227,6 +250,7 @@ export function paidByPeriodOf(
 	payments: { period?: string | null; amount_cents?: number | null }[],
 ) {
 	const paid = new Map<string, number>();
+
 	for (const payment of payments) {
 		if (!payment.period) continue;
 		paid.set(
@@ -234,8 +258,10 @@ export function paidByPeriodOf(
 			(paid.get(payment.period) ?? 0) + Math.max(0, payment.amount_cents ?? 0),
 		);
 	}
+
 	return paid;
 }
+
 /**
  * The periods that are Paid (decision 101): those whose linked cents, `paidByPeriod`, reach 90% of the amount of
  * their own month (occurrencePaid, src/bills/amount.ts). A period with a part payment is left out.

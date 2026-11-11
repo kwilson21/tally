@@ -39,6 +39,7 @@ describe("NotBudgetedRow", () => {
 			color: "cat-slate",
 			spentCents: 0,
 		}).toString();
+
 		expect(html).toContain('<span class="block text-sm text-muted">$0</span>');
 		expect(html).not.toContain("<a ");
 		expect(html).not.toContain("Add a budget");

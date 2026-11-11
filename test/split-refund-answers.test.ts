@@ -76,6 +76,7 @@ describe("refundAnswersError", () => {
 			...part,
 			amountCents: -part.amountCents,
 		}));
+
 		expect(
 			refundAnswersError([FIRST], { [FIRST.id]: "0" }, negativeParts, TODAY),
 		).toBeNull();

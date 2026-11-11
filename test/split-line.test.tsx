@@ -5,6 +5,7 @@ import { SplitLine } from "../src/views/split-form";
 // Decision 128 (#676): the live amount is a figure in its own span; the words around it are prose. The line is a flex
 // row for the check icon, so the sentence sits in one plain span inside it, and the figure is nested in that span.
 const text = (html: string) => html.replace(/<[^>]+>/g, "");
+
 /** The opening tags of the line, its sentence and its figures, in order. */
 const tags = (html: string) => html.match(/<(?:p|span)\b[^>]*>/g) ?? [];
 
@@ -13,6 +14,7 @@ describe("SplitLine (decision 128)", () => {
 		const html = String(
 			SplitLine({ parentCents: 1000, amounts: ["4.00", ""] }),
 		);
+
 		expect(html).toContain(
 			'<span class="tabular-nums">$6.00</span> left to assign',
 		);

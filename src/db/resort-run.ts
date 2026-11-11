@@ -39,8 +39,10 @@ import { categoryAskedSql } from "./suggestions-queue";
 import { type JevSeen, seenSaveGuard } from "./transactions";
 
 export const RUN_KEY = "resort_run";
+
 /** A run older than this is closed when the next run starts (decision 160), and an unclaimed record lasts as long. */
 export const STALE_MS = 2 * 60 * 60_000;
+
 /** How long Undo stays open after the closing toast is claimed (decision 160, the existing toast's 10 seconds). */
 export const UNDO_MS = 10_000;
 
@@ -124,10 +126,12 @@ const isRunSnapshot = isShape<RunSnapshot>({
 	plaid_transaction_id: isNullable(isString),
 	amount_cents: isNumber,
 });
+
 const isNamedCategory = isShape<{ id: number; name: string }>({
 	id: isNumber,
 	name: isString,
 });
+
 const isResortRun = isShape<ResortRun>({
 	id: isString,
 	total: isNumber,
@@ -147,6 +151,7 @@ const isResortRun = isShape<ResortRun>({
 	toasted: isBoolean,
 	finishToken: isOptional(isString),
 });
+
 const isMovedRecord = isShape<MovedRecord>({
 	runId: isString,
 	categoryId: isNumber,
@@ -181,10 +186,13 @@ const isMovedRecord = isShape<MovedRecord>({
  */
 function usable<T>(text: string, guard: Guard<T>): T | null {
 	const record = readStored(text, guard);
+
 	if (record === null)
 		console.error("a stored re-sort record is unusable, none used");
+
 	return record;
 }
+
 const parseRun = (value: string) => usable(value, isResortRun);
 const parseMoved = (value: string) => usable(value, isMovedRecord);
 
@@ -194,6 +202,7 @@ export async function readRun(db: D1Database): Promise<ResortRun | null> {
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(RUN_KEY)
 		.first<{ value: string }>();
+
 	return row ? parseRun(row.value) : null;
 }
 
@@ -209,6 +218,7 @@ export async function readMoved(
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
+
 	return row ? parseMoved(row.value) : null;
 }
 
@@ -219,6 +229,7 @@ async function writeRunIf(
 	next: ResortRun,
 ): Promise<boolean> {
 	const value = JSON.stringify(next);
+
 	const statement =
 		expected === null
 			? db
@@ -231,7 +242,9 @@ async function writeRunIf(
 						"UPDATE household_settings SET value = ? WHERE key = ? AND value = ?",
 					)
 					.bind(value, RUN_KEY, expected);
+
 	const { meta } = await statement.run();
+
 	return meta.changes > 0;
 }
 
@@ -242,11 +255,13 @@ function freshCandidates(
 ): ResortCandidate[] {
 	const seen = new Set<number>();
 	const out: ResortCandidate[] = [];
+
 	for (const candidate of candidates) {
 		if (known.has(candidate.id) || seen.has(candidate.id)) continue;
 		seen.add(candidate.id);
 		out.push(candidate);
 	}
+
 	return out;
 }
 
@@ -293,18 +308,22 @@ export async function startOrJoinRun(
 			.prepare("SELECT value FROM household_settings WHERE key = ?")
 			.bind(RUN_KEY)
 			.first<{ value: string }>();
+
 		const expected = row?.value ?? null;
 		const current = row ? parseRun(row.value) : null;
 
 		if (current?.status === "running" && now - current.startedAt <= STALE_MS) {
 			const room = Math.max(0, RESORT_CANDIDATE_MAX - current.ids.length);
+
 			const fresh = freshCandidates(candidates, new Set(current.ids)).slice(
 				0,
 				room,
 			);
+
 			// Nothing new to add: join without writing, so no instance is counted for a call that asks nothing.
 			if (fresh.length === 0)
 				return { runId: current.id, newIds: [], joined: true };
+
 			const next: ResortRun = {
 				...current,
 				total: current.total + fresh.length,
@@ -320,6 +339,7 @@ export async function startOrJoinRun(
 				}),
 				instances: current.instances + 1,
 			};
+
 			if (await writeRunIf(db, expected, next)) {
 				return {
 					runId: current.id,
@@ -327,6 +347,7 @@ export async function startOrJoinRun(
 					joined: true,
 				};
 			}
+
 			continue;
 		}
 
@@ -340,7 +361,9 @@ export async function startOrJoinRun(
 			0,
 			RESORT_CANDIDATE_MAX,
 		);
+
 		if (fresh.length === 0) return { runId: null, newIds: [], joined: false };
+
 		const run: ResortRun = {
 			id: crypto.randomUUID(),
 			total: fresh.length,
@@ -357,11 +380,14 @@ export async function startOrJoinRun(
 			startedAt: now,
 			toasted: false,
 		};
+
 		if (await writeRunIf(db, expected, run)) {
 			await sweepMovedRecords(db, now);
+
 			return { runId: run.id, newIds: run.ids, joined: false };
 		}
 	}
+
 	throw new Error("The re-sort could not start. Try again.");
 }
 
@@ -379,6 +405,7 @@ export function bumpDoneStatement(
 			WHERE key = ? AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running'`,
 		turnId,
 	);
+
 	return db.prepare(guarded.sql).bind(rows, RUN_KEY, runId, ...guarded.binds);
 }
 
@@ -429,7 +456,9 @@ export async function reaskPicks(
 	}: { ids: readonly number[]; except: ReadonlySet<number>; limit: number },
 ): Promise<ReaskMark[]> {
 	const wanted = [...new Set(ids)].filter((id) => !except.has(id));
+
 	if (wanted.length === 0 || limit <= 0) return [];
+
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.category_confidence AS confidence, t.jev_mixed AS mixed, t.jev_also_category_id AS also,
@@ -450,10 +479,13 @@ export async function reaskPicks(
 			plaid: string | null;
 			amount: number;
 		}>();
+
 	const byId = new Map(results.map((row) => [row.id, row]));
 	const picks: ReaskMark[] = [];
+
 	for (const id of wanted) {
 		const row = byId.get(id);
+
 		if (!row) continue;
 		picks.push({
 			id,
@@ -463,8 +495,10 @@ export async function reaskPicks(
 			plaid: row.plaid,
 			amount: row.amount,
 		});
+
 		if (picks.length === limit) break;
 	}
+
 	return picks;
 }
 
@@ -487,6 +521,7 @@ export function reaskClearStatement(
 				OR CAST(category_confidence * ${BASIS_POINTS} AS INTEGER) < ${confidenceBasisPoints(JEV_THRESHOLD)})`,
 		turnId,
 	);
+
 	return db.prepare(guarded.sql).bind(markIdentities(marks), ...guarded.binds);
 }
 
@@ -506,6 +541,7 @@ export function reaskRestoreStatement(
 	seen?: JevSeen,
 ): D1PreparedStatement {
 	const guard = seen ? seenSaveGuard(seen) : undefined;
+
 	const guarded = withTurnGuard(
 		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?,
 			updated_at = CASE WHEN category_confidence IS NOT ? OR jev_mixed IS NOT ? OR jev_also_category_id IS NOT ?
@@ -514,6 +550,7 @@ export function reaskRestoreStatement(
 			AND jev_mixed IS NULL AND jev_also_category_id IS NULL${guard ? ` AND ${guard.sql}` : ""}`,
 		turnId,
 	);
+
 	return db
 		.prepare(guarded.sql)
 		.bind(
@@ -545,6 +582,7 @@ export function reaskKeepStatement(
 	turnId: string,
 ): D1PreparedStatement {
 	const guard = seenSaveGuard(seen);
+
 	const guarded = withTurnGuard(
 		`UPDATE household_settings SET value = json_set(value, '$.keptCleared',
 				json_insert(COALESCE(json_extract(value, '$.keptCleared'), json('[]')), '$[#]', ?))
@@ -555,6 +593,7 @@ export function reaskKeepStatement(
 					AND NOT ${guard.sql})`,
 		turnId,
 	);
+
 	return db
 		.prepare(guarded.sql)
 		.bind(
@@ -600,7 +639,9 @@ export async function finishRun(
 	if (instanceKey === undefined)
 		return finalizeRun(db, { runId, now, keyed: false });
 	const waiting = await recordInstanceFinish(db, runId, instanceKey);
+
 	if (waiting) return waiting;
+
 	return finalizeRun(db, { runId, now, keyed: true });
 }
 
@@ -615,7 +656,9 @@ async function recordInstanceFinish(
 			.prepare("SELECT value FROM household_settings WHERE key = ?")
 			.bind(RUN_KEY)
 			.first<{ value: string }>();
+
 		const current = row ? parseRun(row.value) : null;
+
 		if (
 			!row ||
 			!current ||
@@ -624,12 +667,17 @@ async function recordInstanceFinish(
 		)
 			return null;
 		let next = current;
+
 		if (!current.finishedKeys.includes(key)) {
 			next = { ...current, finishedKeys: [...current.finishedKeys, key] };
+
 			if (!(await writeRunIf(db, row.value, next))) continue;
 		}
+
 		const pending = Math.max(0, next.instances - next.finishedKeys.length);
+
 		if (pending === 0) return null;
+
 		return {
 			moved: 0,
 			needAnswer: 0,
@@ -639,6 +687,7 @@ async function recordInstanceFinish(
 			pending,
 		};
 	}
+
 	throw new Error("The re-sort could not record its finish. Try again.");
 }
 
@@ -669,6 +718,7 @@ async function finalizeRun(
 
 	const snap = (column: string) =>
 		`(SELECT json_extract(s.value, '$.${column}') FROM json_each(${SNAPSHOTS}) s WHERE json_extract(s.value, '$.id') = transactions.id)`;
+
 	const restore = db
 		.prepare(
 			`UPDATE transactions SET
@@ -708,10 +758,12 @@ async function finalizeRun(
 			AND t.plaid_transaction_id IS json_extract(s.value, '$.plaid_transaction_id')
 			AND t.amount_cents = json_extract(s.value, '$.amount_cents')
 		WHERE t.category_id IS NOT NULL AND t.category_source = 'jev')`;
+
 	// The categories the moved rows went to, from their actual destinations (names and counts), in id order.
 	const destinations = `(SELECT c.id AS id, c.name AS name, COUNT(*) AS n
 		FROM json_each(${movedRows}) m JOIN categories c ON c.id = json_extract(m.value, '$.categoryId')
 		GROUP BY c.id ORDER BY c.id)`;
+
 	const record = db
 		.prepare(
 			`INSERT INTO household_settings (key, value)
@@ -737,6 +789,7 @@ async function finalizeRun(
 	await sweepMovedRecords(db, now);
 
 	const run = await readRun(db);
+
 	if (run && run.id === runId && run.status === "running") {
 		// A keyed finish that lost its flip to a joiner: the run stays open for the instances still to finish.
 		return {
@@ -748,12 +801,14 @@ async function finalizeRun(
 			pending: Math.max(0, run.instances - run.finishedKeys.length),
 		};
 	}
+
 	const counts = (await readRecord(db, runId)) ?? {
 		moved: 0,
 		needAnswer: 0,
 		categories: [],
 		byCategory: [],
 	};
+
 	return { ...counts, finished: true, pending: 0 };
 }
 
@@ -766,9 +821,12 @@ async function readRecord(
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
+
 	if (!row) return null;
 	const record = parseMoved(row.value);
+
 	if (!record) return null;
+
 	return {
 		moved: record.rows.length,
 		needAnswer: record.needAnswer,
@@ -817,7 +875,9 @@ export async function closeToastOnce(
 			)
 			.bind(RUN_KEY, runId),
 	]);
+
 	await sweepMovedRecords(db, now);
+
 	return (claim?.meta.changes ?? 0) > 0;
 }
 
@@ -832,18 +892,22 @@ export async function undoRun(
 	{ runId, now }: { runId: string; now: number },
 ): Promise<{ restored: number; changedSince: number; expired: boolean }> {
 	const key = movedKey(runId);
+
 	const existing = await db
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(key)
 		.first<{ value: string }>();
+
 	if (!existing) return { restored: 0, changedSince: 0, expired: true };
 	const record = parseMoved(existing.value);
+
 	if (!record) return { restored: 0, changedSince: 0, expired: true };
 	const moved = record.rows.length;
 
 	// Parameter ?1 is the record's key, ?2 the time. The record's own `until` (null until claimed) is checked in every write.
 	const live = `EXISTS (SELECT 1 FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') >= ?2)`;
 	const rows = `(SELECT json_extract(value, '$.rows') FROM household_settings WHERE key = ?1)`;
+
 	const undoSnap = (column: string) =>
 		`(SELECT json_extract(s.value, '$.snapshot.${column}') FROM json_each(${rows}) s WHERE json_extract(s.value, '$.id') = transactions.id)`;
 
@@ -867,11 +931,13 @@ export async function undoRun(
 				AND ${live}`,
 		)
 		.bind(key, now);
+
 	const remove = db
 		.prepare(
 			"DELETE FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') >= ?2",
 		)
 		.bind(key, now);
+
 	const expiredRemove = db
 		.prepare(
 			"DELETE FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') < ?2",
@@ -879,9 +945,12 @@ export async function undoRun(
 		.bind(key, now);
 
 	const [restored, removed] = await db.batch([restore, remove, expiredRemove]);
+
 	if ((removed?.meta.changes ?? 0) === 0) {
 		return { restored: 0, changedSince: 0, expired: true };
 	}
+
 	const count = restored?.meta.changes ?? 0;
+
 	return { restored: count, changedSince: moved - count, expired: false };
 }

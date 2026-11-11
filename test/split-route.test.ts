@@ -5,28 +5,35 @@ import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
+
 beforeEach(() => resetDemo(env.DB, "2026-09-22"));
 
 async function ensureIncomeReviewColumns() {
 	const columns = await env.DB.prepare("PRAGMA table_info(transactions)").all<{
 		name: string;
 	}>();
+
 	const existing = new Set(columns.results.map((column) => column.name));
+
 	if (!existing.has("income_source"))
 		await env.DB.prepare(
 			"ALTER TABLE transactions ADD COLUMN income_source TEXT CHECK (income_source IN ('user', 'jev'))",
 		).run();
+
 	if (!existing.has("credit_reviewed"))
 		await env.DB.prepare(
 			"ALTER TABLE transactions ADD COLUMN credit_reviewed INTEGER CHECK (credit_reviewed IN (0, 1))",
 		).run();
+
 	if (!existing.has("credit_reviewed_by"))
 		await env.DB.prepare(
 			"ALTER TABLE transactions ADD COLUMN credit_reviewed_by TEXT CHECK (credit_reviewed_by IN ('user'))",
 		).run();
+
 	const installed = await env.DB.prepare(
 		"PRAGMA table_info(transactions)",
 	).all<{ name: string }>();
+
 	for (const name of ["income_source", "credit_reviewed", "credit_reviewed_by"])
 		expect(installed.results.some((column) => column.name === name)).toBe(true);
 }
@@ -48,6 +55,7 @@ describe("transaction splits", () => {
 		const refund = await env.DB.prepare(
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
 		).first<{ id: number; amountCents: number }>();
+
 		const half = Math.trunc((refund?.amountCents as number) / 2);
 		expect(
 			await saveSplit(
@@ -55,11 +63,13 @@ describe("transaction splits", () => {
 					prepare(query: string) {
 						if (query !== "PRAGMA table_info(transactions)")
 							return env.DB.prepare(query);
+
 						return {
 							all: async () => {
 								const columns = await env.DB.prepare(query).all<{
 									name: string;
 								}>();
+
 								return {
 									...columns,
 									results: columns.results.filter(
@@ -100,9 +110,11 @@ describe("transaction splits", () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number }>();
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${bakery?.id}/split`)
 		).text();
+
 		expect(html).toContain(
 			'<span class="tabular-nums">$12.00</span> left to assign',
 		);
@@ -120,15 +132,18 @@ describe("transaction splits", () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number }>();
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
+
 		const reply = await post(`/transactions/${bakery?.id}/split/line`, [
 			["part_category", String(category?.id)],
 			["part_amount", "4.00"],
 			["part_category", String(category?.id)],
 			["part_amount", ""],
 		]);
+
 		expect(reply.status).toBe(200);
 		const html = await reply.text();
 		expect(html).toContain(
@@ -141,17 +156,23 @@ describe("transaction splits", () => {
 		const income = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE flag_income = 1 LIMIT 1",
 		).first<{ id: number }>();
+
 		const edit = await (
 			await exports.default.fetch(`${BASE}/transactions/${income?.id}`)
 		).text();
+
 		expect(edit).not.toContain(`/transactions/${income?.id}/split?`);
+
 		const form = await exports.default.fetch(
 			`${BASE}/transactions/${income?.id}/split`,
 		);
+
 		expect(form.status).toBe(404);
+
 		const response = await post(`/transactions/${income?.id}/split`, [
 			["back", "/transactions"],
 		]);
+
 		expect(response.status).toBe(422);
 		const html = await response.text();
 		expect(html).toContain('id="split-title"');
@@ -164,10 +185,12 @@ describe("transaction splits", () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number }>();
+
 		const id = bakery?.id as number;
 		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(id)
 			.run();
+
 		const response = await post(`/transactions/${id}/split`, [
 			["part_category", "1"],
 			["part_category", "5"],
@@ -175,6 +198,7 @@ describe("transaction splits", () => {
 			["part_amount", "7"],
 			["back", "/transactions"],
 		]);
+
 		expect(response.status).toBe(422);
 		const html = await response.text();
 		expect(html).toContain("Income can&#39;t be split.");
@@ -192,13 +216,16 @@ describe("transaction splits", () => {
 
 	it("copies current parent date, exclusion and credit review from inside the batch", async () => {
 		await ensureIncomeReviewColumns();
+
 		const bakery = await env.DB.prepare(
 			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; cents: number }>();
+
 		const id = bakery?.id as number;
 		const first = Math.trunc((bakery?.cents as number) / 2);
 		const second = (bakery?.cents as number) - first;
 		let raced = false;
+
 		const db = {
 			prepare: (query: string) => env.DB.prepare(query),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -210,9 +237,11 @@ describe("transaction splits", () => {
 						.bind(id)
 						.run();
 				}
+
 				return env.DB.batch(statements);
 			},
 		} as unknown as D1Database;
+
 		expect(
 			await saveSplit(
 				db,
@@ -256,6 +285,7 @@ describe("transaction splits", () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; cents: number }>();
+
 		const id = bakery?.id as number;
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'jev' WHERE id = ?",
@@ -288,7 +318,9 @@ describe("transaction splits", () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number }>();
+
 		const id = bakery?.id as number;
+
 		const bad = await post(`/transactions/${id}/split`, [
 			["part_category", "1"],
 			["part_category", "5"],
@@ -296,8 +328,10 @@ describe("transaction splits", () => {
 			["part_amount", "6"],
 			["back", "/transactions"],
 		]);
+
 		expect(bad.status).toBe(422);
 		expect(await bad.text()).toContain('role="alert"');
+
 		const saved = await post(`/transactions/${id}/split`, [
 			["part_category", "1"],
 			["part_category", "5"],
@@ -305,6 +339,7 @@ describe("transaction splits", () => {
 			["part_amount", "7"],
 			["back", "/transactions"],
 		]);
+
 		expect(saved.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -336,6 +371,7 @@ describe("transaction splits", () => {
 		const costco = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
 		).first<{ id: number }>();
+
 		await post(`/transactions/${costco?.id}`, [
 			["merchant", "Costco"],
 			["note", ""],
@@ -357,11 +393,14 @@ describe("transaction splits", () => {
 		const bakery = await env.DB.prepare(
 			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; cents: number }>();
+
 		const id = bakery?.id as number;
+
 		const stale = [
 			{ categoryId: 1, amountCents: 500 },
 			{ categoryId: 5, amountCents: (bakery?.cents as number) - 400 },
 		];
+
 		expect(await saveSplit(env.DB, id, stale, "test")).toEqual({
 			saved: false,
 			unlinked: [],
@@ -383,6 +422,7 @@ describe("transaction splits", () => {
 		const refund = await env.DB.prepare(
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
 		).first<{ id: number; amountCents: number }>();
+
 		const id = refund?.id as number;
 		await env.DB.prepare(
 			"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_source = 'user' WHERE id = ?",
@@ -391,12 +431,15 @@ describe("transaction splits", () => {
 			.run();
 		const total = Math.abs(refund?.amountCents as number);
 		const before = await loadMonth(env.DB, "2026-09");
+
 		const totalBefore = before.transactions.reduce(
 			(sum, tx) => sum + tx.amountCents,
 			0,
 		);
+
 		const first = Math.trunc(total / 2);
 		const second = total - first;
+
 		for (let save = 0; save < 2; save++) {
 			const response = await post(`/transactions/${id}/split`, [
 				["part_category", "1"],
@@ -405,14 +448,18 @@ describe("transaction splits", () => {
 				["part_amount", (second / 100).toFixed(2)],
 				["back", "/transactions"],
 			]);
+
 			expect(response.status).toBe(200);
 		}
+
 		const children = await env.DB.prepare(
 			"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ?",
 		)
 			.bind(id)
 			.all();
+
 		expect(children.results).toHaveLength(2);
+
 		for (const child of children.results as Array<Record<string, unknown>>) {
 			expect(child).toMatchObject({
 				flag_income: 0,
@@ -421,6 +468,7 @@ describe("transaction splits", () => {
 				credit_reviewed_by: "user",
 			});
 		}
+
 		const during = await loadMonth(env.DB, "2026-09");
 		expect(
 			during.transactions.reduce((sum, tx) => sum + tx.amountCents, 0),
@@ -493,9 +541,12 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 		const response = await post(`/transactions/${PURCHASE}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		const sent = await trigger(response);
+
 		const message =
 			"Removed split from Costco. The Costco membership bill for 2026 is no longer paid.";
+
 		expect(sent.toast.message).toBe(message);
 		expect(sent.announce).toBe(message);
 	});
@@ -506,9 +557,11 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 		)
 			.bind(GROCERIES_PART)
 			.run();
+
 		const response = await post(`/transactions/${PURCHASE}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		expect((await trigger(response)).toast.message).toBe(
 			"Removed split from Costco. 2 bills are no longer paid.",
 		);
@@ -523,9 +576,11 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 				"UPDATE transactions SET is_split = 0, split_removed_from_cents = 5000, split_removed_bills = ? WHERE id = ?",
 			).bind('[{"name":"Costco membership","period":"2026"}]', PURCHASE),
 		]);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${PURCHASE}`)
 		).text();
+
 		expect(html).toContain(
 			"so its split was removed. The Costco membership bill for 2026 is no longer paid.",
 		);
@@ -539,6 +594,7 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 			["part_amount", "15"],
 			["back", "/transactions"],
 		]);
+
 		expect(response.status).toBe(200);
 		const sent = await trigger(response);
 		expect(sent.toast.message).toBe(
@@ -557,6 +613,7 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		expect(response.status).toBe(200);
 		const sent = await trigger(response);
 		expect(sent.toast.message).toBe("Split Costco");
@@ -593,11 +650,13 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 	describe("after a bank change removed the split and the bill is paid again", () => {
 		const COSTCO_JSON =
 			'[{"billId":9820,"name":"Costco membership","period":"2026"}]';
+
 		const UNPAID_SENTENCE =
 			"The Costco membership bill for 2026 is no longer paid.";
 
 		const editPanel = async () =>
 			(await exports.default.fetch(`${BASE}/transactions/${PURCHASE}`)).text();
+
 		const linkByHand = (bill: number, period: string, transaction: number) =>
 			post(`/bills/${bill}/link`, [
 				["transaction_id", String(transaction)],
@@ -614,9 +673,11 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 			const html = await editPanel();
 			expect(html).toContain("so its split was removed.");
 			expect(html).not.toContain("no longer paid");
+
 			const list = await (
 				await exports.default.fetch(`${BASE}/transactions?q=COSTCO&month=all`)
 			).text();
+
 			expect(list).toContain("so its split was removed.");
 			expect(list).not.toContain("no longer paid");
 		});

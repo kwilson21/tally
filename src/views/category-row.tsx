@@ -39,6 +39,7 @@ const action = (url: string, formId: string) => ({
 
 export const summaryClass =
 	"flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden";
+
 export const chevron = (
 	<span class="shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none">
 		<Icon name="chevron-right" class="size-5" />
@@ -99,6 +100,7 @@ export function CategoryRow({
 }) {
 	const url = `/settings/categories/${c.id}`;
 	const formId = `cat-${c.id}-form`;
+
 	return (
 		<details
 			class={`group border-b border-rule${saved ? ` ${savedRowClass(saved)}` : ""}`}

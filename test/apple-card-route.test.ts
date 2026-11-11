@@ -13,13 +13,17 @@ recordSorting({ sort: true });
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const family = { ...env, DEMO: "false" } as unknown as Env;
+
 const HEADER =
 	"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)";
+
 /** Apple's MM/DD/YYYY for a YYYY-MM-DD day. */
 const apple = (day: string) =>
 	`${day.slice(5, 7)}/${day.slice(8, 10)}/${day.slice(0, 4)}`;
+
 // The rows are dated from the real today, so they stay inside Tally's history whenever this runs (never a fixed date).
 const CLEARED_A = daysBefore(TODAY, 10);
+
 // Made-up rows in Apple's layout (spec §8.10): the Rivera family's store, a card ending 1234, never a real export.
 const ROW_A = `${apple(daysBefore(TODAY, 11))},${apple(CLEARED_A)},"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"`;
 const ROW_B = `${apple(daysBefore(TODAY, 9))},${apple(daysBefore(TODAY, 8))},"THAI PALACE 4 OAK ST SPRINGFIELD 00000 XX USA","Thai Palace","Restaurants","Purchase","24.10"`;
@@ -27,10 +31,12 @@ const csv = (...rows: string[]) => [HEADER, ...rows].join("\n");
 
 // The actor the family's sign-in sets (the accounts app reads it for `updated_by`).
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 app.use("*", async (c, next) => {
 	c.set("actor", "family@example.com");
 	await next();
 });
+
 app.route("/", accounts);
 
 const ctx = () => ({
@@ -51,29 +57,38 @@ const settled = (context: ReturnType<typeof ctx>) =>
  */
 function recordingDb(record: (sql: string, values: unknown[]) => void) {
 	const real = new WeakMap<object, D1PreparedStatement>();
+
 	return new Proxy(env.DB, {
 		get(target, prop) {
 			if (prop === "prepare")
 				return (sql: string) => {
 					const statement = target.prepare(sql);
+
 					const wrapper = new Proxy(statement, {
 						get(inner, key) {
 							if (key === "bind")
 								return (...values: unknown[]) => {
 									record(sql, values);
+
 									return inner.bind(...values);
 								};
+
 							const value = Reflect.get(inner, key, inner);
+
 							return typeof value === "function" ? value.bind(inner) : value;
 						},
 					});
+
 					real.set(wrapper, statement);
+
 					return wrapper;
 				};
+
 			if (prop === "batch")
 				return (statements: D1PreparedStatement[]) =>
 					target.batch(statements.map((s) => real.get(s) ?? s));
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -86,9 +101,12 @@ function failingDb(fails: string): D1Database {
 			if (prop === "prepare")
 				return (sql: string) => {
 					if (sql.includes(fails)) throw new Error("D1 is down");
+
 					return target.prepare(sql);
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -97,6 +115,7 @@ function failingDb(fails: string): D1Database {
 /** A D1 whose first statement containing `fails` throws when prepared, and whose later statements work, as a blip does. */
 function blipDb(fails: string): D1Database {
 	let blipped = false;
+
 	return new Proxy(env.DB, {
 		get(target, prop) {
 			if (prop === "prepare")
@@ -105,9 +124,12 @@ function blipDb(fails: string): D1Database {
 						blipped = true;
 						throw new Error("D1 is down");
 					}
+
 					return target.prepare(sql);
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -116,11 +138,14 @@ function blipDb(fails: string): D1Database {
 /** A multipart form, sent as bytes with an explicit Content-Length, as a browser sends it. */
 async function multipart(fields: Record<string, string | File>) {
 	const form = new FormData();
+
 	for (const [name, value] of Object.entries(fields)) form.set(name, value);
+
 	const request = new Request("http://tally.test/accounts/apple-card", {
 		method: "POST",
 		body: form,
 	});
+
 	return {
 		type: request.headers.get("content-type") ?? "",
 		bytes: await request.arrayBuffer(),
@@ -141,18 +166,23 @@ async function post(
 	} = {},
 ) {
 	const { type, bytes } = await multipart(fields);
+
 	const headers: Record<string, string> = {
 		"content-type": type,
 		"content-length": options.contentLength ?? String(bytes.byteLength),
 	};
+
 	if (options.htmx) headers["HX-Request"] = "true";
+
 	const res = await app.request(
 		"/accounts/apple-card",
 		{ method: "POST", headers, body: bytes },
 		options.bindings ?? family,
 		options.context ?? ctx(),
 	);
+
 	const html = (await res.text()).replaceAll("&#39;", "'");
+
 	return { res, html };
 }
 
@@ -162,6 +192,7 @@ async function post(
  */
 function unreadable() {
 	const state = { pulled: false };
+
 	const stream = new ReadableStream(
 		{
 			pull() {
@@ -171,6 +202,7 @@ function unreadable() {
 		},
 		{ highWaterMark: 0 },
 	);
+
 	return { stream, state };
 }
 
@@ -179,8 +211,10 @@ async function postUnread(contentLength: string, htmx = false) {
 		"content-type": "multipart/form-data; boundary=x",
 		"content-length": contentLength,
 	};
+
 	if (htmx) headers["HX-Request"] = "true";
 	const body = unreadable();
+
 	const res = await app.request(
 		"/accounts/apple-card",
 		{
@@ -192,6 +226,7 @@ async function postUnread(contentLength: string, htmx = false) {
 		family,
 		ctx(),
 	);
+
 	return {
 		res,
 		html: (await res.text()).replaceAll("&#39;", "'"),
@@ -210,6 +245,7 @@ const cardRows = () =>
 	env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
 	).first<{ n: number }>();
+
 const cardAccount = () =>
 	env.DB.prepare(
 		"SELECT balance_cents, balance_on, uploaded_on, removed_at, counted_from FROM accounts WHERE subtype = 'apple_card'",
@@ -234,6 +270,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ headers: { "HX-Request": "true" } },
 				family,
 			);
+
 			const html = (await res.text()).replaceAll("&#39;", "'");
 			// The opener's hx-select="#sheet" takes only the sheet out of the page, and Back can restore the whole page.
 			expect(html).toContain("<main");
@@ -262,6 +299,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				},
 				family,
 			);
+
 			const html = await res.text();
 			expect(res.status).toBe(200);
 			expect(html).toContain("<main");
@@ -282,6 +320,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			expect(html).toContain('hx-get="/accounts/apple-card"');
 		});
 	});
@@ -292,6 +331,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("HX-Push-Url")).toBe("/accounts");
 			expect(res.headers.get("HX-Trigger")).toContain(
@@ -314,10 +354,12 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
 				{ htmx: true },
 			);
+
 			const { res } = await post(
 				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
 				{ htmx: true },
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain(
 				"Nothing new. All 2 were already in Tally.",
 			);
@@ -337,9 +379,11 @@ describe("Apple Card's upload sheet (#766)", () => {
 				removed_at: null,
 			});
 			expect(card?.counted_from).toBe(TODAY);
+
 			const by = await env.DB.prepare(
 				"SELECT t.updated_by AS by FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' LIMIT 1",
 			).first<{ by: string }>();
+
 			expect(by?.by).toBe("family@example.com");
 		});
 
@@ -368,11 +412,13 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 				async () => ({ id: "fake" }),
 			);
+
 			const bindings = {
 				...family,
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			} as unknown as Env;
+
 			await post(
 				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
 				{ htmx: true, bindings },
@@ -424,10 +470,12 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 		it("refuses a file over 1 MB after it's read, under the file field, saving nothing", async () => {
 			const padded = `${csv(ROW_A)}\n${"x".repeat(1_000_001)}`;
+
 			const { res, html } = await post(
 				{ file: file(padded), balance: "" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(422);
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("This file is over 1 MB.");
@@ -440,6 +488,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file("OFXHEADER:100\n<OFX>"), balance: "1,240.18" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(422);
 			expect(html).toContain(
 				"This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV.",
@@ -453,10 +502,12 @@ describe("Apple Card's upload sheet (#766)", () => {
 				ROW_A,
 				'09/12/2026,09/13/2026,"THAI PALACE","Thai Palace","Restaurants","Purchase","$24.10"',
 			);
+
 			const { res, html } = await post(
 				{ file: file(bad), balance: "" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(422);
 			// A refusal after the body is read sends no toast: the alert under the field is what's announced.
 			expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -477,6 +528,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A)), balance: "12.3.4" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(422);
 			expect(html).toContain(
 				"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
@@ -501,10 +553,12 @@ describe("Apple Card's upload sheet (#766)", () => {
 				env.DB.prepare("DELETE FROM accounts"),
 				env.DB.prepare("DELETE FROM plaid_items"),
 			]);
+
 			const { html } = await post(
 				{ file: file(csv(ROW_A)), balance: "" },
 				{ htmx: true },
 			);
+
 			expect(html).toContain(
 				"Link a bank first. Tally's history starts with your bank's.",
 			);
@@ -522,24 +576,30 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const category = await env.DB.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			).first<{ id: number }>();
+
 			await env.DB.prepare(
 				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Greenleaf Market #12', ?)",
 			)
 				.bind(category?.id)
 				.run();
+
 			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 				async () => ({ id: "fake" }),
 			);
+
 			const context = ctx();
+
 			const bindings = {
 				...family,
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			} as unknown as Env;
+
 			const { res } = await post(
 				{ file: file(csv(ROW_A)), balance: "" },
 				{ htmx: true, bindings, context },
 			);
+
 			expect(res.status).toBe(200);
 			await settled(context);
 			expect(
@@ -557,8 +617,10 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 				async () => ({ id: "fake" }),
 			);
+
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
+
 			// Only the merchant rules' statement fails to prepare; the rows are stored before the rules step runs.
 			const bindings = {
 				...family,
@@ -568,11 +630,13 @@ describe("Apple Card's upload sheet (#766)", () => {
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			} as unknown as Env;
+
 			try {
 				const { res } = await post(
 					{ file: file(csv(ROW_A, ROW_B)), balance: "" },
 					{ htmx: true, bindings, context },
 				);
+
 				expect(res.status).toBe(200);
 				await settled(context);
 				expect(await cardRows()).toEqual({ n: 2 });
@@ -591,12 +655,14 @@ describe("Apple Card's upload sheet (#766)", () => {
 		// A bill due on the day the Juniper row cleared, for its amount: the row is the bill's payment once bills can be read.
 		const JUNIPER_CLEARED = daysBefore(TODAY, 8);
 		const ROW_JUNIPER = `${apple(daysBefore(TODAY, 9))},${apple(JUNIPER_CLEARED)},"JUNIPER PHARMACY 2 PINE RD SPRINGFIELD 00000 XX USA","Juniper Pharmacy","Health","Purchase","17.25"`;
+
 		const addJuniperBill = () =>
 			env.DB.prepare(
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name,merchant_raw_text) VALUES(9001,'Juniper Pharmacy',1725,?,'monthly','Juniper Pharmacy',0)",
 			)
 				.bind(Number(JUNIPER_CLEARED.slice(8, 10)))
 				.run();
+
 		const linkedCardPayments = () =>
 			env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' AND bp.status = 'linked'",
@@ -604,11 +670,14 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 		it("keeps the rows when bill matching fails once, answers the success redraw, and matches the payment in a background retry", async () => {
 			await addJuniperBill();
+
 			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 				async () => ({ id: "fake" }),
 			);
+
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
+
 			// Only the matcher's first read of the bills fails: the rows, the rules and the retry are the real D1's.
 			const bindings = {
 				...family,
@@ -616,11 +685,13 @@ describe("Apple Card's upload sheet (#766)", () => {
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			} as unknown as Env;
+
 			try {
 				const { res, html } = await post(
 					{ file: file(csv(ROW_JUNIPER)), balance: "" },
 					{ htmx: true, bindings, context },
 				);
+
 				expect(res.status).toBe(200);
 				expect(res.headers.get("HX-Push-Url")).toBe("/accounts");
 				expect(res.headers.get("HX-Trigger")).toContain(
@@ -648,22 +719,27 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 		it("answers the success redraw and logs fixed words when bill matching fails on its retry too", async () => {
 			await addJuniperBill();
+
 			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 				async () => ({ id: "fake" }),
 			);
+
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
+
 			const bindings = {
 				...family,
 				DB: failingDb("FROM bills WHERE active=1"),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			} as unknown as Env;
+
 			try {
 				const { res } = await post(
 					{ file: file(csv(ROW_JUNIPER)), balance: "" },
 					{ htmx: true, bindings, context },
 				);
+
 				expect(res.status).toBe(200);
 				expect(res.headers.get("HX-Trigger")).toContain(
 					"Added 1 from Apple Card.",
@@ -685,11 +761,14 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 		it("still matches the bills when the rules step fails, so a rule error never leaves a payment unmatched", async () => {
 			await addJuniperBill();
+
 			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 				async () => ({ id: "fake" }),
 			);
+
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
+
 			const bindings = {
 				...family,
 				DB: failingDb(
@@ -698,11 +777,13 @@ describe("Apple Card's upload sheet (#766)", () => {
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			} as unknown as Env;
+
 			try {
 				const { res } = await post(
 					{ file: file(csv(ROW_JUNIPER)), balance: "" },
 					{ htmx: true, bindings, context },
 				);
+
 				expect(res.status).toBe(200);
 				await settled(context);
 				// The bill step ran on its own, so it matched the payment without a retry.
@@ -729,6 +810,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A)), balance: "99999999999999999999" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(422);
 			expect(html).toContain(
 				"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
@@ -742,9 +824,11 @@ describe("Apple Card's upload sheet (#766)", () => {
 		it("saves a balance typed as -0.00 as a whole 0, never a negative zero", async () => {
 			// SQLite stores -0 as 0 too, so the stored row can't tell them apart: the check is on the values bound to D1.
 			const bound: unknown[] = [];
+
 			const db = recordingDb((sql, values) => {
 				if (sql.includes("balance_cents")) bound.push(...values);
 			});
+
 			const { res } = await post(
 				{ file: file(csv(ROW_A)), balance: "-0.00" },
 				{
@@ -752,6 +836,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 					bindings: { ...family, DB: db } as unknown as Env,
 				},
 			);
+
 			expect(res.status).toBe(200);
 			expect(bound).toContain(0);
 			expect(bound.some((value) => Object.is(value, -0))).toBe(false);
@@ -771,6 +856,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const html = await (
 				await app.request("/accounts/apple-card", {}, family)
 			).text();
+
 			expect(sheetIds(html)).toBe(1);
 		});
 
@@ -782,16 +868,19 @@ describe("Apple Card's upload sheet (#766)", () => {
 					family,
 				)
 			).text();
+
 			expect(sheetIds(html)).toBe(1);
 		});
 
 		it("draws one #sheet on the no-JavaScript refusals, the size gate's and a refused file's", async () => {
 			const gate = await postUnread("abc");
 			expect(sheetIds(gate.html)).toBe(1);
+
 			const refused = await post(
 				{ file: file("OFXHEADER:100\n<OFX>"), balance: "" },
 				{ htmx: false },
 			);
+
 			expect(refused.res.status).toBe(422);
 			expect(sheetIds(refused.html)).toBe(1);
 		});
@@ -801,6 +890,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file("OFXHEADER:100\n<OFX>"), balance: "" },
 				{ htmx: true },
 			);
+
 			expect(res.status).toBe(422);
 			expect(sheetIds(html)).toBe(1);
 		});
@@ -812,15 +902,18 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A, ROW_B)), balance: "1,240.18" },
 				{ htmx: true },
 			);
+
 			const plaid = {
 				...family,
 				PLAID_CLIENT_ID: "client",
 				PLAID_SECRET: "secret",
 				TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 			} as unknown as Env;
+
 			const html = (
 				await (await app.request("/accounts", {}, plaid)).text()
 			).replaceAll("&#39;", "'");
+
 			const banks = html.indexOf('id="accounts-banks"');
 			const group = html.indexOf("data-apple-card");
 			const link = html.indexOf("data-link-bank");
@@ -838,9 +931,11 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A)), balance: "1,240.18" },
 				{ htmx: true },
 			);
+
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			expect(html).toContain(`Updated through ${shortDay(CLEARED_A, TODAY)}`);
 			expect(html).toContain("Balance as of");
 			expect(html).toContain("Upload a file");
@@ -849,9 +944,11 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 		it("says the card isn't in net worth yet while no balance counts", async () => {
 			await post({ file: file(csv(ROW_A)), balance: "" }, { htmx: true });
+
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			expect(html).toContain(
 				"Apple Card isn't in net worth yet. Add its balance next time you upload.",
 			);
@@ -861,6 +958,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			expect(html).toContain("Add Apple Card");
 			expect(html).not.toContain("No banks linked yet.");
 		});
@@ -869,12 +967,16 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const sheet = (
 				await (await app.request("/accounts/apple-card", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			// Cancel's own link (its text is Cancel) and the backdrop, which closes the sheet the same way.
 			const cancel = sheet.match(/<a\b[^>]*>Cancel<\/a>/)?.[0] ?? "";
+
 			const backdrop =
 				sheet.match(/<a\b[^>]*data-sheet-close[^>]*>/)?.[0] ?? "";
+
 			expect(cancel).not.toBe("");
 			expect(backdrop).not.toBe("");
+
 			for (const link of [cancel, backdrop]) {
 				expect(link).toContain('href="/accounts?focus=apple-card"');
 				expect(link).toContain('hx-get="/accounts?focus=apple-card"');
@@ -891,6 +993,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ headers: { "HX-Request": "true" } },
 				family,
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain(
 				"Apple Card upload cancelled.",
 			);
@@ -917,16 +1020,20 @@ describe("Apple Card's upload sheet (#766)", () => {
 					"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card'",
 				),
 			]);
+
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			// Add Apple Card shows again, since the card is removed, whatever the banks are (spec §8.10).
 			expect(html).toMatch(
 				/<a [^>]*href="\/accounts\/apple-card"[^>]*>\s*Add Apple Card/,
 			);
+
 			// The removed card's group is drawn like a disconnected bank's: its name and "Removed", no Upload.
 			const group =
 				html.split("data-apple-card")[1]?.split("</section>")[0] ?? "";
+
 			expect(group).toContain("Removed");
 			expect(group).not.toContain("Upload a file");
 		});
@@ -946,9 +1053,11 @@ describe("Apple Card's upload sheet (#766)", () => {
 				env.DB.prepare("DELETE FROM accounts WHERE plaid_item_id IS NOT NULL"),
 				env.DB.prepare("DELETE FROM plaid_items"),
 			]);
+
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
+
 			expect(html).not.toContain("No banks linked yet.");
 			expect(html).toContain("Apple Card");
 			expect(html).toContain("Upload a file");
@@ -962,11 +1071,14 @@ describe("the first week is untouched by an upload (spec §8.10, #766)", () => {
 		const form = new FormData();
 		form.set("file", new File([text], "apple.csv", { type: "text/csv" }));
 		form.set("balance", balance);
+
 		const request = new Request("http://tally.test/accounts/apple-card", {
 			method: "POST",
 			body: form,
 		});
+
 		const bytes = await request.arrayBuffer();
+
 		return app.request(
 			"/accounts/apple-card",
 			{

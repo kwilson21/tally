@@ -12,6 +12,7 @@ async function get(path: string, htmx = false) {
 	const res = await exports.default.fetch(BASE + path, {
 		headers: htmx ? { "HX-Request": "true" } : {},
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -31,16 +32,19 @@ async function post(
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
 /** The whole opening tag of the link that starts with `href`, so its class is checked on that link alone. */
 const linkTag = (html: string, href: string) =>
 	html.match(new RegExp(`<a [^>]*href="${href}"[^>]*>`))?.[0] ?? "";
+
 const marked = (html: string) =>
 	(html.match(/\brow-saved(?:-undo)?\b/g) ?? []).length;
 
 let bakery: number;
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	bakery = (
@@ -58,6 +62,7 @@ describe("a transaction's edit panel save marks its row", () => {
 			back: "/transactions",
 			category: "2",
 		});
+
 		expect(marked(html)).toBe(1);
 		expect(linkTag(html, `/transactions/${bakery}[^"]*`)).toMatch(
 			/\brow-saved\b/,
@@ -72,6 +77,7 @@ describe("a transaction's edit panel save marks its row", () => {
 			back: "/transactions",
 			category: "999999",
 		});
+
 		expect(marked(html)).toBe(0);
 	});
 });
@@ -119,6 +125,7 @@ describe("a Settings category save marks its row", () => {
 		const { res, html } = await post("/settings/categories/1", {
 			name: "Food at home",
 		});
+
 		expect(res.status).toBe(200);
 		expect(marked(html)).toBe(1);
 		expect(html).toMatch(
@@ -140,6 +147,7 @@ describe("a Settings category save marks its row", () => {
 
 describe("a save that asks a question marks its own row, when it is the edit panel's", () => {
 	const MERCHANT = "rule-offer-store";
+
 	const edit = (category: number) => ({
 		category: String(category),
 		merchant: "",
@@ -151,6 +159,7 @@ describe("a save that asks a question marks its own row, when it is the edit pan
 		creditReviewed: "0",
 		back: "/transactions",
 	});
+
 	let groceries: number;
 	let picks: number[];
 
@@ -204,6 +213,7 @@ describe("a save that asks a question marks its own row, when it is the edit pan
 
 	it("marks nothing when a cash entry's save raises the rule offer", async () => {
 		await twoPicks();
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -212,17 +222,20 @@ describe("a save that asks a question marks its own row, when it is the edit pan
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(cash.html).toContain("Always use Groceries for rule-offer-store?");
 		expect(marked(cash.html)).toBe(0);
 	});
 
 	it("marks nothing when a Select-mode save raises the rule offer", async () => {
 		await twoPicks();
+
 		const selected = await post("/transactions/select/category/save", {
 			ids: String(picks[2]),
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(selected.html).toContain(
 			"Always use Groceries for rule-offer-store?",
 		);
@@ -234,6 +247,7 @@ describe("a save that opens the likely transactions marks its own row", () => {
 	beforeEach(async () => {
 		// Two more bakery charges this month, still needing a category; one is the same merchant as the bakery.
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 		for (const [day, cents] of [
 			["01", 1200],
 			["02", 900],
@@ -254,6 +268,7 @@ describe("a save that opens the likely transactions marks its own row", () => {
 			category: "new",
 			new_category_name: "Pet Care",
 		});
+
 		expect(saved.html).toContain("These might belong too:");
 		expect(marked(saved.html)).toBe(1);
 		expect(linkTag(saved.html, `/transactions/${bakery}[^"]*`)).toMatch(
@@ -276,9 +291,11 @@ describe("a save that opens the likely transactions marks its own row", () => {
 			category: "new",
 			new_category_name: "Pet Care",
 		});
+
 		const [notNow, backdrop] = closes(saved.html);
 		expect(notNow).not.toBe("");
 		expect(backdrop).not.toBe("");
+
 		for (const tag of [notNow, backdrop]) {
 			expect(tag).toMatch(new RegExp(`hx-get="[^"]*focus=${bakery}[^"]*"`));
 			expect(tag).toMatch(new RegExp(`hx-get="[^"]*saved=${bakery}[^"]*"`));
@@ -295,6 +312,7 @@ describe("a save that opens the likely transactions marks its own row", () => {
 const detailsOf = (html: string, marker: string) => {
 	const at = html.indexOf(marker);
 	const start = at < 0 ? -1 : html.lastIndexOf("<details", at);
+
 	return start < 0 ? "" : html.slice(start, html.indexOf(">", start) + 1);
 };
 
@@ -303,12 +321,15 @@ describe("a Settings add or time zone save marks the row it changed", () => {
 		const { res, html } = await post("/settings/categories", {
 			name: "Pet Care",
 		});
+
 		expect(res.status).toBe(200);
+
 		const id = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Pet Care'",
 			).first<{ id: number }>()
 		)?.id;
+
 		expect(marked(html)).toBe(1);
 		expect(detailsOf(html, `data-row="${id}"`)).toMatch(/\brow-saved\b/);
 	});
@@ -323,6 +344,7 @@ describe("a Settings add or time zone save marks the row it changed", () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "America/Chicago",
 		});
+
 		expect(res.status).toBe(200);
 		expect(marked(html)).toBe(1);
 		expect(detailsOf(html, 'id="time-zone-disclosure"')).toMatch(
@@ -334,6 +356,7 @@ describe("a Settings add or time zone save marks the row it changed", () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "Mars/Olympus",
 		});
+
 		expect(res.status).toBe(422);
 		expect(marked(html)).toBe(0);
 	});
@@ -356,6 +379,7 @@ describe("a Settings person save marks the row it changed", () => {
 			person_id: String(kids),
 			name: "Kidz",
 		});
+
 		expect(res.status).toBe(200);
 		expect(marked(html)).toBe(1);
 		const row = detailsOf(html, `name="person_id" value="${kids}"`);
@@ -369,6 +393,7 @@ describe("a Settings person save marks the row it changed", () => {
 			person_id: String(kids),
 			name: "Everyone",
 		});
+
 		expect(res.status).toBe(422);
 		expect(marked(html)).toBe(0);
 	});
@@ -378,12 +403,15 @@ describe("a Settings person save marks the row it changed", () => {
 			action: "add",
 			name: "Morgan",
 		});
+
 		expect(res.status).toBe(200);
+
 		const morgan = (
 			await env.DB.prepare(
 				"SELECT id FROM household_people WHERE name = 'Morgan'",
 			).first<{ id: number }>()
 		)?.id;
+
 		expect(marked(html)).toBe(1);
 		expect(detailsOf(html, `name="person_id" value="${morgan}"`)).toMatch(
 			/\brow-saved\b/,
@@ -397,6 +425,7 @@ describe("a Settings person save marks the row it changed", () => {
 			remove: "1",
 			person_id: String(kids),
 		});
+
 		expect(marked(html)).toBe(0);
 	});
 });
@@ -409,25 +438,32 @@ describe("a cash entry's Undo restore marks its row", () => {
 		)
 			.bind(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}-%`)
 			.first<{ id: number; raw_name: string }>();
+
 		if (!entry) throw new Error("cash seed missing");
+
 		const { res } = await post(`/transactions/${entry.id}/delete`, {
 			back: "/transactions",
 			confirm: "1",
 		});
+
 		expect(res.status).toBe(200);
 		const token = JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.undo;
+
 		return { raw_name: entry.raw_name, token: token as string };
 	}
 
 	it("marks the restored row on the ordinary toast stay, and keeps its focus", async () => {
 		const { raw_name, token } = await deleteCashEntry();
+
 		const { res, html } = await post("/transactions/undo-cash-delete", {
 			token,
 			back: "/transactions",
 		});
+
 		const feedback = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 		// The restore's own toast is a plain one: no Undo to offer, so four seconds.
 		expect(feedback.toast.undo).toBeUndefined();
+
 		// A restore takes new ids, so the entry is found by what it was, as the newest row of that name.
 		const restoredId = (
 			await env.DB.prepare(
@@ -436,6 +472,7 @@ describe("a cash entry's Undo restore marks its row", () => {
 				.bind(raw_name)
 				.first<{ id: number }>()
 		)?.id;
+
 		expect(marked(html)).toBe(1);
 		const tag = linkTag(html, `/transactions/${restoredId}(?:\\?[^"]*)?`);
 		expect(tag).toMatch(/\brow-saved\b/);
@@ -449,10 +486,12 @@ describe("a cash entry's Undo restore marks its row", () => {
 			token,
 			back: "/transactions",
 		});
+
 		const { res, html } = await post("/transactions/undo-cash-delete", {
 			token,
 			back: "/transactions",
 		});
+
 		expect(
 			JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 		).toBe("That cash entry is already back.");
@@ -464,6 +503,7 @@ describe("a cash entry's Undo restore marks its row", () => {
 			token: "00000000-0000-4000-8000-000000000000",
 			back: "/transactions",
 		});
+
 		expect(marked(html)).toBe(0);
 	});
 });
@@ -489,6 +529,7 @@ describe("a Likely sheet's close keeps the saved row's tick for the rest of its 
 
 	it("marks nothing unless htmx asks within the stay", async () => {
 		const fresh = String(Date.now() - 1000);
+
 		const cases: [string, boolean][] = [
 			// A close without htmx is a full page load; the save's toast is gone by then.
 			[closeAt(fresh), false],
@@ -498,6 +539,7 @@ describe("a Likely sheet's close keeps the saved row's tick for the rest of its 
 			[`/transactions?focus=${bakery}&saved=0&saved-at=${fresh}`, true],
 			[`/transactions?focus=${bakery}&saved=abc&saved-at=${fresh}`, true],
 		];
+
 		for (const [path, htmx] of cases) {
 			const { html } = await get(path, htmx);
 			expect(marked(html), path).toBe(0);
@@ -535,6 +577,7 @@ describe("nothing but a save's own reply marks a row", () => {
 			back: "/transactions?month=all&category=1",
 			category: "2",
 		});
+
 		expect(linkTag(html, `/transactions/${bakery}[^"]*`)).toBe("");
 		expect(marked(html)).toBe(0);
 		expect(html).not.toContain("saved-tick");
@@ -546,6 +589,7 @@ describe("nothing but a save's own reply marks a row", () => {
 			["back", "/transactions?month=all"],
 			["ids", String(bakery)],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Set 1 transaction to Eating Out.",

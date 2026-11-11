@@ -41,9 +41,12 @@ const dialect = new SQLiteSyncDialect();
 /** Strips one pair of outer parentheses if they wrap the whole text, then one pair of single quotes. */
 function unwrapDefault(value: string): string {
 	let text = value.trim();
+
 	if (wrapsWholeText(text, "(", ")")) text = text.slice(1, -1).trim();
+
 	if (text.length >= 2 && text.startsWith("'") && text.endsWith("'"))
 		text = text.slice(1, -1);
+
 	return text;
 }
 
@@ -51,11 +54,14 @@ function unwrapDefault(value: string): string {
 function wrapsWholeText(text: string, open: string, close: string): boolean {
 	if (!text.startsWith(open) || !text.endsWith(close)) return false;
 	let depth = 0;
+
 	for (let i = 0; i < text.length; i++) {
 		if (text[i] === open) depth++;
 		else if (text[i] === close) depth--;
+
 		if (depth === 0) return i === text.length - 1;
 	}
+
 	return false;
 }
 
@@ -72,21 +78,26 @@ function normaliseSql(text: string): string {
 /** A column's default as text, or null for none. Drizzle keeps a string or number as given and an sql`` as SQL. */
 function schemaDefault(column: SQLiteColumn): string | null {
 	const value: unknown = column.default;
+
 	if (value === undefined || value === null) return null;
+
 	if (typeof value === "string" || typeof value === "number")
 		return unwrapDefault(String(value));
+
 	return unwrapDefault(dialect.sqlToQuery(value as never).sql);
 }
 
 /** The CHECK value lists in a CREATE TABLE statement: `col IN ('a', 'b')` and `col IN (0, 1)`, as text. */
 function liveChecks(createSql: string): Record<string, string[]> {
 	const found: Record<string, string[]> = {};
+
 	for (const match of createSql.matchAll(/\b(\w+)\s+IN\s*\(([^)]*)\)/gi)) {
 		const column = match[1] ?? "";
 		found[column] = (match[2] ?? "")
 			.split(",")
 			.map((value) => value.trim().replace(/^'(.*)'$/, "$1"));
 	}
+
 	return found;
 }
 
@@ -99,16 +110,20 @@ interface LiveIndex {
 /** Splits a CREATE INDEX statement into uniqueness, the indexed expression and the WHERE text. */
 function parseLiveIndex(createSql: string): LiveIndex {
 	const on = /\bON\s+\w+\s*\(/i.exec(createSql);
+
 	if (!on) throw new Error(`cannot read index: ${createSql}`);
 	const start = on.index + on[0].length;
 	let depth = 1;
 	let end = start;
+
 	for (; end < createSql.length && depth > 0; end++) {
 		if (createSql[end] === "(") depth++;
 		else if (createSql[end] === ")") depth--;
 	}
+
 	const rest = createSql.slice(end);
 	const where = /^\s*WHERE\s+([\s\S]*)$/i.exec(rest);
+
 	return {
 		unique: /^\s*CREATE\s+UNIQUE\s+INDEX/i.test(createSql),
 		expression: createSql.slice(start, end - 1),
@@ -119,6 +134,7 @@ function parseLiveIndex(createSql: string): LiveIndex {
 /** The same shape for a Drizzle index, rendered the way SQLite writes it (bare column names). */
 function schemaIndex(index: Index): LiveIndex {
 	const { config } = index;
+
 	return {
 		unique: config.unique,
 		expression: config.columns
@@ -139,7 +155,9 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 	const { results: live } = await env.DB.prepare(
 		`PRAGMA table_info(${tableName})`,
 	).all<LiveColumn>();
+
 	const liveByName = new Map(live.map((column) => [column.name, column]));
+
 	// A key of several columns is declared with primaryKey(), so its columns are not `primary` one by one.
 	const keyColumns = new Set(
 		config.primaryKeys.flatMap((key) =>
@@ -150,31 +168,39 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 	for (const column of config.columns) {
 		const where = `${tableName}.${column.name}`;
 		const found = liveByName.get(column.name);
+
 		if (!found) {
 			problems.push(`${where} is not in the database`);
 			continue;
 		}
+
 		const schemaType = column.getSQLType().toUpperCase();
 		const liveType = found.type.toUpperCase();
+
 		if (schemaType !== liveType)
 			problems.push(
 				`${where} type differs: schema ${schemaType}, database ${liveType}`,
 			);
+
 		// Drizzle's primaryKey() sets notNull in the model, but the migrations do not write NOT NULL on these keys
 		// (SQLite reports notnull 0), so a primary key's not-null is not compared.
 		if (!column.primary && column.notNull !== Boolean(found.notnull))
 			problems.push(`${where} not-null differs`);
 		const wantDefault = schemaDefault(column);
+
 		const haveDefault =
 			found.dflt_value === null ? null : unwrapDefault(found.dflt_value);
+
 		if (wantDefault !== haveDefault)
 			problems.push(
 				`${where} default differs: schema ${wantDefault}, database ${haveDefault}`,
 			);
 		const isKey = column.primary || keyColumns.has(column.name);
+
 		if (isKey !== Boolean(found.pk))
 			problems.push(`${where} primary key differs`);
 	}
+
 	for (const name of liveByName.keys())
 		if (!config.columns.some((column) => column.name === name))
 			problems.push(
@@ -186,10 +212,13 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 	)
 		.bind(tableName)
 		.all<{ sql: string }>();
+
 	const checks = liveChecks(tableRow[0]?.sql ?? "");
 	const expected = lists[tableName] ?? {};
+
 	for (const [column, values] of Object.entries(checks)) {
 		const want = expected[column];
+
 		if (!want)
 			problems.push(
 				`${tableName}.${column} has a CHECK in the database and no entry in CHECK_LISTS`,
@@ -202,6 +231,7 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 				`${tableName}.${column} CHECK differs: CHECK_LISTS ${[...want]}, database ${values}`,
 			);
 	}
+
 	for (const column of Object.keys(expected))
 		if (!(column in checks))
 			problems.push(
@@ -213,27 +243,35 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 	)
 		.bind(tableName)
 		.all<{ name: string; sql: string }>();
+
 	const liveIndexes = indexes.filter(
 		(index) => !index.name.startsWith("sqlite_autoindex_"),
 	);
+
 	for (const live of liveIndexes) {
 		const declared = config.indexes.find(
 			(index) => index.config.name === live.name,
 		);
+
 		if (!declared) {
 			problems.push(`index ${live.name} is in the database, not in the schema`);
 			continue;
 		}
+
 		const want = schemaIndex(declared);
 		const have = parseLiveIndex(live.sql);
+
 		if (want.unique !== have.unique)
 			problems.push(`index ${live.name} uniqueness differs`);
+
 		if ((want.where !== undefined) !== (have.where !== undefined))
 			problems.push(`index ${live.name} partial-ness differs`);
+
 		if (normaliseSql(want.expression) !== normaliseSql(have.expression))
 			problems.push(
 				`index ${live.name} expression differs: schema ${want.expression}, database ${have.expression}`,
 			);
+
 		if (
 			want.where !== undefined &&
 			have.where !== undefined &&
@@ -243,6 +281,7 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 				`index ${live.name} WHERE differs: schema ${want.where}, database ${have.where}`,
 			);
 	}
+
 	for (const declared of config.indexes)
 		if (!liveIndexes.some((live) => live.name === declared.config.name))
 			problems.push(
@@ -307,6 +346,7 @@ describe("the drift check fails on a wrong schema", () => {
 				.default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at"),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.created_at type differs",
 		);
@@ -320,6 +360,7 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at").default("never"),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.decided_at default differs",
 		);
@@ -332,6 +373,7 @@ describe("the drift check fails on a wrong schema", () => {
 			status: text({ enum: CATEGORY_SUGGESTION_STATUS_VALUES }).notNull(),
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.decided_at is in the database, not in the schema",
 		);
@@ -346,6 +388,7 @@ describe("the drift check fails on a wrong schema", () => {
 			decidedAt: text("decided_at"),
 			ghost: text(),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.ghost is not in the database",
 		);
@@ -363,6 +406,7 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at"),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.id primary key differs",
 		);
@@ -381,6 +425,7 @@ describe("the drift check fails on a wrong schema", () => {
 			namesAsked: integer("names_asked").notNull().default(0),
 			notABill: integer("not_a_bill").notNull().default(0),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"merchants.raw_name primary key differs",
 		);
@@ -392,6 +437,7 @@ describe("the drift check fails on a wrong schema", () => {
 			position: integer().notNull(),
 			name: text().notNull(),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"merchant_suggested_names.merchant_key primary key differs",
 		);
@@ -408,6 +454,7 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at"),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.name not-null differs",
 		);
@@ -421,6 +468,7 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at").notNull(), // the database: decided_at TEXT, nullable
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"category_suggestions.decided_at not-null differs",
 		);
@@ -431,6 +479,7 @@ describe("the drift check fails on a wrong schema", () => {
 			...CHECK_LISTS,
 			category_suggestions: { status: ["pending", "created", "dismissed"] },
 		};
+
 		expect((await drift(categorySuggestions, lists)).join("\n")).toContain(
 			"category_suggestions.status CHECK differs",
 		);
@@ -448,6 +497,7 @@ describe("the drift check fails on a wrong schema", () => {
 			...CHECK_LISTS,
 			merchants: { ...CHECK_LISTS.merchants, ghost: ["x"] },
 		};
+
 		expect((await drift(merchants, lists)).join("\n")).toContain(
 			"CHECK_LISTS has merchants.ghost, but the database has no such CHECK",
 		);
@@ -461,6 +511,7 @@ describe("the drift check fails on a wrong schema", () => {
 			createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 			decidedAt: text("decided_at"),
 		});
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"index category_suggestions_pending_name is in the database, not in the schema",
 		);
@@ -482,6 +533,7 @@ describe("the drift check fails on a wrong schema", () => {
 					.where(sql`${t.status} = 'pending' AND ${t.name} <> ''`),
 			],
 		);
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"index category_suggestions_pending_name expression differs",
 		);
@@ -503,6 +555,7 @@ describe("the drift check fails on a wrong schema", () => {
 					.where(sql`${t.status} = 'created' AND ${t.name} <> ''`),
 			],
 		);
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"index category_suggestions_pending_name WHERE differs",
 		);
@@ -524,6 +577,7 @@ describe("the drift check fails on a wrong schema", () => {
 					.where(sql`${t.status} = 'pending' AND ${t.name} <> ''`),
 			],
 		);
+
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"index category_suggestions_pending_name uniqueness differs",
 		);

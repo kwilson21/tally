@@ -42,30 +42,38 @@ export function BankMark() {
 
 /** The value a suggested name's choice posts: the name itself, so a stale page can't pick another one. */
 export const pickValue = (name: string) => `s:${name}`;
+
 /** The value of "The store's own name" (decision 101): the bank's text tidied. */
 export const STORE_VALUE = "store";
+
 /** The value of "Type your own" (decision 101): the name typed in the field. */
 export const OWN_VALUE = "own";
+
 /** The class every Name row choice carries; the Rename list shows while one of them is ticked. */
 export const NAME_PICK_CLASS = "name-pick";
+
 /** The class of the "Type your own" radio: the field under it is shown while it is ticked. */
 export const OWN_PICK_CLASS = "name-own";
+
 /**
  * The edit panel's form: its category, Exclude, Income, refund and merchant rule tick (MerchantRuleTick) controls fold the re-guess
  * note under This one only away once they change (CSS only), so it is a named group that NameChoices' and the Chips'
  * unnamed `group` don't meet.
  */
 export const EDIT_FORM_GROUP = "group/edit";
+
 /**
  * The class of the Name row choice whose name the save would treat as no rename (the route's guard): the store's
  * tidied name, or a suggested name, equal to the row's own name. The re-guess note folds on it (GUESS_AGAIN_FOLDS).
  */
 export const SAME_NAME_CLASS = "name-same";
+
 /**
  * The class of a "This refunds…" choice that links a purchase which isn't excluded (the one the save counts the refund
  * against). The re-guess note's link hooks read it; "Not linked" carries none, so picking it never folds the note.
  */
 export const LINKED_PURCHASE_CLASS = "linked-purchase";
+
 /**
  * The class of the category chip Tally picked for the row, the one it has when the panel opens. The note folds while any
  * other category, or New category, is ticked, since the save posts that one and keeps it.
@@ -84,6 +92,7 @@ function SourceLine({ id, source }: { id: string; source: NameSource }) {
 				From your bank
 			</p>
 		);
+
 	return (
 		<div class="flex flex-wrap items-center gap-x-2 text-sm">
 			<span id={id} class="inline-flex items-center gap-1.5 text-ink">
@@ -146,6 +155,7 @@ function Choice({
 				{notes.map((note) => {
 					const { text, class: hook = "" } =
 						typeof note === "string" ? { text: note, class: "" } : note;
+
 					return (
 						<span class={`text-sm text-muted ${hook}`.trim()}>{text}</span>
 					);
@@ -238,8 +248,10 @@ const GUESS_AGAIN_FOLDS = [
 	"group-has-[.name-same:checked]/edit:hidden",
 	"group-has-[input[name=always]:checked]/edit:hidden",
 ];
+
 /** Exclude blocks the guess unless the row pays a bill (excludeCounts). */
 const EXCLUDE_FOLDS = ["group-has-[input[name=excluded]:checked]/edit:hidden"];
+
 /**
  * Where ticking Reviewed lifts Plaid's exclusion (reviewLifts), Exclude blocks the guess only while Reviewed is unticked, since a
  * ticked review makes the row count. It replaces EXCLUDE_FOLDS there, it doesn't add to it.
@@ -247,6 +259,7 @@ const EXCLUDE_FOLDS = ["group-has-[input[name=excluded]:checked]/edit:hidden"];
 const EXCLUDE_FOLDS_UNLESS_REVIEWED = [
 	"group-has-[input[name=excluded]:checked]/edit:group-has-[input[name=creditReviewed]:not(:checked)]/edit:hidden",
 ];
+
 /** While the drawn link holds (linkHolds), any linked purchase ticked is the refund following it, so it hides the note. */
 const LINK_HOLDS_FOLDS = ["group-has-[.linked-purchase:checked]/edit:hidden"];
 
@@ -287,9 +300,11 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 		scope,
 		scopeName = "name_scope",
 	} = rename;
+
 	const others = otherTransactionsLine(total, { part });
 	const count = allUpdateCount({ total, owned });
 	const allRows = count >= 2;
+
 	return (
 		<div class="hidden flex-col gap-1 border-t border-rule pt-3 group-has-[.name-pick:checked]:flex">
 			<fieldset class="flex flex-col">
@@ -389,6 +404,7 @@ export function NameChoices({
 	const ownPicked = picked === OWN_VALUE;
 	const ownError = ownPicked ? error : undefined;
 	const choiceError = ownPicked ? undefined : error;
+
 	return (
 		<fieldset
 			class="group flex flex-col"

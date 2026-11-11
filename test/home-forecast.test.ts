@@ -50,6 +50,7 @@ describe("forecastMonth", () => {
 				endCents: 0,
 			},
 		];
+
 		for (const entry of cases) {
 			const forecast = forecastMonth({
 				day: 10,
@@ -61,8 +62,10 @@ describe("forecastMonth", () => {
 				refundsCents: entry.refundsCents,
 				billsStillDueCents: 0,
 			});
+
 			expect(forecast.endCents, entry.name).toBe(entry.endCents);
 		}
+
 		const noRefund = forecastMonth({
 			day: 15,
 			daysInMonth: 31,
@@ -73,7 +76,9 @@ describe("forecastMonth", () => {
 			refundsCents: 0,
 			billsStillDueCents: 0,
 		});
+
 		expect(noRefund.endCents).toBe(20667);
+
 		const overRefunded = forecastMonth({
 			day: 15,
 			daysInMonth: 31,
@@ -84,6 +89,7 @@ describe("forecastMonth", () => {
 			refundsCents: 3000,
 			billsStillDueCents: 0,
 		});
+
 		expect(overRefunded.endCents).toBe(-2000);
 	});
 
@@ -136,6 +142,7 @@ describe("forecastMonth", () => {
 			refundsCents: 0,
 			billsStillDueCents: 0,
 		};
+
 		expect(FORECAST_START_DAY).toBe(7);
 		expect(forecastMonth(input).visible).toBe(false);
 		expect(forecastMonth({ ...input, day: 7 }).visible).toBe(true);
@@ -156,6 +163,7 @@ describe("forecastMonth", () => {
 				differenceCents: 0,
 			}),
 		);
+
 		expect(html).toContain(
 			`by ${month === "2026-02" ? "Feb 28" : "Mar 31"}, at this pace`,
 		);
@@ -175,9 +183,11 @@ describe("HomeForecast chart scale", () => {
 				differenceCents: 5000,
 			}),
 		);
+
 		const points = [
 			...html.matchAll(/(?:\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g),
 		].map((match) => Number(match[1]));
+
 		expect(points.length).toBeGreaterThan(0);
 		expect(points.every((y) => y >= 34 && y <= 142)).toBe(true);
 	});
@@ -196,8 +206,10 @@ describe("HomeForecast figures (decision 128)", () => {
 			differenceCents: 35000,
 		}),
 	);
+
 	const quoteForRegExp = (text: string) =>
 		text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 	/** The class attribute of the chart text whose content is exactly `text`, or undefined. */
 	const textClass = (text: string) =>
 		html.match(
@@ -206,8 +218,10 @@ describe("HomeForecast figures (decision 128)", () => {
 
 	it("sets the headline amount in tabular figures", () => {
 		expect(html).toContain("$350 under");
+
 		const headline =
 			html.match(/class="([^"]*font-serif text-4xl[^"]*)"/)?.[1] ?? "";
+
 		expect(headline.split(" ")).toContain("tabular-nums");
 	});
 
@@ -226,18 +240,22 @@ describe("homeForecastDays query budget", () => {
 		const month = "2099-10";
 		await resetDemo(env.DB, `${month}-18`);
 		const before = await homeForecastDays(env.DB, month, `${month}-18`);
+
 		const names = [
 			"Forecast role bill credit",
 			"Forecast role refund",
 			"Forecast role payment",
 			"Forecast role everyday",
 		];
+
 		const bill = await env.DB.prepare(
 			"INSERT INTO bills(name,amount_cents,due_day,frequency,merchant_raw_name) VALUES('Forecast role bill', 2000, 15, 'monthly', 'Forecast role bill') RETURNING id",
 		).first<{ id: number }>();
+
 		const paymentBill = await env.DB.prepare(
 			"INSERT INTO bills(name,amount_cents,due_day,frequency,merchant_raw_name) VALUES('Forecast role payment bill', 5000, 17, 'monthly', 'Forecast role payment bill') RETURNING id",
 		).first<{ id: number }>();
+
 		try {
 			await env.DB.batch([
 				env.DB.prepare(
@@ -253,16 +271,19 @@ describe("homeForecastDays query budget", () => {
 					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1, ?, 1000, ?)",
 				).bind(`${month}-18`, names[3]),
 			]);
+
 			const credit = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = ? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(names[0])
 				.first<{ id: number }>();
+
 			const payment = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = ? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(names[2])
 				.first<{ id: number }>();
+
 			if (!bill || !paymentBill || !credit || !payment)
 				throw new Error("Forecast fixture missing");
 			await env.DB.batch([
@@ -274,6 +295,7 @@ describe("homeForecastDays query budget", () => {
 				).bind(paymentBill.id, month, payment.id),
 			]);
 			const rows = await homeForecastDays(env.DB, month, `${month}-18`);
+
 			for (const [
 				day,
 				spentCents,
@@ -322,18 +344,23 @@ describe("homeForecastDays query budget", () => {
 	it("reads the current month's forecast in one bounded statement", async () => {
 		let statements = 0;
 		let forecastSql = "";
+
 		const db = new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
 						forecastSql = sql;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		await homeForecastDays(db as D1Database, today.slice(0, 7), today);
 		expect(statements).toBe(1);

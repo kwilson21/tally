@@ -39,7 +39,9 @@ export async function plaidPost<T>(
 		env.PLAID_ENV === "production"
 			? "https://production.plaid.com"
 			: "https://sandbox.plaid.com";
+
 	let response: Response;
+
 	try {
 		response = await fetchImpl(`${baseUrl}${path}`, {
 			method: "POST",
@@ -54,12 +56,15 @@ export async function plaidPost<T>(
 	} catch {
 		throw new PlaidError();
 	}
+
 	let parsed: unknown;
+
 	try {
 		parsed = JSON.parse(await response.text());
 	} catch {
 		throw new PlaidError();
 	}
+
 	if (!response.ok) {
 		throw new PlaidError(
 			typeof parsed === "object" && parsed !== null
@@ -67,6 +72,7 @@ export async function plaidPost<T>(
 				: {},
 		);
 	}
+
 	return parsed as T;
 }
 
@@ -135,5 +141,6 @@ export async function getInstitutionName(
 		{ institution_id: institutionId, country_codes: ["US"] },
 		fetchImpl,
 	);
+
 	return result.institution?.name;
 }

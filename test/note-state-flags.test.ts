@@ -17,6 +17,7 @@ const STAMP = "2026-10-01 09:25:00";
 const migration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0068_note_state"),
 );
+
 const BACKFILL = (migration?.queries ?? []).find((query) =>
 	query.includes("UPDATE transactions SET note_state"),
 );
@@ -36,6 +37,7 @@ const TEXT: Partial<Record<NoteState, string>> = {
 const cases = (Object.keys(HELD) as (keyof typeof HELD)[]).flatMap((variant) =>
 	NOTE_STATES.map((state) => ({ variant, state })),
 );
+
 const idOf = (index: number) => FIRST + index;
 
 describe("the flags a state implies", () => {
@@ -51,6 +53,7 @@ describe("the flags a state implies", () => {
 				)
 				.bind(ACCOUNT),
 		]);
+
 		for (const [index, { variant, state }] of cases.entries()) {
 			const flags = flagsFor(state, HELD[variant]);
 			await db
@@ -88,17 +91,20 @@ describe("the flags a state implies", () => {
 		// The backfill reads the stored flags. A state is never changed by it, so a state that reads back differently
 		// would mean its flags do not say it.
 		await db.prepare(BACKFILL).run();
+
 		for (const [index, { variant, state }] of cases.entries()) {
 			const row = await db
 				.prepare("SELECT note_state AS state FROM transactions WHERE id = ?")
 				.bind(idOf(index))
 				.first<{ state: NoteState }>();
+
 			// Known exception (decision 172): a person's emptying after Jev said yes stamps the same flags as Workers AI's
 			// empty answer, and the flags cannot tell them apart, so it reads back as tried_empty.
 			const expected =
 				state === "emptied_by_person" && variant === "jevYes"
 					? "tried_empty"
 					: state;
+
 			expect(row?.state, `${variant} ${state}`).toBe(expected);
 		}
 	});

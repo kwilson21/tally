@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 const db = env.DB;
+
 const migration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0046_bill_added_on"),
 );

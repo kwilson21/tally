@@ -33,6 +33,7 @@ export function joinsLeader(
 	const b = Math.abs(row.amountCents);
 	const lo = Math.min(a, b);
 	const hi = Math.max(a, b);
+
 	return hi <= 2 * lo || hi - lo < NEAR_CENTS;
 }
 
@@ -53,14 +54,18 @@ export function buildClusters<T extends ClusterRow>(
 
 	for (const group of groupBySameCleanedText(rows)) {
 		const [leader, ...others] = group.rows as T[];
+
 		if (!leader) continue;
 		// The rows that pass the rule against the group's leader, in input order. The leader is first.
 		const passing: T[] = [leader];
+
 		for (const row of others) {
 			if (joinsLeader(leader, row)) passing.push(row);
 			else clusters.push([row.id]);
 		}
+
 		for (const chunk of chunkClusters(passing)) clusters.push(chunk);
+
 		for (const row of group.rows) held.add(row.id);
 	}
 
@@ -68,6 +73,7 @@ export function buildClusters<T extends ClusterRow>(
 	for (const row of rows) if (!held.has(row.id)) clusters.push([row.id]);
 
 	const at = (cluster: number[]) => position.get(cluster[0] ?? -1) ?? 0;
+
 	return clusters.sort((a, b) => at(a) - at(b));
 }
 
@@ -77,15 +83,20 @@ export function buildClusters<T extends ClusterRow>(
  */
 function chunkClusters<T extends ClusterRow>(rows: readonly T[]): number[][] {
 	const out: number[][] = [];
+
 	for (let start = 0; start < rows.length; start += CLUSTER_MAX) {
 		const [leader, ...others] = rows.slice(start, start + CLUSTER_MAX);
+
 		if (!leader) continue;
 		const members = [leader.id];
+
 		for (const row of others) {
 			if (joinsLeader(leader, row)) members.push(row.id);
 			else out.push([row.id]);
 		}
+
 		out.push(members);
 	}
+
 	return out;
 }

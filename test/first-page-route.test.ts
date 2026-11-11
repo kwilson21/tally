@@ -29,6 +29,7 @@ import { setupRoute } from "../src/routes/setup";
 const db = env.DB;
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
+
 /** Stroke one was drawn two days ago, so the questions are open today (spec §8.8, decision 146: no wait for a later day). */
 const STROKE_ONE = daysBefore(TODAY, 2);
 
@@ -44,6 +45,7 @@ function app(demo: boolean, DB: D1Database = db) {
 	});
 	router.route("/", setupRoute);
 	router.route("/", firstPage);
+
 	return {
 		fetch(path: string, init?: RequestInit) {
 			return router.fetch(
@@ -59,6 +61,7 @@ const family = app(false);
 
 async function get(path: string) {
 	const res = await family.fetch(path);
+
 	return { res, html: await res.text() };
 }
 
@@ -77,6 +80,7 @@ async function post(
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -132,6 +136,7 @@ async function keepAsShown(htmx = false) {
  */
 async function answerAsShown(answer: "yes" | "no", htmx = false) {
 	const { html } = await get("/setup");
+
 	return post(
 		"/setup/pay",
 		[...hiddenFields(html, "merchant"), ...payFields(html), ["answer", answer]],
@@ -145,6 +150,7 @@ async function answerAsShown(answer: "yes" | "no", htmx = false) {
  */
 async function answerFor(key: string, answer: "yes" | "no", htmx = false) {
 	const merchant = (await payMerchants(db)).find((m) => m.key === key);
+
 	return post(
 		"/setup/pay",
 		[
@@ -162,16 +168,20 @@ async function answerFor(key: string, answer: "yes" | "no", htmx = false) {
  */
 function raceBeforeBatch(hook: (db: D1Database) => Promise<void>): D1Database {
 	let raced = false;
+
 	return new Proxy(db, {
 		get(target, prop) {
 			if (prop === "batch" && !raced) {
 				return async (statements: D1PreparedStatement[]) => {
 					raced = true;
 					await hook(target);
+
 					return target.batch(statements);
 				};
 			}
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -194,9 +204,11 @@ const textOf = (html: string) =>
 		.replace(/\s+/g, " ");
 
 let seq = 0;
+
 /** One imported bank line on the one connected bank (account 1). `over` sets the columns that differ. */
 async function txn(over: Record<string, unknown>) {
 	seq += 1;
+
 	const row: Record<string, unknown> = {
 		account_id: 1,
 		plaid_transaction_id: `first-page-${seq}`,
@@ -209,6 +221,7 @@ async function txn(over: Record<string, unknown>) {
 		income_confidence: 0,
 		...over,
 	};
+
 	const columns = Object.keys(row);
 	await db
 		.prepare(
@@ -219,6 +232,7 @@ async function txn(over: Record<string, unknown>) {
 }
 
 let cachedCategory: number | null = null;
+
 async function categoryId() {
 	if (cachedCategory === null) {
 		const row = await db
@@ -226,8 +240,10 @@ async function categoryId() {
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		cachedCategory = row?.id ?? 1;
 	}
+
 	return cachedCategory;
 }
 
@@ -355,11 +371,13 @@ describe("the gate", () => {
 				income_confidence: 0.5,
 			});
 			const { html } = await get("/setup");
+
 			const asked: [string, string][] = [
 				...hiddenFields(html, "merchant"),
 				...payFields(html),
 				["answer", "yes"],
 			];
+
 			expect(asked).toHaveLength(4);
 			await setUp();
 			const before = await readFirstTally(db);
@@ -382,9 +400,11 @@ describe("the gate", () => {
 			expect(res.status).toBe(204);
 			expect(res.headers.get("HX-Redirect")).toBe("/");
 			expect(await readFirstTally(db)).toEqual(before);
+
 			const bills = await db
 				.prepare("SELECT COUNT(*) AS n FROM bills")
 				.first<{ n: number }>();
+
 			expect(bills?.n).toBe(0);
 		});
 	});
@@ -394,11 +414,13 @@ describe("the family app only", () => {
 	it("is a 404 in the demo, for the page and its answers", async () => {
 		const demo = app(true);
 		expect((await demo.fetch("/first-page")).status).toBe(404);
+
 		const answer = await demo.fetch("/setup/pay", {
 			method: "POST",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
 			body: "merchant=X&answer=yes",
 		});
+
 		expect(answer.status).toBe(404);
 	});
 });
@@ -429,10 +451,12 @@ describe("pay questions from data", () => {
 	it("names the cadence from the dates", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 4, 14);
 		const { html } = await get("/setup");
+
 		const weekday = new Date(`${TODAY}T00:00:00Z`).toLocaleDateString("en-US", {
 			weekday: "long",
 			timeZone: "UTC",
 		});
+
 		expect(textOf(html)).toContain(`Every other ${weekday} · 4 times since`);
 	});
 });
@@ -442,11 +466,13 @@ describe("Yes and No writes", () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const { res } = await answerAsShown("yes");
 		expect(res.status).toBe(303);
+
 		const rows = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
 			)
 			.all<{ flag_income: number; income_source: string }>();
+
 		expect(
 			rows.results.every(
 				(row) => row.flag_income === 1 && row.income_source === "user",
@@ -460,11 +486,13 @@ describe("Yes and No writes", () => {
 			income_confidence: 0.5,
 		});
 		await answerAsShown("no");
+
 		const rows = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'TRANSFER IN'",
 			)
 			.all<{ flag_income: number; income_source: string }>();
+
 		expect(
 			rows.results.every(
 				(row) => row.flag_income === 0 && row.income_source === "user",
@@ -511,22 +539,27 @@ describe("Yes and No writes", () => {
 	it("a stale answer for a merchant with nothing left to ask changes nothing", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		await answerAsShown("yes");
+
 		const before = await db
 			.prepare(
 				"SELECT updated_at FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
 			)
 			.all();
+
 		const { res } = await post(
 			"/setup/pay",
 			{ merchant: "ACME CORP PAYROLL", answer: "no" },
 			true,
 		);
+
 		expect(trigger(res).toast?.type).toBe("info");
+
 		const after = await db
 			.prepare(
 				"SELECT updated_at FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
 			)
 			.all();
+
 		expect(after.results).toEqual(before.results);
 		expect(
 			Object.keys(
@@ -546,11 +579,13 @@ describe("Yes and No writes", () => {
 			yes: byId(merchant),
 			at: 0,
 		});
+
 		const rows = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
 			)
 			.all<{ flag_income: number; income_source: string }>();
+
 		expect(
 			rows.results.every(
 				(row) => row.flag_income === 1 && row.income_source === "user",
@@ -617,10 +652,12 @@ describe("Yes and No writes", () => {
 	it("answers a No that a competing Yes beat with the page as it is, as info, and keeps the Yes", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
+
 		// The competing Yes lands just before this reply's own batch, so the reply's No changes no row.
 		const racing = raceBeforeBatch(async (target) => {
 			await answerPay(target, merchant, "yes", "person@example.com");
 		});
+
 		const res = await app(false, racing).fetch("/setup/pay", {
 			method: "POST",
 			redirect: "manual",
@@ -634,6 +671,7 @@ describe("Yes and No writes", () => {
 				["answer", "no"],
 			]).toString(),
 		});
+
 		const html = await res.text();
 		expect(res.status).toBe(200);
 		expect(trigger(res).toast).toEqual({
@@ -653,6 +691,7 @@ describe("Yes and No writes", () => {
 	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
+
 		// A deposit arrives after the question was read and before this reply's batch: the answer must leave it alone.
 		const racing = raceBeforeBatch(() =>
 			txn({
@@ -663,6 +702,7 @@ describe("Yes and No writes", () => {
 				plaid_category: "INCOME",
 			}),
 		);
+
 		const res = await app(false, racing).fetch("/setup/pay", {
 			method: "POST",
 			redirect: "manual",
@@ -673,19 +713,24 @@ describe("Yes and No writes", () => {
 				["answer", "yes"],
 			]).toString(),
 		});
+
 		expect(res.status).toBe(303);
+
 		const late = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL' AND date = ?",
 			)
 			.bind(daysBefore(TODAY, 7))
 			.first<{ flag_income: number; income_source: string | null }>();
+
 		expect(late).toEqual({ flag_income: 1, income_source: null });
+
 		const answered = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'ACME CORP PAYROLL' AND income_source = 'user'",
 			)
 			.first<{ n: number }>();
+
 		expect(answered?.n).toBe(2);
 		const record = await readFirstTally(db);
 		expect(
@@ -750,9 +795,11 @@ describe("a merchant asked again keeps every Yes in its pay line", () => {
 
 	it("a later No on a new deposit leaves the earlier Yes deposits as they were", async () => {
 		await acmeAskedAgain();
+
 		const yesBefore = Object.keys(
 			(await readFirstTally(db))?.pay?.["ACME CORP"]?.yes ?? {},
 		);
+
 		expect(yesBefore).toHaveLength(2);
 		const { res, html } = await answerAsShown("no", true);
 		const message = "Saved: that deposit from Acme Corp isn't your pay.";
@@ -761,27 +808,32 @@ describe("a merchant asked again keeps every Yes in its pay line", () => {
 		expect(html).not.toContain("Is this your pay?");
 		const record = (await readFirstTally(db))?.pay?.["ACME CORP"];
 		expect(Object.keys(record?.yes ?? {})).toEqual(yesBefore);
+
 		const newId = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'ACME CORP' AND date = ?",
 			)
 			.bind(TODAY)
 			.first<{ id: number }>();
+
 		expect(record?.no).toEqual({
 			[String(newId?.id)]: { date: TODAY, cents: 245000 },
 		});
+
 		const row = await db
 			.prepare(
 				"SELECT income_source, flag_income FROM transactions WHERE id = ?",
 			)
 			.bind(newId?.id ?? 0)
 			.first<{ income_source: string; flag_income: number }>();
+
 		expect(row).toEqual({ income_source: "user", flag_income: 0 });
 	});
 
 	it("a No on several new deposits says how many it kept apart, when the merchant had a Yes line", async () => {
 		await acmeAskedAgain();
 		await answerAsShown("yes");
+
 		for (const days of [7, 0]) {
 			await txn({
 				raw_name: "ACME CORP",
@@ -791,6 +843,7 @@ describe("a merchant asked again keeps every Yes in its pay line", () => {
 				plaid_category: "INCOME",
 			});
 		}
+
 		const { res } = await answerAsShown("no", true);
 		const message = "Saved: those 2 deposits from Acme Corp aren't your pay.";
 		expect(trigger(res).toast?.message).toBe(message);
@@ -832,11 +885,13 @@ describe("a Yes's pay line covers only the deposits the question showed", () => 
 			amount_cents: 18742,
 			is_split: 1,
 		});
+
 		const parent = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'ACME CORP' AND is_split = 1",
 			)
 			.first<{ id: number }>();
+
 		await txn({
 			raw_name: "ACME CORP",
 			date: TODAY,
@@ -893,11 +948,13 @@ describe("A pay answer answers what the page showed", () => {
 		expect(html).not.toContain("Saved:");
 		expect(html).toContain("Is this your pay?");
 		expect(html).toContain(asked);
+
 		const marked = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE income_source = 'user'",
 			)
 			.first<{ n: number }>();
+
 		expect(marked?.n).toBe(0);
 		const record = await readFirstTally(db);
 		expect(record?.pay?.["ACME CORP PAYROLL"]).toBeUndefined();
@@ -914,6 +971,7 @@ describe("A pay answer answers what the page showed", () => {
 			flag_income: 1,
 			plaid_category: "INCOME",
 		});
+
 		const { res, html } = await post(
 			"/setup/pay",
 			[
@@ -923,6 +981,7 @@ describe("A pay answer answers what the page showed", () => {
 			],
 			true,
 		);
+
 		await expectRefused(res, html, "3 times since");
 	});
 
@@ -935,6 +994,7 @@ describe("A pay answer answers what the page showed", () => {
 			)
 			.bind(TODAY)
 			.run();
+
 		const { res, html } = await post(
 			"/setup/pay",
 			[
@@ -944,18 +1004,21 @@ describe("A pay answer answers what the page showed", () => {
 			],
 			true,
 		);
+
 		await expectRefused(res, html, "2 times since");
 	});
 
 	it("says the deposits changed when a sync corrects a shown deposit between the check and the answer", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
+
 		const racing = raceBeforeBatch(async (target) => {
 			await target
 				.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")
 				.bind(merchant.ids[0])
 				.run();
 		});
+
 		const { res, html } = await post(
 			"/setup/pay",
 			[
@@ -966,18 +1029,21 @@ describe("A pay answer answers what the page showed", () => {
 			true,
 			racing,
 		);
+
 		await expectRefused(res, html, "$2,450 to $2,500");
 	});
 
 	it("says the deposits changed when a sync renames a shown deposit's merchant between the check and the answer", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
+
 		const racing = raceBeforeBatch(async (target) => {
 			await target
 				.prepare("UPDATE transactions SET merchant_name = 'ACME' WHERE id = ?")
 				.bind(merchant.ids[0])
 				.run();
 		});
+
 		const { res, html } = await post(
 			"/setup/pay",
 			[
@@ -988,17 +1054,20 @@ describe("A pay answer answers what the page showed", () => {
 			true,
 			racing,
 		);
+
 		// The renamed deposit is now its own merchant, 'ACME', which sorts first and is asked first.
 		await expectRefused(res, html, "Once, on");
 	});
 
 	it("marks nothing when the form posts no deposit field", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
+
 		const { res, html } = await post(
 			"/setup/pay",
 			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
 			true,
 		);
+
 		await expectRefused(res, html, "2 times since");
 	});
 
@@ -1041,11 +1110,13 @@ describe("bills: the exclusions and the one-tap keep", () => {
 		await charge("NETFLIX", 1549);
 		const { res } = await keepAsShown();
 		expect(res.status).toBe(303);
+
 		const bills = await db
 			.prepare(
 				"SELECT name, amount_cents, merchant_raw_name FROM bills WHERE active = 1",
 			)
 			.all<{ name: string; amount_cents: number; merchant_raw_name: string }>();
+
 		expect(bills.results).toEqual([
 			{ name: "Netflix", amount_cents: 1549, merchant_raw_name: "NETFLIX" },
 		]);
@@ -1067,9 +1138,11 @@ describe("Keep keeps what the page showed", () => {
 		const shown = keepFields((await get("/setup")).html);
 		await charge("SPOTIFY", 1199);
 		const { res, html } = await post("/setup/bills", shown, true);
+
 		const bills = await db
 			.prepare("SELECT name FROM bills WHERE active = 1")
 			.all<{ name: string }>();
+
 		expect(bills.results.map((bill) => bill.name)).toEqual(["Netflix"]);
 		expect(trigger(res).announce).toBe(
 			"Kept 1 bill. 1 charge changed since the page drew, so it's asked again below.",
@@ -1088,9 +1161,11 @@ describe("Keep keeps what the page showed", () => {
 			.bind(TODAY)
 			.run();
 		const { res, html } = await post("/setup/bills", shown, true);
+
 		const bills = await db
 			.prepare("SELECT COUNT(*) AS count FROM bills")
 			.first<{ count: number }>();
+
 		expect(bills?.count).toBe(0);
 		expect(trigger(res).announce).toBe(
 			"Nothing kept. 1 charge changed since the page drew, so it's asked again below.",
@@ -1108,9 +1183,11 @@ describe("Keep keeps what the page showed", () => {
 			)
 			.run();
 		const { res, html } = await post("/setup/bills", shown, true);
+
 		const bills = await db
 			.prepare("SELECT COUNT(*) AS count FROM bills")
 			.first<{ count: number }>();
+
 		expect(bills?.count).toBe(0);
 		expect(trigger(res).announce).toBe(
 			"Nothing kept. 1 charge changed since the page drew, so it's asked again below.",
@@ -1123,9 +1200,11 @@ describe("Keep keeps what the page showed", () => {
 	it("keeps no bill when the form submits no charge, even with one on the page", async () => {
 		await charge("NETFLIX", 1549);
 		const { res } = await post("/setup/bills", [], true);
+
 		const bills = await db
 			.prepare("SELECT COUNT(*) AS count FROM bills")
 			.first<{ count: number }>();
+
 		expect(bills?.count).toBe(0);
 		expect(trigger(res).announce).toMatch(/^Nothing kept\./);
 	});
@@ -1144,10 +1223,13 @@ describe("the presence check-in on the page (decision 146)", () => {
 		const tag = /<\/?div\b[^>]*>/g;
 		tag.lastIndex = start;
 		let depth = 0;
+
 		for (let m = tag.exec(html); m; m = tag.exec(html)) {
 			depth += m[0].startsWith("</") ? -1 : 1;
+
 			if (depth === 0) return html.slice(start, m.index + m[0].length);
 		}
+
 		throw new Error("the element is never closed");
 	}
 
@@ -1271,9 +1353,11 @@ describe("refunds and the Yes write", () => {
 			date: daysBefore(TODAY, 3),
 			amount_cents: 2500,
 		});
+
 		const purchase = await db
 			.prepare("SELECT id FROM transactions WHERE raw_name = 'STORE'")
 			.first<{ id: number }>();
+
 		await txn({
 			raw_name: "STORE REFUND",
 			date: TODAY,
@@ -1288,11 +1372,13 @@ describe("refunds and the Yes write", () => {
 		);
 		expect(html).not.toContain("STORE REFUND");
 		await answerFor("STORE REFUND", "yes");
+
 		const row = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'STORE REFUND'",
 			)
 			.first<{ flag_income: number; income_source: string | null }>();
+
 		expect(row).toEqual({ flag_income: 0, income_source: null });
 	});
 
@@ -1302,11 +1388,13 @@ describe("refunds and the Yes write", () => {
 			income_confidence: 0.5,
 		});
 		await answerAsShown("yes");
+
 		const rows = await db
 			.prepare(
 				"SELECT income_confidence FROM transactions WHERE raw_name = 'SIDE GIG'",
 			)
 			.all<{ income_confidence: number | null }>();
+
 		expect(rows.results).toHaveLength(2);
 		expect(rows.results.every((row) => row.income_confidence === null)).toBe(
 			true,
@@ -1318,12 +1406,14 @@ describe("keeping bills links the charges they paid", () => {
 	it("links a charge already paid this period after Keep, so that occurrence isn't due", async () => {
 		await charge("NETFLIX", 1549);
 		await keepAsShown();
+
 		const links = await db
 			.prepare(
 				"SELECT bp.period, t.date FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.status = 'linked' AND t.date = ?",
 			)
 			.bind(TODAY)
 			.all<{ period: string; date: string }>();
+
 		expect(links.results).toEqual([{ period: TODAY.slice(0, 7), date: TODAY }]);
 	});
 });
@@ -1339,15 +1429,18 @@ describe("a Keep that fails part-way", () => {
 				"CREATE TRIGGER fail_keep BEFORE INSERT ON bills WHEN (SELECT COUNT(*) FROM bills) > 0 BEGIN SELECT RAISE(ABORT, 'forced'); END",
 			)
 			.run();
+
 		try {
 			const failed = await post("/setup/bills", shown);
 			expect(failed.res.status).toBe(500);
 		} finally {
 			await db.prepare("DROP TRIGGER IF EXISTS fail_keep").run();
 		}
+
 		const kept = await db
 			.prepare("SELECT amount_cents FROM bills")
 			.all<{ amount_cents: number }>();
+
 		expect(kept.results).toHaveLength(1);
 		expect((await readFirstTally(db))?.bills).toEqual({
 			kept: 1,
@@ -1409,11 +1502,13 @@ describe("the pay question's scope", () => {
 		const { html } = await get("/setup");
 		expect(html).toContain("CREDIT PAY");
 		await answerAsShown("yes");
+
 		const rows = await db
 			.prepare(
 				"SELECT income_source FROM transactions WHERE raw_name = 'CREDIT PAY'",
 			)
 			.all<{ income_source: string }>();
+
 		expect(rows.results.every((row) => row.income_source === "user")).toBe(
 			true,
 		);
@@ -1430,12 +1525,14 @@ describe("the pay question's scope", () => {
 		expect(textOf(html)).toContain(
 			"Tally didn't spot a paycheck. You can mark one from any transaction later.",
 		);
+
 		const rows = () =>
 			db
 				.prepare(
 					"SELECT id, flag_income, income_source, excluded, flag_transfer FROM transactions WHERE raw_name IN ('ACME CORP PAYROLL', 'XFER FROM SAVINGS') ORDER BY id",
 				)
 				.all();
+
 		const before = await rows();
 		await answerFor("ACME CORP PAYROLL", "yes");
 		await answerFor("XFER FROM SAVINGS", "no");
@@ -1483,11 +1580,13 @@ describe("a Never suggest income line doesn't hide the pay question (#651)", () 
 	it("Yes on that question marks each deposit as income, as the person's choice", async () => {
 		await hiddenDeposit("NEVER PAY");
 		await answerAsShown("yes");
+
 		const rows = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'NEVER PAY'",
 			)
 			.all<{ flag_income: number; income_source: string }>();
+
 		expect(rows.results).toHaveLength(2);
 		expect(
 			rows.results.every(
@@ -1517,6 +1616,7 @@ const SAVINGS_QUESTION = "Save some each month?";
 /** The category id a budgets form posts first (its `category` field, or a keep-all form's first `keep` value), for a skip. */
 function firstCategoryOf(html: string): number {
 	const category = hiddenFields(html, "category")[0]?.[1];
+
 	return Number(category ?? 0);
 }
 
@@ -1539,6 +1639,7 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 		"/setup/budgets",
 		"/setup/savings",
 	] as const;
+
 	const OLD_ANSWERS = [
 		"/first-page/pay",
 		"/first-page/bills",
@@ -1559,6 +1660,7 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		await charge("NETFLIX", 1549);
 		const before = await readFirstTally(db);
+
 		for (const path of OLD_ANSWERS) {
 			const htmx = await answerIn(false, path, true);
 			expect(htmx.status).toBe(204);
@@ -1567,16 +1669,21 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 			expect(plain.status).toBe(303);
 			expect(plain.headers.get("Location")).toBe("/setup");
 		}
+
 		expect(await readFirstTally(db)).toEqual(before);
+
 		const yes = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE income_source = 'user'",
 			)
 			.first<{ n: number }>();
+
 		expect(yes?.n).toBe(0);
+
 		const bills = await db
 			.prepare("SELECT COUNT(*) AS n FROM bills")
 			.first<{ n: number }>();
+
 		expect(bills?.n).toBe(0);
 	});
 
@@ -1585,6 +1692,7 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 			expect((await answerIn(true, path)).status).toBe(404);
 			expect((await answerIn(true, path, true)).status).toBe(404);
 		}
+
 		expect((await app(true).fetch("/setup")).status).toBe(404);
 		expect((await app(true).fetch("/first-page")).status).toBe(404);
 	});
@@ -1638,6 +1746,7 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 		expect(textOf(first.html)).toContain(
 			"Your bills · Nothing here to keep in one tap.",
 		);
+
 		const answered = await post(
 			"/setup/budgets",
 			[
@@ -1647,6 +1756,7 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 			],
 			true,
 		);
+
 		expect(textOf(answered.html)).not.toContain(
 			"Tally didn't spot a paycheck.",
 		);
@@ -1689,11 +1799,13 @@ describe("a stale answer's reply (#773)", () => {
 			type: "info",
 		});
 		expect(html).toContain('id="setup-screen"');
+
 		const count = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE income_source = 'user'",
 			)
 			.first<{ n: number }>();
+
 		expect(count?.n).toBe(0);
 		expect(await readFirstTally(db)).toEqual(before);
 	});

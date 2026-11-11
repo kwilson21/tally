@@ -115,9 +115,11 @@ describe("first_tally record", () => {
 
 	it("is set up once all four strokes are drawn, days or not, and not before the budgets stroke (decision 148)", async () => {
 		expect(STROKES).toEqual(["bank", "pay", "bills", "budgets"]);
+
 		for (const stroke of ["bank", "pay", "bills"] as const) {
 			await markStroke(db, stroke, null);
 		}
+
 		expect(isSetUp(await readFirstTally(db))).toBe(false);
 		await markStroke(db, "budgets", null);
 		expect(isSetUp(await readFirstTally(db))).toBe(true);
@@ -342,6 +344,7 @@ describe("the pay stroke's guard (P125 E, #650)", () => {
 			await db
 				.prepare(`SELECT ${NO_PAY_LEFT_SQL} AS none`)
 				.first<{ none: number }>();
+
 		expect(await check()).toEqual({ none: 1 });
 		await payDeposit();
 		expect(await check()).toEqual({ none: 0 });
@@ -350,10 +353,12 @@ describe("the pay stroke's guard (P125 E, #650)", () => {
 
 describe("the legacy bank repair's write (#657)", () => {
 	const REPAIR_DAY = "2026-10-16";
+
 	const disconnectAll = () =>
 		db
 			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
 			.run();
+
 	const repair = () => markStroke(db, "bank", REPAIR_DAY, BANK_CONNECTED_SQL);
 
 	it("draws nothing when every bank is disconnected", async () => {
@@ -389,6 +394,7 @@ describe("the bills step's record (P125 E)", () => {
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		const day = "2026-10-10";
 		await keepBills(db, day, [found("KEPT ONE", "Kept One", 1549, categoryId)]);
 		await keepBills(db, day, [found("KEPT TWO", "Kept Two", 1199, categoryId)]);
@@ -420,12 +426,14 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 			)
 			.bind(name)
 			.first<{ id: number }>();
+
 		const account = await db
 			.prepare(
 				"INSERT INTO accounts (plaid_item_id, name, type) VALUES (?, 'Checking', 'depository') RETURNING id",
 			)
 			.bind(item?.id)
 			.first<{ id: number }>();
+
 		return { item: item?.id as number, account: account?.id as number };
 	}
 
@@ -442,6 +450,7 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 			)
 			.bind(account, date, -cents, rawName)
 			.first<{ id: number }>();
+
 		return row?.id as number;
 	}
 
@@ -449,6 +458,7 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 		const merchant = (await payMerchants(db)).find(
 			(m) => m.key === key,
 		) as PayMerchant;
+
 		return answerPay(db, merchant, answer, "person@example.com");
 	};
 
@@ -471,24 +481,28 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 	it("drops the bank's Yes and No deposits from the record, and the merchants left with none", async () => {
 		const bankA = await linkBank("Bank A");
 		const bankB = await linkBank("Bank B");
+
 		const payA = await depositInto(
 			bankA.account,
 			"NORTHWIND PAYROLL",
 			245000,
 			"2026-10-01",
 		);
+
 		const refundA = await depositInto(
 			bankA.account,
 			"HARBOR REFUND",
 			4000,
 			"2026-10-02",
 		);
+
 		const payB = await depositInto(
 			bankB.account,
 			"SIDE GIG",
 			9000,
 			"2026-10-03",
 		);
+
 		await answerMerchant("HARBOR REFUND", "no");
 		await answerMerchant("NORTHWIND PAYROLL", "yes");
 		await answerMerchant("SIDE GIG", "yes");
@@ -509,12 +523,14 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 		const bankA = await linkBank("Bank A");
 		const bankB = await linkBank("Bank B");
 		await depositInto(bankA.account, "NORTHWIND PAYROLL", 245000, "2026-10-01");
+
 		const payB = await depositInto(
 			bankB.account,
 			"NORTHWIND PAYROLL",
 			245000,
 			"2026-10-15",
 		);
+
 		await answerMerchant("NORTHWIND PAYROLL", "yes");
 
 		await deleteHistory(bankA);
@@ -765,6 +781,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 		categories: true,
 		income: true,
 	}) as string;
+
 	/** One imported charge Jev hasn't answered, as a sync brings one in, so the count sees it waiting (countWaitingForJev). */
 	const waitingCharge = () =>
 		db
@@ -772,6 +789,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 				"INSERT INTO transactions(account_id,plaid_transaction_id,date,amount_cents,raw_name) VALUES(1,'plaid-waiting','2026-10-12',-500,'SHOP W')",
 			)
 			.run();
+
 	/** Takes every charge away, so nothing waits for Jev. */
 	const nothingWaits = () =>
 		db.batch([

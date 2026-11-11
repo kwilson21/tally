@@ -11,6 +11,7 @@ type Listener = (event: Record<string, unknown>) => void;
 /** The worker's global scope, faked, with the handlers the script registers. */
 function worker(windows: unknown[] = []) {
 	const listeners = new Map<string, Listener>();
+
 	const scope = {
 		addEventListener: (type: string, listener: Listener) =>
 			listeners.set(type, listener),
@@ -22,11 +23,14 @@ function worker(windows: unknown[] = []) {
 		},
 		registration: { showNotification: vi.fn(async () => undefined) },
 	};
+
 	new Function("self", swSource)(scope);
+
 	/** Runs one event's listener and waits for everything it handed to waitUntil. */
 	const send = async (type: string, event: Record<string, unknown> = {}) => {
 		const pending: Promise<unknown>[] = [];
 		const listener = listeners.get(type);
+
 		if (!listener) throw new Error(`no ${type} listener`);
 		listener({
 			...event,
@@ -34,6 +38,7 @@ function worker(windows: unknown[] = []) {
 		});
 		await Promise.all(pending);
 	};
+
 	return { scope, listeners, send };
 }
 
@@ -119,6 +124,7 @@ describe("the service worker's push", () => {
 			"push",
 			pushWith(() => ({ title: 1 })),
 		);
+
 		for (const shown of [
 			unreadable.scope.registration.showNotification,
 			failing.scope.registration.showNotification,
@@ -152,6 +158,7 @@ describe("the service worker's push", () => {
 				url: "//evil.example/x",
 			})),
 		);
+
 		for (const [, options] of scope.registration.showNotification.mock
 			.calls as unknown as [string, { data: { url: string } }][]) {
 			expect(options.data.url).toBe(PUSH_PAYLOAD.url);
@@ -183,6 +190,7 @@ describe("the service worker's tap", () => {
 			focus: vi.fn(async () => win),
 			navigate: vi.fn(async () => win),
 		};
+
 		const { send } = worker([win]);
 		const close = vi.fn();
 		await send("notificationclick", {
@@ -219,6 +227,7 @@ describe("the service worker's tap", () => {
 				throw new TypeError("not controlled by this worker");
 			}),
 		};
+
 		const { scope, send } = worker([win]);
 		await send("notificationclick", {
 			notification: { close: vi.fn(), data: { url: "/first-page" } },

@@ -11,16 +11,20 @@ export function parseBudgetAmount(
 	text: string,
 ): { ok: true; cents: number } | { ok: false; error: string } {
 	let cents: number;
+
 	try {
 		cents = toCents(text.trim() === "" ? "x" : text);
 	} catch {
 		return { ok: false, error: NOT_DOLLARS };
 	}
+
 	if (cents < 0) return { ok: false, error: NOT_DOLLARS };
+
 	if (cents > MAX_BUDGET_CENTS)
 		return {
 			ok: false,
 			error: "Keep the budget to $1,000,000 a month or less.",
 		};
+
 	return { ok: true, cents };
 }

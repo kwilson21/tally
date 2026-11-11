@@ -10,28 +10,36 @@ vi.mock("../src/access", () => ({
 	}),
 	verifiedEmail: async () => "fixture@example.test",
 }));
+
 vi.mock("../src/routes/feedback", async (importOriginal) => {
 	const original =
 		await importOriginal<typeof import("../src/routes/feedback")>();
+
 	return original;
 });
+
 const base = "http://fixture.test";
+
 it("keeps Worker discovery out of the separate Node verification suite", async () => {
 	const config = await readFile(
 		new URL("../vitest.config.ts", import.meta.url),
 		"utf8",
 	);
+
 	expect(config).toContain(
 		'include: ["test/**/*.test.ts", "test/**/*.test.tsx"]',
 	);
 	expect(config).toContain("verification tests use the separate Node config");
 });
+
 app.get("/__feedback-fragment-fixture", (c) =>
 	c.html("<p>synthetic fragment</p>", 202),
 );
+
 function bindings(flags: Record<string, string> = {}) {
 	return { DEMO: "false", ...flags } as Env;
 }
+
 describe("actual app diagnostics middleware", () => {
 	for (const enabled of [false, true])
 		it(`preserves a readable complete HTML response with diagnostics ${enabled}`, async () => {
@@ -39,6 +47,7 @@ describe("actual app diagnostics middleware", () => {
 				new Request(`${base}/feedback`),
 				bindings({ FEEDBACK_DIAGNOSTICS_ENABLED: String(enabled) }),
 			);
+
 			expect(response.status).toBe(200);
 			expect(response.headers.get("Content-Security-Policy")).toContain(
 				"script-src 'self'",
@@ -54,10 +63,12 @@ describe("actual app diagnostics middleware", () => {
 		});
 	it("keeps feedback requests out of household-member bookkeeping", async () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const response = await app.fetch(
 			new Request(`${base}/feedback`),
 			bindings({ DEMO: "false" }),
 		);
+
 		expect(response.status).toBe(200);
 		expect(await response.text()).toContain("Send feedback");
 		expect(error).not.toHaveBeenCalled();
@@ -65,10 +76,12 @@ describe("actual app diagnostics middleware", () => {
 	});
 	it("still serves a page when household-member bookkeeping fails, logging one line without an address", async () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const response = await app.fetch(
 			new Request(`${base}/__feedback-fragment-fixture`),
 			bindings({ DEMO: "false" }),
 		);
+
 		expect(response.status).toBe(202);
 		expect(await response.text()).toBe("<p>synthetic fragment</p>");
 		expect(error).toHaveBeenCalledOnce();
@@ -80,6 +93,7 @@ describe("actual app diagnostics middleware", () => {
 			new Request(`${base}/__feedback-fragment-fixture`),
 			bindings({ FEEDBACK_DIAGNOSTICS_ENABLED: "true" }),
 		);
+
 		expect(response.status).toBe(202);
 		expect(response.headers.get("content-type")).toContain("text/html");
 		expect(await response.text()).toBe("<p>synthetic fragment</p>");
@@ -93,18 +107,23 @@ describe("actual app diagnostics middleware", () => {
 				FEEDBACK_SCREENSHOT_PREVIEW_ENABLED: "true",
 			}),
 		);
+
 		expect(await response.text()).not.toContain("/js/feedback-diagnostics.js");
 	});
 });
+
 function fakeDb() {
 	const binds: unknown[][] = [];
 	const statements: string[] = [];
+
 	const db = {
 		prepare: (_sql: string) => {
 			statements.push(_sql);
+
 			return {
 				bind: (...args: unknown[]) => {
 					binds.push(args);
+
 					return {
 						run: async () => ({ meta: { changes: 1, last_row_id: 1 } }),
 					};
@@ -112,14 +131,17 @@ function fakeDb() {
 			};
 		},
 	};
+
 	return { db: db as unknown as D1Database, binds, statements };
 }
+
 describe("feedback route privacy", () => {
 	it("issues an opaque hourly feedback limiter cookie", async () => {
 		const response = await app.fetch(
 			new Request(`${base}/feedback`),
 			bindings(),
 		);
+
 		const cookie = response.headers.get("set-cookie") ?? "";
 		expect(cookie).toMatch(/__Host-tally-feedback-limit=[0-9a-f-]{36}/i);
 		expect(cookie).toContain("HttpOnly");
@@ -130,6 +152,7 @@ describe("feedback route privacy", () => {
 	it("stores sanitized text, route and coarse device under the random limiter ID", async () => {
 		const { db, binds, statements } = fakeDb();
 		const limiter = "123e4567-e89b-12d3-a456-426614174000";
+
 		const response = await app.fetch(
 			new Request(`${base}/feedback`, {
 				method: "POST",
@@ -160,6 +183,7 @@ describe("feedback route privacy", () => {
 				DB: db,
 			},
 		);
+
 		expect(response.status).toBe(303);
 		expect(statements[0]).not.toContain("replay_url");
 		expect(binds[0]?.[0]).toBe(limiter);
@@ -197,9 +221,11 @@ describe("feedback route privacy", () => {
 			},
 			(async (_url, init) => {
 				body = String(init?.body);
+
 				return new Response(JSON.stringify({ number: 2 }), { status: 201 });
 			}) as typeof fetch,
 		);
+
 		for (const secret of [
 			"Riley",
 			"riley@example.test",
@@ -222,6 +248,7 @@ describe("feedback route privacy", () => {
 			}),
 			bindings(),
 		);
+
 		const html = await response.text();
 		expect(html).toContain('name="from" value="/transactions"');
 		expect(html).toContain(
@@ -236,6 +263,7 @@ describe("feedback route privacy", () => {
 			}),
 			bindings(),
 		);
+
 		const html = await response.text();
 		expect(html).toContain('name="from" value="/"');
 		expect(html).toContain('name="return_to" value="/?adjust=1"');
@@ -247,8 +275,10 @@ describe("feedback route privacy", () => {
 			}),
 			bindings(),
 		);
+
 		expect(await response.text()).toContain('name="from" value="/"');
 	});
+
 	for (const from of [
 		"/transactions?q=SECRET#SECRET",
 		"https://other.test/SECRET",
@@ -256,6 +286,7 @@ describe("feedback route privacy", () => {
 	])
 		it(`sanitizes stored page with diagnostics off: ${from}`, async () => {
 			const { db, binds } = fakeDb();
+
 			const response = await app.fetch(
 				new Request(`${base}/feedback`, {
 					method: "POST",
@@ -275,6 +306,7 @@ describe("feedback route privacy", () => {
 				}),
 				{ ...bindings(), DB: db },
 			);
+
 			expect(response.status).toBe(303);
 			expect(binds[0]?.[4]).toBe(
 				from.startsWith("/transactions") ? "/transactions" : "/other",
@@ -298,6 +330,7 @@ describe("feedback route privacy", () => {
 			},
 			(async (_url, init) => {
 				body = String(init?.body);
+
 				return new Response(JSON.stringify({ number: 1 }), { status: 201 });
 			}) as typeof fetch,
 		);
@@ -330,6 +363,7 @@ it("uses only legacy columns when diagnostics are disabled", async () => {
 	expect(statements[0]).not.toContain("client_context");
 	expect(statements[0]).not.toContain("replay_url");
 });
+
 for (const consent of [false, true])
 	it(`ignores replay identifiers regardless of checkbox: ${consent}`, async () => {
 		const { db, binds, statements } = fakeDb();
@@ -366,6 +400,7 @@ for (const consent of [false, true])
 		expect(statements[0]).not.toContain("replay_url");
 		expect(JSON.stringify(binds)).not.toContain("fake-session");
 	});
+
 it("does not offer replay while no pinned SDK and payload proof exist", async () => {
 	const response = await app.fetch(
 		new Request(`${base}/feedback`),
@@ -376,8 +411,10 @@ it("does not offer replay while no pinned SDK and payload proof exist", async ()
 			FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://replay.example.test",
 		}),
 	);
+
 	expect(await response.text()).not.toContain('name="include_replay"');
 });
+
 it("keeps recorder consent and session identifiers out of the form", async () => {
 	const response = await app.fetch(
 		new Request(`${base}/feedback`),
@@ -388,6 +425,7 @@ it("keeps recorder consent and session identifiers out of the form", async () =>
 			FEEDBACK_APPROVED_REPLAY_ORIGIN: "https://replay.example.test",
 		}),
 	);
+
 	const html = await response.text();
 	expect(html).not.toContain('name="include_replay"');
 	expect(html).not.toContain('name="posthog_session_id"');

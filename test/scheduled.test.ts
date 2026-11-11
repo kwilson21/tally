@@ -114,11 +114,13 @@ describe("scheduled handler", () => {
 		const month = today.slice(0, 7);
 		await resetDemo(env.DB, today);
 		const beforeData = await loadMonth(env.DB, month);
+
 		const before = summarizeMonth({
 			month,
 			...beforeData,
 			unpaidDueBillsCents: 0,
 		});
+
 		await scheduledWith.scheduled(
 			{ cron: "0 8 * * *" },
 			{
@@ -130,22 +132,27 @@ describe("scheduled handler", () => {
 				AI: undefined,
 			},
 		);
+
 		const suggestion = await env.DB.prepare(
 			"SELECT id FROM category_suggestions WHERE name='Pet Care' AND status='pending'",
 		).first<{ id: number }>();
+
 		const rows = await env.DB.prepare(
 			"SELECT COUNT(*) AS n, MIN(date) AS earliest FROM transactions WHERE category_suggestion_id=?",
 		)
 			.bind(suggestion?.id)
 			.first<{ n: number; earliest: string }>();
+
 		expect(rows?.n).toBeGreaterThanOrEqual(3);
 		expect(rows?.earliest.slice(0, 7)).toBe(monthOffset(today, 2).slice(0, 7));
 		const afterData = await loadMonth(env.DB, month);
+
 		const after = summarizeMonth({
 			month,
 			...afterData,
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(after).toEqual(before);
 	});
 
@@ -173,6 +180,7 @@ describe("scheduled handler", () => {
 		const untouched = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL AND flag_income = 0 AND excluded = 0",
 		).first<{ n: number }>();
+
 		expect(untouched?.n).toBeGreaterThanOrEqual(10);
 	});
 
@@ -184,9 +192,11 @@ describe("scheduled handler", () => {
 			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('NEW SHOP', ?)",
 		)
@@ -198,6 +208,7 @@ describe("scheduled handler", () => {
 		)
 			.bind(token)
 			.run();
+
 		const fetchImpl = async (url: RequestInfo | URL) => {
 			if (String(url).endsWith("/accounts/get")) {
 				return new Response(
@@ -213,6 +224,7 @@ describe("scheduled handler", () => {
 					}),
 				);
 			}
+
 			return new Response(
 				JSON.stringify({
 					added: [
@@ -260,9 +272,11 @@ describe("scheduled handler", () => {
 			env.DB.prepare("DELETE FROM merchant_suggested_names"),
 			env.DB.prepare("DELETE FROM merchants"),
 		]);
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('NEW SHOP', ?)",
 		)
@@ -273,6 +287,7 @@ describe("scheduled handler", () => {
 		)
 			.bind(await encryptToken("access-token", KEY))
 			.run();
+
 		const fetchImpl = async (url: RequestInfo | URL) =>
 			String(url).endsWith("/accounts/get")
 				? Response.json({
@@ -377,16 +392,19 @@ describe("scheduled handler: which run a cron starts", () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 	}
+
 	/** Fires one cron in production with a fake Jev (the global fetch) and a fake Workers AI. */
 	async function fire(cron: string) {
 		const jev = vi
 			.spyOn(globalThis, "fetch")
 			.mockImplementation(async () => jevAnswer());
+
 		const ai = aiThatSays("Some Place Name");
 		await scheduledWith.scheduled(
 			{ cron },
 			{ ...env, DEMO: "false", JEV_API_KEY: "jev", AI: ai },
 		);
+
 		return { jev: jev.mock.calls.length, names: ai.run.mock.calls.length };
 	}
 
@@ -440,15 +458,18 @@ describe("scheduled handler: the minute run for the ready email (decision 146)",
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await openFamily();
 		create.mockClear();
+
 		const resend = vi
 			.spyOn(globalThis, "fetch")
 			.mockImplementation(async () => Response.json({}, { status: 200 }));
+
 		const minuteEnv = {
 			...env,
 			DEMO: "false",
 			RESEND_API_KEY: "key",
 			EMAIL: undefined,
 		};
+
 		await scheduledWith.scheduled({ cron: "* * * * *" }, minuteEnv);
 		expect(resend).toHaveBeenCalledTimes(1);
 		expect(create).not.toHaveBeenCalled();
@@ -461,9 +482,11 @@ describe("scheduled handler: the minute run for the ready email (decision 146)",
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await openFamily();
 		create.mockClear();
+
 		const resend = vi
 			.spyOn(globalThis, "fetch")
 			.mockImplementation(async () => Response.json({}, { status: 200 }));
+
 		await scheduledWith.scheduled(
 			{ cron: "* * * * *" },
 			{ ...env, DEMO: "true", RESEND_API_KEY: "key" },
@@ -481,6 +504,7 @@ it("logs a night that fails to start by its error name, and the feedback retry s
 		"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why?', '/', 'Desktop browser')",
 	).run();
 	create.mockRejectedValueOnce(new TypeError("secret transaction text"));
+
 	const github = vi.fn(async () =>
 		Response.json({ number: 5 }, { status: 201 }),
 	);
@@ -517,6 +541,7 @@ describe("scheduled handler: merchant names", () => {
 			),
 		]);
 	}
+
 	const pending = async () => {
 		const { results } = await env.DB.prepare(
 			"SELECT raw_name, display_name, suggestion_status FROM merchants",
@@ -525,6 +550,7 @@ describe("scheduled handler: merchant names", () => {
 			display_name: string | null;
 			suggestion_status: string;
 		}>();
+
 		return {
 			results: await Promise.all(
 				results.map(async (row) => ({
@@ -583,6 +609,7 @@ describe("scheduled handler: merchant names", () => {
 				 SELECT 'plaid-name-' || i, 1, '2026-09-20', 500 + i, 'SHOP NUMBER ' || i FROM n`,
 			),
 		]);
+
 		// A note's call answers empty, so it is tried and not asked again; a name's call answers a name.
 		const ai = {
 			run: vi.fn(async (_model: string, input: unknown) => ({
@@ -591,6 +618,7 @@ describe("scheduled handler: merchant names", () => {
 					: "Some Place Name",
 			})),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+
 		await runNight({ ...env, DEMO: "false", AI: ai });
 		const asked = ai.run.mock.calls.map(([, input]) => JSON.stringify(input));
 		expect(asked.filter((text) => text.includes("NOTE SHOP"))).toHaveLength(
@@ -626,6 +654,7 @@ describe("scheduled handler: merchant names", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 	}
+
 	/**
 	 * A fake Plaid sending `n` new transactions, each from a store of its own, in pages of at most 95 (Plaid's
 	 * own pages are 100, the most one D1 query can bind), and a fake GitHub; `seen` hears each request.
@@ -636,17 +665,24 @@ describe("scheduled handler: merchant names", () => {
 	) => {
 		const PAGE = 95;
 		let page = 0;
+
 		return async (url: RequestInfo | URL) => {
 			const text = String(url);
+
 			if (text.includes("api.github.com")) {
 				seen("feedback");
+
 				return Response.json({ number: 5 }, { status: 201 });
 			}
+
 			if (!text.includes("/accounts/get") && !text.includes("/transactions/")) {
 				seen("other");
+
 				return new Response(null, { status: 500 });
 			}
+
 			seen("plaid");
+
 			return text.endsWith("/accounts/get")
 				? Response.json({
 						accounts: [
@@ -662,6 +698,7 @@ describe("scheduled handler: merchant names", () => {
 						const from = page * PAGE;
 						const to = Math.min(n, from + PAGE);
 						page += 1;
+
 						return Response.json({
 							added: Array.from({ length: to - from }, (_, k) => ({
 								transaction_id: `new-${from + k}`,
@@ -679,6 +716,7 @@ describe("scheduled handler: merchant names", () => {
 					})();
 		};
 	};
+
 	const bank = {
 		PLAID_CLIENT_ID: "client",
 		PLAID_SECRET: "secret",
@@ -694,13 +732,17 @@ describe("scheduled handler: merchant names", () => {
 			"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why?', '/', 'Desktop browser')",
 		).run();
 		const order: string[] = [];
+
 		const note = (what: string) => {
 			if (order.at(-1) !== what) order.push(what);
 		};
+
 		const fetchImpl = fakeBanks(3, note);
+
 		const ai = {
 			run: vi.fn(async () => {
 				note("names");
+
 				return { response: "Some Place Name" };
 			}),
 		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
@@ -713,6 +755,7 @@ describe("scheduled handler: merchant names", () => {
 			JEV_API_KEY: "jev",
 			FEEDBACK_GITHUB_TOKEN: "token",
 		};
+
 		await runScheduled(prodEnv, fetchImpl as unknown as typeof fetch);
 
 		// No "other" request either: Jev, which the run never asks, would be one.
@@ -727,16 +770,21 @@ describe("scheduled handler: merchant names", () => {
 		await oneUnnamedCharge();
 		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const order: string[] = [];
+
 		const ai = {
 			run: vi.fn(async () => {
 				order.push("names");
+
 				return { response: "Blue Bottle Coffee" };
 			}),
 		} as unknown as Ai;
+
 		const fetchImpl = vi.fn(async () => {
 			order.push("jev");
+
 			return jevAnswer();
 		});
+
 		const prodEnv = { ...env, DEMO: "false", AI: ai, JEV_API_KEY: "jev" };
 		const night = sortInProcess(prodEnv, { fetchImpl });
 		await runScheduled({ ...prodEnv, SORT: night.SORT });
@@ -765,11 +813,13 @@ describe("scheduled handler: merchant names", () => {
 		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		const ai = {
 			run: vi.fn(async () => {
 				throw new Error("capacity");
 			}),
 		} as unknown as Ai;
+
 		const fetchImpl = vi.fn(async () => jevAnswer());
 		await expect(
 			runNight(
@@ -796,12 +846,15 @@ describe("scheduled handler: merchant names", () => {
 		new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						if (/FROM categories WHERE archived = 0/.test(sql))
 							throw new Error("D1 is down for the secret text");
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as D1Database;
@@ -813,6 +866,7 @@ describe("scheduled handler: merchant names", () => {
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		const ai = aiThatSays("Blue Bottle Coffee");
 		const fetchImpl = vi.fn(async () => jevAnswer());
+
 		const prodEnv = {
 			...env,
 			DB: dbThatFailsTheSort(),
@@ -849,6 +903,7 @@ describe("scheduled handler: merchant names", () => {
 			AI: ai,
 			JEV_API_KEY: "jev",
 		};
+
 		await expect(
 			runScheduled({
 				...demoEnv,
@@ -881,6 +936,7 @@ describe("scheduled handler: new category suggestions", () => {
 		]);
 		await addNoneFit(n, theme);
 	}
+
 	const addNoneFit = (n: number, theme: string) =>
 		env.DB.prepare(
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
@@ -889,12 +945,14 @@ describe("scheduled handler: new category suggestions", () => {
 		)
 			.bind(n, theme, theme, theme)
 			.run();
+
 	const suggested = async () =>
 		(
 			await env.DB.prepare(
 				"SELECT name, status FROM category_suggestions ORDER BY id",
 			).all<{ name: string; status: string }>()
 		).results;
+
 	/** A fake Workers AI that says which kind of question it heard, and answers a category question with `name`. */
 	const aiThatHears = (heard: string[], name = "Subscriptions") =>
 		({
@@ -902,8 +960,10 @@ describe("scheduled handler: new category suggestions", () => {
 				const user = (
 					input as { messages: { role: string; content: string }[] }
 				).messages.find((m) => m.role === "user")?.content;
+
 				const kind = user?.startsWith("Places:") ? "categories" : "names";
 				heard.push(kind);
+
 				return { response: kind === "categories" ? name : "Some Place Name" };
 			}),
 		}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
@@ -915,10 +975,13 @@ describe("scheduled handler: new category suggestions", () => {
 		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const order: string[] = [];
 		const ai = aiThatHears(order);
+
 		const jev = vi.fn(async () => {
 			order.push("jev");
+
 			return jevAnswer();
 		});
+
 		const categoriesBefore = await categoryCount();
 
 		await runNight(
@@ -933,10 +996,12 @@ describe("scheduled handler: new category suggestions", () => {
 		expect(await categoryCount()).toBe(categoriesBefore);
 		vi.restoreAllMocks();
 	});
+
 	const addUnsortedAndUnnamed = () =>
 		env.DB.prepare(
 			"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('plaid-1', 1, '2026-09-20', 650, 'SQ *BLUE BOTTLE COF 0412')",
 		).run();
+
 	const categoryCount = async () =>
 		(
 			await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
@@ -972,15 +1037,19 @@ describe("scheduled handler: new category suggestions", () => {
 		const order: string[] = [];
 		const ai = aiThatHears(order);
 		let found = false;
+
 		// The demo's run resets first, so Jev's answers are put in as it goes: three confident none-fits.
 		const jev = vi.fn(async () => {
 			order.push("jev");
+
 			if (!found) {
 				found = true;
 				await addNoneFit(3, "ENTERTAINMENT");
 			}
+
 			return jevAnswer();
 		});
+
 		const demo = { ...env, AI: ai, JEV_API_KEY: "jev" };
 		await runScheduled({
 			...demo,
@@ -997,6 +1066,7 @@ describe("scheduled handler: new category suggestions", () => {
 		await noneFitGroup();
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		const ai = {
 			run: vi.fn(async () => {
 				throw Object.assign(new Error("failed for Stream A"), {
@@ -1004,13 +1074,16 @@ describe("scheduled handler: new category suggestions", () => {
 				});
 			}),
 		} as unknown as Ai;
+
 		await expect(
 			runNight({ ...env, DEMO: "false", AI: ai }),
 		).resolves.toBeUndefined();
 		expect(await suggested()).toEqual([]);
+
 		const lines = logged.mock.calls
 			.map((call) => String(call.join(" ")))
 			.join("\n");
+
 		expect(lines).toContain("AiError");
 		expect(lines).not.toContain("Stream");
 		logged.mockRestore();
@@ -1033,23 +1106,29 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 	/** A DB that counts every statement a run prepares, for D1's 1,000 queries per invocation. */
 	function countingDb() {
 		let statements = 0;
+
 		const counted = new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		return { db: counted as D1Database, statements: () => statements };
 	}
 
 	it("cleans old cash snapshots in a fixed number of statements and keeps today's", async () => {
 		const countFor = async (n: number) => {
 			await env.DB.prepare("DELETE FROM cash_delete_holds").run();
+
 			if (n > 0)
 				await env.DB.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
 					INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows)
@@ -1063,12 +1142,16 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 				.run();
 			const counted = countingDb();
 			await runScheduled({ ...env, DB: counted.db, DEMO: "false" });
+
 			return counted.statements();
 		};
+
 		const few = await countFor(1);
+
 		const remaining = await env.DB.prepare(
 			"SELECT token FROM cash_delete_holds",
 		).all<{ token: string }>();
+
 		expect(remaining.results.map(({ token }) => token)).toEqual(["new"]);
 		const many = await countFor(500);
 		expect(
@@ -1123,14 +1206,18 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const counted = countingDb();
 		let calls = 0;
+
 		const ai = {
 			run: vi.fn(async () => {
 				calls += 1;
+
 				// Every odd call fails, so three never fail in a row and all 100 are asked: 20 batches, each with both.
 				if (calls % 2 === 1) throw new Error("capacity");
+
 				return { response: "Some Place Name" };
 			}),
 		} as unknown as Ai;
+
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
 		// 1 + 1 + 20 × 5 = 102: a switch read, a merchants upsert, its names, a failures upsert and a failures delete per batch.
@@ -1181,6 +1268,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		)
 			.bind(await encryptToken("access-token", KEY))
 			.run();
+
 		const fetchImpl = async (url: RequestInfo | URL) =>
 			String(url).includes("api.github.com")
 				? Response.json({ number: 5 }, { status: 201 })
@@ -1209,6 +1297,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 							next_cursor: "next",
 							has_more: false,
 						});
+
 		const counted = countingDb();
 		const ai = aiThatSays("Some Place Name");
 
@@ -1223,6 +1312,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 			FEEDBACK_GITHUB_TOKEN: "token",
 			AI: ai,
 		};
+
 		await runScheduled(prodEnv, fetchImpl);
 
 		expect(await count()).toBe(NEW_TRANSACTIONS);
@@ -1261,7 +1351,9 @@ const plaidBank = (
 				],
 			});
 		}
+
 		if (failSync) return new Response("unavailable", { status: 500 });
+
 		return Response.json({
 			added: Array.from({ length: added }, (_, i) => ({
 				transaction_id: `${prefix}-${i}`,
@@ -1298,6 +1390,7 @@ const answeredHousehold = async () => {
 		env.DB.prepare("DELETE FROM household_settings WHERE key = 'first_tally'"),
 	]);
 	await linkBank("Chase", "ok");
+
 	for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
 		await markStroke(env.DB, stroke, "2026-10-12");
 	}

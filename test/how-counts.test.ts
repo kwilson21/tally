@@ -124,12 +124,14 @@ describe("monthCounts", () => {
 				"UPDATE transactions SET category_id = 1, category_source = 'merchant_rule' WHERE raw_name = 'SQ *FARMERS MKT'",
 			)
 			.run();
+
 		const unsure = {
 			categoryId: null,
 			suggestedCategoryId: 1,
 			confidence: 0.5,
 			flags: { transfer: false, reimbursement: false, income: false },
 		};
+
 		await saveJevResult(db, await idOf("VENMO *J RIVERA"), unsure);
 		// "None of these fit": a confidence but no pick.
 		await saveJevResult(db, await idOf("POS 4417 CITY PARKING"), {
@@ -191,6 +193,7 @@ describe("excludedBreakdown", () => {
 			"POS 4417 CITY PARKING",
 			"flag_transfer = 0, flag_reimbursement = 0",
 		);
+
 		const n = async (rawName: string) =>
 			(
 				await db
@@ -200,6 +203,7 @@ describe("excludedBreakdown", () => {
 					.bind(rawName, MONTH)
 					.first<{ n: number }>()
 			)?.n ?? 0;
+
 		// Both flags count once, as a transfer.
 		expect(await excludedBreakdown(db, MONTH)).toEqual({
 			transfer: before.transfer + (await n("SQ *FARMERS MKT")),
@@ -251,6 +255,7 @@ describe("the held count (Home) counts a credit flagged as a transfer that the p
 				)
 				.bind(`${MONTH}-15`, rawName, flagTransfer)
 				.run();
+
 		const before = (await monthCounts(db, MONTH)).heldForReview;
 
 		await insertCredit("SYNTH ORDINARY HELD CREDIT", 0);

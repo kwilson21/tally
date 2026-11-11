@@ -10,6 +10,7 @@ import type { PayDeposit } from "../first-tally/pay";
  * savings question is part of that last step). Setup is done once all four are drawn.
  */
 export const STROKES = ["bank", "pay", "bills", "budgets"] as const;
+
 export type Stroke = (typeof STROKES)[number];
 
 /**
@@ -120,13 +121,16 @@ export async function readFirstTally(
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(KEY)
 		.first<{ value: string }>();
+
 	return row ? parseFirstTally(row.value) : null;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
+
 const isCents = (value: unknown): value is number => Number.isInteger(value);
 const isText = (value: unknown): value is string => typeof value === "string";
+
 const textList = (value: unknown): string[] | undefined =>
 	Array.isArray(value) ? value.filter(isText) : undefined;
 
@@ -136,9 +140,12 @@ function pickEntries<T>(
 	keep: (entry: unknown) => T | undefined,
 ): Record<string, T> {
 	const kept: Record<string, T> = {};
+
 	if (!isObject(value)) return kept;
+
 	for (const [key, entry] of Object.entries(value)) {
 		const result = keep(entry);
+
 		// defineProperty, not assignment: a key named __proto__ (a merchant's raw name can be) would set the prototype.
 		if (result !== undefined)
 			Object.defineProperty(kept, key, {
@@ -148,23 +155,28 @@ function pickEntries<T>(
 				configurable: true,
 			});
 	}
+
 	return kept;
 }
 
 function budgetAnswer(entry: unknown): BudgetAnswer | undefined {
 	if (!isObject(entry)) return undefined;
+
 	if (entry.kind === "skipped")
 		return entry.cents === null ? { kind: "skipped", cents: null } : undefined;
+
 	if (
 		(entry.kind === "suggested" || entry.kind === "another") &&
 		isCents(entry.cents)
 	)
 		return { kind: entry.kind, cents: entry.cents };
+
 	return undefined;
 }
 
 function payDeposits(value: unknown): PayDeposits | undefined {
 	if (!isObject(value)) return undefined;
+
 	return pickEntries(value, (deposit) =>
 		isObject(deposit) && isText(deposit.date) && isCents(deposit.cents)
 			? { date: deposit.date, cents: deposit.cents }
@@ -177,8 +189,11 @@ function payRecord(entry: unknown): PayRecord | undefined {
 	const record: PayRecord = { at: entry.at };
 	const yes = payDeposits(entry.yes);
 	const no = payDeposits(entry.no);
+
 	if (yes) record.yes = yes;
+
 	if (no) record.no = no;
+
 	return record;
 }
 
@@ -191,46 +206,61 @@ function payRecord(entry: unknown): PayRecord | undefined {
  */
 export function parseFirstTally(value: string): FirstTally {
 	let parsed: unknown;
+
 	try {
 		parsed = JSON.parse(value);
 	} catch {
 		throw new Error("first_tally is not JSON");
 	}
+
 	if (!isObject(parsed)) throw new Error("first_tally is not a JSON object");
 	const strokes: FirstTally["strokes"] = {};
+
 	if (isObject(parsed.strokes))
 		for (const stroke of STROKES) {
 			const day = parsed.strokes[stroke];
+
 			if (day === null || isText(day)) strokes[stroke] = day;
 		}
+
 	const record: FirstTally = {
 		strokes,
 		budgets: pickEntries(parsed.budgets, budgetAnswer),
 	};
+
 	if (isObject(parsed.pay)) record.pay = pickEntries(parsed.pay, payRecord);
+
 	if (
 		isObject(parsed.bills) &&
 		isCents(parsed.bills.kept) &&
 		isCents(parsed.bills.cents)
 	)
 		record.bills = { kept: parsed.bills.kept, cents: parsed.bills.cents };
+
 	if (isObject(parsed.reAsk) && isText(parsed.reAsk.bank))
 		record.reAsk = { bank: parsed.reAsk.bank };
+
 	if (parsed.waitsForRun === true) record.waitsForRun = true;
 	const emailed = textList(parsed.readyEmailedTo);
+
 	if (emailed) record.readyEmailedTo = emailed;
 	const pushed = textList(parsed.readyPushedTo);
+
 	if (pushed) record.readyPushedTo = pushed;
+
 	if (isObject(parsed.readyPushedAt))
 		record.readyPushedAt = pickEntries(parsed.readyPushedAt, (at) =>
 			isText(at) ? at : undefined,
 		);
+
 	if (isObject(parsed.heldReadyEmail))
 		record.heldReadyEmail = pickEntries(parsed.heldReadyEmail, (entry) =>
 			isObject(entry) ? (entry as HeldReadyEmail) : undefined,
 		);
+
 	if (parsed.savings === "skipped" || isCents(parsed.savings))
 		record.savings = parsed.savings;
+
 	return record;
 }
 
@@ -287,6 +317,7 @@ export function strokeStatement(
 		stroke === "budgets"
 			? "json_remove(json_insert(value, '$.strokes.' || ?2, ?3), '$.reAsk')"
 			: "json_insert(value, '$.strokes.' || ?2, ?3)";
+
 	return db
 		.prepare(
 			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
@@ -333,6 +364,7 @@ export function clearWaitsForRunStatement(
 ): D1PreparedStatement {
 	const nothingWaiting =
 		waitingSql === null ? "" : ` AND NOT EXISTS (SELECT 1 ${waitingSql})`;
+
 	return db
 		.prepare(
 			`UPDATE household_settings SET value = json_remove(value, '$.waitsForRun') WHERE key = ?1${nothingWaiting}`,
@@ -354,6 +386,7 @@ export function takeBackBankStrokes(
 	const notSetUp = STROKES.map(
 		(stroke) => `json_type(value, '$.strokes.${stroke}') IS NOT NULL`,
 	).join(" AND ");
+
 	return db
 		.prepare(
 			`UPDATE household_settings SET value = json_remove(value, ${STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.reAsk', '$.waitsForRun')
@@ -384,8 +417,10 @@ function forgetDepositsWhere(
 ): D1PreparedStatement {
 	const kept = (answer: "yes" | "no") =>
 		`(SELECT json_group_object(d.key, json(d.value)) FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
+
 	const hasKept = (answer: "yes" | "no") =>
 		`EXISTS (SELECT 1 FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
+
 	return db
 		.prepare(
 			`WITH gone AS (${gone})

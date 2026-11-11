@@ -11,6 +11,7 @@ import {
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
+
 /**
  * False when an archive period covers the whole month `month` (spec §5, an SQL expression such as ?1): archived in an
  * earlier month and not restored until a later one. A month the category was archived in still counts. Alias `c`.
@@ -20,6 +21,7 @@ const activeInMonthSql = (month: string) => `NOT EXISTS (
 	WHERE p.category_id = c.id AND substr(p.archived_on, 1, 7) < ${month}
 		AND (p.restored_on IS NULL OR substr(p.restored_on, 1, 7) > ${month})
 )`;
+
 const ACTIVE_IN_MONTH = activeInMonthSql("?1");
 
 export type CategoryRow = {
@@ -154,6 +156,7 @@ export async function monthResults(
 			budgetCents: number;
 			spentCents: number;
 		}>();
+
 	return Object.fromEntries(
 		rows.results.map((row) => [
 			row.month,
@@ -191,5 +194,6 @@ export async function firstCountedMonth(
 			)`,
 		)
 		.first<{ month: string | null }>();
+
 	return row?.month ?? null;
 }

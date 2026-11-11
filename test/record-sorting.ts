@@ -17,6 +17,7 @@ export function recordSorting(options: { sort?: boolean } = {}) {
 	const real = env.SORT;
 	// Instances run one after another, as a waiting group would (the sorting turn lets one group sort at a time).
 	let queue: Promise<unknown> = Promise.resolve();
+
 	const create = vi.fn((input: { params: SortParams }) => {
 		const run = queue.then(async () => {
 			if (options.sort)
@@ -29,11 +30,15 @@ export function recordSorting(options: { sort?: boolean } = {}) {
 						rulesApplied: input.params.rulesApplied,
 					},
 				);
+
 			return { id: "fake" };
 		});
+
 		queue = run.catch(() => {});
+
 		return run;
 	});
+
 	beforeEach(() => {
 		create.mockClear();
 		(env as { SORT: unknown }).SORT = { create };
@@ -43,6 +48,7 @@ export function recordSorting(options: { sort?: boolean } = {}) {
 		await queue.catch(() => {});
 		(env as { SORT: unknown }).SORT = real;
 	});
+
 	return create;
 }
 
@@ -61,6 +67,7 @@ export function sortInProcess(
 	} = {},
 ) {
 	const runs: ReturnType<typeof fakeSteps>[] = [];
+
 	const create = vi.fn(async ({ params }: { params: SortParams }) => {
 		const steps = fakeSteps();
 		runs.push(steps);
@@ -68,7 +75,9 @@ export function sortInProcess(
 			runId: crypto.randomUUID(),
 			...options,
 		});
+
 		return { id: "fake" };
 	});
+
 	return { SORT: { create } as unknown as Env["SORT"], create, runs };
 }

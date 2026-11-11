@@ -89,6 +89,7 @@ const EMPTY_NOTE = "(t.note IS NULL OR trim(t.note) = '')";
 
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
+
 // A split part is its own row, stored as posted; it is as pending as its parent (the purchase), read
 // from the parent so there's nothing to keep in sync. Needs the parent joined as `p`.
 const PENDING_SQL =
@@ -145,6 +146,7 @@ export type ListRow = {
 
 /** What a row needs from its merchant to decide the name it shows (src/transactions/name-suggestions.ts). */
 export const NAME_SUGGESTION_COLUMNS = `${merchantNamesJsonSql(merchantKeySql("t"))} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
+
 type NameSuggestionColumns = {
 	suggestedNames: string | null;
 	suggestionStatus: string | null;
@@ -156,15 +158,20 @@ type NameSuggestionColumns = {
 /** The joins behind the Maybe chip: Tally's category guess, and the pending suggestion a new category came from. */
 export const MAYBE_CATEGORY_JOINS = `LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
 	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending' AND NOT ${neverSuggestedSql("t", "new_category")}`;
+
 /** The Maybe chip's category name (a new one as "new:name"), and whether it is a new one; needs MAYBE_CATEGORY_JOINS. */
 export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND ${askedSql("category", "t.category_confidence")} THEN maybeCat.name END AS maybeCategoryName,
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
+
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;
+
 /** The name of the planned expense whose payment this transaction is, on its own link or its split parent's (`paysPlanSql`). */
 export const PLAN_NAME_COLUMN = `(SELECT pe.name FROM planned_expenses pe WHERE pe.transaction_id IN (t.id, t.parent_id) LIMIT 1) AS planName`;
+
 /** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
 export const BILL_NAME_COLUMN = `(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName`;
+
 /** The month a bill moved the row into, for its "Counts in …" caption, when it isn't the row's own month; needs COUNTED_JOINS. */
 export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth`;
 
@@ -176,6 +183,7 @@ export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.da
 const suggestedNameMatch = (namesOn: boolean) => {
 	// With the names switch off only the bank's own name counts: the one name, and it is the merchant's key.
 	const bankOnly = `(SELECT COUNT(*) FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name) = 1 AND EXISTS (SELECT 1 FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name AND x.name = m.raw_name)`;
+
 	return `EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : ` AND ${bankOnly}`} AND EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = m.raw_name AND n.name LIKE ? ESCAPE '\\'))`;
 };
 
@@ -191,6 +199,7 @@ export const PAGE_SIZE = 25;
 // while held credits and income stay out of spending classification.
 /** A transaction that still needs a category (Home's count, Organize's list). Needs `t` and COUNTED_JOINS. */
 export const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+
 /**
  * A credit a person still has to review (decision 70): money in, not reviewed, not income, not a split parent, and in the
  * budget (INCLUDED). Monthly counts and the night's needs-you count both read it. Needs `t` only, so it is self-contained.
@@ -198,10 +207,13 @@ export const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t
  * An included credit flagged as a transfer is held too: the person included it on purpose (#870 and the design issue).
  */
 export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND t.is_split = 0 AND ${INCLUDED}`;
+
 export const OLDER_NEEDS_CATEGORY_SQL = `SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS}
 	WHERE (t.date < ?1 OR (t.date >= ?1 AND t.date < ?2 AND ${COUNTED_MONTH} < ?3))
 	AND ${NEEDS_CATEGORY}`;
+
 const bankRowSql = (sql: string) => sql.replaceAll(" AND t.is_split = 0", "");
+
 // Jev must be allowed to classify a new credit as income or another known kind of credit.
 export const NEEDS_JEV_CLASSIFICATION = `${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND (((COALESCE(t.income_source, '') != 'user' AND COALESCE(t.credit_reviewed_by, '') != 'user') AND ((t.category_id IS NULL AND t.category_source IS NULL) OR (t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0))) OR (t.category_id IS NULL AND t.category_source IS NULL AND t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user')))`;
 
@@ -229,6 +241,7 @@ const SHOW_SQL: Record<Show, string | null> = {
 		AND (${paysBillOrPlanSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
 	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
+
 const RAW_SHOW_SQL: Record<Show, string | null> = {
 	...SHOW_SQL,
 	spending: bankRowSql(SHOW_SQL.spending ?? ""),
@@ -251,22 +264,29 @@ export function filterMatch(
 	const args: (string | number)[] = [];
 	const rowMonth = f.raw ? "substr(t.date,1,7)" : COUNTED_MONTH;
 	const rowCategory = f.raw ? "t.category_id" : COUNTED_CATEGORY;
+
 	if (f.month !== "all") {
 		where.push(`${rowMonth} = ?`);
 		args.push(f.month);
 	}
+
 	if (f.category !== null) {
 		where.push(`${rowCategory} = ?`);
+
 		if (!f.raw) where.push("t.is_split = 0");
 		args.push(f.category);
 	}
+
 	if (f.account !== null) {
 		where.push("t.account_id = ?");
 		args.push(f.account);
 	}
+
 	if (f.uncategorized && !f.raw) where.push(NEEDS_CATEGORY);
+
 	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
 	if (f.raw) where.push("t.parent_id IS NULL");
+
 	// Ticked rows that are not in the list on screen (#350): split parents have no tick, and an unknown id drops out.
 	// Start here names a split parent too, since its line is still the bank's (splitParents).
 	if (ids) {
@@ -275,12 +295,15 @@ export function filterMatch(
 		);
 		args.push(JSON.stringify(ids));
 	}
+
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
+
 	if (shown) where.push(shown);
 	// The search's pattern when it looks in categories too (#211), so the count can say whether one matched.
 	let categoryPattern: string | null = null;
 	// The search's amount, when it looks at amounts, so the count can say whether every row matched by one.
 	let amountSearch: AmountSearch | null = null;
+
 	if (f.q) {
 		if (f.raw) {
 			where.push("t.raw_name LIKE ? ESCAPE '\\'");
@@ -298,6 +321,7 @@ export function filterMatch(
 			amountSearch = amount;
 			const pattern = likePattern(f.q);
 			const alternatives: string[] = [];
+
 			if (amount === null || amount.plain) {
 				categoryPattern = pattern;
 				alternatives.push(
@@ -305,10 +329,12 @@ export function filterMatch(
 				);
 				args.push(pattern, pattern, pattern, pattern, pattern, pattern);
 			}
+
 			if (amount) {
 				alternatives.push("ABS(t.amount_cents) BETWEEN ? AND ?");
 				args.push(amount.low, amount.high);
 			}
+
 			where.push(`(${alternatives.join(" OR ")})`);
 		}
 	}
@@ -346,6 +372,7 @@ export async function listTransactions(
 		details: detailsOn,
 		income: incomeOn,
 	} = await readAiSwitches(db);
+
 	const { joins, where, args, categoryPattern, amountSearch } = filterMatch(
 		f,
 		namesOn,
@@ -353,6 +380,7 @@ export async function listTransactions(
 		ids,
 		splitParents,
 	);
+
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
 	const from = `FROM transactions t
 			${joins}
@@ -364,18 +392,21 @@ export async function listTransactions(
 	// row counted it holds, as it does for an amount-only search, so the count names the amount then.
 	const countColumns = ["COUNT(*) AS n"];
 	const countArgs: (string | number)[] = [];
+
 	if (amountSearch?.plain) {
 		countColumns.push(
 			"COALESCE(MIN(CASE WHEN ABS(t.amount_cents) BETWEEN ? AND ? THEN 1 ELSE 0 END), 1) AS allAmount",
 		);
 		countArgs.push(amountSearch.low, amountSearch.high);
 	}
+
 	if (categoryPattern !== null) {
 		countColumns.push(
 			"MAX(CASE WHEN c.name LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END) AS categoryHit",
 		);
 		countArgs.push(categoryPattern);
 	}
+
 	const counted = await db
 		.prepare(`SELECT ${countColumns.join(", ")} ${from}`)
 		.bind(...countArgs, ...args)
@@ -384,13 +415,16 @@ export async function listTransactions(
 			allAmount?: number | null;
 			categoryHit?: number | null;
 		}>();
+
 	const total = counted?.n ?? 0;
+
 	const matched: SearchMatch = {
 		category: counted?.categoryHit === 1,
 		allByAmount:
 			amountSearch !== null &&
 			(!amountSearch.plain || counted?.allAmount === 1),
 	};
+
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 	const page = Math.min(f.page, pages);
 
@@ -479,6 +513,7 @@ export async function listTransactions(
 				rawName: r.rawName,
 				namesOn,
 			});
+
 			return {
 				...r,
 				parentName: parentRawName
@@ -509,6 +544,7 @@ export async function listTransactions(
 			};
 		},
 	);
+
 	return { rows, total, page, pages, matched };
 }
 
@@ -521,6 +557,7 @@ export async function listRowsByIds(
 	ids: number[],
 ): Promise<ListRow[]> {
 	if (ids.length === 0) return [];
+
 	const { rows } = await listTransactions(
 		db,
 		{
@@ -535,6 +572,7 @@ export async function listRowsByIds(
 		},
 		ids,
 	);
+
 	return rows;
 }
 
@@ -568,7 +606,9 @@ export async function startHereRows(
 		.prepare("SELECT date FROM transactions WHERE id = ?")
 		.bind(DEMO_BAKERY_ID)
 		.first<{ date: string }>();
+
 	const month = bakeryDate?.date.slice(0, 7) ?? fallbackMonth;
+
 	const latest = (flag: "flag_income" | "flag_transfer") =>
 		db
 			.prepare(
@@ -576,13 +616,16 @@ export async function startHereRows(
 			)
 			.bind(month)
 			.first<{ id: number }>();
+
 	const [paycheck, transfer] = await Promise.all([
 		latest("flag_income"),
 		latest("flag_transfer"),
 	]);
+
 	const ids = [paycheck?.id, transfer?.id, DEMO_BAKERY_ID].filter(
 		(id): id is number => id !== undefined,
 	);
+
 	const [{ rows }, { total }] = await Promise.all([
 		listTransactions(
 			db,
@@ -610,7 +653,9 @@ export async function startHereRows(
 			raw: true,
 		}),
 	]);
+
 	const line = (id?: number) => rows.find((row) => row.id === id) ?? null;
+
 	return {
 		month,
 		paycheck: line(paycheck?.id),
@@ -630,12 +675,14 @@ export async function selectableMatchIds(
 ): Promise<number[]> {
 	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
 	const match = filterMatch(f, namesOn, detailsOn);
+
 	const { results } = await db
 		.prepare(
 			`SELECT t.id FROM transactions t ${match.joins} WHERE ${["t.is_split = 0", ...match.where].join(" AND ")}`,
 		)
 		.bind(...match.args)
 		.all<{ id: number }>();
+
 	return results.map((row) => row.id);
 }
 
@@ -649,13 +696,16 @@ export async function selectableTickIds(
 	ids: number[],
 ): Promise<number[]> {
 	if (ids.length === 0) return [];
+
 	const { results } = await db
 		.prepare(
 			"SELECT id FROM transactions WHERE is_split = 0 AND id IN (SELECT value FROM json_each(?))",
 		)
 		.bind(JSON.stringify(ids))
 		.all<{ id: number }>();
+
 	const selectable = new Set(results.map((row) => row.id));
+
 	return ids.filter((id) => selectable.has(id));
 }
 
@@ -667,25 +717,32 @@ export async function needsCategoryCount(
 ): Promise<number> {
 	if (raw) {
 		const inMonth = month === "all" ? "" : "substr(t.date,1,7) = ? AND ";
+
 		const statement = db.prepare(
 			`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}t.parent_id IS NULL`,
 		);
+
 		const row = await (month === "all"
 			? statement
 			: statement.bind(month)
 		).first<{ n: number }>();
+
 		return row?.n ?? 0;
 	}
+
 	const inMonth = month === "all" ? "" : `${COUNTED_MONTH} = ? AND `;
+
 	const statement = db.prepare(
 		`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${inMonth}${NEEDS_CATEGORY}`,
 	);
+
 	const row = await (month === "all"
 		? statement
 		: statement.bind(month)
 	).first<{
 		n: number;
 	}>();
+
 	return row?.n ?? 0;
 }
 
@@ -696,10 +753,12 @@ export async function olderNeedsCategoryCount(
 ): Promise<number> {
 	const [year = 0, month = 1] = monthStart.slice(0, 7).split("-").map(Number);
 	const nextMonthStart = `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, "0")}-01`;
+
 	const row = await db
 		.prepare(OLDER_NEEDS_CATEGORY_SQL)
 		.bind(monthStart, nextMonthStart, monthStart.slice(0, 7))
 		.first<{ n: number }>();
+
 	return row?.n ?? 0;
 }
 
@@ -713,6 +772,7 @@ export async function monthsWithTransactions(
 			 ${COUNTED_JOINS} ORDER BY month DESC`,
 		)
 		.all<{ month: string }>();
+
 	return results.map((r) => r.month);
 }
 
@@ -736,6 +796,7 @@ export async function firstVisitState(
 			END AS state`,
 		)
 		.first<{ state: FirstVisit | null }>();
+
 	return row?.state ?? null;
 }
 
@@ -831,7 +892,9 @@ export async function refundPurchases(
 	>,
 ): Promise<RefundPurchase[]> {
 	const isRefund = refund.amountCents < 0 && !refund.income && !refund.isSplit;
+
 	if (!isRefund && refund.refundOfId == null) return [];
+
 	const { results } = await db
 		.prepare(`SELECT t.id,t.date,t.amount_cents AS amountCents,t.category_id AS categoryId,c.name AS categoryName,t.excluded
 		FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
@@ -842,6 +905,7 @@ export async function refundPurchases(
 		ORDER BY t.date DESC,t.id DESC`)
 		.bind(refund.refundOfId ?? null, isRefund ? 1 : 0, refund.date, refund.id)
 		.all<RefundPurchase>();
+
 	return results;
 }
 
@@ -932,7 +996,9 @@ export async function getTransaction(
 					forPersonGuessed: number;
 				}
 		>();
+
 	if (!r) return null;
+
 	// A person's chosen name wins; until then the first pending suggestion, shown dashed; otherwise the
 	// bank's raw text is tidied for display (spec §7). The panel offers every pending suggestion.
 	const {
@@ -944,35 +1010,42 @@ export async function getTransaction(
 		thisOwnName,
 		...row
 	} = r;
+
 	const {
 		names: namesOn,
 		details: detailsOn,
 		income: incomeOn,
 	} = await readAiSwitches(db);
+
 	const merchant = {
 		stored: suggestedNames,
 		status: suggestionStatus,
 		key: merchantKey,
 		namesOn,
 	};
+
 	const shown = shownName({
 		...merchant,
 		chosen: r.merchantName,
 		ownName: r.ownName,
 		rawName: r.rawName,
 	});
+
 	const storeName = shownName({
 		...merchant,
 		chosen: r.merchantName,
 		rawName: r.rawName,
 	}).name;
+
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	const tidied = tidyName(r.rawName);
+
 	const owned = (
 		JSON.parse(ownedJson) as { name: string; date: string; part: number }[]
 	)
 		.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
 		.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
 	return {
 		...row,
 		detailsVisible: detailsOn,
@@ -1124,7 +1197,9 @@ export async function saveEdit(
 			forPersonId: number | null;
 			forPersonGuessed: number;
 		}>();
+
 	if (!current) throw new Error(`No transaction ${id}`);
+
 	// The split's correction, when there is one. Its gate is the edit's gate for a split cash entry (below), and its
 	// first statements run before the edit's, its new parts after them.
 	const splitPrepared = splitEdit
@@ -1139,6 +1214,7 @@ export async function saveEdit(
 		(current.noteState !== "guessed" ||
 			edit.detailsVisible !== false ||
 			edit.noteProvided === true);
+
 	// The note's state after this save: a person's words, a person's keeping of a guess, or no change.
 	const noteEvent = noteChanged
 		? (edit.note ?? "").trim() === ""
@@ -1147,27 +1223,35 @@ export async function saveEdit(
 		: edit.keepDetails
 			? "person_kept"
 			: null;
+
 	const nextNote: NoteState = noteEvent
 		? afterNoteEvent(current.noteState, noteEvent)
 		: current.noteState;
+
 	const newLink =
 		edit.refundOfId !== undefined && edit.refundOfId !== current.refundOfId
 			? edit.refundOfId
 			: undefined;
+
 	const linking = typeof newLink === "number";
+
 	const incomeChanged =
 		edit.incomeWas === undefined
 			? (edit.income ? 1 : 0) !== current.income
 			: edit.income !== edit.incomeWas;
+
 	const creditReviewChoice = edit.creditReviewed ? 1 : 0;
+
 	const creditReviewChanged =
 		edit.creditReviewedProvided === false
 			? false
 			: edit.creditReviewedWas === undefined
 				? edit.creditReviewed !== (current.creditReviewedBy === "user")
 				: edit.creditReviewed !== edit.creditReviewedWas;
+
 	const creditReviewByUser =
 		creditReviewChanged && !edit.income && creditReviewChoice === 1;
+
 	// A linked credit counts with its purchase once it is reviewed and not income (followsPurchase), so a save
 	// that makes it start counting, with the link staying, is checked like a link. followsPurchaseAfterSave says
 	// whether it counts once saved, whether by a review as not income or by clearing its income. A save that
@@ -1184,9 +1268,11 @@ export async function saveEdit(
 		creditReviewed: current.creditReviewed === 1,
 		creditReviewedByUser: current.creditReviewedBy === "user",
 	};
+
 	const startsCounting =
 		!followsPurchase(storedCredit) &&
 		followsPurchaseAfterSave(storedCredit, edit);
+
 	const recounting =
 		newLink === undefined &&
 		current.refundOfId !== null &&
@@ -1215,6 +1301,7 @@ export async function saveEdit(
 					args: [id, recounting],
 				}
 			: { sql: () => "", args: [] };
+
 	// The cash check on its own: the entry is still a cash entry at the amount it's given, its parts add up
 	// to it, and its refunds fit within it. The two linking writes wait on this check and the parts check
 	// (baseGate), but not on the link check, because the link check reads the link they set. The cash check's
@@ -1231,6 +1318,7 @@ export async function saveEdit(
 							` AND EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?${n} AND cash.parent_id IS NULL AND cash.account_id IN (SELECT id FROM accounts WHERE type='cash') AND (cash.is_split = 0 OR (SELECT COALESCE(SUM(amount_cents), 0) FROM transactions part WHERE part.parent_id = cash.id) = ?${n + 1}) AND COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) <= ?${n + 1})`,
 						args: [id, edit.cashAmountCents],
 					};
+
 	// A split credit reviewed as not income makes each of its linked parts count against its own purchase, so
 	// each one is checked (splitPartMisfitSql). The parts on the parent's old link are left out, since they move
 	// with the parent, and the link statement checks what moves against what is left of the new purchase, counting
@@ -1238,6 +1326,7 @@ export async function saveEdit(
 	// gives the same answer at every statement of the batch: the move runs only when it fits what is left,
 	// counting those parts, and if it is refused nothing changes.
 	const splitReview = creditReviewByUser && current.isSplit === 1;
+
 	const partsGate: { sql: (n: number) => string; args: unknown[] } = splitReview
 		? {
 				sql: (n) =>
@@ -1245,22 +1334,26 @@ export async function saveEdit(
 				args: [id, newLink === undefined ? null : current.refundOfId],
 			}
 		: { sql: () => "", args: [] };
+
 	// Every write waits on the parts check and the cash check, and on the link's check too (gate).
 	const baseGate = {
 		sql: (n: number) =>
 			`${partsGate.sql(n)}${cashGate.sql(n + partsGate.args.length)}`,
 		args: [...partsGate.args, ...cashGate.args],
 	};
+
 	const gate = {
 		sql: (n: number) =>
 			`${linkGate.sql(n)}${baseGate.sql(n + linkGate.args.length)}`,
 		args: [...linkGate.args, ...baseGate.args],
 	};
+
 	/** A statement with the gate on its WHERE (before `tail`), binding `args` and then the gate's. */
 	const gated = (sql: string, args: unknown[], tail = "") =>
 		db
 			.prepare(`${sql}${gate.sql(args.length + 1)}${tail}`)
 			.bind(...args, ...gate.args);
+
 	/** A statement with the parts and cash checks on its WHERE, binding `args` and then their own. */
 	const cashGated = (sql: string, args: unknown[]) =>
 		db
@@ -1269,10 +1362,12 @@ export async function saveEdit(
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
+
 	// Changing the exclusion makes it a person's choice, which Jev never overrides. A refund being
 	// linked counts, whatever the panel's Exclude chip held (it was drawn from the old state).
 	const excluded = edit.excluded && !linking ? 1 : 0;
 	const excludeArgs = [excluded, excluded];
+
 	// The review and income parameters the panel's own UPDATE shares between its two forms.
 	const reviewArgs = [
 		creditReviewByUser || incomeChanged ? 1 : 0,
@@ -1293,6 +1388,7 @@ export async function saveEdit(
 	];
 
 	const statements: D1PreparedStatement[] = [];
+
 	if (linking) {
 		// First, so what follows can depend on it. The parts of a split refund move with it, only while
 		// they still follow its old link; one a person linked to another purchase keeps its own choice.
@@ -1319,6 +1415,7 @@ export async function saveEdit(
 			),
 		);
 	}
+
 	// The panel's own update comes next, so for a credit that counts again its result says whether it
 	// was refused (it is the first statement then).
 	statements.push(
@@ -1360,6 +1457,7 @@ export async function saveEdit(
 					],
 				),
 	);
+
 	// A guessed name a person keeps is logged before the merchant's suggestion settles (spec §8.6).
 	if (
 		edit.nameChanged !== false &&
@@ -1394,6 +1492,7 @@ export async function saveEdit(
 					" ON CONFLICT(raw_name) DO NOTHING",
 				),
 	);
+
 	// The store's own name has no displayName, so this row takes the bank's text tidied, which is what it
 	// shows and what the save's toast names; the merchant's own name stays as it was.
 	if (oneOnly)
@@ -1403,6 +1502,7 @@ export async function saveEdit(
 				[edit.displayName ?? tidyName(current.rawName), actor, id],
 			),
 		);
+
 	if (renamesMerchant)
 		statements.push(
 			gated(
@@ -1410,6 +1510,7 @@ export async function saveEdit(
 				[actor, id],
 			),
 		);
+
 	// "Keep the bank's name": the tidied text stays and the suggestions are turned down, never offered again.
 	if (edit.keepBankName && edit.displayName === null && renamesMerchant)
 		statements.push(
@@ -1418,6 +1519,7 @@ export async function saveEdit(
 				[current.merchantKey],
 			),
 		);
+
 	// A credit a person newly marks as income, or newly reviews as a refund or other non-income credit,
 	// is theirs to count (decision 70), so an exclusion Plaid put on it (a transfer category) comes off,
 	// even though the panel sends its Exclude chip as it was drawn, on. This runs after the panel's own
@@ -1431,6 +1533,7 @@ export async function saveEdit(
 				[actor, id],
 			),
 		);
+
 	// A split credit is one bank transaction and only its parts count, so a person reviewing it from
 	// the split's own panel reviews its parts too, and Plaid's exclusion comes off them. A part that is
 	// income keeps that, and so does one a person or Jev excluded.
@@ -1445,6 +1548,7 @@ export async function saveEdit(
 				[actor, id],
 			),
 		);
+
 	if (newLink === null) {
 		// Unlinking: the parts of a split refund that still follow its link go too, before its own
 		// update changes it; one a person linked to another purchase keeps its own choice. The
@@ -1469,6 +1573,7 @@ export async function saveEdit(
 			),
 		);
 	}
+
 	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
 	// Tally picked, or no category at all (an unsure answer included), is cleared so the next answer can take its
 	// place, unless the same save ticks the merchant rule, which settles the category (oneOffGuessesAgain).
@@ -1492,6 +1597,7 @@ export async function saveEdit(
 				? current.refundOfId !== null && current.purchaseExcluded === 0
 				: newLink !== null) && followsPurchaseAfterSave(storedCredit, edit),
 	};
+
 	if (
 		oneOffGuessesAgain({
 			edit,
@@ -1512,6 +1618,7 @@ export async function saveEdit(
 				[actor, id],
 			),
 		);
+
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
 	// A Kind or For that differs from the stored one changes it and clears Jev's category confidence
@@ -1524,22 +1631,26 @@ export async function saveEdit(
 		(current.kindGuessed === 0 ||
 			edit.detailsVisible !== false ||
 			edit.detailsFieldChanged === true);
+
 	const kindTaken =
 		kindChanged ||
 		(edit.kind !== undefined &&
 			current.kindGuessed === 1 &&
 			edit.detailsFieldChanged === true);
+
 	const personChanged =
 		edit.forPersonId !== undefined &&
 		edit.forPersonId !== current.forPersonId &&
 		(current.forPersonGuessed === 0 ||
 			edit.detailsVisible !== false ||
 			edit.detailsFieldChanged === true);
+
 	const personTaken =
 		personChanged ||
 		(edit.forPersonId !== undefined &&
 			current.forPersonGuessed === 1 &&
 			edit.detailsFieldChanged === true);
+
 	if (noteChanged || kindTaken || personTaken || edit.keepDetails) {
 		statements.push(
 			gated(
@@ -1593,6 +1704,7 @@ export async function saveEdit(
 			),
 		);
 	}
+
 	if (excluded !== current.excluded)
 		statements.push(
 			gated(
@@ -1605,12 +1717,14 @@ export async function saveEdit(
 				[excluded, actor, id],
 			),
 		);
+
 	const ruleChange = merchantRuleChange(
 		edit.alwaysWas ?? false,
 		edit.alwaysForMerchant,
 		edit.merchantRuleWas,
 		edit.categoryId,
 	);
+
 	if (ruleChange.action === "set" && edit.categoryId !== null) {
 		statements.push(
 			gated("UPDATE merchants SET default_category_id = ? WHERE raw_name = ?", [
@@ -1618,6 +1732,7 @@ export async function saveEdit(
 				current.merchantKey,
 			]),
 		);
+
 		if (ruleChange.recategorize)
 			statements.push(
 				gated(`${APPLY_MERCHANT_RULE_SQL} AND id != ?`, [
@@ -1635,7 +1750,9 @@ export async function saveEdit(
 			]),
 		);
 	}
+
 	let cashChangeIndex: number | null = null;
+
 	if (edit.cashDate !== undefined && edit.cashAmountCents !== undefined) {
 		cashChangeIndex = statements.length;
 		statements.push(
@@ -1652,10 +1769,12 @@ export async function saveEdit(
 			gated(unlinkUnfitCashPlanPaymentsSql(), [id], " RETURNING id"),
 		);
 	}
+
 	// A For person removed after the panel's household list loaded fails the details write on its foreign
 	// key. The batch is atomic, so that failure saved nothing: it is a refusal, and the person is named.
 	const correctionBefore = splitPrepared?.before ?? [];
 	const correctionAfter = splitPrepared?.after ?? [];
+
 	const results = await db
 		.batch([...correctionBefore, ...statements, ...correctionAfter])
 		.catch(async (error: unknown) => {
@@ -1670,12 +1789,16 @@ export async function saveEdit(
 				return null;
 			throw error;
 		});
+
 	if (!results) return { saved: false, personMissing: true };
+
 	if (splitPrepared) {
 		// The correction's first statement (the parent's amount) says whether it saved, and it is the batch's first.
 		const correction = await splitPrepared.finish(results);
+
 		if (!correction.saved) return { saved: false, split: correction };
 	}
+
 	// Once the correction has saved, the edit's own gates pass for a split cash entry: its gate is the correction's,
 	// which the edit's statements shared, a split can't be linked as a refund, and a cash entry is money out, so the
 	// split review (splitReview) never refuses its parts.
@@ -1684,6 +1807,7 @@ export async function saveEdit(
 		correctionBefore.length,
 		correctionBefore.length + statements.length,
 	);
+
 	// A split review with a part that doesn't fit its own purchase is refused by the parts check, which leaves
 	// the statement that decides unchanged (the link's, for a link; the panel's otherwise). The first such part
 	// names its purchase; with none, the cash and link checks below say why.
@@ -1702,6 +1826,7 @@ export async function saveEdit(
 				amountCents: number;
 				categoryName: string | null;
 			}>();
+
 		if (part)
 			return {
 				saved: false,
@@ -1709,6 +1834,7 @@ export async function saveEdit(
 				refundPurchase: part,
 			};
 	}
+
 	if (cashChangeIndex !== null && !own[cashChangeIndex]?.meta.changes) {
 		const state = await db
 			.prepare(
@@ -1718,24 +1844,31 @@ export async function saveEdit(
 			)
 			.bind(id)
 			.first<{ parts: number; refunds: number }>();
+
 		// The row is there unless it was deleted during the save, and then nothing says why it was refused.
 		if (!state) throw new Error(`No transaction ${id}`);
+
 		if (current.isSplit && state.parts !== edit.cashAmountCents)
 			return { saved: false, cashError: "split", amountCents: state.parts };
+
 		return { saved: false, cashError: "refund", refundCents: state.refunds };
 	}
+
 	// The statement that decides is the refund's own link, the second one, when there is a link; for a
 	// credit that counts again it is the panel's own update, the first. No change means the amount
 	// didn't fit, and then none of the others applied either.
 	const purchase = linking ? newLink : recounting;
+
 	if (typeof purchase === "number" && !own[linking ? 1 : 0]?.meta.changes)
 		return {
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
+
 	// The unlink's statement returns its row when it set a plan aside.
 	if (cashChangeIndex !== null && own[cashChangeIndex + 2]?.results.length)
 		return { saved: true, planUnlinked: true };
+
 	return { saved: true };
 }
 
@@ -1808,6 +1941,7 @@ export async function linkedRefunds(
 			movesWithParent: number;
 			movingCents: number;
 		}>();
+
 	return results.map((row) => ({
 		id: row.id,
 		date: row.date,
@@ -1829,12 +1963,15 @@ function unlinkedDates(
 	rows: { id: number; date: string; parentId: number | null }[],
 ): string[] {
 	const byRoot = new Map<number, string>();
+
 	for (const row of [...rows].sort(
 		(a, b) => a.date.localeCompare(b.date) || a.id - b.id,
 	)) {
 		const root = row.parentId ?? row.id;
+
 		if (!byRoot.has(root)) byRoot.set(root, row.date);
 	}
+
 	return [...byRoot.values()];
 }
 
@@ -1868,6 +2005,7 @@ async function partBills(
 		)
 		.bind(parentId)
 		.all<PartPayment>();
+
 	return results;
 }
 
@@ -1895,6 +2033,7 @@ async function partPlans(
 		)
 		.bind(parentId)
 		.all<PartPlan>();
+
 	return results;
 }
 
@@ -1921,6 +2060,7 @@ function keepParts<
 >(items: T[], parts: SplitPart[], used: Set<number>) {
 	const kept: { item: T; index: number }[] = [];
 	const lost: T[] = [];
+
 	for (const item of items) {
 		const index = parts.findIndex(
 			(part, i) =>
@@ -1928,6 +2068,7 @@ function keepParts<
 				part.amountCents === item.amountCents &&
 				part.categoryId === item.categoryId,
 		);
+
 		if (index === -1) {
 			lost.push(item);
 		} else {
@@ -1935,6 +2076,7 @@ function keepParts<
 			kept.push({ item, index });
 		}
 	}
+
 	return { kept, lost };
 }
 
@@ -1964,6 +2106,7 @@ const stillUnpaidStatement = (db: D1Database, lost: PartPayment[]) =>
 /** The bills a batch's stillUnpaidStatement returned, as the toast names them: a name and an occurrence. */
 function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
 	const row = result?.results[0] as { bills: string | null } | undefined;
+
 	return parseUnpaidBills(row?.bills).map(({ name, period }) => ({
 		name,
 		period,
@@ -2025,6 +2168,7 @@ export async function saveSplit(
 		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
 		.bind(parentId)
 		.first();
+
 	if (!parent) throw new Error(`No transaction ${parentId}`);
 	// Every child reads its parent inside the atomic batch, so date, exclusion and review edits
 	// made after the route validation are reflected in the children.
@@ -2034,6 +2178,7 @@ export async function saveSplit(
 	// saw: refuseMovedPlan, the batch's first statement, fails on it before anything is written. The ids are whole numbers
 	// from the database, and the purchase id is a number too, so all are inlined.
 	const readPlans = await partPlans(db, parentId);
+
 	const readOnItsPart =
 		readPlans
 			.map(
@@ -2041,21 +2186,28 @@ export async function saveSplit(
 					`(pe.id = ${Number(plan.id)} AND pe.transaction_id = ${Number(plan.transactionId)})`,
 			)
 			.join(" OR ") || "0";
+
 	const plansMovedSinceRead = `EXISTS (SELECT 1 FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
 		WHERE part.parent_id = ${Number(parentId)} AND NOT (${readOnItsPart}))`;
+
 	const plansLinkedElsewhere = `EXISTS (SELECT 1 FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
 		WHERE part.parent_id = ${Number(parentId)} AND pe.id NOT IN (${readPlans.map((plan) => Number(plan.id)).join(", ")}))`;
+
 	const unchanged = `EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?) AND NOT ${plansLinkedElsewhere}`;
 	// The same check with numbered parameters, for the statements that keep a person's Not this one (decision 105).
 	const unchangedNumbered = `EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2) AND NOT ${plansLinkedElsewhere}`;
 	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
+
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
+
 	const linked = await linkedRefunds(db, parentId, true);
+
 	// A chosen refund goes with its part: only an offered refund can move. Each move is checked in the batch
 	// (refundFitsSql), and only the ones that fit move.
 	const moves = linked.flatMap((refund) => {
 		const part = choices[refund.id] ?? null;
+
 		return offeredToSplit(refund) &&
 			part !== null &&
 			Number.isInteger(part) &&
@@ -2064,6 +2216,7 @@ export async function saveSplit(
 			? [{ refundId: refund.id, isSplit: refund.isSplit, part }]
 			: [];
 	});
+
 	// Each chosen refund with the parts of it that still follow its link: they are parked, kept, and moved or swept
 	// together (decision 99). A part linked elsewhere is not in the list, so it keeps its link.
 	const movedIds = JSON.stringify(
@@ -2074,14 +2227,17 @@ export async function saveSplit(
 				.map((row) => row.id),
 		]),
 	);
+
 	const payments = await partBills(db, parentId);
 	// Bills are paired first. A plan on a part is paired the same way (decision 99): with a new part of its amount and
 	// category that no bill took. A plan with no such part is unlinked when its part goes (ON DELETE SET NULL), and set aside.
 	const used = new Set<number>();
 	const { kept, lost } = keepParts(payments, parts, used);
 	const { kept: keptPlans } = keepParts(readPlans, parts, used);
+
 	const inheritedRefundLink =
 		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
+
 	// A kept payment is parked on the purchase as dismissed, out of the way of the parts it leaves, and moved to its
 	// new part last. Only linked rows are unique, so the parked row can't clash (decision 99).
 	const park =
@@ -2100,6 +2256,7 @@ export async function saveSplit(
 						),
 				]
 			: [];
+
 	// The purchase's own refund link is cleared only when the refund no longer fits (unlinkSplitOverRefundedSql), and the
 	// new parts keep it otherwise. RETURNING names it when it goes, alongside the refunds unlinked from the purchase and parts.
 	// A part that a kept plan still holds here has no refund link left: unlinkLinked, earlier in this batch, has cleared
@@ -2110,6 +2267,7 @@ export async function saveSplit(
 			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total);
+
 	// Each kept payment moves to the new part at its position in the sheet, which the new parts' ids follow.
 	const restore = kept.map((keep) =>
 		db
@@ -2126,6 +2284,7 @@ export async function saveSplit(
 				total,
 			),
 	);
+
 	// Each kept plan moves to the new part it was paired with, as a kept payment does (decision 99). It moves only while it
 	// is still on a part of this purchase, so a plan unlinked after the read stays unlinked. The new parts hold no plan yet,
 	// so any match is an old part, and the new part is found by its place from the newest, since the old parts that held a
@@ -2139,6 +2298,7 @@ export async function saveSplit(
 			)
 			.bind(parentId, parts.length - 1 - keep.index, keep.item.id, total),
 	);
+
 	// The old parts that held a kept plan, which the first delete left for restorePlans: every part but the newest n, which
 	// are the new parts. Guarded like the others, so a change whose amount moved removes nothing.
 	const leftoverParts = db
@@ -2147,15 +2307,19 @@ export async function saveSplit(
 			AND ${unchangedNumbered}`,
 		)
 		.bind(parentId, total, parts.length);
+
 	const markParent = db
 		.prepare(
 			`UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, jev_mixed=NULL, jev_also_category_id=NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ? AND NOT ${plansLinkedElsewhere}`,
 		)
 		.bind(by, parentId, total);
+
 	const stillUnpaid = stillUnpaidStatement(db, lost);
+
 	// The new part at a sheet index (its id order, as restore finds a kept payment's part). ?1 is the purchase.
 	const partAt = (index: string) =>
 		`(SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id LIMIT 1 OFFSET ${index})`;
+
 	// The chosen refunds, and the parts that follow them, are parked on the purchase before the old parts go, so a part's
 	// delete can't unlink them, and the moves below check they are still there. Only a link that is still on the purchase
 	// or its parts parks (changes a row): one a competing save moved or unlinked since the read doesn't, and stays as it is.
@@ -2165,6 +2329,7 @@ export async function saveSplit(
 			WHERE id IN (SELECT value FROM json_each(?3)) AND refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1 OR id = ?1) AND ${unchangedNumbered}`,
 		)
 		.bind(parentId, total, movedIds);
+
 	// A chosen refund moves onto its part once the parts exist. It moves only if it is still on the purchase (parked
 	// above), still a top-level refund of the kind it was read as (a split refund stays split) that follows the purchase
 	// (a competing save can split or change the credit after the read), and the whole refund still fits that part
@@ -2195,6 +2360,7 @@ export async function saveSplit(
 					.bind(parentId, total, move.refundId, move.part)
 			: null,
 	}));
+
 	// A chosen refund that parked and didn't move is still on the purchase, with its parts: they are unlinked, and named
 	// once. One that moved is not.
 	const sweepRefused = db
@@ -2204,6 +2370,7 @@ export async function saveSplit(
 			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total, movedIds);
+
 	// Every refund still linked to the purchase or its parts is unlinked, except the chosen ones and the parts that follow
 	// them, which are parked above and move below. RETURNING names each one it unlinks, including one a competing save
 	// linked after the read.
@@ -2214,13 +2381,16 @@ export async function saveSplit(
 			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total, movedIds);
+
 	// The text of refuseMovedPlan's failure, as D1 passes SQLite's message on. No other statement in the batch writes
 	// planned_expenses.amount_cents, so this text is refuseMovedPlan's alone.
 	const movedPlanRefusal =
 		/NOT NULL constraint failed: planned_expenses\.amount_cents/;
+
 	// The text of refuseMovedBill's failure, as D1 passes it on. No other statement in the batch writes a NULL bill_id
 	// (the bill-copying inserts take it from a row), so this text is refuseMovedBill's alone.
 	const movedBillRefusal = /NOT NULL constraint failed: bill_payments\.bill_id/;
+
 	// Runs before any write. A plan the read didn't see on its part fails this statement (amount_cents is NOT NULL), and D1
 	// rolls the whole batch back, so nothing is written and the catch below says planLinked. RAISE(ABORT) works only inside
 	// a trigger, and no trigger covers this, so the batch is stopped by a NOT NULL failure the catch recognises by its
@@ -2229,6 +2399,7 @@ export async function saveSplit(
 	const refuseMovedPlan = db.prepare(
 		`UPDATE planned_expenses SET amount_cents = NULL WHERE ${plansMovedSinceRead}`,
 	);
+
 	// The save goes on only while the parts' linked bill payments are exactly the ones the read saw, each on its part,
 	// bill and period (#638). A payment moved, linked, unlinked or deleted since the read (a Not this one deletes the link
 	// and adds a dismissal), or a new link that took a deleted payment's id (bill_payments ids can be handed out again),
@@ -2236,6 +2407,7 @@ export async function saveSplit(
 	// exist, and D1 rolls the whole batch back. It runs before any write.
 	const paymentsOnParts = `FROM bill_payments bp JOIN transactions part ON part.id = bp.transaction_id
 		WHERE part.parent_id = ?1 AND bp.status = 'linked'`;
+
 	const refuseMovedBill = db
 		.prepare(
 			`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status)
@@ -2246,6 +2418,7 @@ export async function saveSplit(
 					AND json_extract(r.value, '$.billId') = bp.bill_id AND json_extract(r.value, '$.period') = bp.period))`,
 		)
 		.bind(parentId, JSON.stringify(payments), payments.length);
+
 	const statements = [
 		refuseMovedPlan,
 		refuseMovedBill,
@@ -2303,7 +2476,9 @@ export async function saveSplit(
 		markParent,
 		stillUnpaid,
 	];
+
 	let results: D1Result[];
+
 	try {
 		results = await db.batch(statements);
 	} catch (error) {
@@ -2318,6 +2493,7 @@ export async function saveSplit(
 				bills: [],
 				moved: [],
 			};
+
 		if (error instanceof Error && movedBillRefusal.test(error.message))
 			return {
 				saved: false,
@@ -2328,8 +2504,10 @@ export async function saveSplit(
 			};
 		throw error;
 	}
+
 	const saved =
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
+
 	// The rows a statement returned with RETURNING: the refunds it changed, a refund's own row or one of its parts
 	// (parentId is the refund's id for a part). unlinkedDates counts each refund once.
 	const returnedRows = (statement: D1PreparedStatement) =>
@@ -2338,6 +2516,7 @@ export async function saveSplit(
 			date: string;
 			parentId: number | null;
 		}[];
+
 	return {
 		saved,
 		unlinked: !saved
@@ -2412,6 +2591,7 @@ export async function correctCashSplit(
 	by: string,
 ): Promise<CashSplitResult> {
 	const prepared = await prepareCashSplitCorrection(db, parentId, edit, by);
+
 	return prepared.finish(
 		await db.batch([...prepared.before, ...prepared.after]),
 	);
@@ -2437,20 +2617,26 @@ async function prepareCashSplitCorrection(
 }> {
 	const { totalCents, amountWasCents, parts } = edit;
 	const partsTotal = parts.reduce((sum, part) => sum + part.amountCents, 0);
+
 	if (partsTotal !== totalCents)
 		throw new Error(`The parts of ${parentId} don't add up to ${totalCents}`);
+
 	const savedParts = parts.flatMap((part, index) =>
 		part.id === null
 			? []
 			: [{ id: part.id, cents: part.amountCents, position: index + 1 }],
 	);
+
 	const savedJson = JSON.stringify(savedParts);
+
 	const current = await db
 		.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 		.bind(parentId)
 		.all<{ id: number }>();
+
 	const savedIds = savedParts.map((part) => part.id).sort((x, y) => x - y);
 	const currentIds = current.results.map((row) => row.id);
+
 	if (
 		savedIds.length !== currentIds.length ||
 		savedIds.some((id, index) => id !== currentIds[index])
@@ -2471,7 +2657,9 @@ async function prepareCashSplitCorrection(
 			+ COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?${n + 3}) AS saved), 0)) <= ?${n + 2}
 		AND NOT EXISTS (SELECT 1 FROM transactions WHERE parent_id = ?${n}
 			AND id NOT IN (SELECT json_extract(saved.value, '$.id') FROM json_each(?${n + 3}) AS saved))`;
+
 	const gateArgs = [parentId, amountWasCents, totalCents, savedJson];
+
 	const gated = (sql: string, args: unknown[]) =>
 		db
 			.prepare(`${sql} AND ${gate(args.length + 1)}`)
@@ -2481,6 +2669,7 @@ async function prepareCashSplitCorrection(
 		"UPDATE transactions SET amount_cents = ?1, updated_by = ?2, updated_at = datetime('now') WHERE id = ?3",
 		[totalCents, by, parentId],
 	);
+
 	const partStatements = parts.flatMap((part) =>
 		part.id === null
 			? []
@@ -2491,6 +2680,7 @@ async function prepareCashSplitCorrection(
 					),
 				],
 	);
+
 	// Every new part in one statement, so the count the gate reads is still the saved parts' count until it runs.
 	// The copy of the purchase's Not this one below is the one statement after it, and it is not gated.
 	const newParts = parts.flatMap((part) =>
@@ -2498,6 +2688,7 @@ async function prepareCashSplitCorrection(
 			? [{ cents: part.amountCents, categoryId: part.categoryId }]
 			: [],
 	);
+
 	const insertStatements =
 		newParts.length === 0
 			? []
@@ -2511,6 +2702,7 @@ async function prepareCashSplitCorrection(
 						[by, JSON.stringify(newParts), parentId],
 					),
 				];
+
 	// The copy of the purchase's Not this one to the new parts (decision 105) follows the insert and is not gated: the
 	// gate's last check fails once the new parts exist. It guards on the parts' count instead, which is the posted count
 	// only if the insert ran, so a refused batch still writes nothing.
@@ -2527,6 +2719,7 @@ async function prepareCashSplitCorrection(
 						)
 						.bind(parentId, parts.length, totalCents),
 				];
+
 	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written. The
 	// new parts come after the edit's statements (see the doc above), and the purchase's Not this one copy after them,
 	// only when a part was added.
@@ -2549,9 +2742,11 @@ async function prepareCashSplitCorrection(
 				)
 				.bind(parentId, savedJson, amountWasCents, totalCents)
 				.first<{ refundCents: number }>();
+
 			if (linked && linked.refundCents > totalCents)
 				return { saved: false, refundTotalCents: linked.refundCents };
 			const misfit = `${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents')`;
+
 			const refused = await db
 				.prepare(
 					`SELECT json_extract(saved.value, '$.position') AS part,
@@ -2563,6 +2758,7 @@ async function prepareCashSplitCorrection(
 				)
 				.bind(savedJson, parentId, amountWasCents, totalCents)
 				.first<{ part: number; refundCents: number }>();
+
 			if (refused)
 				return {
 					saved: false,
@@ -2589,14 +2785,18 @@ export async function removeSplit(
 ): Promise<{ unlinked: string[]; bills: UnpaidBill[] }> {
 	const unlinked = unlinkedDates(await linkedRefunds(db, parentId, false));
 	const bills = await partBills(db, parentId);
+
 	const parent = await db
 		.prepare("SELECT date FROM transactions WHERE id = ?")
 		.bind(parentId)
 		.first<{ date: string }>();
+
 	const unlinkRefund = db
 		.prepare(unlinkSplitOverRefundedSql("?1"))
 		.bind(parentId);
+
 	const stillUnpaid = stillUnpaidStatement(db, bills);
+
 	const statements = [
 		db
 			.prepare(
@@ -2615,9 +2815,12 @@ export async function removeSplit(
 		unlinkRefund,
 		stillUnpaid,
 	];
+
 	const results = await db.batch(statements);
+
 	const refundUnlinked =
 		(results[statements.indexOf(unlinkRefund)]?.meta.changes ?? 0) > 0;
+
 	return {
 		unlinked: parent && refundUnlinked ? [...unlinked, parent.date] : unlinked,
 		bills: unpaidBillsFrom(results[statements.indexOf(stillUnpaid)]),
@@ -2638,6 +2841,7 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 export function merchantRuleStatement(db: D1Database): D1PreparedStatement {
 	const rule = `SELECT c.id FROM categories c
 		WHERE c.archived = 0 AND c.id = ${merchantColumnSql("transactions", "default_category_id")}`;
+
 	return db.prepare(
 		`UPDATE transactions SET
 			category_id = (${rule}),
@@ -2778,6 +2982,7 @@ export async function pendingForJev(
 				forPersonId: number | null;
 			}
 		>();
+
 	return results.map(
 		({
 			suggestedNames,
@@ -2834,12 +3039,16 @@ export function waitingForJevSql({
 	income: boolean;
 }): string | null {
 	if (!categories && !income) return null;
+
 	const categoryWork = `(t.category_confidence IS NULL AND (EXISTS (SELECT 1 FROM categories WHERE archived = 0)
 		OR (NOT ${CATEGORY_ONLY} AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))`;
+
 	const incomeWork = `(NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)`;
+
 	const asked = [categories ? categoryWork : null, income ? incomeWork : null]
 		.filter((part) => part !== null)
 		.join(" OR ");
+
 	return `FROM transactions t
 		${COUNTED_JOINS}
 		WHERE t.plaid_transaction_id IS NOT NULL AND t.jev_failed_at IS NULL
@@ -2862,10 +3071,13 @@ export async function countWaitingForJev(
 	{ categories, income }: { categories: boolean; income: boolean },
 ): Promise<number> {
 	const sql = waitingForJevSql({ categories, income });
+
 	if (sql === null) return 0;
+
 	const row = await db
 		.prepare(`SELECT COUNT(*) AS waiting ${sql}`)
 		.first<{ waiting: number }>();
+
 	return row?.waiting ?? 0;
 }
 
@@ -2922,10 +3134,13 @@ export function seenSaveGuard(seen: JevSeen): {
 	binds: (string | number | null)[];
 } {
 	const binds: (string | number | null)[] = [];
+
 	const sql = seenMatchSql((field) => {
 		binds.push(seen[field]);
+
 		return "?";
 	});
+
 	return { sql, binds };
 }
 
@@ -2946,6 +3161,7 @@ export function markJevFailedStatement(
 		WHERE id = ? AND NOT ${gaveUpSql("transactions")}`,
 		turnId,
 	);
+
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
 }
 
@@ -2964,6 +3180,7 @@ export function markReaskFailedStatement(
 		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ? AND NOT ${gaveUpSql("transactions")}`,
 		turnId,
 	);
+
 	return db
 		.prepare(guarded.sql)
 		.bind(row.id, row.plaidTransactionId, row.amountCents, ...guarded.binds);
@@ -2989,10 +3206,12 @@ export function saveJevDetailsStatement(
 	if (details.length === 0) return undefined;
 	// The save is guarded by the switches it was asked under (`stillOn`, decision 139) and the sorting turn.
 	const still = options.stillOn === undefined ? "" : ` AND ${STILL_ON_SQL}`;
+
 	// A row's details are applied only while it still reads as its `seen` (decision 143). Jev's own kind and
 	// forPersonId sit beside `seen` in each answer, so the seen values are read from `$.seen`.
 	const seenIntact = `NOT EXISTS (SELECT 1 FROM answers a WHERE a.id = transactions.id AND a.seen IS NOT NULL
 		AND NOT ${seenMatchSql((field) => `json_extract(a.seen, '$.${field}')`)})`;
+
 	const guarded = withTurnGuard(
 		`WITH answers AS (
 				SELECT json_extract(value, '$.id') AS id,
@@ -3018,6 +3237,7 @@ export function saveJevDetailsStatement(
 			WHERE details_asked = 0 AND id IN (SELECT id FROM answers) AND NOT ${gaveUpSql("transactions")}${still} AND ${seenIntact}`,
 		options.turnId,
 	);
+
 	return db
 		.prepare(guarded.sql)
 		.bind(
@@ -3063,6 +3283,7 @@ export async function transactionsNeedingNoteGuess(
 		)
 		.bind(limit)
 		.all<NoteNameRow>();
+
 	return results;
 }
 
@@ -3083,6 +3304,7 @@ export async function noteNameRows(
 		)
 		.bind(JSON.stringify(ids))
 		.all<NoteNameRow>();
+
 	return results;
 }
 
@@ -3139,6 +3361,7 @@ function answerStatements(
 	turnId: string | undefined,
 ): JevAnswerStatements {
 	if (!log || (!log.category && !log.income)) return { update };
+
 	return {
 		update,
 		log: jevAnswerLogStatement(
@@ -3211,24 +3434,30 @@ export function saveJevResultStatements(
 		income: options.switches?.income,
 		sortOnArrival: options.switches?.sortOnArrival,
 	});
+
 	// The answer is applied only while the transaction still reads as Jev was asked (decision 143). A caller without
 	// `seen` (a plan cached before that, or a test) skips the guard.
 	const seenGuard = options.seen ? seenSaveGuard(options.seen) : undefined;
 	const seenSql = seenGuard ? ` AND ${seenGuard.sql}` : "";
 	// What the answer writes to its categories: none when the category question wasn't asked.
 	const categoryWritten = options.categoryAsked === false ? null : d.categoryId;
+
 	const suggestionWritten =
 		options.categoryAsked === false ? null : d.suggestedCategoryId;
+
 	const alsoWritten = d.alsoCategoryId ?? null;
 	// A save from sorting also writes only while every category the answer names is still there and active (decision 143):
 	// a category archived or removed since Jev was asked leaves the transaction waiting. A null names none, so it never
 	// blocks. Each name's two binds are its id, once for the null test and once for the lookup.
 	const fromSorting = options.seen !== undefined || options.turn !== undefined;
+
 	const activeNamed =
 		"(? IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0))";
+
 	const activeSql = fromSorting
 		? ` AND ${activeNamed} AND ${activeNamed} AND ${activeNamed}`
 		: "";
+
 	const activeBinds = fromSorting
 		? [
 				categoryWritten,
@@ -3239,6 +3468,7 @@ export function saveJevResultStatements(
 				alsoWritten,
 			]
 		: [];
+
 	if (options.reask) {
 		// The re-ask writes only the category answer. It has no classification check: the row was cleared on purpose, and
 		// its Maybe mark (confidence NULL) is what the guard reads (decision 160). It writes only while its run is still the
@@ -3255,6 +3485,7 @@ export function saveJevResultStatements(
 					AND NOT ${gaveUpSql("transactions")} AND plaid_transaction_id IS ? AND amount_cents = ?${options.leaderFiled ? " AND EXISTS (SELECT 1 FROM transactions g WHERE g.id = ? AND g.category_id = ? AND g.category_source = 'jev')" : ""}`,
 			options.turn,
 		);
+
 		const category = db
 			.prepare(guarded.sql)
 			.bind(
@@ -3277,6 +3508,7 @@ export function saveJevResultStatements(
 					: []),
 				...guarded.binds,
 			);
+
 		return answerStatements(
 			db,
 			category,
@@ -3285,6 +3517,7 @@ export function saveJevResultStatements(
 			options.turn,
 		);
 	}
+
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.
@@ -3299,6 +3532,7 @@ export function saveJevResultStatements(
 					AND ${INCLUDED_ROW} AND is_split = 0 AND NOT ${gaveUpSql("transactions")} AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
 			options.turn,
 		);
+
 		const category = db
 			.prepare(guarded.sql)
 			.bind(
@@ -3315,6 +3549,7 @@ export function saveJevResultStatements(
 				...activeBinds,
 				...guarded.binds,
 			);
+
 		return answerStatements(
 			db,
 			category,
@@ -3323,17 +3558,21 @@ export function saveJevResultStatements(
 			options.turn,
 		);
 	}
+
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise. A payment
 	// that pays a bill counts all the same (it is read as counted, spec §8.5), so it needs no exception here.
 	// One that is excluded and pays a bill only gets a category (`categoryOnly` above), never these flags.
 	const excludes = d.flags.transfer || d.flags.reimbursement ? 1 : 0;
 	const income = options.switches?.income === false ? false : d.flags.income;
 	const incomeOn = options.switches?.income !== false;
+
 	const incomeConfidence = incomeOn
 		? (d.flagConfidence?.income ?? (income ? 1 : null))
 		: null;
+
 	// The Maybe range's edges (src/ai/maybe.ts), so this save and the review queue read the same bounds.
 	const { above, below } = unsureBounds();
+
 	const guarded = withTurnGuard(
 		`UPDATE transactions SET
 				-- A credit asked only for its income (its category confidence is set, decision 79) keeps its stored category answer.
@@ -3367,6 +3606,7 @@ export function saveJevResultStatements(
 				AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
 		options.turn,
 	);
+
 	const update = db.prepare(guarded.sql).bind(
 		categoryWritten,
 		options.categoryAsked === false || d.categoryId === null ? null : "jev",
@@ -3406,6 +3646,7 @@ export function saveJevResultStatements(
 		...activeBinds,
 		...guarded.binds,
 	);
+
 	return answerStatements(db, update, id, options.log, options.turn);
 }
 
@@ -3421,8 +3662,10 @@ export async function saveJevResult(
 	options: JevAnswerSave = {},
 ): Promise<boolean> {
 	const { update, log } = saveJevResultStatements(db, id, d, options);
+
 	if (!log) return (await update.run()).meta.changes > 0;
 	const [saved] = await db.batch([update, log]);
+
 	return (saved?.meta.changes ?? 0) > 0;
 }
 
@@ -3435,6 +3678,7 @@ export async function payingCounts(
 	ids: number[],
 ): Promise<{ paying: number; bills: number; plans: number }> {
 	if (ids.length === 0) return { paying: 0, bills: 0, plans: 0 };
+
 	// One bind for the whole list (D1 takes 100 binds at most), so Select all can count past 100 (#321).
 	const row = await db
 		.prepare(
@@ -3443,6 +3687,7 @@ export async function payingCounts(
 		)
 		.bind(JSON.stringify(ids))
 		.first<{ paying: number; bills: number; plans: number }>();
+
 	return row ?? { paying: 0, bills: 0, plans: 0 };
 }
 
@@ -3471,12 +3716,14 @@ export async function excludedBreakdown(
 		)
 		.bind(month)
 		.first<ExcludedBreakdown>();
+
 	return row ?? { transfer: 0, reimbursement: 0, byPerson: 0 };
 }
 
 // Who categorized a transaction, read from where its category comes from: a linked refund's purchase.
 const countedBy = (column: string) =>
 	`CASE WHEN ${FOLLOWS_PURCHASE} THEN rp.${column} ELSE t.${column} END`;
+
 const COUNTED_BY = {
 	source: countedBy("category_source"),
 	confidence: countedBy("category_confidence"),
@@ -3499,6 +3746,7 @@ export async function bankDatedCount(
 		)
 		.bind(month)
 		.first<{ n: number }>();
+
 	return row?.n ?? 0;
 }
 
@@ -3555,6 +3803,7 @@ export async function monthCounts(
 			heldForReview: number;
 			linkedWaiting: number;
 		}>();
+
 	return (
 		row ?? {
 			counted: 0,

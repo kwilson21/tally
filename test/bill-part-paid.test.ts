@@ -55,12 +55,14 @@ describe("partial payments on one rent bill", () => {
 		)
 			.bind(id, date, cents)
 			.run();
+
 	const link = (transaction: number, period = MONTH) =>
 		env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','linked')",
 		)
 			.bind(RENT, period, transaction)
 			.run();
+
 	const rentRow = async (today: string) =>
 		(await loadBillRows(env.DB, today)).rows.find((row) => row.id === RENT);
 
@@ -175,9 +177,11 @@ describe("partial payments on one rent bill", () => {
 		await addPayment(9603, "2026-10-04", 60000);
 		await link(9601);
 		await link(9602);
+
 		const result = await env.DB.prepare(linkPaymentSql)
 			.bind(RENT, MONTH, 9603, "2026-10-01", 7)
 			.run();
+
 		expect(result.meta.changes).toBe(0);
 		expect(
 			await env.DB.prepare(
@@ -190,9 +194,11 @@ describe("partial payments on one rent bill", () => {
 		await addPayment(9601, "2026-10-01", 60000);
 		await addPayment(9602, "2026-10-02", 60000);
 		await link(9601);
+
 		const result = await env.DB.prepare(linkPaymentSql)
 			.bind(RENT, MONTH, 9602, "2026-10-01", 7)
 			.run();
+
 		expect(result.meta.changes).toBe(1);
 	});
 });

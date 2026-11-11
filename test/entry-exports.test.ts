@@ -11,6 +11,7 @@ describe("the Worker's entry module", () => {
 				(typeof value === "object" &&
 					value !== null &&
 					typeof (value as { fetch?: unknown }).fetch === "function");
+
 			expect(ok, `${name} must be a function or a handler`).toBe(true);
 		}
 	});

@@ -38,16 +38,21 @@ export async function startSorting(
 	params: SortParams,
 ): Promise<boolean> {
 	const rows = params.reask ? params.reask.ids.length : params.ids?.length;
+
 	if (rows === 0) return false;
+
 	// The night starts without a Jev key too: its names and suggestions don't need one (sorting then asks nothing).
 	if (!env.JEV_API_KEY && !params.night) return false;
+
 	try {
 		await env.SORT.create({ params });
+
 		return true;
 	} catch (error) {
 		console.error(
 			`sorting: couldn't start ${error instanceof Error ? error.name : "unknown"}`,
 		);
+
 		return false;
 	}
 }

@@ -31,11 +31,13 @@ const PATCHES = [
 export function patchHtmx(source) {
 	return PATCHES.reduce((text, { anchor, replacement }) => {
 		const found = text.split(anchor).length - 1;
+
 		if (found !== 1) {
 			throw new Error(
 				`patch-htmx: expected "${anchor}" once, found ${found}. htmx has moved this code, or fixed the bug (decision 112, #471): read its changelog. Fixed: delete this script and its test, and take the node scripts/patch-htmx.mjs command out of build:vendor (keep that script's html2canvas copy). Moved: update the anchors here.`,
 			);
 		}
+
 		return text.replace(anchor, () => replacement);
 	}, source);
 }

@@ -5,6 +5,7 @@
  */
 export function currentGoalSql(month: string): string {
 	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+
 	return `(SELECT NULLIF(amount_cents, 0) FROM savings_goal_amounts WHERE effective_month <= '${month}' ORDER BY effective_month DESC LIMIT 1)`;
 }
 

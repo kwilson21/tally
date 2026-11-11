@@ -16,9 +16,11 @@ export function forecastMonth(input: ForecastInput) {
 	const projectedCents = Math.round(
 		(input.everydayCents * (input.daysInMonth - input.day)) / input.day,
 	);
+
 	const endCents = input.spentCents + input.billsStillDueCents + projectedCents;
 	const differenceCents = input.totalBudgetCents - endCents;
 	const visible = input.day >= FORECAST_START_DAY;
+
 	return differenceCents >= 0
 		? {
 				endCents,

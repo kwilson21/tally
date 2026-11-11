@@ -38,17 +38,20 @@ describe("afterSync", () => {
 		env.DB.prepare(
 			"CREATE TRIGGER fail_rules BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'rules nope'); END",
 		).run();
+
 	// Makes the bill matcher's insert fail, standing in for any bill error.
 	const failBills = () =>
 		env.DB.prepare(
 			"CREATE TRIGGER fail_bills BEFORE INSERT ON bill_payments BEGIN SELECT RAISE(ABORT, 'bills nope'); END",
 		).run();
+
 	const linkedPayments = async () =>
 		(
 			await env.DB.prepare(
 				"SELECT transaction_id FROM bill_payments WHERE status = 'linked'",
 			).all<{ transaction_id: number }>()
 		).results;
+
 	const ruleSource = async () =>
 		(
 			await env.DB.prepare(
@@ -67,9 +70,11 @@ describe("afterSync", () => {
 	it("runs the rules, then matches bills", async () => {
 		await afterSync(env.DB);
 		expect(await ruleSource()).toBe("merchant_rule");
+
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE status = 'linked'",
 		).first<{ n: number }>();
+
 		expect(linked?.n).toBe(1);
 	});
 

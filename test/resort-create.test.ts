@@ -18,12 +18,14 @@ const PLAID_FOOD = "FOOD_AND_DRINK";
 const create = recordSorting();
 
 type Env = { JEV_API_KEY?: string };
+
 const mutableEnv = env as unknown as Env;
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path, {
 		headers: { Origin: BASE },
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -33,8 +35,10 @@ async function post(
 	htmx = true,
 ) {
 	const body = new URLSearchParams();
+
 	for (const [key, value] of Object.entries(fields))
 		for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
@@ -45,6 +49,7 @@ async function post(
 		},
 		body: body.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -68,10 +73,12 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
 let seq = 0;
+
 /** One purchase money out that waits for a category, with its Plaid category and Jev's guess. */
 async function addRow(
 	fields: {
@@ -86,6 +93,7 @@ async function addRow(
 	} = {},
 ): Promise<number> {
 	seq += 1;
+
 	const row = await db
 		.prepare(
 			`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, plaid_category,
@@ -105,6 +113,7 @@ async function addRow(
 			fields.source ?? null,
 		)
 		.first<{ id: number }>();
+
 	return Number(row?.id);
 }
 
@@ -125,21 +134,25 @@ const reaskOf = (call: number) => {
 	const input = create.mock.calls[call]?.[0] as
 		| { params: { reask?: { runId: string; ids: number[] } } }
 		| undefined;
+
 	return input?.params.reask;
 };
 
 /** Jev's category guess row, filed by a Maybe card, plus related waiting rows that share its Plaid category. */
 async function maybeFixture() {
 	const eating = await categoryId("Eating Out");
+
 	const filed = await addRow({
 		raw: LUPITA,
 		jevCategoryId: eating,
 		confidence: 0.5,
 	});
+
 	const related = [
 		await addRow({ raw: "BOOKSHOP 1", amount: 1500, jevCategoryId: eating }),
 		await addRow({ raw: "BOOKSHOP 2", amount: 1800, jevCategoryId: eating }),
 	];
+
 	return { filed, related, eating };
 }
 
@@ -165,11 +178,13 @@ afterEach(() => {
 describe("starting the re-check from a Maybe card's Create (decision 157)", () => {
 	it("starts one run over the related rows and draws the progress line on the page it lands on", async () => {
 		const { filed, related } = await maybeFixture();
+
 		const { res, html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		const reask = reaskOf(0);
@@ -193,31 +208,37 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 	it("does nothing without a Jev key: no run, no line, and the Create still files the purchase", async () => {
 		const { filed } = await maybeFixture();
 		delete mutableEnv.JEV_API_KEY;
+
 		const { res, html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(res.status).toBe(200);
 		expect(create).not.toHaveBeenCalled();
 		expect(await readRun(db)).toBeNull();
 		expect(html).not.toContain("/resort/progress");
 		expect(html).not.toContain('id="recheck"');
+
 		const made = await db
 			.prepare("SELECT category_id AS id FROM transactions WHERE id = ?")
 			.bind(filed)
 			.first<{ id: number }>();
+
 		expect(made?.id).not.toBeNull();
 	});
 
 	it("does nothing while the categories switch is off", async () => {
 		const { filed } = await maybeFixture();
 		await saveAiSwitches(db, { categories: false });
+
 		const { html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(create).not.toHaveBeenCalled();
 		expect(await readRun(db)).toBeNull();
 		expect(html).not.toContain("/resort/progress");
@@ -225,16 +246,19 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 
 	it("starts nothing when no related row waits, and draws no line", async () => {
 		const eating = await categoryId("Eating Out");
+
 		const filed = await addRow({
 			raw: LUPITA,
 			jevCategoryId: eating,
 			plaid: null,
 		});
+
 		const { res, html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(res.status).toBe(200);
 		expect(create).not.toHaveBeenCalled();
 		expect(await readRun(db)).toBeNull();
@@ -245,11 +269,13 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 	it("does not start for Add to an existing category, which the person chose (no AI)", async () => {
 		const { filed } = await maybeFixture();
 		const groceries = await categoryId("Groceries");
+
 		const { html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "else",
 			category: String(groceries),
 		});
+
 		expect(create).not.toHaveBeenCalled();
 		expect(await readRun(db)).toBeNull();
 		expect(html).not.toContain("/resort/progress");
@@ -281,18 +307,22 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 			new_name: "Books & audio",
 		});
 		const run = await readRun(db);
+
 		const late = await addRow({
 			raw: "BOOKSHOP 3",
 			amount: 1900,
 			jevCategoryId: eating,
 			plaid: null,
 		});
+
 		const second = await addRow({ raw: `${LUPITA} 2`, jevCategoryId: eating });
+
 		const { res } = await post("/settings/suggestions", {
 			id: `category-${second}`,
 			answer: "create",
 			new_name: "Gifts",
 		});
+
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(2);
 		expect(reaskOf(1)?.runId).toBe(run?.id);
@@ -312,12 +342,14 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 		});
 		const run = await readRun(db);
 		const again = await addRow({ raw: `${LUPITA} 3`, jevCategoryId: eating });
+
 		// Every related row is already in the run, so the second Create adds none.
 		const { res, html } = await post("/settings/suggestions", {
 			id: `category-${again}`,
 			answer: "create",
 			new_name: "Gifts",
 		});
+
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect((await readRun(db))?.id).toBe(run?.id);
@@ -329,11 +361,13 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 	it("a failed start never leaves the line stuck: the run finishes at once, with its own fresh instance key", async () => {
 		const { filed } = await maybeFixture();
 		create.mockRejectedValueOnce(new Error("no instance"));
+
 		const { html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(create).toHaveBeenCalledTimes(1);
 		const run = await readRun(db);
 		expect(run?.status).toBe("done");
@@ -414,11 +448,13 @@ describe("the progress poll (decision 159)", () => {
 		});
 		const old = await readRun(db);
 		await finishRun(db, { runId: old?.id ?? "", now: Date.now() });
+
 		// A newer run replaces resort_run.
 		const newer = await addRow({
 			raw: "NEWER ROW",
 			jevCategoryId: await categoryId("Eating Out"),
 		});
+
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
@@ -474,6 +510,7 @@ describe("the progress poll (decision 159)", () => {
 /** A running run of `total` rows, written as the run record holds it (no instance is started). */
 async function seedRun(total: number): Promise<string> {
 	const id = crypto.randomUUID();
+
 	const run = {
 		id,
 		total,
@@ -490,12 +527,14 @@ async function seedRun(total: number): Promise<string> {
 		startedAt: Date.now(),
 		toasted: false,
 	};
+
 	await db
 		.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('resort_run', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 		)
 		.bind(JSON.stringify(run))
 		.run();
+
 	return id;
 }
 
@@ -516,6 +555,7 @@ describe("the progress announcements (#821 owner feedback)", () => {
 		let held = 0; // the milestone the page holds (the poll's m)
 		let spoken = ""; // the text the hidden region holds
 		const spokenChanges: string[] = [];
+
 		for (let done = 0; done <= 14; done++) {
 			await setDone(done);
 			const { html } = await get(`/resort/progress?run=${runId}&m=${held}`);
@@ -523,10 +563,12 @@ describe("the progress announcements (#821 owner feedback)", () => {
 				`<span aria-hidden="true" class="tabular-nums">${done}</span>`,
 			);
 			const nextHeld = Number(/[?&](?:amp;)?m=(\d)/.exec(html)?.[1] ?? held);
+
 			const milestone =
 				/<span id="recheck-milestone" hx-swap-oob="innerHTML">([^<]*)<\/span>/.exec(
 					html,
 				);
+
 			if (milestone) {
 				spoken = milestone[1] ?? "";
 				spokenChanges.push(spoken);
@@ -534,8 +576,10 @@ describe("the progress announcements (#821 owner feedback)", () => {
 				// Nothing crossed: nothing is sent for the hidden region, so nothing is spoken.
 				expect(nextHeld).toBe(held);
 			}
+
 			held = nextHeld;
 		}
+
 		expect(spokenChanges).toEqual([
 			"4 of 14 done.",
 			"7 of 14 done.",
@@ -547,11 +591,13 @@ describe("the progress announcements (#821 owner feedback)", () => {
 
 	it("draws the hidden polite region beside the sentence, and the sentence's count is aria-hidden", async () => {
 		const { filed } = await maybeFixture();
+
 		const { html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(html).toContain(
 			'<span id="recheck-milestone" role="status" aria-live="polite" class="sr-only"></span>',
 		);
@@ -603,10 +649,12 @@ describe("the progress announcements (#821 owner feedback)", () => {
 		await setDone(14);
 		const reference = await get(`/resort/progress?run=${runId}&m=0`);
 		expect(spokenIn(reference.html)).toBe("14 of 14 done.");
+
 		for (const junk of ["abc", "-1", "99999", "1.5", "", "NaN", "4"]) {
 			const { html } = await get(`/resort/progress?run=${runId}&m=${junk}`);
 			expect(html).toBe(reference.html);
 		}
+
 		// The answer's own m is the quarter it holds, so the next poll sends a valid one and is silent.
 		const held = await get(`/resort/progress?run=${runId}&m=3`);
 		expect(spokenIn(held.html)).toBeNull();
@@ -632,20 +680,24 @@ describe("Undo (decision 160)", () => {
 			.run();
 		await finishRun(db, { runId: run?.id ?? "", now: Date.now() });
 		await get(`/resort/progress?run=${run?.id}`);
+
 		return { runId: run?.id ?? "", related, eating };
 	}
 
 	it("puts back only the rows the run moved, and says so", async () => {
 		const { runId, related } = await movedRun();
+
 		const { res, html } = await post("/resort/undo", {
 			token: runId,
 			back: "/settings/suggestions",
 		});
+
 		expect(res.status).toBe(200);
 		expect(html).toContain('id="suggestions-page"');
 		expect(trigger(res).toast?.message).toBe("Put 2 back.");
 		expect(trigger(res).toast?.undoDone).toBe(runId);
 		expect(trigger(res).announce).toBe("Put 2 back.");
+
 		for (const id of related) expect((await rowOf(id))?.categoryId).toBeNull();
 	});
 
@@ -657,10 +709,12 @@ describe("Undo (decision 160)", () => {
 			)
 			.bind(related[1])
 			.run();
+
 		const { res } = await post("/resort/undo", {
 			token: runId,
 			back: "/settings/suggestions",
 		});
+
 		expect(trigger(res).toast?.message).toBe(
 			"Put 1 back. 1 changed since, so it stayed.",
 		);
@@ -674,14 +728,17 @@ describe("Undo (decision 160)", () => {
 			)
 			.bind(`resort_moved_${runId}`)
 			.run();
+
 		const late = await post("/resort/undo", {
 			token: runId,
 			back: "/settings/suggestions",
 		});
+
 		expect(trigger(late.res).toast).toMatchObject({
 			message: "Too late to undo that.",
 			type: "error",
 		});
+
 		for (const id of related)
 			expect((await rowOf(id))?.categoryId).toBe(eating);
 	});
@@ -689,24 +746,29 @@ describe("Undo (decision 160)", () => {
 	it("a double Undo puts back once and changes nothing the second time", async () => {
 		const { runId } = await movedRun();
 		await post("/resort/undo", { token: runId, back: "/settings/suggestions" });
+
 		const again = await post("/resort/undo", {
 			token: runId,
 			back: "/settings/suggestions",
 		});
+
 		expect(trigger(again.res).toast?.message).toBe("Too late to undo that.");
 	});
 
 	it("draws the page with the skip state of its back address, as the browser's address has it (#842 review)", async () => {
 		const { runId } = await movedRun();
+
 		// A card the person skipped stays set aside after Undo, so its skip link is in the drawn page.
 		const other = await addRow({
 			raw: "OTHER SKIP ROW",
 			jevCategoryId: await categoryId("Eating Out"),
 		});
+
 		const skipped = await post("/resort/undo", {
 			token: runId,
 			back: `/settings/suggestions?skip=category-${other}`,
 		});
+
 		expect(skipped.res.status).toBe(200);
 		// The card's form posts to the page with the skip it was drawn with, so the skip carries into the drawn page.
 		expect(skipped.html).toContain(
@@ -717,28 +779,34 @@ describe("Undo (decision 160)", () => {
 
 	it("answers a back address that is not on this site with a redirect, not a page", async () => {
 		const { runId } = await movedRun();
+
 		const { res } = await post(
 			"/resort/undo",
 			{ token: runId, back: "//evil.example/settings/suggestions" },
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/suggestions");
 	});
 
 	it("draws the page named by back, and answers a page it does not know with a redirect", async () => {
 		const { runId } = await movedRun();
+
 		const plain = await post(
 			"/resort/undo",
 			{ token: runId, back: "/elsewhere" },
 			false,
 		);
+
 		expect(plain.res.status).toBe(303);
 		expect(plain.res.headers.get("location")).toBe("/settings/suggestions");
+
 		const drawn = await post("/resort/undo", {
 			token: runId,
 			back: "/elsewhere",
 		});
+
 		expect(drawn.res.status).toBe(200);
 		expect(drawn.html).toContain('id="suggestions-page"');
 	});
@@ -747,6 +815,7 @@ describe("Undo (decision 160)", () => {
 describe("the four Create paths", () => {
 	it("Settings' categories card Create starts a run for a new category", async () => {
 		const eating = await categoryId("Eating Out");
+
 		const suggestion = (
 			await db
 				.prepare(
@@ -754,6 +823,7 @@ describe("the four Create paths", () => {
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		const pets = [
 			await addRow({
 				raw: "CHEWY.COM 1",
@@ -770,15 +840,18 @@ describe("the four Create paths", () => {
 				jevCategoryId: eating,
 			}),
 		];
+
 		const related = await addRow({
 			raw: "BOOKSHOP 9",
 			amount: 1200,
 			jevCategoryId: eating,
 		});
+
 		const { res } = await post(`/settings/suggestions/${suggestion}/create`, {
 			ids: pets.map(String),
 			shown: pets.map(String),
 		});
+
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect(reaskOf(0)?.ids).toEqual([related]);
@@ -786,6 +859,7 @@ describe("the four Create paths", () => {
 
 	it("Organize's card Create starts a run for a new category", async () => {
 		const eating = await categoryId("Eating Out");
+
 		const suggestion = (
 			await db
 				.prepare(
@@ -793,6 +867,7 @@ describe("the four Create paths", () => {
 				)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		const pets = [
 			await addRow({
 				raw: "CHEWY.COM 1",
@@ -809,15 +884,18 @@ describe("the four Create paths", () => {
 				jevCategoryId: eating,
 			}),
 		];
+
 		const related = await addRow({
 			raw: "BOOKSHOP 9",
 			amount: 1200,
 			jevCategoryId: eating,
 		});
+
 		const filed = await post("/transactions/organize/suggestion", {
 			suggestion: String(suggestion),
 			shown: pets.map(String),
 		});
+
 		expect(filed.res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect(reaskOf(0)?.ids).toEqual([related]);
@@ -842,12 +920,14 @@ describe("a failing re-check never fails the Create (#842 review)", () => {
 		const prepare = db.prepare.bind(db);
 		vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
 			if (sql.includes(text)) throw new Error("forced failure");
+
 			return prepare(sql);
 		});
 	}
 
 	const maybeCreate = async () => {
 		const { filed } = await maybeFixture();
+
 		return post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
@@ -865,9 +945,11 @@ describe("a failing re-check never fails the Create (#842 review)", () => {
 		expect(html).not.toContain('id="recheck"');
 		expect(create).not.toHaveBeenCalled();
 		vi.restoreAllMocks();
+
 		const made = await db
 			.prepare("SELECT id FROM categories WHERE name = 'Books & audio'")
 			.first<{ id: number }>();
+
 		expect(made?.id).toBeDefined();
 	});
 
@@ -888,6 +970,7 @@ describe("a failing re-check never fails the Create (#842 review)", () => {
 describe("the re-check, round 2 of the #842 review", () => {
 	/** The closing toast's poll for a finished run, its page key in the address (or none), and the run's id. */
 	let shelves = 0;
+
 	async function closingPoll(key?: string) {
 		const { filed, related } = await maybeFixture();
 		// A new category each time, so every call's Create makes a run of its own.
@@ -908,6 +991,7 @@ describe("the re-check, round 2 of the #842 review", () => {
 		await finishRun(db, { runId: run?.id ?? "", now: Date.now() });
 		const query = key === undefined ? "" : `&p=${key}`;
 		const res = await get(`/resort/progress?run=${run?.id}${query}`);
+
 		return { ...res, runId: run?.id ?? "" };
 	}
 
@@ -933,11 +1017,13 @@ describe("the re-check, round 2 of the #842 review", () => {
 
 	it("keeps the running line's wrapper, its milestone region and sentence, whole while the run goes", async () => {
 		const { filed } = await maybeFixture();
+
 		const { html } = await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
 			new_name: "Books & audio",
 		});
+
 		expect(html).toContain('<div id="recheck" class="mt-4">');
 		expect(html).toContain('<p id="recheck-line"');
 		expect(html).toContain('<span id="recheck-milestone" role="status"');
@@ -946,6 +1032,7 @@ describe("the re-check, round 2 of the #842 review", () => {
 	it("a Create and next keeps its card's same-text peers out of the run, so the card still offers them", async () => {
 		const eating = await categoryId("Eating Out");
 		const { filed, related } = await maybeFixture();
+
 		const peer = await addRow({
 			raw: LUPITA,
 			amount: 2300,
@@ -953,6 +1040,7 @@ describe("the re-check, round 2 of the #842 review", () => {
 			confidence: 0.5,
 			plaid: null,
 		});
+
 		await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
@@ -1011,10 +1099,12 @@ describe("the re-check, round 2 of the #842 review", () => {
 			["organize", "#organize-page"],
 			["categories", "#categories"],
 		];
+
 		for (const [key, target] of pages) {
 			const { res } = await closingPoll(key);
 			expect(trigger(res).toast?.undoTarget).toBe(target);
 		}
+
 		const none = await closingPoll();
 		expect(trigger(none.res).toast?.undoTarget).toBeUndefined();
 		expect(trigger(none.res).toast?.undo).toBeDefined();
@@ -1024,16 +1114,20 @@ describe("the re-check, round 2 of the #842 review", () => {
 
 	it("the Undo answer for an Organize or a Settings categories toast draws that page, with its own element", async () => {
 		const organize = await closingPoll("organize");
+
 		const drawnOrganize = await post("/resort/undo", {
 			token: organize.runId,
 			back: "/transactions/organize",
 		});
+
 		expect(drawnOrganize.html).toContain('id="organize-page"');
 		const categories = await closingPoll("categories");
+
 		const drawnCategories = await post("/resort/undo", {
 			token: categories.runId,
 			back: "/settings/categories",
 		});
+
 		expect(drawnCategories.html).toContain('id="categories"');
 	});
 });

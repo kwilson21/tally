@@ -21,23 +21,30 @@ import {
 } from "./score";
 
 export type CompareEnv = { AI: Ai; JEV_API_KEY?: string };
+
 export type ModelId = "jev" | "clef" | "clef-flash";
+
 export type ListId = "demo" | "fifty";
+
 export type Slice = { models?: ModelId[]; lists?: ListId[] };
+
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 const MODELS: ModelId[] = ["jev", "clef", "clef-flash"];
 const LISTS: ListId[] = ["demo", "fifty"];
+
 const MODEL_NAMES: Record<ModelId, string> = {
 	jev: "Jev",
 	clef: "Clef",
 	"clef-flash": "Clef-flash",
 };
+
 /** Each Workers AI model's id; its selector in the body is the same as its key here. */
 const WORKERS_AI: Record<Exclude<ModelId, "jev">, string> = {
 	clef: "@cf/cloudflare/clef",
 	"clef-flash": "@cf/cloudflare/clef-flash",
 };
+
 /** The household's one person, as every household starts with (migrations/0030). */
 const OPTIONS = { details: true, people: [{ id: 1, name: "Everyone" }] };
 
@@ -53,11 +60,13 @@ export function viaWorkersAI(
 ): FetchLike {
 	return async (_url, init) => {
 		const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+
 		const answer = await ai.run(
 			modelId,
 			{ ...body, model: selector },
 			{ signal: init?.signal ?? undefined },
 		);
+
 		return Response.json(answer);
 	};
 }
@@ -82,15 +91,18 @@ const usageOf = (text: string): unknown => {
 function recording(fetchImpl: FetchLike, rec: Recorder): FetchLike {
 	return async (url, init) => {
 		let response: Response;
+
 		try {
 			response = await fetchImpl(url, init);
 		} catch (error) {
 			rec.error ??= error instanceof Error ? error.message : String(error);
 			throw error;
 		}
+
 		const text = await response.clone().text();
 		rec.body = text;
 		rec.usage ??= usageOf(text);
+
 		return response;
 	};
 }
@@ -106,15 +118,20 @@ function modelRun(
 	fetchImpl: FetchLike,
 ): ModelRun {
 	const rec: Recorder = {};
+
 	if (model === "jev") {
 		const key = env.JEV_API_KEY;
+
 		const asker: Asker | null = key
 			? (input, categories) =>
 					askJev(input, categories, key, recording(fetchImpl, rec), OPTIONS)
 			: null;
+
 		return { model, rec, asker };
 	}
+
 	const workersAi = viaWorkersAI(env.AI, WORKERS_AI[model], model);
+
 	return {
 		model,
 		rec,
@@ -131,16 +148,19 @@ async function rowsFor(
 ): Promise<Row[]> {
 	if (!run.asker) return cases.map(() => skippedRow());
 	const rows: Row[] = [];
+
 	for (const [index, kase] of cases.entries()) {
 		const started = Date.now();
 		const result = await run.asker(kase.input, list.categories);
 		const row = scoreCase(kase, result, list.categories, Date.now() - started);
+
 		if (row.outcome === "unreadable") run.rec.unreadable ??= run.rec.body;
 		console.log(
 			`compare-models ${run.model} ${list.id} case ${index + 1} ${row.outcome} ${row.ms}ms`,
 		);
 		rows.push(row);
 	}
+
 	return rows;
 }
 
@@ -156,13 +176,17 @@ export async function runComparison(
 ): Promise<string> {
 	const seed = buildSeed(today);
 	const cases = buildCases(seed);
+
 	const runs = (slice.models ?? MODELS).map((model) =>
 		modelRun(model, env, fetchImpl),
 	);
+
 	const lists: ReportList[] = [];
+
 	for (const id of slice.lists ?? LISTS) {
 		const categories =
 			id === "demo" ? demoCategories(seed) : fiftyCategories(seed);
+
 		const list: ReportList = {
 			id,
 			title:
@@ -172,26 +196,32 @@ export async function runComparison(
 			categories,
 			models: [],
 		};
+
 		for (const run of runs) {
 			list.models.push({
 				name: MODEL_NAMES[run.model],
 				rows: await rowsFor(run, list, cases),
 			});
 		}
+
 		lists.push(list);
 	}
+
 	const notes: ModelNote[] = runs.map(({ model, rec }) => ({
 		name: MODEL_NAMES[model],
 		error: rec.error,
 		unreadable: rec.unreadable,
 		usage: rec.usage,
 	}));
+
 	const jev = runs.find((run) => run.model === "jev");
+
 	const jevStatus = !jev
 		? "not in this run"
 		: jev.asker
 			? "ran"
 			: "skipped, no JEV_API_KEY";
+
 	return formatReport({ today, cases, jevStatus, lists, notes });
 }
 
@@ -203,23 +233,28 @@ const isOneOf = <T extends string>(
 export default {
 	async fetch(request: Request, env: CompareEnv): Promise<Response> {
 		const url = new URL(request.url);
+
 		if (url.pathname !== "/") return new Response("Not found", { status: 404 });
+
 		if (request.method !== "GET")
 			return new Response("Method not allowed", { status: 405 });
 		const modelParam = url.searchParams.get("model");
 		const listParam = url.searchParams.get("list");
+
 		const models =
 			modelParam === null
 				? MODELS
 				: isOneOf(MODELS, modelParam)
 					? [modelParam]
 					: null;
+
 		const lists =
 			listParam === null
 				? LISTS
 				: isOneOf(LISTS, listParam)
 					? [listParam]
 					: null;
+
 		// A typo gets a 400, not a full paid run.
 		if (!models || !lists) {
 			return new Response(
@@ -227,10 +262,12 @@ export default {
 				{ status: 400 },
 			);
 		}
+
 		const text = await runComparison(env, fetch, todayIn(DEFAULT_TIME_ZONE), {
 			models,
 			lists,
 		});
+
 		return new Response(text, {
 			headers: { "content-type": "text/markdown; charset=utf-8" },
 		});

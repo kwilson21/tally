@@ -27,6 +27,7 @@ const base: ListRow = {
 	categoryColor: null,
 	pending: true,
 };
+
 const groceries = {
 	categoryId: 1,
 	categoryName: "Groceries",
@@ -37,9 +38,11 @@ const groceries = {
 /** The pieces of text on a row's caption line, in order (the row's second line). */
 async function caption(row: ListRow) {
 	const html = await TransactionRow({ row }).toString();
+
 	const line = html.match(
 		/gap-2 leading-6">(.*?)<\/span><\/span><span class="shrink-0 text-lg tabular-nums">/s,
 	)?.[1];
+
 	return (line ?? "").split(/<[^>]+>/).filter(Boolean);
 }
 
@@ -49,9 +52,11 @@ describe("Pending on a row's caption line", () => {
 			"Groceries",
 			"· Pending",
 		]);
+
 		const html = await TransactionRow({
 			row: { ...base, ...groceries },
 		}).toString();
+
 		expect(html).toContain(
 			'<span class="shrink-0 text-muted">· Pending</span>',
 		);
@@ -138,7 +143,9 @@ describe("Pending on a row's caption line", () => {
 		const html = await TransactionRow({
 			row: { ...base, ...groceries },
 		}).toString();
+
 		expect(html.match(/gap-2 leading-6">/g)).toHaveLength(1);
+
 		for (const row of [
 			{ ...base, pending: false },
 			{ ...base, pending: undefined },
@@ -146,6 +153,7 @@ describe("Pending on a row's caption line", () => {
 		]) {
 			expect(await TransactionRow({ row }).toString()).not.toContain("Pending");
 		}
+
 		expect(await caption({ ...base, ...groceries, pending: false })).toEqual([
 			"Groceries",
 		]);
@@ -159,8 +167,10 @@ describe("a pending row in select mode", () => {
 			row,
 			today: "2026-10-05",
 		}).toString();
+
 		const id = html.match(/aria-labelledby="([^"]+)"/)?.[1];
 		const label = html.match(new RegExp(`id="${id}"[^>]*>(.*?)</span>`, "s"));
+
 		return (label?.[1] ?? "").replaceAll("&#39;", "'");
 	}
 
@@ -200,25 +210,31 @@ describe("PendingNote", () => {
 });
 
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 const words = (html: string) =>
 	html.replace(/<[^>]+>/g, " ").replaceAll("&#39;", "'");
 
 describe("pages for a pending transaction", () => {
 	const NOTE =
 		"Pending. The bank hasn't finished it, so its amount can still change.";
+
 	const PENDING = 9001;
 	const POSTED = 9002;
 	beforeEach(async () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		await resetDemo(env.DB, today);
+
 		const insert = (id: number, name: string, pending: number) =>
 			env.DB.prepare(
 				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, pending) SELECT ?, id, ?, 1100, ?, 1, ? FROM accounts LIMIT 1",
 			).bind(id, today, name, pending);
+
 		await env.DB.batch([
 			insert(PENDING, "PANTRY ONE", 1),
 			insert(POSTED, "PANTRY TWO", 0),
@@ -227,10 +243,12 @@ describe("pages for a pending transaction", () => {
 
 	it("lists it with Pending on its caption line, and only it", async () => {
 		const { html } = await get("/transactions");
+
 		const li = (id: number) =>
 			html.match(
 				new RegExp(`<li data-transaction="${id}">(.*?)</li>`, "s"),
 			)?.[1] ?? "";
+
 		expect(li(PENDING)).toContain("Pantry one");
 		expect(li(PENDING)).toContain("· Pending");
 		expect(li(POSTED)).toContain("Pantry two");
@@ -240,10 +258,12 @@ describe("pages for a pending transaction", () => {
 	it("lists it in select mode too, and the checkbox's name says it's pending", async () => {
 		const { html } = await get("/transactions?select=1");
 		expect(html).toContain("· Pending");
+
 		const label = (id: number) =>
 			html.match(
 				new RegExp(`id="select-${id}-name"[^>]*>(.*?)</span>`, "s"),
 			)?.[1] ?? "";
+
 		expect(words(label(PENDING)).replace(/\s+/g, " ")).toMatch(
 			/^Select Pantry one, \+?\$11\.00, .+, pending$/,
 		);
@@ -288,14 +308,17 @@ describe("pages for a pending transaction", () => {
 
 		it("shows its parent's Pending in the list and the panel, and drops it once the parent posts", async () => {
 			const list = (await get("/transactions")).html;
+
 			for (const id of [PARENT, ...PARTS]) {
 				expect(li(list, id)).toContain("Pending");
 			}
+
 			for (const id of PARTS) {
 				const text = words((await get(`/transactions/${id}`)).html).replace(
 					/\s+/g,
 					" ",
 				);
+
 				expect(text).toContain(NOTE);
 			}
 
@@ -303,9 +326,11 @@ describe("pages for a pending transaction", () => {
 				.bind(PARENT)
 				.run();
 			const posted = (await get("/transactions")).html;
+
 			for (const id of [PARENT, ...PARTS]) {
 				expect(li(posted, id)).not.toContain("Pending");
 			}
+
 			for (const id of PARTS) {
 				expect((await get(`/transactions/${id}`)).html).not.toContain(
 					"Pending. The bank",

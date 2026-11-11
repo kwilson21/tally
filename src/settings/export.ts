@@ -53,18 +53,21 @@ export const EXPORT_COLUMNS = {
 export function exportDollars(cents: number): string {
 	const sign = cents < 0 ? "-" : "";
 	const absolute = Math.abs(cents);
+
 	return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, "0")}`;
 }
 
 /** RFC 4180 permits bare fields, but commas, quotes and line breaks must be quoted. */
 export function csvField(value: unknown): string {
 	const text = value === null || value === undefined ? "" : String(value);
+
 	return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 /** Prevent spreadsheet programs from interpreting an exported text cell as a formula. */
 function csvText(value: string | null): string {
 	if (value === null) return "";
+
 	return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
@@ -97,6 +100,7 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 			ORDER BY t.date DESC, t.id DESC`,
 		)
 		.all<CsvRow>();
+
 	const rows: unknown[][] = [
 		[
 			"date",
@@ -125,6 +129,7 @@ export async function transactionsCsv(db: D1Database): Promise<string> {
 			csvText(row.account),
 		]),
 	];
+
 	return `${rows.map((row) => row.map(csvField).join(",")).join("\r\n")}\r\n`;
 }
 
@@ -139,6 +144,7 @@ export const OWN_STATEMENTS = {
 /** Build an allowlisted export in one batch, so every table comes from the same moment. Bank logins and document contents are never selected. */
 export async function tallyExport(db: D1Database) {
 	const tables = Object.entries(EXPORT_COLUMNS);
+
 	const results = await db.batch([
 		...tables.map(([table, columns]) =>
 			db.prepare(`SELECT ${columns} FROM ${table}`),
@@ -146,7 +152,9 @@ export async function tallyExport(db: D1Database) {
 		db.prepare(OWN_STATEMENTS.plaid_items),
 		db.prepare(OWN_STATEMENTS.documents),
 	]);
+
 	const [plaidItems, documents] = results.slice(tables.length);
+
 	return {
 		schema_version: 1,
 		exported_at: new Date().toISOString(),

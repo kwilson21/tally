@@ -12,6 +12,7 @@ const BASE = "http://tally.test";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -26,6 +27,7 @@ async function post(path: string, fields: Record<string, string>) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -44,6 +46,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -65,6 +68,7 @@ async function writtenAgo(seconds: number): Promise<number> {
 		)
 		.bind(`-${seconds} seconds`)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -93,10 +97,12 @@ describe("the Undo's remaining time", () => {
 	it("a Forget written 10.5 s ago is no longer undone: the server refuses the Undo", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
 		const id = await writtenAgo(10.5);
+
 		const undo = await post("/settings/learned/undo", {
 			token: String(id),
 			back: "/settings/learned",
 		});
+
 		expect(trigger(undo.res).toast).toMatchObject({
 			type: "error",
 			message: "Undo expired. The line stays forgotten.",
@@ -105,9 +111,11 @@ describe("the Undo's remaining time", () => {
 
 	it("a fresh Forget offers its Undo with about ten seconds, counted from the server", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const toast = trigger(
 			(await post("/settings/learned/forget", { text: "netflix.com" })).res,
 		).toast;
+
 		expect(toast?.undo).toMatch(/^\d+$/);
 		expect(toast?.undoExpiresInMs).toBeGreaterThanOrEqual(9000);
 		expect(toast?.undoExpiresInMs).toBeLessThanOrEqual(10000);
@@ -125,9 +133,11 @@ describe("the Undo's remaining time", () => {
 			)
 			.run();
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const toast = trigger(
 			(await post("/settings/learned/forget", { text: "netflix.com" })).res,
 		).toast;
+
 		// The second Forget writes a fresh time, so its Undo is about ten seconds, not the four the first had left.
 		expect(toast?.undoExpiresInMs).toBeGreaterThanOrEqual(9000);
 	});

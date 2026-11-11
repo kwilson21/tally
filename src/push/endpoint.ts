@@ -26,16 +26,20 @@ export const PUSH_SERVICE_EXACT_HOSTS = ["jmt17.google.com"] as const;
  */
 export function isPushServiceEndpoint(endpoint: string): boolean {
 	let url: URL;
+
 	try {
 		url = new URL(endpoint);
 	} catch {
 		return false;
 	}
+
 	// A URL's port is "" for the default port (443 for https), so a port written out as 443 is the default too.
 	if (url.protocol !== "https:" || url.port !== "") return false;
 	const host = url.hostname.toLowerCase();
+
 	if ((PUSH_SERVICE_EXACT_HOSTS as readonly string[]).includes(host))
 		return true;
+
 	return PUSH_SERVICE_HOSTS.some(
 		(service) => host === service || host.endsWith(`.${service}`),
 	);

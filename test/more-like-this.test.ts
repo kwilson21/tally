@@ -14,6 +14,7 @@ const AUDIBLE = "AUDIBLE*TE3E10I7 WA";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -23,8 +24,10 @@ async function post(
 	htmx = true,
 ) {
 	const body = new URLSearchParams();
+
 	for (const [key, value] of Object.entries(fields))
 		for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
@@ -35,6 +38,7 @@ async function post(
 		},
 		body: body.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -55,6 +59,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -93,6 +98,7 @@ async function tx(fields: {
 			fields.categorySource ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -165,11 +171,13 @@ describe("sameTextPeers: the rows that look like the filed one (pure)", () => {
 
 	it("gives the other rows of the filed one's group, in the order given, never the filed row", () => {
 		const filed = row(1, AUDIBLE);
+
 		const peers = sameTextPeers(filed, [
 			row(3, AUDIBLE),
 			row(4, "CHEWY.COM 1"),
 			row(5, AUDIBLE),
 		]);
+
 		expect(peers.map((r) => r.id)).toEqual([3, 5]);
 	});
 
@@ -242,11 +250,13 @@ describe("after Create and next", () => {
 		expect(without).not.toContain("like this");
 
 		const filed = await maybe("APPLE.COM/BILL", "iCloud");
+
 		const same = await tx({
 			raw: "APPLE.COM/BILL",
 			date: "2026-10-06",
 			note: "  ICLOUD ",
 		});
+
 		const { html } = await createBooks(filed);
 		expect(html).toContain("1 more looks like this");
 		expect(html).toMatch(
@@ -289,6 +299,7 @@ describe("after Create and next", () => {
 
 		const urls = [...urlsIn(html), ...urlsIn(page.html)];
 		expect(urls.length).toBeGreaterThan(0);
+
 		for (const url of urls) expect(url).not.toMatch(/audible/i);
 	});
 
@@ -462,32 +473,42 @@ function raceAfterFiledRead(
 			get(target, prop) {
 				if (prop !== "first") {
 					const value = Reflect.get(target, prop, target);
+
 					return typeof value === "function" ? value.bind(target) : value;
 				}
+
 				return async () => {
 					const row = await target.first();
 					await race();
+
 					return row;
 				};
 			},
 		});
+
 	return new Proxy(real, {
 		get(target, prop) {
 			if (prop === "prepare")
 				return (sql: string) => {
 					const stmt = target.prepare(sql);
+
 					if (!sql.includes("c.archived AS archived")) return stmt;
+
 					return new Proxy(stmt, {
 						get(s, p) {
 							if (p !== "bind") {
 								const value = Reflect.get(s, p, s);
+
 								return typeof value === "function" ? value.bind(s) : value;
 							}
+
 							return (...args: unknown[]) => bindOf(s.bind(...args));
 						},
 					});
 				};
+
 			const value = Reflect.get(target, prop, target);
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
@@ -497,12 +518,15 @@ describe("Add checks the filed purchase in the same write (Codex P2)", () => {
 	/** A filed purchase in Groceries, and one waiting peer with the same bank text. */
 	async function filedAndPeer() {
 		const groceries = await categoryId("Groceries");
+
 		const filed = await tx({
 			raw: AUDIBLE,
 			categoryId: groceries,
 			categorySource: "user",
 		});
+
 		const peer = await tx({ raw: AUDIBLE, date: "2026-10-05" });
+
 		return { groceries, filed, peer };
 	}
 
@@ -532,6 +556,7 @@ describe("Add checks the filed purchase in the same write (Codex P2)", () => {
 		const { groceries, filed, peer } = await filedAndPeer();
 		const pets = await tx({ raw: "CHEWY.COM 1", date: "2026-10-05" });
 		const eatingOut = await categoryId("Eating Out");
+
 		const raced = raceAfterFiledRead(db, () =>
 			db
 				.prepare("UPDATE transactions SET category_id = ? WHERE id = ?")
@@ -556,6 +581,7 @@ describe("Add checks the filed purchase in the same write (Codex P2)", () => {
 
 	it("moves nothing, and reports changed, when the filed purchase is deleted after its read", async () => {
 		const { groceries, filed, peer } = await filedAndPeer();
+
 		const raced = raceAfterFiledRead(db, () =>
 			db.prepare("DELETE FROM transactions WHERE id = ?").bind(filed).run(),
 		);
@@ -691,16 +717,19 @@ describe("after Save and next on an existing category (decision 165)", () => {
 	it("files the purchase in the existing category, makes none, and still offers the look-alikes", async () => {
 		const filed = await maybe(AUDIBLE);
 		const same = await tx({ raw: AUDIBLE, date: "2026-10-05" });
+
 		const categoriesBefore = (
 			await db
 				.prepare("SELECT COUNT(*) AS n FROM categories")
 				.first<{ n: number }>()
 		)?.n;
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: `category-${filed}`, answer: "create", new_name: "  groceries " },
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(trigger(res).toast?.message).toMatch(/^Added .+ to Groceries\.$/);
 		expect(

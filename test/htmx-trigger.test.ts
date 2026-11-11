@@ -16,6 +16,7 @@ describe("hxTrigger", () => {
 			toast: { message: "Mum’s budget is −$5.00", type: "success" },
 			announce: "Mum’s budget is −$5.00 a month.",
 		};
+
 		const header = hxTrigger(trigger);
 		expect(header).toMatch(ASCII);
 		expect(header).toContain("\\u2019");
@@ -51,16 +52,19 @@ const HELPED = /"HX-Trigger(?:-After-(?:Swap|Settle))?"\s*[,:]\s*hxTrigger\(/y;
 function unhelpedTriggerSites(files: Record<string, string>) {
 	let sites = 0;
 	const unhelped: string[] = [];
+
 	for (const [file, text] of Object.entries(files)) {
 		for (const match of text.matchAll(HEADER_NAME)) {
 			sites++;
 			const at = match.index ?? 0;
 			HELPED.lastIndex = at;
+
 			if (!HELPED.test(text)) {
 				unhelped.push(`${file}:${text.slice(0, at).split("\n").length}`);
 			}
 		}
 	}
+
 	return { sites, unhelped };
 }
 
@@ -77,6 +81,7 @@ describe("HX-Trigger headers in src", () => {
 			"src/after.tsx": 'c.header("HX-Trigger-After-Swap", JSON.stringify({}));',
 			"src/helped.tsx": 'c.header("HX-Trigger-After-Settle", hxTrigger({}));',
 		});
+
 		expect(sites).toBe(3);
 		expect(unhelped).toEqual(["src/example.tsx:1", "src/after.tsx:1"]);
 	});
@@ -100,6 +105,7 @@ describe("a route's HX-Trigger header", () => {
 				category: "1",
 			}),
 		});
+
 		expect(res.status).toBe(200);
 		const header = res.headers.get("HX-Trigger") ?? "";
 		expect(header).toMatch(ASCII);

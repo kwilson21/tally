@@ -37,6 +37,7 @@ describe("migration 0023", () => {
 				"INSERT INTO household_settings (key, value) VALUES ('time_zone', 'America/Chicago'), ('ai_income', 'off')",
 			),
 		]);
+
 		for (const query of migration?.queries ?? []) await db.prepare(query).run();
 		expect(await stored()).toEqual([
 			{ key: "ai_categories", value: "on" },
@@ -86,6 +87,7 @@ describe("readAiSwitches", () => {
 				throw new Error("D1_ERROR: network connection lost");
 			},
 		} as unknown as D1Database;
+
 		await expect(readAiSwitches(broken)).rejects.toThrow("network connection");
 	});
 });

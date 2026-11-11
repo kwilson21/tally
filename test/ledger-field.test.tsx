@@ -8,6 +8,7 @@ describe("LedgerField", () => {
 		const html = renderToString(
 			<LedgerField id="bill-name" name="name" label="Name" value="" />,
 		);
+
 		expect(html).toContain(
 			'<label for="bill-name" class="text-sm text-muted">Name</label>',
 		);
@@ -25,6 +26,7 @@ describe("LedgerField", () => {
 				value=""
 			/>,
 		);
+
 		expect(html).toContain('<label for="match" class="sr-only">');
 	});
 
@@ -39,6 +41,7 @@ describe("LedgerField", () => {
 				error="Enter a name for the bill."
 			/>,
 		);
+
 		expect(html).toContain('id="bill-name-hint"');
 		expect(html).toContain(
 			'<p id="bill-name-error" role="alert" class="text-sm text-over">Enter a name for the bill.</p>',
@@ -57,6 +60,7 @@ describe("LedgerField", () => {
 		const html = renderToString(
 			<LedgerField id="bill-name" name="name" label="Name" value="Water" />,
 		);
+
 		const input = html.match(/<input [^>]*>/)?.[0] ?? "";
 		expect(input).not.toContain("aria-invalid");
 		expect(input).not.toContain("aria-describedby");
@@ -77,6 +81,7 @@ describe("LedgerField", () => {
 				inputmode="decimal"
 			/>,
 		);
+
 		expect(html).toContain(
 			'<span aria-hidden="true" class="font-serif text-4xl text-muted">$</span>',
 		);
@@ -92,6 +97,7 @@ describe("LedgerField", () => {
 		const html = renderToString(
 			<LedgerField id="where" name="where" label="Where" value="" />,
 		);
+
 		expect(html).not.toContain("aria-hidden");
 		expect(html).toMatch(/<input [^>]*class="[^"]*min-h-11 text-lg/);
 	});
@@ -107,6 +113,7 @@ describe("LedgerField", () => {
 				required
 			/>,
 		);
+
 		const input = html.match(/<input [^>]*>/)?.[0] ?? "";
 		expect(input).toContain("autofocus");
 		expect(input).toContain("required");

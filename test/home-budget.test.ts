@@ -11,18 +11,24 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents, toCents } from "../src/money";
 
 const BASE = "http://tally.test";
+
 /** A transaction row's amount in integer cents: "$50.00" is money out, "+$15.00" money in (negative). */
 const rowCents = (row: string) => {
 	const text =
 		row.match(/shrink-0 text-lg tabular-nums">([^<]+)<\/span>/)?.[1]?.trim() ??
 		"";
+
 	const cents = toCents(text.replace(/^\+/, ""));
+
 	return text.startsWith("+") ? -cents : cents;
 };
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 async function post(path: string, fields: Record<string, string>, htmx = true) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
@@ -34,18 +40,22 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
+
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string };
 		announce?: string;
 	};
+
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
 		.replaceAll("&#39;", "'")
 		.replace(/\s+/g, " ");
+
 const THIS_MONTH = () => monthName(todayIn(DEFAULT_TIME_ZONE).slice(0, 7));
 
 beforeEach(async () => {
@@ -116,14 +126,18 @@ describe("Home's budget rows", () => {
 			"UPDATE categories SET archived = 1 WHERE id = 2",
 		).run();
 		const { html } = await get("/");
+
 		const rowWith = (text: string) =>
 			html.split("<li").find((part) => part.includes(text)) ?? "";
+
 		const arrow = rowWith('href="/budget/1"').match(
 			/<svg class="([^"]*)"[^>]*data-icon="chevron-right"/,
 		)?.[1];
+
 		const space = rowWith(">Eating Out<").match(
 			/<span aria-hidden="true" class="([^"]*)"><\/span>/,
 		)?.[1];
+
 		expect(arrow).toContain("text-muted group-hover/row:text-ink");
 		expect(space).toBe(
 			arrow?.replace(" text-muted group-hover/row:text-ink", " invisible"),
@@ -186,19 +200,25 @@ describe("GET /budget/:id", () => {
 				`<a[^>]*href="/transactions\\?category=1&amp;month=${month}&amp;show=spending"[^>]*>9 transactions`,
 			),
 		);
+
 		const { html: list } = await get(
 			`/transactions?month=${month}&category=1&show=spending`,
 		);
+
 		const rows = [
 			...list.matchAll(/<li data-transaction="(\d+)">([\s\S]*?)<\/li>/g),
 		];
+
 		expect(rows).toHaveLength(9);
+
 		const listedCents = rows.reduce((sum, row) => {
 			const text =
 				row[2]?.match(/shrink-0 text-lg tabular-nums">([^<]+)<\/span>/)?.[1] ??
 				"";
+
 			return sum + Math.round(Number(text.replace(/[$,]/g, "")) * 100);
 		}, 0);
+
 		expect(listedCents).toBe(counted.reduce((sum, cents) => sum + cents, 0));
 		expect(rows.map((row) => row[1])).toContain("918");
 		expect(rows.map((row) => row[1])).not.toContain("919");
@@ -237,6 +257,7 @@ describe("GET /budget/:id", () => {
 			),
 		]);
 		const { html: sheet } = await get("/budget/1");
+
 		const linked = Number(
 			sheet.match(
 				new RegExp(
@@ -244,15 +265,18 @@ describe("GET /budget/:id", () => {
 				),
 			)?.[1],
 		);
+
 		expect(linked).toBe(3);
 		expect(textOf(sheet)).toContain("$65.00 spent so far");
 
 		const { html: list } = await get(
 			`/transactions?month=${month}&category=1&show=spending`,
 		);
+
 		const rows = [
 			...list.matchAll(/<li data-transaction="(\d+)">([\s\S]*?)<\/li>/g),
 		];
+
 		expect(rows).toHaveLength(linked);
 		expect(rows.map((row) => row[1]).sort()).toEqual(["940", "941", "942"]);
 		expect(rows.reduce((sum, row) => sum + rowCents(row[2] ?? ""), 0)).toBe(
@@ -313,6 +337,7 @@ describe("GET /budget/:id", () => {
 		);
 		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="950.00"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
+
 		for (const [delta, label] of <[string, string][]>[
 			["-100", `Decrease Budget from ${THIS_MONTH()} on by $1`],
 			["-1", `Decrease Budget from ${THIS_MONTH()} on by 1 cent`],
@@ -325,11 +350,13 @@ describe("GET /budget/:id", () => {
 				),
 			);
 		}
+
 		const last = await lastMonthSpentCents(
 			env.DB,
 			1,
 			todayIn(DEFAULT_TIME_ZONE).slice(0, 7),
 		);
+
 		expect(html).toMatch(new RegExp(`data-set="${last}"`));
 		expect(textOf(html)).toContain(`Last month: ${formatCents(last)}`);
 		// $950 has no cents, so there's nothing to round up yet.

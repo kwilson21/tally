@@ -32,6 +32,7 @@ export function MaybeQuestion({ children }: { children: Child }) {
 /** "Chewy, Petsmart and Banfield", as the question and the line read it. */
 export function joinStores(labels: string[]): string {
 	if (labels.length <= 1) return labels[0] ?? "";
+
 	return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 }
 
@@ -165,12 +166,14 @@ export function AskFirst({
 	focus?: boolean;
 }) {
 	const labels = joinStores(stores.map((store) => store.label));
+
 	const subject =
 		kind === "income"
 			? "income"
 			: kind === "transfer"
 				? "a transfer"
 				: (name ?? "a new category");
+
 	return (
 		<div class="flex flex-col gap-3">
 			{check && (
@@ -418,6 +421,7 @@ function NameHeading({
 	focus: boolean;
 }) {
 	const { count, bankText } = item.review;
+
 	return (
 		<div>
 			<p class="text-sm text-muted">The bank says</p>
@@ -528,6 +532,7 @@ export function NewCategoryRow({
 	error?: string;
 }) {
 	const existing = activeNamed(name, categories);
+
 	return (
 		<details
 			class="group rounded-control border border-dashed border-ink px-4"

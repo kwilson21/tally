@@ -24,8 +24,10 @@ export function next(
 	context?: Record<string, unknown>,
 ): string | null {
 	const current = restoreState(machine, state, context);
+
 	if (!current.can({ type: event })) return null;
 	const [after] = transition(machine, current, { type: event });
+
 	return String(after.value);
 }
 
@@ -40,8 +42,10 @@ function restoreState(
 	if (!isKnownState(machine, state)) {
 		throw new Error(`Unknown state "${state}" for machine "${machine.id}"`);
 	}
+
 	if (context) return machine.resolveState({ value: state, context });
 	const [initial] = initialTransition(machine);
+
 	return machine.resolveState({ value: state, context: initial.context });
 }
 

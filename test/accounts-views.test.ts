@@ -19,6 +19,7 @@ describe("AccountRow", () => {
 				isLiability: false,
 			}),
 		);
+
 		expect(html).toContain("Checking");
 		expect(html).toContain("4521");
 		expect(html).toContain("$3,904.12");
@@ -35,6 +36,7 @@ describe("AccountRow", () => {
 				isLiability: true,
 			}),
 		);
+
 		expect(html).toContain("-$2,122.40");
 		expect(html).toContain('data-icon="card"');
 	});
@@ -49,6 +51,7 @@ describe("AccountRow", () => {
 				isLiability: false,
 			}),
 		);
+
 		expect(html).toContain('<span class="sr-only">ending in </span>');
 		expect(html).toMatch(/<span aria-hidden="true">••<\/span>5678/);
 	});
@@ -63,6 +66,7 @@ describe("AccountRow", () => {
 				isLiability: true,
 			}),
 		);
+
 		expect(html).not.toContain("ending in");
 	});
 });
@@ -83,6 +87,7 @@ describe("BankGroup", () => {
 		const html = await render(
 			BankGroup({ name: "First Harbor Bank", accounts: rows }),
 		);
+
 		expect(html).toMatch(/<h2[^>]*>First Harbor Bank<\/h2>/);
 		expect(html.indexOf("First Harbor Bank")).toBeLessThan(
 			html.indexOf("Checking"),
@@ -99,6 +104,7 @@ describe("BankGroup", () => {
 				now: new Date("2026-09-28T12:00:00Z"),
 			}),
 		);
+
 		expect(html).toContain("Synced 12 minutes ago");
 		expect(html.indexOf("Synced 12 minutes ago")).toBeLessThan(
 			html.indexOf("Checking"),
@@ -109,13 +115,16 @@ describe("BankGroup", () => {
 		const never = await render(
 			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: null }),
 		);
+
 		// A bank linked before sync times were kept has none yet; it isn't "never synced".
 		expect(never).not.toMatch(/synced yet|Synced/);
 		const omitted = await render(BankGroup({ name: "New Bank", accounts: [] }));
 		expect(omitted).not.toMatch(/synced yet|Synced/);
+
 		const unreadable = await render(
 			BankGroup({ name: "New Bank", accounts: [], lastSyncedAt: "garbage" }),
 		);
+
 		expect(unreadable).not.toMatch(/synced yet|Synced|Invalid/);
 	});
 
@@ -129,6 +138,7 @@ describe("BankGroup", () => {
 				now: new Date("2026-09-28T12:00:00Z"),
 			}),
 		);
+
 		expect(html).toContain("Disconnected");
 		expect(html).not.toMatch(/Synced/);
 	});
@@ -147,6 +157,7 @@ describe("BankGroup", () => {
 				needsAttention: true,
 			}),
 		);
+
 		expect(html).toContain("Needs attention: sign in again");
 		expect(html).toContain('data-icon="alert"');
 		expect(html).toMatch(/<button[^>]*type="button"[^>]*>/);
@@ -156,6 +167,7 @@ describe("BankGroup", () => {
 });
 
 const TODAY = "2026-10-05";
+
 const rising = netWorthView(
 	[
 		{ date: "2026-05-01", cents: 1200000 },
@@ -164,6 +176,7 @@ const rising = netWorthView(
 	],
 	TODAY,
 );
+
 const firstDay = netWorthView([{ date: TODAY, cents: 1560000 }], TODAY);
 const noDays = netWorthView([], TODAY);
 
@@ -172,6 +185,7 @@ describe("AccountsTop", () => {
 		const html = await render(
 			AccountsTop({ netWorthCents: 1438200, history: rising }),
 		);
+
 		expect(html).toMatch(/<h1[^>]*>Accounts<\/h1>/);
 		expect(html.indexOf("Net worth")).toBeLessThan(html.indexOf("$14,382"));
 		expect(html).not.toContain("$14,382.00");
@@ -181,6 +195,7 @@ describe("AccountsTop", () => {
 		const html = await render(
 			AccountsTop({ netWorthCents: -50000, history: noDays }),
 		);
+
 		expect(html).toContain("-$500");
 	});
 
@@ -188,6 +203,7 @@ describe("AccountsTop", () => {
 		const html = await render(
 			AccountsTop({ netWorthCents: 1560000, history: rising }),
 		);
+
 		expect(html.indexOf("$15,600")).toBeLessThan(
 			html.indexOf("Up $3,600 since May."),
 		);
@@ -276,9 +292,11 @@ describe("BankGroup, Manage", () => {
 				manageHref: "/accounts/1/disconnect",
 			}),
 		);
+
 		const details = html.match(
 			/<details[^>]*>\s*<summary[^>]*>[\s\S]*?<\/summary>/,
 		);
+
 		expect(details?.[0]).toMatch(/<details class="group /);
 		expect(details?.[0]).toContain("group-open:rotate-90");
 		expect(details?.[0]).toContain('data-icon="chevron-right"');
@@ -300,6 +318,7 @@ describe("BankGroup, disconnected", () => {
 				fixAttrs: { "data-fix-connection": "", "data-item-id": "1" },
 			}),
 		);
+
 		expect(html).toContain("Disconnected");
 		expect(html).not.toContain("Needs attention");
 		expect(html).not.toContain("Fix connection");

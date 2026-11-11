@@ -252,6 +252,7 @@ const brickSheet = (
 
 const NOTHING_SENT =
 	"Feedback is off in the demo. Sign in to your Tally to send it.";
+
 const FEEDBACK_VALUES = {
 	type: "Idea",
 	feeling: "Okay",
@@ -365,6 +366,7 @@ function AddCash({ p, corners }: { p: string; corners?: string }) {
 
 const GROCERIES_ROW = OCTOBER[0] as (typeof OCTOBER)[number];
 const LAST_MONTH_CENTS = SEPTEMBER[0]?.spentCents ?? 0;
+
 /**
  * The 3-month average as drawn: July $662.00, August $652.00, September $636.00 make $650.00. It is
  * a picture, not a sum: #250 builds the average.

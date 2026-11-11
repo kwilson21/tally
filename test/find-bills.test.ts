@@ -36,6 +36,7 @@ describe("finding bills", () => {
 		expect(
 			findBillSuggestions([charge("2026-08-01"), charge("2026-08-26", 900)]),
 		).toHaveLength(1);
+
 		for (const rows of [
 			[charge("2026-08-01")],
 			[charge("2026-08-01"), charge("2026-08-25")],
@@ -51,6 +52,7 @@ describe("finding bills", () => {
 			{ ...charge("2026-08-01", 1050), categoryId: 3 },
 			{ ...charge("2026-09-01", 1075), categoryId: 2 },
 		]);
+
 		expect(found[0]).toMatchObject({
 			amountCents: 1075,
 			dueDay: 1,
@@ -85,6 +87,7 @@ describe("finding bills", () => {
 			bankText: "BLUE BOTTLE COFFEE",
 			displayName: null,
 		};
+
 		expect(
 			findBillSuggestions([bank, { ...bank, date: "2026-09-01" }]),
 		).toMatchObject([
@@ -107,6 +110,7 @@ describe("finding bills", () => {
 			bankText,
 			displayName: null,
 		});
+
 		expect(
 			findBillSuggestions([
 				named("Local Bakery", "2026-08-01", "SQ *LOCAL BAKERY 4432"),
@@ -402,9 +406,11 @@ describe("finding bills", () => {
 	it("never suggests a split part of a purchase left out as a transfer", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("SPLIT MOVE");
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT MOVE' ORDER BY date DESC LIMIT 1",
 		).first<{ id: number; account_id: number; date: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET is_split=1, flag_transfer=1, excluded=1, excluded_source='jev' WHERE id=?",
@@ -421,9 +427,11 @@ describe("finding bills", () => {
 	it("suggests a split part of a transfer a person brought back", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("SPLIT BACK");
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT BACK' ORDER BY date DESC LIMIT 1",
 		).first<{ id: number; account_id: number; date: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET is_split=1, flag_transfer=1, excluded=0, excluded_source='user' WHERE id=?",
@@ -445,9 +453,11 @@ describe("finding bills", () => {
 		)
 			.bind("SPLIT LOAN")
 			.run();
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT LOAN' ORDER BY date DESC LIMIT 1",
 		).first<{ id: number; account_id: number; date: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(
 				parent?.id,
@@ -469,9 +479,11 @@ describe("finding bills", () => {
 		)
 			.bind("SPLIT CARD")
 			.run();
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT CARD' ORDER BY date DESC LIMIT 1",
 		).first<{ id: number; account_id: number; date: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(
 				parent?.id,
@@ -515,6 +527,7 @@ describe("finding bills", () => {
 	it("dismisses a merchant whose name has a percent sign", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("100% PURE");
+
 		const response = await exports.default.fetch(
 			"http://tally.test/bills/find/100%25%20PURE/dismiss",
 			{
@@ -522,6 +535,7 @@ describe("finding bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
+
 		expect(response.status).toBe(200);
 		expect(
 			await env.DB.prepare("SELECT not_a_bill FROM merchants WHERE raw_name=?")
@@ -532,10 +546,12 @@ describe("finding bills", () => {
 
 	it("saves nothing when the name isn't a current suggestion", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		const response = await exports.default.fetch(
 			"http://tally.test/bills/find/NOT%20LISTED/dismiss",
 			{ method: "POST", headers: { Origin: "http://tally.test" } },
 		);
+
 		expect(response.status).toBe(404);
 		expect(
 			await env.DB.prepare(
@@ -557,14 +573,17 @@ describe("finding bills", () => {
 	it("counts a split part under its purchase's merchant", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("SPLIT GYM");
+
 		const { results } = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT GYM' ORDER BY date DESC LIMIT 1",
 		).all<{ id: number; account_id: number; date: string }>();
+
 		const parent = results[0] as {
 			id: number;
 			account_id: number;
 			date: string;
 		};
+
 		await env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(
 				parent.id,
@@ -608,9 +627,11 @@ describe("finding bills", () => {
 	it("names an unnamed merchant by its tidied text in the headline and the Add form, with the bank's text on the muted line", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await insertCandidate("SHOP BANK 4411", 0, false);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
+
 		expect(html).toContain("<span>Shop bank</span>");
 		expect(html).toContain("name=Shop+bank&amp;amount=");
 		expect(html).toContain("SHOP BANK 4411 ·");
@@ -628,9 +649,11 @@ describe("finding bills", () => {
 				displayName: "Local bakery",
 			}),
 		);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
+
 		expect(html).toContain("<span>Local bakery</span>");
 		expect(html).toContain("name=Local+bakery&amp;amount=");
 		expect(html).toContain("merchant_raw_name=Local+Bakery");
@@ -641,15 +664,18 @@ describe("finding bills", () => {
 
 	it("prefills every Add value", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		// The seeded charge dates follow today, so the due day is its latest charge's day.
 		const latest = await env.DB.prepare(
 			"SELECT MAX(date) AS date FROM transactions WHERE raw_name='CITY GYM MEMBERSHIP' AND date<=?",
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.first<string>("date");
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
+
 		expect(html).toContain(
 			`/bills/new?name=City+Gym&amp;amount=42.50&amp;due_day=${Number(latest?.slice(8))}&amp;frequency=monthly&amp;category_id=5&amp;merchant_raw_name=CITY+GYM+MEMBERSHIP`,
 		);
@@ -657,9 +683,11 @@ describe("finding bills", () => {
 
 	it("names the possible bill in its Add link, so the Add sheet closes back to this finding", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
+
 		expect(html).toContain(
 			"merchant_raw_name=CITY+GYM+MEMBERSHIP&amp;finding=CITY+GYM+MEMBERSHIP",
 		);
@@ -667,9 +695,11 @@ describe("finding bills", () => {
 
 	it("remembers Not a bill and removes the row with feedback", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		const raw = (
 			await loadBillSuggestions(env.DB, todayIn(DEFAULT_TIME_ZONE))
 		)[0]?.rawName;
+
 		const response = await exports.default.fetch(
 			`http://tally.test/bills/find/${encodeURIComponent(raw ?? "")}/dismiss`,
 			{
@@ -677,6 +707,7 @@ describe("finding bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
+
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Marked as not a bill", type: "success" },
 			announce: "Suggestion removed",
@@ -693,6 +724,7 @@ describe("finding bills", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET not_a_bill=1 WHERE raw_name <> 'CITY GYM MEMBERSHIP'",
 		).run();
+
 		const response = await exports.default.fetch(
 			"http://tally.test/bills/find/CITY%20GYM%20MEMBERSHIP/dismiss",
 			{
@@ -700,6 +732,7 @@ describe("finding bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
+
 		expect(await response.text()).toContain("No possible bills to review.");
 	});
 });
@@ -770,6 +803,7 @@ async function linkCharge(
 	)
 		.bind(rawName, daysAgo(days))
 		.first<number>("id");
+
 	await env.DB.prepare(
 		"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,?,'linked')",
 	)

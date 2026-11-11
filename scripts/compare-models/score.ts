@@ -35,20 +35,24 @@ export function buildCases(seed: Seed): Case[] {
 	const cash = new Set(
 		seed.accounts.filter((a) => a.type === "cash").map((a) => a.id),
 	);
+
 	const cases = new Map<
 		string,
 		{ first: SeedTransaction; rightCategoryId: number | null }
 	>();
+
 	for (const t of seed.transactions) {
 		if (t.parentId != null || t.isSplit || cash.has(t.accountId)) continue;
 		const key = `${t.rawName}\n${directionOf(t.amountCents)}`;
 		const seen = cases.get(key);
+
 		if (!seen) {
 			cases.set(key, { first: t, rightCategoryId: t.categoryId });
 		} else if (seen.rightCategoryId === null) {
 			seen.rightCategoryId = t.categoryId;
 		}
 	}
+
 	return [...cases.values()].map(({ first, rightCategoryId }) => ({
 		rawName: first.rawName,
 		direction: directionOf(first.amountCents),
@@ -166,12 +170,15 @@ export const skippedRow = (): Row => ({
 
 const failedOutcome = (status: number | null): string => {
 	if (status === null) return "failed: no response";
+
 	if (status >= 200 && status < 300) return "unreadable";
+
 	return `failed: HTTP ${status}`;
 };
 
 const flagOutcome = (set: boolean, truth: boolean): FlagOutcome => {
 	if (set) return truth ? "hit" : "false alarm";
+
 	return truth ? "missed" : "quiet";
 };
 
@@ -188,23 +195,29 @@ export function scoreCase(
 	if (!result.ok) {
 		return { outcome: failedOutcome(result.status), ms, answer: null };
 	}
+
 	const { answer } = result;
+
 	const decision = decide(
 		answer,
 		categories.map((name, i) => ({ id: i + 1, name })),
 		JEV_THRESHOLD,
 	);
+
 	const appliedName =
 		decision.categoryId === null
 			? null
 			: (categories[decision.categoryId - 1] ?? null);
+
 	const applied = appliedName !== null;
 	const right = kase.rightCategory;
 	const left = decision.noneFit ? "left: none fit" : "left: unsure";
 	let outcome: string;
+
 	if (right === null) outcome = applied ? "applied" : left;
 	else if (!applied) outcome = left;
 	else outcome = appliedName === right ? "right" : "wrong";
+
 	return {
 		outcome,
 		ms,
@@ -246,20 +259,26 @@ export type Summary = {
 function median(values: number[]): number {
 	const sorted = [...values].sort((a, b) => a - b);
 	const half = Math.floor(sorted.length / 2);
+
 	if (sorted.length % 2 === 1) return sorted[half] ?? 0;
+
 	return ((sorted[half - 1] ?? 0) + (sorted[half] ?? 0)) / 2;
 }
 
 /** One model's rows for one list, counted. Skipped rows make no call, so their time is left out. */
 export function summarize(rows: Row[]): Summary {
 	const answered = rows.flatMap((r) => (r.answer ? [r.answer] : []));
+
 	const count = (outcome: string) =>
 		rows.filter((r) => r.outcome === outcome).length;
+
 	const flagOutcomes = answered.flatMap((a) => Object.values(a.flags));
 	const confidences = answered.map((a) => a.confidence);
+
 	const times = rows
 		.filter((r) => r.outcome !== SKIPPED_OUTCOME)
 		.map((r) => r.ms);
+
 	return {
 		worked: answered.length,
 		total: rows.length,

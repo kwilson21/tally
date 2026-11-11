@@ -14,17 +14,21 @@ import { sameOrigin } from "../src/security";
 const PERSON = "person@example.com";
 const ORIGIN = "http://localhost";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
+
 // RFC 8292's VAPID pair from Appendix A: a valid P-256 pair, so the route's key check passes.
 const AS_PUBLIC =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
 const family = { ...env, DEMO: "false" } as unknown as Env;
+
 const pushing = {
 	...family,
 	VAPID_PUBLIC_KEY: AS_PUBLIC,
 	VAPID_PRIVATE_KEY: AS_PRIVATE,
 } as unknown as Env;
+
 const demo = {
 	...env,
 	DEMO: "true",
@@ -36,15 +40,19 @@ const CONTROL = 'data-notify="true"';
 const PUSH_MODULE = 'src="/js/push.js"';
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 router.use("*", sameOrigin);
+
 router.use("*", async (c, next) => {
 	c.set("actor", PERSON);
 	await next();
 });
+
 router.route("/", home);
 
 const page = async (bindings: Env) =>
 	(await setupRoute.request("/setup", {}, bindings)).text();
+
 const homePage = async (bindings: Env, path = "/") =>
 	(await home.request(path, {}, bindings)).text();
 
@@ -124,10 +132,12 @@ describe("setup's reading screen: the control and its script", () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
 		const previous = new Date(`${TODAY.slice(0, 7)}-01T00:00:00Z`);
 		previous.setUTCMonth(previous.getUTCMonth() - 1);
+
 		const html = await homePage(
 			pushing,
 			`/?month=${previous.toISOString().slice(0, 7)}`,
 		);
+
 		expect(html).not.toContain("data-notify");
 		expect(html).not.toContain(PUSH_MODULE);
 		await writeRecord({
@@ -152,12 +162,14 @@ describe("setup's reading screen: the control and its script", () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
+
 		const html = await page({
 			...pushing,
 			PLAID_CLIENT_ID: "client",
 			PLAID_SECRET: "secret",
 			TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 		} as unknown as Env);
+
 		expect(html).toContain('src="/js/plaid-link.js"');
 		expect(html).toContain(PUSH_MODULE);
 	});

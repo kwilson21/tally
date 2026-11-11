@@ -198,6 +198,7 @@ const income = async () =>
 
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
+
 	for (const row of rows) await insert(row);
 });
 

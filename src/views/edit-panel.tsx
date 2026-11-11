@@ -52,13 +52,16 @@ export type Category = {
 // A payment that pays a bill or a planned expense counts whatever its exclusion (spec §8.5, decision 82). These
 // sentences are the panel's top lines and the Exclude switch's line, so their words can't drift apart.
 const PAYS_BILL_COUNTS = "It pays a bill, so it counts in the budget.";
+
 const PAYS_PLAN_COUNTS =
 	"It pays a planned expense, so it counts in the budget.";
 
 /** The Exclude switch's muted line: the sentence that says a bill or planned payment counts, else the plain one. */
 function excludeHint(tx: TransactionDetail) {
 	if (tx.paysBill) return PAYS_BILL_COUNTS;
+
 	if (tx.paysPlan) return PAYS_PLAN_COUNTS;
+
 	return "It won't count in Spent or any budget.";
 }
 
@@ -154,6 +157,7 @@ export function linkedPurchases(
 	refunds: RefundPurchase[],
 ) {
 	const linked = refunds.find((p) => p.id === values.refundOfId && !p.excluded);
+
 	return {
 		linked,
 		locked: linked && followsPurchaseAfterSave(tx, values) ? linked : undefined,
@@ -168,6 +172,7 @@ export function countsWithPurchase(
 ) {
 	const category = categories.find((cat) => cat.id === purchase.categoryId);
 	const day = shortDay(purchase.date, date);
+
 	return category
 		? `Counts in ${category.name} with the ${day} purchase.`
 		: `Counts with the ${day} purchase.`;
@@ -206,6 +211,7 @@ export function CategoryChoice({
 }) {
 	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
 	const mixed = mixedCategories(tx);
+
 	// Tally's guess waits unsure: its line sits under the legend, and when it names a category its dashed chip is the
 	// grid's first cell.
 	const unsureGuess =
@@ -216,7 +222,9 @@ export function CategoryChoice({
 		Boolean(tx.suggestedCategoryName) &&
 		tx.categoryConfidence !== null &&
 		isUnsure(tx.categoryConfidence, "category");
+
 	const guessChip = unsureGuess && tx.suggestedCategoryId !== null;
+
 	// The saved category once it's archived: the active list doesn't hold it, so its row still folds and names it.
 	// Only while the posted choice is that saved category, so a category error's null never folds a row.
 	const archivedSaved =
@@ -232,25 +240,32 @@ export function CategoryChoice({
 					color: tx.categoryColor,
 				}
 			: undefined;
+
 	const chosen =
 		categories.find((cat) => cat.id === values.categoryId) ?? archivedSaved;
+
 	const needsCategory = tx.categoryId === null || guessChip;
+
 	// Folded once it has one (or New category is chosen, which the row says).
 	const folded =
 		!purchase && !needsCategory && (chosen !== undefined || values.newCategory);
+
 	// Opens by itself for New category or a category error, so an error is never inside a closed row (a saved category
 	// archived since the panel opened still folds the row).
 	const openFolded =
 		values.newCategory === true || errors.category !== undefined;
+
 	// The line says how the saved category was settled. A redraw after a refused save with another choice posted says
 	// nothing about the saved one, so the line goes unless the posted choice is the saved category or Tally's guess.
 	const savedChoice =
 		!values.newCategory &&
 		(values.categoryId === tx.categoryId ||
 			(guessChip && values.categoryId === tx.suggestedCategoryId));
+
 	const source = savedChoice
 		? categorySource(tx, unsureGuess, purchase !== undefined)
 		: undefined;
+
 	// A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts.
 	const mixedLine = !purchase && mixed && (
 		<MixedTripLine
@@ -259,6 +274,7 @@ export function CategoryChoice({
 			href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
 		/>
 	);
+
 	const choiceValue: Child = values.newCategory ? (
 		<span class="text-accent">New category</span>
 	) : (
@@ -269,6 +285,7 @@ export function CategoryChoice({
 			</>
 		)
 	);
+
 	const choices = (
 		<>
 			<CategoryGrid
@@ -311,6 +328,7 @@ export function CategoryChoice({
 			)}
 		</>
 	);
+
 	const ruleTick = rule && (
 		<div class="pt-3">
 			<MerchantRuleTick
@@ -320,6 +338,7 @@ export function CategoryChoice({
 			/>
 		</div>
 	);
+
 	return (
 		<div id="edit-category">
 			{folded ? (
@@ -385,11 +404,15 @@ function categorySource(
 ): Child | undefined {
 	if (tx.categorySource === "bill")
 		return <WhyLink section="categorization" topic="this category" />;
+
 	if (locked) return undefined;
+
 	if (tx.categorySource === "jev" && tx.categoryConfidence !== null)
 		return `Picked by Tally · ${Math.round(tx.categoryConfidence * 100)}% sure`;
+
 	if (guessLine && tx.categoryConfidence !== null)
 		return `Tally's guess · ${Math.round(tx.categoryConfidence * 100)}% sure`;
+
 	return undefined;
 }
 
@@ -418,6 +441,7 @@ export function EditSheet({
 	const closeHref = withFocus(back, tx.id);
 	const closeAttrs = listCloseAttrs(back, tx.id);
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
+
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
 	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
 	// "Counts in" line say how the row really counts.
@@ -426,6 +450,7 @@ export function EditSheet({
 		values,
 		refunds,
 	);
+
 	// Count as income and Reviewed lock a linked credit's category, so a change draws that choice again (/category/lock).
 	const lockRedraw = linkedPurchase
 		? {
@@ -439,6 +464,7 @@ export function EditSheet({
 				"hx-include": "closest form",
 			}
 		: {};
+
 	// The For name drawn for the posted choice: none while nothing is chosen (the placeholder asks for the people) or the
 	// person is gone, so their row has no source line either.
 	const forName =
@@ -446,6 +472,7 @@ export function EditSheet({
 			? null
 			: (people.find((person) => person.id === values.forPersonId)?.name ??
 				null);
+
 	// A detail draws as Tally's guess only while it holds the value Tally filled in. A refused save draws what the person
 	// posted, and the posted `*_was` field holds the value as it was first drawn, so a changed or emptied value is the
 	// person's: no dashes, and no source line when it is empty.
@@ -453,15 +480,19 @@ export function EditSheet({
 		Boolean(values.note) &&
 		tx.noteGuessed &&
 		values.note === (values.noteWas ?? values.note);
+
 	const kindGuessed =
 		Boolean(values.kind) &&
 		tx.kindGuessed &&
 		values.kind === (values.kindWas ?? values.kind);
+
 	const forPersonGuessed =
 		forName !== null &&
 		tx.forPersonGuessed &&
 		values.forPersonId === (values.forPersonIdWas ?? values.forPersonId);
+
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
+
 	// Whether the row counts with the review ticked or unticked, read as if Exclude were ticked, income off and no new link
 	// (excludedAfterSave). So it asks only whether the review lifts the exclusion that Exclude stands for, which the
 	// panel's hooks need even after a redraw that posted Exclude off or Income on.
@@ -476,6 +507,7 @@ export function EditSheet({
 			}),
 			tx.paysBill === true || tx.paysPlan === true,
 		);
+
 	return (
 		<BottomSheet
 			labelledBy="edit-title"

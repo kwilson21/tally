@@ -19,10 +19,13 @@ describe("MonthNavigation for a year before 1000", () => {
 				results={{}}
 			/>,
 		);
+
 		const nav = html.match(/<ol[^>]*>([\s\S]*?)<\/ol>/)?.[1] ?? "";
+
 		const links = [...nav.matchAll(/<a href="\/\?month=([0-9-]+)"/g)].map(
 			(match) => match[1],
 		);
+
 		expect(links).toHaveLength(36);
 		expect(links[0]).toBe("0100-01");
 		expect(html).toMatch(
@@ -38,6 +41,7 @@ describe("MonthNavigation history window", () => {
 			const firstMonth = "2018-01";
 			const currentMonth = monthsBefore(firstMonth, -99);
 			const month = monthsBefore(firstMonth, -offset);
+
 			const html = renderToString(
 				<MonthNavigation
 					month={month}
@@ -46,10 +50,13 @@ describe("MonthNavigation history window", () => {
 					results={{}}
 				/>,
 			);
+
 			const nav = html.match(/<ol[^>]*>([\s\S]*?)<\/ol>/)?.[1] ?? "";
+
 			const links = [...nav.matchAll(/<a href="\/?\?month=([0-9-]+)"/g)].map(
 				(match) => match[1],
 			);
+
 			expect(links.length).toBeLessThanOrEqual(36);
 			expect(links).toContain(month);
 			expect(
@@ -57,10 +64,12 @@ describe("MonthNavigation history window", () => {
 					(item) => item && item >= firstMonth && item <= currentMonth,
 				),
 			).toBe(true);
+
 			const firstVisible =
 				firstMonth > monthsBefore(month, 35)
 					? firstMonth
 					: monthsBefore(month, 35);
+
 			expect(links).toEqual(
 				Array.from({ length: links.length }, (_, index) =>
 					monthsBefore(firstVisible, -index),
@@ -79,9 +88,11 @@ describe("MonthNavigation month marks", () => {
 		"2026-09": -213447,
 		"2026-10": 50000,
 	};
+
 	// The strip's own link for a month; the arrows beside the title link to the same months.
 	const link = (html: string, month: string) => {
 		const strip = html.match(/<ol[^>]*>([\s\S]*?)<\/ol>/)?.[1] ?? "";
+
 		return (
 			strip.match(
 				new RegExp(`<a href="/\\?month=${month}"[^>]*>[\\s\\S]*?</a>`),
@@ -98,6 +109,7 @@ describe("MonthNavigation month marks", () => {
 				results={results}
 			/>,
 		);
+
 		expect(link(page, "2026-05")).toContain('data-mark="under"');
 		expect(link(page, "2026-05")).toContain(
 			'<span class="sr-only">May, ended $310 under</span>',
@@ -122,6 +134,7 @@ describe("MonthNavigation month marks", () => {
 				results={results}
 			/>,
 		);
+
 		const current = link(page, "2026-10");
 		expect(current).toContain('data-mark="current"');
 		expect(current).not.toMatch(/data-mark="(under|over|empty)"/);
@@ -146,6 +159,7 @@ describe("MonthNavigation month marks", () => {
 				results={results}
 			/>,
 		);
+
 		expect(link(page, "2026-09")).toContain('aria-current="page"');
 		expect(link(page, "2026-09")).toContain("ring-ink");
 		expect(link(page, "2026-09")).not.toContain("ring-accent");
@@ -178,6 +192,7 @@ describe("MonthNavigation month marks", () => {
 			"2026-09",
 			"2026-10",
 		]);
+
 		const page = renderToString(
 			<MonthNavigation
 				month="2026-06"
@@ -186,10 +201,13 @@ describe("MonthNavigation month marks", () => {
 				results={{}}
 			/>,
 		);
+
 		const strip = page.match(/<ol[^>]*>([\s\S]*?)<\/ol>/)?.[1] ?? "";
+
 		const links = [...strip.matchAll(/<a href="\/\?month=([0-9-]+)"/g)].map(
 			(match) => match[1],
 		);
+
 		expect(links).toEqual(months);
 	});
 });

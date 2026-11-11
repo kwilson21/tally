@@ -9,7 +9,9 @@ import { pinClock } from "./pinned-clock";
 
 const request = async (path: string, init?: RequestInit) => {
 	const headers = new Headers(init?.headers);
+
 	if (init?.method === "POST") headers.set("Origin", "http://tally.test");
+
 	return exports.default.fetch(`http://tally.test${path}`, {
 		...init,
 		headers,
@@ -31,6 +33,7 @@ afterEach(() => {
  * take theirs from here rather than naming one. */
 const firstPageIds = async () => {
 	const html = await (await request("/transactions?month=all&select=1")).text();
+
 	return [...html.matchAll(/name="ids" value="(\d+)"/g)].map((m) =>
 		Number(m[1]),
 	);
@@ -43,7 +46,9 @@ const unlinkedFirstPageIds = async () => {
 	const { results } = await env.DB.prepare(
 		"SELECT id FROM transactions WHERE refund_of_id IS NOT NULL OR parent_id IS NOT NULL",
 	).all<{ id: number }>();
+
 	const linked = new Set(results.map((row) => row.id));
+
 	return (await firstPageIds()).filter((id) => !linked.has(id));
 };
 
@@ -55,36 +60,46 @@ const unlinkedFirstPageIds = async () => {
 const submittedFields = (html: string) => {
 	const form =
 		html.match(/<form id="selection-form"[\s\S]*?<\/form>/)?.[0] ?? "";
+
 	const fields = new URLSearchParams();
+
 	const inputs = [
 		...(form.match(/<input [^>]*>/g) ?? []),
 		...(html.match(/<input [^>]*form="selection-form"[^>]*>/g) ?? []),
 	];
+
 	for (const tag of inputs) {
 		const name = tag.match(/ name="([^"]*)"/)?.[1];
+
 		if (name === undefined) continue;
+
 		if (/type="checkbox"/.test(tag) && !/ checked/.test(tag)) continue;
 		fields.append(
 			name,
 			tag.match(/ value="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&") ?? "",
 		);
 	}
+
 	for (const select of html.match(
 		/<select [^>]*form="selection-form"[^>]*>[\s\S]*?<\/select>/g,
 	) ?? []) {
 		const name = select.match(/ name="([^"]*)"/)?.[1];
+
 		const chosen =
 			select.match(/<option value="([^"]*)"[^>]* selected/)?.[1] ??
 			select.match(/<option value="([^"]*)"/)?.[1] ??
 			"";
+
 		if (name !== undefined) fields.append(name, chosen);
 	}
+
 	return fields;
 };
 
 /** The address Add cash's button submits to without JavaScript: its action, with the selection form's fields (#383). */
 const addCashSubmitAddress = (html: string) => {
 	const button = html.match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+
 	return `${button.match(/ formaction="([^"]*)"/)?.[1] ?? ""}?${submittedFields(html)}`;
 };
 
@@ -133,16 +148,20 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 			category: String(GROCERIES),
 			back: "/transactions?month=all",
 		});
+
 		for (const id of ids) body.append("ids", String(id));
+
 		const res = await request("/transactions/select/category/save", {
 			method: "POST",
 			body,
 			headers: { "HX-Request": "true" },
 		});
+
 		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 			toast?: { message: string };
 			announce?: string;
 		};
+
 		return {
 			res,
 			message: trigger.toast?.message,
@@ -397,6 +416,7 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 
 	describe("a link that changes while the save runs", () => {
 		type TestApp = { Bindings: Env; Variables: { actor: string } };
+
 		const route = new Hono<TestApp>();
 		route.use("*", async (c, next) => {
 			c.set("actor", "test@example.com");
@@ -411,33 +431,43 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 		 */
 		function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
 			let raced = false;
+
 			const fire = async () => {
 				if (raced) return;
 				raced = true;
 				await rival();
 			};
+
 			const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
 				new Proxy(statement, {
 					get(target, prop) {
 						if (prop === "bind")
 							return (...values: unknown[]) => guard(target.bind(...values));
+
 						if (prop === "run" || prop === "all" || prop === "first")
 							return async (...args: unknown[]) => {
 								await fire();
+
 								return Reflect.apply(target[prop], target, args);
 							};
+
 						const value = Reflect.get(target, prop);
+
 						return typeof value === "function" ? value.bind(target) : value;
 					},
 				});
+
 			return new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop === "prepare")
 						return (sql: string) => {
 							const statement = target.prepare(sql);
+
 							return sql.startsWith(prefix) ? guard(statement) : statement;
 						};
+
 					const value = Reflect.get(target, prop);
+
 					return typeof value === "function" ? value.bind(target) : value;
 				},
 			});
@@ -449,7 +479,9 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 				category: String(GROCERIES),
 				back: "/transactions?month=all",
 			});
+
 			for (const id of ids) body.append("ids", String(id));
+
 			const res = await route.request(
 				"/transactions/select/category/save",
 				{
@@ -463,10 +495,12 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 				},
 				{ ...env, DB: db },
 			);
+
 			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 				toast?: { message: string };
 				announce?: string;
 			};
+
 			return {
 				res,
 				message: trigger.toast?.message,
@@ -495,11 +529,13 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 
 		it("a refund relinked to the second purchase mid-save moves that purchase, and the first keeps its category", async () => {
 			await seed();
+
 			const db = racing("UPDATE transactions SET category_id", () =>
 				env.DB.prepare(
 					"UPDATE transactions SET refund_of_id=9412 WHERE id=9413",
 				).run(),
 			);
+
 			const { res, message, announce } = await saveWith(db, [9413]);
 			expect(res.status).toBe(200);
 			expect(message).toBe(
@@ -525,11 +561,13 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 
 		it("a refund unlinked from its purchase mid-save takes the category itself, with no moved sentence", async () => {
 			await seed();
+
 			const db = racing("UPDATE transactions SET category_id", () =>
 				env.DB.prepare(
 					"UPDATE transactions SET refund_of_id=NULL WHERE id=9413",
 				).run(),
 			);
+
 			const { message, announce } = await saveWith(db, [9413]);
 			expect(message).toBe("Set 1 transaction to Groceries.");
 			expect(announce).toBe(message);
@@ -547,11 +585,13 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 
 		it("a refund whose purchase is excluded mid-save takes the category itself and stays linked", async () => {
 			await seed();
+
 			const db = racing("UPDATE transactions SET category_id", () =>
 				env.DB.prepare(
 					"UPDATE transactions SET excluded=1 WHERE id=9411",
 				).run(),
 			);
+
 			const { message, announce } = await saveWith(db, [9413]);
 			expect(message).toBe("Set 1 transaction to Groceries.");
 			expect(announce).toBe(message);
@@ -572,17 +612,22 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 			await insertRow(9406, { date: "2026-09-01", amount: 1000 });
 			await insertRow(9407, { date: "2026-09-12", amount: -500 });
 			const prepared: string[] = [];
+
 			const db = new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop === "prepare")
 						return (sql: string) => {
 							prepared.push(sql);
+
 							return target.prepare(sql);
 						};
+
 					const value = Reflect.get(target, prop);
+
 					return typeof value === "function" ? value.bind(target) : value;
 				},
 			});
+
 			const { res, message } = await saveWith(db, [9406, 9407, 9413]);
 			expect(res.status).toBe(200);
 			expect(message).toBe(
@@ -602,12 +647,15 @@ describe("select several transactions", () => {
 		const html = await (
 			await request("/transactions?month=all&page=2&select=1")
 		).text();
+
 		expect(html).toMatch(
 			/href="\/transactions\?month=all&amp;page=2" id="select-toggle"/,
 		);
+
 		const normal = await (
 			await request("/transactions?month=all&page=2")
 		).text();
+
 		expect(normal).toMatch(
 			/href="\/transactions\?month=all&amp;page=2&amp;select=1" id="select-toggle"/,
 		);
@@ -620,9 +668,11 @@ describe("select several transactions", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id,category_id) SELECT 990,account_id,date,500,raw_name,110,1 FROM transactions WHERE id=110",
 			),
 		]);
+
 		const html = await (
 			await request("/transactions?select=1&q=Local+Bakery")
 		).text();
+
 		expect(html).not.toContain('name="ids" value="110"');
 		expect(html).toContain('name="ids" value="990"');
 	});
@@ -642,17 +692,21 @@ describe("select several transactions", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET is_split=1 WHERE id=110",
 		).run();
+
 		const body = new URLSearchParams({
 			ids: "110",
 			category: "1",
 			back: "/transactions?month=all&q=shop",
 		});
+
 		body.append("ids", "111");
+
 		const res = await request("/transactions/select/category/save", {
 			method: "POST",
 			body,
 			headers: { "HX-Request": "true" },
 		});
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Set 1 transaction to Groceries.",
@@ -669,6 +723,7 @@ describe("select several transactions", () => {
 		await env.DB.prepare(
 			'UPDATE transactions SET category_id=2, category_source=\'jev\', split_removed_from_cents=1234, split_removed_bills=\'[{"name":"Water","period":"2026-09"}]\' WHERE id=111',
 		).run();
+
 		const res = await request("/transactions/select/category/save", {
 			method: "POST",
 			body: new URLSearchParams({
@@ -678,6 +733,7 @@ describe("select several transactions", () => {
 			}),
 			headers: { "HX-Request": "true" },
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -698,6 +754,7 @@ describe("select several transactions", () => {
 				await env.DB.prepare(
 					"INSERT INTO categories(id,name,icon,color,sort_order,archived) VALUES(9,'Old','list','ink',99,1)",
 				).run();
+
 			const res = await request("/transactions/select/category/save", {
 				method: "POST",
 				body: new URLSearchParams({
@@ -707,6 +764,7 @@ describe("select several transactions", () => {
 				}),
 				headers: { "HX-Request": "true" },
 			});
+
 			expect(res.status).toBe(422);
 			expect(await res.text()).toContain('role="alert"');
 		},
@@ -716,10 +774,12 @@ describe("select several transactions", () => {
 		const before = await env.DB.prepare(
 			"SELECT category_id FROM transactions WHERE id=110",
 		).first();
+
 		const res = await request("/transactions/select/exclude", {
 			method: "POST",
 			body: new URLSearchParams({ back: "/transactions" }),
 		});
+
 		expect(res.status).toBe(422);
 		expect(await res.text()).toContain('role="alert"');
 		expect(
@@ -731,11 +791,13 @@ describe("select several transactions", () => {
 
 	it("excludes selections as a user and redirects no-JS requests to the filtered list", async () => {
 		const before = await (await request("/")).text();
+
 		const count = Number(
 			before.match(
 				/(\d+)<span class="sr-only"> transactions<\/span> need a category/,
 			)?.[1],
 		);
+
 		const res = await request("/transactions/select/exclude", {
 			method: "POST",
 			body: new URLSearchParams({
@@ -744,6 +806,7 @@ describe("select several transactions", () => {
 			}),
 			redirect: "manual",
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/transactions?uncategorized=1");
 		expect(
@@ -763,6 +826,7 @@ describe("select several transactions", () => {
 				"SELECT id,category_id,category_source,excluded,excluded_source FROM transactions ORDER BY id",
 			).all()
 		).results;
+
 	const post = (path: string, body: URLSearchParams, hx = true) =>
 		request(path, {
 			method: "POST",
@@ -770,11 +834,15 @@ describe("select several transactions", () => {
 			headers: hx ? { "HX-Request": "true" } : {},
 			redirect: "manual",
 		});
+
 	const form = (ids: (string | number)[], fields: Record<string, string>) => {
 		const body = new URLSearchParams(fields);
+
 		for (const id of ids) body.append("ids", String(id));
+
 		return body;
 	};
+
 	const splitParent = async () =>
 		env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=110"),
@@ -794,6 +862,7 @@ describe("select several transactions", () => {
 			SELECT 5000 + n.i, src.account_id, src.date, -100 - n.i, src.raw_name, src.category_id
 			FROM n, (SELECT account_id,date,raw_name,category_id FROM transactions WHERE id=110) AS src`,
 		).run();
+
 		return Array.from({ length: 101 }, (_, i) => 5001 + i);
 	};
 
@@ -803,15 +872,19 @@ describe("select several transactions", () => {
 			"UPDATE transactions SET category_id=NULL, category_source=NULL WHERE id IN (111,112)",
 		).run();
 		const before = await snapshot();
+
 		const res = await post(
 			"/transactions/select/category/save",
 			form([110, 111, 990], { category: "1", back: "/transactions" }),
 		);
+
 		expect(res.status).toBe(200);
 		const after = await snapshot();
+
 		const changed = after
 			.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
 			.map((row) => row.id);
+
 		expect(changed.sort()).toEqual([111, 990]);
 		expect(after.find((row) => row.id === 110)).toEqual(
 			before.find((row) => row.id === 110),
@@ -826,10 +899,12 @@ describe("select several transactions", () => {
 					"INSERT INTO categories(id,name,icon,color,sort_order,archived) VALUES(9,'Old','list','ink',99,1)",
 				).run();
 			const before = await snapshot();
+
 			const res = await post(
 				"/transactions/select/category/save",
 				form([111, 112], { category, back: "/transactions" }),
 			);
+
 			expect(res.status).toBe(422);
 			expect(await snapshot()).toEqual(before);
 		},
@@ -840,6 +915,7 @@ describe("select several transactions", () => {
 			"/transactions/select/category",
 			form([], { back: "/transactions" }),
 		);
+
 		expect(res.status).toBe(422);
 		const html = await res.text();
 		const sheet = html.slice(html.indexOf('id="sheet"'));
@@ -850,10 +926,12 @@ describe("select several transactions", () => {
 
 	it("announces the save and returns to the filtered list out of select mode", async () => {
 		const back = "/transactions?q=shop&month=all";
+
 		const res = await post(
 			"/transactions/select/category/save",
 			form([111], { category: "1", back }),
 		);
+
 		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 		expect(trigger.announce).toBe("Set 1 transaction to Groceries.");
 		expect(trigger.toast.message).toBe("Set 1 transaction to Groceries.");
@@ -866,10 +944,12 @@ describe("select several transactions", () => {
 
 	it("pushes the list URL after Exclude", async () => {
 		const back = "/transactions?uncategorized=1";
+
 		const res = await post(
 			"/transactions/select/exclude",
 			form([111], { back }),
 		);
+
 		expect(res.headers.get("HX-Push-Url")).toBe(back);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
 			"Excluded 1 transaction.",
@@ -878,11 +958,13 @@ describe("select several transactions", () => {
 
 	it("redirects a no-JS category save to the filtered list", async () => {
 		const back = "/transactions?q=shop&month=all";
+
 		const res = await post(
 			"/transactions/select/category/save",
 			form([111], { category: "1", back }),
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe(back);
 	});
@@ -892,10 +974,12 @@ describe("select several transactions", () => {
 		expect(ids.length).toBeGreaterThan(1);
 		// The sheet lists the ids in ascending order.
 		const [a, b] = ids.slice(0, 2).sort((x, y) => x - y) as [number, number];
+
 		const res = await post(
 			"/transactions/select/category",
 			form([a, b], { back: "/transactions?month=all" }),
 		);
+
 		const html = await res.text();
 		// Cancel puts focus back on Set category (#87), with the ticks kept.
 		const cancel = `/transactions?month=all&amp;select=1&amp;ids=${a},${b}&amp;focus=set-category-back`;
@@ -904,11 +988,13 @@ describe("select several transactions", () => {
 			html.match(new RegExp(`href="${cancel.replace(/[?]/g, "\\?")}"`, "g"))
 				?.length,
 		).toBe(2);
+
 		const list = await (
 			await request(
 				`/transactions?month=all&select=1&ids=${a},${b},abc,-3,1.5,0`,
 			)
 		).text();
+
 		expect(list).toMatch(new RegExp(`value="${a}"[^>]*checked`));
 		expect(list).toMatch(new RegExp(`value="${b}"[^>]*checked`));
 		expect((list.match(/name="ids"[^>]*checked/g) ?? []).length).toBe(2);
@@ -918,6 +1004,7 @@ describe("select several transactions", () => {
 		const html = await (
 			await request("/transactions?month=all&select=1")
 		).text();
+
 		const older = html.match(/<button [^>]*>Older<\/button>/)?.[0] ?? "";
 		expect(older).toContain('form="selection-form"');
 		expect(older).toContain('formaction="/transactions"');
@@ -930,12 +1017,15 @@ describe("select several transactions", () => {
 		/** The list as a request without JavaScript or htmx draws it. */
 		const listHtml = async (query: string) =>
 			(await request(`/transactions?${query}`)).text();
+
 		/** The selection form, from its opening tag to its closing one. */
 		const selectionForm = (html: string) =>
 			html.match(/<form id="selection-form"[\s\S]*?<\/form>/)?.[0] ?? "";
+
 		/** The no-JavaScript block inside the selection form: the list's own fields, drawn as they stand. */
 		const noscriptBlock = (html: string) =>
 			selectionForm(html).match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] ?? "";
+
 		/** The no-JavaScript block of a form's markup (the filter form's own, in these tests). */
 		const noscriptBlockOf = (markup: string) =>
 			markup.match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] ?? "";
@@ -946,6 +1036,7 @@ describe("select several transactions", () => {
 			const older = html.match(/<button [^>]*>Older<\/button>/)?.[0] ?? "";
 			expect(newer).toContain('name="page" value="1"');
 			expect(older).toContain('name="page" value="3"');
+
 			for (const button of [newer, older]) {
 				expect(button).toContain('type="submit"');
 				expect(button).toContain('form="selection-form"');
@@ -971,6 +1062,7 @@ describe("select several transactions", () => {
 			const block = noscriptBlock(
 				await listHtml("month=all&q=coffee&page=2&select=1"),
 			);
+
 			expect(block).toContain('name="select" value="1"');
 			expect(block).not.toContain('name="q"');
 			expect(block).not.toContain('name="month"');
@@ -979,6 +1071,7 @@ describe("select several transactions", () => {
 
 		it("makes the filter fields the selection form's own, by form attribute, only in Select mode", async () => {
 			const html = await listHtml("month=all&q=coffee&select=1");
+
 			for (const name of [
 				"q",
 				"month",
@@ -991,8 +1084,10 @@ describe("select several transactions", () => {
 					html.match(
 						new RegExp(`<(?:input|select)[^>]* name="${name}"[^>]*>`),
 					)?.[0] ?? "";
+
 				expect(tag, name).toContain('form="selection-form"');
 			}
+
 			expect(await listHtml("month=all&q=coffee")).not.toContain(
 				'form="selection-form"',
 			);
@@ -1000,10 +1095,13 @@ describe("select several transactions", () => {
 
 		it("makes Apply filters, drawn for a browser without JavaScript, a button that submits the selection form", async () => {
 			const html = await listHtml("month=all&select=1");
+
 			const filters =
 				html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+
 			const apply =
 				filters.match(/<button [^>]*>Apply filters<\/button>/)?.[0] ?? "";
+
 			expect(noscriptBlockOf(filters)).toContain("Apply filters");
 			expect(apply).toContain('type="submit"');
 			expect(apply).toContain('form="selection-form"');
@@ -1014,8 +1112,10 @@ describe("select several transactions", () => {
 		it("keeps the filter form's ticks out of its own no-JavaScript block, since the checked boxes are the selection form's", async () => {
 			const ids = (await firstPageIds()).slice(0, 2);
 			const html = await listHtml(`month=all&select=1&ids=${ids.join(",")}`);
+
 			const filters =
 				html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+
 			expect(noscriptBlockOf(filters)).not.toContain('name="ids"');
 			expect(
 				submittedFields(html)
@@ -1071,9 +1171,11 @@ describe("select several transactions", () => {
 
 		it("counts the ticks a page link submits as they stand, so a row left unticked is dropped", async () => {
 			const [first, second] = await firstPageIds();
+
 			const both = await listHtml(
 				`month=all&page=2&select=1&ids=${first}&ids=${second}`,
 			);
+
 			expect(both).toMatch(/id="selected-count"[^>]*>2 selected/);
 			const one = await listHtml(`month=all&page=2&select=1&ids=${first}`);
 			expect(one).toMatch(/id="selected-count"[^>]*>1 selected/);
@@ -1081,9 +1183,11 @@ describe("select several transactions", () => {
 
 		it("keeps a row unticked from the whole set when a page link is submitted, with the page's rows as page-ids", async () => {
 			const [kept, unticked] = await firstPageIds();
+
 			const html = await listHtml(
 				`month=all&page=2&select=1&all=1&page-ids=${kept},${unticked}&ids=${kept}`,
 			);
+
 			expect(html).toContain(`name="unticked" value="${unticked}"`);
 			expect(html).not.toContain(`name="unticked" value="${kept}"`);
 		});
@@ -1093,7 +1197,9 @@ describe("select several transactions", () => {
 		const html = await (
 			await request("/transactions?month=all&select=1")
 		).text();
+
 		const oob = html.match(/id="filters"[^>]*hx-select-oob="([^"]*)"/)?.[1];
+
 		for (const part of [
 			"#select-toggle:outerHTML",
 			"#selection-back:outerHTML",
@@ -1103,9 +1209,11 @@ describe("select several transactions", () => {
 			"#select-all-page:outerHTML",
 		])
 			expect(oob).toContain(part);
+
 		const pageOob = html.match(
 			/name="page" value="2"[^>]*hx-select-oob="([^"]*)"/,
 		)?.[1];
+
 		expect(pageOob).toContain("#select-toggle:outerHTML");
 		expect(pageOob).toContain("#selected-count:innerHTML");
 		expect(html).toMatch(/id="select-toggle"/);
@@ -1114,17 +1222,21 @@ describe("select several transactions", () => {
 
 	it("re-derives the count from the ticked rows still in the list", async () => {
 		const [id] = await firstPageIds();
+
 		const res = await request(
 			`/transactions?month=all&select=1&ids=${id}&ids=999999`,
 			{ headers: { "HX-Request": "true" } },
 		);
+
 		const html = await res.text();
 		expect(html).toMatch(/id="selected-count"[^>]*>1 selected</);
+
 		const empty = await (
 			await request("/transactions?month=all&select=1", {
 				headers: { "HX-Request": "true" },
 			})
 		).text();
+
 		expect(empty).toMatch(/id="selected-count"[^>]*>0 selected</);
 		expect(empty).toMatch(/id="exclude-selection"[^>]*disabled/);
 	});
@@ -1133,15 +1245,19 @@ describe("select several transactions", () => {
 		const html = await (
 			await request("/transactions/select/count?ids=110")
 		).text();
+
 		const exclude = html.match(/<button[^>]*id="exclude-selection"[^>]*>/)?.[0];
 		expect(exclude).toContain('hx-swap="innerHTML"');
 		expect(exclude).toContain('hx-swap-oob="outerHTML"');
+
 		const page = await (
 			await request("/transactions?select=1&month=all")
 		).text();
+
 		const pageExclude = page.match(
 			/<button[^>]*id="exclude-selection"[^>]*>/,
 		)?.[0];
+
 		expect(pageExclude).toContain('hx-swap="innerHTML"');
 		expect(pageExclude).not.toContain("hx-swap-oob");
 	});
@@ -1150,6 +1266,7 @@ describe("select several transactions", () => {
 		const html = await (
 			await request("/transactions?select=1&month=all")
 		).text();
+
 		const input = html.match(/<input[^>]*name="ids" value="110"[^>]*>/)?.[0];
 		expect(input).toContain('aria-labelledby="select-110-name"');
 		const name = html.match(/id="select-110-name"[^>]*>([^<]*)</)?.[1];
@@ -1165,25 +1282,31 @@ describe("select several transactions", () => {
 		)
 			.bind(lastYear)
 			.run();
+
 		const html = await (
 			await request("/transactions?select=1&month=all&q=OLD%20SHOP")
 		).text();
+
 		const name = html.match(/id="select-992-name"[^>]*>([^<]*)</)?.[1];
 		expect(name).toMatch(new RegExp(`Mar 7, ${lastYear.slice(0, 4)}$`));
 	});
 
 	it("excludes a split part's whole purchase, as the edit panel does", async () => {
 		await splitParent();
+
 		const res = await post(
 			"/transactions/select/exclude",
 			form([990], { back: "/transactions" }),
 		);
+
 		expect(res.status).toBe(200);
+
 		const rows = (
 			await env.DB.prepare(
 				"SELECT id,excluded,excluded_source FROM transactions WHERE id IN (110,990,991) ORDER BY id",
 			).all()
 		).results;
+
 		expect(rows).toEqual([
 			{ id: 110, excluded: 1, excluded_source: "user" },
 			{ id: 990, excluded: 1, excluded_source: "user" },
@@ -1209,15 +1332,19 @@ describe("select several transactions", () => {
 				).bind(bill, transaction),
 			),
 		]);
+
 		const said = async (ids: number[]) => {
 			const res = await post(
 				"/transactions/select/exclude",
 				form(ids, { back: "/transactions" }),
 			);
+
 			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 			expect(trigger.toast.message).toBe(trigger.announce);
+
 			return trigger.announce;
 		};
+
 		expect(await said([111])).toBe(
 			"Excluded 1 transaction. It still counts while it pays a bill.",
 		);
@@ -1238,11 +1365,13 @@ describe("select several transactions", () => {
 			"/transactions/select/exclude",
 			form([111, 112], { back: "/transactions?excluded=1" }),
 		);
+
 		const rows = (
 			await env.DB.prepare(
 				"SELECT id,excluded,excluded_source FROM transactions WHERE id IN (111,112) ORDER BY id",
 			).all()
 		).results;
+
 		expect(rows).toEqual([
 			{ id: 111, excluded: 1, excluded_source: "jev" },
 			{ id: 112, excluded: 1, excluded_source: "user" },
@@ -1257,10 +1386,12 @@ describe("select several transactions", () => {
 		// 101 real rows: a missing id drops out before the limit counts (#350), so made-up ids would not reach it.
 		const ids = await addHundredOneRows();
 		const before = await snapshot();
+
 		const res = await post(
 			path,
 			form(ids, { back: "/transactions", ...extra }),
 		);
+
 		expect(res.status).toBe(422);
 		expect(await res.text()).toMatch(
 			/role="alert"[\s\S]*?Select 100 or fewer transactions\./,
@@ -1283,20 +1414,25 @@ describe("select several transactions", () => {
 				htmx ? { headers: { "HX-Request": "true" } } : undefined,
 			)
 		).text();
+
 	/** The rows on the page that can be ticked, in order. */
 	const rowIds = (html: string) =>
 		[...html.matchAll(/name="ids" value="(\d+)"/g)].map((m) => Number(m[1]));
+
 	const tickedIds = (html: string) =>
 		[...html.matchAll(/name="ids" value="(\d+)" checked/g)].map((m) =>
 			Number(m[1]),
 		);
+
 	const selectAllLabel = (html: string) =>
 		html.match(/>Select all (\d+)<\/a>/)?.[1];
+
 	/** The link's address as a browser follows it (its ampersands are escaped in the HTML). */
 	const selectAllHref = (html: string) =>
 		html
 			.match(/<a href="([^"]*)"[^>]*>Select all \d+<\/a>/)?.[1]
 			?.replaceAll("&amp;", "&");
+
 	/**
 	 * The count's reply for these ticked ids, on a page whose selectable rows are `pageIds`. `disclosure`
 	 * sends the marker a form carries while the "not on this page" line is drawn (#350).
@@ -1319,6 +1455,7 @@ describe("select several transactions", () => {
 				? undefined
 				: { headers: { "HX-Current-URL": currentUrl } },
 		);
+
 	const countFragment = async (
 		ids: number[],
 		pageIds: number[],
@@ -1346,10 +1483,12 @@ describe("select several transactions", () => {
 		expect(oneOff.match(/<a [^>]*>Select all \d+<\/a>/)?.[0]).toContain(
 			'hx-sync="#filters:replace"',
 		);
+
 		for (const id of ["set-category-selection", "exclude-selection"]) {
 			const button = html.match(
 				new RegExp(`<button[^>]*id="${id}"[^>]*>`),
 			)?.[0];
+
 			expect(button).toBeDefined();
 			expect(button).not.toContain("hx-sync");
 		}
@@ -1360,9 +1499,11 @@ describe("select several transactions", () => {
 		const ids = rowIds(html);
 		const href = selectAllHref(html);
 		expect(href).toBeDefined();
+
 		const after = await (
 			await request(href ?? "", { headers: { "HX-Request": "true" } })
 		).text();
+
 		expect(tickedIds(after)).toEqual(ids);
 		expect(after).toMatch(/id="selected-count"[^>]*aria-live="polite"/);
 		expect(after).toMatch(
@@ -1434,14 +1575,17 @@ describe("select several transactions", () => {
 		await resetDemo(env.DB, "2026-10-15");
 		const ids = rowIds(await pageHtml("month=2026-10&select=1"));
 		const before = (await snapshot()) as SnapshotRow[];
+
 		const res = await post(
 			"/transactions/select/category/save",
 			form(ids, { category: "1", back: "/transactions?month=all" }),
 		);
+
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
 			`Set ${ids.length} transactions to Groceries.`,
 		);
 		const beforeById = new Map(before.map((row) => [row.id, row]));
+
 		for (const row of (await snapshot()) as SnapshotRow[]) {
 			if (ids.includes(row.id)) expect(row.category_id).toBe(1);
 			else expect(row).toEqual(beforeById.get(row.id));
@@ -1451,9 +1595,11 @@ describe("select several transactions", () => {
 	/** The page's Select all link, whole, so its attributes can be read. */
 	const selectAllTag = (html: string) =>
 		html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0] ?? "";
+
 	/** One attribute of a tag, with its ampersands unescaped. */
 	const attribute = (tag: string, name: string) =>
 		tag.match(new RegExp(` ${name}="([^"]*)"`))?.[1]?.replaceAll("&amp;", "&");
+
 	/** Whether a reply's Set category button takes focus when it is swapped in. */
 	const setCategoryFocused = (html: string) =>
 		/<button[^>]*id="set-category-selection"[^>]*autofocus/.test(html);
@@ -1463,13 +1609,16 @@ describe("select several transactions", () => {
 		const hxGet = attribute(selectAllTag(page), "hx-get") ?? "";
 		// The page's rows come as page-ids, which htmx includes with the request (#350).
 		const pageRows = page.match(/name="page-ids" value="([^"]*)"/)?.[1] ?? "";
+
 		const reply = await (
 			await request(`${hxGet}&page-ids=${pageRows}`, {
 				headers: { "HX-Request": "true" },
 			})
 		).text();
+
 		const setCategory =
 			reply.match(/<button[^>]*id="set-category-selection"[^>]*>/)?.[0] ?? "";
+
 		expect(setCategory).toContain("autofocus");
 		// The class list has disabled:opacity-40, so look for the attribute itself.
 		expect(setCategory).not.toMatch(/\sdisabled(=|\s|>)/);
@@ -1507,8 +1656,10 @@ describe("select several transactions", () => {
 		expect(wrapperSwap(pageLink)).toBe("outerMorph");
 		// The whole-set link: every row on the page is ticked and more rows match.
 		const whole = await countFragment(ids, ids);
+
 		const wholeLink =
 			whole.match(/<a [^>]*>Select all \d+ in [^<]*<\/a>/)?.[0] ?? "";
+
 		expect(attribute(wholeLink, "id")).toBe("select-all-link");
 		expect(whole.match(/id="select-all-link"/g)).toHaveLength(1);
 		expect(wrapperSwap(whole)).toBe("outerMorph");
@@ -1516,6 +1667,7 @@ describe("select several transactions", () => {
 
 	it("draws no link once every matched row is ticked: the wrapper swaps whole, and the count takes the link's id without autofocus (#455)", async () => {
 		const ids = rowIds(await pageHtml("month=all&select=1"));
+
 		// In all mode a page row whose box isn't posted is unticked, so every page row is posted as checked.
 		const reply = await (
 			await request(
@@ -1527,6 +1679,7 @@ describe("select several transactions", () => {
 				])}`,
 			)
 		).text();
+
 		// Every matched row is ticked, so neither link (page's or whole set's) is drawn.
 		expect(reply).not.toMatch(/<a [^>]*>Select all /);
 		expect(wrapperSwap(reply)).toBe("outerHTML settle:0");
@@ -1560,6 +1713,7 @@ describe("select several transactions", () => {
 	/** The opening tag of the first element that matches. */
 	const openingTag = (html: string, pattern: RegExp) =>
 		html.match(pattern)?.[0] ?? "";
+
 	/** The list's page links (Newer and Older), whole: anchors outside Select mode, buttons inside it (#383). */
 	const pageLinks = (html: string) =>
 		[
@@ -1567,6 +1721,7 @@ describe("select several transactions", () => {
 				/<(?:a|button) [^>]*(?:rel="(?:prev|next)"|name="page")[^>]*>/g,
 			),
 		].map((m) => m[0]);
+
 	const LOAD_PAUSE = {
 		"hx-indicator": "#selection-form",
 		"hx-disable": "#set-category-selection, #exclude-selection",
@@ -1579,10 +1734,12 @@ describe("select several transactions", () => {
 		expect(attribute(filters, "hx-disable")).toBe(LOAD_PAUSE["hx-disable"]);
 		const links = pageLinks(html);
 		expect(links.length).toBeGreaterThan(0);
+
 		for (const link of links) {
 			expect(attribute(link, "hx-indicator")).toBe(LOAD_PAUSE["hx-indicator"]);
 			expect(attribute(link, "hx-disable")).toBe(LOAD_PAUSE["hx-disable"]);
 		}
+
 		const selectAll = selectAllTag(html);
 		expect(attribute(selectAll, "hx-indicator")).toBe(
 			LOAD_PAUSE["hx-indicator"],
@@ -1604,10 +1761,12 @@ describe("select several transactions", () => {
 		expect(filters).not.toContain("hx-disable");
 		const links = pageLinks(html);
 		expect(links.length).toBeGreaterThan(0);
+
 		for (const link of links) {
 			expect(link).not.toContain("hx-indicator");
 			expect(link).not.toContain("hx-disable");
 		}
+
 		expect(html).not.toContain('class="selection-list');
 	});
 
@@ -1626,14 +1785,17 @@ describe("select several transactions", () => {
 		const html = await pageHtml("month=all&page=2&select=1");
 		const links = pageLinks(html);
 		expect(links.length).toBeGreaterThan(0);
+
 		for (const link of links) {
 			const pushed = attribute(link, "hx-push-url");
 			expect(pushed).toContain("select=1");
 			expect(attribute(link, "hx-get")).toBe(`${pushed}&focus=first-tick`);
 			expect(attribute(link, "formaction")).toBe("/transactions");
 		}
+
 		const plain = await pageHtml("month=all&page=2");
 		expect(plain).not.toContain("first-tick");
+
 		for (const link of pageLinks(plain)) {
 			expect(attribute(link, "hx-get")).toBe(attribute(link, "href"));
 			expect(attribute(link, "hx-push-url")).toBe("true");
@@ -1645,6 +1807,7 @@ describe("select several transactions", () => {
 			"month=all&page=2&select=1&focus=first-tick",
 			true,
 		);
+
 		expect(html.match(/ autofocus/g)?.length ?? 0).toBe(1);
 		const tick = openingTag(html, /<input[^>]*autofocus[^>]*>/);
 		expect(tick).toContain('name="ids"');
@@ -1655,16 +1818,21 @@ describe("select several transactions", () => {
 	describe("ticks across pages (#350)", () => {
 		/** Three rows on page 1 that link to no other row, ticked as a person's taps leave them. */
 		const pageOneTicks = async () => (await unlinkedFirstPageIds()).slice(0, 3);
+
 		/** Page 2's selectable rows: none of them is on page 1, so page 1's ticks are not on this page. */
 		const pageTwoRows = async () =>
 			rowIds(await pageHtml("month=all&page=2&select=1"));
+
 		const ticksParam = (ids: number[]) => ids.join(",");
 		const htmxHeaders = { headers: { "HX-Request": "true" } };
+
 		/** The form that holds the bar, its ticks and its rows: a closed disclosure's ticks are in it too. */
 		const selectionForm = (html: string) => {
 			const start = html.indexOf('<form id="selection-form"');
+
 			return start < 0 ? "" : html.slice(start, html.indexOf("</form>", start));
 		};
+
 		/** The ids a link or an address carries, once each, in the order written. */
 		const idsIn = (url: string) => [
 			...new Set(
@@ -1675,15 +1843,18 @@ describe("select several transactions", () => {
 					.map(Number),
 			),
 		];
+
 		const sorted = (ids: number[]) => [...ids].sort((a, b) => a - b);
 
 		it("keeps page 1's ticks on page 2, and the bar counts them as not on this page", async () => {
 			const ids = await pageOneTicks();
 			expect(ids).toHaveLength(3);
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 				true,
 			);
+
 			expect(html).toMatch(
 				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
 			);
@@ -1693,25 +1864,30 @@ describe("select several transactions", () => {
 
 		it("draws the off-page ticks in a closed disclosure inside the selection form, scrolling at 40% of the screen", async () => {
 			const ids = await pageOneTicks();
+
 			const form = selectionForm(
 				await pageHtml(
 					`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 					true,
 				),
 			);
+
 			expect(form).toContain('id="not-on-page"');
 			expect(form).toMatch(/<details(?![^>]* open)[^>]*>/);
 			expect(form).toContain("max-h-[40vh]");
 			expect(form).toContain("overflow-y-auto");
+
 			for (const id of ids) expect(form).toContain(`name="ids" value="${id}"`);
 		});
 
 		it("leaves the disclosure out once every tick is back on the list", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&select=1&ids=${ticksParam(ids)}`,
 				true,
 			);
+
 			expect(html).toMatch(/id="selected-count"[^>]*>3 selected</);
 			expect(html).not.toContain("not on this page");
 			// The keys' details under How this works (decision 118) is the page's only disclosure.
@@ -1754,24 +1930,30 @@ describe("select several transactions", () => {
 					.bind(...ids)
 					.run();
 				const before = await snapshot();
+
 				const res = await post(
 					path,
 					form(ids, { ...fields, back: "/transactions?month=all&page=2" }),
 				);
+
 				expect(res.status).toBe(200);
 				const after = await snapshot();
+
 				const changed = after
 					.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
 					.map((row) => row.id);
+
 				expect(changed.sort()).toEqual([...ids].sort());
 			},
 		);
 
 		it("says the ticks in words on a full page load without JavaScript, not Choose rows", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 			);
+
 			expect(html).toMatch(
 				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
 			);
@@ -1780,10 +1962,12 @@ describe("select several transactions", () => {
 
 		it("keeps the ticks through a filter change, and counts the rows it hides as not on this page", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam(ids)}`,
 				true,
 			);
+
 			expect(html).toContain("No transactions match these filters.");
 			expect(html).toMatch(
 				/id="selected-count"[^>]*>3 selected<span class="sr-only">, 3 not on this page<\/span>/,
@@ -1793,10 +1977,12 @@ describe("select several transactions", () => {
 
 		it("keeps the ticks when Set category opens, and lists the ones not on this page behind the sheet", async () => {
 			const ids = await pageOneTicks();
+
 			const res = await post(
 				"/transactions/select/category",
 				form(ids, { back: "/transactions?month=all&page=2" }),
 			);
+
 			const html = await res.text();
 			expect(html).toContain("Set category for 3");
 			expect(html).toContain("3 not on this page");
@@ -1804,10 +1990,12 @@ describe("select several transactions", () => {
 
 		it("sends Select all's ticks and the page's rows as parameters, not in its own address", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 				true,
 			);
+
 			const link = html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0] ?? "";
 			expect(link).toContain(
 				'hx-include="#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]"',
@@ -1820,10 +2008,12 @@ describe("select several transactions", () => {
 		it("ticks the page's rows and keeps the ticks not on this page when Select all comes back", async () => {
 			const off = await pageOneTicks();
 			const pageTwo = rowIds(await pageHtml("month=all&page=2&select=1"));
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&focus=set-category-selection&ids=${ticksParam(off)}&page-ids=${pageTwo.join(",")}`,
 				true,
 			);
+
 			expect(html).toMatch(
 				new RegExp(
 					`id="selected-count"[^>]*>${off.length + pageTwo.length} selected<span class="sr-only">, ${off.length} not on this page</span>`,
@@ -1833,10 +2023,12 @@ describe("select several transactions", () => {
 
 		it("pushes the address with the ticks in it, and leaves the focus marker out", async () => {
 			const ids = await pageOneTicks();
+
 			const res = await request(
 				`/transactions?month=all&page=2&select=1&focus=first-tick&ids=${ticksParam(ids)}`,
 				htmxHeaders,
 			);
+
 			expect(res.headers.get("HX-Push-Url")).toBe(
 				`/transactions?month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 			);
@@ -1849,18 +2041,22 @@ describe("select several transactions", () => {
 
 		it("keeps the ticks on a reload, as they ride in the address", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 			);
+
 			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
 		});
 
 		it("drops every tick with Done, whose link carries no ticks", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 				true,
 			);
+
 			expect(html).toMatch(
 				/href="\/transactions\?month=all&amp;page=2" id="select-toggle"/,
 			);
@@ -1893,10 +2089,12 @@ describe("select several transactions", () => {
 
 		it("lists 101 real ticks without trimming any of them", async () => {
 			const ids = await addHundredOneRows();
+
 			const html = await pageHtml(
 				`month=all&select=1&ids=${ticksParam(ids)}`,
 				true,
 			);
+
 			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
 			expect(html).toContain("Select 100 or fewer transactions.");
 			expect(tickedIds(html)).toHaveLength(101);
@@ -1904,10 +2102,12 @@ describe("select several transactions", () => {
 
 		it("keeps all 101 ticks when a refused Exclude redraws the list", async () => {
 			const ids = await addHundredOneRows();
+
 			const res = await post(
 				"/transactions/select/exclude",
 				form(ids, { back: "/transactions?month=all" }),
 			);
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
@@ -1916,10 +2116,12 @@ describe("select several transactions", () => {
 
 		it("keeps all 101 ticks in a refused Set category sheet, and in its Cancel", async () => {
 			const ids = await addHundredOneRows();
+
 			const res = await post(
 				"/transactions/select/category",
 				form(ids, { back: "/transactions?month=all" }),
 			);
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
@@ -1964,6 +2166,7 @@ describe("select several transactions", () => {
 
 			it("keeps #main in all mode with a row unticked from the whole set", async () => {
 				const [unticked] = await firstPageIds();
+
 				const res = await request(
 					`/transactions/select/count?${new URLSearchParams([
 						["back", "/transactions?month=all"],
@@ -1972,6 +2175,7 @@ describe("select several transactions", () => {
 					])}`,
 					{ headers: { "HX-Current-URL": current } },
 				);
+
 				expect(res.headers.get("HX-Replace-Url")).toBe(
 					`/transactions?month=all&select=1&all=1&unticked=${unticked}#main`,
 				);
@@ -1984,6 +2188,7 @@ describe("select several transactions", () => {
 					])}`,
 					{ headers: { "HX-Current-URL": current } },
 				);
+
 				expect(res.headers.get("HX-Replace-Url")).toBe(
 					"/transactions?month=2026-09&select=1#main",
 				);
@@ -1991,12 +2196,14 @@ describe("select several transactions", () => {
 
 			it("keeps an element id of 64 characters", async () => {
 				const id = "a".repeat(64);
+
 				const res = await countReply(
 					[],
 					[],
 					false,
 					`http://tally.test/transactions?select=1#${id}`,
 				);
+
 				expect(res.headers.get("HX-Replace-Url")).toBe(
 					`/transactions?month=all&select=1#${id}`,
 				);
@@ -2057,6 +2264,7 @@ describe("select several transactions", () => {
 		it("moves focus to the count when no Select all is drawn, so focus stays in the bar", async () => {
 			// The whole month is selected, so no link is left to tick anything (#321): focus stays on the count.
 			const pageRows = await pageTwoRows();
+
 			const text = await (
 				await request(
 					`/transactions/select/count?${new URLSearchParams([
@@ -2068,6 +2276,7 @@ describe("select several transactions", () => {
 					])}`,
 				)
 			).text();
+
 			expect(selectAllTag(text)).toBe("");
 			expect(text).toMatch(
 				/^<span[^>]*tabindex="-1"[^>]*autofocus[^>]*>\d+ selected<\/span>/,
@@ -2078,6 +2287,7 @@ describe("select several transactions", () => {
 			const withLine = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(await pageOneTicks())}`,
 			);
+
 			expect(withLine).toContain(
 				'<input type="hidden" name="not-on-page" value="1"',
 			);
@@ -2087,26 +2297,32 @@ describe("select several transactions", () => {
 
 		it("submits the ticks with the no-JS page links through the selection form, and never puts them in the htmx requests", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
 			);
+
 			const links = pageLinks(html);
 			expect(links.length).toBeGreaterThan(0);
+
 			for (const link of links) {
 				// Without JavaScript the link submits the selection form, which draws each tick as a checked box (#383).
 				expect(attribute(link, "formaction")).toBe("/transactions");
 				expect(attribute(link, "hx-get")).toContain("focus=first-tick");
 				expect(attribute(link, "hx-get")).not.toContain("ids=");
 			}
+
 			expect(
 				submittedFields(html)
 					.getAll("ids")
 					.map(Number)
 					.sort((a, b) => a - b),
 			).toEqual([...ids].sort((a, b) => a - b));
+
 			// The filter form's Apply submits the same checked boxes, since they are the selection form's own (#383).
 			const filters =
 				html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+
 			expect(filters).not.toContain('name="ids"');
 		});
 
@@ -2122,15 +2338,19 @@ describe("select several transactions", () => {
 
 		it("keeps select mode and every tick in Clear filters when the filters match nothing", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam(ids)}`,
 			);
+
 			expect(html).toContain("No transactions match these filters.");
 			const clear = html.match(/<a [^>]*>Clear filters<\/a>/)?.[0] ?? "";
+
 			const params = new URL(
 				attribute(clear, "href") ?? "",
 				"http://tally.test",
 			).searchParams;
+
 			expect(params.get("select")).toBe("1");
 			expect(params.get("ids")?.split(",").map(Number)).toEqual(ids);
 		});
@@ -2140,15 +2360,19 @@ describe("select several transactions", () => {
 			const pageRows = await pageTwoRows();
 			// The page's first row is ticked already, so the link must not add it twice.
 			const ticked = [...off, pageRows[0] as number];
+
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ticked)}`,
 			);
+
 			const href = selectAllHref(html) ?? "";
+
 			const linked =
 				new URL(href, "http://tally.test").searchParams
 					.get("ids")
 					?.split(",")
 					.map(Number) ?? [];
+
 			expect(new Set(linked).size).toBe(linked.length);
 			expect([...linked].sort()).toEqual([...off, ...pageRows].sort());
 			const after = await (await request(href)).text();
@@ -2161,10 +2385,12 @@ describe("select several transactions", () => {
 
 		it("says a refused Exclude over 100 once, in the bar", async () => {
 			const ids = await addHundredOneRows();
+
 			const res = await post(
 				"/transactions/select/exclude",
 				form(ids, { back: "/transactions?month=all" }),
 			);
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(html.match(/Select 100 or fewer transactions\./g)).toHaveLength(1);
@@ -2179,10 +2405,12 @@ describe("select several transactions", () => {
 			const addCash = list.match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
 			// Without JavaScript the button submits the selection form: the address it sends carries the ticks as drawn (#383).
 			expect(attribute(addCash, "formaction")).toBe("/transactions/cash/new");
+
 			const submitted = new URL(
 				addCashSubmitAddress(list),
 				"http://tally.test",
 			);
+
 			expect(submitted.searchParams.get("back")).toBe(
 				"/transactions?month=all",
 			);
@@ -2199,11 +2427,13 @@ describe("select several transactions", () => {
 			);
 			// Closing puts focus back on Add cash (#87), with the ticks kept.
 			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}&focus=add-cash`;
+
 			const sheetUrl = `/transactions/cash/new?${new URLSearchParams([
 				["back", "/transactions?month=all"],
 				["select", "1"],
 				...ids.map((id) => ["ids", String(id)]),
 			])}`;
+
 			const sheet = await (await request(sheetUrl, htmxHeaders)).text();
 			const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
 			expect(attribute(backdrop ?? "", "href")).toBe(close);
@@ -2217,6 +2447,7 @@ describe("select several transactions", () => {
 
 		it("keeps Select mode and the ticks when the Add cash form is refused, in its close link, Cancel and fields", async () => {
 			const ids = await pageOneTicks();
+
 			const res = await post(
 				"/transactions/cash",
 				form(ids, {
@@ -2229,6 +2460,7 @@ describe("select several transactions", () => {
 					select: "1",
 				}),
 			);
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(html).toContain("Enter an amount greater than zero.");
@@ -2238,17 +2470,22 @@ describe("select several transactions", () => {
 			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
 			// Closing puts focus back on Add cash (#87), with the ticks kept.
 			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}&focus=add-cash`;
+
 			const backdrop =
 				html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0] ?? "";
+
 			expect(attribute(backdrop, "href")).toBe(close);
 			const cancel = html.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
 			expect(attribute(cancel, "href")).toBe(close);
+
 			// The refused form carries Select mode and the ticks, so its next try keeps them too.
 			const cashForm =
 				html.match(
 					/<form[^>]*action="\/transactions\/cash"[\s\S]*?<\/form>/,
 				)?.[0] ?? "";
+
 			expect(cashForm).toContain('name="select" value="1"');
+
 			for (const id of ids)
 				expect(cashForm).toContain(`name="ids" value="${id}"`);
 		});
@@ -2256,9 +2493,11 @@ describe("select several transactions", () => {
 		it("counts 100 real ticks on a full page load, past a missing one and a split parent, and submits only those from the links", async () => {
 			const real = (await addHundredOneRows()).slice(0, 100);
 			await splitParent();
+
 			const html = await pageHtml(
 				`month=all&select=1&ids=${ticksParam([...real, 999999, 110])}`,
 			);
+
 			expect(html).toMatch(/id="selected-count"[^>]*>100 selected/);
 			expect(html).not.toContain("Select 100 or fewer transactions.");
 			expect(html).not.toMatch(
@@ -2269,6 +2508,7 @@ describe("select several transactions", () => {
 			);
 			const links = pageLinks(html);
 			expect(links.length).toBeGreaterThan(0);
+
 			// Without JavaScript the page links and Add cash submit the selection form, which draws every tick (#383).
 			for (const link of links)
 				expect(attribute(link, "formaction")).toBe("/transactions");
@@ -2292,10 +2532,12 @@ describe("select several transactions", () => {
 		it("pushes only the 100 real ticks into the address on an htmx list change", async () => {
 			const real = (await addHundredOneRows()).slice(0, 100);
 			await splitParent();
+
 			const res = await request(
 				`/transactions?month=all&select=1&ids=${ticksParam([...real, 999999, 110])}`,
 				htmxHeaders,
 			);
+
 			const pushed = res.headers.get("HX-Push-Url") ?? "";
 			expect(sorted(idsIn(pushed))).toEqual(sorted(real));
 			expect(pushed).not.toMatch(/focus=|page-ids=/);
@@ -2303,6 +2545,7 @@ describe("select several transactions", () => {
 
 		it("pushes month=all with the ticks when a search is typed into an empty box in Select mode", async () => {
 			const ids = await pageOneTicks();
+
 			const res = await request(
 				`/transactions?select=1&q=abc&ids=${ticksParam(ids)}`,
 				{
@@ -2312,6 +2555,7 @@ describe("select several transactions", () => {
 					},
 				},
 			);
+
 			expect(res.headers.get("HX-Push-Url")).toBe(
 				`/transactions?q=abc&month=all&select=1&ids=${ticksParam(ids)}`,
 			);
@@ -2320,6 +2564,7 @@ describe("select several transactions", () => {
 		it("names this month in the pushed address when a month picked from an empty box is this one", async () => {
 			const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 			const ids = await pageOneTicks();
+
 			const res = await request(
 				`/transactions?select=1&q=abc&month=${thisMonth}&ids=${ticksParam(ids)}`,
 				{
@@ -2329,6 +2574,7 @@ describe("select several transactions", () => {
 					},
 				},
 			);
+
 			expect(res.headers.get("HX-Push-Url")).toBe(
 				`/transactions?q=abc&month=${thisMonth}&select=1&ids=${ticksParam(ids)}`,
 			);
@@ -2337,24 +2583,30 @@ describe("select several transactions", () => {
 		it("acts on exactly the 100 real ticks when one of 101 posted ids is stale", async () => {
 			const real = (await addHundredOneRows()).slice(0, 100);
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const res = await post(
 				"/transactions/select/exclude",
 				form([...real, 999999], { back: "/transactions?month=all" }),
 			);
+
 			expect(res.status).toBe(200);
 			const after = (await snapshot()) as SnapshotRow[];
+
 			const changed = after
 				.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
 				.map((row) => row.id);
+
 			expect(sorted(changed)).toEqual(sorted(real));
 		});
 
 		it("refuses 101 real ticks with one stale among them, says 101 selected and the limit once, in the bar", async () => {
 			const real = await addHundredOneRows();
+
 			const res = await post(
 				"/transactions/select/exclude",
 				form([...real, 999999], { back: "/transactions?month=all" }),
 			);
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(html).toMatch(/id="selected-count"[^>]*>101 selected/);
@@ -2367,9 +2619,11 @@ describe("select several transactions", () => {
 
 		it("leaves a stale tick out of Clear filters' address when the filters match nothing", async () => {
 			const ids = await pageOneTicks();
+
 			const html = await pageHtml(
 				`month=all&select=1&q=zzz-no-such-merchant&ids=${ticksParam([...ids, 999999])}`,
 			);
+
 			expect(html).toContain("No transactions match these filters.");
 			const clear = html.match(/<a [^>]*>Clear filters<\/a>/)?.[0] ?? "";
 			expect(idsIn(attribute(clear, "href") ?? "")).toEqual(ids);
@@ -2388,6 +2642,7 @@ describe("select several transactions", () => {
 
 		it("leaves a stale tick out of a refused Add cash form's fields", async () => {
 			const ids = await pageOneTicks();
+
 			const res = await post(
 				"/transactions/cash",
 				form([...ids, 999999], {
@@ -2400,13 +2655,16 @@ describe("select several transactions", () => {
 					select: "1",
 				}),
 			);
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(html).not.toContain('value="999999"');
+
 			const cashForm =
 				html.match(
 					/<form[^>]*action="\/transactions\/cash"[\s\S]*?<\/form>/,
 				)?.[0] ?? "";
+
 			expect(
 				sorted(
 					[...cashForm.matchAll(/name="ids" value="(\d+)"/g)].map((m) =>
@@ -2432,12 +2690,14 @@ describe("select several transactions", () => {
 					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,is_split,category_id) SELECT 5200,account_id,date,-900,'ZQ TEST BAKERY',1,2 FROM transactions WHERE id=110",
 				),
 			]);
+
 			return Array.from({ length: 101 }, (_, i) => 5001 + i);
 		};
 
 		it("sets every transaction the filters match, past 100, and leaves a split parent and every other row alone", async () => {
 			const matched = await seedMatches();
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const res = await post(
 				"/transactions/select/category/save",
 				new URLSearchParams({
@@ -2446,11 +2706,13 @@ describe("select several transactions", () => {
 					back: "/transactions?month=all&q=ZQ+TEST+BAKERY",
 				}),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe("Set 101 transactions to Groceries.");
 			const beforeById = new Map(before.map((row) => [row.id, row]));
+
 			for (const row of (await snapshot()) as SnapshotRow[]) {
 				if (matched.includes(row.id))
 					expect(row).toMatchObject({
@@ -2468,6 +2730,7 @@ describe("select several transactions", () => {
 					"SELECT COUNT(*) AS n FROM transactions WHERE is_split = 0",
 				).first<{ n: number }>()
 			)?.n ?? 0;
+
 		const selectableIds = async () =>
 			(
 				await env.DB.prepare(
@@ -2523,6 +2786,7 @@ describe("select several transactions", () => {
 			const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 			const html = await pageHtml(`month=${month}&select=1`);
 			const ids = rowIds(html);
+
 			const text = await (
 				await request(
 					`/transactions/select/count?${new URLSearchParams([
@@ -2532,6 +2796,7 @@ describe("select several transactions", () => {
 					])}`,
 				)
 			).text();
+
 			expect(text).toMatch(
 				new RegExp(
 					`>Select all \\d+ in ${monthLabel(month, todayIn(DEFAULT_TIME_ZONE))}</a>`,
@@ -2547,6 +2812,7 @@ describe("select several transactions", () => {
 			const counted = await wholeCount(ids, rest, back);
 			expect(counted).toContain(`${total - 1} selected`);
 			expect(counted).toContain(`>Select all ${total} in all months</a>`);
+
 			// The reply's address keeps the whole set and the row that was unticked from it.
 			const replaced = (
 				await request(
@@ -2558,6 +2824,7 @@ describe("select several transactions", () => {
 					])}`,
 				)
 			).headers.get("HX-Replace-Url");
+
 			expect(replaced).toContain("all=1");
 			expect(replaced).toContain(`unticked=${first}`);
 
@@ -2566,7 +2833,9 @@ describe("select several transactions", () => {
 					"SELECT id, is_split, category_id FROM transactions",
 				).all<{ id: number; is_split: number; category_id: number | null }>()
 			).results;
+
 			const firstBefore = before.find((row) => row.id === first)?.category_id;
+
 			const res = await post(
 				"/transactions/select/category/save",
 				new URLSearchParams([
@@ -2578,17 +2847,20 @@ describe("select several transactions", () => {
 					...rest.map((id) => ["ids", String(id)]),
 				]),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe(
 				`Set ${await changedCount((await selectableIds()).filter((id) => id !== first))} transactions to Groceries.`,
 			);
+
 			const after = (
 				await env.DB.prepare(
 					"SELECT id, is_split, category_id FROM transactions",
 				).all<{ id: number; is_split: number; category_id: number | null }>()
 			).results;
+
 			// A refund that follows its purchase keeps its own category: its purchase took the category (#346).
 			const followers = new Set(
 				(
@@ -2597,6 +2869,7 @@ describe("select several transactions", () => {
 					).all<{ id: number }>()
 				).results.map((row) => row.id),
 			);
+
 			for (const row of after) {
 				if (row.id === first) expect(row.category_id).toBe(firstBefore);
 				else if (followers.has(row.id))
@@ -2609,8 +2882,10 @@ describe("select several transactions", () => {
 
 		it("reads the whole set on the filters its address names, so a search changes the count", async () => {
 			await seedMatches();
+
 			const search = (q: string) =>
 				wholeCount([], [], `/transactions?month=all&q=${q}`);
+
 			// With no link drawn, the words sit in the count's focus stop (SelectedCount's fallback, #455).
 			expect(await search("ZQ+TEST+BAKERY")).toMatch(
 				/^(?:<span [^>]*>)?101 selected</,
@@ -2623,6 +2898,7 @@ describe("select several transactions", () => {
 		it("excludes every row the whole set holds past 100, and leaves a split parent and the rows the filters miss alone", async () => {
 			const matched = await seedMatches();
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const res = await post(
 				"/transactions/select/exclude",
 				new URLSearchParams({
@@ -2630,11 +2906,13 @@ describe("select several transactions", () => {
 					back: "/transactions?month=all&q=ZQ+TEST+BAKERY",
 				}),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe("Excluded 101 transactions.");
 			const beforeById = new Map(before.map((row) => [row.id, row]));
+
 			for (const row of (await snapshot()) as SnapshotRow[]) {
 				if (matched.includes(row.id))
 					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
@@ -2648,6 +2926,7 @@ describe("select several transactions", () => {
 				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=990",
 			).run();
 			const back = "/transactions?month=all&category=2";
+
 			const matched = new Set(
 				(
 					await env.DB.prepare(
@@ -2655,17 +2934,22 @@ describe("select several transactions", () => {
 					).all<{ id: number }>()
 				).results.map((row) => row.id),
 			);
+
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const counted = Number(
 				(await wholeCount([], [], back)).match(
 					/^(?:<span [^>]*>)?(\d+) selected/,
 				)?.[1],
 			);
+
 			expect(counted).toBe(matched.size);
+
 			const res = await post(
 				"/transactions/select/exclude",
 				new URLSearchParams({ all: "1", back }),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
@@ -2676,6 +2960,7 @@ describe("select several transactions", () => {
 				excluded_source: "user",
 			});
 			const beforeById = new Map(before.map((row) => [row.id, row]));
+
 			for (const row of after) {
 				if (matched.has(row.id)) expect(row.excluded).toBe(1);
 				else expect(row).toEqual(beforeById.get(row.id));
@@ -2690,6 +2975,7 @@ describe("select several transactions", () => {
 		const expectWholePurchaseTick = async (tick: [string, string]) => {
 			await splitParent();
 			const back = "/transactions?month=all&category=2";
+
 			const matched = new Set(
 				(
 					await env.DB.prepare(
@@ -2697,16 +2983,20 @@ describe("select several transactions", () => {
 					).all<{ id: number }>()
 				).results.map((row) => row.id),
 			);
+
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const res = await post(
 				"/transactions/select/exclude",
 				new URLSearchParams([tick, ["all", "1"], ["back", back]]),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe(`Excluded ${matched.size + 1} transactions.`);
 			const beforeById = new Map(before.map((row) => [row.id, row]));
+
 			for (const row of (await snapshot()) as SnapshotRow[]) {
 				if (matched.has(row.id)) expect(row.excluded).toBe(1);
 				else if ([110, 990, 991].includes(row.id))
@@ -2751,10 +3041,12 @@ describe("select several transactions", () => {
 				/^(?:<span [^>]*>)?101 selected</,
 			);
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const res = await post(
 				"/transactions/select/exclude",
 				new URLSearchParams({ all: "1", back }),
 			);
+
 			expect(res.status).toBe(200);
 			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 			expect(trigger.toast.message).toBe(
@@ -2762,6 +3054,7 @@ describe("select several transactions", () => {
 			);
 			expect(trigger.announce).toBe(trigger.toast.message);
 			const beforeById = new Map(before.map((row) => [row.id, row]));
+
 			for (const row of (await snapshot()) as SnapshotRow[]) {
 				if (already.includes(row.id))
 					expect(row).toEqual(beforeById.get(row.id));
@@ -2773,6 +3066,7 @@ describe("select several transactions", () => {
 
 		it("opens Set category over the whole set with its all-mode fields, and titles every row it changes", async () => {
 			await seedMatches();
+
 			const res = await post(
 				"/transactions/select/category",
 				new URLSearchParams({
@@ -2780,6 +3074,7 @@ describe("select several transactions", () => {
 					back: "/transactions?month=all&q=ZQ+TEST+BAKERY",
 				}),
 			);
+
 			const html = await res.text();
 			expect(html).toContain("Set category for 101");
 			expect(html).toMatch(/<input type="hidden" name="all" value="1"/);
@@ -2790,12 +3085,14 @@ describe("select several transactions", () => {
 			const ids = rowIds(await pageHtml("month=all&select=1"));
 			const [first] = ids;
 			const total = await selectableTotal();
+
 			const html = await (
 				await request(
 					`/transactions?month=all&select=1&all=1&focus=set-category-selection&unticked=${first}`,
 					{ headers: { "HX-Request": "true" } },
 				)
 			).text();
+
 			expect(html).toContain(`${total} selected`);
 			expect(tickedIds(html)).toContain(first);
 			expect(html).not.toMatch(/>Select all \d+ in all months<\/a>/);
@@ -2817,6 +3114,7 @@ describe("select several transactions", () => {
 			await env.DB.prepare(
 				"UPDATE transactions SET date = '2000-01-01' WHERE id BETWEEN 5001 AND 5101",
 			).run();
+
 			return matched;
 		};
 
@@ -2824,36 +3122,44 @@ describe("select several transactions", () => {
 			const matched = await seedOldMatches();
 			const old = rowIds(await pageHtml("month=all&select=1"));
 			const search = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+
 			// The fields a filter change posts: the old page's boxes, all of them checked, and the old page's ids.
 			const fields: [string, string][] = [
 				["page-ids", old.join(",")],
 				["all", "1"],
 				...old.map((id): [string, string] => ["ids", String(id)]),
 			];
+
 			const list = await (
 				await request(`${search}&select=1&${new URLSearchParams(fields)}`, {
 					headers: { "HX-Request": "true" },
 				})
 			).text();
+
 			expect(list).toContain("101 selected");
 			expect(list).not.toContain("not on this page");
+
 			const counted = await (
 				await request(
 					`/transactions/select/count?${new URLSearchParams([["back", search], ...fields])}`,
 				)
 			).text();
+
 			expect(counted).toContain("101 selected");
 			expect(counted).not.toContain("not on this page");
 			const before = (await snapshot()) as SnapshotRow[];
+
 			const res = await post(
 				"/transactions/select/category/save",
 				new URLSearchParams([["back", search], ["category", "1"], ...fields]),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe("Set 101 transactions to Groceries.");
 			const beforeById = new Map(before.map((row) => [row.id, row]));
+
 			for (const row of (await snapshot()) as SnapshotRow[]) {
 				if (matched.includes(row.id))
 					expect(row).toMatchObject({
@@ -2867,13 +3173,16 @@ describe("select several transactions", () => {
 		it("after Select all, keeps a tick the new filters hide on the not-on-this-page line, and counts none of the old page's boxes", async () => {
 			await seedOldMatches();
 			const old = rowIds(await pageHtml("month=all&select=1"));
+
 			// A row the search doesn't match and the old page doesn't show: a tick made before the filters changed.
 			const hidden = await env.DB.prepare(
 				`SELECT id FROM transactions WHERE is_split = 0 AND id < 5000 AND id NOT IN (${old.map(() => "?").join(",")}) ORDER BY id LIMIT 1`,
 			)
 				.bind(...old)
 				.first<{ id: number }>();
+
 			expect(hidden).not.toBeNull();
+
 			const counted = await (
 				await request(
 					`/transactions/select/count?${new URLSearchParams([
@@ -2885,6 +3194,7 @@ describe("select several transactions", () => {
 					])}`,
 				)
 			).text();
+
 			expect(counted).toContain("102 selected");
 			expect(counted).toContain("1 not on this page");
 		});
@@ -2896,7 +3206,9 @@ describe("select several transactions", () => {
 			)
 				.bind(...old)
 				.first<{ id: number }>();
+
 			if (!row) throw new Error("no selectable row off the old page");
+
 			return row.id;
 		};
 
@@ -2905,6 +3217,7 @@ describe("select several transactions", () => {
 			const old = rowIds(await pageHtml("month=all&select=1"));
 			const x = await hiddenRow(old);
 			const total = await selectableTotal();
+
 			const reply = await request(
 				`/transactions?${new URLSearchParams([
 					["month", "all"],
@@ -2916,12 +3229,16 @@ describe("select several transactions", () => {
 				])}`,
 				{ headers: { "HX-Request": "true" } },
 			);
+
 			const html = await reply.text();
 			expect(html).toContain(`${total} selected`);
 			expect(html).not.toContain("not on this page");
+
 			const bar =
 				html.match(/<span id="select-all-page"[\s\S]*?<\/span>/)?.[0] ?? "";
+
 			expect(bar).toContain(`<input type="hidden" name="held" value="${x}"`);
+
 			const pushed =
 				new URL(
 					reply.headers.get("HX-Push-Url") ?? "",
@@ -2930,6 +3247,7 @@ describe("select several transactions", () => {
 					.get("ids")
 					?.split(",")
 					.map(Number) ?? [];
+
 			expect(pushed).toContain(x);
 		});
 
@@ -2937,6 +3255,7 @@ describe("select several transactions", () => {
 			await seedOldMatches();
 			const old = rowIds(await pageHtml("month=all&select=1"));
 			const x = await hiddenRow(old);
+
 			// The fields a search change posts: the old page's boxes, all of them checked, and the held tick.
 			const fields: [string, string][] = [
 				["page-ids", old.join(",")],
@@ -2944,21 +3263,26 @@ describe("select several transactions", () => {
 				...old.map((id): [string, string] => ["ids", String(id)]),
 				["held", String(x)],
 			];
+
 			const list = await (
 				await request(
 					`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(fields)}`,
 					{ headers: { "HX-Request": "true" } },
 				)
 			).text();
+
 			expect(list).toContain("102 selected");
 			expect(list).toContain("1 not on this page");
 			expect(tickedIds(list)).toContain(x);
+
 			const count = await request(
 				`/transactions/select/count?${new URLSearchParams([["back", "/transactions?month=all&q=ZQ+TEST+BAKERY"], ...fields])}`,
 			);
+
 			const counted = await count.text();
 			expect(counted).toContain("102 selected");
 			expect(counted).toContain("1 not on this page");
+
 			const replaced =
 				new URL(
 					count.headers.get("HX-Replace-Url") ?? "",
@@ -2967,12 +3291,14 @@ describe("select several transactions", () => {
 					.get("ids")
 					?.split(",")
 					.map(Number) ?? [];
+
 			expect(replaced).toContain(x);
 			await env.DB.prepare(
 				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
 			)
 				.bind(x)
 				.run();
+
 			const res = await post(
 				"/transactions/select/category/save",
 				new URLSearchParams([
@@ -2981,6 +3307,7 @@ describe("select several transactions", () => {
 					...fields,
 				]),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
@@ -2999,6 +3326,7 @@ describe("select several transactions", () => {
 			const total = await selectableTotal();
 			// X is on the page, but its box is not posted: it was unticked. The held field still says it was held.
 			const pageIds = [...old, x];
+
 			const count = await request(
 				`/transactions/select/count?${new URLSearchParams([
 					["page-ids", pageIds.join(",")],
@@ -3008,6 +3336,7 @@ describe("select several transactions", () => {
 					["held", String(x)],
 				])}`,
 			);
+
 			expect(await count.text()).toContain(`${total - 1} selected`);
 			const replaced = count.headers.get("HX-Replace-Url") ?? "";
 			expect(replaced).toContain(`unticked=${x}`);
@@ -3017,6 +3346,7 @@ describe("select several transactions", () => {
 					?.split(",")
 					.map(Number) ?? [],
 			).not.toContain(x);
+
 			// The search change carries what the reply left in the form: the unticked row, and no held one.
 			const listed = await (
 				await request(
@@ -3031,6 +3361,7 @@ describe("select several transactions", () => {
 					{ headers: { "HX-Request": "true" } },
 				)
 			).text();
+
 			expect(listed).toContain("101 selected");
 			expect(listed).not.toContain("not on this page");
 			expect(tickedIds(listed)).not.toContain(x);
@@ -3040,6 +3371,7 @@ describe("select several transactions", () => {
 			await seedOldMatches();
 			const old = rowIds(await pageHtml("month=all&select=1"));
 			const x = await hiddenRow(old);
+
 			const reply = await request(
 				`/transactions?${new URLSearchParams([
 					["month", "all"],
@@ -3051,14 +3383,18 @@ describe("select several transactions", () => {
 				])}`,
 				{ headers: { "HX-Request": "true" } },
 			);
+
 			const pushed = new URL(
 				reply.headers.get("HX-Push-Url") ?? "",
 				"http://tally.test",
 			);
+
 			pushed.searchParams.set("q", "ZQ TEST BAKERY");
+
 			const html = await (
 				await request(`${pushed.pathname}${pushed.search}`)
 			).text();
+
 			expect(html).toContain("102 selected");
 			expect(html).toContain("1 not on this page");
 		});
@@ -3081,6 +3417,7 @@ describe("select several transactions", () => {
 			)
 				.bind(x)
 				.run();
+
 			// The search after Select all: the held tick is off its rows, so it is drawn on the line, ticked.
 			const narrowed = await (
 				await request(
@@ -3093,10 +3430,12 @@ describe("select several transactions", () => {
 					{ headers: { "HX-Request": "true" } },
 				)
 			).text();
+
 			expect(narrowed).toContain("102 selected");
 			expect(narrowed).toContain(`name="not-on-page-ids" value="${x}"`);
 			// The row's box is unticked on the line: the line still lists it, but its box posts nothing.
 			const zq = pageIdsOf(narrowed);
+
 			const count = await request(
 				`/transactions/select/count?${new URLSearchParams([
 					["back", search],
@@ -3107,6 +3446,7 @@ describe("select several transactions", () => {
 					...zq.map((id): [string, string] => ["ids", String(id)]),
 				])}`,
 			);
+
 			const counted = await count.text();
 			expect(counted).toContain("101 selected");
 			expect(counted).not.toContain("not on this page");
@@ -3119,6 +3459,7 @@ describe("select several transactions", () => {
 					.map(Number) ?? [],
 			).not.toContain(x);
 			expect(counted).toContain(`name="unticked" value="${x}"`);
+
 			// Clearing the search carries what the reply left in the form: the unticked row, which stays out.
 			const cleared = await (
 				await request(
@@ -3131,9 +3472,11 @@ describe("select several transactions", () => {
 					{ headers: { "HX-Request": "true" } },
 				)
 			).text();
+
 			expect(cleared).toContain(`${total - 1} selected`);
 			expect(cleared).not.toContain("not on this page");
 			expect(tickedIds(cleared)).not.toContain(x);
+
 			const res = await post(
 				"/transactions/select/category/save",
 				new URLSearchParams([
@@ -3145,6 +3488,7 @@ describe("select several transactions", () => {
 					...zq.map((id): [string, string] => ["ids", String(id)]),
 				]),
 			);
+
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
@@ -3162,6 +3506,7 @@ describe("select several transactions", () => {
 			await seedOldMatches();
 			const old = rowIds(await pageHtml("month=all&select=1"));
 			const x = await hiddenRow(old);
+
 			const zq = pageIdsOf(
 				await (
 					await request(
@@ -3177,6 +3522,7 @@ describe("select several transactions", () => {
 					)
 				).text(),
 			);
+
 			const listed = await request(
 				`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(
 					[
@@ -3189,6 +3535,7 @@ describe("select several transactions", () => {
 				)}`,
 				{ headers: { "HX-Request": "true" } },
 			);
+
 			const html = await listed.text();
 			expect(html).toContain("101 selected");
 			expect(html).not.toContain("not on this page");
@@ -3199,8 +3546,10 @@ describe("select several transactions", () => {
 
 		describe("past 100 rows unticked from the whole set (#423)", () => {
 			const ALL_BACK = "/transactions?month=all";
+
 			const WORDS_RE =
 				/<div id="selection-limit"[^>]*><p[^>]*role="alert"[^>]*>[\s\S]*?Untick 100 or fewer\. To leave out more, filter the list first\.<\/p><\/div>/;
+
 			/** A count's or action's request for the whole set, with these rows unticked from it. */
 			const unticking = (
 				unticked: (string | number)[],
@@ -3212,6 +3561,7 @@ describe("select several transactions", () => {
 					...extra,
 					...unticked.map((id) => ["unticked", String(id)]),
 				]);
+
 			const isDisabled = (html: string, id: string) =>
 				new RegExp(
 					`<button(?=[^>]*id="${id}")[^>]*\\sdisabled(?=[\\s>=])`,
@@ -3219,26 +3569,32 @@ describe("select several transactions", () => {
 
 			it("says the words in brick once more than 100 rows are unticked, and both actions wait", async () => {
 				const ids = await addHundredOneRows();
+
 				const res = await request(
 					`/transactions/select/count?${unticking(ids)}`,
 				);
+
 				const text = await res.text();
 				expect(text).toMatch(WORDS_RE);
 				expect(isDisabled(text, "set-category-selection")).toBe(true);
 				expect(isDisabled(text, "exclude-selection")).toBe(true);
+
 				const replaced = new URL(
 					`http://tally.test${res.headers.get("HX-Replace-Url")}`,
 				).searchParams.get("unticked");
+
 				expect(replaced?.split(",")).toHaveLength(101);
 			});
 
 			it("allows exactly 100 unticked rows, with the actions on and no words", async () => {
 				const ids = await addHundredOneRows();
+
 				const text = await (
 					await request(
 						`/transactions/select/count?${unticking(ids.slice(0, 100))}`,
 					)
 				).text();
+
 				expect(text).not.toContain("Untick 100 or fewer");
 				expect(isDisabled(text, "set-category-selection")).toBe(false);
 				expect(isDisabled(text, "exclude-selection")).toBe(false);
@@ -3253,11 +3609,13 @@ describe("select several transactions", () => {
 				async (_kind, extra) => {
 					const ids = await addHundredOneRows();
 					await splitParent();
+
 					const text = await (
 						await request(
 							`/transactions/select/count?${unticking([...ids.slice(0, 100), extra])}`,
 						)
 					).text();
+
 					expect(text).toMatch(WORDS_RE);
 					expect(isDisabled(text, "set-category-selection")).toBe(true);
 				},
@@ -3265,34 +3623,41 @@ describe("select several transactions", () => {
 
 			it("drops the words once a re-tick brings the unticks back to 100, and the actions come on", async () => {
 				const ids = await addHundredOneRows();
+
 				// The 101 unticks are hidden fields, and the first row is drawn and checked again, so 100 stay unticked.
 				const params = unticking(ids, [
 					["page-ids", String(ids[0])],
 					["ids", String(ids[0])],
 				]);
+
 				const text = await (
 					await request(`/transactions/select/count?${params}`)
 				).text();
+
 				expect(text).not.toContain("Untick 100 or fewer");
 				expect(isDisabled(text, "set-category-selection")).toBe(false);
 			});
 
 			it("counts a row unticked twice once, so 100 distinct unticks show no words", async () => {
 				const ids = await addHundredOneRows();
+
 				const text = await (
 					await request(
 						`/transactions/select/count?${unticking([...ids.slice(0, 100), ...ids.slice(0, 1)])}`,
 					)
 				).text();
+
 				expect(text).not.toContain("Untick 100 or fewer");
 			});
 
 			it("the whole-set link's request ticks the set again, so 101 unticks draw no words and no unticked fields", async () => {
 				const ids = await addHundredOneRows();
+
 				const html = await pageHtml(
 					`month=all&select=1&all=1&focus=set-category-selection&unticked=${ids.join(",")}`,
 					true,
 				);
+
 				expect(html).not.toContain("Untick 100 or fewer");
 				expect(html).not.toContain('name="unticked"');
 			});
@@ -3354,6 +3719,7 @@ describe("select several transactions", () => {
 			it("when 101 ticks and 101 unticks are both over, only the tick words show", async () => {
 				const ids = await addHundredOneRows();
 				const made = Array.from({ length: 101 }, (_, i) => 1000 + i);
+
 				const text = await (
 					await request(
 						`/transactions/select/count?${unticking(
@@ -3362,6 +3728,7 @@ describe("select several transactions", () => {
 						)}`,
 					)
 				).text();
+
 				expect(text.match(/Select 100 or fewer transactions\./g)).toHaveLength(
 					1,
 				);
@@ -3376,6 +3743,7 @@ describe("select several transactions", () => {
 					[5302, "2026-10-20"],
 					[5303, "2026-11-02"],
 				];
+
 				await env.DB.batch(
 					rows.map(([id, date]) =>
 						env.DB.prepare(
@@ -3394,6 +3762,7 @@ describe("select several transactions", () => {
 				vi.useFakeTimers({ toFake: ["Date"] });
 				vi.setSystemTime(new Date(instant));
 			};
+
 			const OCTOBER = "2026-10-31T16:00:00Z";
 			const NOVEMBER = "2026-11-01T16:00:00Z";
 
@@ -3402,6 +3771,7 @@ describe("select several transactions", () => {
 				const html = await (
 					await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")
 				).text();
+
 				return (
 					attribute(
 						html.match(/<input[^>]*id="selection-back"[^>]*>/)?.[0] ?? "",
@@ -3409,19 +3779,24 @@ describe("select several transactions", () => {
 					) ?? ""
 				);
 			};
+
 			/** The month an address names, or null when it names none. */
 			const monthOf = (address: string) =>
 				new URL(address, "http://tally.test").searchParams.get("month");
+
 			/** The back an Add cash address carries: the list the sheet returns to. */
 			const backOf = (address: string) =>
 				new URL(address, "http://tally.test").searchParams.get("back") ?? "";
+
 			/** The TURNOVER Select all list, as drawn at the moment. */
 			const addCashPage = async () =>
 				(await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")).text();
+
 			/** The Add cash button on that list (#383). */
 			const addCashTag = async () =>
 				(await addCashPage()).match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ??
 				"";
+
 			/** The address that button submits to without JavaScript, with the selection form's fields. */
 			const addCashHref = async () => addCashSubmitAddress(await addCashPage());
 
@@ -3434,6 +3809,7 @@ describe("select several transactions", () => {
 				atInstant(OCTOBER);
 				const back = await barBack();
 				atInstant(NOVEMBER);
+
 				const counted = await (
 					await request(
 						`/transactions/select/count?${new URLSearchParams([
@@ -3442,6 +3818,7 @@ describe("select several transactions", () => {
 						])}`,
 					)
 				).text();
+
 				expect(counted).toContain("2 selected");
 			});
 
@@ -3449,18 +3826,22 @@ describe("select several transactions", () => {
 				atInstant(OCTOBER);
 				const back = await barBack();
 				atInstant(NOVEMBER);
+
 				const res = await post(
 					"/transactions/select/exclude",
 					new URLSearchParams({ all: "1", back }),
 				);
+
 				expect(res.status).toBe(200);
 				expect(
 					JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 				).toBe("Excluded 2 transactions.");
 				expect(monthOf(res.headers.get("HX-Push-Url") ?? "")).toBe("2026-10");
+
 				const rows = await env.DB.prepare(
 					"SELECT id, excluded FROM transactions WHERE raw_name = 'ZQ TURNOVER' ORDER BY id",
 				).all<{ id: number; excluded: number }>();
+
 				expect(rows.results).toEqual([
 					{ id: 5301, excluded: 1 },
 					{ id: 5302, excluded: 1 },
@@ -3472,18 +3853,22 @@ describe("select several transactions", () => {
 				atInstant(OCTOBER);
 				const back = await barBack();
 				atInstant(NOVEMBER);
+
 				const res = await post(
 					"/transactions/select/category/save",
 					new URLSearchParams({ all: "1", back, category: "1" }),
 				);
+
 				expect(res.status).toBe(200);
 				expect(
 					JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 				).toBe("Set 2 transactions to Groceries.");
 				expect(monthOf(res.headers.get("HX-Push-Url") ?? "")).toBe("2026-10");
+
 				const rows = await env.DB.prepare(
 					"SELECT id, category_id FROM transactions WHERE raw_name = 'ZQ TURNOVER' ORDER BY id",
 				).all<{ id: number; category_id: number }>();
+
 				expect(rows.results).toEqual([
 					{ id: 5301, category_id: 1 },
 					{ id: 5302, category_id: 1 },
@@ -3493,6 +3878,7 @@ describe("select several transactions", () => {
 
 			it("pushes no month for an Exclude in the month on screen, as the address was before", async () => {
 				atInstant(OCTOBER);
+
 				const res = await post(
 					"/transactions/select/exclude",
 					new URLSearchParams({
@@ -3500,6 +3886,7 @@ describe("select several transactions", () => {
 						back: "/transactions?q=ZQ+TURNOVER&month=2026-10",
 					}),
 				);
+
 				expect(res.headers.get("HX-Push-Url")).toBe(
 					"/transactions?q=ZQ+TURNOVER",
 				);
@@ -3522,11 +3909,14 @@ describe("select several transactions", () => {
 				atInstant(OCTOBER);
 				const href = await addCashHref();
 				atInstant(NOVEMBER);
+
 				const sheet = await (
 					await request(href, { headers: { "HX-Request": "true" } })
 				).text();
+
 				const backdrop = sheet.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
 				const cancel = sheet.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+
 				for (const link of [backdrop ?? "", cancel]) {
 					const address = attribute(link, "href") ?? "";
 					expect(monthOf(address)).toBe("2026-10");
@@ -3534,10 +3924,12 @@ describe("select several transactions", () => {
 						new URL(address, "http://tally.test").searchParams.get("all"),
 					).toBe("1");
 				}
+
 				const backField = attribute(
 					sheet.match(/<input[^>]*name="back"[^>]*>/)?.[0] ?? "",
 					"value",
 				);
+
 				expect(backField).toBe(backOf(href));
 				expect(monthOf(backField ?? "")).toBe("2026-10");
 			});
@@ -3546,6 +3938,7 @@ describe("select several transactions", () => {
 				atInstant(OCTOBER);
 				const back = backOf(await addCashHref());
 				atInstant(NOVEMBER);
+
 				const res = await post(
 					"/transactions/cash",
 					new URLSearchParams({
@@ -3559,10 +3952,12 @@ describe("select several transactions", () => {
 						all: "1",
 					}),
 				);
+
 				expect(res.status).toBe(422);
 				const html = await res.text();
 				const backdrop = html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0];
 				const cancel = html.match(/<a [^>]*>Cancel<\/a>/)?.[0] ?? "";
+
 				for (const link of [backdrop ?? "", cancel]) {
 					const address = attribute(link, "href") ?? "";
 					expect(monthOf(address)).toBe("2026-10");
@@ -3570,6 +3965,7 @@ describe("select several transactions", () => {
 						new URL(address, "http://tally.test").searchParams.get("all"),
 					).toBe("1");
 				}
+
 				expect(
 					attribute(
 						html.match(/<input[^>]*name="back"[^>]*>/)?.[0] ?? "",
@@ -3580,6 +3976,7 @@ describe("select several transactions", () => {
 
 			it("pushes the list's address, with no month, for a saved Add cash on the month on screen", async () => {
 				atInstant(OCTOBER);
+
 				const res = await post(
 					"/transactions/cash",
 					new URLSearchParams({
@@ -3593,6 +3990,7 @@ describe("select several transactions", () => {
 						all: "1",
 					}),
 				);
+
 				expect(res.status).toBe(200);
 				expect(res.headers.get("HX-Push-Url")).toBe(
 					"/transactions?q=ZQ+TURNOVER",

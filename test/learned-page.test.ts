@@ -7,11 +7,13 @@ import { resetDemo } from "../src/demo/reset";
 
 const db = env.DB;
 const BASE = "http://tally.test";
+
 const INTRO =
 	"Tally files these the way you chose them. Forget one and Tally goes back to guessing.";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -26,6 +28,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -58,6 +61,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -204,8 +208,10 @@ describe("GET /settings: the contents row", () => {
 
 	it("says Nothing yet when there are no lines", async () => {
 		const { html } = await get("/settings");
+
 		const row =
 			html.split('href="/settings/learned"')[1]?.split("</a>")[0] ?? "";
+
 		expect(textOf(row)).toContain("Nothing yet");
 	});
 });
@@ -213,9 +219,11 @@ describe("GET /settings: the contents row", () => {
 describe("POST /settings/learned/forget", () => {
 	it("hides the line, keeps it hidden on a later render, and offers a ten-second Undo", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const { res, html } = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(res.status).toBe(200);
 		const t = trigger(res);
 		expect(t.toast?.message).toBe(
@@ -235,22 +243,28 @@ describe("POST /settings/learned/forget", () => {
 		await answer("NETFLIX.COM", "Entertainment");
 		const { html } = await get("/settings/learned");
 		expect(urlsIn(html).join(" ")).not.toMatch(/netflix/i);
+
 		const { res } = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(res.headers.get("location")).toBeNull();
 	});
 
 	it("is undone by Undo within the window, and the line comes back", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const forgot = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		const token = trigger(forgot.res).toast?.undo ?? "";
+
 		const undo = await post("/settings/learned/undo", {
 			token,
 			back: "/settings/learned",
 		});
+
 		expect(trigger(undo.res).toast?.message).toBe(
 			"Forget undone. Tally has that line back.",
 		);
@@ -266,9 +280,11 @@ describe("POST /settings/learned/forget", () => {
 				"UPDATE transactions SET updated_at = datetime('now', '-1 minute')",
 			)
 			.run();
+
 		const forgot = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		const token = trigger(forgot.res).toast?.undo ?? "";
 		await db
 			.prepare(
@@ -276,10 +292,12 @@ describe("POST /settings/learned/forget", () => {
 			)
 			.bind(Number(token))
 			.run();
+
 		const undo = await post("/settings/learned/undo", {
 			token,
 			back: "/settings/learned",
 		});
+
 		expect(trigger(undo.res).toast).toMatchObject({
 			type: "error",
 			message: "Undo expired. The line stays forgotten.",
@@ -306,9 +324,11 @@ describe("POST /settings/learned/forget", () => {
 		await db
 			.prepare("UPDATE transactions SET updated_at = '2026-10-02 12:00:00'")
 			.run();
+
 		const first = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(textOf((await get("/settings/learned")).html)).toContain(
 			"Nothing yet",
 		);
@@ -330,17 +350,21 @@ describe("POST /settings/learned/forget", () => {
 		expect(textOf((await get("/settings/learned")).html)).toContain(
 			"Netflix.com → Groceries",
 		);
+
 		// The second Forget hides it again; its Undo must put back the state just before it.
 		const second = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(textOf((await get("/settings/learned")).html)).toContain(
 			"Nothing yet",
 		);
+
 		const undo = await post("/settings/learned/undo", {
 			token: trigger(second.res).toast?.undo ?? "",
 			back: "/settings/learned",
 		});
+
 		expect(trigger(undo.res).toast?.message).toBe(
 			"Forget undone. Tally has that line back.",
 		);
@@ -349,11 +373,13 @@ describe("POST /settings/learned/forget", () => {
 		expect(after).toContain("From 1 of your answers");
 		// The Change form lists every category, so only the line itself says what it files under.
 		expect(after).not.toContain("Netflix.com → Entertainment");
+
 		const row = await db
 			.prepare(
 				"SELECT forgotten_at AS f, previous_forgotten_at AS p FROM forgotten_texts",
 			)
 			.first<{ f: string; p: string | null }>();
+
 		expect(row).toEqual({ f: "2026-10-10 09:00:00", p: null });
 	});
 
@@ -361,13 +387,16 @@ describe("POST /settings/learned/forget", () => {
 		const { res } = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(trigger(res).toast?.message).toBe(
 			"Forgot Netflix.com. Tally goes back to guessing.",
 		);
 		expect(trigger(res).toast?.undo).toBeUndefined();
+
 		const rows = await db
 			.prepare("SELECT COUNT(*) AS n FROM forgotten_texts")
 			.first<{ n: number }>();
+
 		expect(rows?.n).toBe(0);
 	});
 
@@ -380,11 +409,13 @@ describe("POST /settings/learned/forget", () => {
 
 	it("works without script: a plain form post goes back to the page", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const { res } = await post(
 			"/settings/learned/forget",
 			{ text: "netflix.com" },
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/learned");
 	});
@@ -405,10 +436,12 @@ describe("POST /settings/learned/change", () => {
 		await answer("NETFLIX.COM", "Entertainment");
 		await answer("NETFLIX.COM", "Entertainment", "user", "2026-10-03");
 		const books = await categoryId("Books & audio");
+
 		const { res, html } = await post("/settings/learned/change", {
 			text: "netflix.com",
 			category: String(books),
 		});
+
 		expect(res.status).toBe(200);
 		expect(trigger(res).toast).toMatchObject({
 			message: "Netflix.com now goes to Books & audio every time.",
@@ -426,11 +459,13 @@ describe("POST /settings/learned/change", () => {
 			text: "netflix.com",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		const row = await db
 			.prepare(
 				"SELECT category_id AS c, category_source AS s FROM transactions",
 			)
 			.first<{ c: number; s: string }>();
+
 		expect(row).toEqual({ c: await categoryId("Entertainment"), s: "user" });
 	});
 
@@ -444,19 +479,23 @@ describe("POST /settings/learned/change", () => {
 			text: "netflix.com",
 			category: String(await categoryId("Entertainment")),
 		});
+
 		const n = await db
 			.prepare("SELECT COUNT(*) AS n FROM bank_text_rules")
 			.first<{ n: number }>();
+
 		expect(n?.n).toBe(1);
 		expect(await ruleOf("netflix.com")).toBe(await categoryId("Entertainment"));
 	});
 
 	it("refuses a known-vague text with an alert, and makes no rule", async () => {
 		await answer("APPLE.COM/BILL 09/30", "Entertainment");
+
 		const { res, html } = await post("/settings/learned/change", {
 			text: "apple.com/bill",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		expect(res.status).toBe(400);
 		expect(html).toContain('role="alert"');
 		expect(trigger(res).announce).toBeDefined();
@@ -465,10 +504,12 @@ describe("POST /settings/learned/change", () => {
 
 	it("refuses an unknown or archived category beside its own line, with an alert", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const unknown = await post("/settings/learned/change", {
 			text: "netflix.com",
 			category: "999999",
 		});
+
 		expect(unknown.res.status).toBe(400);
 		expect(unknown.html).toContain('role="alert"');
 		expect(unknown.html).toContain("Choose a category.");
@@ -479,10 +520,12 @@ describe("POST /settings/learned/change", () => {
 				"UPDATE categories SET archived = 1 WHERE name = 'Books & audio'",
 			)
 			.run();
+
 		const archived = await post("/settings/learned/change", {
 			text: "netflix.com",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		expect(archived.res.status).toBe(400);
 		expect(await ruleOf("netflix.com")).toBeNull();
 	});
@@ -492,12 +535,14 @@ describe("POST /settings/learned/change", () => {
 			text: "",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		expect(res.status).toBe(400);
 		expect(html).toContain('role="alert"');
 	});
 
 	it("works without script: a plain form post goes back to the page", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
+
 		const { res } = await post(
 			"/settings/learned/change",
 			{
@@ -506,6 +551,7 @@ describe("POST /settings/learned/change", () => {
 			},
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/learned");
 	});
@@ -528,10 +574,12 @@ describe("POST /settings/learned/change: a failed apply saves nothing (review of
 				"CREATE TRIGGER fail_bank_apply BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'apply nope'); END",
 			)
 			.run();
+
 		const { res, html } = await post("/settings/learned/change", {
 			text: "netflix.com",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		expect(res.status).toBe(503);
 		expect(html).toContain('role="alert"');
 		expect(textOf(html)).toContain(
@@ -541,11 +589,13 @@ describe("POST /settings/learned/change: a failed apply saves nothing (review of
 			"Tally couldn't save that rule, so nothing changed. Try again.",
 		);
 		expect(await ruleOf("netflix.com")).toBeNull();
+
 		const row = await db
 			.prepare(
 				"SELECT category_source AS s FROM transactions WHERE raw_name = 'NETFLIX.COM*0912'",
 			)
 			.first<{ s: string | null }>();
+
 		expect(row?.s).toBeNull();
 	});
 });
@@ -565,16 +615,20 @@ describe("POST /settings/learned/change: merchant rules first (review of #838)",
 				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('unfilled-2', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', 1499, 'NETFLIX.COM*0912')",
 			)
 			.run();
+
 		const { res } = await post("/settings/learned/change", {
 			text: "netflix.com",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		expect(res.status).toBe(200);
+
 		const row = await db
 			.prepare(
 				"SELECT category_id AS c, category_source AS s FROM transactions WHERE plaid_transaction_id = 'unfilled-2'",
 			)
 			.first<{ c: number; s: string }>();
+
 		expect(row).toEqual({ c: eating, s: "merchant_rule" });
 	});
 });
@@ -615,15 +669,19 @@ describe("the learned page with a rule", () => {
 			text: "netflix.com",
 			category: String(books),
 		});
+
 		const forgot = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(textOf(forgot.html)).toContain("Nothing yet");
 		expect(await ruleOf("netflix.com")).toBeNull();
+
 		const undo = await post("/settings/learned/undo", {
 			token: trigger(forgot.res).toast?.undo ?? "",
 			back: "/settings/learned",
 		});
+
 		expect(trigger(undo.res).toast?.message).toBe(
 			"Forget undone. Tally has that line back.",
 		);
@@ -637,9 +695,11 @@ describe("the learned page with a rule", () => {
 			text: "netflix.com",
 			category: String(await categoryId("Books & audio")),
 		});
+
 		const { res } = await post("/settings/learned/forget", {
 			text: "netflix.com",
 		});
+
 		expect(trigger(res).toast?.message).toBe(
 			"Forgot Netflix.com → Books & audio. Tally goes back to guessing.",
 		);

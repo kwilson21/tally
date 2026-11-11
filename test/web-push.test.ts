@@ -16,27 +16,36 @@ import {
 
 // RFC 8291 Appendix A, as base64url with the whitespace removed.
 const PLAINTEXT = "When I grow up, I want to be a watermelon";
+
 const UA_PUBLIC =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+
 const AUTH = "BTBZMqHH6r4Tts7J_aSIgg";
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
+
 const AS_PUBLIC =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const SALT = "DGv6ra1nlYgDCS1FRnbzlw";
+
 const HEADER =
 	"DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const CIPHERTEXT =
 	"8pfeW0KbunFT06SuDKoJH9Ql87S1QUrdirN6GcG7sFz1y1sqLgVi1VhjVkHsUoEsbI_0LpXMuGvnzQ";
 
 const bytes = (text: string) => {
 	const decoded = fromBase64Url(text);
+
 	if (!decoded) throw new Error(`not base64url: ${text}`);
+
 	return decoded;
 };
 
 /** The sender key pair in the form encrypt takes for a test: the JWK's d, x and y, from Appendix A's public point. */
 const senderJwk = () => {
 	const point = bytes(AS_PUBLIC);
+
 	return {
 		d: AS_PRIVATE,
 		x: b64u(point.slice(1, 33)),
@@ -65,6 +74,7 @@ async function openRecord(
 	const senderPublic = body.slice(21, 21 + idlen);
 	const record = body.slice(21 + idlen);
 	const uaPoint = bytes(uaPublic);
+
 	const uaKey = await crypto.subtle.importKey(
 		"jwk",
 		{
@@ -78,6 +88,7 @@ async function openRecord(
 		false,
 		["deriveBits"],
 	);
+
 	const senderKey = await crypto.subtle.importKey(
 		"raw",
 		senderPublic,
@@ -85,6 +96,7 @@ async function openRecord(
 		false,
 		[],
 	);
+
 	const ecdh = new Uint8Array(
 		await crypto.subtle.deriveBits(
 			{
@@ -95,7 +107,9 @@ async function openRecord(
 			256,
 		),
 	);
+
 	const enc = new TextEncoder();
+
 	const expand = async (
 		ikm: Uint8Array,
 		hkdfSalt: Uint8Array,
@@ -105,6 +119,7 @@ async function openRecord(
 		const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, [
 			"deriveBits",
 		]);
+
 		return new Uint8Array(
 			await crypto.subtle.deriveBits(
 				{ name: "HKDF", hash: "SHA-256", salt: hkdfSalt, info },
@@ -113,32 +128,40 @@ async function openRecord(
 			),
 		);
 	};
+
 	const keyInfo = new Uint8Array([
 		...enc.encode("WebPush: info\0"),
 		...uaPoint,
 		...senderPublic,
 	]);
+
 	const ikm = await expand(ecdh, bytes(auth), keyInfo, 32);
+
 	const cek = await expand(
 		ikm,
 		salt,
 		enc.encode("Content-Encoding: aes128gcm\0"),
 		16,
 	);
+
 	const nonce = await expand(
 		ikm,
 		salt,
 		enc.encode("Content-Encoding: nonce\0"),
 		12,
 	);
+
 	const aesKey = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, [
 		"decrypt",
 	]);
+
 	const plain = new Uint8Array(
 		await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, record),
 	);
+
 	if (plain[plain.length - 1] !== 0x02)
 		throw new Error("no last-record delimiter");
+
 	return plain.slice(0, -1);
 }
 
@@ -160,7 +183,9 @@ const keys = async () => {
 		VAPID_PUBLIC_KEY: AS_PUBLIC,
 		VAPID_PRIVATE_KEY: AS_PRIVATE,
 	});
+
 	if (!pair) throw new Error("the RFC pair should make keys");
+
 	return pair;
 };
 
@@ -171,6 +196,7 @@ describe("encrypt (RFC 8291, aes128gcm)", () => {
 			{ p256dh: UA_PUBLIC, auth: AUTH },
 			{ sender: senderJwk(), salt: bytes(SALT) },
 		);
+
 		expect(body.byteLength).toBe(144);
 		// The two parts are decoded apart: the header is 86 bytes, not a multiple of 3, so joining their base64url would be wrong.
 		expect(body).toEqual(
@@ -184,6 +210,7 @@ describe("encrypt (RFC 8291, aes128gcm)", () => {
 			{ p256dh: UA_PUBLIC, auth: AUTH },
 			{ sender: senderJwk(), salt: bytes(SALT) },
 		);
+
 		const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
 		expect(body.slice(0, 16)).toEqual(bytes(SALT));
 		expect(view.getUint32(16)).toBe(4096);
@@ -226,12 +253,16 @@ describe("vapidAuthorization (RFC 8292)", () => {
 	/** Splits the header into its JWT and its key, and reads the JWT's three parts. */
 	const parse = (header: string) => {
 		const match = /^vapid t=([^,]+), k=(.+)$/.exec(header);
+
 		if (!match) throw new Error(`bad header ${header}`);
 		const [, token = "", key = ""] = match;
+
 		const [headerPart = "", claimsPart = "", signaturePart = ""] =
 			token.split(".");
+
 		const json = (part: string) =>
 			JSON.parse(new TextDecoder().decode(bytes(part)));
+
 		return {
 			key,
 			token,
@@ -248,6 +279,7 @@ describe("vapidAuthorization (RFC 8292)", () => {
 			await keys(),
 			NOW,
 		);
+
 		const parsed = parse(header);
 		expect(parsed.key).toBe(AS_PUBLIC);
 		expect(parsed.header).toEqual({ typ: "JWT", alg: "ES256" });
@@ -260,6 +292,7 @@ describe("vapidAuthorization (RFC 8292)", () => {
 		const parsed = parse(
 			await vapidAuthorization(SUBSCRIPTION.endpoint, await keys(), NOW),
 		);
+
 		expect(parsed.claims).toEqual({
 			aud: "https://push.example.test",
 			exp: NOW + 43_200,
@@ -272,7 +305,9 @@ describe("vapidAuthorization (RFC 8292)", () => {
 		const parsed = parse(
 			await vapidAuthorization(SUBSCRIPTION.endpoint, await keys(), NOW),
 		);
+
 		expect(parsed.signature.byteLength).toBe(64);
+
 		const publicKey = await crypto.subtle.importKey(
 			"raw",
 			bytes(AS_PUBLIC),
@@ -280,6 +315,7 @@ describe("vapidAuthorization (RFC 8292)", () => {
 			false,
 			["verify"],
 		);
+
 		expect(
 			await crypto.subtle.verify(
 				{ name: "ECDSA", hash: "SHA-256" },
@@ -295,6 +331,7 @@ describe("sendPush", () => {
 	let logged: unknown[][];
 	beforeEach(() => {
 		logged = [];
+
 		for (const name of ["log", "info", "warn", "error", "debug"] as const)
 			vi.spyOn(console, name).mockImplementation((...args: unknown[]) => {
 				logged.push(args);
@@ -307,21 +344,26 @@ describe("sendPush", () => {
 	/** A fetch that answers `status`, and records each request. */
 	function answering(status: number) {
 		const requests: { url: string; init: RequestInit }[] = [];
+
 		const fetchImpl = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				requests.push({ url: String(url), init: init ?? {} });
+
 				return new Response(null, { status });
 			},
 		);
+
 		return { fetchImpl, requests };
 	}
 
 	it("posts the encrypted payload with exactly the five headers", async () => {
 		const { fetchImpl, requests } = answering(201);
+
 		const result = await sendPush(SUBSCRIPTION, PAYLOAD, await keys(), {
 			fetchImpl,
 			nowSec: 1_800_000_000,
 		});
+
 		expect(result).toEqual({ status: 201 });
 		expect(requests).toHaveLength(1);
 		const [request] = requests;
@@ -363,6 +405,7 @@ describe("sendPush", () => {
 		const fetchImpl = vi.fn(async () => {
 			throw new TypeError("network down");
 		});
+
 		expect(
 			await sendPush(SUBSCRIPTION, PAYLOAD, await keys(), { fetchImpl }),
 		).toEqual({ status: null });
@@ -377,6 +420,7 @@ describe("sendPush", () => {
 					);
 				}),
 		);
+
 		expect(
 			await sendPush(SUBSCRIPTION, PAYLOAD, await keys(), {
 				fetchImpl,
@@ -429,23 +473,28 @@ describe("the VAPID header's cache (decision 149)", () => {
 		nowSec: number,
 	) {
 		const requests: RequestInit[] = [];
+
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, init?: RequestInit) => {
 				requests.push(init ?? {});
+
 				return new Response(null, { status: 201 });
 			},
 		);
+
 		await sendPush({ ...SUBSCRIPTION, endpoint }, PAYLOAD, pair, {
 			fetchImpl,
 			nowSec,
 		});
 		const headers = requests[0]?.headers as Record<string, string>;
+
 		return headers.Authorization ?? "";
 	}
 
 	/** The claims of the JWT in an Authorization header. */
 	const claimsOf = (header: string) => {
 		const token = /^vapid t=([^,]+),/.exec(header)?.[1] ?? "";
+
 		return JSON.parse(
 			new TextDecoder().decode(bytes(token.split(".")[1] ?? "")),
 		) as { aud: string; exp: number; sub: string };
@@ -458,29 +507,36 @@ describe("the VAPID header's cache (decision 149)", () => {
 			true,
 			["sign", "verify"],
 		)) as CryptoKeyPair;
+
 		const privateJwk = (await crypto.subtle.exportKey(
 			"jwk",
 			pair.privateKey,
 		)) as JsonWebKey;
+
 		const publicRaw = new Uint8Array(
 			(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
 		);
+
 		const made = await vapidKeys({
 			VAPID_PUBLIC_KEY: toBase64Url(publicRaw),
 			VAPID_PRIVATE_KEY: privateJwk.d ?? "",
 		});
+
 		if (!made) throw new Error("a fresh pair should make keys");
+
 		return made;
 	}
 
 	it("reuses one token for two sends to the same origin within an hour", async () => {
 		const pair = await keys();
 		const first = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW);
+
 		const second = await authorizationOf(
 			`${ORIGIN}/send/two`,
 			pair,
 			NOW + 1_800,
 		);
+
 		expect(second).toBe(first);
 	});
 
@@ -503,16 +559,19 @@ describe("the VAPID header's cache (decision 149)", () => {
 
 	it("gives a different push origin its own token, with its own aud", async () => {
 		const pair = await keys();
+
 		const apple = await authorizationOf(
 			"https://web.push.apple.com/abc",
 			pair,
 			NOW,
 		);
+
 		const mozilla = await authorizationOf(
 			"https://updates.push.services.mozilla.com/wpush/x",
 			pair,
 			NOW + 60,
 		);
+
 		expect(claimsOf(apple).aud).toBe("https://web.push.apple.com");
 		expect(claimsOf(mozilla).aud).toBe(
 			"https://updates.push.services.mozilla.com",
@@ -524,11 +583,13 @@ describe("the VAPID header's cache (decision 149)", () => {
 		const first = await keys();
 		const headerOld = await authorizationOf(`${ORIGIN}/send/one`, first, NOW);
 		const changed = await freshKeys();
+
 		const headerNew = await authorizationOf(
 			`${ORIGIN}/send/one`,
 			changed,
 			NOW + 60,
 		);
+
 		expect(headerNew).not.toBe(headerOld);
 		expect(headerNew.endsWith(`k=${changed.publicKey}`)).toBe(true);
 	});

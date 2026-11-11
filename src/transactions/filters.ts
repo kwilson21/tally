@@ -73,15 +73,19 @@ export type SearchMatch = {
 
 export function searchAmount(q: string): AmountSearch | null {
 	const text = q.trim();
+
 	if (text.startsWith("-")) return null;
 	let cents: number;
+
 	try {
 		cents = toCents(text);
 	} catch {
 		return null;
 	}
+
 	if (!Number.isSafeInteger(cents)) return null;
 	const exact = text.includes(".");
+
 	return exact
 		? { low: cents, high: cents, exact, plain: false }
 		: {
@@ -103,8 +107,10 @@ export type PageBefore = {
 /** The page before a request, or null when there is no such address or it is another page's. */
 export function pageBefore(address: string | undefined): PageBefore | null {
 	if (!address) return null;
+
 	try {
 		const url = new URL(address);
+
 		return url.pathname === "/transactions"
 			? {
 					search: searchText(url.searchParams.get("q")),
@@ -133,9 +139,13 @@ export function monthFor(
 	thisMonth: string,
 ): string {
 	if (before === null) return f.month;
+
 	if (emptied(f, before)) return thisMonth;
+
 	if (before.namedMonth) return f.month;
+
 	if (before.search === "" && f.q !== "" && f.month === thisMonth) return "all";
+
 	return f.month;
 }
 
@@ -152,6 +162,7 @@ export function monthParam(
 	thisMonth: string,
 ): string | null {
 	if (month !== thisMonth) return month;
+
 	return before?.namedMonth && !emptied(f, before) ? month : null;
 }
 
@@ -166,6 +177,7 @@ export function parseFilters(
 	const account = Number(params.get("account"));
 	const show = params.get("show");
 	const page = Number(params.get("page"));
+
 	return {
 		q: searchText(params.get("q")),
 		month: month === "all" || MONTH.test(month) ? month : thisMonth,
@@ -186,14 +198,23 @@ export function parseFilters(
 /** The query string for these filters, leaving out defaults (used for links and the edit panel's "back"). */
 export function filtersToQuery(f: Filters, thisMonth: string): string {
 	const p = new URLSearchParams();
+
 	if (f.q) p.set("q", f.q);
+
 	if (f.month !== thisMonth) p.set("month", f.month);
+
 	if (f.category !== null) p.set("category", String(f.category));
+
 	if (f.account !== null) p.set("account", String(f.account));
+
 	if (f.uncategorized) p.set("uncategorized", "1");
+
 	if (f.show !== "all") p.set("show", f.show);
+
 	if (f.page > 1) p.set("page", String(f.page));
+
 	if (f.raw) p.set("raw", "1");
+
 	return p.toString();
 }
 

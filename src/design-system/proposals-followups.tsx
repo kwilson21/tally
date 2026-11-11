@@ -62,6 +62,7 @@ const SOURCE = `${shortDay(SAVED.date, SAVED.date)} (${formatCents(SAVED.amountC
 
 /** The reason behind a suggestion: code can show the first, only Tally's guess is AI (spec §2, rule 6). */
 type Reason = "merchant" | "guess";
+
 type Suggestion = { row: ListRow; ticked: boolean; reason: Reason };
 
 /**
@@ -103,6 +104,7 @@ function ReasonLine({ reason }: { reason: Reason }) {
 			<p class="pb-2 pl-21 text-sm text-muted">Same merchant as {SOURCE}</p>
 		);
 	}
+
 	return (
 		<div class="flex items-center gap-1 pb-2 pl-21">
 			<p class="min-w-0 flex-1 text-sm text-muted">

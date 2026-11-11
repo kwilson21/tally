@@ -21,22 +21,28 @@ export async function afterSyncSteps(db: D1Database): Promise<{
 	// Each step runs even if the other fails, so a rule error never leaves a bill unmatched; the first
 	// failure is returned with the flags, so the caller can say which step failed.
 	const failures: unknown[] = [];
+
 	const failed = async (step: () => Promise<unknown>): Promise<boolean> => {
 		try {
 			await step();
+
 			return false;
 		} catch (error) {
 			failures.push(error);
+
 			return true;
 		}
 	};
+
 	// The bank-text rules (decision 163) run after the merchant rules, in the same step, so a merchant rule wins and a
 	// failure here leaves the rules step failed, for the sort to retry.
 	const rulesFailed = await failed(async () => {
 		await applyMerchantRules(db);
 		await applyBankTextRules(db);
 	});
+
 	const billsFailed = await failed(() => matchBillPayments(db));
+
 	return failures.length > 0
 		? { rulesFailed, billsFailed, error: failures[0] }
 		: { rulesFailed, billsFailed };
@@ -45,5 +51,6 @@ export async function afterSyncSteps(db: D1Database): Promise<{
 /** afterSyncSteps for a sync's callers: throws the first failure, so a failed sync can say so. */
 export async function afterSync(db: D1Database): Promise<void> {
 	const { rulesFailed, billsFailed, error } = await afterSyncSteps(db);
+
 	if (rulesFailed || billsFailed) throw error;
 }

@@ -36,6 +36,7 @@ describe("the web app manifest", () => {
 	it("has 192 and 512 icons, both PNG, for any purpose", () => {
 		const icon = (size: string) =>
 			manifest.icons.find((item) => item.sizes === size);
+
 		expect(icon("192x192")).toMatchObject({
 			src: "/icons/icon-192.png",
 			type: "image/png",

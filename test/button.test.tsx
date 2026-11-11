@@ -18,6 +18,7 @@ describe("Button", () => {
 				Cancel
 			</Button>,
 		);
+
 		expect(html).toContain('<a href="/back"');
 		expect(html).toContain('hx-get="/next"');
 		expect(html).toContain("w-full");
@@ -29,6 +30,7 @@ describe("Button", () => {
 				Save
 			</Button>,
 		);
+
 		expect(html).toContain('type="submit"');
 		expect(html).toContain('formaction="/save"');
 		expect(html).toContain("disabled");
@@ -49,6 +51,7 @@ describe("Button", () => {
 					Next
 				</Button>,
 			);
+
 			expect(html).toContain("inline-flex");
 			expect(html).toContain("items-center");
 			expect(html).toContain("justify-center");
@@ -62,6 +65,7 @@ describe("Button", () => {
 				Next
 			</Button>,
 		);
+
 		expect(html).toContain('<button type="button" disabled');
 		expect(html).toContain("disabled:opacity-40");
 		expect(html).not.toContain("<a");

@@ -19,6 +19,7 @@ describe("the catalog's net-worth examples", () => {
 			"bankLinked",
 		] as const) {
 			const view = NET_WORTH_VIEWS[name];
+
 			if (view.kind !== "line") throw new Error(`${name} should be a line`);
 			expect(view.description, name).toContain(`is ${headline} today.`);
 			expect(view.endLabel, name).toBe("Today");
@@ -27,6 +28,7 @@ describe("the catalog's net-worth examples", () => {
 
 	it("the falling line starts $3,600 above today's net worth, not below it", () => {
 		const view = NET_WORTH_VIEWS.falling;
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.sentence).toBe("Down $3,600 since May.");
 		expect(view.description).toContain(
@@ -37,6 +39,7 @@ describe("the catalog's net-worth examples", () => {
 
 	it("a line can be drawn to end on any headline, as a proposal's own number needs", () => {
 		const view = netWorthViewEnding(2340000);
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.description).toContain("and is $23,400 today.");
 		expect(view.sentence).toBe("Up $3,600 since May.");
@@ -51,6 +54,7 @@ describe("the catalog's net-worth examples", () => {
 
 	it("an account added steps the line down on its first day by what the card owes, and the sentence names the card", () => {
 		const view = NET_WORTH_VIEWS.cardAdded;
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		// The card wasn't counted in May, so May's net worth is $1,240 higher than the climb; the change reads $2,360, not $3,600.
 		expect(view.startLabel).toBe("May");
@@ -67,6 +71,7 @@ describe("the catalog's net-worth examples", () => {
 
 	it("a bank linked steps the line up on its first day by its cash, and the sentence names the bank", () => {
 		const view = NET_WORTH_VIEWS.bankLinked;
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.startLabel).toBe("May");
 		expect(view.sentence).toBe(

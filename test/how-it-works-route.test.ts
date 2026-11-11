@@ -17,17 +17,22 @@ import { pinClock } from "./pinned-clock";
 pinClock();
 
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 /** Undoes the HTML escaping Hono applies to text, for comparing with plain strings. */
 const decodeHtml = (html: string) =>
 	html
 		.replaceAll("&#39;", "'")
 		.replaceAll("&quot;", '"')
 		.replaceAll("&amp;", "&");
+
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+
 const monthName = () =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
 		new Date(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}-01T00:00:00Z`),
@@ -86,8 +91,10 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("names planned expenses in the budget section: its list, the diagram's Planned box and the worked example", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
+
 		const budget =
 			html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(budget).toContain(
 			"A planned one-time expense is set aside for its whole month",
 		);
@@ -106,13 +113,17 @@ describe("GET /how-it-works in the demo", () => {
 	it("says in the Bills section, right after the finding-bills rule, that card payments and moves are never suggested while they're left out of the budget", async () => {
 		const sentence =
 			"Card payments and moves between your own accounts are never suggested while they're left out of the budget: what you bought on the card already counts, and saving each month is what the savings goal on Home is for.";
+
 		const demoHtml = decodeHtml((await get("/how-it-works")).html);
+
 		const familyHtml = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		for (const html of [demoHtml, familyHtml]) {
 			const bills =
 				html.match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 			expect(bills).toContain(sentence);
 			expect(bills).toMatch(
 				/Tally suggests a possible bill[\s\S]*?<\/li>\s*<li>Card payments and moves between your own accounts are never suggested while they're left out of the budget:/,
@@ -123,15 +134,20 @@ describe("GET /how-it-works in the demo", () => {
 	it("says in the Bills section that a steady loan payment is suggested, and a payee already linked to a bill is not, until two monthly payments in a row go unlinked", async () => {
 		const loan =
 			"A steady loan payment, such as a car, mortgage or student loan that your bank marks as one, is suggested even while it's left out of the budget.";
+
 		const linked =
 			"A merchant whose payment is already linked to a bill isn't suggested until two monthly payments in a row are left unlinked.";
+
 		const demoHtml = decodeHtml((await get("/how-it-works")).html);
+
 		const familyHtml = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		for (const html of [demoHtml, familyHtml]) {
 			const bills =
 				html.match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 			expect(bills).toContain(loan);
 			expect(bills).toContain(linked);
 		}
@@ -142,6 +158,7 @@ describe("GET /how-it-works in the demo", () => {
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>How Tally works · Tally</title>");
 		expect(html).toMatch(/<h1[^>]*>How Tally works<\/h1>/);
+
 		for (const id of [
 			"architecture",
 			"budget",
@@ -151,6 +168,7 @@ describe("GET /how-it-works in the demo", () => {
 		]) {
 			expect(html).toMatch(new RegExp(`<section[^>]*id="${id}"`));
 		}
+
 		expect(html).toContain('role="img"');
 		expect(html).toContain("Income counts only toward Income, not spending.");
 		expect(html).toContain("due or overdue and not yet paid");
@@ -164,8 +182,10 @@ describe("GET /how-it-works in the demo", () => {
 		expect(decodeHtml(html)).toContain(
 			"AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today.",
 		);
+
 		const names =
 			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(decodeHtml(names)).toContain("sparkles icon and a dashed underline");
 		expect(decodeHtml(names)).toContain(
 			"nothing is renamed until you choose it",
@@ -193,11 +213,14 @@ describe("GET /how-it-works in the demo", () => {
 		).run();
 
 		const demo = decodeHtml((await get("/how-it-works")).html);
+
 		const family = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		const names = (html: string) =>
 			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(names(demo)).toContain(
 			"In the demo, </span>1 merchant name is waiting for a choice.",
 		);
@@ -210,9 +233,11 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("explains suggested categories in the Categories section", async () => {
 		const { html } = await get("/how-it-works");
+
 		const categories =
 			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
 			"";
+
 		expect(categories).toContain("suggested category");
 		expect(categories).toContain("nothing is created until a person says so");
 		expect(html).not.toContain('href="/how-it-works#categorization"');
@@ -220,9 +245,11 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("explains the rule offer, and names no count of a store's categories", async () => {
 		const { html } = await get("/how-it-works");
+
 		const categories =
 			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
 			"";
+
 		expect(categories).toContain(
 			"picks the same category for the same merchant three times",
 		);
@@ -232,8 +259,10 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("explains Trends: its rules, and an example from the demo's own numbers", async () => {
 		const { html } = await get("/how-it-works");
+
 		const trends =
 			html.match(/<section[^>]*id="trends"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(trends).toContain("Trends compares this month with last month");
 		expect(trends).toContain("under budget 3 or more months running");
 		expect(trends).toContain("up 3 or more months running");
@@ -246,17 +275,23 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("keeps its budget example equal to Home", async () => {
 		const page = (await get("/how-it-works")).html;
+
 		const match = page.match(
 			/Your budgets have (\$[\d,]+(?:\.\d\d)?) left\. Safe to spend is (\$[\d,]+(?:\.\d\d)?) less:/,
 		);
+
 		expect(match).not.toBeNull();
+
 		const cents = (value: string) =>
 			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
+
 		const safeCents = cents(match?.[1] ?? "$0") - cents(match?.[2] ?? "$0");
 		const homeHtml = (await get("/")).html;
+
 		const shown = homeHtml.match(
 			/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([−-]?)\$([\d,]+)/,
 		);
+
 		expect(shown).not.toBeNull();
 		// Home's headline is formatCents in whole dollars, so the example is rounded the same way.
 		expect(`${shown?.[1] ?? ""}$${shown?.[2]}`).toBe(
@@ -281,25 +316,31 @@ describe("GET /how-it-works in the demo", () => {
 
 	it("draws each section's diagram from the same numbers as its worked example", async () => {
 		const page = decodeHtml((await get("/how-it-works")).html);
+
 		const descOf = (id: string) =>
 			page.match(
 				new RegExp(`<(?:desc|span) id="${id}-desc"[^>]*>([^<]+)<`),
 			)?.[1] ?? "";
+
 		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
 
 		const [budgetsLeft, less] = example(
 			/Your budgets have (\$[\d,]+(?:\.\d\d)?) left\. Safe to spend is (\$[\d,]+(?:\.\d\d)?) less:/,
 		);
+
 		const amountCents = (value: string) =>
 			Math.round(Number(value.replace(/[$,]/g, "")) * 100);
+
 		const safe = formatCents(
 			amountCents(budgetsLeft ?? "$0") - amountCents(less ?? "$0"),
 		);
+
 		expect(descOf("budget-diagram")).toContain(`leaves ${safe} safe to spend.`);
 
 		const [counted, needs] = example(
 			/has (\d+) counted transactions, and (\d+) need a category\./,
 		);
+
 		expect(descOf("transactions-diagram")).toContain(`${counted} counted`);
 		expect(descOf("transactions-diagram")).toContain(
 			`${needs} of those need a category.`,
@@ -308,6 +349,7 @@ describe("GET /how-it-works in the demo", () => {
 		const [excluded, kinds] = example(
 			/This month, (\d+) transactions are excluded \(([^)]+)\)/,
 		);
+
 		expect(descOf("exclusions-diagram")).toContain(
 			`${counted} counted, 0 held for review, and ${excluded} excluded (${kinds}).`,
 		);
@@ -353,6 +395,7 @@ describe("the budget guide with no activity", () => {
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		const section = budgetSection(html);
 		expect(section).toContain("With your numbers");
 		expect(section).toContain("Savings goal");
@@ -368,9 +411,11 @@ describe("the budget guide with no activity", () => {
 			env.DB.prepare("DELETE FROM savings_goal_amounts"),
 			env.DB.prepare("DELETE FROM planned_expenses"),
 		]);
+
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		const section = budgetSection(html);
 		expect(section).toContain("No budgets have been set yet.");
 		expect(section).not.toContain("With your numbers");
@@ -380,14 +425,18 @@ describe("the budget guide with no activity", () => {
 describe("outside the demo", () => {
 	it("says both AI jobs are live and gives a household example when no names wait", async () => {
 		await clearMerchants(env.DB, "suggestion_status = 'pending'");
+
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		expect(html).toContain(
 			"AI helps with categories and store names, and a person can always change them.",
 		);
+
 		const names =
 			html.match(/<section[^>]*id="names"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(names).toContain("With your numbers,");
 		expect(names).toContain("No merchant names are waiting for a choice.");
 		expect(names).not.toMatch(/jev|workers ai/i);
@@ -408,8 +457,10 @@ describe("outside the demo", () => {
 		const own = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		const section = (html: string) =>
 			html.match(/<section[^>]*id="trends"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(section(own)).toMatch(/With your numbers for \w+: /);
 		expect(decodeHtml(section(own))).toContain("so it's going well.");
 
@@ -418,9 +469,11 @@ describe("outside the demo", () => {
 		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
 			.bind(`${last}-02`)
 			.run();
+
 		const early = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(section(early)).toContain(
 			"Trends fill in as months pass, so there is nothing to compare yet.",
 		);
@@ -434,9 +487,11 @@ describe("outside the demo", () => {
 		)
 			.bind(month)
 			.run();
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(
 			html.match(
 				/(?:There are no transactions this month yet|No bill has been paid yet this month)\./g,
@@ -450,9 +505,11 @@ describe("outside the demo", () => {
 
 	it("uses the household's own paid bill for the Bills example", async () => {
 		await env.DB.prepare("UPDATE bills SET name = 'Electricity'").run();
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).toContain(`With your numbers for ${monthName()}:`);
 		expect(html).toContain("Electricity is");
 		expect(html).not.toContain('id="bills-diagram-title"');
@@ -461,9 +518,11 @@ describe("outside the demo", () => {
 
 	it("uses a plain sentence when no bill has been paid", async () => {
 		await env.DB.prepare("DELETE FROM bill_payments").run();
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).toContain("No bill has been paid yet this month.");
 		expect(html).not.toContain('id="bills-diagram-title"');
 	});
@@ -473,9 +532,11 @@ describe("outside the demo", () => {
 		await env.DB.prepare("DELETE FROM transactions").run();
 		await env.DB.prepare("UPDATE bills SET active = 0").run();
 		await env.DB.prepare("DELETE FROM planned_expenses").run();
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).toContain("No budgets have been set yet.");
 		expect(html).not.toContain('id="budget-diagram-title"');
 	});
@@ -484,6 +545,7 @@ describe("outside the demo", () => {
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).not.toMatch(/jev/i);
 		// Pele wraps a long box label over several lines of its own, so read the words, not the markup.
 		expect(
@@ -495,9 +557,11 @@ describe("outside the demo", () => {
 
 	it("shows the calculation when there's spending but no budget", async () => {
 		await env.DB.prepare("DELETE FROM budget_amounts").run();
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).toContain("No budgets have been set yet.");
 		expect(html).toContain('id="budget-diagram-title"');
 		expect(html).toMatch(/safe to spend\./);
@@ -505,11 +569,13 @@ describe("outside the demo", () => {
 
 	it("keeps the transaction examples when this month's only transaction counts in an earlier month", async () => {
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 		const { results } = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE substr(date, 1, 7) = ? ORDER BY id",
 		)
 			.bind(month)
 			.all<{ id: number }>();
+
 		const keep = results[0]?.id;
 		expect(keep).toBeDefined();
 		await env.DB.prepare(
@@ -517,20 +583,24 @@ describe("outside the demo", () => {
 		)
 			.bind(month, keep)
 			.run();
+
 		// It refunds a purchase from an earlier month, so it counts there instead.
 		const earlier = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE substr(date, 1, 7) < ? AND excluded = 0 AND is_split = 0 ORDER BY date DESC LIMIT 1",
 		)
 			.bind(month)
 			.first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET refund_of_id = ?, excluded = 0, is_split = 0, amount_cents = -500 WHERE id = ?",
 		)
 			.bind(earlier?.id, keep)
 			.run();
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).toContain('id="transactions-diagram-title"');
 	});
 
@@ -561,6 +631,7 @@ describe("outside the demo", () => {
 		const html = await (
 			await destinations.request("/more", {}, notDemo)
 		).text();
+
 		expect(html).toContain('href="/how-it-works"');
 	});
 
@@ -601,9 +672,11 @@ describe("links in the demo", () => {
 
 	it("explains where merchant rules can be reviewed and removed", async () => {
 		const html = (await get("/how-it-works")).html;
+
 		const categorization =
 			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
 			"";
+
 		expect(categorization).toContain(
 			"See every rule in Settings under Tally&#39;s rules.",
 		);
@@ -614,9 +687,11 @@ describe("links in the demo", () => {
 
 	it("says a merchant rule is set by the edit panel's tick, and removed by unticking it (#491, #353)", async () => {
 		const html = (await get("/how-it-works")).html;
+
 		const categorization =
 			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
 			"";
+
 		expect(categorization).toContain(
 			"set by ticking &quot;Use this category for … from now on&quot; in the edit panel.",
 		);
@@ -627,9 +702,11 @@ describe("links in the demo", () => {
 
 	it("says a what-it-was line is written only when it can say more than the store's name (decision 103)", async () => {
 		const html = (await get("/how-it-works")).html;
+
 		const categorization =
 			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
 			"";
+
 		expect(categorization).toContain(
 			"Tally writes “What it was” only when it can say more than the store&#39;s name.",
 		);
@@ -640,6 +717,7 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 	/** The Net worth section's markup, or "" if the page has none. */
 	const sectionOf = (html: string) =>
 		html.split('id="net-worth"')[1]?.split("</section>")[0] ?? "";
+
 	const family = async () =>
 		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
 
@@ -754,6 +832,7 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 			const hrefs = [...accountsHtml.matchAll(/href="(\/how-it-works#[^"]+)"/g)]
 				.map((m) => m[1])
 				.filter((href) => href !== "/how-it-works#start-here");
+
 			expect(hrefs).toEqual(["/how-it-works#net-worth"]);
 			// The anchor is a real section id on the page it points to.
 			const id = (hrefs[0] ?? "").split("#")[1];
@@ -768,21 +847,26 @@ describe("the parts table", () => {
 			spec.indexOf("## 4. Architecture"),
 			spec.indexOf("### 4.1"),
 		);
+
 		const rows = [...section.matchAll(/^\| \*\*(.+?)\*\* \| (.+) \|$/gm)].map(
 			([, part = "", job = ""]) => [
 				part.replaceAll("`", ""),
 				job.replaceAll("`", ""),
 			],
 		);
+
 		expect(rows.length).toBeGreaterThan(10);
 		const { html } = await get("/how-it-works");
+
 		// Only the architecture table: other sections (Bills' statuses, #341) are definition lists too.
 		const architecture =
 			html.match(/<section[^>]*id="architecture"[\s\S]*?<\/section>/)?.[0] ??
 			"";
+
 		const page = [
 			...architecture.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>([^<]+)<\/dd>/g),
 		].map(([, part = "", job = ""]) => [decodeHtml(part), decodeHtml(job)]);
+
 		expect(page).toEqual(rows);
 	});
 });
@@ -794,6 +878,7 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 				new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
 			)?.[0] ?? "",
 		).replace(/\s+/g, " ");
+
 	const family = async () =>
 		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
 
@@ -802,6 +887,7 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 		expect(spec).toContain(
 			"is held out of Spent, Uncategorized, and Safe to spend until Jev confidently categorizes it as non-income or a person marks it reviewed as a refund or other non-income credit (decision 70)",
 		);
+
 		for (const html of [(await get("/how-it-works")).html, await family()]) {
 			const text = sectionOf(html, "transactions");
 			expect(text).toContain(
@@ -820,6 +906,7 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 				"A credit held for review isn't excluded: it waits until Tally confidently sorts it as non-income or a person reviews it, and once a person marks it as income it counts toward Income instead, unless it's excluded too (see Transactions).",
 			);
 		}
+
 		expect(sectionOf(await family(), "transactions")).not.toMatch(/jev/i);
 	});
 });
@@ -831,6 +918,7 @@ describe("a payment for a planned expense counts while excluded, as a bill's doe
 				new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
 			)?.[0] ?? "",
 		).replace(/\s+/g, " ");
+
 	const family = async () =>
 		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
 
@@ -860,8 +948,10 @@ describe("new category suggestions in the Categories section (spec §7, #51)", (
 		(
 			html.split('id="categorization"')[1]?.split("</section>")[0] ?? ""
 		).replace(/\s+/g, " ");
+
 	const family = async () =>
 		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+
 	const NOTHING =
 		"A suggested category is only an idea; nothing is created until a person says so.";
 
@@ -881,16 +971,19 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 	const billsSection = (html: string) =>
 		decodeHtml(html).match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ??
 		"";
+
 	beforeEach(async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-10T16:00:00Z"));
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.prepare("DELETE FROM bills").run();
+
 		const [paid, earlier] = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 2",
 			).all<{ id: number }>()
 		).results;
+
 		// Electric overdue (Oct 3), Internet due in a week (Oct 14), Gym upcoming (Oct 25, September paid), Water paid (Oct 3).
 		await env.DB.batch([
 			env.DB.prepare(
@@ -911,11 +1004,14 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 
 	it("explains each status in plain words, with one of this household's bills as the example", async () => {
 		const demoHtml = (await get("/how-it-works")).html;
+
 		const familyHtml = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		for (const html of [demoHtml, familyHtml]) {
 			const bills = billsSection(html);
+
 			for (const term of [
 				"Overdue",
 				"Due in the next 7 days",
@@ -938,6 +1034,7 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 		const html = billsSection(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		expect(html).toContain(
 			"A weekly or every-two-weeks bill stays overdue until it's paid, within the month it was due.",
 		);
@@ -948,9 +1045,11 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 
 	it("says so plainly for a status no bill has", async () => {
 		await env.DB.prepare("DELETE FROM bills").run();
+
 		const html = billsSection(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 		expect(html).toContain("No bill is overdue right now.");
 		expect(html).toContain("No bill is due in the next 7 days right now.");
 		expect(html).toContain("No bill is upcoming right now.");
@@ -960,6 +1059,7 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 
 describe("Start here, the demo banner and the page's order (spec §8.8, §9; P124 A)", () => {
 	const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 	/** The newest bank line of this month with the flag, read the way Start here reads it. */
 	const latestId = async (flag: "flag_income" | "flag_transfer") =>
 		(
@@ -969,6 +1069,7 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 				.bind(thisMonth)
 				.first<{ id: number }>()
 		)?.id;
+
 	const startHere = (html: string) =>
 		decodeHtml(
 			html.match(/<section[^>]*id="start-here"[\s\S]*?<\/section>/)?.[0] ?? "",
@@ -982,6 +1083,7 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 			expect(link).toBeGreaterThan(-1);
 			expect(link).toBeLessThan(html.indexOf("<aside"));
 		}
+
 		const family = await (await home.request("/", {}, notDemo)).text();
 		expect(family).not.toContain("Demo data. Nothing here is real.");
 		expect(family).not.toContain("#start-here");
@@ -990,6 +1092,7 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 	it("opens How Tally works with Start here under its title, then the intro, then the feature sections in their order, and How it's built last, in the demo", async () => {
 		const { html } = await get("/how-it-works");
 		const at = (needle: string) => html.indexOf(needle);
+
 		const ids = [
 			"budget",
 			"transactions",
@@ -1002,6 +1105,7 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 			"net-worth",
 			"architecture",
 		];
+
 		const positions = ids.map((id) => at(`id="${id}"`));
 		expect(positions.every((position) => position > -1)).toBe(true);
 		expect(positions).toEqual([...positions].sort((a, b) => a - b));
@@ -1019,6 +1123,7 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		expect(html).not.toContain('id="start-here"');
 		expect(html).not.toContain('id="architecture"');
 		expect(html).toMatch(
@@ -1036,11 +1141,13 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 	it("strikes three of this month's bank lines and writes Tally's row under each: the latest paycheck, the latest transfer, then transaction 110", async () => {
 		const { html } = await get("/how-it-works");
 		const section = startHere(html);
+
 		const lines = [
 			...section.matchAll(
 				/<s class="decoration-muted">([^<]+)<\/s>[\s\S]*?data-transaction="(\d+)"/g,
 			),
 		].map((m) => [m[1], Number(m[2])]);
+
 		expect(lines).toEqual([
 			["ACME CORP PAYROLL", await latestId("flag_income")],
 			["ONLINE TRANSFER TO SAV ...5678", await latestId("flag_transfer")],
@@ -1052,9 +1159,11 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 
 	it("shows Safe to spend exactly as Home does for the same day, under a decorative double rule", async () => {
 		const home = (await get("/")).html;
+
 		const amount = home.match(
 			/lg:text-7xl[^"]*">(?:<span[^>]*>)?([^<]+)</,
 		)?.[1];
+
 		expect(amount).toBeTruthy();
 		const { html } = await get("/how-it-works");
 		expect(startHere(html)).toContain(`tabular-nums">${amount}</p>`);
@@ -1068,9 +1177,11 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 
 	it("links to the list without Tally, and has the three things to try, moved here from Home, each linking to where it's done", async () => {
 		const { html } = await get("/how-it-works");
+
 		const links = [
 			...startHere(html).matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g),
 		].map((m) => [m[1], m[2]]);
+
 		expect(links).toEqual([
 			["/transactions?raw=1", "See every line without Tally"],
 			["/transactions?uncategorized=1", "Give a transaction a category"],
@@ -1092,10 +1203,12 @@ describe("Start here's month and count (#502)", () => {
 				.match(/<p id="result-count"[^>]*>([\s\S]*?)<\/p>/)?.[1]
 				?.replace(/<[^>]+>/g, "") ?? "",
 		);
+
 	const startHere = (html: string) =>
 		decodeHtml(
 			html.match(/<section[^>]*id="start-here"[\s\S]*?<\/section>/)?.[0] ?? "",
 		);
+
 	/** The seed's month: the month of transaction 110, which Start here's lines are from. */
 	const storyMonth = async () =>
 		(
@@ -1103,6 +1216,7 @@ describe("Start here's month and count (#502)", () => {
 				"SELECT substr(date, 1, 7) AS month FROM transactions WHERE id = 110",
 			).first<{ month: string }>()
 		)?.month;
+
 	/** Resets the demo on October 31 (its seed is October's), then moves the clock to November 1. */
 	const toNovemberFirst = async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
@@ -1110,15 +1224,18 @@ describe("Start here's month and count (#502)", () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		vi.setSystemTime(new Date("2026-11-01T16:00:00Z"));
 	};
+
 	const startHereHtml = async () =>
 		startHere((await get("/how-it-works")).html);
 
 	it("on November 1 names October for the bank lines and November for Safe to spend, which equals Home's", async () => {
 		await toNovemberFirst();
 		const home = (await get("/")).html;
+
 		const amount = home.match(
 			/lg:text-7xl[^"]*">(?:<span[^>]*>)?([^<]+)</,
 		)?.[1];
+
 		expect(amount).toBeTruthy();
 		const section = await startHereHtml();
 		expect(section).toContain(
@@ -1134,9 +1251,11 @@ describe("Start here's month and count (#502)", () => {
 	it("says 'Three lines of N so far', with N the raw list's own count, and drops that heading and the Without Tally sentence once the month has no transfer", async () => {
 		const month = await storyMonth();
 		const listed = await get("/transactions?raw=1");
+
 		const n = Number(
 			resultCount(listed.html).match(/(\d+) transactions?\b/)?.[1],
 		);
+
 		expect(n).toBeGreaterThan(0);
 		const section = await startHereHtml();
 		expect(section).toContain(`Three lines of ${n} so far`);
@@ -1162,6 +1281,7 @@ describe("Start here's month and count (#502)", () => {
 			],
 			"person@example.com",
 		);
+
 		expect(split.saved).toBe(true);
 		const section = await startHereHtml();
 		expect(section).toMatch(
@@ -1195,14 +1315,17 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 		"what-ai-did",
 		"net-worth",
 	];
+
 	/** The section's markup, or "" if the page has none. */
 	const sectionOf = (html: string, id: string) =>
 		html.match(
 			new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?<\\/section>`),
 		)?.[0] ?? "";
+
 	/** The section's one fold, from its <details> to its </details>. */
 	const foldOf = (section: string) =>
 		section.match(/<details[\s\S]*<\/details>/)?.[0] ?? "";
+
 	const pages = [
 		["the demo", async () => (await get("/how-it-works")).html],
 		[
@@ -1227,11 +1350,14 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 				);
 				const fold = foldOf(section);
 				const at = section.indexOf("<details");
+
 				for (const picture of ['role="img"', "bg-band"]) {
 					const last = section.lastIndexOf(picture);
+
 					if (last !== -1)
 						expect(last, `${picture} comes before the fold`).toBeLessThan(at);
 				}
+
 				expect(
 					section.replace(fold, ""),
 					"no rules outside the fold",
@@ -1246,19 +1372,23 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 			"%s's fold says 'The exact rules' and then its rule count, which is the rules inside it",
 			async (id) => {
 				const fold = foldOf(sectionOf(await load(), id));
+
 				const summary = fold.slice(
 					fold.indexOf("<summary"),
 					fold.indexOf("</summary>"),
 				);
+
 				const label = summary.indexOf("The exact rules");
 				const count = summary.match(/(\d+) (rules?)</);
 				expect(label, "the label").toBeGreaterThanOrEqual(0);
 				expect(count, "the rule count").not.toBeNull();
 				expect(label, "the label comes first").toBeLessThan(count?.index ?? -1);
 				const body = fold.slice(fold.indexOf("</summary>"));
+
 				const rules =
 					(body.match(/<li[ >]/g) ?? []).length +
 					(body.match(/<p[ >]/g) ?? []).length;
+
 				expect(rules, "rules inside the fold").toBeGreaterThan(0);
 				expect(Number(count?.[1]), "the count matches the rules").toBe(rules);
 				expect(count?.[2]).toBe(rules === 1 ? "rule" : "rules");
@@ -1268,6 +1398,7 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 		it("keeps Categories' four steps and five rule paragraphs in the fold, in order", async () => {
 			const section = decodeHtml(sectionOf(await load(), "categorization"));
 			const fold = decodeHtml(foldOf(section));
+
 			const rules = [
 				"A person's choice, which nothing overwrites.",
 				"A merchant rule:",
@@ -1279,26 +1410,32 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 				"A suggested category is only an idea",
 				"With Fill in details on",
 			];
+
 			let previous = -1;
+
 			for (const rule of rules) {
 				expect(section.split(rule), `${rule} appears once`).toHaveLength(2);
 				const at = fold.indexOf(rule);
 				expect(at, `${rule} is in the fold`).toBeGreaterThan(previous);
 				previous = at;
 			}
+
 			expect(fold.match(/<ol class="mt-3 list-decimal/g)).toHaveLength(1);
 		});
 
 		it("keeps Bills' intro and four groups where they are, before its picture and the fold", async () => {
 			const section = decodeHtml(sectionOf(await load(), "bills"));
+
 			const intro = section.indexOf(
 				"Bills puts each active bill in one of four groups:",
 			);
+
 			const groups = section.indexOf("<dl");
 			const picture = section.indexOf('role="img"');
 			const fold = section.indexOf("<details");
 			expect(intro).toBeGreaterThanOrEqual(0);
 			expect(groups).toBeGreaterThan(intro);
+
 			// Bills' picture renders only with a paid bill, so the order is checked when it does.
 			if (picture !== -1) expect(picture).toBeGreaterThan(groups);
 			expect(fold).toBeGreaterThan(groups);
@@ -1308,6 +1445,7 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 		it("leaves Architecture as it was, with no fold", async () => {
 			const html = await load();
 			const architecture = sectionOf(html, "architecture");
+
 			if (architecture !== "") expect(architecture).not.toContain("<details");
 		});
 	});
@@ -1323,9 +1461,11 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 			env.DB.prepare("DELETE FROM balance_history"),
 			env.DB.prepare("DELETE FROM accounts"),
 		]);
+
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
+
 		for (const id of SECTIONS) {
 			const section = sectionOf(html, id);
 			expect(section, `${id} renders`).not.toBe("");
@@ -1334,6 +1474,7 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 				/<div class="mt-3"><details class="group border-b border-rule"[^>]*>[\s\S]*<\/details><\/div><\/section>$/,
 			);
 		}
+
 		const budget = sectionOf(html, "budget");
 		expect(budget).toContain("No budgets have been set yet.");
 		expect(budget.indexOf("No budgets have been set yet.")).toBeLessThan(
@@ -1350,19 +1491,23 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 
 describe("How Tally works' first budget, in Budget and safe to spend (#774)", () => {
 	const demoBindings = { ...env, DEMO: "true" } as unknown as Env;
+
 	const familyPage = async () =>
 		decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
 		);
+
 	const demoPage = async () =>
 		decodeHtml(
 			await (
 				await howItWorks.request("/how-it-works", {}, demoBindings)
 			).text(),
 		);
+
 	/** The first budget's paragraph, as the page's words read it (spec §6, decision 114). */
 	const FIRST_BUDGET =
 		"A first budget is suggested from what your bank shows a category spent in up to its last three full months: their average, rounded up to the next $10, with the months it came from. Nothing is saved until you say yes.";
+
 	/** The Budget section, from its id to its close. */
 	const budgetSection = (html: string) =>
 		html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";

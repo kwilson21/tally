@@ -46,6 +46,7 @@ export function NetWorthChart({ view }: { view: NetWorthView }) {
 			</>
 		);
 	}
+
 	return (
 		<>
 			<Sentence>{view.sentence}</Sentence>

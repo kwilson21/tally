@@ -17,14 +17,17 @@ recordSorting({ sort: true });
 // transaction, added by the demo's Add the sample. The demo never reads a file; its body is never read.
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const demo = { ...env, DEMO: "true" } as unknown as Env;
+
 const ANCHOR_SQL =
 	"SELECT MAX(t.date) AS d FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id IS NOT NULL";
 
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 app.use("*", async (c, next) => {
 	c.set("actor", "demo");
 	await next();
 });
+
 app.route("/", accounts);
 
 const ctx = () => ({
@@ -39,13 +42,16 @@ async function anchor() {
 
 async function addSample(htmx = true) {
 	const headers: Record<string, string> = {};
+
 	if (htmx) headers["HX-Request"] = "true";
+
 	const res = await app.request(
 		"/accounts/apple-card",
 		{ method: "POST", headers },
 		demo,
 		ctx(),
 	);
+
 	return { res, text: await res.text() };
 }
 
@@ -60,6 +66,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 	it("reads as Apple's file, and holds every kind the spec lists", async () => {
 		const read = parseAppleCsv(appleCardSample("2026-09-22"));
 		expect(read.ok).toBe(true);
+
 		if (!read.ok) return;
 		const rows = read.rows;
 		expect(rows.length).toBeGreaterThanOrEqual(12);
@@ -87,12 +94,15 @@ describe("the demo's Apple Card sample (#766)", () => {
 	it("dates every row within the 60 days before the anchor, so each cleared row is on or after Tally's history", async () => {
 		const day = "2026-09-22";
 		const read = parseAppleCsv(appleCardSample(day));
+
 		if (!read.ok) throw new Error("the sample must read");
+
 		for (const row of read.rows) {
 			expect(
 				row.transactionDate >= daysBefore(day, 60) &&
 					row.transactionDate <= day,
 			).toBe(true);
+
 			if (row.clearingDate !== null)
 				expect(row.clearingDate >= daysBefore(day, 60)).toBe(true);
 		}
@@ -113,11 +123,13 @@ describe("the demo's Apple Card sample (#766)", () => {
 		const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 			async () => ({ id: "fake" }),
 		);
+
 		const bindings = {
 			...demo,
 			JEV_API_KEY: "test-key",
 			SORT: { create },
 		} as unknown as Env;
+
 		const press = () =>
 			app.request(
 				"/accounts/apple-card",
@@ -125,6 +137,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 				bindings,
 				ctx(),
 			);
+
 		await press();
 		expect(create).toHaveBeenCalledTimes(1);
 		const params = create.mock.calls[0]?.[0].params;
@@ -142,13 +155,18 @@ describe("the demo's Apple Card sample (#766)", () => {
 				if (prop === "prepare")
 					return (sql: string) => {
 						if (sql.includes("GROUP BY h.date")) throw new Error("D1 is down");
+
 						return target.prepare(sql);
 					};
+
 				const value = Reflect.get(target, prop, target);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const background: Promise<unknown>[] = [];
+
 		const collecting = {
 			waitUntil: (promise: Promise<unknown>) => {
 				background.push(promise);
@@ -156,11 +174,14 @@ describe("the demo's Apple Card sample (#766)", () => {
 			passThroughOnException() {},
 			props: {},
 		};
+
 		// The sorting binding is a recorder, as the sort hand-off test's is.
 		const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
 			async () => ({ id: "fake" }),
 		);
+
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			const res = await app.request(
 				"/accounts/apple-card",
@@ -173,6 +194,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 				} as unknown as Env,
 				collecting as unknown as ExecutionContext,
 			);
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("HX-Trigger")).toContain(
 				"Added 13 from Apple Card.",
@@ -201,12 +223,15 @@ describe("the demo's Apple Card sample (#766)", () => {
 			"UPDATE transactions SET date = date(date, '-1 day') WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id IS NOT NULL)",
 		).run();
 		expect(await anchor()).not.toBe(TODAY);
+
 		const cardLatest = () =>
 			env.DB.prepare(
 				"SELECT MAX(t.date) AS d FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
 			).first<{ d: string | null }>();
+
 		// Only Date is faked, so today moves on a day between the presses and nothing else in the request changes.
 		vi.useFakeTimers({ toFake: ["Date"] });
+
 		try {
 			vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
 			const first = await addSample();
@@ -230,6 +255,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 		expect(lines[0]).toBe(
 			"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By",
 		);
+
 		for (const line of lines.slice(1)) {
 			expect(line).toMatch(/^(\d{2}\/\d{2}\/\d{4})?,(\d{2}\/\d{2}\/\d{4})?,"/);
 			expect(line.endsWith(',"Pat Rivera"')).toBe(true);
@@ -239,6 +265,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 	it("reads no body and needs no Content-Length: a demo POST with any body succeeds", async () => {
 		// A body that throws when read, and says whether it was: highWaterMark 0 means only a read pulls it.
 		const state = { pulled: false };
+
 		const body = new ReadableStream(
 			{
 				pull() {
@@ -248,6 +275,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 			},
 			{ highWaterMark: 0 },
 		);
+
 		const res = await app.request(
 			"/accounts/apple-card",
 			{
@@ -259,6 +287,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 			demo,
 			ctx(),
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/accounts");
 		expect(state.pulled).toBe(false);
@@ -273,7 +302,9 @@ describe("the demo's Apple Card sample (#766)", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
+
 		expect(withOrigin.status).toBe(200);
+
 		const withoutOrigin = await exports.default.fetch(
 			"http://tally.test/accounts/apple-card",
 			{
@@ -282,6 +313,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 				body: "x",
 			},
 		);
+
 		expect(withoutOrigin.status).toBe(403);
 	});
 
@@ -295,6 +327,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 				)
 			).text()
 		).replaceAll("&#39;", "'");
+
 		expect(html).toContain("In the demo, Tally uses a sample file.");
 		expect(html).toContain("Add the sample");
 		expect(html).not.toContain('id="apple-card-file"');
@@ -303,6 +336,7 @@ describe("the demo's Apple Card sample (#766)", () => {
 
 	it("gives the demo's card its months: its balance counts on the anchor, and the line starts at the earliest seed balance", async () => {
 		await addSample();
+
 		const card = await env.DB.prepare(
 			"SELECT balance_cents, balance_on, counted_from FROM accounts WHERE subtype = 'apple_card'",
 		).first<{
@@ -310,11 +344,14 @@ describe("the demo's Apple Card sample (#766)", () => {
 			balance_on: string;
 			counted_from: string;
 		}>();
+
 		expect(card?.balance_cents).toBe(124018);
 		expect(card?.balance_on).toBe(await anchor());
+
 		const earliest = await env.DB.prepare(
 			"SELECT MIN(h.date) AS d FROM balance_history h JOIN accounts a ON a.id = h.account_id WHERE a.plaid_item_id IS NOT NULL",
 		).first<{ d: string }>();
+
 		expect(card?.counted_from).toBe(earliest?.d);
 		const { points, appleCard } = await accountsWithHistory(env.DB, TODAY);
 		expect(appleCard?.balanceOn).toBe(await anchor());

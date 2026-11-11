@@ -26,6 +26,7 @@ const fakeAi = (answer: (text: string) => unknown = () => ({ response: "" })) =>
 			).messages
 				.find((m) => m.role === "user")
 				?.content.replace("Bank text: ", "");
+
 			return answer(text ?? "");
 		}),
 	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
@@ -48,6 +49,7 @@ async function addTransactions(
 	}[],
 ) {
 	let n = 0;
+
 	for (const row of rows) {
 		n += 1;
 		await db
@@ -72,12 +74,14 @@ type MerchantRow = {
 	display_name: string | null;
 	suggestion_status: string;
 };
+
 const merchants = async (): Promise<MerchantRow[]> => {
 	const { results } = await db
 		.prepare(
 			"SELECT raw_name, display_name, suggestion_status FROM merchants ORDER BY raw_name",
 		)
 		.all<Omit<MerchantRow, "names">>();
+
 	return Promise.all(
 		results.map(async (row) => ({
 			...row,
@@ -114,17 +118,22 @@ describe("suggestMerchantNames", () => {
 			})),
 		);
 		let statements = 0;
+
 		const counted = new Proxy(db, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
 		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
@@ -136,6 +145,7 @@ describe("suggestMerchantNames", () => {
 
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
 		await addTransactions([{ rawName: RAW }, { rawName: RAW }]);
+
 		const ai = fakeAi(() => ({
 			response: "Blue Bottle Coffee\nBlue Bottle",
 		}));
@@ -157,11 +167,13 @@ describe("suggestMerchantNames", () => {
 
 	it("never asks again for a merchant it already asked about, whatever the answer was", async () => {
 		await addTransactions([{ rawName: RAW }, { rawName: "NOTHING USEFUL" }]);
+
 		const ai = fakeAi((text) =>
 			text === RAW
 				? { response: "Blue Bottle Coffee" }
 				: { response: "NOTHING USEFUL" },
 		);
+
 		await suggestMerchantNames({ DB: db, AI: ai });
 		expect(callsFor(ai).sort()).toEqual([RAW, "NOTHING USEFUL"].sort());
 		// An answer with no usable name is remembered as an empty suggestion, not a pending one.
@@ -273,6 +285,7 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "A Name" }));
 		ai.run.mockImplementationOnce(async () => {
 			await saveAiSwitches(db, { names: false });
+
 			return { response: "First Shop" };
 		});
 		expect(await suggestMerchantNames({ DB: db, AI: ai })).toMatchObject({
@@ -290,6 +303,7 @@ describe("suggestMerchantNames", () => {
 					"INSERT INTO merchants (raw_name, display_name) VALUES ('FIRST SHOP', 'Mine') ON CONFLICT(raw_name) DO UPDATE SET display_name = 'Mine'",
 				)
 				.run();
+
 			return { response: "Shopfront" };
 		});
 		await suggestMerchantNames({ DB: db, AI: naming });
@@ -303,9 +317,11 @@ describe("suggestMerchantNames", () => {
 			["ONE", "TWO", "THREE", "FOUR"].map((rawName) => ({ rawName })),
 		);
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const failing = fakeAi(() => {
 			throw new Error("capacity");
 		});
+
 		expect(await suggestMerchantNames({ DB: db, AI: failing })).toEqual({
 			asked: 3,
 			suggested: 0,
@@ -335,10 +351,13 @@ describe("suggestMerchantNames", () => {
 			{ rawName: "SMALL A" },
 			{ rawName: "SMALL B" },
 		]);
+
 		const answer = (text: string) => {
 			if (text.startsWith("TOP")) throw new Error("capacity");
+
 			return { response: "Small Place" };
 		};
+
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		// Night one: the three top merchants fail in a row, so the run stops before the two small ones.
@@ -373,9 +392,11 @@ describe("suggestMerchantNames", () => {
 	it("asks a merchant whose call failed again on a later night, and a later success clears its failure", async () => {
 		await addTransactions([{ rawName: RAW }]);
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const failing = fakeAi(() => {
 			throw new Error("capacity");
 		});
+
 		expect(await suggestMerchantNames({ DB: db, AI: failing })).toEqual({
 			asked: 1,
 			suggested: 0,
@@ -409,14 +430,18 @@ describe("suggestMerchantNames", () => {
 			.bind(RAW)
 			.run();
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const failing = fakeAi(() => {
 			throw new Error("capacity");
 		});
+
 		await suggestMerchantNames({ DB: db, AI: failing });
 		logged.mockRestore();
+
 		const failures = await db
 			.prepare("SELECT raw_name, failed_at FROM merchant_name_failures")
 			.all<{ raw_name: string; failed_at: string }>();
+
 		const [failure] = failures.results;
 		expect(failures.results).toHaveLength(1);
 		expect(failure?.raw_name).toBe(RAW);
@@ -465,23 +490,31 @@ describe("suggestMerchantNames", () => {
 			["ONE", "TWO", "THREE", "FOUR", "FIVE"].map((rawName) => ({ rawName })),
 		);
 		let statements = 0;
+
 		const counted = new Proxy(db, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		// Two of the five calls fail and three answer, all in one batch of five.
 		const ai = fakeAi((text) => {
 			if (text === "TWO" || text === "FOUR") throw new Error("capacity");
+
 			return { response: "A Name" };
 		});
+
 		expect(
 			await suggestMerchantNames({ DB: counted as D1Database, AI: ai }),
 		).toEqual({ asked: 5, suggested: 3 });
@@ -519,8 +552,10 @@ describe("suggestMerchantNames", () => {
 			["ONE", "TWO", "THREE", "FOUR", "FIVE"].map((rawName) => ({ rawName })),
 		);
 		let now = 0;
+
 		const ai = fakeAi(() => {
 			now += 1_000;
+
 			return { response: "A Name" };
 		});
 
@@ -550,6 +585,7 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "A Name" }));
 		ai.run.mockImplementationOnce(async () => {
 			await saveAiSwitches(db, { names: false });
+
 			return { response: "A Name" };
 		});
 		expect(await suggestMerchantNames({ DB: db, AI: ai })).toEqual({
@@ -618,9 +654,11 @@ describe("suggestTransactionNotes", () => {
 	it("asks again about a note whose call failed", async () => {
 		await addNoteCandidates(1);
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const failing = fakeAi(() => {
 			throw new Error("capacity");
 		});
+
 		expect(await suggestTransactionNotes({ DB: db, AI: failing })).toEqual({
 			asked: 1,
 			suggested: 0,
@@ -649,9 +687,11 @@ describe("suggestTransactionNotes", () => {
 				)
 				.bind(`plaid-note-${rawName}`, date, rawName)
 				.run();
+
 		// Every call for a FAILS text throws; the others answer empty.
 		const answer = (text: string) => {
 			if (text.includes("FAILS")) throw new Error("capacity");
+
 			return { response: "" };
 		};
 
@@ -777,6 +817,7 @@ describe("suggestTransactionNotes", () => {
 			const ai = fakeAi(() => ({ response: "Dog bed" }));
 			ai.run.mockImplementationOnce(async () => {
 				await db.prepare(rename).run();
+
 				return { response: "Dog bed" };
 			});
 			expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
@@ -800,6 +841,7 @@ describe("suggestTransactionNotes", () => {
 					"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
 				)
 				.run();
+
 			return { response: "Vet visit" };
 		});
 		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
@@ -816,17 +858,22 @@ describe("suggestTransactionNotes", () => {
 	it("saves 100 notes in a small fixed statement count, reading each batch's names once before its save", async () => {
 		await addNoteCandidates(nameCallLimit);
 		let statements = 0;
+
 		const counted = new Proxy(db, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const ai = fakeAi(() => ({ response: "Bought a gift" }));
 		expect(
 			await suggestTransactionNotes({
@@ -851,6 +898,7 @@ describe("suggestNightlyNames", () => {
 	/** How many of the night's calls were for notes, and how many for names, by the bank text each was about. */
 	const askedAbout = (ai: { run: ReturnType<typeof vi.fn> }) => {
 		const texts = callsFor(ai);
+
 		return {
 			notes: texts.filter((text) => text?.startsWith("NOTE SHOP")).length,
 			names: texts.filter((text) => !text?.startsWith("NOTE SHOP")).length,
@@ -902,27 +950,36 @@ describe("suggestNightlyNames", () => {
 		await addNoteCandidates(1);
 		await addNamesWaiting(150);
 		let statements = 0;
+
 		const counted = new Proxy(db, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		let namesAsked = 0;
+
 		const ai = fakeAi((text) => {
 			if (text.startsWith("NOTE SHOP")) return { response: "Bought a gift" };
 			namesAsked += 1;
+
 			// Every other name call fails: no three in a row, and each batch saves both answers and failures.
 			if (namesAsked % 2 === 1) throw new Error("capacity");
+
 			return { response: "Some Place Name" };
 		});
+
 		await suggestNightlyNames({ DB: counted as D1Database, AI: ai });
 		expect(askedAbout(ai)).toEqual({ notes: 1, names: 99 });
 		// The probe (the switch read and the names query): 2. The notes' own two reads, then the note's batch (its

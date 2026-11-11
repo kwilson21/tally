@@ -31,22 +31,29 @@ export function fakeSteps(
 ) {
 	const cache = new Map<string, unknown>();
 	const steps: RecordedStep[] = [];
+
 	const runStep: StepRunner = async (name, config, fn) => {
 		if (cache.has(name)) {
 			steps.push({ name, config, attempts: 0, cached: true });
+
 			return cache.get(name) as never;
 		}
+
 		const record: RecordedStep = { name, config, attempts: 0, cached: false };
 		steps.push(record);
+
 		// A step that throws is retried up to its limit, and at least as often as it was made to throw (a re-run after a
 		// crash, which Workflows does even for a step with no retries).
 		const limit =
 			options.limits?.[name] ??
 			Math.max(config.retries?.limit ?? 5, options.throws?.[name] ?? 0);
+
 		for (let attempt = 1; ; attempt++) {
 			record.attempts = attempt;
+
 			try {
 				await options.beforeAttempt?.(name, attempt);
+
 				if (
 					options.fails?.includes(name) ||
 					(options.throws?.[name] ?? 0) >= attempt
@@ -54,13 +61,16 @@ export function fakeSteps(
 					throw new Error(`fake failure in ${name}`);
 				const result = await fn({ attempt });
 				cache.set(name, result);
+
 				if (options.replayAfter?.includes(name))
 					await fn({ attempt: attempt + 1 });
+
 				return result as never;
 			} catch (error) {
 				if (attempt > limit) throw error;
 			}
 		}
 	};
+
 	return { runStep, steps, names: () => steps.map((step) => step.name) };
 }

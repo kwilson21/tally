@@ -25,6 +25,7 @@ describe("feedback minimization", () => {
 		const cleaned = sanitizeFeedbackMessage(
 			`${canaries.join(" | ")} https://tally.test/transactions?id=secret#private /transactions?merchant=secret#private`,
 		);
+
 		for (const canary of canaries) expect(cleaned).not.toContain(canary);
 		expect(cleaned).not.toContain("id=secret");
 		expect(cleaned).not.toContain("#private");
@@ -52,6 +53,7 @@ describe("feedback minimization", () => {
 			const cleaned = sanitizeFeedbackMessage(sample);
 			expect(sanitizeFeedbackMessage(cleaned)).toBe(cleaned);
 		}
+
 		expect(sanitizeFeedbackMessage("Card failed while loading")).toBe(
 			"Card failed while loading",
 		);
@@ -96,21 +98,27 @@ describe("cleaned-message confirmation", () => {
 			string,
 			(event: { preventDefault(): void }) => void
 		>();
+
 		const inputListeners = new Map<string, () => void>();
 		const children: Array<{ textContent?: string }> = [];
+
 		const message = {
 			value: "account 123456789 and Card failed",
 			addEventListener: (name: string, callback: () => void) =>
 				inputListeners.set(name, callback),
 			focus: () => {},
 		};
+
 		const reviewedMarker = { value: "" };
+
 		const confirmReview = {
 			checked: false,
 			required: false,
 			focus: () => {},
 		};
+
 		const confirmLabel = { hidden: true };
+
 		const review = {
 			hidden: true,
 			replaceChildren: () => {
@@ -119,12 +127,17 @@ describe("cleaned-message confirmation", () => {
 			append: (...items: Array<{ textContent?: string }>) =>
 				children.push(...items),
 		};
+
 		const form = {
 			querySelector: (selector: string) => {
 				if (selector === '[name="message"]') return message;
+
 				if (selector === '[name="message_reviewed"]') return reviewedMarker;
+
 				if (selector === '[name="confirm_review"]') return confirmReview;
+
 				if (selector === "[data-feedback-confirm-label]") return confirmLabel;
+
 				return null;
 			},
 			addEventListener: (
@@ -132,11 +145,13 @@ describe("cleaned-message confirmation", () => {
 				callback: (event: { preventDefault(): void }) => void,
 			) => listeners.set(name, callback),
 		};
+
 		const doc = {
 			querySelector: (selector: string) =>
 				selector.startsWith("form") ? form : review,
 			createElement: () => ({ textContent: "" }),
 		};
+
 		installFeedbackMessageReview(doc as never);
 		let prevented = false;
 		listeners.get("submit")?.({
@@ -232,6 +247,7 @@ describe("safe screenshot tree", () => {
 				},
 			],
 		});
+
 		const serialized = JSON.stringify(tree);
 		expect(serialized).toContain("Transactions");
 		expect(serialized).not.toContain("Riley");
@@ -273,8 +289,10 @@ describe("PostHog replay payload policy", () => {
 			],
 			console: ["Riley Example", "stack secret"],
 		});
+
 		const serialized = JSON.stringify(output);
 		expect(serialized).toContain("Transactions");
+
 		for (const secret of [
 			"Riley",
 			"riley@example.test",

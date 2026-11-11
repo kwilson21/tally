@@ -14,8 +14,10 @@ import { READING_STEP, StepBar } from "./step-bar";
 import { YourBanks } from "./your-banks";
 
 export const READING_HEADING = "Reading your bank";
+
 export const EMAIL_LINE =
 	"You can close this page. Tally emails you the moment your questions are ready.";
+
 export const MORE_BANKS_LINE =
 	"Link every bank and card you use, so your questions cover them all.";
 
@@ -33,20 +35,27 @@ export function readingStep(
 	view: SetupView,
 ): "reading" | "sorting" | "slow" | "run" {
 	if (view.waitsForRun) return "run";
+
 	if (view.slow) return "slow";
+
 	if (view.sorting) return "sorting";
+
 	return "reading";
 }
 
 /** The status sentence (text-lg), by step. */
 export function readingStatus(view: SetupView): string {
 	const step = readingStep(view);
+
 	if (step === "run")
 		return `Tally sorts your last 90 days in its daily run, at about ${view.runTime}, as set in Settings.`;
+
 	if (step === "slow")
 		return `Sorting is taking longer than usual: ${count(view.sorted)} of ${count(view.total)}.`;
+
 	if (step === "sorting")
 		return `Sorting your last 90 days: ${count(view.sorted)} of ${count(view.total)} done.`;
+
 	// The bank is named only with one connected; with more, the count says how many (P140 A).
 	const from =
 		view.bankCount === 1
@@ -54,6 +63,7 @@ export function readingStatus(view: SetupView): string {
 			: view.bankCount > 1
 				? ` from ${count(view.bankCount)} banks`
 				: "";
+
 	return `Tally's reading your last 90 days${from}.`;
 }
 
@@ -63,18 +73,23 @@ export function readingStatus(view: SetupView): string {
  */
 export function readingNextLine(view: SetupView, bankLine: boolean): string {
 	const step = readingStep(view);
+
 	if (step === "run") return "Your three questions open once they're sorted.";
+
 	if (step === "slow")
 		return `Tally keeps trying on its own.${bankLine ? "" : " Nothing for you to do."}`;
 	const updates = view.refreshes ? " This page updates as it goes." : "";
+
 	if (step === "sorting")
 		return `Your three questions open the moment it's done, usually in a few minutes.${updates}`;
+
 	return `Next it sorts them, then you answer three quick questions and your budget is ready.${updates}`;
 }
 
 /** The sort's bar, filled to the share sorted, one decimal, 0 to 100; 0 with nothing to sort. */
 export function sortedShare(sorted: number, total: number): number {
 	if (total <= 0) return 0;
+
 	return Math.min(100, Math.max(0, Math.round((sorted / total) * 1000) / 10));
 }
 
@@ -127,6 +142,7 @@ export function SetupReading({
 	polls?: boolean;
 }) {
 	const step = readingStep(view);
+
 	return (
 		<SetupScreen
 			foot={

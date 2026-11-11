@@ -57,6 +57,7 @@ describe("netWorthSeries", () => {
 			row(2, "2026-10-01", 500),
 			row(2, "2026-10-02", 505),
 		];
+
 		expect(netWorthSeries(others, "2026-05-01", [1, 2, 3])).toEqual([
 			point("2026-10-01", 1500),
 			point("2026-10-02", 1515),
@@ -216,6 +217,7 @@ describe("accountsAdded", () => {
 			row(1, "2026-10-01", 120),
 			row(2, "2026-06-10", 200),
 		];
+
 		expect(
 			accountsAdded(
 				rows,
@@ -231,6 +233,7 @@ describe("accountsAdded", () => {
 			row(1, "2026-06-10", 100),
 			row(1, "2026-07-01", 110),
 		];
+
 		expect(accountsAdded(rows, [bank("Chase", [1, 2])], "2026-05-01")).toEqual([
 			{ name: "Chase", verb: "linked", date: "2026-06-10" },
 		]);
@@ -242,6 +245,7 @@ describe("accountsAdded", () => {
 			row(3, "2026-10-18", 124000, true),
 			row(4, "2026-09-03", 50),
 		];
+
 		expect(
 			accountsAdded(
 				rows,
@@ -308,6 +312,7 @@ describe("netWorthView, with fewer than two days of balances", () => {
 
 describe("netWorthView, with a line to draw", () => {
 	const today = "2026-10-05";
+
 	const rising = [
 		point("2026-05-01", 1200000),
 		point("2026-07-15", 1400000),
@@ -350,6 +355,7 @@ describe("netWorthView, with a line to draw", () => {
 			[point("2026-10-01", 1500000), point("2026-10-05", 1512000)],
 			today,
 		);
+
 		expect(view).toMatchObject({
 			sentence: "Up $120 since Oct 1.",
 			startLabel: "Oct 1",
@@ -361,15 +367,19 @@ describe("netWorthView, with a line to draw", () => {
 			[point("2026-05-01", 1200000), point("2026-10-04", 1560000)],
 			today,
 		);
+
 		expect(view).toMatchObject({ endLabel: "Oct 4" });
 	});
 
 	it("draws the first day at the left edge and the last at the right, higher money higher up", () => {
 		const view = netWorthView(rising, today);
+
 		if (view.kind !== "line") throw new Error("expected a line");
+
 		const coords = view.points
 			.split(" ")
 			.map((p) => p.split(",").map(Number) as [number, number]);
+
 		expect(coords).toHaveLength(3);
 		expect(coords[0]?.[0]).toBe(0);
 		expect(coords.at(-1)?.[0]).toBe(100);
@@ -377,6 +387,7 @@ describe("netWorthView, with a line to draw", () => {
 		expect(coords[0]?.[1]).toBeGreaterThan(coords[1]?.[1] ?? 0);
 		expect(coords[1]?.[1]).toBeGreaterThan(coords[2]?.[1] ?? 0);
 		expect(view.end).toEqual({ x: 100, y: coords[2]?.[1] });
+
 		for (const [, y] of coords) {
 			expect(y).toBeGreaterThanOrEqual(0);
 			expect(y).toBeLessThanOrEqual(100);
@@ -392,6 +403,7 @@ describe("netWorthView, with a line to draw", () => {
 			],
 			today,
 		);
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		const xs = view.points.split(" ").map((p) => Number(p.split(",")[0]));
 		expect(xs).toEqual([0, 3.3, 100]);
@@ -402,20 +414,24 @@ describe("netWorthView, with a line to draw", () => {
 			[point("2026-09-01", 500000), point("2026-10-01", 500000)],
 			today,
 		);
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.points).toBe("0,50 100,50");
 	});
 
 	it("gives screen readers the sentence and both ends in dollars", () => {
 		const view = netWorthView(rising, today);
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.description).toBe(
 			"Net worth over time. Up $3,600 since May. It was $12,000 on May 1 and is $15,600 today.",
 		);
+
 		const older = netWorthView(
 			[point("2026-05-01", 1200000), point("2026-10-04", 1560000)],
 			today,
 		);
+
 		if (older.kind !== "line") throw new Error("expected a line");
 		expect(older.description).toBe(
 			"Net worth over time. Up $3,600 since May. It was $12,000 on May 1 and was $15,600 on Oct 4.",
@@ -427,6 +443,7 @@ describe("netWorthView, with a line to draw", () => {
 			[point("2026-05-01", -500000), point("2026-10-05", -300000)],
 			today,
 		);
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.sentence).toBe("Up $2,000 since May.");
 		expect(view.description).toContain(
@@ -437,11 +454,13 @@ describe("netWorthView, with a line to draw", () => {
 
 describe("netWorthView, names an account added since the line's start", () => {
 	const today = "2026-10-05";
+
 	const rising = [
 		point("2026-05-01", 1200000),
 		point("2026-07-15", 1400000),
 		point("2026-10-05", 1560000),
 	];
+
 	const added = (
 		name: string,
 		verb: AccountAdded["verb"],
@@ -499,6 +518,7 @@ describe("netWorthView, names an account added since the line's start", () => {
 		const view = netWorthView(rising, today, [
 			added("Apple Card", "added", "2026-10-04"),
 		]);
+
 		if (view.kind !== "line") throw new Error("expected a line");
 		expect(view.description).toBe(
 			"Net worth over time. Up $3,600 since May. You added Apple Card on Oct 4. It was $12,000 on May 1 and is $15,600 today.",

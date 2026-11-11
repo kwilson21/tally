@@ -26,6 +26,7 @@ describe("Bills' opening rows and Band on the page (issue #602)", () => {
 		const { id } = (await env.DB.prepare(
 			"SELECT id FROM bills WHERE name='Internet'",
 		).first<{ id: number }>()) as { id: number };
+
 		const home = await get("/");
 		expect(home).toContain("Bills due soon");
 		expect(home).toMatch(

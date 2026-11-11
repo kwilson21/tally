@@ -43,6 +43,7 @@ type Parsed = { ok: true; zone: string } | { ok: false; error: string };
 /** The posted `time_zone`, if it is one the select offers. */
 export function parseTimeZone(form: FormData): Parsed {
 	const zone = form.get("time_zone");
+
 	return typeof zone === "string" && isSupportedZone(zone)
 		? { ok: true, zone }
 		: { ok: false, error: TIME_ZONE_ERROR };

@@ -9,6 +9,7 @@ type RequestEvent = {
 	defaultPrevented: boolean;
 	preventDefault: () => void;
 };
+
 type RequestListener = (event: RequestEvent) => void;
 
 /** A cancelable htmx event, as htmx 4 dispatches one on the element it concerns (htmx.js #trigger). */
@@ -21,12 +22,14 @@ function requestEvent(target?: unknown, ctx?: unknown): RequestEvent {
 			event.defaultPrevented = true;
 		},
 	};
+
 	return event;
 }
 
 /** The listeners on one element, which htmx's request events reach. */
 function elementListeners() {
 	const listeners = new Map<string, Set<RequestListener>>();
+
 	return {
 		listeners,
 		addEventListener: (name: string, listener: RequestListener) => {
@@ -105,14 +108,18 @@ function harness({
 } = {}) {
 	let click: () => Promise<void> = async () => {};
 	let delegatedClick: (event: unknown) => Promise<void> = async () => {};
+
 	let linkOptions:
 		| {
 				onSuccess: (token: string) => Promise<void>;
 				onExit: (error?: unknown) => void;
 		  }
 		| undefined;
+
 	type RequestListener = (event: { detail?: { ctx?: unknown } }) => void;
+
 	const listeners = new Map<string, Set<RequestListener>>();
+
 	const button = {
 		dataset,
 		isConnected: true,
@@ -137,26 +144,33 @@ function harness({
 			}
 		},
 	};
+
 	const children: Array<{ textContent?: string; role?: string }> = [];
+
 	const errorRegion = {
 		replaceChildren: vi.fn((...nodes) =>
 			children.splice(0, children.length, ...nodes),
 		),
 	};
+
 	const repairChildren: Array<{ textContent?: string; role?: string }> = [];
+
 	const repairError = {
 		replaceChildren: vi.fn((...nodes) =>
 			repairChildren.splice(0, repairChildren.length, ...nodes),
 		),
 	};
+
 	let liveRepairError = repairError;
 	let liveLinkButton: typeof button | undefined;
 	let liveErrorRegion = errorRegion;
 	const repairedHeading = { focus: vi.fn() };
+
 	const section = {
 		querySelector: (selector: string) =>
 			selector === "[data-fix-error]" ? repairError : undefined,
 	};
+
 	const repairButton = {
 		isConnected: true,
 		disabled: false,
@@ -169,36 +183,45 @@ function harness({
 		removeEventListener: button.removeEventListener,
 		dispatchRequest: button.dispatchRequest,
 	};
+
 	const currentSummary = {
 		version: "old",
 		replaceWith: vi.fn(),
 	};
+
 	const parsedSummaries: Array<{ version: string }> = [];
 	// Home's #page holds Link a bank, so the refresh that swaps it in also takes the button away. A reading-phase Home
 	// redraws its own Have more accounts? button, so the refresh keeps one (redrawKeepsLinkButton).
 	let linkButtonGone = false;
+
 	const currentPage = {
 		version: "old",
 		replaceWith: vi.fn(() => {
 			linkButtonGone = !redrawKeepsLinkButton;
 		}),
 	};
+
 	const parsedPages: Array<{ version: string }> = [];
+
 	// Setup's screen (#setup-screen), which a setup link's refresh swaps in.
 	const currentSetup = {
 		version: "old",
 		replaceWith: vi.fn(),
 	};
+
 	const parsedSetups: Array<{ version: string }> = [];
 	const status = { focus: vi.fn() };
+
 	// The document body, which an exchange with no Link a bank on screen uses as its source (plaid-link.js).
 	const body = {
 		isConnected: true,
 		dispatchEvent: vi.fn(),
 		...elementListeners(),
 	};
+
 	// The document's own listeners: the click delegate, and the before-request guard for Home's waiting refreshes.
 	const documentEvents = elementListeners();
+
 	const document = {
 		body,
 		injectedScripts: [] as Array<{
@@ -230,14 +253,20 @@ function harness({
 				return linkButtonGone
 					? undefined
 					: (liveLinkButton ?? (linkBank ? button : undefined));
+
 			if (selector === "[data-link-bank-error]")
 				return errorRegionOnScreen ? liveErrorRegion : undefined;
+
 			if (selector === "#accounts-summary") return currentSummary;
+
 			if (selector === "#page") return currentPage;
+
 			if (selector === "#setup-screen") return currentSetup;
+
 			// Setup's status line (setup-reading.tsx) is the focus target; this harness returns it only for a #page refresh, so the setup tests have none.
 			if (selector === "[data-link-bank-focus]")
 				return dataset?.linkBankTarget === "#page" ? status : undefined;
+
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
 				return liveRepairError;
 		},
@@ -253,22 +282,31 @@ function harness({
 			textContent: "",
 		}),
 	};
+
 	const fetch = vi.fn(async (url: string) => {
 		if (url === "/accounts") return refreshResponse;
+
 		if (url === "/") return homeRefreshResponse;
+
 		if (url === "/setup") return setupRefreshResponse;
+
 		return tokenResponse;
 	});
+
 	const create = vi.fn((options) => {
 		linkOptions = options;
+
 		return { open: vi.fn() };
 	});
+
 	class DOMParser {
 		parseFromString(text: string) {
 			const match = text.match(/role=["']alert["'][^>]*>([^<]*)/);
+
 			const summaryMatch = text.match(
 				/id=["']accounts-summary["'][^>]*data-version=["']([^"']*)/,
 			);
+
 			const summary = summaryMatch?.[1]
 				? {
 						version: summaryMatch[1],
@@ -281,17 +319,25 @@ function harness({
 								: undefined,
 					}
 				: undefined;
+
 			if (summary) parsedSummaries.push(summary);
+
 			const pageMatch = text.match(
 				/id=["']page["'][^>]*data-version=["']([^"']*)/,
 			);
+
 			const page = pageMatch?.[1] ? { version: pageMatch[1] } : undefined;
+
 			if (page) parsedPages.push(page);
+
 			const setupMatch = text.match(
 				/id=["']setup-screen["'][^>]*data-version=["']([^"']*)/,
 			);
+
 			const setup = setupMatch?.[1] ? { version: setupMatch[1] } : undefined;
+
 			if (setup) parsedSetups.push(setup);
+
 			return {
 				querySelector: (selector: string) =>
 					selector === "#accounts-summary"
@@ -306,9 +352,11 @@ function harness({
 			};
 		}
 	}
+
 	if (sdkLoaded) (globalThis as { Plaid?: unknown }).Plaid = { create };
 	else delete (globalThis as { Plaid?: unknown }).Plaid;
 	const process = vi.fn();
+
 	// htmx 4 sends no request for a source that is no longer in the document: its #handleTriggerEvent returns when
 	// !elt.isConnected (node_modules/htmx.org/dist/htmx.js). The fake refuses one the same way, so an exchange that
 	// depends on a redrawn button fails here as it would in the browser.
@@ -316,31 +364,37 @@ function harness({
 		async (method: string, url: string, options: { source?: unknown }) => {
 			if ((options.source as { isConnected?: boolean })?.isConnected === false)
 				return;
+
 			// The harness's mock, called as htmx calls it (its union type is not callable directly).
 			const send = ajax as unknown as (
 				method: string,
 				url: string,
 				options: unknown,
 			) => unknown;
+
 			return send(method, url, options);
 		},
 	);
+
 	setupPlaidLink({
 		document,
 		fetch,
 		htmx: { ajax: htmxAjax, process },
 		DOMParser,
 	});
+
 	return {
 		ajax,
 		body,
 		/** The before-request event htmx 4 dispatches on a request's source, and whether a listener cancelled it. */
 		beforeRequest: (source: unknown) => {
 			const event = requestEvent(source);
+
 			for (const listener of documentEvents.listeners.get(
 				"htmx:before:request",
 			) ?? [])
 				listener(event);
+
 			return event;
 		},
 		button,
@@ -385,6 +439,7 @@ function harness({
 		/** A summary refresh re-renders Link a bank and its error region (decision 55). */
 		replaceLinkButton(next: typeof button, region?: typeof errorRegion) {
 			liveLinkButton = next;
+
 			if (region) liveErrorRegion = region;
 		},
 	};
@@ -458,6 +513,7 @@ describe("plaid-link.js", () => {
 							}),
 						},
 					};
+
 					options.source.dispatchRequest("htmx:after:request", ctx);
 					options.source.dispatchRequest("htmx:finally:request", ctx);
 				},
@@ -480,9 +536,11 @@ describe("plaid-link.js", () => {
 			expect(h.currentSummary.replaceWith).toHaveBeenCalledWith(
 				h.parsedSummaries[0],
 			);
+
 			const announcements = h.document.body.dispatchEvent.mock.calls.filter(
 				([event]) => event.type === "announce",
 			);
+
 			expect(announcements).toHaveLength(1);
 			expect(announcements[0]?.[0].detail).toEqual({
 				value: "Fixed First Bank.",
@@ -497,6 +555,7 @@ describe("plaid-link.js", () => {
 					text: async () => '<p role="alert">Token failed.</p>',
 				},
 			});
+
 			await h.repairClick();
 			expect(h.repairChildren[0]?.textContent).toBe("Token failed.");
 			expect(h.repairButton.disabled).toBe(false);
@@ -535,6 +594,7 @@ describe("plaid-link.js", () => {
 					options.source.dispatchRequest("htmx:finally:request", {});
 				},
 			);
+
 			const h = harness({ ajax });
 			await h.repairClick();
 			await h.linkOptions?.onSuccess("unused");
@@ -551,6 +611,7 @@ describe("plaid-link.js", () => {
 					throw new TypeError("network");
 				}),
 			});
+
 			await h.repairClick();
 			await h.linkOptions?.onSuccess("unused");
 			expect(h.repairChildren).toHaveLength(1);
@@ -563,11 +624,13 @@ describe("plaid-link.js", () => {
 		it("shows a repaired failure in the live region after the summary is replaced", async () => {
 			const h = harness({ ajax: repairedAjax(502) });
 			const liveChildren: Array<{ textContent?: string; role?: string }> = [];
+
 			const liveRegion = {
 				replaceChildren: vi.fn((...nodes) =>
 					liveChildren.splice(0, liveChildren.length, ...nodes),
 				),
 			};
+
 			await h.repairClick();
 			h.replaceRepairError(liveRegion);
 			await h.linkOptions?.onSuccess("unused");
@@ -587,10 +650,12 @@ describe("plaid-link.js", () => {
 
 		it("keeps the summary and shows one alert when refresh returns 500", async () => {
 			const ajax = repairedAjax();
+
 			const h = harness({
 				ajax,
 				refreshResponse: { ok: false, text: async () => "failed" },
 			});
+
 			await h.repairClick();
 			await h.linkOptions?.onSuccess("unused");
 			expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
@@ -606,12 +671,14 @@ describe("plaid-link.js", () => {
 			await h.repairClick();
 			// The first fix ends (Link closed) before the redrawn button is clicked.
 			h.linkOptions?.onExit();
+
 			const replacement = {
 				...h.repairButton,
 				disabled: false,
 				setAttribute: vi.fn(),
 				classList: { toggle: vi.fn() },
 			};
+
 			await h.repairClick(replacement);
 			expect(h.fetch).toHaveBeenCalledTimes(2);
 			expect(replacement.disabled).toBe(true);
@@ -631,21 +698,27 @@ describe("plaid-link.js", () => {
 						}),
 					},
 				};
+
 				h.button.dispatchRequest("htmx:after:request", ctx);
 				const earlyTriggers = JSON.parse(ctx.hx.trigger);
+
 				for (const [type, detail] of Object.entries(earlyTriggers)) {
 					h.document.body.dispatchEvent(new CustomEvent(type, { detail }));
 				}
+
 				h.button.dispatchRequest("htmx:finally:request", ctx);
 			}
 		});
+
 		const h = harness({ ajax });
 		await h.click();
 		await h.linkOptions?.onSuccess("public-secret");
+
 		const announced = () =>
 			h.document.body.dispatchEvent.mock.calls.filter(
 				([event]) => event.type === "announce",
 			);
+
 		expect(h.document.body.dispatchEvent.mock.calls[0]?.[0].type).toBe("toast");
 		expect(ajax).toHaveBeenNthCalledWith(
 			1,
@@ -676,10 +749,12 @@ describe("plaid-link.js", () => {
 				h.button.dispatchRequest("htmx:finally:request", ctx);
 			}
 		});
+
 		const h = harness({
 			ajax,
 			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
 		});
+
 		await h.click();
 		await h.linkOptions?.onSuccess("public-secret");
 		expect(h.fetch).toHaveBeenCalledWith("/");
@@ -701,11 +776,13 @@ describe("plaid-link.js", () => {
 				h.button.dispatchRequest("htmx:finally:request", ctx);
 			}
 		});
+
 		const h = harness({
 			ajax,
 			redrawKeepsLinkButton: true,
 			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
 		});
+
 		await h.click();
 		await h.linkOptions?.onSuccess("public-secret");
 		expect(h.currentPage.replaceWith).toHaveBeenCalledWith(h.parsedPages[0]);
@@ -728,6 +805,7 @@ describe("plaid-link.js", () => {
 				});
 			}
 		});
+
 		const h = harness({
 			ajax,
 			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
@@ -744,9 +822,11 @@ describe("plaid-link.js", () => {
 					"First Bank is linked. Tally's reading your last 90 days, but the page didn't refresh. Reload the page to see it.",
 			}),
 		]);
+
 		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
 			([event]) => event.type === "announce",
 		);
+
 		expect(announcements).toHaveLength(1);
 		expect(h.currentPage.replaceWith).not.toHaveBeenCalled();
 		expect(h.status.focus).not.toHaveBeenCalled();
@@ -767,10 +847,12 @@ describe("plaid-link.js", () => {
 						}),
 					},
 				};
+
 				h.button.dispatchRequest("htmx:after:request", ctx);
 				h.button.dispatchRequest("htmx:finally:request", ctx);
 			}
 		});
+
 		const h = harness({
 			ajax,
 			dataset: { linkBankRefresh: "/setup", linkBankTarget: "#setup-screen" },
@@ -805,6 +887,7 @@ describe("plaid-link.js", () => {
 				h.button.dispatchRequest("htmx:finally:request", ctx);
 			}
 		});
+
 		const h = harness({
 			ajax,
 			dataset: { linkBankRefresh: "/setup", linkBankTarget: "#setup-screen" },
@@ -844,6 +927,7 @@ describe("plaid-link.js", () => {
 				text: async () => '<p role="alert">Plaid is unavailable.</p>',
 			},
 		});
+
 		await h.click();
 		expect(h.children[0]?.textContent).toBe("Plaid is unavailable.");
 		expect(h.button.disabled).toBe(false);
@@ -856,6 +940,7 @@ describe("plaid-link.js", () => {
 				text: '<p role="alert">Exchange failed.</p>',
 			}),
 		);
+
 		const h = harness({ ajax });
 		await h.click();
 		await h.linkOptions?.onSuccess("public-secret");
@@ -880,6 +965,7 @@ describe("plaid-link.js", () => {
 				throw new TypeError("network");
 			}),
 		});
+
 		await h.click();
 		await h.linkOptions?.onSuccess("public-secret");
 		expect(h.children[0]?.textContent).toBe(genericFailure);
@@ -888,10 +974,13 @@ describe("plaid-link.js", () => {
 
 	it("cleans up exchange listeners after a rejection so a retry announces once", async () => {
 		let exchangeAttempt = 0;
+
 		const ajax = vi.fn(async (method: string) => {
 			if (method !== "POST") return;
 			exchangeAttempt += 1;
+
 			if (exchangeAttempt === 1) throw new TypeError("network");
+
 			const ctx = {
 				response: { status: 204 },
 				text: "",
@@ -899,9 +988,11 @@ describe("plaid-link.js", () => {
 					trigger: JSON.stringify({ announce: "Linked Retry Bank." }),
 				},
 			};
+
 			h.button.dispatchRequest("htmx:after:request", ctx);
 			h.button.dispatchRequest("htmx:finally:request", ctx);
 		});
+
 		const h = harness({ ajax });
 
 		await h.click();
@@ -911,9 +1002,11 @@ describe("plaid-link.js", () => {
 
 		await h.click();
 		await h.linkOptions?.onSuccess("retry-public-secret");
+
 		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
 			([event]) => event.type === "announce",
 		);
+
 		expect(announcements).toHaveLength(1);
 		expect(announcements[0]?.[0].detail).toEqual({
 			value: "Linked Retry Bank.",
@@ -931,8 +1024,10 @@ describe("plaid-link.js", () => {
 					trigger: JSON.stringify({ announce: "Linked First Bank." }),
 				},
 			};
+
 			h.button.dispatchRequest("htmx:finally:request", ctx);
 		});
+
 		const h = harness({
 			ajax,
 			refreshResponse: { ok: false, text: async () => "Refresh failed." },
@@ -948,9 +1043,11 @@ describe("plaid-link.js", () => {
 					"Linked First Bank, but the list didn't refresh. Reload the page to see it.",
 			}),
 		]);
+
 		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
 			([event]) => event.type === "announce",
 		);
+
 		expect(announcements).toHaveLength(1);
 		expect(announcements[0]?.[0].detail).toEqual({
 			value: "Linked First Bank.",
@@ -975,6 +1072,7 @@ describe("plaid-link.js", () => {
 				});
 			}
 		});
+
 		const h = harness({
 			ajax,
 			refreshResponse: { ok: false, text: async () => "Refresh failed." },
@@ -999,6 +1097,7 @@ describe("plaid-link.js", () => {
 				hx: { trigger: JSON.stringify({ announce: "Linked First Bank." }) },
 			});
 		});
+
 		const h = harness({ ajax });
 		h.fetch.mockImplementationOnce(async () => ({
 			ok: true,
@@ -1034,6 +1133,7 @@ describe("plaid-link.js", () => {
 							}),
 						},
 					};
+
 					options.source.dispatchRequest("htmx:after:request", ctx);
 					options.source.dispatchRequest("htmx:finally:request", ctx);
 				},
@@ -1080,12 +1180,15 @@ describe("plaid-link.js", () => {
 					text: async () => '<p role="alert">Server said no.</p>',
 				},
 			});
+
 			const liveChildren: Array<{ textContent?: string }> = [];
+
 			const liveRegion = {
 				replaceChildren: vi.fn((...nodes) =>
 					liveChildren.splice(0, liveChildren.length, ...nodes),
 				),
 			};
+
 			h.replaceLinkButton(h.button, liveRegion);
 			await h.click();
 			expect(liveChildren.map((c) => c.textContent)).toEqual([
@@ -1110,6 +1213,7 @@ describe("plaid-link.js", () => {
 		it("keeps a redrawn Link a bank busy until the running link ends, then frees it", async () => {
 			const h = harness();
 			await h.click();
+
 			const redrawn = {
 				...h.button,
 				disabled: false,
@@ -1117,6 +1221,7 @@ describe("plaid-link.js", () => {
 				classList: { toggle: vi.fn() },
 				focus: vi.fn(),
 			};
+
 			h.replaceLinkButton(redrawn);
 			// The end of the running link reaches the button now on screen.
 			h.linkOptions?.onExit();
@@ -1146,11 +1251,13 @@ describe("plaid-link.js", () => {
 			isConnected: true,
 			hasAttribute: (name: string) => name === "data-waits-for-link",
 		});
+
 		const announcements = (h: ReturnType<typeof harness>) =>
 			h.document.body.dispatchEvent.mock.calls
 				.map(([event]) => event)
 				.filter((event) => event.type === "announce")
 				.map((event) => event.detail.value);
+
 		const linked = () => ({
 			response: { status: 204 },
 			text: "",
@@ -1165,6 +1272,7 @@ describe("plaid-link.js", () => {
 			isConnected: true,
 			hasAttribute: (name: string) => name === "data-waits-for-link",
 		});
+
 		/** The POSTs to /home/seen the page has sent, as fetch was called. */
 		const pingsOf = (h: ReturnType<typeof harness>) =>
 			h.fetch.mock.calls
@@ -1248,12 +1356,14 @@ describe("plaid-link.js", () => {
 
 		it("leaves the exchange alone while the link is running", async () => {
 			const cancelled: boolean[] = [];
+
 			const ajax = vi.fn(
 				async (_method: string, _url: string, options: { source: unknown }) => {
 					cancelled.push(h.beforeRequest(options.source).defaultPrevented);
 					h.button.dispatchRequest("htmx:finally:request", linked());
 				},
 			);
+
 			const h = harness({ ajax });
 			await h.click();
 			await h.linkOptions?.onSuccess("public-secret");
@@ -1292,6 +1402,7 @@ describe("plaid-link.js", () => {
 					options.source.dispatchRequest("htmx:finally:request", linked());
 				},
 			);
+
 			const h = harness({ ajax });
 			await h.click();
 			const live = { ...h.button, isConnected: true, focus: vi.fn() };
@@ -1322,6 +1433,7 @@ describe("plaid-link.js", () => {
 					options.source.dispatchRequest("htmx:finally:request", linked());
 				},
 			);
+
 			const h = harness({ ajax, linkBank: false });
 			await h.click();
 			h.button.isConnected = false;
@@ -1341,12 +1453,15 @@ describe("plaid-link.js", () => {
 					text: '<p role="alert">Exchange failed.</p>',
 				});
 			});
+
 			const h = harness({ ajax, errorRegionOnScreen: false });
 			await h.click();
 			await h.linkOptions?.onSuccess("public-secret");
+
 			const toasts = h.document.body.dispatchEvent.mock.calls
 				.map(([event]) => event)
 				.filter((event) => event.type === "toast");
+
 			expect(toasts).toHaveLength(1);
 			expect(toasts[0]?.detail).toEqual({
 				message: "Exchange failed.",
@@ -1361,6 +1476,7 @@ describe("plaid-link.js", () => {
 					text: '<p role="alert">Exchange failed.</p>',
 				});
 			});
+
 			const h = harness({ ajax });
 			await h.click();
 			await h.linkOptions?.onSuccess("public-secret");

@@ -74,9 +74,11 @@ describe("questionsOpen, one condition at a time", () => {
 
 describe("countWaitingForJev", () => {
 	let n = 0;
+
 	/** Inserts one imported row on the test account, with `over` for the columns that differ. */
 	async function txn(over: Record<string, unknown> = {}) {
 		n += 1;
+
 		const row: Record<string, unknown> = {
 			account_id: 1,
 			plaid_transaction_id: `gate-${n}`,
@@ -85,17 +87,22 @@ describe("countWaitingForJev", () => {
 			raw_name: `SHOP ${n}`,
 			...over,
 		};
+
 		const columns = Object.keys(row);
+
 		const inserted = await db
 			.prepare(
 				`INSERT INTO transactions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
 			)
 			.bind(...Object.values(row))
 			.run();
+
 		return inserted.meta.last_row_id;
 	}
+
 	const count = (categories: boolean, income: boolean) =>
 		countWaitingForJev(db, { categories, income });
+
 	/** The stored income answer and its flag, for a row. */
 	const incomeOf = (id: number) =>
 		db
@@ -104,6 +111,7 @@ describe("countWaitingForJev", () => {
 			)
 			.bind(id)
 			.first<{ income_confidence: number | null; flag_income: number }>();
+
 	/** Jev's unsure category answer on a credit: the category is unsure, so the row still waits for income. */
 	const unsureCategory = {
 		categoryId: null,
@@ -248,6 +256,7 @@ describe("countWaitingForJev", () => {
 
 	it("leaves out a refund that follows its purchase, which has no question of its own", async () => {
 		await txn({ category_id: 1, category_source: "user", amount_cents: 4000 });
+
 		const purchase = (
 			await db
 				.prepare(
@@ -255,6 +264,7 @@ describe("countWaitingForJev", () => {
 				)
 				.first<{ id: number }>()
 		)?.id;
+
 		await txn({
 			amount_cents: -4000,
 			credit_reviewed: 1,
@@ -284,11 +294,14 @@ describe("countWaitingForJev", () => {
 				category_confidence: 0.4,
 				jev_category_id: 1,
 			});
+
 			const failed = await txn({
 				amount_cents: -5000,
 				jev_failed_at: "2026-10-12",
 			});
+
 			await txn({ category_id: 1, category_source: "user", note: "" });
+
 			return failed;
 		}
 
@@ -300,9 +313,11 @@ describe("countWaitingForJev", () => {
 			"with categories %s and income %s, counts the rows the queue asks about that Jev did not fail on",
 			async (categories, income, expected) => {
 				const failed = await seedQueue();
+
 				const asked = (
 					await pendingForJev(db, 100, { categories, income })
 				).filter((pending) => pending.id !== failed);
+
 				expect(asked).toHaveLength(expected);
 				expect(await count(categories, income)).toBe(expected);
 			},
@@ -400,6 +415,7 @@ describe("readQuestionsGate", () => {
 		await markStroke(db, "bank", "2026-10-13");
 		await addBank("gate-bank-1");
 		expect(await readQuestionsGate(db)).toBe(true);
+
 		for (const stroke of STROKES) await markStroke(db, stroke, TODAY);
 		expect(await readQuestionsGate(db)).toBe(false);
 	});

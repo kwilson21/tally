@@ -173,14 +173,18 @@ import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
+
 /**
  * The sentence after a saved exclusion, for the rows that still count because they pay a bill or a planned expense
  * (`thing`). Empty when none of the selection pays one.
  */
 function stillCountsSentence(selected: number, paying: number, thing: string) {
 	if (paying === 0) return "";
+
 	if (selected === 1) return ` It still counts while it pays a ${thing}.`;
+
 	if (paying === 1) return ` 1 still counts while it pays a ${thing}.`;
+
 	return ` ${paying} still count while they pay a ${thing}.`;
 }
 
@@ -197,11 +201,14 @@ const jevAnswersCategories = async (c: Context<App>) =>
 /** Consecutive rows that share a date, in list order. */
 function byDay(rows: ListRow[]): [string, ListRow[]][] {
 	const groups: [string, ListRow[]][] = [];
+
 	for (const row of rows) {
 		const last = groups.at(-1);
+
 		if (last && last[0] === row.date) last[1].push(row);
 		else groups.push([row.date, [row]]);
 	}
+
 	return groups;
 }
 
@@ -251,14 +258,18 @@ type ListOptions = {
 /** The list URL for these filters (the edit sheet's "back"). */
 function listHref(filters: Filters, thisMonth: string) {
 	const query = filtersToQuery(filters, thisMonth);
+
 	return `/transactions${query ? `?${query}` : ""}`;
 }
+
 /** The list URL for these filters with the month always named, even this month: the month on screen (#321). */
 function pinnedListHref(filters: Filters, thisMonth: string) {
 	const query = new URLSearchParams(filtersToQuery(filters, thisMonth));
 	query.set("month", filters.month);
+
 	return `/transactions?${query}`;
 }
+
 /**
  * Whether the household has nothing at all yet, and what it is waiting for (spec §8.5). The demo
  * always has its seeded household and no Plaid, so it never shows the first visit's lists.
@@ -342,6 +353,7 @@ async function renderList(
 		).all<Category>(),
 		accountChoices(c.env.DB),
 	]);
+
 	const peoplePrompt = filters.raw
 		? false
 		: await c.env.DB.prepare(
@@ -360,11 +372,13 @@ async function renderList(
 		months.push(filters.month);
 		months.sort().reverse();
 	}
+
 	const first = (page - 1) * PAGE_SIZE + 1;
 	// Named even when archived (a bookmarked link can still filter by it), so the count always
 	// says which category it is and every change is announced (#56). Only an archived or
 	// unknown id needs the extra lookup.
 	let categoryName: string | null = null;
+
 	if (filters.category !== null) {
 		categoryName =
 			categories.results.find((cat) => cat.id === filters.category)?.name ??
@@ -375,12 +389,14 @@ async function renderList(
 			)?.name ??
 			`category ${filters.category}`;
 	}
+
 	// Named like the category, so the count always says which account; one that's gone reads by its id.
 	const accountName =
 		filters.account === null
 			? null
 			: (accounts.find((a) => a.id === filters.account)?.label ??
 				`account ${filters.account}`);
+
 	// A saved link can name an account that's since been deleted: keep it in the choice, as the month
 	// picker keeps its month, so the choice shows the filter the list is using rather than "All accounts".
 	if (
@@ -392,6 +408,7 @@ async function renderList(
 			label: `account ${filters.account}`,
 			disconnected: false,
 		});
+
 	const count = resultCountParts(
 		{ total, first, shown: rows.length, pages },
 		filters,
@@ -400,32 +417,42 @@ async function renderList(
 		accountName,
 		matched,
 	);
+
 	const listQuery = filtersToQuery({ ...filters, page }, today.slice(0, 7));
+
 	// The count takes focus when the row a save was about has left the list, or when "Only October" asked (#211).
 	const focusCount =
 		firstVisit === null &&
 		(countFocus ||
 			(focusId !== undefined && !rows.some((r) => r.id === focusId)));
+
 	const allCategorized =
 		filters.uncategorized &&
 		filters.q === "" &&
 		filters.category === null &&
 		filters.account === null &&
 		filters.show === "all";
+
 	// The address of this list with other filters: select mode is kept.
 	const listUrl = (next: Filters) => {
 		const params = new URLSearchParams(filtersToQuery(next, today.slice(0, 7)));
+
 		if (selecting) params.set("select", "1");
+
 		return `/transactions${params.size ? `?${params}` : ""}`;
 	};
+
 	// The page's selectable rows (a split parent has no checkbox), which Select all ticks.
 	const pageIds = rows.filter((row) => !row.isSplit).map((row) => row.id);
 	const onPage = new Set(pageIds);
+
 	// The rows the filters match (no split parent): what Select all selects, and what the selection settles against (#321).
 	const selectable = selecting
 		? await selectableMatchIds(c.env.DB, filters)
 		: [];
+
 	const settled = settle(selection, new Set(selectable));
+
 	// A tick stays until it is unticked, Done or acted on, so a tick that isn't on this page is drawn in
 	// the bar's "not on this page" line, still ticked (#350). Only rows that still exist are counted.
 	const offPage = selecting
@@ -434,10 +461,12 @@ async function renderList(
 				settled.ticks.filter((id) => !onPage.has(id)),
 			)
 		: [];
+
 	// Every tick the list keeps, on this page or not: the address, the links, the bar and the limit all read these.
 	// A tick to a row that is gone, or is now a split, drops out here, whichever caller drew the list (#350).
 	const offIds = new Set(offPage.map((row) => row.id));
 	const ticks = settled.ticks.filter((id) => onPage.has(id) || offIds.has(id));
+
 	// Held ticks are rows the filters match, so they exist: they are not filtered by the gone-row rule above.
 	const current: Selection = {
 		ticks,
@@ -445,6 +474,7 @@ async function renderList(
 		all: settled.all,
 		unticked: settled.unticked,
 	};
+
 	// What the actions act on, and the matched rows the bar doesn't select yet: the whole-set link's count (#321).
 	const picked = selecting ? selectedIds(current, selectable) : [];
 	const pickedSet = new Set(picked);
@@ -454,18 +484,23 @@ async function renderList(
 	const unticked = new Set(current.unticked);
 	// The month the whole-set link names: "September", or "all months" (#321).
 	const monthWords = monthWordsFor(filters.month, today);
+
 	// A row's box: all mode checks every row the set holds, except the rows unticked from it.
 	const checkedOn = (id: number) =>
 		current.all ? !unticked.has(id) : tickedSet.has(id);
+
 	const pageHref = (n: number) => listUrl({ ...filters, page: n });
+
 	// "Only October" narrows a search that runs in every month to this month, and keeps the search (#211).
 	const onlyMonthHref = listUrl({
 		...filters,
 		month: today.slice(0, 7),
 		page: 1,
 	});
+
 	// Its request asks for focus on the count, since the link goes with its focus; the address it pushes stays clean.
 	const onlyMonthRequest = `${onlyMonthHref}${onlyMonthHref.includes("?") ? "&" : "?"}focus=count`;
+
 	// In select mode a list change carries the ticked rows, so the ones still listed stay ticked, and
 	// its controls pause while it loads (LIST_LOAD_PAUSE).
 	const includeTicked = selecting
@@ -474,15 +509,18 @@ async function renderList(
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
+
 	// In Select mode the filter fields belong to the selection form (#383), so the filter form's request reads them by
 	// selector beside the ticks; its own FormData holds only the fields it still draws.
 	const filterForm = selecting ? SELECTION_FORM : undefined;
+
 	const filtersInclude = selecting
 		? {
 				"hx-include": `${FILTER_FIELDS}, ${TICKS}`,
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
+
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
 	// In select mode a page link is a button that submits the selection form, so without JavaScript it carries the
 	// ticks and the filter fields as they stand, not as drawn (#383). Its own value is the page.
@@ -501,6 +539,7 @@ async function renderList(
 			"hx-push-url": selecting ? pageHref(n) : "true",
 			...includeTicked,
 		};
+
 		return selecting ? (
 			<button
 				{...submitsSelection("/transactions")}
@@ -522,6 +561,7 @@ async function renderList(
 			</a>
 		);
 	};
+
 	const pageNav = pages > 1 && (
 		<nav
 			aria-label="Pages"
@@ -536,10 +576,12 @@ async function renderList(
 			</span>
 		</nav>
 	);
+
 	const back = listHref(filters, today.slice(0, 7));
 	// The select bar's back always names the month on screen, even this month, so a Select all list that
 	// outlives the month turning over keeps acting on the month it shows (#321).
 	const selectionBack = pinnedListHref(filters, today.slice(0, 7));
+
 	const clearFiltersHref = listHref(
 		{
 			...filters,
@@ -553,19 +595,23 @@ async function renderList(
 		},
 		today.slice(0, 7),
 	);
+
 	// Select and Done keep every filter and the page; Done drops only select mode.
 	const doneHref = `/transactions${listQuery ? `?${listQuery}` : ""}`;
 	const selectHref = `/transactions?${listQuery ? `${listQuery}&` : ""}select=1`;
 	// The demo's raw view draws each row as the bank sends it; which rows are listed, and what a tap does, don't change.
 	const shown = (row: ListRow) => (filters.raw ? bankRow(row) : row);
+
 	const suggestedNameNote = rows.some((row) => shown(row).nameSuggested) ? (
 		<p class="mb-2 flex flex-wrap items-center gap-x-1 text-sm text-muted">
 			Dashed names are suggestions.
 			<WhyLink section="names" topic="suggested name" />
 		</p>
 	) : null;
+
 	// The page's first tick takes focus after Older or Newer (FOCUS_FIRST_TICK), so focus isn't left on a removed link.
 	const firstTickId = focusFirstTick ? pageIds[0] : undefined;
+
 	// The ticks not on this page, under their day headings, in the disclosure (ticked).
 	const offPageRows = byDay(offPage).map(([date, dayRows]) => (
 		<>
@@ -579,6 +625,7 @@ async function renderList(
 			</ul>
 		</>
 	));
+
 	const htmx = c.req.header("HX-Request") === "true";
 	// In Select mode the sheet returns to the pinned back, so the month on screen survives the month turning over (#321).
 	// Add cash is a button that submits the selection form in Select mode (#383), so a browser without JavaScript sends
@@ -586,6 +633,7 @@ async function renderList(
 	// The sheet's close link and Cancel keep the ticks as drawn (#350), since they can't change while the sheet is open.
 	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(selecting ? selectionBack : back)}`;
 	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
+
 	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
 	// A reply to ?keys keeps keys too, since htmx takes this header over the push the keys sheet asked for (#72).
 	if (selecting && htmx && selectPushBase !== undefined) {
@@ -1007,6 +1055,7 @@ async function renderList(
 									<ul class="divide-y divide-rule">
 										{dayRows.map((row) => {
 											const href = `/transactions/${row.id}${listQuery ? `?${listQuery}` : ""}`;
+
 											return (
 												<TransactionRow
 													row={shown(row)}
@@ -1060,12 +1109,14 @@ transactions.get("/transactions", async (c) => {
 	// A tick to a row that is gone, or is now a split, drops out here, before the address and the list read it (#350).
 	// The whole-set link ticks every match again, so its request clears the unticked rows (#321).
 	const read = selectionFields(params);
+
 	const selection = selecting
 		? await requestedSelection(c.env.DB, read, {
 				pageLink: selectAll && !read.all,
 				wholeAgain: selectAll && read.all,
 			})
 		: NO_SELECTION;
+
 	const filters = { ...asked, month };
 	// The row a Likely sheet's close names, while its toast can still be up (P119 A, #71). Both times are the server's
 	// Date.now(), so the window overstates the toast's real age by the round trip, and the tick can only end early,
@@ -1073,6 +1124,7 @@ transactions.get("/transactions", async (c) => {
 	const savedAt = Number(params.get("saved-at"));
 	const saved = Number(params.get("saved"));
 	const age = Date.now() - savedAt;
+
 	const savedId =
 		c.req.header("HX-Request") === "true" &&
 		Number.isInteger(saved) &&
@@ -1082,29 +1134,36 @@ transactions.get("/transactions", async (c) => {
 		age < SAVED_TOAST_MS
 			? saved
 			: undefined;
+
 	let selectPushBase: string | undefined;
+
 	if (c.req.header("HX-Request") === "true") {
 		const named = monthParam(asked, before, month, thisMonth);
+
 		if (selecting) {
 			// In Select mode the address is written clean (#350): the filters, and the month it names (set even when that
 			// is this month, which filtersToQuery leaves out). renderList adds the settled selection to it (#321).
 			const query = new URLSearchParams(filtersToQuery(filters, thisMonth));
+
 			if (named !== null) query.set("month", named);
 			selectPushBase = `/transactions${query.size ? `?${query}` : ""}`;
 		} else {
 			// htmx shows this address, so a reload shows the list it shows: the month it names, and no focus marker.
 			// It is written only when the request's own address names a different month (htmx sends the form's month).
 			const address = new URL(c.req.url);
+
 			if (named !== address.searchParams.get("month")) {
 				address.searchParams.delete("focus");
 				address.searchParams.delete("saved");
 				address.searchParams.delete("saved-at");
+
 				if (named === null) address.searchParams.delete("month");
 				else address.searchParams.set("month", named);
 				c.header("HX-Push-Url", `${address.pathname}${address.search}`);
 			}
 		}
 	}
+
 	return renderList(c, today, filters, {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		savedId,
@@ -1149,13 +1208,17 @@ const NONE_SELECTED = "Select at least one transaction.";
 /** Positive whole-number ids, once each; each value may be one id or "1,2,3". */
 function parseIds(values: (string | File)[]) {
 	const ids = new Set<number>();
+
 	for (const value of values) {
 		if (typeof value !== "string") continue;
+
 		for (const part of value.split(",")) {
 			const id = /^\d{1,15}$/.test(part.trim()) ? Number(part) : 0;
+
 			if (id > 0) ids.add(id);
 		}
 	}
+
 	return [...ids];
 }
 
@@ -1163,6 +1226,7 @@ function parseIds(values: (string | File)[]) {
 const keptFragment = (currentUrl = "") => {
 	try {
 		const url = new URL(currentUrl);
+
 		return url.pathname === "/transactions" &&
 			/^#[A-Za-z][\w-]{0,63}$/.test(url.hash)
 			? url.hash
@@ -1182,6 +1246,7 @@ transactions.get("/transactions/select/count", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const matched = await selectableMatchIds(c.env.DB, filters);
+
 	// The count counts the ticks the form posts, as it always has: an action is what drops a gone row (#350).
 	const selection = settle(
 		{
@@ -1192,6 +1257,7 @@ transactions.get("/transactions/select/count", async (c) => {
 		},
 		new Set(matched),
 	);
+
 	// What the actions act on, and the matched rows the bar doesn't select yet (the whole-set link's count, #321).
 	const picked = selectedIds(selection, matched);
 	const pickedSet = new Set(picked);
@@ -1207,6 +1273,7 @@ transactions.get("/transactions/select/count", async (c) => {
 	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
 	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
 	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
+
 	const linkDrawn =
 		selectAllOffer({
 			pageIds,
@@ -1214,8 +1281,10 @@ transactions.get("/transactions/select/count", async (c) => {
 			all: selection.all,
 			unselected,
 		}) !== null;
+
 	const focusSelectAll = lineGone && linkDrawn;
 	const focusCount = lineGone && !focusSelectAll;
+
 	return c.html(
 		<>
 			{/* With no link drawn, the count is the bar's focus stop: a focus the link had moves here (#455). */}
@@ -1255,6 +1324,7 @@ type SelectionReadable = {
 	get(name: string): string | File | null;
 	getAll(name: string): (string | File)[];
 };
+
 function selectionFields(fields: SelectionReadable) {
 	const pageIds = fields.getAll("page-ids");
 	const ids = parseIds(fields.getAll("ids"));
@@ -1263,6 +1333,7 @@ function selectionFields(fields: SelectionReadable) {
 	// The rows the not-on-this-page line lists, ticked or not: an unticked one is a box the request drew (#321).
 	const lineIds = parseIds(fields.getAll(NOT_ON_PAGE_IDS_FIELD));
 	const drawn = [...(onPage ?? []), ...lineIds];
+
 	return {
 		/** The ticked boxes, on this page or not (the form's checkboxes, or the address's ids). */
 		ids,
@@ -1291,6 +1362,7 @@ async function requestedSelection(
 	const ids = [...read.ticks, ...(pageLink ? (read.pageIds ?? []) : [])];
 	const ticks = await selectableTickIds(db, [...new Set(ids)]);
 	const held = await selectableTickIds(db, read.held);
+
 	if (!read.all)
 		return {
 			ticks: [...new Set([...ticks, ...held])],
@@ -1298,6 +1370,7 @@ async function requestedSelection(
 			all: false,
 			unticked: [],
 		};
+
 	return {
 		ticks,
 		held,
@@ -1327,6 +1400,7 @@ async function postedSelection(
 		c.env.DB,
 		filtersFrom(c, today, back),
 	);
+
 	const selection = settle(
 		await requestedSelection(c.env.DB, selectionFields(form), {
 			pageLink: false,
@@ -1334,10 +1408,13 @@ async function postedSelection(
 		}),
 		new Set(matched),
 	);
+
 	// Over a limit the words win, even when every match is unticked (so NONE_SELECTED would say less).
 	const limit = limitWords(selection);
+
 	if (limit) return { ids: [], set: [], selection, error: limit };
 	const ids = selectedIds(selection, matched);
+
 	return {
 		ids,
 		set: setIds(selection, matched),
@@ -1369,11 +1446,13 @@ function SelectCategorySheet({
 		selectModeHref(back, selection),
 		FOCUS_SET_CATEGORY_BACK,
 	);
+
 	const alert = error && (
 		<p id="select-category-error" role="alert" class="text-sm text-over">
 			{error}
 		</p>
 	);
+
 	return (
 		<BottomSheet
 			labelledBy="select-category-title"
@@ -1475,6 +1554,7 @@ transactions.post("/transactions/select/category", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 	const { ids, selection, error } = await postedSelection(c, form, back, today);
+
 	return categorySheet(c, today, back, { ids, selection, error });
 });
 
@@ -1492,8 +1572,10 @@ const SET_CATEGORY = `UPDATE transactions SET category_id=?2, category_source='u
 /** The toast's sentence about purchases that moved with a refund: its date when one moved, "Their" when several did (#346). */
 function movedSentence(dates: string[], today: string): string {
 	const [date] = dates;
+
 	if (dates.length === 1 && date)
 		return ` Its ${shortDay(date, today)} purchase moved with it.`;
+
 	return dates.length > 1 ? " Their purchases moved with them." : "";
 }
 
@@ -1504,6 +1586,7 @@ async function finishSelection(
 	message: string,
 ) {
 	const address = listAddress(c, today, back);
+
 	if (!c.req.header("HX-Request")) return c.redirect(address, 303);
 	c.header(
 		"HX-Trigger",
@@ -1511,6 +1594,7 @@ async function finishSelection(
 	);
 	// The list is out of select mode, so the address bar is too.
 	c.header("HX-Push-Url", address);
+
 	return renderList(c, today, filtersFrom(c, today, address), {
 		focusHeading: true,
 	});
@@ -1521,6 +1605,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 	const { ids, selection, error } = await postedSelection(c, form, back, today);
+
 	if (error)
 		return categorySheet(c, today, back, {
 			ids,
@@ -1529,6 +1614,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			still: true,
 		});
 	const category = Number(form.get("category"));
+
 	const cat = Number.isInteger(category)
 		? await c.env.DB.prepare(
 				"SELECT id,name FROM categories WHERE id=? AND archived=0",
@@ -1536,6 +1622,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 				.bind(category)
 				.first<{ id: number; name: string }>()
 		: null;
+
 	if (!cat)
 		return categorySheet(c, today, back, {
 			ids,
@@ -1543,26 +1630,32 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			error: "Pick a category from the list.",
 			still: true,
 		});
+
 	// One statement picks the rows and writes them (SET_CATEGORY), the same write as the edit panel's category change
 	// (saveEdit), so the follow rule is read as the write runs. The count, the toast and the rule offer all come from
 	// the rows it returns.
 	const { results } = await c.env.DB.prepare(SET_CATEGORY)
 		.bind(JSON.stringify(ids), cat.id, actor(c))
 		.all<{ id: number; date: string }>();
+
 	const changed = results.map((row) => row.id);
 	// A returned row that was not ticked is a purchase that moved with a ticked refund (#346).
 	const ticked = new Set(ids);
+
 	const movedDates = results
 		.filter((row) => !ticked.has(row.id))
 		.map((row) => row.date);
+
 	const message = `Set ${changed.length} ${changed.length === 1 ? "transaction" : "transactions"} to ${cat.name}.${movedSentence(movedDates, today)}`;
 	// The first merchant in the selection to reach three picks of this category is asked (decision 79). A purchase that
 	// moved with its refund is a pick now, so the offer reads the changed rows (#346).
 	const found = await firstRuleOfferAmong(c.env.DB, changed, cat.id);
 	const tx = found ? await getTransaction(c.env.DB, found.transactionId) : null;
+
 	if (!found || !tx) return finishSelection(c, today, back, message);
 	// The rule offer's address leaves this month out, as the list's does (listAddress).
 	const address = listAddress(c, today, back);
+
 	const value: RuleOfferValue = {
 		merchantKey: found.merchantKey,
 		categoryId: found.categoryId,
@@ -1572,18 +1665,21 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		back: address,
 		transactionId: found.transactionId,
 	};
+
 	const announce = ruleOfferAnnouncement(value, message);
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "success" }, announce }),
 	);
 	c.header("HX-Push-Url", address);
+
 	return renderRuleOffer(c, today, address, value);
 });
 
 /** Excludes the rows named by id, each on its own (`?1` the JSON ids, `?2` the actor), and returns the ones it changed. */
 const EXCLUDE_ROWS = `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
 		WHERE excluded=0 AND id IN (SELECT value FROM json_each(?1)) RETURNING id`;
+
 /** The edit panel's exclude for a tick: a part excludes its whole purchase, its parent and every sibling (`?1`, `?2` as above). */
 const EXCLUDE_PURCHASE = `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
 		WHERE excluded=0 AND (
@@ -1597,12 +1693,14 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
+
 	const { ids, set, selection, error } = await postedSelection(
 		c,
 		form,
 		back,
 		today,
 	);
+
 	if (error)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
@@ -1615,10 +1713,12 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	// match, so each takes its whole purchase, as the edit panel does. That statement runs second: run first, it
 	// could exclude a matched sibling before RETURNING reads it.
 	let excluded: number[];
+
 	if (selection.all) {
 		const statements = [
 			c.env.DB.prepare(EXCLUDE_ROWS).bind(JSON.stringify(set), actor(c)),
 		];
+
 		if (selection.ticks.length > 0)
 			statements.push(
 				c.env.DB.prepare(EXCLUDE_PURCHASE).bind(
@@ -1637,10 +1737,12 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			.run();
 		excluded = ids;
 	}
+
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
 	// Bills and planned expenses share one count and one sentence; the noun names the kinds that are there.
 	const { paying, bills, plans } = await payingCounts(c.env.DB, excluded);
+
 	const stillCounts = stillCountsSentence(
 		excluded.length,
 		paying,
@@ -1650,6 +1752,7 @@ transactions.post("/transactions/select/exclude", async (c) => {
 				? "planned expense"
 				: "bill",
 	);
+
 	return finishSelection(
 		c,
 		today,
@@ -1681,6 +1784,7 @@ function savedCloseAttrs(
 function postedRefundOf(tx: TransactionDetail, form: FormData): number | null {
 	const current = tx.refundOfId ?? null;
 	const posted = form.get("refund_of");
+
 	return posted === null ? current : posted === "" ? null : Number(posted);
 }
 
@@ -1693,6 +1797,7 @@ async function postedRuleCategoryName(
 	id: number | null | undefined,
 ): Promise<string | undefined> {
 	if (!id) return undefined;
+
 	return (
 		await db
 			.prepare("SELECT name FROM categories WHERE id = ?")
@@ -1746,6 +1851,7 @@ function CashSheet({
 		selection ? selectModeHref(back, selection) : back,
 		FOCUS_ADD_CASH,
 	);
+
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
@@ -1782,13 +1888,16 @@ transactions.get("/transactions/cash/new", async (c) => {
 	// In Select mode the selection rides in the address (or, from a tap, in the request), and the sheet's close link
 	// and Cancel keep it, so closing the sheet leaves the selection as it was (#350, #321).
 	const selecting = params.get("select") === "1";
+
 	const selection = selecting
 		? await requestedSelection(c.env.DB, selectionFields(params), {
 				pageLink: false,
 				wholeAgain: false,
 			})
 		: undefined;
+
 	const today = await householdToday(c.env.DB);
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		pageTitle: "Add cash · Tally",
 		selecting,
@@ -1810,22 +1919,27 @@ transactions.post("/transactions/cash", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	// A form drawn in Select mode posts its selection back, so a refused form keeps it (#350, #321).
 	const selecting = form.get("select") === "1";
+
 	const selection = selecting
 		? await requestedSelection(c.env.DB, selectionFields(form), {
 				pageLink: false,
 				wholeAgain: false,
 			})
 		: undefined;
+
 	const today = await householdToday(c.env.DB);
 	const values = cashValues(today, form);
+
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id,name,icon,color FROM categories WHERE archived=0 ORDER BY sort_order,name",
 	).all<Category>();
+
 	const parsed = parseCash(
 		values,
 		today,
 		categories.map((x) => x.id),
 	);
+
 	if (!parsed.ok)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			pageTitle: "Add cash · Tally",
@@ -1844,6 +1958,7 @@ transactions.post("/transactions/cash", async (c) => {
 			),
 		});
 	const wasFirstVisit = (await firstVisitFor(c)) !== null;
+
 	// The same form posted again (a lost reply, a failed render) changes nothing and saves once. The
 	// reply names the entry as stored, not as the form now says, so it tells the truth about it.
 	const saved = await saveCash(
@@ -1852,20 +1967,25 @@ transactions.post("/transactions/cash", async (c) => {
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
+
 	// In Select mode the reply's address is the list's own, keeping a month that has turned over on screen (#321);
 	// otherwise it is the back as sent, as it always was.
 	const address = selecting ? listAddress(c, today, back) : back;
+
 	// A repost of an entry already saved stores nothing new, so it asks nothing: only a row this
 	// save stored can be the pick.
 	const offerRecord = saved.inserted
 		? await ruleOfferForTransaction(c.env.DB, saved.id, saved.categoryId)
 		: null;
+
 	const categoryName = categories.find(
 		(category) => category.id === saved.categoryId,
 	)?.name;
+
 	// The question names the merchant as the family named it, as the Select save does: the name the list
 	// shows for the saved entry, or its tidied bank text when no name is chosen.
 	const savedTx = offerRecord ? await getTransaction(c.env.DB, saved.id) : null;
+
 	const offer: RuleOfferValue | null =
 		offerRecord && categoryName
 			? {
@@ -1876,6 +1996,7 @@ transactions.post("/transactions/cash", async (c) => {
 					transactionId: saved.id,
 				}
 			: null;
+
 	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
 	if (!c.req.header("HX-Request"))
 		return offer
@@ -1883,6 +2004,7 @@ transactions.post("/transactions/cash", async (c) => {
 			: c.redirect(address, 303);
 	// The save's own words come first in the announcement, with or without the question after them.
 	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
+
 	if (offer) {
 		c.header(
 			"HX-Trigger",
@@ -1892,8 +2014,10 @@ transactions.post("/transactions/cash", async (c) => {
 			}),
 		);
 		c.header("HX-Push-Url", address);
+
 		return renderRuleOffer(c, today, address, offer, saved.id);
 	}
+
 	c.header(
 		"HX-Trigger",
 		hxTrigger({
@@ -1902,8 +2026,10 @@ transactions.post("/transactions/cash", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", address);
+
 	// The pressed button leaves with the swap, so focus goes to the title instead.
 	if (wasFirstVisit) swapWholePage(c);
+
 	return renderList(c, today, filtersFrom(c, today, address), {
 		focusHeading: wasFirstVisit,
 	});
@@ -1917,7 +2043,9 @@ transactions.post("/transactions/cash", async (c) => {
  */
 function asksFromThisPage(c: Context<App>) {
 	const from = c.req.header("HX-Current-URL");
+
 	if (!c.req.header("HX-Request") || !from) return false;
+
 	try {
 		return new URL(from).pathname === new URL(c.req.url).pathname;
 	} catch {
@@ -1939,15 +2067,19 @@ function ruleMatches(tx: TransactionDetail) {
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (!tx) return c.notFound();
 	const today = await householdToday(c.env.DB);
 	const thisMonth = today.slice(0, 7);
+
 	const filters = parseFilters(
 		new URL(c.req.url).searchParams,
 		thisMonth,
 		isDemo(c),
 	);
+
 	const back = listHref(filters, thisMonth);
+
 	const values: Edit = {
 		categoryId: tx.categoryId,
 		alwaysForMerchant: ruleMatches(tx),
@@ -1965,13 +2097,16 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		kind: tx.kind,
 		forPersonId: tx.forPersonId,
 	};
+
 	const people = (
 		await c.env.DB.prepare(
 			"SELECT id, name FROM household_people ORDER BY id",
 		).all<HouseholdPerson>()
 	).results;
+
 	const refunds = await refundPurchases(c.env.DB, tx);
 	const jevCategories = await jevAnswersCategories(c);
+
 	return renderList(c, today, filters, {
 		sheet: (categories, today) => (
 			<EditSheet
@@ -2007,6 +2142,7 @@ type Correction = {
 /** "Groceries and Household" when Jev says the trip looks mixed (#233), else undefined: the split's guess line. */
 function guessLabelOf(tx: TransactionDetail): string | undefined {
 	const guess = mixedCategories(tx);
+
 	return guess ? `${guess.first.name} and ${guess.second.name}` : undefined;
 }
 
@@ -2036,6 +2172,7 @@ function SplitSheet({
 	choices?: Record<number, string | undefined>;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
+
 	return (
 		// Closing it, by the backdrop or Cancel, returns focus to this transaction's row, as the edit panel does (#87).
 		<BottomSheet
@@ -2089,6 +2226,7 @@ function sheetToken(raw: string | null): string | null {
 function wholeCents(raw: string | null): number | null {
 	if (raw === null || !/^[1-9]\d*$/.test(raw)) return null;
 	const cents = Number(raw);
+
 	return Number.isSafeInteger(cents) ? cents : null;
 }
 
@@ -2101,6 +2239,7 @@ function correctionTotal(
 	raw: string | null,
 ): number | null {
 	const cents = wholeCents(raw);
+
 	return cents !== null &&
 		tx.accountType === "cash" &&
 		tx.parentId === null &&
@@ -2115,11 +2254,13 @@ function correctionTotal(
  */
 function partIdsOf(raw: string[]): (number | undefined)[] | null {
 	const ids: (number | undefined)[] = [];
+
 	for (const value of raw) {
 		if (value === "") ids.push(undefined);
 		else if (/^[1-9]\d*$/.test(value)) ids.push(Number(value));
 		else return null;
 	}
+
 	return ids;
 }
 
@@ -2138,11 +2279,13 @@ function postedSplitValues(
 	const guessing = mixedCategories(tx) !== null;
 	const guesses = form.getAll("part_guess").map(String);
 	const amounts = form.getAll("part_amount").map(String);
+
 	return form
 		.getAll("part_category")
 		.map(String)
 		.map((category, i) => {
 			const partId = partIds[i];
+
 			return {
 				category,
 				amount: amounts[i] ?? "",
@@ -2190,9 +2333,11 @@ function refundAnswers(
 
 async function splitContext(c: Context<App>) {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	const categories = await c.env.DB.prepare(
 		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 	).all<Category>();
+
 	return { tx, categories: categories.results };
 }
 
@@ -2208,6 +2353,7 @@ async function archivedPartCategories(db: D1Database, parentId: number) {
 		)
 		.bind(parentId)
 		.all<{ partId: number; id: number; name: string }>();
+
 	return new Map(
 		rows.results.map((row) => [row.partId, { id: row.id, name: row.name }]),
 	);
@@ -2227,7 +2373,9 @@ async function savedPartValues(
 		)
 		.bind(tx.id)
 		.all<{ id: number; categoryId: number | null; amountCents: number }>();
+
 	const archived = await archivedPartCategories(db, tx.id);
+
 	return saved.results.map((part) => ({
 		category: part.categoryId === null ? "" : String(part.categoryId),
 		amount: centsToAmount(part.amountCents),
@@ -2250,6 +2398,7 @@ async function changePartsList(
 	pendingEdit?: string,
 ) {
 	const values = await savedPartValues(c.env.DB, tx);
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (categories, today) => (
 			<SplitSheet
@@ -2266,6 +2415,7 @@ async function changePartsList(
 
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
+
 	if (!tx || tx.parentId !== null) return c.notFound();
 	const url = new URL(c.req.url);
 	const back = safeBack(url.searchParams.get("back"));
@@ -2273,16 +2423,21 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	// Change the parts: the saved parts filled in, each with its id, against the new total. Income is corrected
 	// this way too (#366).
 	const correcting = url.searchParams.has("total");
+
 	const total = correcting
 		? correctionTotal(tx, url.searchParams.get("total"))
 		: null;
+
 	if (correcting && total === null) return c.notFound();
+
 	if (total !== null) return changePartsList(c, tx, back, today, total);
+
 	// Income is never split (decision 62's review): no form for it either.
 	if (tx.income) return c.notFound();
 	// A trip that looks mixed opens with Jev's two categories as Tally's guess: dashed, amounts empty (#233).
 	// The amounts are always a person's, so nothing here reads one from the database.
 	const guess = mixedCategories(tx);
+
 	const values: SplitValue[] = guess
 		? [
 				{
@@ -2300,8 +2455,10 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 				{ category: "", amount: "" },
 				{ category: "", amount: "" },
 			];
+
 	// The linked refunds ask which part they go with; nothing is chosen until a person picks (decision 99).
 	const refunds = await splitRefundsOf(c.env.DB, tx.id);
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
@@ -2318,31 +2475,37 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 
 transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const { tx, categories } = await splitContext(c);
+
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
 	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
 	const partIds = partIdsOf(form.getAll("part_id").map(String));
+
 	if (partIds === null) return c.notFound();
 	const amounts = form.getAll("part_amount").map(String);
 	// A trip that looks mixed draws the parts a person has touched again out of band: one that was Tally's guess when the
 	// sheet last drew it and is not one now turns solid, once, and its guess marker is cleared with it (#233). A part still
 	// a guess, or already solid, is left as it is. Its parts are never saved ones, so none has a kept category.
 	const values = postedSplitValues(tx, form, partIds, new Map());
+
 	const touched = values.flatMap((value, index) =>
 		value.guess !== undefined && !isGuessedPart(value)
 			? [{ value, index }]
 			: [],
 	);
+
 	// The refund chooser's part labels follow the parts' categories and amounts, out of band (decision 99). Only the
 	// labels are redrawn, never the radios, so a pick made while this request is in flight stays checked and focused.
 	// A Change the parts sheet keeps its links by part, so it has no chooser. The labels belong to the drawing of the
 	// sheet that posted its token, so a reply with no valid token draws none.
 	const sheet = sheetToken(form.get("sheet")?.toString() ?? null);
+
 	const refunds =
 		total === null && sheet !== null
 			? await splitRefundsOf(c.env.DB, tx.id)
 			: [];
+
 	return c.html(
 		<>
 			<div id="split-line">
@@ -2365,6 +2528,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 
 transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
+
 	if (!tx || tx.parentId !== null) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
@@ -2372,13 +2536,17 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	// Change the parts: the posted total, and the amount the saved parts were drawn with, which the save
 	// checks. A posted total that doesn't qualify for this entry is not found.
 	const correcting = form.has("total");
+
 	const total = correcting
 		? correctionTotal(tx, form.get("total")?.toString() ?? null)
 		: null;
+
 	const amountWas = correcting
 		? wholeCents(form.get("amount_was")?.toString() ?? null)
 		: null;
+
 	if (correcting && (total === null || amountWas === null)) return c.notFound();
+
 	const correction =
 		total !== null && amountWas !== null
 			? {
@@ -2387,18 +2555,23 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					pendingEdit: form.get("pending_edit")?.toString(),
 				}
 			: undefined;
+
 	const categoryValues = form.getAll("part_category").map(String);
 	const amountValues = form.getAll("part_amount").map(String);
 	const partIds = partIdsOf(form.getAll("part_id").map(String));
+
 	if (partIds === null) return c.notFound();
+
 	const archived = correction
 		? await archivedPartCategories(c.env.DB, tx.id)
 		: new Map<number, Category>();
+
 	const values = postedSplitValues(tx, form, partIds, archived);
 	// Which part each linked refund goes with (decision 99). A Change the parts sheet keeps each part's links, so it
 	// asks nothing; a new split asks about every linked refund, and a redraw keeps the answers given.
 	const refunds = correction ? [] : await splitRefundsOf(c.env.DB, tx.id);
 	const choices = refundAnswers(refunds, form);
+
 	// Income is never split. A row that a bank change made income after the sheet opened gets the same
 	// sheet back, refused in words, as the other split refusals do. A Change the parts correction (#366) is
 	// not a new split: it keeps the entry's split, income or not, so only a new split is refused.
@@ -2420,9 +2593,11 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				/>
 			),
 		});
+
 	if (form.get("add") === "1") {
 		// Add a part: the open sheet again, with one more part.
 		values.push({ category: "", amount: "" });
+
 		return renderList(c, today, filtersFrom(c, today, back), {
 			sheet: (_categories, today) => (
 				<SplitSheet
@@ -2439,6 +2614,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			),
 		});
 	}
+
 	const parsed = parseSplit(
 		categoryValues,
 		amountValues,
@@ -2446,6 +2622,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		categories.map((cat) => cat.id),
 		values.map((value) => value.kept?.id),
 	);
+
 	if (!parsed.ok)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
@@ -2464,6 +2641,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				/>
 			),
 		});
+
 	// Each linked refund goes with a part or Not linked, and every part has room for what is chosen for it (decision
 	// 99). Refused in words with nothing saved, and the sheet comes back with the answers given.
 	const partNames = (parts: { categoryId: number; amountCents: number }[]) =>
@@ -2471,12 +2649,14 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			name: categories.find((cat) => cat.id === part.categoryId)?.name ?? "",
 			amountCents: part.amountCents,
 		}));
+
 	const refundError = refundAnswersError(
 		refunds,
 		choices,
 		partNames(parsed.parts),
 		today,
 	);
+
 	if (refundError)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
@@ -2495,6 +2675,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				/>
 			),
 		});
+
 	if (correction) {
 		const split: CashSplitEdit = {
 			totalCents: correction.totalCents,
@@ -2505,12 +2686,14 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				amountCents: part.amountCents,
 			})),
 		};
+
 		// The sheet again at the posted parts, with why the correction was refused (nothing saved).
 		const refused = (refusal: CashSplitRefusal) => {
 			const error =
 				"refundPart" in refusal
 					? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
 					: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
+
 			return renderList(c, today, filtersFrom(c, today, back), {
 				status: 422,
 				sheet: (_categories, today) => (
@@ -2529,6 +2712,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				),
 			});
 		};
+
 		// The panel's pending edit is checked first, and saved in the same batch as the parts (#365): an edit that
 		// fails its checks saves nothing, and a refused correction saves none of the edit either.
 		if (correction.pendingEdit)
@@ -2539,10 +2723,13 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				{ split, refused },
 			);
 		const result = await correctCashSplit(c.env.DB, tx.id, split, actor(c));
+
 		if (result.saved)
 			return splitSaved(c, tx, today, back, { unlinked: [], bills: [] });
+
 		return refused(result);
 	}
+
 	// The part each refund goes with, or null for Not linked (every answer was checked above).
 	const result = await saveSplit(
 		c.env.DB,
@@ -2556,6 +2743,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			]),
 		),
 	);
+
 	if (result.saved)
 		return splitSaved(c, tx, today, back, {
 			unlinked: result.unlinked,
@@ -2570,6 +2758,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		});
 	// Show the bank's new amount, so the next save checks against it.
 	const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		status: 422,
 		sheet: (_categories, today) => (
@@ -2634,6 +2823,7 @@ function splitSaved(
 		}),
 	);
 	c.header("HX-Push-Url", back);
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusId: tx.id,
 	});
@@ -2648,12 +2838,14 @@ function unlinkedSentence(
 	today: string,
 ): string {
 	const [first] = unlinked;
+
 	const refunds =
 		first === undefined
 			? ""
 			: unlinked.length === 1
 				? `The refund on ${shortDay(first, today)} is no longer linked.`
 				: `${unlinked.length} refunds are no longer linked.`;
+
 	return [
 		...moved.map(
 			(refund) =>
@@ -2669,14 +2861,17 @@ function unlinkedSentence(
 
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (!tx?.isSplit) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
+
 	const unlinked = unlinkedSentence(
 		await removeSplit(c.env.DB, tx.id, actor(c)),
 		today,
 	);
+
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
@@ -2689,6 +2884,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
+
 	return renderList(c, today, filtersFrom(c, today, back), { focusId: tx.id });
 });
 
@@ -2699,17 +2895,21 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
  */
 transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
+
 	const { linked, locked } = linkedPurchases(
 		tx,
 		{ refundOfId: postedRefundOf(tx, form), ...postedCredit(form) },
 		await refundPurchases(c.env.DB, tx),
 	);
+
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 	).all<Category>();
+
 	if (linked)
 		c.header(
 			"HX-Trigger",
@@ -2722,6 +2922,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 	// A locked choice is disabled, so the browser posts none of its radios: it carries the last pick in hidden
 	// fields (CategoryChoice), and the row's own category is drawn only when nothing is posted.
 	const posted = form.get("category");
+
 	// The rule the panel was drawn with, named by its category: the posted id is a number, not a name.
 	const ruleName =
 		form.get("always_was") === "1"
@@ -2732,6 +2933,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 				tx.merchantRuleCategoryName ??
 				undefined)
 			: undefined;
+
 	return c.html(
 		<CategoryChoice
 			tx={tx}
@@ -2755,7 +2957,9 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (!tx) return c.notFound();
+
 	return savePanel(c, tx, await c.req.formData());
 });
 
@@ -2769,6 +2973,7 @@ function pendingEditOf(form: FormData): string {
 		if (key !== "change_parts" && typeof value === "string")
 			fields.append(key, value);
 	});
+
 	return fields.toString();
 }
 
@@ -2802,17 +3007,21 @@ async function savePanel(
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
+
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0",
 	).all<Category>();
+
 	const people = (
 		await c.env.DB.prepare(
 			"SELECT id, name FROM household_people ORDER BY id",
 		).all<HouseholdPerson>()
 	).results;
+
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
 	const refunds = await refundPurchases(c.env.DB, tx);
+
 	// Only a top-level cash entry has the Amount and Date fields; a split part's date and amount come from its parent.
 	const cashValues =
 		tx.accountType === "cash" && tx.parentId === null
@@ -2822,13 +3031,17 @@ async function savePanel(
 						form.get("amount")?.toString() ?? centsToAmount(tx.amountCents),
 				}
 			: undefined;
+
 	const cashParsed = cashValues
 		? parseCashDateAmount(cashValues.date, cashValues.amount, today)
 		: undefined;
+
 	const current = tx.refundOfId ?? null;
 	const refundOfId = postedRefundOf(tx, form);
+
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
+
 	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
 	// merchant rule made from it) is ignored. It follows by the counting rule on what this save will hold.
 	// Only a new tick of Always is dropped: a kept one (always_was) leaves the store's rule as it is, and an
@@ -2836,48 +3049,60 @@ async function savePanel(
 	const linkedPurchase = refunds.find(
 		(p) => p.id === refundOfId && !p.excluded,
 	);
+
 	// The category the panel posted, kept for a 422's redraw: the linking branch below empties the form of it, and
 	// the redraw must still draw what the person chose (a validation error keeps the panel as it was left).
 	const postedCategory = form.get("category");
 	const postedNewCategoryName = form.get("new_category_name")?.toString() ?? "";
+
 	if (
 		linkedPurchase &&
 		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
 	) {
 		form.delete("category");
 		form.delete("new_category_name");
+
 		if (form.get("always_was") !== "1") form.delete("always");
 	}
+
 	// A name choice counts only while it is still offered: the panel may have been opened before "Suggest store
 	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or
 	// turn down a guess they can no longer see. A name typed in the field is always their own.
 	const pick = form.get("name_pick")?.toString() ?? "";
 	const offered = tx.nameChoices.names;
+
 	const stillOffered =
 		pick === STORE_VALUE ||
 		pick === OWN_VALUE ||
 		offered.some((name) => pickValue(name) === pick);
+
 	if (pick && !stillOffered) form.delete("name_pick");
+
 	// "Looks right" with nothing ticked confirms Tally's guess for the store, as it does without the Rename list:
 	// it names the merchant (all), whatever scope the hidden list posted (decision 101). A guess the panel
 	// no longer offers, because the merchant was named since it was drawn, names nothing.
 	if (keptDetails && !form.has("name_pick")) {
 		const displayedGuess = form.get("displayed_name_guess")?.toString() ?? "";
+
 		if (displayedGuess && offered.includes(displayedGuess)) {
 			form.set("name_pick", pickValue(displayedGuess));
 			form.set("name_scope", "all");
 		}
 	}
+
 	const parsed = parseEdit(
 		form,
 		categories.map((cat) => cat.id),
 		people.map((person) => person.id),
 	);
+
 	// The store's own name turns the suggestions down only when the panel offers some: with the names switch
 	// off Tally's guesses are hidden, and a save can't turn down what a person can't see (decision 80).
 	if (parsed.ok && offered.length === 0) parsed.value.keepBankName = false;
 	const jevCategories = await jevAnswersCategories(c);
+
 	if (parsed.ok) parsed.value.jevCategories = jevCategories;
+
 	// "All" with a typed name the merchant already has changes no merchant name, but it still replaces this
 	// transaction's own name (decision 101), so the save counts as a name change for this one.
 	if (
@@ -2887,6 +3112,7 @@ async function savePanel(
 		tx.nameChoices.thisOwn !== null
 	)
 		parsed.value.nameChanged = true;
+
 	// Under This one only, the name this transaction already shows as its own is no rename: nothing is written,
 	// and Tally doesn't guess its category again (rename.ts oneOffGuessesAgain). The name compared is the one the
 	// row shows (tx.ownName, which a split part inherits from its purchase), and a store's name is the tidied bank
@@ -2935,11 +3161,13 @@ async function savePanel(
 				: tx.forPersonId,
 			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
 		};
+
 		// The rule the panel posted, named as it was: another tab may have set the store's rule since, and the
 		// save clears only the rule posted (saveEdit), so the hint must not name the rule the store has now.
 		const postedRuleName = values.alwaysWas
 			? await postedRuleCategoryName(c.env.DB, values.merchantRuleWas)
 			: undefined;
+
 		return renderList(c, today, filters, {
 			status: 422,
 			sheet: (all, today) => (
@@ -2963,6 +3191,7 @@ async function savePanel(
 			),
 		});
 	};
+
 	// The amount broke its parts: the panel again, or, when Change the parts was asked for, the split sheet at
 	// that amount, holding the panel's other changes (spec §8.4).
 	const partsBroken = (amountCents: number, partsCents: number) =>
@@ -2978,6 +3207,7 @@ async function savePanel(
 	// "New category" (decision 101): the name under the chips is checked here, and the category is made only
 	// once every other check has passed, so a taken name or a full list saves nothing.
 	const choseNew = form.get("category") === "new";
+
 	const named = choseNew
 		? parseCategory(
 				nameForm(form.get("new_category_name")),
@@ -2985,7 +3215,9 @@ async function savePanel(
 				null,
 			)
 		: null;
+
 	const newCategoryError = named && !named.ok ? named.errors.name : undefined;
+
 	if (
 		!parsed.ok ||
 		!refundOk ||
@@ -2998,6 +3230,7 @@ async function savePanel(
 			...(newCategoryError ? { newCategory: newCategoryError } : {}),
 			...(cashParsed?.errors ?? {}),
 		});
+
 	// With a correction, the linked refunds and the parts are checked against the amount in the same batch (saveEdit),
 	// and a refusal draws the split sheet with the posted parts, so they are not checked here.
 	if (cashParsed && tx.isSplit && !correction) {
@@ -3008,22 +3241,28 @@ async function savePanel(
 		)
 			.bind(tx.id)
 			.first<{ cents: number }>();
+
 		if (linked && linked.cents > cashParsed.amountCents)
 			return showErrors({
 				amount: `Linked refunds add up to ${formatCents(linked.cents)}, so the amount can't be less than that.`,
 			});
+
 		const parts = await c.env.DB.prepare(
 			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
 		)
 			.bind(tx.id)
 			.first<{ cents: number }>();
+
 		if (parts && parts.cents !== cashParsed.amountCents)
 			return partsBroken(cashParsed.amountCents, parts.cents);
 	}
+
 	let edit: Edit = parsed.value;
 	let made: { id: number; name: string } | null = null;
+
 	if (named?.ok) {
 		const created = await makeCategory(c.env.DB, named.value);
+
 		if (!created.ok) return showErrors({ newCategory: created.error });
 		edit = { ...parsed.value, categoryId: created.id };
 		made = { id: created.id, name: named.value.name };
@@ -3051,12 +3290,15 @@ async function savePanel(
 		if (made) await unmakeCategory(c.env.DB, made.id);
 		throw error;
 	});
+
 	if (!result.saved) {
 		// Nothing was filed in a category made for this save, so it goes too: a retry must not find its name taken.
 		if (made) await unmakeCategory(c.env.DB, made.id);
+
 		// Only a save with a correction is refused for its split; without one, the split is never in the batch.
 		if ("split" in result)
 			return correction ? correction.refused(result.split) : c.notFound();
+
 		if ("personMissing" in result)
 			// Removed since this page loaded the household: the panel shows the household as it is now.
 			return showErrors(
@@ -3068,6 +3310,7 @@ async function savePanel(
 					).all<HouseholdPerson>()
 				).results,
 			);
+
 		// A part of a split refund that doesn't fit names its own purchase, unless that is the purchase the
 		// refund is linked to (the field then names it as it always has).
 		return "refundLeftCents" in result
@@ -3086,6 +3329,7 @@ async function savePanel(
 						amount: `Linked refunds add up to ${formatCents(result.refundCents)}, so the amount can't be less than that.`,
 					});
 	}
+
 	// The rule offer asks about the whole store, so a name given to this one transaction ("This one only")
 	// doesn't stand in for it. An unnamed store is named by its tidied text, never the raw bank string (#93),
 	// or by the suggestion its rows were showing when nothing was chosen (P29 A). A panel that didn't rename
@@ -3096,11 +3340,13 @@ async function savePanel(
 		parsed.value.keepBankName === true &&
 		parsed.value.nameChanged !== false &&
 		parsed.value.nameScope !== "one";
+
 	const storeName =
 		(parsed.value.nameChanged === false || parsed.value.nameScope === "one"
 			? tx.merchantName
 			: parsed.value.displayName) ??
 		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
+
 	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
 	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
 	// A bill or planned-expense payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
@@ -3110,6 +3356,7 @@ async function savePanel(
 	// A transfer put back in the budget can be the third pick though its category stays. An ordinary row counts while
 	// excluded, so putting it back adds no pick (COUNTED_PICKS_SQL).
 	const putBackInBudget = tx.markedTransfer && countsNow && !countedBefore;
+
 	// The question follows a new pick: a category picked, or a transfer put back in the budget. The post-save lookup
 	// drops it when the store already has that rule, including one this save made or kept (decision 101).
 	const ruleOfferRecord =
@@ -3117,9 +3364,11 @@ async function savePanel(
 		(parsed.value.categoryId === tx.categoryId && !putBackInBudget)
 			? null
 			: await ruleOfferForTransaction(c.env.DB, tx.id, parsed.value.categoryId);
+
 	const offerCategory = categories.find(
 		(cat) => cat.id === parsed.value.categoryId,
 	);
+
 	const ruleOffer =
 		ruleOfferRecord && offerCategory
 			? {
@@ -3130,6 +3379,7 @@ async function savePanel(
 					transactionId: tx.id,
 				}
 			: undefined;
+
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
 	// again (spec §7, decision 79). It runs once this answer is out, so the save never waits for it;
 	// a transaction that already has a category, or gets one in this save, asks nothing.
@@ -3139,11 +3389,14 @@ async function savePanel(
 		parsed.value.nameChanged !== false &&
 		parsed.value.displayName !== null &&
 		parsed.value.displayName !== tx.merchantName;
+
 	const addedNote = parsed.value.note !== null && parsed.value.note !== tx.note;
+
 	const changedDetails =
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
+
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
@@ -3162,6 +3415,7 @@ async function savePanel(
 				followsPurchaseAfterSave(tx, { ...parsed.value, refundOfId }),
 		},
 	});
+
 	if (
 		((addedName || addedNote || changedDetails) &&
 			tx.categoryId === null &&
@@ -3169,6 +3423,7 @@ async function savePanel(
 		guessAgain
 	)
 		c.executionCtx.waitUntil(askAgain(c.env, tx.id));
+
 	// A category made here offers the transactions that might belong in it, when there are any (decision 76).
 	// Its reason names the entry as this save left it: a cash entry's date and amount may have just changed.
 	const likely = made
@@ -3182,11 +3437,15 @@ async function savePanel(
 				rows: await likelyTransactions(c.env.DB, tx.id, made.name, today),
 			}
 		: null;
+
 	const panel = likely && likely.rows.length > 0 ? likely : null;
+
 	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
 	if (!c.req.header("HX-Request")) {
 		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
+
 		if (panel) return renderLikely(c, today, filters, panel);
+
 		return c.redirect(back, 303);
 	}
 
@@ -3197,9 +3456,11 @@ async function savePanel(
 	const name = after?.displayName ?? tx.displayName;
 	// A save that chose no name while the row still shows an undecided guess named nothing: it says just "Saved.".
 	const unnamed = after?.nameSuggested === true;
+
 	// A category made in this save is named too, so the toast says what the transaction is now.
 	const category =
 		made?.name ?? categories.find((cat) => cat.id === edit.categoryId)?.name;
+
 	// A one-off name that made Tally guess the category again had its category cleared (saveEdit), so the
 	// category the save posted is not what the row now shows: the announcer says Tally guesses it again.
 	const saved = unnamed
@@ -3209,6 +3470,7 @@ async function savePanel(
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
+
 	const exclusion =
 		excludedNow && !tx.excluded
 			? tx.paysBill
@@ -3219,16 +3481,20 @@ async function savePanel(
 			: countsNow && !countedBefore
 				? " It counts in the budget again."
 				: "";
+
 	const keptWords = unnamed
 		? "Kept the details."
 		: guessAgain
 			? `Kept the details for ${name}. ${GUESSES_AGAIN}`
 			: `Kept the details for ${name}.`;
+
 	// A cash date that moved its plan's payment out of the plan's month unlinked the plan (saveEdit), and the save says so.
 	const planWords = result.planUnlinked
 		? " Its payment is no longer linked."
 		: "";
+
 	const saveWords = (keptDetails ? keptWords : saved) + exclusion + planWords;
+
 	const toastWords = unnamed
 		? keptDetails
 			? "Kept details."
@@ -3236,10 +3502,12 @@ async function savePanel(
 		: keptDetails
 			? `Kept details for ${name}`
 			: `Saved ${name}`;
+
 	// The toast's name has no full stop, so the plan's sentence follows one; an unnamed toast already ends in one.
 	const toastMessage = result.planUnlinked
 		? `${unnamed ? toastWords : `${toastWords}.`}${planWords}`
 		: toastWords;
+
 	c.header(
 		"HX-Trigger",
 		hxTrigger({
@@ -3253,12 +3521,15 @@ async function savePanel(
 		}),
 	);
 	c.header("HX-Push-Url", back);
+
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
 	// The row this save saved is marked, and the question or sheet it draws keeps it marked behind (P119 A, #71).
 	if (ruleOffer)
 		return renderRuleOffer(c, today, back, ruleOffer, tx.id, tx.id);
+
 	if (panel) return renderLikely(c, today, filters, panel, tx.id, Date.now());
+
 	return renderList(c, today, filters, { focusId: tx.id, savedId: tx.id });
 }
 
@@ -3272,13 +3543,16 @@ function pendingEditForm(pendingEdit: string, totalCents: number): FormData {
 		form.append(key, value);
 	});
 	form.set("amount", centsToAmount(totalCents));
+
 	return form;
 }
 
 /** A live category a likely-transactions form names, or null. */
 async function liveCategory(db: D1Database, value: string | File | null) {
 	const id = Number(value);
+
 	if (!Number.isInteger(id) || id <= 0) return null;
+
 	return db
 		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
 		.bind(id)
@@ -3288,12 +3562,14 @@ async function liveCategory(db: D1Database, value: string | File | null) {
 // The likely transactions after a new category (decision 76): Add files the ticked ones, and only them.
 transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const category = await liveCategory(c.env.DB, form.get("category"));
+
 	// A category archived or renamed since the panel opened moves nothing, as when every ticked row has changed.
 	const filed = category
 		? await addLikely(c.env.DB, {
@@ -3305,13 +3581,16 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 				actor: actor(c),
 			})
 		: { moved: 0, name: null };
+
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+
 	// Nothing moves when every ticked row changed since the panel opened (addLikely files only the ticked rows
 	// the panel's rules still allow). The toast names the category as it is stored, not as the panel showed it.
 	const message =
 		filed.name === null
 			? "Nothing moved: those transactions changed since the panel opened."
 			: `Set ${filed.moved} ${filed.moved === 1 ? "transaction" : "transactions"} to ${filed.name}.`;
+
 	c.header(
 		"HX-Trigger",
 		hxTrigger({
@@ -3320,6 +3599,7 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", back);
+
 	return renderList(c, today, filters, { focusId: tx.id });
 });
 
@@ -3327,11 +3607,14 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 // would file now, not the six the panel lists.
 transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	const today = await householdToday(c.env.DB);
 	const category = await liveCategory(c.env.DB, form.get("category"));
+
 	if (!category) return c.notFound();
+
 	const count = (
 		await likelyStill(c.env.DB, {
 			savedId: tx.id,
@@ -3341,6 +3624,7 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 			ticked: form.getAll("ids").map(Number),
 		})
 	).length;
+
 	return c.html(<LikelyAdd count={count} categoryName={category.name} />);
 });
 
@@ -3356,12 +3640,15 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	// pick of this category and doesn't look mixed, the test that asked the question.
 	const trip = Number(form.get("trip"));
 	const today = await householdToday(c.env.DB);
+
 	const validCategory = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
 	)
 		.bind(categoryId)
 		.first<{ id: number; name: string }>();
+
 	const askedName = form.get("merchant")?.toString() ?? "";
+
 	const merchantName = merchantKey
 		? await c.env.DB.prepare(
 				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
@@ -3369,19 +3656,24 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 				.bind(merchantKey)
 				.first<{ displayName: string | null }>()
 		: null;
+
 	const offer =
 		yes && validCategory && merchantKey && Number.isInteger(trip) && trip > 0
 			? await ruleOfferForTransaction(c.env.DB, trip, categoryId)
 			: null;
+
 	const rule = offer !== null && offer.merchantKey === merchantKey;
+
 	const message =
 		yes && rule && validCategory
 			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
 			: validCategory
 				? `Saved as ${validCategory.name}.`
 				: "Saved.";
+
 	if (yes && rule && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
+
 	if (!c.req.header("HX-Request"))
 		return c.redirect(
 			savedId === undefined ? back : withFocus(back, savedId),
@@ -3392,6 +3684,7 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", back);
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusId: savedId,
 		focusHeading: savedId === undefined,
@@ -3472,22 +3765,26 @@ function renderRuleOffer(
 transactions.post("/transactions/rule-offer", (c) =>
 	respondToRuleOffer(c, true),
 );
+
 transactions.post("/transactions/rule-offer/dismiss", (c) =>
 	respondToRuleOffer(c, false),
 );
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+
 	if (tx?.accountType !== "cash" || tx.parentId !== null) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
+
 	if (form.get("confirm") !== "1") {
 		const people = (
 			await c.env.DB.prepare(
 				"SELECT id, name FROM household_people ORDER BY id",
 			).all<HouseholdPerson>()
 		).results;
+
 		const values: Edit = {
 			categoryId: tx.categoryId,
 			income: tx.income,
@@ -3502,8 +3799,10 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			kind: tx.kind,
 			forPersonId: tx.forPersonId,
 		};
+
 		const refunds = await refundPurchases(c.env.DB, tx);
 		const jevCategories = await jevAnswersCategories(c);
+
 		return renderList(c, today, filtersFrom(c, today, back), {
 			sheet: (categories, today) => (
 				<EditSheet
@@ -3520,9 +3819,12 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			),
 		});
 	}
+
 	const undoToken = await holdCashDelete(c.env.DB, tx.id, tx.displayName);
+
 	if (!undoToken) return c.notFound();
 	const undoExpiresInMs = await cashDeleteUndoExpiresInMs(c.env.DB, undoToken);
+
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	const deleted = `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`;
 	c.header(
@@ -3540,7 +3842,9 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	const nowFirstVisit = (await firstVisitFor(c)) !== null;
+
 	if (nowFirstVisit) swapWholePage(c);
+
 	return renderList(c, today, filtersFrom(c, today, back), {
 		focusHeading: nowFirstVisit,
 	});
@@ -3551,11 +3855,14 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	const token = form.get("token");
 	const back = safeBack(form.get("back")?.toString());
 	const wasFirstVisit = (await firstVisitFor(c)) !== null;
+
 	const restored =
 		typeof token === "string" && /^[0-9a-f-]{36}$/i.test(token)
 			? await restoreCashDelete(c.env.DB, token)
 			: null;
+
 	const today = await householdToday(c.env.DB);
+
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	// The restored entry, when this Undo restored it (not an earlier one, nor an expired one).
 	const restoredNow = restored && !restored.alreadyRestored ? restored : null;
@@ -3597,7 +3904,9 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 		),
 	);
 	c.header("HX-Push-Url", back);
+
 	if (wasFirstVisit && restoredNow) swapWholePage(c);
+
 	// The restored row takes focus when this list shows it, and the saved tick (P119 A); otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
 	return renderList(c, today, filtersFrom(c, today, back), {
 		restoredId: restoredNow?.id,

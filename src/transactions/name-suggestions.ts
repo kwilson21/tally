@@ -14,13 +14,16 @@ export function parseSuggestedNames(
 	stored: string | null | undefined,
 ): string[] {
 	let rows: unknown;
+
 	try {
 		rows = JSON.parse(stored ?? "[]");
 	} catch {
 		return [];
 	}
+
 	if (!Array.isArray(rows)) return [];
 	const named: [number, string][] = [];
+
 	for (const row of rows) {
 		if (
 			Array.isArray(row) &&
@@ -29,6 +32,7 @@ export function parseSuggestedNames(
 		)
 			named.push([row[0], row[1].trim()]);
 	}
+
 	return named
 		.filter(([, name]) => name !== "")
 		.sort((a, b) => a[0] - b[0])
@@ -86,6 +90,7 @@ export function usableSuggestedNames({
 }: Stored): string[] {
 	if (status !== MERCHANT_SUGGESTION_WAITING) return [];
 	const names = parseSuggestedNames(stored);
+
 	return namesOn ? names : names.filter((name) => isBankName(name, key));
 }
 
@@ -141,11 +146,14 @@ export function shownName({
 	fromBank: boolean;
 } {
 	if (ownName) return { name: ownName, suggested: false, fromBank: false };
+
 	if (chosen) return { name: chosen, suggested: false, fromBank: false };
 	const tidied = tidyName(rawName);
+
 	const first = usableSuggestedNames(merchant).find(
 		(name) => !repeatsShown(name, merchant.key, tidied),
 	);
+
 	return first
 		? {
 				name: first,
@@ -158,6 +166,7 @@ export function shownName({
 /** The names the edit panel and the review offer: the usable ones that differ from the tidied bank text. */
 export function offeredNames(merchant: Stored, rawName: string): string[] {
 	const tidied = tidyName(rawName);
+
 	return usableSuggestedNames(merchant).filter(
 		(name) => !repeatsShown(name, merchant.key, tidied),
 	);

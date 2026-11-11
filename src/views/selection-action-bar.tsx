@@ -9,17 +9,22 @@ import { Icon } from "./icons";
 
 /** The most ticked rows one bulk action takes (D1 binds at most 100 parameters per statement). */
 export const MAX_SELECTED = 100;
+
 /** Over the limit the bar says so in brick; both actions wait, and nothing is trimmed. */
 export const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
+
 /** The most rows one whole-set selection unticks: keeps the address a safe size (#423). */
 export const MAX_UNTICKED = 100;
+
 /** Over the untick limit, after Select all on the whole set: filter first, since the address holds every untick (#423). */
 export const TOO_MANY_UNTICKED = `Untick ${MAX_UNTICKED} or fewer. To leave out more, filter the list first.`;
 
 /** The words for a selection over a limit, or undefined: the ticks first, then the unticks from the whole set (#423). */
 export function limitWords(selection: Selection): string | undefined {
 	if (selection.ticks.length > MAX_SELECTED) return TOO_MANY;
+
 	if (selection.unticked.length > MAX_UNTICKED) return TOO_MANY_UNTICKED;
+
 	return undefined;
 }
 
@@ -119,6 +124,7 @@ export const submitsSelection = (action: string) =>
  */
 export const selectionQuery = (selection: Selection) => {
 	const ids = unique([...selection.ticks, ...selection.held]);
+
 	return `${ids.length ? `&ids=${ids.join(",")}` : ""}${selection.all ? "&all=1" : ""}${selection.all && selection.unticked.length ? `&unticked=${selection.unticked.join(",")}` : ""}`;
 };
 
@@ -132,6 +138,7 @@ export const selectModeHref = (back: string, selection: Selection) =>
  */
 export function SelectionFields({ selection }: { selection: Selection }) {
 	if (!selection.all) return null;
+
 	return (
 		<>
 			<input type="hidden" name="all" value="1" />
@@ -157,6 +164,7 @@ export function SelectionActionButtons({
 	focusSetCategory?: boolean;
 }) {
 	const oobSwap = oob ? "outerHTML" : undefined;
+
 	return (
 		<>
 			<Button
@@ -214,8 +222,10 @@ export function selectAllOffer({
 	unselected: number;
 }): "page" | "whole" | null {
 	if (all) return unselected > 0 ? "whole" : null;
+
 	if (pageIds.length > 0 && !pageIds.every((id) => ticked.has(id)))
 		return "page";
+
 	return unselected > 0 ? "whole" : null;
 }
 
@@ -258,6 +268,7 @@ export function SelectAllOnPage({
 		all: selection.all,
 		unselected,
 	});
+
 	// Each id once: the ticks, the held ones, then this page's rows that aren't ticked yet (the address both forms share).
 	const pageAddress = selectModeHref(back, {
 		ticks: unique([...selection.ticks, ...selection.held, ...pageIds]),
@@ -265,6 +276,7 @@ export function SelectAllOnPage({
 		all: false,
 		unticked: [],
 	});
+
 	// The whole set, with every tick kept and no unticked rows: the link ticks everything the filters match.
 	const wholeAddress = selectModeHref(back, {
 		ticks: selection.ticks,
@@ -272,6 +284,7 @@ export function SelectAllOnPage({
 		all: true,
 		unticked: [],
 	});
+
 	return (
 		<span
 			id="select-all-page"
@@ -367,6 +380,7 @@ export function SelectedCount({
 			)}
 		</>
 	);
+
 	// As the result count and the title do: no ring around text that is only there to be read.
 	return focus || fallback ? (
 		<span
@@ -394,6 +408,7 @@ export function SelectionLimit({
 	oob?: boolean;
 }) {
 	const limit = limitWords(selection);
+
 	return (
 		<div
 			id="selection-limit"

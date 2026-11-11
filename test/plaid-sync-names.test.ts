@@ -37,11 +37,13 @@ const response = (body: unknown) =>
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
+
 	return result?.id as number;
 }
 
@@ -75,13 +77,17 @@ async function syncPages(
 	}: { db?: D1Database; between?: (page: number) => Promise<void> } = {},
 ) {
 	let served = 0;
+
 	const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 		if (String(url).endsWith("/accounts/get")) {
 			return response({ accounts: [ACCOUNT] });
 		}
+
 		const index = served++;
+
 		if (index > 0) await between?.(index);
 		const page = pages[index] ?? {};
+
 		return response({
 			added: page.added ?? [],
 			modified: page.modified ?? [],
@@ -92,6 +98,7 @@ async function syncPages(
 			has_more: page.hasMore ?? false,
 		});
 	});
+
 	await syncItem({ ...env, DB: db, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
 }
 
@@ -104,18 +111,23 @@ const sync = (
 /** The database, and how many statements the sync prepared on it (D1 allows 1,000 queries per invocation). */
 function counting(db: D1Database) {
 	let statements = 0;
+
 	const counted = new Proxy(db, {
 		get(target, property) {
 			const value = Reflect.get(target, property);
+
 			if (property === "prepare") {
 				return (sql: string) => {
 					statements += 1;
+
 					return target.prepare(sql);
 				};
 			}
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
+
 	return { db: counted as D1Database, statements: () => statements };
 }
 
@@ -137,6 +149,7 @@ const pendingNames = async () => {
 		   AND EXISTS (SELECT 1 FROM transactions t WHERE t.merchant_name = merchants.raw_name)
 		 ORDER BY raw_name`,
 	).all<{ raw_name: string }>();
+
 	return Promise.all(results.map((row) => merchantNames(env.DB, row.raw_name)));
 };
 
@@ -144,6 +157,7 @@ const merchants = async (): Promise<MerchantRow[]> => {
 	const { results } = await env.DB.prepare(
 		"SELECT raw_name, display_name, suggestion_status FROM merchants ORDER BY raw_name",
 	).all<Omit<MerchantRow, "names">>();
+
 	return Promise.all(
 		results.map(async (row) => ({
 			...row,
@@ -415,16 +429,19 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 
 		it("suggests only the newer name when both arrive together, whichever comes first", async () => {
 			const id = await addItem();
+
 			const older = transaction({
 				transaction_id: "old",
 				date: "2026-08-02",
 				merchant_name: "Blue Bottle",
 			});
+
 			const newer = transaction({
 				transaction_id: "new",
 				date: "2026-09-27",
 				merchant_name: "Blue Bottle Coffee",
 			});
+
 			await sync(id, { added: [newer, older] });
 			expect(await pendingNames()).toEqual([["Blue Bottle Coffee"]]);
 		});
@@ -829,6 +846,7 @@ describe("a bank text's newest charge leaves it", () => {
 			merchant_name: "Blue Bottle Coffee",
 			...overrides,
 		});
+
 	const older = (overrides: Record<string, unknown> = {}) =>
 		transaction({
 			transaction_id: "old",
@@ -989,6 +1007,7 @@ describe("a bank text's newest charge leaves it", () => {
 // to the Plaid-named merchant to sit there as "Tally's guess".
 describe("a guess Workers AI made before Plaid named the text", () => {
 	const GUESS = ["Target Stores", "Target Corp"];
+
 	const unnamed = (overrides: Record<string, unknown> = {}) =>
 		transaction({
 			transaction_id: "t1",
@@ -996,14 +1015,17 @@ describe("a guess Workers AI made before Plaid named the text", () => {
 			merchant_name: null,
 			...overrides,
 		});
+
 	const row = async (key: string) => {
 		const found = await env.DB.prepare(
 			"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
 		)
 			.bind(key)
 			.first<{ display_name: string | null; suggestion_status: string }>();
+
 		return found && { ...found, names: await merchantNames(env.DB, key) };
 	};
+
 	const guessOn = (key: string) =>
 		seedMerchant(env.DB, { key, status: "pending", names: GUESS });
 
@@ -1409,12 +1431,14 @@ describe("a copy whose winner has no names, over a destination that had names", 
 				},
 			},
 		);
+
 		const statusOf = async (key: string) =>
 			env.DB.prepare(
 				"SELECT suggestion_status AS status, names_asked AS asked, display_name AS display FROM merchants WHERE raw_name = ?",
 			)
 				.bind(key)
 				.first();
+
 		expect(await statusOf("K")).toEqual({
 			status: "none",
 			asked: 1,

@@ -53,11 +53,13 @@ describe("programmatic money controls", () => {
 		input.addEventListener("input", (event) => {
 			events.push(event);
 		});
+
 		const root = {
 			querySelector: (selector: string) =>
 				selector === "[data-money-input]" ? input : null,
 			querySelectorAll: () => [],
 		};
+
 		Object.defineProperty(globalThis, "document", {
 			value: { getElementById: () => null },
 			configurable: true,
@@ -213,6 +215,7 @@ function control(dataset: Record<string, string> = {}): Control {
 		querySelector: () => null,
 		dispatchEvent: () => true,
 	};
+
 	return el;
 }
 
@@ -221,6 +224,7 @@ function widget(text: string, offer = "", credit = false) {
 	const input = control(
 		credit ? { moneyInput: "", allowCredit: "" } : { moneyInput: "" },
 	);
+
 	input.value = text;
 	const minus = control({ nudge: "-100" });
 	const plus = control({ nudge: "100" });
@@ -231,6 +235,7 @@ function widget(text: string, offer = "", credit = false) {
 	round.querySelector = (selector) =>
 		selector === "[data-roundup-label]" ? label : null;
 	const lastMonth = control({ set: "57180" });
+
 	const byId: Record<string, Control> = {
 		"[data-money-input]": input,
 		"[data-roundup]": round,
@@ -239,6 +244,7 @@ function widget(text: string, offer = "", credit = false) {
 		'[data-nudge="1"]': up,
 		'[data-nudge="-1"]': down,
 	};
+
 	const root = {
 		querySelector: (selector: string) => byId[selector] ?? null,
 		querySelectorAll: (selector: string) =>
@@ -248,6 +254,7 @@ function widget(text: string, offer = "", credit = false) {
 					? [lastMonth]
 					: [],
 	};
+
 	return { root, input, minus, plus, up, down, round, label, lastMonth };
 }
 
@@ -310,10 +317,13 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 		it("turns all four steps off while the text can't be read, and hides Round to", () => {
 			const { root, minus, plus, up, down, round, lastMonth } =
 				widget("six hundred");
+
 			update(root);
+
 			for (const step of [minus, plus, up, down]) {
 				expect(step.disabled).toBe(true);
 			}
+
 			expect(round.hidden).toBe(true);
 			expect(round.attrs["aria-pressed"]).toBe("false");
 			expect(lastMonth.attrs["aria-pressed"]).toBe("false");
@@ -333,6 +343,7 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 		it("turns every step on for a readable amount", () => {
 			const { root, minus, plus, up, down } = widget("612.40");
 			update(root);
+
 			for (const step of [minus, plus, up, down]) {
 				expect(step.disabled).toBe(false);
 			}
@@ -537,6 +548,7 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 		) {
 			input.matches = (selector) => selector === "[data-money-input]";
 			input.closest = (selector) => (selector === "[data-money]" ? root : null);
+
 			return { target: input, preventDefault: vi.fn(), ...init };
 		}
 
@@ -553,6 +565,7 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 				key: "ArrowUp",
 				shiftKey: true,
 			});
+
 			onKeydown(shiftUp);
 			expect(input.value).toBe("6.01");
 			expect(browser.region.textContent).toBe("$6.01");
@@ -561,6 +574,7 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 				key: "ArrowDown",
 				shiftKey: true,
 			});
+
 			onKeydown(shiftDown);
 			expect(input.value).toBe("5.01");
 			expect(browser.region.textContent).toBe("$5.01");
@@ -578,6 +592,7 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 		it("leaves Alt, Ctrl and Cmd arrows to the browser, and other keys alone", () => {
 			browserStubs();
 			const { root, input } = widget("5.00");
+
 			for (const init of [
 				{ key: "ArrowUp", altKey: true },
 				{ key: "ArrowUp", ctrlKey: true },
@@ -588,17 +603,20 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 				onKeydown(event);
 				expect(event.preventDefault).not.toHaveBeenCalled();
 			}
+
 			expect(input.value).toBe("5.00");
 		});
 
 		it("ignores ↑ pressed anywhere but the field", () => {
 			browserStubs();
 			const { input } = widget("5.00");
+
 			const elsewhere = {
 				key: "ArrowUp",
 				target: control(),
 				preventDefault: vi.fn(),
 			};
+
 			onKeydown(elsewhere);
 			expect(elsewhere.preventDefault).not.toHaveBeenCalled();
 			expect(input.value).toBe("5.00");
@@ -609,12 +627,14 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 			input.selectionStart = 5;
 			input.selectionEnd = 5;
 			input.matches = (selector) => selector === "[data-money-input]";
+
 			const typed = {
 				target: input,
 				inputType: "insertText",
 				data: "5",
 				preventDefault: vi.fn(),
 			};
+
 			onBeforeInput(typed);
 			expect(typed.preventDefault).toHaveBeenCalledOnce();
 			expect(input.value).toBe("12.34");
@@ -625,20 +645,24 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 			input.selectionStart = 4;
 			input.selectionEnd = 4;
 			input.matches = (selector) => selector === "[data-money-input]";
+
 			const digit = {
 				target: input,
 				inputType: "insertText",
 				data: "4",
 				preventDefault: vi.fn(),
 			};
+
 			onBeforeInput(digit);
 			expect(digit.preventDefault).not.toHaveBeenCalled();
+
 			const deletion = {
 				target: input,
 				inputType: "deleteContentBackward",
 				data: null,
 				preventDefault: vi.fn(),
 			};
+
 			onBeforeInput(deletion);
 			expect(deletion.preventDefault).not.toHaveBeenCalled();
 		});
@@ -700,6 +724,7 @@ describe("credit balances (allowCredit: a leading minus, and no floor at $0)", (
 		vi.stubGlobal("requestAnimationFrame", (callback: () => void) =>
 			callback(),
 		);
+
 		try {
 			const { root, input } = widget("12.00", "", true);
 			set(root, "-12.34");
@@ -727,12 +752,14 @@ describe("credit balances (allowCredit: a leading minus, and no floor at $0)", (
 		input.value = "-3.50";
 		const minus = control({ nudge: "-100" });
 		const plus = control({ nudge: "100" });
+
 		const root = {
 			querySelector: (selector: string) =>
 				selector === "[data-money-input]" ? input : null,
 			querySelectorAll: (selector: string) =>
 				selector === "[data-nudge]" ? [minus, plus] : [],
 		};
+
 		expect(() => update(root)).not.toThrow();
 		expect(minus.disabled).toBe(false);
 		expect(plus.disabled).toBe(false);

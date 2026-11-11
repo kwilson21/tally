@@ -11,11 +11,13 @@ export type SeedCategory = {
 	color: string;
 	sortOrder: number;
 };
+
 /** A linked bank as Plaid would name it. The demo's are made up and hold no token. */
 export type SeedBank = {
 	id: number;
 	name: string;
 };
+
 export type SeedAccount = {
 	id: number;
 	bankId: number | null;
@@ -26,6 +28,7 @@ export type SeedAccount = {
 	isLiability: boolean;
 	balanceCents: number;
 };
+
 /** One `merchants` row, keyed by merchant key: Plaid's merchant name when a transaction has one, else its raw name. */
 export type SeedMerchant = {
 	key: string;
@@ -36,6 +39,7 @@ export type SeedMerchant = {
 	/** Names Tally guessed for it, up to three, waiting for a person (spec §7), so suggestions show right after a reset. */
 	suggestedNames?: string[];
 };
+
 export type SeedTransaction = {
 	id?: number;
 	parentId?: number | null;
@@ -55,12 +59,14 @@ export type SeedTransaction = {
 	isSplit: boolean;
 	refundOfId?: number | null;
 };
+
 /** One bank account's balance on one day, as `balance_history` stores it (cents; for debt, the amount owed). */
 export type SeedBalance = {
 	accountId: number;
 	date: string;
 	balanceCents: number;
 };
+
 export type Seed = {
 	categories: SeedCategory[];
 	banks: SeedBank[];
@@ -81,6 +87,7 @@ const SAVINGS = 2;
 const CARD = 3;
 const CASH = 4;
 const CHILDCARE = 6;
+
 /** Rent (#205): its own budget category, and the rent bill it pays in parts, by hand (decision 101). */
 export const RENT_CATEGORY = 7;
 export const RENT_PAYEE = "HARBOR PROPERTY MGMT";
@@ -334,6 +341,7 @@ const HISTORY_PARTS: Record<number, [number, number][]> = {
 export function monthOffset(today: string, monthsAgo: number): string {
 	const [y, m] = today.split("-").map(Number) as [number, number];
 	const index = y * 12 + (m - 1) - monthsAgo;
+
 	return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
 }
 
@@ -345,10 +353,12 @@ function day(month: string, d: number): string {
 function daycareFridays(today: string): string[] {
 	const dates: string[] = [];
 	const cursor = new Date(`${monthOffset(today, 1)}-01T00:00:00Z`);
+
 	while (cursor.toISOString().slice(0, 10) <= today) {
 		if (cursor.getUTCDay() === 5) dates.push(cursor.toISOString().slice(0, 10));
 		cursor.setUTCDate(cursor.getUTCDate() + 1);
 	}
+
 	return dates;
 }
 
@@ -390,21 +400,26 @@ function balanceHistory(
 ): SeedBalance[] {
 	const balanceToday = (id: number) =>
 		ACCOUNTS.find((a) => a.id === id)?.balanceCents ?? 0;
+
 	const transfers = transactions.filter((t) => t.flagTransfer);
+
 	// What the transfers after `date` moved, still in Checking on `date` and not yet in Savings.
 	const movedAfter = (date: string) =>
 		transfers
 			.filter((t) => t.date > date)
 			.reduce((sum, t) => sum + t.amountCents, 0);
+
 	// `k` is how many days before today.
 	const checkingSwell = (k: number) => 3000 * Math.abs((k % 30) - 15);
 	const cardBuildUp = (k: number) => 1500 * (k % 30);
 
 	const start = `${monthOffset(today, 5)}-01`;
 	let oldest = 0;
+
 	while (daysBefore(today, oldest + 1) >= start) oldest++;
 
 	const rows: SeedBalance[] = [];
+
 	for (let k = oldest; k >= 0; k--) {
 		const date = daysBefore(today, k);
 		rows.push(
@@ -431,6 +446,7 @@ function balanceHistory(
 			},
 		);
 	}
+
 	return rows;
 }
 
@@ -439,14 +455,17 @@ export function buildSeed(today: string): Seed {
 	const thisMonth = today.slice(0, 7);
 	const todayDay = Number(today.slice(8, 10));
 	const clamp = (target: number) => day(thisMonth, Math.min(target, todayDay));
+
 	// A day of `month`, the month's last day at most.
 	const onDay = (month: string, target: number) =>
 		day(month, Math.min(target, daysInMonth(month)));
+
 	const transactions: SeedTransaction[] = [];
 
 	// Previous 5 months: three transactions per category (HISTORY_PARTS), plus paychecks and the savings transfer.
 	for (let monthsAgo = 5; monthsAgo >= 1; monthsAgo--) {
 		const month = monthOffset(today, monthsAgo);
+
 		// Childcare has no history of its own: its Fridays are only Daycare charges, added below.
 		for (const category of CATEGORIES.filter((c) => HISTORY[c.id])) {
 			const total = HISTORY[category.id]?.[5 - monthsAgo] ?? 0;
@@ -457,12 +476,15 @@ export function buildSeed(today: string): Seed {
 				// The last part takes what is left, so the month's total is exact.
 				const cents =
 					i === parts.length - 1 ? left : Math.floor((total * percent) / 100);
+
 				left -= cents;
+
 				// Two and four months ago each part goes to the next merchant, so a store's charges a month apart
 				// differ and the bill finder never takes one for a bill.
 				const [rawName] = merchants[
 					(i + (monthsAgo % 2 === 0 ? 1 : 0)) % merchants.length
 				] as [string, string];
+
 				transactions.push(
 					spend(
 						i === 2 ? CARD : CHECKING,
@@ -474,6 +496,7 @@ export function buildSeed(today: string): Seed {
 				);
 			});
 		}
+
 		transactions.push(
 			income(day(month, 1)),
 			income(day(month, 15)),
@@ -487,9 +510,11 @@ export function buildSeed(today: string): Seed {
 			spend(CHECKING, onDay(thisMonth, target), rawName, categoryId, cents),
 		);
 	}
+
 	for (const [target, rawName, cents] of UNCATEGORIZED) {
 		transactions.push(spend(CARD, clamp(target), rawName, null, cents));
 	}
+
 	transactions.push({
 		...spend(CASH, clamp(20), "Farmers market", GROCERIES, 2000),
 		categorySource: "user",
@@ -500,12 +525,15 @@ export function buildSeed(today: string): Seed {
 	// not enough to claim a payment.
 	const streamingDueDay = Math.min(16, todayDay);
 	const priorMonth = monthOffset(today, 1);
+
 	const priorMonthEnd = new Date(
 		Date.UTC(Number(priorMonth.slice(0, 4)), Number(priorMonth.slice(5, 7)), 0),
 	).getUTCDate();
+
 	const streamingLookalike = new Date(
 		`${day(priorMonth, Math.min(streamingDueDay, priorMonthEnd))}T00:00:00Z`,
 	);
+
 	streamingLookalike.setUTCDate(streamingLookalike.getUTCDate() + 8);
 	transactions.push(
 		spend(
@@ -529,7 +557,9 @@ export function buildSeed(today: string): Seed {
 		["PROCREATE DREAMS", 499],
 		["CITY GYM MEMBERSHIP", 4250],
 	] as const;
+
 	const subscriptionDay = Math.min(todayDay, 12);
+
 	for (const [rawName, amount] of subscriptions)
 		for (const monthsAgo of [2, 1])
 			transactions.push(
@@ -546,7 +576,9 @@ export function buildSeed(today: string): Seed {
 	const costcoIndex = transactions.findIndex(
 		(t) => t.rawName === "COSTCO WHSE #0431" && t.date.startsWith(thisMonth),
 	);
+
 	const costco = transactions[costcoIndex];
+
 	if (costco) {
 		costco.isSplit = true;
 		const parentId = costcoIndex + 1;
@@ -578,6 +610,7 @@ export function buildSeed(today: string): Seed {
 			},
 		);
 	}
+
 	// P19: a refund linked to its purchase. The purchase is about 30 days ago, always last month, and
 	// the refund 5 days ago, so the refund usually shows counting in the purchase's month.
 	const lastMonthEnd = daysBefore(`${thisMonth}-01`, 1);
@@ -596,12 +629,14 @@ export function buildSeed(today: string): Seed {
 			refundOfId: targetPurchaseId,
 		},
 	);
+
 	// Daycare: $240 on each Friday of last month and of this month so far, from Checking and categorized
 	// as Childcare. Added before Netflix, so Netflix stays last.
 	for (const friday of daycareFridays(today))
 		transactions.push(
 			spend(CHECKING, friday, "LITTLE SPROUTS DAYCARE", CHILDCARE, 24000),
 		);
+
 	// Rent is paid in parts (#205, decision 101): $700 and $500 last month make it Paid, and $600 this month so far
 	// leaves it part paid. The $500 came late: it dates this month's 1st but reset links it to last month, so it counts
 	// in last month and not in this month's days, and Trends' same-days comparison keeps Rent $100 in the household's
@@ -612,6 +647,7 @@ export function buildSeed(today: string): Seed {
 		categorySource: "bill",
 		categoryConfidence: null,
 	});
+
 	const lastMonth = monthOffset(today, 1);
 	transactions.push(
 		rentPayment(day(lastMonth, 1), 70000),
@@ -636,12 +672,14 @@ export function buildSeed(today: string): Seed {
 	transactions.forEach((transaction, index) => {
 		transaction.id = index + 1;
 	});
+
 	// This month's purchases still to come aren't there yet (a split's parts go with their parent).
 	const upToToday = transactions.filter(
 		(transaction) => transaction.date <= today,
 	);
 
 	const startMonth = monthOffset(today, 5);
+
 	const budgetAmounts: BudgetAmount[] = [
 		{ categoryId: GROCERIES, effectiveMonth: startMonth, amountCents: 70000 },
 		{ categoryId: EATING_OUT, effectiveMonth: startMonth, amountCents: 20000 },
@@ -737,6 +775,7 @@ export function buildSeed(today: string): Seed {
 			defaultCategoryId: null,
 		},
 	];
+
 	// One row per merchant key. Raw names that share a key (the two Amazons) share its row, the first one's name winning.
 	const merchants = merchantRows.filter(
 		(m, i) => merchantRows.findIndex((o) => o.key === m.key) === i,

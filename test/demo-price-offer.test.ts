@@ -26,15 +26,19 @@ describe("the demo's price-changed offer", () => {
 		timeout: 180_000,
 	}, async () => {
 		const problems: string[] = [];
+
 		for (const today of DAYS) {
 			await resetDemo(env.DB, today);
 			const { rows } = await loadBillRows(env.DB, today);
 			const offers = await loadPriceOffers(env.DB, rows);
+
 			const asked = rows
 				.filter((row) => offers.has(row.id))
 				.map((row) => row.name);
+
 			const netflix = rows.find((row) => row.name === "Netflix");
 			const offer = netflix && offers.get(netflix.id);
+
 			if (asked.join() !== "Netflix") problems.push(`${today}: ${asked}`);
 			else if (
 				netflix?.amountCents !== 1549 ||
@@ -43,14 +47,17 @@ describe("the demo's price-changed offer", () => {
 				offer.merchant !== "Netflix"
 			)
 				problems.push(`${today}: ${JSON.stringify([netflix, offer])}`);
+
 			// The bills that make the demo's Safe to spend set money aside stay unpaid.
 			const status = (name: string) =>
 				rows.find((row) => row.name === name)?.status;
+
 			if (status("Electric") !== "overdue" || status("Internet") !== "due")
 				problems.push(
 					`${today}: Electric ${status("Electric")}, Internet ${status("Internet")}`,
 				);
 		}
+
 		expect(problems).toEqual([]);
 	});
 });

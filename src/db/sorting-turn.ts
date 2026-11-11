@@ -23,6 +23,7 @@ export function sortingTurnState(
 	now: number,
 ): keyof typeof sortingTurnMachine.states {
 	if (turn === null) return "free";
+
 	return (turn.until ?? 0) < now ? "expired" : "held";
 }
 
@@ -39,6 +40,7 @@ export async function readSortingTurn(
 			`SELECT ${turnIdSql("value")} AS id, ${turnUntilSql("value")} AS until FROM household_settings WHERE key = 'sorting_turn'`,
 		)
 		.first<{ id: string | null; until: number | null }>();
+
 	// A null id is a damaged row. An id that is empty text is still a turn, as the statements treat it.
 	return row && row.id !== null ? { id: row.id, until: row.until } : null;
 }
@@ -60,6 +62,7 @@ export const turnShapeOkSql = (column: string) =>
  */
 export const turnIdSql = (column: string) =>
 	`(CASE WHEN ${turnShapeOkSql(column)} THEN json_extract(${column}, '$.id') END)`;
+
 export const turnUntilSql = (column: string) =>
 	`(CASE WHEN ${turnShapeOkSql(column)} THEN (CASE WHEN json_type(${column}, '$.until') IN ('integer', 'real') THEN json_extract(${column}, '$.until') END) END)`;
 
@@ -100,12 +103,14 @@ export async function takeSortingTurn(
 	turnId: string,
 ): Promise<boolean> {
 	const now = Date.now();
+
 	const { meta } = await db
 		.prepare(
 			`INSERT INTO household_settings (key, value) VALUES ('sorting_turn', ?1) ${TAKE_ON_CONFLICT}`,
 		)
 		.bind(turnValue(turnId, now), now, turnId)
 		.run();
+
 	return meta.changes > 0;
 }
 
@@ -120,6 +125,7 @@ export const takeSortingTurnStatement = (
 	reservedKey: string,
 ) => {
 	const now = Date.now();
+
 	return db
 		.prepare(
 			`INSERT INTO household_settings (key, value) SELECT 'sorting_turn', ?1

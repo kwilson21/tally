@@ -23,7 +23,9 @@ import { recordSorting } from "./record-sorting";
 // are kept with the transaction, read by one SQL rule, and gate the split line and the rule questions.
 
 const db = env.DB;
+
 recordSorting({ sort: true });
+
 const today = todayIn(DEFAULT_TIME_ZONE);
 const JEV_KEY = { JEV_API_KEY: "jev-key" };
 
@@ -47,13 +49,16 @@ async function insertTrip(
 		"raw_name",
 		...Object.keys(extra),
 	];
+
 	const values = [1, today, 1000, rawName, ...Object.values(extra)];
+
 	const row = await db
 		.prepare(
 			`INSERT INTO transactions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) RETURNING id`,
 		)
 		.bind(...values)
 		.first<{ id: number }>();
+
 	return row?.id as number;
 }
 
@@ -69,6 +74,7 @@ const rowOf = (id: number) =>
 function fakeJev(answers: Record<string, unknown>) {
 	return vi.fn(async (url: string) => {
 		if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
+
 		return Response.json({
 			answers: {
 				transfer: { type: "noul", noul: 0.01 },
@@ -96,6 +102,7 @@ describe("decide reads Jev's mixed-trip answer (#233)", () => {
 		{ id: 1, name: "Groceries" },
 		{ id: 2, name: "Household" },
 	];
+
 	const answer = (over: object = {}) => ({
 		category: { label: "Groceries", confidence: 0.9 },
 		flags: { transfer: 0.01, reimbursement: 0.01, income: 0.01 },
@@ -108,6 +115,7 @@ describe("decide reads Jev's mixed-trip answer (#233)", () => {
 			categories,
 			0.8,
 		);
+
 		expect(d).toMatchObject({ mixedProbability: 0.91, alsoCategoryId: 2 });
 	});
 
@@ -117,6 +125,7 @@ describe("decide reads Jev's mixed-trip answer (#233)", () => {
 			categories,
 			0.8,
 		);
+
 		expect(d).toMatchObject({ mixedProbability: 0.91, alsoCategoryId: null });
 	});
 
@@ -126,6 +135,7 @@ describe("decide reads Jev's mixed-trip answer (#233)", () => {
 			categories,
 			0.8,
 		);
+
 		expect(d).toMatchObject({ mixedProbability: 0.91, alsoCategoryId: null });
 	});
 
@@ -136,6 +146,7 @@ describe("decide reads Jev's mixed-trip answer (#233)", () => {
 			0.8,
 			{ categories: false },
 		);
+
 		expect(off).not.toHaveProperty("mixedProbability");
 		expect(off).not.toHaveProperty("alsoCategoryId");
 		expect(decide(answer(), categories, 0.8)).not.toHaveProperty(
@@ -221,11 +232,13 @@ describe("saveJevResult stores and clears the mixed-trip answer (#233)", () => {
 		const groceries = await categoryIdOf("Groceries");
 		const household = await categoryIdOf("Household");
 		const id = await insertTrip("MIXED-TRIP-END-TO-END");
+
 		const fetchImpl = fakeJev({
 			category: { type: "choice", choice: "Groceries", confidence: 0.93 },
 			mixed: { type: "noul", noul: 0.92 },
 			also_category: { type: "choice", choice: "Household", confidence: 0.7 },
 		});
+
 		await categorizePending({ DB: db, ...JEV_KEY }, fetchImpl, {
 			onlyIds: [id],
 		});
@@ -244,6 +257,7 @@ describe("the mixed-trip rule (#233)", () => {
 		const household = await categoryIdOf("Household");
 		const eating = await categoryIdOf("Eating Out");
 		const gas = await categoryIdOf("Gas");
+
 		const cases: [string, Record<string, unknown>, number][] = [
 			[
 				"MIXED-AT-THRESHOLD",
@@ -318,19 +332,23 @@ describe("the mixed-trip rule (#233)", () => {
 				0,
 			],
 		];
+
 		for (const [rawName, extra] of cases) await insertTrip(rawName, extra);
 		await db
 			.prepare("UPDATE categories SET archived = 1 WHERE id IN (?, ?)")
 			.bind(gas, eating)
 			.run();
+
 		const hits = await db
 			.prepare(
 				`SELECT raw_name AS rawName, ${jevSaysMixedSql("transactions")} AS hit FROM transactions WHERE raw_name LIKE 'MIXED-%'`,
 			)
 			.all<{ rawName: string; hit: number }>();
+
 		const byName = Object.fromEntries(
 			hits.results.map((row) => [row.rawName, row.hit]),
 		);
+
 		for (const [rawName, , expected] of cases)
 			expect(byName[rawName], rawName).toBe(expected);
 	});
@@ -357,6 +375,7 @@ describe("a mixed trip gets no rule question (#233)", () => {
 			.prepare("INSERT INTO merchants (raw_name) VALUES (?)")
 			.bind(merchant)
 			.run();
+
 		for (let i = 0; i < 3; i++)
 			await db
 				.prepare(
@@ -364,12 +383,14 @@ describe("a mixed trip gets no rule question (#233)", () => {
 				)
 				.bind(today, merchant, merchant, groceries)
 				.run();
+
 		const rows = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE merchant_name = ? ORDER BY id",
 			)
 			.bind(merchant)
 			.all<{ id: number }>();
+
 		picks = rows.results.map((row) => row.id);
 	});
 

@@ -22,9 +22,11 @@ const count = (text: string, part: string) => text.split(part).length - 1;
 describe("patchHtmx", () => {
 	it("applies each replacement to the vendored htmx exactly once", () => {
 		const patched = patchHtmx(htmxSource);
+
 		for (const replacement of PATCHED) {
 			expect(count(patched, replacement)).toBe(1);
 		}
+
 		expect(patched).not.toContain("continue(){this.#e=null");
 	});
 

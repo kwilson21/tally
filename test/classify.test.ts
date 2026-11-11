@@ -46,6 +46,7 @@ const PURCHASE_EXCLUDED = 2; // excluded purchase
 const SPLIT_PARENT = 3; // split parent, paid by a planned expense
 
 type Link = "bill" | "plan" | "dismissed_bill";
+
 type Seed = Partial<Row> & { name?: string; link?: Link; raw_name?: string };
 
 // The bank text a "Never suggest income" rule covers. Seeds have no merchant name, so their merchant key is their bank
@@ -335,16 +336,20 @@ const NAMED: Seed[] = [
 /** Small deterministic random generator, so a failure repeats. */
 function prng(seed: number) {
 	let s = seed;
+
 	return () => {
 		s = (s * 1664525 + 1013904223) % 4294967296;
+
 		return s / 4294967296;
 	};
 }
 
 function randomSeeds(n: number): Seed[] {
 	const rnd = prng(42);
+
 	const pick = <T>(xs: readonly T[]): T =>
 		xs[Math.floor(rnd() * xs.length)] as T;
+
 	// Confidence edges: 0.2, 0.4 and 0.8 sit exactly on the Maybe range's bounds.
 	const edges = [
 		null,
@@ -359,6 +364,7 @@ function randomSeeds(n: number): Seed[] {
 		0.8,
 		0.95,
 	] as const;
+
 	return Array.from({ length: n }, () => ({
 		amount_cents: pick([1000, -500, 0]),
 		pending: pick([0, 0, 0, 1]),
@@ -425,6 +431,7 @@ const countedIds = async (where: string): Promise<Set<number>> => {
 	const { results } = await db
 		.prepare(`SELECT t.id FROM transactions t ${COUNTED_JOINS} WHERE ${where}`)
 		.all<{ id: number }>();
+
 	return new Set(results.map((r) => r.id));
 };
 
@@ -446,12 +453,16 @@ const SQL_FOR: Record<keyof Questions, string> = {
 async function sqlSet(key: keyof Questions): Promise<Set<number>> {
 	if (key === "waitingForJev") {
 		const sql = waitingForJevSql({ categories: true, income: true });
+
 		if (sql === null) throw new Error("waitingForJevSql is off");
+
 		const { results } = await db
 			.prepare(`SELECT t.id ${sql}`)
 			.all<{ id: number }>();
+
 		return new Set(results.map((r) => r.id));
 	}
+
 	return countedIds(SQL_FOR[key]);
 }
 
@@ -476,9 +487,11 @@ beforeAll(async () => {
 			"INSERT INTO categories (id, name, icon, color, archived) VALUES (103,'ClassifyOld','a','#000',1)",
 		),
 	]);
+
 	const account = await db
 		.prepare("SELECT id FROM accounts WHERE name = 'Checking'")
 		.first<{ id: number }>();
+
 	if (!account) throw new Error("the test account was not inserted");
 	const acct = account.id;
 
@@ -499,23 +512,28 @@ beforeAll(async () => {
 	let billN = 0;
 	all.forEach((seed, index) => {
 		const id = index + 1;
+
 		const values = COLS.map((c) => {
 			const v = (seed[c] === undefined ? DEFAULTS[c] : seed[c]) as
 				| string
 				| number
 				| null;
+
 			// plaid_transaction_id is UNIQUE, so every non-null value gets its own id.
 			return c === "plaid_transaction_id" && v !== null
 				? `classify-${++plaidN}`
 				: v;
 		});
+
 		statements.push(
 			db.prepare(insertTxn).bind(id, seed.raw_name ?? PLAIN_RAW, ...values),
 		);
+
 		if (seed.name) {
 			names.set(id, seed.name);
 			idByName.set(seed.name, id);
 		}
+
 		if (seed.link === "plan") {
 			statements.push(
 				db
@@ -541,17 +559,20 @@ beforeAll(async () => {
 			);
 		}
 	});
+
 	for (let i = 0; i < statements.length; i += 100)
 		await db.batch(statements.slice(i, i + 100));
 
 	rows = (await db.prepare("SELECT * FROM transactions ORDER BY id").all<Row>())
 		.results;
 	const byId = new Map(rows.map((r) => [r.id, r]));
+
 	const paying = new Set(
 		all.flatMap((seed, index) =>
 			seed.link === "bill" || seed.link === "plan" ? [index + 1] : [],
 		),
 	);
+
 	// Facts from outside the row. The active-category fact is read from the table. The Never-suggest fact is the
 	// seed's bank text against the rule's text (seeds have no merchant name, so the key is the bank text).
 	const activeCategories =
@@ -560,12 +581,15 @@ beforeAll(async () => {
 				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
 				.first<{ n: number }>()
 		)?.n ?? 0;
+
 	const bankTextOf = new Map(
 		all.map((s, i) => [i + 1, s.raw_name ?? PLAIN_RAW]),
 	);
+
 	const contextFor = (r: Row): Context => {
 		const target =
 			r.refund_of_id === null ? undefined : byId.get(r.refund_of_id);
+
 		return {
 			paysBillOrPlan:
 				paying.has(r.id) || (r.parent_id !== null && paying.has(r.parent_id)),
@@ -578,6 +602,7 @@ beforeAll(async () => {
 			neverSuggestIncome: bankTextOf.get(r.id) === NEVER_RAW,
 		};
 	};
+
 	for (const r of rows) {
 		const ctx = contextFor(r);
 		contexts.set(r.id, ctx);
@@ -594,14 +619,20 @@ beforeAll(async () => {
 
 const sqlSays = (key: keyof Questions, name: string): boolean =>
 	sets[key].has(idOf(name));
+
 const idOf = (name: string): number => {
 	const id = idByName.get(name);
+
 	if (id === undefined) throw new Error(`no named row: ${name}`);
+
 	return id;
 };
+
 const classifiedOf = (id: number): Classified => {
 	const found = classified.get(id);
+
 	if (!found) throw new Error(`row ${id} was not classified`);
+
 	return found;
 };
 
@@ -618,6 +649,7 @@ describe("classify agrees with each SQL question, row by row", () => {
 					(r) =>
 						`${r.id} ${names.get(r.id) ?? "random"} classify=${!sets[key].has(r.id)}`,
 				);
+
 			expect(wrong.slice(0, 10), `${wrong.length} rows differ`).toEqual([]);
 			// No vacuous pass: the question must say yes to at least one row.
 			expect(sets[key].size).toBeGreaterThan(0);
@@ -774,16 +806,20 @@ describe("current behaviour awaiting an owner decision (owner decision d)", () =
 
 const ctxOf = (id: number): Context => {
 	const found = contexts.get(id);
+
 	if (!found) throw new Error(`row ${id} has no context`);
+
 	return found;
 };
 
 describe("the Never-suggest income rule (the oracle's fact against SQL's rule table)", () => {
 	it("the rule covers the same rows whether SQL reads its table or the oracle reads the bank text", async () => {
 		const bySql = await countedIds(neverSuggestedSql("t", "income"));
+
 		const byFact = rows
 			.filter((r) => ctxOf(r.id).neverSuggestIncome)
 			.map((r) => r.id);
+
 		expect(bySql.size).toBeGreaterThan(0);
 		expect([...bySql].sort((a, b) => a - b)).toEqual(byFact);
 	});
@@ -803,8 +839,10 @@ describe("waitingForJev with no active category (the other branch of the categor
 		const saved = await db
 			.prepare("SELECT id, archived FROM categories")
 			.all<{ id: number; archived: number }>();
+
 		await db.prepare("UPDATE categories SET archived = 1").run();
 		let withoutActive = new Set<number>();
+
 		try {
 			withoutActive = await sqlSet("waitingForJev");
 		} finally {
@@ -816,12 +854,15 @@ describe("waitingForJev with no active category (the other branch of the categor
 				),
 			);
 		}
+
 		const oracle = (r: Row) =>
 			classify(r, { ...ctxOf(r.id), anyActiveCategory: false }).questions
 				.waitingForJev;
+
 		const wrong = rows
 			.filter((r) => oracle(r) !== withoutActive.has(r.id))
 			.map((r) => r.id);
+
 		expect(wrong.slice(0, 10), `${wrong.length} rows differ`).toEqual([]);
 		// No vacuous pass: the question must say yes to some row, and the branch must change some answer.
 		expect(withoutActive.size).toBeGreaterThan(0);
@@ -838,11 +879,14 @@ describe("the named money state agrees with the SQL held rule (decision 174)", (
 	it("held_for_review exactly where HELD_FOR_REVIEW_SQL matches, on every row", () => {
 		const isHeldState = (id: number) => {
 			const money = classifiedOf(id).money;
+
 			return money.kind === "credit" && money.state.kind === "held_for_review";
 		};
+
 		const wrong = rows
 			.filter((r) => isHeldState(r.id) !== sets.heldForReview.has(r.id))
 			.map((r) => r.id);
+
 		expect(wrong.slice(0, 10), `${wrong.length} rows differ`).toEqual([]);
 		expect(sets.heldForReview.size).toBeGreaterThan(0);
 	});

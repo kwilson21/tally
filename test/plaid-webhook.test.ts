@@ -10,11 +10,13 @@ recordSorting({ sort: true });
 
 const KEY = btoa("01234567890123456789012345678901");
 const encoder = new TextEncoder();
+
 const b64 = (value: Uint8Array) =>
 	btoa(String.fromCharCode(...value))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
+
 const json64 = (value: unknown) => b64(encoder.encode(JSON.stringify(value)));
 
 async function signer() {
@@ -23,17 +25,21 @@ async function signer() {
 		true,
 		["sign", "verify"],
 	)) as CryptoKeyPair;
+
 	const kid = crypto.randomUUID();
+
 	return async (body: string) => {
 		const digest = new Uint8Array(
 			await crypto.subtle.digest("SHA-256", encoder.encode(body)),
 		);
+
 		const signed = `${json64({ alg: "ES256", kid })}.${json64({
 			iat: Math.floor(Date.now() / 1000),
 			request_body_sha256: Array.from(digest, (byte) =>
 				byte.toString(16).padStart(2, "0"),
 			).join(""),
 		})}`;
+
 		const signature = new Uint8Array(
 			await crypto.subtle.sign(
 				{ name: "ECDSA", hash: "SHA-256" },
@@ -41,6 +47,7 @@ async function signer() {
 				encoder.encode(signed),
 			),
 		);
+
 		return {
 			token: `${signed}.${b64(signature)}`,
 			jwk: await crypto.subtle.exportKey("jwk", pair.publicKey),
@@ -90,6 +97,7 @@ describe("Plaid webhook route", () => {
 
 	it("rejects a bad signature before writing", async () => {
 		const prepare = vi.spyOn(env.DB, "prepare");
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -102,6 +110,7 @@ describe("Plaid webhook route", () => {
 			},
 			env,
 		);
+
 		expect(response.status).toBe(401);
 		expect(prepare).not.toHaveBeenCalled();
 	});
@@ -114,6 +123,7 @@ describe("Plaid webhook route", () => {
 			"fetch",
 			vi.fn(async () => new Response(null, { status: 500 })),
 		);
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -126,21 +136,25 @@ describe("Plaid webhook route", () => {
 			},
 			env,
 		);
+
 		expect(response.status).toBe(503);
 	});
 
 	it("accepts signed JSON without an Origin and ignores an unknown Item", async () => {
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "unknown",
 			webhook_type: "ITEM",
 			webhook_code: "ERROR",
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
 		);
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -153,6 +167,7 @@ describe("Plaid webhook route", () => {
 			},
 			env,
 		);
+
 		expect(response.status).toBe(200);
 	});
 
@@ -164,6 +179,7 @@ describe("Plaid webhook route", () => {
 			"fetch",
 			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
 		);
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -176,6 +192,7 @@ describe("Plaid webhook route", () => {
 			},
 			env,
 		);
+
 		expect(response.status).toBe(400);
 	});
 
@@ -189,6 +206,7 @@ describe("Plaid webhook route", () => {
 				"fetch",
 				vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
 			);
+
 			const response = await app.request(
 				"http://tally.test/webhooks/plaid",
 				{
@@ -201,6 +219,7 @@ describe("Plaid webhook route", () => {
 				},
 				env,
 			);
+
 			expect(response.status).toBe(200);
 			expect(prepare).not.toHaveBeenCalled();
 		},
@@ -218,12 +237,14 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: webhookCode,
 			...(errorCode !== undefined ? { error: { error_code: errorCode } } : {}),
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -248,6 +269,7 @@ describe("Plaid webhook route", () => {
 		expect(
 			await env.DB.prepare("SELECT status FROM plaid_items").first(),
 		).toEqual({ status });
+
 		if (webhookCode !== "ERROR") {
 			expect(fetch).toHaveBeenCalledTimes(1);
 		}
@@ -260,11 +282,13 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "PENDING_EXPIRATION",
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -303,16 +327,21 @@ describe("Plaid webhook route", () => {
 		)
 			.bind(await encryptToken("access-token", KEY))
 			.first<{ id: number }>();
+
 		// Every guarded write loses: the held flag is flipped just ahead of each attempt.
 		const fired = { count: 0 };
+
 		const racing = new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop !== "prepare") {
 					const value = Reflect.get(target, prop);
+
 					return typeof value === "function" ? value.bind(target) : value;
 				}
+
 				return (sql: string) => {
 					const statement = target.prepare(sql);
+
 					if (
 						!sql.startsWith(
 							"UPDATE plaid_items SET status = 'needs_attention'",
@@ -321,9 +350,11 @@ describe("Plaid webhook route", () => {
 					) {
 						return statement;
 					}
+
 					return {
 						bind: (...values: unknown[]) => {
 							const bound = statement.bind(...values);
+
 							const race = async () => {
 								fired.count += 1;
 								await target
@@ -333,9 +364,11 @@ describe("Plaid webhook route", () => {
 									.bind(row?.id)
 									.run();
 							};
+
 							return {
 								run: async () => {
 									await race();
+
 									return bound.run();
 								},
 							};
@@ -344,17 +377,21 @@ describe("Plaid webhook route", () => {
 				};
 			},
 		});
+
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "PENDING_EXPIRATION",
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
 		);
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -367,6 +404,7 @@ describe("Plaid webhook route", () => {
 			},
 			{ ...env, DB: racing },
 		);
+
 		expect(response.status).toBe(503);
 		expect(fired.count).toBe(3);
 	});
@@ -389,6 +427,7 @@ describe("Plaid webhook route", () => {
 				.bind(await encryptToken("access-token", KEY))
 				.run();
 			const sign = await signer();
+
 			const body = JSON.stringify({
 				item_id: "item-1",
 				webhook_type: "ITEM",
@@ -397,19 +436,24 @@ describe("Plaid webhook route", () => {
 					? { error: { error_code: webhookError } }
 					: {}),
 			});
+
 			const { token, jwk } = await sign(body);
+
 			const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
 				String(input).endsWith("/webhook_verification_key/get")
 					? Response.json({ key: { ...jwk, expired_at: null } })
 					: Response.json({ item: { error: currentError } }),
 			);
+
 			vi.stubGlobal("fetch", fetchMock);
 			const promises: Promise<unknown>[] = [];
+
 			const ctx = {
 				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 				passThroughOnException() {},
 				props: {},
 			} as unknown as ExecutionContext;
+
 			expect(
 				(
 					await app.request(
@@ -448,12 +492,14 @@ describe("Plaid webhook route", () => {
 			.bind(encryptedToken)
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "ERROR",
 			error: { error_code: "ITEM_LOGIN_REQUIRED" },
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -461,15 +507,18 @@ describe("Plaid webhook route", () => {
 				if (String(input).endsWith("/webhook_verification_key/get")) {
 					return Response.json({ key: { ...jwk, expired_at: null } });
 				}
+
 				await env.DB.prepare(
 					"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0",
 				).run();
+
 				return Response.json({
 					item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
 				});
 			}),
 		);
 		const promises: Promise<unknown>[] = [];
+
 		const ctx = {
 			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 			passThroughOnException() {},
@@ -507,11 +556,13 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "PENDING_EXPIRATION",
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -519,23 +570,29 @@ describe("Plaid webhook route", () => {
 		);
 		// A good sync lands just ahead of the warning's first guarded write, once.
 		let landed = false;
+
 		const racing = new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop !== "prepare") {
 					const value = Reflect.get(target, prop);
+
 					return typeof value === "function" ? value.bind(target) : value;
 				}
+
 				return (sql: string) => {
 					const statement = target.prepare(sql);
+
 					if (
 						landed ||
 						!sql.startsWith("UPDATE plaid_items SET status = 'needs_attention'")
 					) {
 						return statement;
 					}
+
 					return {
 						bind: (...values: unknown[]) => {
 							const bound = statement.bind(...values);
+
 							return {
 								run: async () => {
 									landed = true;
@@ -544,6 +601,7 @@ describe("Plaid webhook route", () => {
 											"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL",
 										)
 										.run();
+
 									return bound.run();
 								},
 							};
@@ -552,6 +610,7 @@ describe("Plaid webhook route", () => {
 				};
 			},
 		});
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -564,6 +623,7 @@ describe("Plaid webhook route", () => {
 			},
 			{ ...env, DB: racing },
 		);
+
 		expect(response.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -583,12 +643,14 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "ERROR",
 			error: { error_code: "ITEM_LOGIN_REQUIRED" },
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -596,10 +658,12 @@ describe("Plaid webhook route", () => {
 				if (String(input).endsWith("/webhook_verification_key/get")) {
 					return Response.json({ key: { ...jwk, expired_at: null } });
 				}
+
 				// A good sync lands while Plaid's answer is being confirmed.
 				await env.DB.prepare(
 					"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL",
 				).run();
+
 				return Response.json({
 					item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
 				});
@@ -607,11 +671,13 @@ describe("Plaid webhook route", () => {
 		);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const promises: Promise<unknown>[] = [];
+
 		const ctx = {
 			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 			passThroughOnException() {},
 			props: {},
 		} as unknown as ExecutionContext;
+
 		expect(
 			(
 				await app.request(
@@ -650,12 +716,14 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "ERROR",
 			error: { error_code: "ITEM_LOGIN_REQUIRED" },
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -663,6 +731,7 @@ describe("Plaid webhook route", () => {
 				if (String(input).endsWith("/webhook_verification_key/get")) {
 					return Response.json({ key: { ...jwk, expired_at: null } });
 				}
+
 				// The repair lands, and then the confirmation lookup itself fails.
 				await env.DB.prepare(
 					"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0",
@@ -672,11 +741,13 @@ describe("Plaid webhook route", () => {
 		);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const promises: Promise<unknown>[] = [];
+
 		const ctx = {
 			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 			passThroughOnException() {},
 			props: {},
 		} as unknown as ExecutionContext;
+
 		expect(
 			(
 				await app.request(
@@ -714,13 +785,16 @@ describe("Plaid webhook route", () => {
 			)
 				.bind(await encryptToken("access-token", KEY))
 				.first<{ id: number }>();
+
 			const sign = await signer();
+
 			const body = JSON.stringify({
 				item_id: "item-1",
 				webhook_type: "ITEM",
 				webhook_code: "ERROR",
 				error: { error_code: "ITEM_LOGIN_REQUIRED" },
 			});
+
 			const { token, jwk } = await sign(body);
 			vi.stubGlobal(
 				"fetch",
@@ -728,12 +802,14 @@ describe("Plaid webhook route", () => {
 					if (String(input).endsWith("/webhook_verification_key/get")) {
 						return Response.json({ key: { ...jwk, expired_at: null } });
 					}
+
 					// The good sync (or relink) completes while Plaid's error is being confirmed; the state stays ok.
 					if (landing === "sync") {
 						await markSyncSucceeded(env.DB, row?.id as number, "lease-x");
 					} else {
 						await clearAttention(env.DB, row?.id as number);
 					}
+
 					return Response.json({
 						item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
 					});
@@ -741,11 +817,13 @@ describe("Plaid webhook route", () => {
 			);
 			const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 			const promises: Promise<unknown>[] = [];
+
 			const ctx = {
 				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 				passThroughOnException() {},
 				props: {},
 			} as unknown as ExecutionContext;
+
 			expect(
 				(
 					await app.request(
@@ -781,11 +859,13 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("access-token", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: "USER_PERMISSION_REVOKED",
 		});
+
 		const { token, jwk } = await sign(body);
 		vi.stubGlobal(
 			"fetch",
@@ -825,16 +905,21 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("token-secret", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-secret",
 			webhook_type: "TRANSACTIONS",
 			webhook_code: "SYNC_UPDATES_AVAILABLE",
 		});
+
 		const { token, jwk } = await sign(body);
+
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+
 			if (url.endsWith("/webhook_verification_key/get"))
 				return Response.json({ key: { ...jwk, expired_at: null } });
+
 			if (url.endsWith("/accounts/get"))
 				return Response.json({
 					accounts: [
@@ -846,6 +931,7 @@ describe("Plaid webhook route", () => {
 						},
 					],
 				});
+
 			return Response.json({
 				added: [
 					{
@@ -863,15 +949,19 @@ describe("Plaid webhook route", () => {
 				has_more: false,
 			});
 		});
+
 		vi.stubGlobal("fetch", fetchMock);
 		const promises: Promise<unknown>[] = [];
+
 		const ctx = {
 			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 			passThroughOnException() {},
 			props: {},
 		} as unknown as ExecutionContext;
+
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -885,6 +975,7 @@ describe("Plaid webhook route", () => {
 			env,
 			ctx,
 		);
+
 		expect(response.status).toBe(200);
 		await Promise.all(promises);
 		expect(
@@ -907,6 +998,7 @@ describe("Plaid webhook route", () => {
 				.bind(await encryptToken("token-history", KEY))
 				.run();
 			const sign = await signer();
+
 			const body = JSON.stringify({
 				item_id: "item-history",
 				webhook_type: "TRANSACTIONS",
@@ -914,13 +1006,16 @@ describe("Plaid webhook route", () => {
 				historical_update_complete: historicalComplete,
 				initial_update_complete: true,
 			});
+
 			const { token, jwk } = await sign(body);
 			vi.stubGlobal(
 				"fetch",
 				vi.fn(async (input: RequestInfo | URL) => {
 					const url = String(input);
+
 					if (url.endsWith("/webhook_verification_key/get"))
 						return Response.json({ key: { ...jwk, expired_at: null } });
+
 					if (url.endsWith("/accounts/get"))
 						return Response.json({
 							accounts: [
@@ -932,6 +1027,7 @@ describe("Plaid webhook route", () => {
 								},
 							],
 						});
+
 					return Response.json({
 						added: [],
 						modified: [],
@@ -942,11 +1038,13 @@ describe("Plaid webhook route", () => {
 				}),
 			);
 			const promises: Promise<unknown>[] = [];
+
 			const ctx = {
 				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 				passThroughOnException() {},
 				props: {},
 			} as unknown as ExecutionContext;
+
 			vi.spyOn(console, "log").mockImplementation(() => {});
 			expect(
 				(
@@ -966,9 +1064,11 @@ describe("Plaid webhook route", () => {
 				).status,
 			).toBe(200);
 			await Promise.all(promises);
+
 			const at = await env.DB.prepare(
 				"SELECT history_complete_at AS at FROM plaid_items WHERE plaid_item_id = 'item-history'",
 			).first<{ at: string | null }>();
+
 			expect(at?.at !== null && at?.at !== undefined).toBe(historicalComplete);
 		},
 	);
@@ -977,6 +1077,7 @@ describe("Plaid webhook route", () => {
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULED SHOP', ?)",
 		)
@@ -988,12 +1089,15 @@ describe("Plaid webhook route", () => {
 			.bind(await encryptToken("token-rules", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-rules",
 			webhook_type: "TRANSACTIONS",
 			webhook_code: "SYNC_UPDATES_AVAILABLE",
 		});
+
 		const { token, jwk } = await sign(body);
+
 		const added = (id: string, name: string) => ({
 			transaction_id: id,
 			account_id: "account-1",
@@ -1002,12 +1106,15 @@ describe("Plaid webhook route", () => {
 			name,
 			pending: false,
 		});
+
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = String(input);
+
 				if (url.endsWith("/webhook_verification_key/get"))
 					return Response.json({ key: { ...jwk, expired_at: null } });
+
 				if (url.endsWith("/accounts/get"))
 					return Response.json({
 						accounts: [
@@ -1019,6 +1126,7 @@ describe("Plaid webhook route", () => {
 							},
 						],
 					});
+
 				return Response.json({
 					added: [
 						added("ruled", "RULED SHOP"),
@@ -1032,11 +1140,13 @@ describe("Plaid webhook route", () => {
 			}),
 		);
 		const promises: Promise<unknown>[] = [];
+
 		const ctx = {
 			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 			passThroughOnException() {},
 			props: {},
 		} as unknown as ExecutionContext;
+
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
 		const response = await app.request(
@@ -1052,6 +1162,7 @@ describe("Plaid webhook route", () => {
 			env,
 			ctx,
 		);
+
 		expect(response.status).toBe(200);
 		await Promise.all(promises);
 
@@ -1075,6 +1186,7 @@ describe("Plaid webhook route", () => {
 // Spec §8.6, decision 68: after a webhook's sync, in the same waitUntil, Jev sorts what arrived.
 describe("Plaid webhook sorting what arrived", () => {
 	const JEV_URL = "https://api.typesafe.ai/v1/systemone";
+
 	const jevSays = () =>
 		Response.json({
 			answers: {
@@ -1119,23 +1231,29 @@ describe("Plaid webhook sorting what arrived", () => {
 			.bind(await encryptToken("token-sort", KEY))
 			.run();
 		const sign = await signer();
+
 		const body = JSON.stringify({
 			item_id: "item-sort",
 			webhook_type: "TRANSACTIONS",
 			webhook_code: "SYNC_UPDATES_AVAILABLE",
 		});
+
 		const { token, jwk } = await sign(body);
 		const asked: string[] = [];
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = String(input);
+
 				if (url === JEV_URL) {
 					asked.push(JSON.parse(String(init?.body)).state.bank_description);
+
 					return jev();
 				}
+
 				if (url.endsWith("/webhook_verification_key/get"))
 					return Response.json({ key: { ...jwk, expired_at: null } });
+
 				if (url.endsWith("/accounts/get"))
 					return Response.json({
 						accounts: [
@@ -1147,6 +1265,7 @@ describe("Plaid webhook sorting what arrived", () => {
 							},
 						],
 					});
+
 				return Response.json({
 					added: [
 						{
@@ -1166,13 +1285,16 @@ describe("Plaid webhook sorting what arrived", () => {
 			}),
 		);
 		const promises: Promise<unknown>[] = [];
+
 		const ctx = {
 			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
 			passThroughOnException() {},
 			props: {},
 		} as unknown as ExecutionContext;
+
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const response = await app.request(
 			"http://tally.test/webhooks/plaid",
 			{
@@ -1186,6 +1308,7 @@ describe("Plaid webhook sorting what arrived", () => {
 			env,
 			ctx,
 		);
+
 		return {
 			response,
 			asked,
@@ -1230,6 +1353,7 @@ describe("Plaid webhook sorting what arrived", () => {
 		]);
 		const output = sent.logged();
 		expect(output).toContain("jev: 503");
+
 		for (const secret of ["NEW SHOP", "jev-key", "token-sort", "item-sort"])
 			expect(output).not.toContain(secret);
 	});

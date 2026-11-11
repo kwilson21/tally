@@ -36,6 +36,7 @@ const P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 /** A form field as text, or null when it is missing or a file. */
 const fieldOf = (form: Record<string, unknown>, name: string) => {
 	const value = form[name];
+
 	return typeof value === "string" ? value : null;
 };
 
@@ -45,20 +46,29 @@ async function subscriptionOf(form: Record<string, unknown>) {
 	const endpoint = fieldOf(form, "endpoint");
 	const p256dh = fieldOf(form, "p256dh");
 	const auth = fieldOf(form, "auth");
+
 	if (!endpoint || endpoint.length > MAX_ENDPOINT_LENGTH) return null;
+
 	if (!p256dh || p256dh.length !== P256DH_LENGTH) return null;
+
 	if (!auth || auth.length !== AUTH_LENGTH) return null;
+
 	if (!isPushServiceEndpoint(endpoint)) return null;
 	const point = fromBase64Url(p256dh);
+
 	if (point?.length !== 65 || point[0] !== 0x04) return null;
+
 	try {
 		// RFC 8291 §7: the key must be on the curve, which an import checks.
 		await crypto.subtle.importKey("raw", point, P256, false, []);
 	} catch {
 		return null;
 	}
+
 	const secret = fromBase64Url(auth);
+
 	if (secret?.length !== 16) return null;
+
 	return { endpoint, p256dh, auth };
 }
 
@@ -93,21 +103,25 @@ push.post("/push/subscribe", async (c) => {
 	// Web Push off (the demo reads nothing; no keys) and no member signed in are answered before the body is read or parsed.
 	if (!(await vapidKeys(c.env))) return c.body(null, 404);
 	let member: string;
+
 	try {
 		member = actor(c);
 	} catch {
 		return c.body(null, 404);
 	}
+
 	// The early answer for someone who isn't a member. The write below checks membership again, and it is the one that stores.
 	const current = await c.env.DB.prepare(
 		"SELECT 1 AS present FROM household_members WHERE email = ? AND removed_at IS NULL",
 	)
 		.bind(member)
 		.first();
+
 	if (!current) return c.body(null, 404);
 	// The body is read only when its declared size is a number of bytes within MAX_BODY_LENGTH: a missing or unreadable
 	// Content-Length, or a larger one, answers 413 before parseBody reads anything.
 	const declared = c.req.header("content-length");
+
 	if (
 		!declared ||
 		!/^\d{1,9}$/.test(declared) ||
@@ -116,30 +130,38 @@ push.post("/push/subscribe", async (c) => {
 		return c.body(null, 413);
 	const form = (await c.req.parseBody()) as Record<string, unknown>;
 	const subscription = await subscriptionOf(form);
+
 	if (!subscription) return c.body(null, 422);
+
 	const row = [
 		member,
 		subscription.endpoint,
 		subscription.p256dh,
 		subscription.auth,
 	];
+
 	// The write and the cap are one batch, so the cap holds atomically: a failed trim leaves the write undone too.
 	if (form.restore !== "1") {
 		const [tapped] = await c.env.DB.batch([
 			c.env.DB.prepare(TAP_SQL).bind(...row),
 			c.env.DB.prepare(TRIM_SQL).bind(member),
 		]);
+
 		return c.body(null, tapped?.meta.changes ? 204 : 404);
 	}
+
 	// A page load's quiet re-post: a missing row is stored for this person. An existing row must already be theirs, and is then
 	// left as it is; one that belongs to someone else is not moved here, so the answer is 409 and the page shows the device as Off.
 	const [restored] = await c.env.DB.batch([
 		c.env.DB.prepare(RESTORE_SQL).bind(...row),
 		c.env.DB.prepare(TRIM_SQL).bind(member),
 	]);
+
 	if (restored?.meta.changes) return c.body(null, 204);
+
 	const owner = await c.env.DB.prepare(OWNER_SQL)
 		.bind(subscription.endpoint)
 		.first<{ member_email: string }>();
+
 	return c.body(null, owner?.member_email === member ? 204 : 409);
 });

@@ -40,16 +40,19 @@ const plaidFetch = (
 	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get"))
 			return response({ accounts: [account] });
+
 		return sync(JSON.parse(String(init?.body)));
 	});
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
+
 	return result?.id as number;
 }
 
@@ -70,14 +73,18 @@ describe("history_complete_at from the webhook", () => {
 	it("is set on the last page of a sync the webhook says ran after history was complete", async () => {
 		const id = await addItem();
 		let calls = 0;
+
 		const fetchImpl = plaidFetch(async () => {
 			calls += 1;
+
 			if (calls === 1)
 				return response(page({ next_cursor: "c1", has_more: true }));
 			// Before the last page commits, the first page's write has not set it.
 			expect(await historyAt(id)).toBeNull();
+
 			return response(page({ next_cursor: "c2" }));
 		});
+
 		await syncItem(env2, id, fetchImpl, { historyComplete: true });
 		expect(calls).toBe(2);
 		expect(await historyAt(id)).not.toBeNull();
@@ -96,14 +103,18 @@ describe("history_complete_at from the webhook", () => {
 	it("is not set when the sync dies before its last page", async () => {
 		const id = await addItem();
 		let calls = 0;
+
 		const fetchImpl = plaidFetch(() => {
 			calls += 1;
+
 			if (calls === 1)
 				return response(page({ next_cursor: "c1", has_more: true }));
+
 			return new Response(JSON.stringify({ error_type: "API_ERROR" }), {
 				status: 500,
 			});
 		});
+
 		await expect(
 			syncItem(env2, id, fetchImpl, { historyComplete: true }),
 		).rejects.toThrow("Plaid request failed");

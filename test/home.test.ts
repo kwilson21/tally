@@ -25,17 +25,20 @@ import { pinClock } from "./pinned-clock";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
+
 	return { res, html: await res.text() };
 }
 
 async function homeAt(month: string) {
 	const res = await exports.default.fetch(`http://tally.test/?month=${month}`);
+
 	return { res, html: await res.text() };
 }
 
 // The demo's months, "Back to <month>" and the finished-month figures all follow the household's today, so the
 // clock is pinned to October 2026 for the whole file (#808).
 beforeEach(() => pinClock());
+
 afterEach(() => vi.useRealTimers());
 
 describe("GET / with the demo seed", () => {
@@ -47,24 +50,32 @@ describe("GET / with the demo seed", () => {
 	it("uses a fixed number of database statements as transaction history grows", async () => {
 		const requestCount = async () => {
 			let statements = 0;
+
 			const db = new Proxy(env.DB, {
 				get(target, property) {
 					const value = Reflect.get(target, property);
+
 					if (property === "prepare")
 						return (sql: string) => {
 							statements += 1;
+
 							return target.prepare(sql);
 						};
+
 					return typeof value === "function" ? value.bind(target) : value;
 				},
 			});
+
 			const response = await homeRoute.request("http://tally.test/", {}, {
 				...env,
 				DB: db,
 			} as Env);
+
 			expect(response.status).toBe(200);
+
 			return statements;
 		};
+
 		const before = await requestCount();
 		await env.DB.prepare(`WITH digits(n) AS (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9))
 			INSERT INTO transactions (account_id,date,amount_cents,raw_name)
@@ -88,6 +99,7 @@ describe("GET / with the demo seed", () => {
 	it("keeps a finished month's budget when the category amount changes later", async () => {
 		const data = await loadMonth(env.DB, "2026-09");
 		const previous = budgetForMonth(data.amounts, 1, "2026-09");
+
 		if (previous === null) throw new Error("Groceries has no September budget");
 		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await setBudget(env.DB, 1, previous + 12300, current);
@@ -112,8 +124,10 @@ describe("GET / with the demo seed", () => {
 			"UPDATE categories SET archived = 1, archived_on = '2026-10-01' WHERE id = 900",
 		).run();
 		const after = (await homeAt("2026-09")).html;
+
 		const endedAmount = (html: string) =>
 			html.match(/<p class="whitespace-nowrap[^>]*>([^<]+)<\/p>/)?.[1];
+
 		expect(after).toContain("$230");
 		expect(after).toContain('aria-label="September ended"');
 		expect(endedAmount(after)).toBe(endedAmount(before));
@@ -165,14 +179,18 @@ describe("GET / with the demo seed", () => {
 			),
 		]);
 		const current = await home();
+
 		const currentRow = current.html.match(
 			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg tabular-nums">([^<]+)<\/span>/,
 		)?.[1];
+
 		vi.setSystemTime(new Date("2026-11-01T00:01:00-04:00"));
 		const finished = await homeAt("2026-10");
+
 		const finishedRow = finished.html.match(
 			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg tabular-nums">([^<]+)<\/span>/,
 		)?.[1];
+
 		expect(currentRow).toBe("$20 of $100");
 		expect(finishedRow).toBe("$20 of $100");
 		expect(current.html).toContain("Archived this month");
@@ -219,6 +237,7 @@ describe("GET / with the demo seed", () => {
 
 	it("keeps the finished amount equal to what Home showed at the end of that month", async () => {
 		vi.useFakeTimers();
+
 		try {
 			vi.setSystemTime(new Date("2026-09-30T16:00:00-04:00"));
 			await resetDemo(env.DB, "2026-09-30");
@@ -231,10 +250,12 @@ describe("GET / with the demo seed", () => {
 			const whileCurrent = await home();
 			vi.setSystemTime(new Date("2026-10-01T00:01:00-04:00"));
 			const finished = await homeAt("2026-09");
+
 			const amount = (html: string) =>
 				html.match(
 					/<p class="[^"]*text-6xl[^"]*">(?:<span class="whitespace-nowrap">)?([^<]+)<\/(?:span|p)>/,
 				)?.[1];
+
 			expect(whileCurrent.html).toContain("Safe to spend");
 			expect(finished.html).toContain("September ended");
 			expect(amount(finished.html)).toBe(amount(whileCurrent.html));
@@ -304,8 +325,10 @@ describe("GET / with the demo seed", () => {
 		).run();
 		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const { html } = await home();
+
 		const nav =
 			html.match(/<nav aria-label="Months"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+
 		const links = [...nav.matchAll(/href="\/?\?month=(\d{4}-\d{2})"/g)];
 		expect(links).toHaveLength(36);
 		expect(html).toContain("Earlier");
@@ -320,7 +343,9 @@ describe("GET / with the demo seed", () => {
 		).run();
 		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const firstMonth = await firstCountedMonth(env.DB);
+
 		if (!firstMonth) throw new Error("History has no counted month");
+
 		for (const viewed of [
 			current,
 			monthsBefore(current, 12),
@@ -328,14 +353,17 @@ describe("GET / with the demo seed", () => {
 			monthsBefore(current, 100),
 		]) {
 			const { html } = await homeAt(viewed);
+
 			const nav =
 				html.match(/<nav aria-label="Months"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ??
 				"";
+
 			const links = [
 				...nav.matchAll(
 					/<a href="\/?\?month=(\d{4}-\d{2})"([^>]*)>([\s\S]*?)<\/a>/g,
 				),
 			];
+
 			expect(links).toHaveLength(36);
 			expect(links.map((link) => link[1])).toContain(viewed);
 			expect(links.find((link) => link[1] === viewed)?.[2]).toContain(
@@ -343,16 +371,20 @@ describe("GET / with the demo seed", () => {
 			);
 			const firstDot = links[0]?.[1];
 			const lastDot = links.at(-1)?.[1];
+
 			const expectedFirst =
 				firstMonth > monthsBefore(viewed, 35)
 					? firstMonth
 					: monthsBefore(viewed, 35);
+
 			const expectedLast =
 				current < monthsBefore(expectedFirst, -35)
 					? current
 					: monthsBefore(expectedFirst, -35);
+
 			expect(firstDot).toBe(expectedFirst);
 			expect(lastDot).toBe(expectedLast);
+
 			if (firstMonth < (firstDot ?? firstMonth)) {
 				expect(html).toContain(
 					`href="/?month=${monthsBefore(firstDot ?? viewed, 1)}"`,
@@ -360,6 +392,7 @@ describe("GET / with the demo seed", () => {
 			} else {
 				expect(html).not.toContain(">Earlier</a>");
 			}
+
 			if ((lastDot ?? current) < current) {
 				expect(html).toContain(">Later</a>");
 				expect(html).toContain(
@@ -376,6 +409,7 @@ describe("GET / with the demo seed", () => {
 		const { html } = await homeAt(currentMonth);
 		expect(html).not.toMatch(/aria-label="Next month,[^"]+"[^>]*href=/);
 		const first = await firstCountedMonth(env.DB);
+
 		if (first) {
 			const earliest = await homeAt(first);
 			expect(earliest.html).not.toMatch(
@@ -388,19 +422,25 @@ describe("GET / with the demo seed", () => {
 		const currentMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const viewedMonth = monthsBefore(currentMonth, 1);
 		const first = await firstCountedMonth(env.DB);
+
 		if (!first) throw new Error("Demo has no counted transaction month");
 		const { html } = await homeAt(viewedMonth);
+
 		const nav = html.match(
 			/<nav aria-label="Months"[^>]*>([\s\S]*?)<\/nav>/,
 		)?.[1];
+
 		if (!nav) throw new Error("Home has no month strip");
 		expect(nav).toContain('<ol class="flex flex-wrap">');
+
 		const links = [
 			...nav.matchAll(
 				/<a href="\/\?month=(\d{4}-\d{2})"([^>]*)>([\s\S]*?)<\/a>/g,
 			),
 		];
+
 		const expected: string[] = [];
+
 		for (
 			let date = new Date(`${first}-01T00:00:00Z`);
 			date <= new Date(`${currentMonth}-01T00:00:00Z`);
@@ -410,19 +450,24 @@ describe("GET / with the demo seed", () => {
 				`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`,
 			);
 		}
+
 		expect(links.map((link) => link[1])).toEqual(expected);
+
 		for (const link of links) {
 			const [, target, attributes, body] = link;
+
 			const monthName = new Date(`${target}-01T00:00:00Z`).toLocaleString(
 				"en-US",
 				{ month: "long", timeZone: "UTC" },
 			);
+
 			expect(body).toContain(`<span class="sr-only">${monthName}`);
 			expect(attributes).toContain(
 				'class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm',
 			);
 			expect(body).toContain("size-8 rounded-full");
 		}
+
 		const selected = links.find((link) => link[1] === viewedMonth);
 		expect(selected?.[2]).toContain('aria-current="page"');
 		expect(selected?.[3]).toContain("ring-ink");
@@ -439,6 +484,7 @@ describe("GET / with the demo seed", () => {
 		const data = await loadMonth(env.DB, month);
 		const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents: 0 });
 		const budgeted = new Set(summary.categories.map((cat) => cat.id));
+
 		const unbudgeted = data.categories
 			.filter((cat) => !budgeted.has(cat.id))
 			.map((cat) => ({
@@ -447,7 +493,9 @@ describe("GET / with the demo seed", () => {
 					.filter((t) => t.categoryId === cat.id && !t.income)
 					.reduce((sum, t) => sum + t.amountCents, 0),
 			}));
+
 		const over = summary.totalSpentCents - summary.totalBudgetCents;
+
 		const cause = monthCause(
 			monthCauses(
 				summary.categories,
@@ -456,6 +504,7 @@ describe("GET / with the demo seed", () => {
 			),
 			over,
 		);
+
 		if (!cause) throw new Error("September has no cause to name");
 		expect(cause.text.startsWith("Most of it had no budget:")).toBe(true);
 		expect(cause.named.every((named) => named.kind === "unbudgeted")).toBe(
@@ -466,10 +515,12 @@ describe("GET / with the demo seed", () => {
 		expect(html).toContain(`<a href="#${month}-not-budgeted"`);
 		expect(html).toContain(`id="${month}-not-budgeted"`);
 		expect(html).toContain(cause.text);
+
 		// The strip's name for September says the same number as MonthEnd prints.
 		const shown = html.match(
 			/aria-label="September ended"[\s\S]*?whitespace-nowrap[^>]*>([^<]+)</,
 		)?.[1];
+
 		expect(shown).toBeTruthy();
 		expect(html).toContain(`September, ended ${shown} over`);
 	});
@@ -537,31 +588,39 @@ describe("GET / with the demo seed", () => {
 		).run();
 
 		let statements = 0;
+
 		const db = new Proxy(env.DB, {
 			get(target, property) {
 				const value = Reflect.get(target, property);
+
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		const plan = await env.DB.prepare(
 			`EXPLAIN QUERY PLAN ${OLDER_NEEDS_CATEGORY_SQL}`,
 		)
 			.bind(`${month}-01`, `${monthsBefore(month, -1)}-01`, month)
 			.all<{ detail: string }>();
+
 		expect(plan.results.map((row) => row.detail).join("\n")).toMatch(
 			/SEARCH (transactions|t) USING (COVERING )?INDEX transactions_date/,
 		);
 		const app = new Hono<{ Bindings: Env }>().route("/", homeRoute);
+
 		const response = await app.request(
 			"http://tally.test/",
 			{},
 			{ ...env, DB: db },
 		);
+
 		expect(response.status).toBe(200);
 		expect(await response.text()).toContain("+5000 older");
 		expect(statements).toBeLessThanOrEqual(20);
@@ -593,15 +652,18 @@ describe("GET / with the demo seed", () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
 		await resetDemo(env.DB, "2026-10-10");
+
 		const dollars = (html: string) => {
 			const match = html.match(
 				/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([−-]?)\$([\d,]+)/,
 			);
+
 			return (
 				Number(match?.[2]?.replaceAll(",", "") ?? Number.NaN) *
 				(match?.[1] ? -1 : 1)
 			);
 		};
+
 		const withBills = dollars((await home()).html);
 		// Safe to spend stays positive with the bills counted, so the difference below is the bills' own, not a floor's.
 		expect(withBills).toBeGreaterThan(0);
@@ -626,9 +688,11 @@ describe("GET / with the demo seed", () => {
 			const today = todayIn(DEFAULT_TIME_ZONE);
 			const month = today.slice(0, 7);
 			await resetDemo(env.DB, today);
+
 			const nextId = await env.DB.prepare(
 				"SELECT COALESCE(MAX(id), 0) + 1 AS id FROM bills",
 			).first<{ id: number }>();
+
 			const firstId = nextId?.id ?? 1000;
 			await env.DB.batch([
 				env.DB.prepare(
@@ -644,9 +708,11 @@ describe("GET / with the demo seed", () => {
 					"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1, ?, 20000, 'FORECAST PAID')",
 				).bind(`${month}-03`),
 			]);
+
 			const payment = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'FORECAST PAID' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>();
+
 			if (!payment) throw new Error("Forecast payment was not inserted");
 			await env.DB.prepare(
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, ?, ?, 'user', 'linked')",
@@ -656,6 +722,7 @@ describe("GET / with the demo seed", () => {
 
 			const { rows } = await loadBillRows(env.DB, today);
 			const active = rows.filter((bill) => bill.active);
+
 			const billTotals = calculateBillTotals({
 				month,
 				bills: active.map((bill) => ({
@@ -677,6 +744,7 @@ describe("GET / with the demo seed", () => {
 						.map((occurrence) => ({ billId: bill.id, ...occurrence })),
 				),
 			});
+
 			const expectedStillToPay = active
 				.flatMap((bill) =>
 					bill.totalOccurrences.filter((occurrence) =>
@@ -688,6 +756,7 @@ describe("GET / with the demo seed", () => {
 						sum + Math.max(0, occurrence.amountCents - occurrence.paidCents),
 					0,
 				);
+
 			expect(billTotals.stillToPayCents).toBe(expectedStillToPay);
 			expect(billTotals.stillToPayCents).toBeGreaterThan(10000);
 			expect(
@@ -705,8 +774,10 @@ describe("GET / with the demo seed", () => {
 					)?.paidCents,
 			).toBe(20000);
 			const overdueSeptember = active.find((bill) => bill.id === firstId + 2);
+
 			const expectedOccurrenceMonth =
 				Number(today.slice(8, 10)) >= 21 ? month : monthsBefore(month, 1);
+
 			const expectedDueDate = `${expectedOccurrenceMonth}-28`;
 			expect(overdueSeptember?.dueDate).toBe(expectedDueDate);
 			expect(overdueSeptember?.status).toBe(
@@ -720,12 +791,15 @@ describe("GET / with the demo seed", () => {
 			);
 
 			const data = await loadMonth(env.DB, month);
+
 			const summary = summarizeMonth({
 				month,
 				...data,
 				unpaidDueBillsCents: 0,
 			});
+
 			const days = await homeForecastDays(env.DB, month, today);
+
 			const forecast = forecastMonth({
 				day: Number(today.slice(8, 10)),
 				daysInMonth: daysInMonth(month),
@@ -739,11 +813,14 @@ describe("GET / with the demo seed", () => {
 				refundsCents: days.reduce((sum, row) => sum + row.refundsCents, 0),
 				billsStillDueCents: billTotals.stillToPayCents,
 			});
+
 			const difference = summary.totalBudgetCents - forecast.endCents;
+
 			const shown =
 				difference >= 0
 					? Math.floor(difference / 100) * 100
 					: Math.ceil(-difference / 100) * 100;
+
 			const descriptor = `${formatCents(shown, { wholeDollars: true })} ${difference >= 0 ? "under" : "over"}`;
 			const homeHtml = (await home()).html;
 			expect(homeHtml).toContain(`at this pace: ${descriptor} the`);
@@ -771,20 +848,25 @@ describe("GET / with the demo seed", () => {
 		vi.setSystemTime(new Date("2026-10-20T12:00:00-04:00"));
 		await resetDemo(env.DB, "2026-10-20");
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 		const parent = await env.DB.prepare(
 			"SELECT amount_cents FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
 		).first<{ amount_cents: number }>();
+
 		const children = await env.DB.prepare(
 			"SELECT amount_cents AS amountCents FROM transactions WHERE parent_id = (SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1)",
 		).all<{ amountCents: number }>();
+
 		const data = await loadMonth(env.DB, month);
 		expect(parent?.amount_cents).toBe(18742);
 		expect(
 			children.results.reduce((sum, row) => sum + row.amountCents, 0),
 		).toBe(18742);
+
 		for (const child of children.results) {
 			expect(data.transactions).toContainEqual(expect.objectContaining(child));
 		}
+
 		expect(data.transactions).not.toContainEqual(
 			expect.objectContaining({ amountCents: parent?.amount_cents }),
 		);
@@ -813,6 +895,7 @@ describe("GET / with the demo seed", () => {
 		const billData = await loadBillRows(env.DB, today);
 		// The same bills total Home's Safe to spend subtracts, not a copy of its rule.
 		const dueBills = billTotalsForRows(month, billData.rows).setAsideCents;
+
 		const safe = summarizeMonth({
 			month,
 			...data,
@@ -820,9 +903,11 @@ describe("GET / with the demo seed", () => {
 			// The planned expenses Home sets aside too (decision 74).
 			unpaidPlansCents: await plansSetAsideCents(env.DB, month),
 		}).safeToSpendCents;
+
 		const budget = await env.DB.prepare(
 			"SELECT category_id AS categoryId, amount_cents AS amountCents FROM budget_amounts ORDER BY category_id LIMIT 1",
 		).first<{ categoryId: number; amountCents: number }>();
+
 		if (!budget) throw new Error("Demo budget is missing");
 		await env.DB.prepare(
 			"UPDATE budget_amounts SET amount_cents = amount_cents - ? WHERE category_id = ?",
@@ -1103,6 +1188,7 @@ describe("GET /?month= before a linked refund's date", () => {
 describe("How this works at the foot of Home", () => {
 	const FOOT =
 		/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#budget" aria-label="How this works: the budget" class="[^"]*">How this works<\/a><\/div><\/div>/;
+
 	// The keys' details on desktop (decision 118) is the one block that may follow the foot: it is not a section.
 	const withoutKeys = (text: string) =>
 		text.replace(

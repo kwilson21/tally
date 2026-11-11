@@ -31,18 +31,21 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 		)
 			.bind(id, date, cents)
 			.run();
+
 	const link = (bill: number, transaction: number, period: string) =>
 		env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','linked')",
 		)
 			.bind(bill, period, transaction)
 			.run();
+
 	const rowOn = async (today: string, id: number) =>
 		(await loadBillRows(env.DB, today)).rows.find((row) => row.id === id);
 
 	it("keeps October's unpaid part of the rent set aside on the 24th, 25th and 31st, while November's rent is due soon", async () => {
 		await addPayment(9801, "2026-10-01", 60000);
 		await link(RENT, 9801, MONTH);
+
 		for (const today of ["2026-10-24", "2026-10-25", "2026-10-31"]) {
 			const row = await rowOn(today, RENT);
 			expect(row).toBeDefined();
@@ -50,6 +53,7 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 			expect(totals.setAsideCents).toBe(60000);
 			expect(totals.soonCount).toBe(1);
 		}
+
 		// The 25th is the handoff day: November's rent is the shown occurrence, and October's is no longer shown.
 		const onThe25th = await rowOn("2026-10-25", RENT);
 		expect(onThe25th?.dueDate).toBe("2026-11-01");
@@ -59,10 +63,12 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 			amountCents: 120000,
 			paidCents: 60000,
 		});
+
 		// November's rent is not set aside in October, though Bills counts it as due soon (soonCents, as today).
 		const totals = billTotalsForRows(MONTH, [
 			onThe25th as NonNullable<typeof onThe25th>,
 		]);
+
 		expect(totals.soonCents).toBe(120000);
 	});
 

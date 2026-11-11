@@ -7,19 +7,24 @@ import { setupPush } from "../public/js/push.js";
 
 const AS_PUBLIC =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const OTHER_KEY =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+
 const ON = "Notifications are on for this device.";
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
+
 // The Home Screen hint's sentence, as the server draws it, and as push.js sets it on an iPad (every iPhone in it becomes iPad).
 const IPHONE_HINT =
 	"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.";
+
 const IPAD_HINT =
 	"To get a notification on iPad, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPads), then Add to Home Screen. Then open Tally from there and tap Notify me.";
 
 /** base64url text as the bytes it stands for. */
 const bytesOf = (text: string) => {
 	const base64 = text.replaceAll("-", "+").replaceAll("_", "/");
+
 	return Uint8Array.from(
 		atob(base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=")),
 		(c) => c.charCodeAt(0),
@@ -27,6 +32,7 @@ const bytesOf = (text: string) => {
 };
 
 type Ev = { type: string; target?: El; detail?: unknown };
+
 type Handler = (event: Ev) => unknown;
 
 /** A tiny element: attributes, children, the hidden and disabled flags, and the selectors push.js uses ([name] and [name="v"]). */
@@ -55,6 +61,7 @@ class El {
 	/** A disabled element drops focus, as a browser does: a busy button that had focus leaves it on nothing. */
 	set disabled(value: boolean) {
 		this.isDisabled = value;
+
 		if (value && this.owner.activeElement === this) this.owner.active = null;
 	}
 	setAttribute(name: string, value: string) {
@@ -98,15 +105,19 @@ class El {
 	closest(selector: string): El | null {
 		for (let el: El | null = this; el; el = el.parent)
 			if (matches(el, selector)) return el;
+
 		return null;
 	}
 }
 
 function matches(el: El, selector: string) {
 	const match = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(selector);
+
 	if (!match) throw new Error(`unsupported selector ${selector}`);
 	const [, name, value] = match;
+
 	if (!el.hasAttribute(name ?? "")) return false;
+
 	return value === undefined || el.getAttribute(name ?? "") === value;
 }
 
@@ -130,7 +141,9 @@ class Dom {
 	}
 	dispatchEvent(event: Ev) {
 		this.dispatched.push(event);
+
 		for (const handler of this.listeners.get(event.type) ?? []) handler(event);
+
 		return true;
 	}
 	querySelectorAll(selector: string) {
@@ -175,6 +188,7 @@ function drawControl(dom: Dom, vapidKey = AS_PUBLIC) {
 	blocked.hidden = true;
 	node.append(off, on, iphone, blocked);
 	dom.root.append(node);
+
 	return node;
 }
 
@@ -186,6 +200,7 @@ function subscriptionWith(
 	const bytes = bytesOf(key);
 	const p256dh = new Uint8Array([1, 2, 3, 4]);
 	const auth = new Uint8Array([5, 6, 7, 8]);
+
 	return {
 		endpoint,
 		options: { applicationServerKey: bytes.buffer as ArrayBuffer },
@@ -201,6 +216,7 @@ function subscriptionWith(
  */
 function paddedJsonSubscription() {
 	const endpoint = "https://push.example.test/send/padded";
+
 	return {
 		endpoint,
 		options: { applicationServerKey: bytesOf(AS_PUBLIC).buffer as ArrayBuffer },
@@ -241,14 +257,17 @@ type Options = {
 async function page(options: Options = {}) {
 	const dom = new Dom();
 	const control = drawControl(dom, options.vapidKey);
+
 	const fresh = subscriptionWith(
 		AS_PUBLIC,
 		"https://push.example.test/send/fresh",
 	);
+
 	const subscribe = vi.fn(options.subscribe ?? (async () => fresh));
 	const getSubscription = vi.fn(async () => options.subscription ?? null);
 	const registration = { pushManager: { subscribe, getSubscription } };
 	const register = vi.fn(async () => registration);
+
 	const navigator = {
 		serviceWorker: { register, ready: Promise.resolve(registration) },
 		userAgent:
@@ -256,23 +275,30 @@ async function page(options: Options = {}) {
 		maxTouchPoints: options.maxTouchPoints ?? 0,
 		standalone: options.standalone,
 	};
+
 	const notification = { permission: options.permission ?? "default" };
+
 	const window =
 		options.supported === false
 			? {}
 			: { PushManager: class {}, Notification: class {} };
+
 	// A page load's quiet re-post (restore=1) answers restoreStatus when given, and a tap's save answers saveStatus.
 	const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
 		const restore =
 			(init?.body as URLSearchParams | undefined)?.get("restore") === "1";
+
 		if (restore && options.restoreError) throw new TypeError("network down");
+
 		if (restore && options.restoreGate) await options.restoreGate;
+
 		return new Response(null, {
 			status: restore
 				? (options.restoreStatus ?? options.saveStatus ?? 201)
 				: (options.saveStatus ?? 201),
 		});
 	});
+
 	setupPush({
 		document: dom,
 		navigator,
@@ -283,6 +309,7 @@ async function page(options: Options = {}) {
 		screen: options.screen ?? { width: 1024, height: 1366 },
 	});
 	await flush();
+
 	return {
 		dom,
 		control,
@@ -299,6 +326,7 @@ async function page(options: Options = {}) {
 /** Whether a state is shown on the control (its element is not hidden). */
 const shown = (control: El, state: string) => {
 	const el = control.querySelector(`[data-notify-state="${state}"]`);
+
 	return el ? !el.hidden : false;
 };
 
@@ -309,6 +337,7 @@ const hintOf = (control: El) =>
 describe("the notify control on a page: what the browser already has", () => {
 	it("shows nothing in a browser without Web Push", async () => {
 		const { control, register } = await page({ supported: false });
+
 		for (const state of ["off", "on", "iphone", "blocked"])
 			expect(shown(control, state)).toBe(false);
 		expect(register).not.toHaveBeenCalled();
@@ -320,6 +349,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
 			standalone: false,
 		});
+
 		expect(shown(control, "iphone")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
 	});
@@ -330,6 +360,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
 			standalone: true,
 		});
+
 		expect(shown(control, "iphone")).toBe(false);
 	});
 
@@ -339,6 +370,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
 			standalone: false,
 		});
+
 		expect(shown(control, "iphone")).toBe(true);
 		expect(hintOf(control)?.textContent).toBe(IPHONE_HINT);
 		expect(hintOf(control)?.children).toEqual([]);
@@ -351,6 +383,7 @@ describe("the notify control on a page: what the browser already has", () => {
 				"Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15",
 			standalone: false,
 		});
+
 		expect(shown(control, "iphone")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
 		// The iPad sentence: the same words, every iPhone (and "newer iPhones") said as iPad, in one text node.
@@ -366,6 +399,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			screen: { width: 1024, height: 1366 },
 			standalone: false,
 		});
+
 		expect(shown(control, "iphone")).toBe(true);
 		expect(hintOf(control)?.textContent).toBe(IPAD_HINT);
 	});
@@ -378,6 +412,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			screen: { width: 390, height: 844 },
 			standalone: false,
 		});
+
 		expect(shown(control, "iphone")).toBe(true);
 		expect(hintOf(control)?.textContent).toBe(IPHONE_HINT);
 	});
@@ -390,6 +425,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			screen: { width: 844, height: 390 },
 			standalone: false,
 		});
+
 		expect(hintOf(control)?.textContent).toBe(IPHONE_HINT);
 	});
 
@@ -401,7 +437,9 @@ describe("the notify control on a page: what the browser already has", () => {
 			screen: { width: 1024, height: 1366 },
 			standalone: false,
 		});
+
 		expect(hintOf(phone.control)?.textContent).toBe(IPHONE_HINT);
+
 		const tablet = await page({
 			supported: false,
 			userAgent:
@@ -410,6 +448,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			screen: { width: 390, height: 844 },
 			standalone: false,
 		});
+
 		expect(hintOf(tablet.control)?.textContent).toBe(IPAD_HINT);
 	});
 
@@ -420,6 +459,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			maxTouchPoints: 0,
 			standalone: false,
 		});
+
 		for (const state of ["off", "on", "iphone", "blocked"])
 			expect(shown(control, state)).toBe(false);
 	});
@@ -432,16 +472,19 @@ describe("the notify control on a page: what the browser already has", () => {
 			screen: { width: 390, height: 844 },
 			standalone: false,
 		});
+
 		for (const state of ["off", "on", "iphone", "blocked"])
 			expect(shown(control, state)).toBe(false);
 	});
 
 	it("shows On, and posts the subscription again, when a matching subscription exists with permission granted", async () => {
 		const subscription = subscriptionWith(AS_PUBLIC);
+
 		const { control, fetch, subscribe } = await page({
 			permission: "granted",
 			subscription,
 		});
+
 		expect(shown(control, "on")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
 		expect(fetch).toHaveBeenCalledOnce();
@@ -465,20 +508,24 @@ describe("the notify control on a page: what the browser already has", () => {
 			subscription: subscriptionWith(AS_PUBLIC),
 			saveStatus: 500,
 		});
+
 		expect(shown(control, "on")).toBe(true);
 		expect(dom.sent("toast")).toEqual([]);
 	});
 
 	it("shows neither On nor Off while the quiet re-post is pending, then On once it answers 2xx", async () => {
 		let answer = () => {};
+
 		const gate = new Promise<void>((resolve) => {
 			answer = resolve;
 		});
+
 		const { control, dom, fetch } = await page({
 			permission: "granted",
 			subscription: subscriptionWith(AS_PUBLIC),
 			restoreGate: gate,
 		});
+
 		expect(fetch).toHaveBeenCalledOnce();
 		expect(shown(control, "on")).toBe(false);
 		expect(shown(control, "off")).toBe(false);
@@ -491,15 +538,18 @@ describe("the notify control on a page: what the browser already has", () => {
 
 	it("shows neither On nor Off while the quiet re-post is pending, then Off quietly for a 409", async () => {
 		let answer = () => {};
+
 		const gate = new Promise<void>((resolve) => {
 			answer = resolve;
 		});
+
 		const { control, dom } = await page({
 			permission: "granted",
 			subscription: subscriptionWith(AS_PUBLIC),
 			restoreStatus: 409,
 			restoreGate: gate,
 		});
+
 		expect(shown(control, "on")).toBe(false);
 		expect(shown(control, "off")).toBe(false);
 		answer();
@@ -516,6 +566,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			subscription: subscriptionWith(AS_PUBLIC),
 			restoreStatus: 503,
 		});
+
 		expect(shown(control, "on")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
 		expect(dom.sent("toast")).toEqual([]);
@@ -527,6 +578,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			subscription: subscriptionWith(AS_PUBLIC),
 			restoreError: true,
 		});
+
 		expect(shown(control, "on")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
 		expect(dom.sent("toast")).toEqual([]);
@@ -534,11 +586,13 @@ describe("the notify control on a page: what the browser already has", () => {
 
 	it("shows Off, with no toast, focus or unsubscribe, when the quiet re-post answers 409 (the device is someone else's)", async () => {
 		const subscription = subscriptionWith(AS_PUBLIC);
+
 		const { control, dom } = await page({
 			permission: "granted",
 			subscription,
 			restoreStatus: 409,
 		});
+
 		expect(shown(control, "off")).toBe(true);
 		expect(shown(control, "on")).toBe(false);
 		expect(subscription.unsubscribe).not.toHaveBeenCalled();
@@ -554,6 +608,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			restoreStatus: 409,
 			saveStatus: 201,
 		});
+
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(fetch).toHaveBeenCalledTimes(2);
@@ -568,10 +623,12 @@ describe("the notify control on a page: what the browser already has", () => {
 
 	it("unsubscribes a subscription made with a different key, then shows Off", async () => {
 		const subscription = subscriptionWith(OTHER_KEY);
+
 		const { control, fetch } = await page({
 			permission: "granted",
 			subscription,
 		});
+
 		expect(subscription.unsubscribe).toHaveBeenCalledOnce();
 		expect(shown(control, "off")).toBe(true);
 		expect(fetch).not.toHaveBeenCalled();
@@ -588,6 +645,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			permission: "default",
 			subscription: subscriptionWith(AS_PUBLIC),
 		});
+
 		expect(shown(control, "off")).toBe(true);
 		expect(shown(control, "on")).toBe(false);
 	});
@@ -604,12 +662,15 @@ describe("the notify control's tap", () => {
 	it("calls subscribe in the click itself, before any await, with the page's key as bytes", async () => {
 		const { dom, control, subscribe } = await page();
 		const button = control.querySelector("[data-notify-on]");
+
 		if (!button) throw new Error("no button");
 		dom.click(button);
 		expect(subscribe).toHaveBeenCalledOnce();
+
 		const [options] = subscribe.mock.calls[0] as unknown as [
 			{ userVisibleOnly: boolean; applicationServerKey: Uint8Array },
 		];
+
 		expect(options.userVisibleOnly).toBe(true);
 		expect(options.applicationServerKey).toEqual(bytesOf(AS_PUBLIC));
 		expect(options.applicationServerKey[0]).toBe(4);
@@ -639,6 +700,7 @@ describe("the notify control's tap", () => {
 		const { dom, control, fetch } = await page({
 			subscribe: async () => paddedJsonSubscription(),
 		});
+
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(fetch).toHaveBeenCalledOnce();
@@ -654,6 +716,7 @@ describe("the notify control's tap", () => {
 			permission: "granted",
 			subscription: paddedJsonSubscription(),
 		});
+
 		await flush();
 		expect(fetch).toHaveBeenCalledOnce();
 		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
@@ -665,12 +728,14 @@ describe("the notify control's tap", () => {
 
 	it("shows the busy state while the subscribe is pending, and clears it once saved", async () => {
 		let finish: (value: unknown) => void = () => {};
+
 		const { dom, control } = await page({
 			subscribe: () =>
 				new Promise((resolve) => {
 					finish = resolve;
 				}),
 		});
+
 		const button = control.querySelector("[data-notify-on]") as El;
 		dom.click(button);
 		expect(button.disabled).toBe(true);
@@ -690,6 +755,7 @@ describe("the notify control's tap", () => {
 				throw new DOMException("denied", "NotAllowedError");
 			},
 		});
+
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(shown(control, "blocked")).toBe(true);
@@ -710,6 +776,7 @@ describe("the notify control's tap", () => {
 				throw new DOMException("dismissed", "NotAllowedError");
 			},
 		});
+
 		const button = control.querySelector("[data-notify-on]") as El;
 		dom.click(button);
 		await flush();
@@ -725,10 +792,12 @@ describe("the notify control's tap", () => {
 			AS_PUBLIC,
 			"https://push.example.test/send/bad",
 		);
+
 		const { dom, control } = await page({
 			saveStatus: 500,
 			subscribe: async () => subscribed,
 		});
+
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(subscribed.unsubscribe).toHaveBeenCalledOnce();
@@ -744,6 +813,7 @@ describe("the notify control's tap", () => {
 		// The device was turned on by someone else (the restore answers 409). subscribe with the same key returns that same
 		// subscription, so a failed save must leave it alone: removing it would take the other person's notifications away.
 		const existing = subscriptionWith(AS_PUBLIC);
+
 		const { dom, control } = await page({
 			permission: "granted",
 			subscription: existing,
@@ -751,6 +821,7 @@ describe("the notify control's tap", () => {
 			saveStatus: 500,
 			subscribe: async () => existing,
 		});
+
 		expect(shown(control, "off")).toBe(true);
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
@@ -766,10 +837,12 @@ describe("the notify control's tap", () => {
 
 	it("still unsubscribes a new subscription whose save fails after a 409 restore, since it is not the device's own", async () => {
 		const existing = subscriptionWith(AS_PUBLIC);
+
 		const fresh = subscriptionWith(
 			AS_PUBLIC,
 			"https://push.example.test/send/brand-new",
 		);
+
 		const { dom, control } = await page({
 			permission: "granted",
 			subscription: existing,
@@ -777,6 +850,7 @@ describe("the notify control's tap", () => {
 			saveStatus: 500,
 			subscribe: async () => fresh,
 		});
+
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(fresh.unsubscribe).toHaveBeenCalledOnce();
@@ -786,12 +860,14 @@ describe("the notify control's tap", () => {
 
 	it("unsubscribes a fresh device's subscription when its save fails (no subscription before the tap)", async () => {
 		const fresh = subscriptionWith(AS_PUBLIC);
+
 		const { dom, control } = await page({
 			permission: "granted",
 			subscription: null,
 			saveStatus: 500,
 			subscribe: async () => fresh,
 		});
+
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(fresh.unsubscribe).toHaveBeenCalledOnce();
@@ -803,6 +879,7 @@ describe("the notify control's tap", () => {
 			saveStatus: 500,
 			subscribe: async () => subscriptionWith(AS_PUBLIC),
 		});
+
 		const button = control.querySelector("[data-notify-on]") as El;
 		// Enter or Space on a focused button is the keyboard's tap; the busy state then disables that focused button.
 		button.focus();
@@ -820,6 +897,7 @@ describe("the notify control's tap", () => {
 				throw new DOMException("aborted", "AbortError");
 			},
 		});
+
 		const button = control.querySelector("[data-notify-on]") as El;
 		button.focus();
 		dom.click(button);
@@ -839,6 +917,7 @@ describe("the notify control's tap", () => {
 			saveStatus: 500,
 			subscribe: async () => subscriptionWith(AS_PUBLIC),
 		});
+
 		const button = control.querySelector("[data-notify-on]") as El;
 		button.focus();
 		dom.click(button);
@@ -868,6 +947,7 @@ describe("the notify control's setup on a page", () => {
 			permission: "granted",
 			subscription: subscriptionWith(AS_PUBLIC),
 		});
+
 		expect(dom.focused).toEqual([]);
 		expect(dom.sent("announce")).toEqual([]);
 	});

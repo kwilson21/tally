@@ -28,6 +28,7 @@ import { loadMonth } from "../src/db/month";
 const TODAY = "2026-10-15";
 
 const BASE = "http://tally.test";
+
 const post = (path: string, body: Record<string, string> = {}, htmx = true) =>
 	exports.default.fetch(BASE + path, {
 		method: "POST",
@@ -39,6 +40,7 @@ const post = (path: string, body: Record<string, string> = {}, htmx = true) =>
 		},
 		body: new URLSearchParams(body),
 	});
+
 const get = async (path: string) =>
 	(await exports.default.fetch(BASE + path)).text();
 
@@ -53,11 +55,13 @@ describe("pickPriceOffer", () => {
 		expect(
 			pickPriceOffer([pay(1, "2026-10-03", 1799)], "2026-10-02", 1549)?.id,
 		).toBe(1);
+
 		// Exactly 10% either way, and 9%: the matcher's, not an offer.
 		for (const cents of [1100, 900, 1090, 1000, 910])
 			expect(
 				pickPriceOffer([pay(1, "2026-10-03", cents)], "2026-10-02", 1000),
 			).toBeUndefined();
+
 		// One cent past 10%, in either direction.
 		for (const cents of [1101, 899])
 			expect(
@@ -68,6 +72,7 @@ describe("pickPriceOffer", () => {
 	it("keeps to the date window, money out, and a bill amount that can be confirmed", () => {
 		const offer = (p: ReturnType<typeof pay>) =>
 			pickPriceOffer([p], "2026-10-10", 1000);
+
 		expect(offer(pay(1, "2026-10-05", 1500))?.id).toBe(1);
 		expect(offer(pay(1, "2026-10-15", 1500))?.id).toBe(1);
 		expect(offer(pay(1, "2026-10-04", 1500))).toBeUndefined();
@@ -88,6 +93,7 @@ describe("pickPriceOffer", () => {
 				1000,
 				WEEKLY_BILL_DATE_WINDOW_DAYS,
 			);
+
 		expect(weekly("2026-10-06")?.id).toBe(1);
 		expect(weekly("2026-10-12")?.id).toBe(1);
 		expect(weekly("2026-10-05")).toBeUndefined();
@@ -105,6 +111,7 @@ describe("pickPriceOffer", () => {
 			"2026-10-10",
 			1000,
 		);
+
 		expect(picked?.id).toBe(1);
 		expect(
 			pickPriceOffer(
@@ -179,19 +186,23 @@ describe("bill matching and price changes", () => {
 			),
 		]);
 	}
+
 	const billRow = async () =>
 		await env.DB.prepare("SELECT amount_cents FROM bills WHERE id=1").first<{
 			amount_cents: number;
 		}>();
+
 	const rows = async (table: string, where = "1=1") =>
 		(await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`).all())
 			.results;
+
 	/** What the page showed, in integer cents: the occurrence's amount, the charge and the bill's current amount (a payment at a new price: $100.00, $115.00). */
 	const SEEN = {
 		bill_cents: "10000",
 		charge_cents: "11500",
 		current_cents: "10000",
 	};
+
 	const accept = (
 		transaction: number,
 		htmx = true,
@@ -202,6 +213,7 @@ describe("bill matching and price changes", () => {
 			{ transaction_id: String(transaction), ...seen },
 			htmx,
 		);
+
 	const dismiss = (transaction: number, htmx = true) =>
 		post(
 			`/bills/1/occurrences/${period}/price/dismiss`,
@@ -237,9 +249,11 @@ describe("bill matching and price changes", () => {
 		async function home() {
 			// An early payment counts in the month the bank dated it (spec §6).
 			const month = paidOn.slice(0, 7);
+
 			const category = (await env.DB.prepare(
 				"SELECT id FROM categories ORDER BY id LIMIT 1",
 			).first<{ id: number }>()) as { id: number };
+
 			await env.DB.batch([
 				env.DB.prepare("DELETE FROM budget_amounts"),
 				env.DB.prepare(
@@ -248,11 +262,13 @@ describe("bill matching and price changes", () => {
 			]);
 			const data = await loadMonth(env.DB, month);
 			const bills = await loadBillRows(env.DB, today);
+
 			const setAside = bills.rows
 				.filter(
 					(b) => b.active && (b.status === "due" || b.status === "overdue"),
 				)
 				.reduce((sum, b) => sum + b.amountCents, 0);
+
 			return {
 				summary: summarizeMonth({
 					month,
@@ -305,6 +321,7 @@ describe("bill matching and price changes", () => {
 				period,
 				opened_period: period,
 			});
+
 			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 				toast: { message: "Payment linked", type: "success" },
 				announce: "Payment linked",
@@ -335,12 +352,14 @@ describe("bill matching and price changes", () => {
 					"transactions",
 					"id=1 AND excluded=1 AND excluded_source='jev'",
 				);
+
 			const link = () =>
 				post("/bills/1/link", {
 					transaction_id: "1",
 					period,
 					opened_period: period,
 				});
+
 			// The month already has a $500 part payment: another part payment links too (decision 101), and the
 			// exclusion stays. A month already Paid would refuse it.
 			await env.DB.batch([
@@ -389,8 +408,10 @@ describe("bill matching and price changes", () => {
 			const bills = await get("/bills");
 			expect(bills).toContain("Price changed?");
 			expect(bills).toContain(`Paid $115.00 on ${paidLabel}`);
+
 			const group =
 				bills.split("Due in the next 7 days")[1]?.split("</section>")[0] ?? "";
+
 			expect(group).toContain("Netflix");
 			expect(group).toContain("Price changed?");
 			// The row keeps the bill's own amount, and the caption lines are ink, then muted.
@@ -486,10 +507,12 @@ describe("bill matching and price changes", () => {
 			expect(page).toContain("Updating the bill links that payment");
 			expect(page).toContain("$115.00 a year.");
 			expect(page).toContain(`/bills/1/occurrences/${year}/price/accept`);
+
 			const res = await post(`/bills/1/occurrences/${year}/price/accept`, {
 				transaction_id: "1",
 				...SEEN,
 			});
+
 			expect(res.status).toBe(200);
 			expect(await rows("bill_payments", `period='${year}'`)).toHaveLength(1);
 			expect((await billRow())?.amount_cents).toBe(11500);
@@ -606,6 +629,7 @@ describe("bill matching and price changes", () => {
 				expect(await res.text()).toContain("isn&#39;t on offer");
 				expect(res.headers.get("HX-Trigger")).toBeNull();
 			}
+
 			expect(await rows("bill_payments")).toEqual([]);
 			expect((await billRow())?.amount_cents).toBe(10000);
 			// A missing bill is a 404, and a month that isn't the current one has no offer.
@@ -616,12 +640,14 @@ describe("bill matching and price changes", () => {
 					})
 				).status,
 			).toBe(404);
+
 			const wrongMonth = await post(
 				"/bills/1/occurrences/2020-01/price/accept",
 				{
 					transaction_id: "1",
 				},
 			);
+
 			expect(await wrongMonth.text()).toContain("isn&#39;t on offer");
 			expect((await billRow())?.amount_cents).toBe(10000);
 		});
@@ -644,6 +670,7 @@ describe("bill matching and price changes", () => {
 				amount: "1.00",
 				...SEEN,
 			});
+
 			expect(res.status).toBe(200);
 			expect((await billRow())?.amount_cents).toBe(11500);
 		});
@@ -658,6 +685,7 @@ describe("bill matching and price changes", () => {
 					),
 				).toHaveLength(1);
 			};
+
 			beforeEach(() =>
 				env.DB.prepare(
 					"UPDATE transactions SET excluded=1,excluded_source='jev' WHERE id=1",
@@ -686,12 +714,14 @@ describe("bill matching and price changes", () => {
 				expect(await res.text()).toContain("isn&#39;t on offer");
 				expect((await billRow())?.amount_cents).toBe(10000);
 				await untouched();
+
 				// What the page shows now, $120.00, is what it saves.
 				const fresh = await accept(1, true, {
 					bill_cents: "10000",
 					charge_cents: "12000",
 					current_cents: "10000",
 				});
+
 				expect(fresh.headers.get("HX-Trigger")).toContain("Bill updated");
 				expect((await billRow())?.amount_cents).toBe(12000);
 			});
@@ -714,10 +744,12 @@ describe("bill matching and price changes", () => {
 					},
 					{ bill_cents: "", charge_cents: "", current_cents: "" },
 				];
+
 				for (const seen of stale) {
 					const res = await accept(1, true, seen);
 					expect(await res.text()).toContain("isn&#39;t on offer");
 				}
+
 				expect((await billRow())?.amount_cents).toBe(10000);
 				await untouched();
 			});
@@ -737,6 +769,7 @@ describe("bill matching and price changes", () => {
 				amountCents: 11500,
 				merchant: "Netflix",
 			};
+
 			const accepts = () =>
 				acceptPriceOffer(
 					env.DB,
@@ -747,12 +780,14 @@ describe("bill matching and price changes", () => {
 					period.slice(0, 7),
 					10000,
 				);
+
 			const unchanged = async (excluded = 1) => {
 				expect((await billRow())?.amount_cents).toBe(10000);
 				expect(
 					await rows("transactions", `id=1 AND excluded=${excluded}`),
 				).toHaveLength(1);
 			};
+
 			beforeEach(() =>
 				env.DB.prepare(
 					"UPDATE transactions SET excluded=1,excluded_source='jev' WHERE id=1",
@@ -848,12 +883,14 @@ describe("bill matching and price changes", () => {
 
 		it("is made only for an active bill whose occurrence is due or overdue", async () => {
 			await seed({ amount: 10000 }, [{ id: 1, amount: 11500 }]);
+
 			for (const status of ["due", "overdue"] as const) {
 				expect(
 					(await findPriceOffer(env.DB, { ...bill, active: true, status }))
 						?.transactionId,
 				).toBe(1);
 			}
+
 			// Paid already, still weeks away, an inactive bill, or a payment already linked, part paid or not
 			// (decision 101): nothing to ask.
 			for (const [active, status, linked] of [
@@ -867,12 +904,14 @@ describe("bill matching and price changes", () => {
 				expect(
 					await findPriceOffer(env.DB, { ...bill, active, status, linked }),
 				).toBeUndefined();
+
 			const all = await loadPriceOffers(env.DB, [
 				{ ...bill, id: 1, active: true, status: "paid" },
 				{ ...bill, id: 2, active: true, status: "upcoming" },
 				{ ...bill, id: 3, active: false, status: "overdue" },
 				{ ...bill, id: 4, active: true, status: "due" },
 			]);
+
 			expect([...all.keys()]).toEqual([4]);
 		});
 
@@ -1009,6 +1048,7 @@ describe("a weekly bill's price offer", () => {
 		frequency: "weekly" as const,
 		linked: false,
 	};
+
 	beforeEach(async () => {
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
@@ -1019,6 +1059,7 @@ describe("a weekly bill's price offer", () => {
 			),
 		]);
 	});
+
 	/** A charge at another price: $280.00 against the $240.00 Friday. */
 	const charge = (date: string) =>
 		env.DB.prepare(

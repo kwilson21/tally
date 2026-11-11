@@ -46,6 +46,7 @@ export async function householdTimeZone(db: D1Database): Promise<string> {
 		const row = await db
 			.prepare("SELECT value FROM household_settings WHERE key = 'time_zone'")
 			.first<{ value: string }>();
+
 		if (row?.value && dateIn(row.value, new Date()) !== null) return row.value;
 	} catch (error) {
 		// Only a database not yet migrated may use the default zone. Any other failure (a dropped
@@ -53,6 +54,7 @@ export async function householdTimeZone(db: D1Database): Promise<string> {
 		if (!(error instanceof Error && /no such table/i.test(error.message)))
 			throw error;
 	}
+
 	return DEFAULT_TIME_ZONE;
 }
 
@@ -122,12 +124,14 @@ export const monthDay = (month: number, day: number) =>
 export function shortDay(date: string, beside: string): string {
 	const label = `${SHORT[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
 	const year = date.slice(0, 4);
+
 	return year === beside.slice(0, 4) ? label : `${label}, ${year}`;
 }
 
 /** "Today, Sep 22", "Sep 21", or "Dec 31, 2025", from YYYY-MM-DD strings. */
 export function dayLabel(date: string, today: string): string {
 	const label = shortDay(date, today);
+
 	return date === today ? `Today, ${label}` : label;
 }
 
@@ -143,6 +147,7 @@ export const dayNumber = (date: string) => {
 		Number(date.slice(5, 7)) - 1,
 		Number(date.slice(8, 10)),
 	);
+
 	return Math.floor(midnight.getTime() / DAY_MS);
 };
 
@@ -158,6 +163,7 @@ export function daysBefore(date: string, days: number): string {
 /** "September", or "December 2025" when it isn't this year. */
 export function monthLabel(month: string, today: string): string {
 	const year = month.slice(0, 4);
+
 	return year === today.slice(0, 4)
 		? monthName(month)
 		: `${monthName(month)} ${year}`;

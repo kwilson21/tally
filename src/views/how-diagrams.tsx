@@ -9,6 +9,7 @@ import { formatCents } from "../money";
 import { PeleDiagram } from "./pele-diagram";
 
 const W = 360;
+
 const plural = (n: number, one: string, many: string) =>
 	`${n} ${n === 1 ? one : many}`;
 
@@ -71,6 +72,7 @@ function BudgetUnit({
 	const lead = operator === undefined ? 0 : UNIT_OP_W;
 	const width = lead + UNIT_BOX_W;
 	const cx = lead + UNIT_BOX_W / 2;
+
 	return (
 		<svg
 			aria-hidden="true"
@@ -140,6 +142,7 @@ export function BudgetDiagram(
 	const id = s.id ?? "budget-diagram";
 	const savingsGoalCents = s.savingsGoalCents ?? 0;
 	const plannedCents = s.plannedCents ?? 0;
+
 	// Bills due is what Safe to spend takes out beyond the budget, spending, savings goal and planned expenses.
 	const billsCents =
 		s.totalBudgetCents -
@@ -147,7 +150,9 @@ export function BudgetDiagram(
 		s.safeToSpendCents -
 		savingsGoalCents -
 		plannedCents;
+
 	const over = s.safeToSpendCents < 0;
+
 	const boxes: [string, number][] = [
 		["Budget", s.totalBudgetCents],
 		["Spent", s.totalSpentCents],
@@ -160,18 +165,24 @@ export function BudgetDiagram(
 			: []),
 		["Safe to spend", s.safeToSpendCents],
 	];
+
 	const money = (cents: number) => formatCents(cents);
+
 	const bills =
 		billsCents > 0 ? ` minus ${money(billsCents)} for bills due` : "";
+
 	const planned =
 		plannedCents > 0
 			? ` minus ${money(plannedCents)} for planned expenses`
 			: "";
+
 	const savings =
 		savingsGoalCents > 0
 			? ` minus ${money(savingsGoalCents)} for the savings goal`
 			: "";
+
 	const desc = `The ${money(s.totalBudgetCents)} budget minus ${money(s.totalSpentCents)} spent${bills}${planned}${savings} leaves ${money(s.safeToSpendCents)} safe to spend.`;
+
 	// Every box keeps its size and the row wraps where it doesn't fit: one row on desktop, and after Bills due on a phone.
 	return (
 		<div
@@ -207,20 +218,25 @@ export function TransactionsDiagram(c: {
 	needsCategory: number;
 }) {
 	const total = c.counted + c.excluded + c.heldForReview;
+
 	const needs =
 		c.needsCategory === 0
 			? "None need a category."
 			: `${c.needsCategory} of those ${c.needsCategory === 1 ? "needs" : "need"} a category.`;
+
 	const states = [
 		c.counted > 0 && `${c.counted} counted`,
 		c.heldForReview > 0 && `${c.heldForReview} held for review`,
 		c.excluded > 0 && `${c.excluded} excluded`,
 	].filter(Boolean);
+
 	const counts = `${plural(total, "transaction", "transactions")} this month: ${states.join(", ") || "none to count"}.`;
+
 	const dropped = [
 		c.excluded > 0 && `− ${c.excluded} excluded`,
 		c.heldForReview > 0 && `− ${c.heldForReview} held for review`,
 	].filter(Boolean);
+
 	return (
 		<PeleDiagram
 			id="transactions-diagram"
@@ -248,6 +264,7 @@ export function ExclusionsDiagram({
 }) {
 	const excluded = excludedTotal(breakdown);
 	const total = counted + excluded + heldForReview;
+
 	const kinds: [number, string, string][] = (
 		[
 			[heldForReview, "held for review", "held for review"],
@@ -256,6 +273,7 @@ export function ExclusionsDiagram({
 			[breakdown.byPerson, "by a person", "by a person"],
 		] as [number, string, string][]
 	).filter(([n]) => n > 0);
+
 	// Each slice is at least 8 wide so a single exclusion stays visible. The slices shrink to fit
 	// beside the counted part, or fill the bar when nothing counts; tenths are rounded down, so
 	// nothing ever runs past the edge.
@@ -266,14 +284,19 @@ export function ExclusionsDiagram({
 	const rawSum = raw.reduce((a, b) => a + b, 0);
 	const scale = counted > 0 ? Math.min(1, room / rawSum) : room / rawSum;
 	const widths = raw.map((w) => Math.floor(w * scale * 10) / 10);
+
 	const countedW =
 		counted > 0 ? W - gaps - widths.reduce((a, b) => a + b, 0) : 0;
+
 	let x = counted > 0 ? countedW + gap : 0;
+
 	const slices = widths.map((w) => {
 		const at = { x: x, w };
 		x += w + gap;
+
 		return at;
 	});
+
 	const said = kinds
 		.filter(([, one]) => one !== "held for review")
 		.map(([n, one, many]) =>
@@ -281,11 +304,14 @@ export function ExclusionsDiagram({
 				? `${n} excluded by a person`
 				: plural(n, one, many),
 		);
+
 	const sentence =
 		said.length < 2
 			? said.join("")
 			: `${said.slice(0, -1).join(", ")} and ${said.at(-1)}`;
+
 	const desc = `${plural(total, "transaction", "transactions")} this month: ${counted} counted, ${heldForReview} held for review, and ${excluded} excluded${sentence ? ` (${sentence})` : ""}.`;
+
 	return (
 		<Figure
 			id="exclusions-diagram"
@@ -369,10 +395,12 @@ export function CategoriesDiagram(c: {
 	ai?: "Jev" | "Tally";
 }) {
 	const ai = c.ai ?? "Tally";
+
 	const income =
 		c.income > 0
 			? ` ${c.income} ${c.income === 1 ? "is" : "are"} income, which needs no category.`
 			: "";
+
 	const steps: [string, number][] = [
 		["A person's choice", c.user],
 		["A merchant rule", c.merchantRule],
@@ -380,19 +408,23 @@ export function CategoriesDiagram(c: {
 		[`${ai}, if ${c.threshold} or more sure`, c.jev],
 		["Waits for a person", c.waiting],
 	];
+
 	const lines = ["flowchart TB"];
 	steps.forEach(([label, count], i) => {
 		lines.push(
 			`  s${i}["${i + 1} ${label.replaceAll('"', "'")} · <b>${count}</b>"]`,
 		);
+
 		if (i > 0) lines.push(`  s${i - 1} --> s${i}`);
 	});
 	lines.push("  class s4 undecided");
+
 	if (c.income > 0) {
 		lines.push(
 			`  s4 -.- income["+ ${c.income} income, which needs no category"]`,
 		);
 	}
+
 	return (
 		<PeleDiagram
 			id="categories-diagram"

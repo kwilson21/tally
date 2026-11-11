@@ -27,6 +27,7 @@ export function monthlyBillShare(
 		BillTotalFrequency,
 		[number, number]
 	>[BillTotalFrequency];
+
 	return Math.floor((amountCents * numerator + denominator / 2) / denominator);
 }
 
@@ -88,6 +89,7 @@ export type BillTotalsRow = {
  */
 export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
 	const active = rows.filter((row) => row.active);
+
 	return calculateBillTotals({
 		month,
 		bills: active.map(({ id, currentAmountCents, frequency }) => ({
@@ -123,25 +125,32 @@ export function calculateBillTotals({
 	const activeIds = new Set(
 		bills.filter((bill) => bill.active).map((bill) => bill.id),
 	);
+
 	const frequencyById = new Map(bills.map((bill) => [bill.id, bill.frequency]));
+
 	const monthlyCents = bills.reduce(
 		(total, bill) =>
 			total +
 			(bill.active ? monthlyBillShare(bill.amountCents, bill.frequency) : 0),
 		0,
 	);
+
 	// The occurrences the totals count, each once (decisions 62 and 122): the shown one of every bill, then this month's
 	// occurrences of every frequency, each judged on its own. The shown one wins a tie.
 	const counted = new Map<string, (typeof displayedOccurrences)[number]>();
+
 	for (const occurrence of [...displayedOccurrences, ...thisMonthOccurrences]) {
 		const key = `${occurrence.billId}:${occurrence.dueDate}`;
+
 		if (!counted.has(key)) counted.set(key, occurrence);
 	}
+
 	const listed = new Set(
 		displayedOccurrences.map(
 			(occurrence) => `${occurrence.billId}:${occurrence.dueDate}`,
 		),
 	);
+
 	// "To pay soon" judges the shown occurrence of every bill and a weekly or every-two-weeks bill's other occurrences
 	// (decision 62). A monthly bill's handed-off occurrence is counted under its heading but not judged for it.
 	const judged = [...counted].filter(
@@ -149,24 +158,28 @@ export function calculateBillTotals({
 			listed.has(key) ||
 			dayStepFrequencies.has(frequencyById.get(occurrence.billId) ?? "monthly"),
 	);
+
 	const groups = {
 		overdueCents: 0,
 		dueCents: 0,
 		upcomingCents: 0,
 		paidCents: 0,
 	};
+
 	const unlisted: Record<BillStatus, UnlistedOccurrence[]> = {
 		overdue: [],
 		due: [],
 		upcoming: [],
 		paid: [],
 	};
+
 	// Every heading counts each occurrence of its group in the month, listed as a row or not (decisions 122 and 127), and
 	// names the ones no row lists in `unlisted`. Paid this month counts every listed paid row at its full amount, since a
 	// paid occurrence has nothing left to pay (issue #601), plus each unlisted paid occurrence due this month, whenever it
 	// was paid. The unpaid headings count what is left of an occurrence, and Upcoming only those due this month.
 	for (const [key, occurrence] of counted) {
 		if (!activeIds.has(occurrence.billId)) continue;
+
 		if (occurrence.status === "paid") {
 			if (!listed.has(key) && !occurrence.dueDate.startsWith(month)) continue;
 			groups.paidCents += occurrence.amountCents;
@@ -181,48 +194,62 @@ export function calculateBillTotals({
 				occurrence.amountCents - occurrence.paidCents,
 			);
 		}
+
 		if (!listed.has(key))
 			unlisted[occurrence.status].push({
 				billId: occurrence.billId,
 				dueDate: occurrence.dueDate,
 			});
 	}
+
 	// "To pay soon" counts each due or overdue occurrence once (spec §6).
 	const soon = new Map<string, number>();
 	const soonBillIds = new Set<number>();
 	const overdueBillIds = new Set<number>();
+
 	for (const [key, occurrence] of judged) {
 		if (!activeIds.has(occurrence.billId)) continue;
+
 		if (occurrence.status !== "due" && occurrence.status !== "overdue")
 			continue;
 		soon.set(key, Math.max(0, occurrence.amountCents - occurrence.paidCents));
 		soonBillIds.add(occurrence.billId);
+
 		if (occurrence.status === "overdue") overdueBillIds.add(occurrence.billId);
 	}
+
 	let stillToPayCents = 0;
+
 	for (const occurrence of thisMonthOccurrences) {
 		if (!activeIds.has(occurrence.billId)) continue;
+
 		if (occurrence.dueDate.startsWith(month))
 			stillToPayCents += Math.max(
 				0,
 				occurrence.amountCents - occurrence.paidCents,
 			);
 	}
+
 	const soonCents = [...soon.values()].reduce(
 		(total, cents) => total + cents,
 		0,
 	);
+
 	// Safe to spend sets aside only this month's bills that are due or overdue and not paid (decision 123, #631). Each
 	// counted occurrence is judged once, the shown one winning a tie. A bill due in a later month waits for its month;
 	// it still counts in soonCents, as Bills shows it due soon.
 	let setAsideCents = 0;
+
 	for (const occurrence of counted.values()) {
 		if (!activeIds.has(occurrence.billId)) continue;
+
 		if (!occurrence.dueDate.startsWith(month)) continue;
+
 		if (occurrence.status !== "due" && occurrence.status !== "overdue")
 			continue;
 		setAsideCents += Math.max(0, occurrence.amountCents - occurrence.paidCents);
 	}
+
 	return {
 		monthlyCents,
 		stillToPayCents,

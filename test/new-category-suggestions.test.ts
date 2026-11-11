@@ -10,6 +10,7 @@ const THIS = TODAY.slice(0, 7);
 
 async function get(path = "/settings/categories") {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -24,6 +25,7 @@ async function post(path: string, fields: [string, string][]) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -81,6 +83,7 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
 		).run();
+
 		const made = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Pet Care'",
@@ -88,6 +91,7 @@ describe("Settings' Suggested card for a category that already exists", () => {
 				id: number;
 			}>()
 		)?.id as number;
+
 		const categories = (
 			await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
 				n: number;
@@ -101,26 +105,32 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		]);
 
 		expect(res.status).toBe(200);
+
 		const filed = await env.DB.prepare(
 			"SELECT id, category_id AS categoryId, category_source AS source FROM transactions WHERE id IN (?, ?) ORDER BY id",
 		)
 			.bind(first, second)
 			.all<{ id: number; categoryId: number | null; source: string | null }>();
+
 		expect(filed.results).toEqual([
 			{ id: first, categoryId: made, source: "user" },
 			{ id: second, categoryId: null, source: null },
 		]);
+
 		const count = (
 			await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
 				n: number;
 			}>()
 		)?.n;
+
 		expect(count).toBe(categories);
+
 		const status = await env.DB.prepare(
 			"SELECT status FROM category_suggestions WHERE id = ?",
 		)
 			.bind(suggestion)
 			.first<{ status: string }>();
+
 		expect(status?.status).toBe("created");
 	});
 
@@ -176,7 +186,9 @@ describe("Settings' Suggested card for an archived category with that name (deci
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 99) RETURNING id",
 			).first<{ id: number }>()
 		)?.id as number;
+
 		await setArchived(env.DB, id, true, "2026-07-15");
+
 		return id;
 	}
 
@@ -228,6 +240,7 @@ describe("Settings' Suggested card for an archived category with that name (deci
 		).toMatchObject({
 			results: [{ archived_on: "2026-07-15", restored_on: TODAY }],
 		});
+
 		const filed = await env.DB.prepare(
 			"SELECT id, category_id AS categoryId, category_source AS source FROM transactions WHERE id IN (?, ?) ORDER BY id",
 		)
@@ -237,15 +250,18 @@ describe("Settings' Suggested card for an archived category with that name (deci
 				categoryId: number | null;
 				source: string | null;
 			}>();
+
 		expect(filed.results).toEqual([
 			{ id: first, categoryId: id, source: "user" },
 			{ id: second, categoryId: id, source: "user" },
 		]);
+
 		const status = await env.DB.prepare(
 			"SELECT status FROM category_suggestions WHERE id = ?",
 		)
 			.bind(suggestion)
 			.first<{ status: string }>();
+
 		expect(status?.status).toBe("created");
 	});
 
@@ -264,11 +280,13 @@ describe("Settings' Suggested card for an archived category with that name (deci
 
 	it("refuses while 50 categories are active, with the restore words, and leaves it archived", async () => {
 		const id = await archivePetCare();
+
 		const have = (
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
 			).first<{ n: number }>()
 		)?.n as number;
+
 		for (let i = have; i < 50; i++)
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",

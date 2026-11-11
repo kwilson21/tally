@@ -26,17 +26,21 @@ const RAW = "SQ *BLUE BOTTLE COF 0412";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
+
 async function post(
 	path: string,
 	fields: Record<string, string | string[]>,
 	htmx = false,
 ) {
 	const form = new URLSearchParams();
+
 	for (const [key, value] of Object.entries(fields))
 		for (const item of Array.isArray(value) ? value : [value])
 			form.append(key, item);
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
@@ -47,6 +51,7 @@ async function post(
 		},
 		body: form.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -62,14 +67,17 @@ async function charge(
 		)
 		.bind(`plaid-${crypto.randomUUID()}`, date, rawName, merchantName)
 		.first<{ id: number }>();
+
 	return row?.id as number;
 }
+
 const suggest = (
 	key: string,
 	names: string[],
 	status: "pending" | "accepted" | "rejected" = "pending",
 	display: string | null = null,
 ) => seedMerchant(db, { key, status, names, displayName: display });
+
 const merchant = async (key: string) => {
 	const found = await db
 		.prepare(
@@ -77,11 +85,15 @@ const merchant = async (key: string) => {
 		)
 		.bind(key)
 		.first<{ display_name: string | null; suggestion_status: string }>();
+
 	return found && { ...found, names: await merchantNames(db, key) };
 };
+
 const filters = parseFilters(new URLSearchParams("month=all"), "2026-09");
+
 const rowOf = async (id: number) =>
 	(await listTransactions(db, filters)).rows.find((r) => r.id === id);
+
 /** The ids of the rows a search finds. */
 const found = async (q: string) =>
 	(
@@ -90,6 +102,7 @@ const found = async (q: string) =>
 			parseFilters(new URLSearchParams({ month: "all", q }), "2026-09"),
 		)
 	).rows.map((r) => r.id);
+
 /** A split part of a purchase from `rawName`, as the split form saves it. */
 async function splitPart(rawName = RAW): Promise<number> {
 	const parent = await db
@@ -99,6 +112,7 @@ async function splitPart(rawName = RAW): Promise<number> {
 		)
 		.bind(`plaid-${crypto.randomUUID()}`, rawName)
 		.first<{ id: number }>();
+
 	const part = await db
 		.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id)
@@ -106,6 +120,7 @@ async function splitPart(rawName = RAW): Promise<number> {
 		)
 		.bind(rawName, parent?.id)
 		.first<{ id: number }>();
+
 	return part?.id as number;
 }
 
@@ -139,8 +154,10 @@ describe("the Transactions list", () => {
 		expect(guessed).toContain('href="/how-it-works#names"');
 		expect(guessed).toMatch(/Dashed names are suggestions\.[\s\S]{0,300}Why\?/);
 		expect(guessed.match(/Dashed names are suggestions\./g)).toHaveLength(1);
+
 		const results =
 			guessed.match(/<section id="results"[\s\S]*?<\/section>/)?.[0] ?? "";
+
 		expect(results.indexOf("Dashed names are suggestions.")).toBeLessThan(
 			results.indexOf("<ul"),
 		);
@@ -183,6 +200,7 @@ describe("the Transactions list", () => {
 		const taken = await charge("TAKEN 123");
 		await suggest("TURNED DOWN 123", ["Turned Down"], "rejected");
 		await suggest("TAKEN 123", ["Taken"], "accepted");
+
 		for (const id of [plain, turnedDown, taken])
 			expect(await rowOf(id)).toMatchObject({ nameSuggested: false });
 		expect((await rowOf(turnedDown))?.displayName).toBe("Turned down");
@@ -252,13 +270,17 @@ describe("the Transactions list", () => {
 		expect(html).toMatch(
 			/<span class="sr-only">From your bank: <\/span><span class="[^"]*decoration-dashed[^"]*">Lupita&#39;s Taqueria<\/span>/,
 		);
+
 		const nameRow =
 			html.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
 			"";
+
 		expect(nameRow).not.toContain("Tally&#39;s guess");
+
 		// No sparkles: the only svg before the name is the row's own category-less circle.
 		const row =
 			html.split("Lupita&#39;s Taqueria")[0]?.split("<li")?.pop() ?? "";
+
 		expect(row).not.toContain("M11.017 2.814");
 	});
 
@@ -389,10 +411,12 @@ describe("searching the Transactions list", () => {
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
 			.bind(named)
 			.run();
+
 		const search = parseFilters(
 			new URLSearchParams({ month: "all", q: "Blue Bottle Coffee" }),
 			"2026-09",
 		);
+
 		const listed = await listTransactions(db, search);
 		expect(listed.total).toBe(1);
 		expect(listed.rows.map((r) => r.id)).toEqual([plain]);
@@ -446,9 +470,11 @@ describe("the edit panel's name choices", () => {
 		]);
 		const { res, html } = await get(`/transactions/${id}?month=all`);
 		expect(res.status).toBe(200);
+
 		const radios = [...html.matchAll(/<input[^>]*name="name_pick"[^>]*>/g)].map(
 			(m) => m[0],
 		);
+
 		expect(radios.map((r) => r.match(/value="([^"]*)"/)?.[1])).toEqual([
 			"s:Blue Bottle Coffee",
 			"s:Blue Bottle",
@@ -456,6 +482,7 @@ describe("the edit panel's name choices", () => {
 			"store",
 			"own",
 		]);
+
 		// Saving the panel for another reason must never rename the merchant.
 		for (const radio of radios) expect(radio).not.toMatch(/\schecked/);
 		expect(html).toContain("The bank says SQ *BLUE BOTTLE COF 0412");
@@ -520,9 +547,11 @@ describe("the edit panel's name choices", () => {
 			/<p id="name-source-0" class="text-sm text-muted">From your bank<\/p>/,
 		);
 		expect(html).toContain('value="s:Lupita&#39;s Taqueria"');
+
 		const nameRow =
 			html.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
 			"";
+
 		expect(nameRow).not.toContain("Tally&#39;s guess");
 		expect(html.match(/href="\/how-it-works#names"/g)).toHaveLength(1);
 		expect(html).not.toContain("M11.017 2.814");
@@ -537,17 +566,21 @@ describe("the edit panel's name choices", () => {
 		await saveAiSwitches(db, { names: false });
 		const off = (await get(`/transactions/${guessed}`)).html;
 		expect(off).not.toContain('value="s:Blue Bottle Coffee"');
+
 		const nameRow =
 			off.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
 			"";
+
 		expect(nameRow).not.toContain("Tally&#39;s guess");
 		expect(off).toMatch(/<legend[^>]*>Name<\/legend>/);
 		const bank = (await get(`/transactions/${banked}`)).html;
 		expect(bank).toContain('value="s:Lupita&#39;s Taqueria"');
 		expect(bank).toContain("From your bank");
+
 		const bankNameRow =
 			bank.split('data-detail-row="detail-name"')[1]?.split("</details>")[0] ??
 			"";
+
 		expect(bankNameRow).not.toContain("Tally&#39;s guess");
 	});
 
@@ -571,6 +604,7 @@ describe("the edit panel's name choices", () => {
 				names: ["Blue Bottle Coffee", "Blue Bottle"],
 				suggestion_status: "accepted",
 			});
+
 			for (const t of [id, other])
 				expect(await rowOf(t)).toMatchObject({
 					displayName: "Blue Bottle",
@@ -585,6 +619,7 @@ describe("the edit panel's name choices", () => {
 						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 					)
 					.first<{ id: number }>();
+
 			const categoryOf = async (id: number) =>
 				(
 					await db
@@ -597,12 +632,14 @@ describe("the edit panel's name choices", () => {
 				/** Posts the edit form as htmx does and reads the redrawn panel's name fields. */
 				const redraw = async (id: number, fields: Record<string, string>) => {
 					const { res, html } = await save(id, fields, true);
+
 					return {
 						status: res.status,
 						was: html.match(/name="merchant_was" value="([^"]*)"/)?.[1],
 						typed: html.match(/name="merchant"[^>]*value="([^"]*)"/)?.[1],
 					};
 				};
+
 				const BAD_CATEGORY = "999999";
 
 				it("carries the posted merchant_was through, not the name another tab chose, so fixing the form doesn't erase it", async () => {
@@ -613,12 +650,14 @@ describe("the edit panel's name choices", () => {
 					expect(await merchant(RAW)).toMatchObject({
 						display_name: "Blue Bottle",
 					});
+
 					// The stale panel posts with a mistake.
 					const failed = await redraw(id, {
 						merchant_was: "",
 						merchant: "",
 						category: BAD_CATEGORY,
 					});
+
 					expect(failed.status).toBe(422);
 					expect(failed.was).toBe("");
 					// It posts again, fixed, without touching the name: the other tab's name survives.
@@ -646,18 +685,22 @@ describe("the edit panel's name choices", () => {
 					await db
 						.prepare("UPDATE merchants SET display_name = 'New Name'")
 						.run();
+
 					const first = await redraw(id, {
 						merchant_was: "Old Name",
 						name_pick: "own",
 						merchant: "Old Name",
 						category: BAD_CATEGORY,
 					});
+
 					expect(first.was).toBe("Old Name");
+
 					const second = await redraw(id, {
 						merchant_was: first.was ?? "",
 						merchant: first.typed ?? "",
 						category: BAD_CATEGORY,
 					});
+
 					expect(second.was).toBe("Old Name");
 					await save(id, {
 						merchant_was: second.was ?? "",
@@ -672,12 +715,14 @@ describe("the edit panel's name choices", () => {
 				it("a name typed before the error is still the person's own once the form is fixed", async () => {
 					const id = await charge();
 					await suggest(RAW, ["Blue Bottle Coffee"]);
+
 					const failed = await redraw(id, {
 						merchant_was: "",
 						name_pick: "own",
 						merchant: "My Bottle",
 						category: BAD_CATEGORY,
 					});
+
 					expect(failed.status).toBe(422);
 					// What was typed comes back in the field, and the original merchant_was beside it.
 					expect(failed.typed).toBe("My Bottle");
@@ -704,11 +749,13 @@ describe("the edit panel's name choices", () => {
 						)
 						.bind(RAW)
 						.run();
+
 					const failed = await redraw(id, {
 						merchant_was: "Old Name",
 						name_pick: "store",
 						category: BAD_CATEGORY,
 					});
+
 					expect(failed.was).toBe("Old Name");
 					await save(id, {
 						merchant_was: failed.was ?? "",
@@ -726,11 +773,13 @@ describe("the edit panel's name choices", () => {
 						)
 						.bind(RAW)
 						.run();
+
 					const failed = await redraw(id, {
 						name_pick: "own",
 						merchant: "Current",
 						category: BAD_CATEGORY,
 					});
+
 					expect(failed.was).toBe("Current");
 				});
 			});
@@ -764,11 +813,13 @@ describe("the edit panel's name choices", () => {
 				});
 				// Tab A's panel, drawn before that: nothing chosen, the field empty, and a category picked.
 				const picked = (await category())?.id;
+
 				const { res } = await save(id, {
 					merchant_was: "",
 					merchant: "",
 					category: String(picked),
 				});
+
 				expect(res.status).toBe(303);
 				expect(await merchant(RAW)).toMatchObject({
 					display_name: "Blue Bottle",
@@ -842,11 +893,13 @@ describe("the edit panel's name choices", () => {
 					category: String(picked),
 					always: "1",
 				});
+
 				const rule = await db
 					.prepare(
 						"SELECT default_category_id AS c FROM merchants WHERE raw_name = 'NO ROW YET 9'",
 					)
 					.first<{ c: number }>();
+
 				expect(rule?.c).toBe(picked);
 			});
 		});
@@ -862,11 +915,13 @@ describe("the edit panel's name choices", () => {
 				const id = await charge();
 				await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 				await saveAiSwitches(db, { names: false });
+
 				for (const pick of ["s:Blue Bottle Coffee", "store"]) {
 					const { res } = await save(id, { name_pick: pick });
 					expect(res.status).toBe(303);
 					expect(await merchant(RAW)).toEqual(stillPending);
 				}
+
 				// Switched back on, the guesses are still waiting for a choice.
 				await saveAiSwitches(db, { names: true });
 				expect(await rowOf(id)).toMatchObject({
@@ -879,18 +934,22 @@ describe("the edit panel's name choices", () => {
 				const id = await charge();
 				await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
 				await saveAiSwitches(db, { names: false });
+
 				const category = await db
 					.prepare("SELECT id FROM categories WHERE archived = 0 LIMIT 1")
 					.first<{ id: number }>();
+
 				await save(id, {
 					name_pick: "s:Blue Bottle",
 					category: String(category?.id),
 				});
 				expect(await merchant(RAW)).toEqual(stillPending);
+
 				const saved = await db
 					.prepare("SELECT category_id FROM transactions WHERE id = ?")
 					.bind(id)
 					.first<{ category_id: number }>();
+
 				expect(saved?.category_id).toBe(category?.id);
 			});
 
@@ -993,11 +1052,13 @@ describe("the edit panel's name choices", () => {
 		it("says what was saved, naming the chosen name", async () => {
 			const id = await charge();
 			await suggest(RAW, ["Blue Bottle Coffee"]);
+
 			const { res } = await save(
 				id,
 				{ name_pick: "s:Blue Bottle Coffee" },
 				true,
 			);
+
 			expect(res.status).toBe(200);
 			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 			expect(trigger.toast.message).toBe("Saved Blue Bottle Coffee");
@@ -1006,10 +1067,12 @@ describe("the edit panel's name choices", () => {
 		it("a name that is too long comes back with the choices and the error, nothing saved", async () => {
 			const id = await charge();
 			await suggest(RAW, ["Blue Bottle Coffee"]);
+
 			const { res, html } = await save(id, {
 				name_pick: "own",
 				merchant: "x".repeat(81),
 			});
+
 			expect(res.status).toBe(422);
 			expect(html).toContain("Keep the name under 80 characters.");
 			expect(html).toContain('name="name_pick"');
@@ -1033,17 +1096,20 @@ describe("Organize", () => {
 		await charge("LUPITAS 55");
 		await suggest(RAW, ["Blue Bottle Coffee"]);
 		await suggest("LUPITAS 55", ["Lupitas Taqueria"]);
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		const organize = (group: string, name: string) =>
 			post("/transactions/organize", {
 				group,
 				category: String(category?.id),
 				name,
 			});
+
 		await organize("Blue bottle cof", "Blue Bottle Coffee");
 		await organize("Lupitas 55", "Lupita's");
 		expect(await merchant(RAW)).toMatchObject({
@@ -1059,11 +1125,13 @@ describe("Organize", () => {
 	it("leaves a pending suggestion waiting when no name is given", async () => {
 		await charge();
 		await suggest(RAW, ["Blue Bottle Coffee"]);
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		// The form's name field holds the group's own name unless changed, which saves no new name.
 		await post("/transactions/organize", {
 			group: "Blue bottle cof",
@@ -1081,10 +1149,13 @@ describe("saveEdit and parseEdit", () => {
 	it("reads a chip, the bank's name, and a typed name from the form, the typed one first", () => {
 		const parse = (fields: Record<string, string>) => {
 			const form = new FormData();
+
 			for (const [k, v] of Object.entries(fields)) form.set(k, v);
 			const parsed = parseEdit(form, []);
+
 			return parsed.ok ? parsed.value : null;
 		};
+
 		expect(parse({ name_pick: "s:Blue Bottle" })).toMatchObject({
 			displayName: "Blue Bottle",
 			keepBankName: false,

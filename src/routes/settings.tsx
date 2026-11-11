@@ -101,6 +101,7 @@ import {
 } from "./suggestions";
 
 type App = { Bindings: Env };
+
 export const settings = new Hono<App>();
 
 const ruleFocus = (
@@ -110,6 +111,7 @@ const ruleFocus = (
 	const index = renderedRules.findIndex(
 		(rule) => rule.merchantKey === removedKey,
 	);
+
 	return {
 		focusRuleIndex:
 			renderedRules.length > 1
@@ -211,6 +213,7 @@ type View = {
 
 /** A save's answer: the page it lives on (htmx gets that page; a plain browser goes to it), with the view it draws. */
 type Done = View & { page: Page };
+
 /**
  * The AI suggestions switches that have a feature behind them (spec §8.6, decision 73): the field
  * each posts, its words and its muted line, in the order the group shows them, and how each is read
@@ -268,12 +271,16 @@ const AI_FEATURES: {
 /** What the greyed sorting switch says it needs, in the words of the rows above it. */
 const SORT_NEEDS =
 	"Needs Fill in details, Categories and exclusions, or Income on.";
+
 /** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
 const SORT_GREYED = "sortOnArrivalGreyed";
+
 /** Which switches the page drew On, so a save can tell which one the person flipped. */
 const DRAWN_ON = "drawnOn";
+
 /** The switch a flip posted, sent with that switch's own request (its hx-vals): the one that takes focus after the save. */
 const FLIPPED = "flipped";
+
 /** The DRAWN_ON value for these switches: the keys that are On, separated by spaces. */
 const drawnOnOf = (switches: AiSwitches) =>
 	AI_FEATURES.filter((f) => switches[f.key])
@@ -296,6 +303,7 @@ function AiSwitchForm({
 	// Sorting is greyed out while Jev isn't asked at all (categories, income and details all off).
 	const nothingToSort =
 		!switches.categories && !switches.income && !switches.details;
+
 	return (
 		<form method="post" action="/settings/ai" data-switches-revert>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
@@ -345,6 +353,7 @@ function AiPage({
 	focus?: keyof AiSwitches;
 }) {
 	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
+
 	return (
 		<section
 			id="ai-suggestions"
@@ -395,13 +404,16 @@ async function renderContents(c: Context<App>) {
 	const aiSwitches = await readAiSwitches(db);
 	const tally = await readAiTally(db, today);
 	const bankEmailsOn = await readBankSignInEmails(db);
+
 	const people = await db
 		.prepare("SELECT COUNT(*) AS n FROM household_people WHERE id > 1")
 		.first<{ n: number }>();
+
 	const waiting = (await suggestionQueue(db, aiSwitches)).length;
 	const rules = await merchantRules(db, aiSwitches.names, "");
 	const learned = await loadLearnedLines(db);
 	const budgeted = active.filter((cat) => cat.budgetCents !== null);
+
 	const places = settingsPlaces({
 		categories: {
 			count: active.length,
@@ -419,6 +431,7 @@ async function renderContents(c: Context<App>) {
 		sorted: tally.sorted,
 		month: tally.month,
 	});
+
 	return settingsPage(
 		c,
 		"Settings",
@@ -452,6 +465,7 @@ function CategorySuggestion({
 	notes?: Record<number, string>;
 }) {
 	const address = `/settings/suggestions/${suggestion.id}`;
+
 	return (
 		<div class="mt-3">
 			<NewCategoryCard
@@ -503,15 +517,19 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 	const timeZone = view.timeZone ?? (await householdTimeZone(db));
 	const today = view.today ?? todayIn(timeZone);
 	const { active, archived } = await settingsCategories(db, today.slice(0, 7));
+
 	const { suggestions: categorySuggestions, more: moreSuggestions } =
 		await pendingSuggestionPage(db);
+
 	const adding = view.open === "new";
+
 	const cards = categorySuggestions.map((suggestion, place) => {
 		// A suggestion whose name a category already has is added to it, or restores it when archived, not made again
 		// (decisions 101, 110): Add to the active category with the suggested name, or Restore the archived one.
 		const named = [...active, ...archived].find((cat) =>
 			sameName(cat.name, tidyName(suggestion.name)),
 		);
+
 		return (
 			<CategorySuggestion
 				place={place}
@@ -537,6 +555,7 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 			/>
 		);
 	});
+
 	// The question after a No (decision 101), in the card's place: its Yes and Not now post to the same address. The
 	// No sends its card's place, so the question is drawn where the card was; splice puts it last past the end.
 	if (view.ask)
@@ -555,6 +574,7 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 				/>
 			</div>,
 		);
+
 	return settingsPage(
 		c,
 		"Categories · Settings",
@@ -661,12 +681,15 @@ async function renderRules(c: Context<App>, view: View = {}) {
 	const db = c.env.DB;
 	const today = view.today ?? todayIn(await householdTimeZone(db));
 	const aiSwitches = await readAiSwitches(db);
+
 	const rulesSearch =
 		view.rulesSearch ??
 		new URL(c.req.url).searchParams.get("rules_search") ??
 		"";
+
 	const ruleData = await merchantRules(db, aiSwitches.names, rulesSearch);
 	const neverRules = await neverSuggestRules(db);
+
 	return settingsPage(
 		c,
 		"Tally's rules · Settings",
@@ -697,6 +720,7 @@ async function renderRules(c: Context<App>, view: View = {}) {
 async function renderLearned(c: Context<App>, view: View = {}) {
 	const lines = await loadLearnedLines(c.env.DB);
 	const categories = await learnedCategoryChoices(c.env.DB);
+
 	return settingsPage(
 		c,
 		"What Tally has learned · Settings",
@@ -716,6 +740,7 @@ async function renderHousehold(c: Context<App>, view: View = {}) {
 	const timeZone = view.timeZone ?? (await householdTimeZone(db));
 	const bankEmailsOn = await readBankSignInEmails(db);
 	const members = await reconnectRecipients(db);
+
 	return settingsPage(
 		c,
 		"Household · Settings",
@@ -751,6 +776,7 @@ async function renderPeople(c: Context<App>, view: View = {}) {
 	const people = await c.env.DB.prepare(
 		"SELECT id, name FROM household_people ORDER BY id",
 	).all<{ id: number; name: string }>();
+
 	return settingsPage(
 		c,
 		"People · Settings",
@@ -784,6 +810,7 @@ async function renderAi(c: Context<App>, view: View = {}) {
 	const today = view.today ?? todayIn(await householdTimeZone(db));
 	const switches = await readAiSwitches(db);
 	const tally = await readAiTally(db, today);
+
 	return settingsPage(
 		c,
 		"AI suggestions · Settings",
@@ -848,34 +875,43 @@ export function categoriesAgain(c: Context<App>) {
 function rulesAddress(search: string): string {
 	return `/settings/rules${search ? `?rules_search=${encodeURIComponent(search)}` : ""}`;
 }
+
 settings.post("/settings/merchant-rules/remove", async (c) => {
 	const form = await c.req.formData();
 	const merchantKey = String(form.get("merchant") ?? "");
 	const search = String(form.get("rules_search") ?? "");
+
 	if (!merchantKey) {
 		const message = "Choose a merchant to remove.";
+
 		if (c.req.header("HX-Request"))
 			c.header("HX-Trigger", hxTrigger({ announce: message }));
+
 		return renderPage(c, "rules", {
 			rulesSearch: search,
 			merchantRuleError: message,
 			status: 400,
 		});
 	}
+
 	const switches = await readAiSwitches(c.env.DB);
 	const before = await merchantRules(c.env.DB, switches.names, search, true);
 	const focusRules = before;
 	const removed = await removeMerchantRule(c.env.DB, merchantKey);
 	const view = { rulesSearch: search };
+
 	if (!removed) {
 		if (c.req.header("HX-Request"))
 			c.header(
 				"HX-Trigger",
 				hxTrigger({ announce: "Merchant rules list updated." }),
 			);
+
 		return renderPage(c, "rules", view);
 	}
+
 	const message = `Removed the Always rule for ${removed}`;
+
 	if (c.req.header("HX-Request")) {
 		c.header(
 			"HX-Trigger",
@@ -884,11 +920,13 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 				announce: `Removed ${removed}. ${Math.max(0, before.total - 1)} merchant${before.total === 2 ? "" : "s"} left.`,
 			}),
 		);
+
 		return renderPage(c, "rules", {
 			...view,
 			...ruleFocus(focusRules.rules, merchantKey),
 		});
 	}
+
 	return c.redirect(rulesAddress(search), 303);
 });
 
@@ -902,10 +940,12 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 	const kind = String(form.get("kind") ?? "");
 	const search = String(form.get("rules_search") ?? "");
 	const lines = await neverSuggestRules(c.env.DB);
+
 	const removed =
 		Number.isInteger(id) && id > 0
 			? await removeNeverSuggest(c.env.DB, { id, merchantKey, kind })
 			: null;
+
 	if (!removed) {
 		// A line that is already gone: a plain form goes back to the rules, as a Remove that worked does.
 		if (!c.req.header("HX-Request"))
@@ -914,12 +954,15 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 			"HX-Trigger",
 			hxTrigger({ announce: "Tally's rules list updated." }),
 		);
+
 		return renderPage(c, "rules", {
 			rulesSearch: search,
 			focusNever: lines.length === 0 ? { heading: true } : { index: 0 },
 		});
 	}
+
 	const message = "Removed. Tally can suggest that again.";
+
 	if (c.req.header("HX-Request")) {
 		c.header(
 			"HX-Trigger",
@@ -931,9 +974,11 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 		const after = await neverSuggestRules(c.env.DB);
 		const keep = new Set(after.map((line) => line.id));
 		const index = lines.findIndex((line) => line.id === removed.rule.id);
+
 		const above = lines
 			.slice(0, Math.max(index, 0))
 			.filter((line) => keep.has(line.id)).length;
+
 		return renderPage(c, "rules", {
 			rulesSearch: search,
 			focusNever:
@@ -942,6 +987,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 					: { index: Math.min(above, after.length - 1) },
 		});
 	}
+
 	return c.redirect(rulesAddress(search), 303);
 });
 
@@ -950,21 +996,28 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 settings.post("/settings/learned/forget", async (c) => {
 	const form = await c.req.formData();
 	const text = String(form.get("text") ?? "");
+
 	if (text === "") {
 		const message = "Choose a line to forget.";
+
 		if (c.req.header("HX-Request"))
 			c.header("HX-Trigger", hxTrigger({ announce: message }));
+
 		return renderPage(c, "learned", { learnedError: message, status: 400 });
 	}
+
 	const line = (await loadLearnedLines(c.env.DB)).find(
 		(learned) => learned.cleanedText === text,
 	);
+
 	const name = line ? `${line.name} → ${line.categoryName}` : displayName(text);
 	const message = `Forgot ${name}. Tally goes back to guessing.`;
 	const id = line ? await forgetText(c.env.DB, text) : 0;
+
 	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
 	// The Undo's time is what the server has left from the Forget's stored time, so the button never outlives the window.
 	const left = id > 0 ? await undoRemainingMs(c.env.DB, id) : 0;
+
 	const toast =
 		left >= FORGET_UNDO_MIN_MS
 			? {
@@ -975,7 +1028,9 @@ settings.post("/settings/learned/forget", async (c) => {
 					undoAction: "/settings/learned/undo",
 				}
 			: { message, type: "success" };
+
 	c.header("HX-Trigger", hxTrigger({ toast, announce: message }));
+
 	return renderPage(c, "learned");
 });
 
@@ -984,9 +1039,12 @@ settings.post("/settings/learned/undo", async (c) => {
 	const form = await c.req.formData();
 	const token = String(form.get("token") ?? "");
 	const id = Number(token);
+
 	const outcome =
 		Number.isInteger(id) && id > 0 ? await undoForget(c.env.DB, id) : "gone";
+
 	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
+
 	const toast =
 		outcome === "undone"
 			? {
@@ -1001,7 +1059,9 @@ settings.post("/settings/learned/undo", async (c) => {
 						undoDone: token,
 					}
 				: { message: "Nothing to undo.", type: "error", undoDone: token };
+
 	c.header("HX-Trigger", hxTrigger({ toast, announce: toast.message }));
+
 	return renderPage(c, "learned");
 });
 
@@ -1014,21 +1074,27 @@ settings.post("/settings/learned/change", async (c) => {
 	const text = String(form.get("text") ?? "");
 	const categoryId = Number(form.get("category") ?? "");
 	const htmx = Boolean(c.req.header("HX-Request"));
+
 	const line =
 		text === ""
 			? undefined
 			: (await loadLearnedLines(c.env.DB)).find(
 					(learned) => learned.cleanedText === text,
 				);
+
 	const refuse = (message: string) => {
 		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+
 		return renderPage(c, "learned", { learnedError: message, status: 400 });
 	};
+
 	if (!line) return refuse("Choose a line to change.");
+
 	if (line.vague)
 		return refuse(
 			`${line.name} covers more than one kind of purchase, so a rule can't be made for it.`,
 		);
+
 	const category =
 		Number.isInteger(categoryId) && categoryId > 0
 			? await c.env.DB.prepare(
@@ -1037,59 +1103,76 @@ settings.post("/settings/learned/change", async (c) => {
 					.bind(categoryId)
 					.first<{ id: number; name: string }>()
 			: null;
+
 	if (!category) {
 		const message = "Choose a category.";
+
 		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+
 		return renderPage(c, "learned", {
 			learnedChange: { cleanedText: text, error: message },
 			status: 400,
 		});
 	}
+
 	// The rule and its immediate apply are one batch (review of #838): a failure leaves no rule, and says so.
 	let written: boolean;
+
 	try {
 		written = await changeBankTextRule(c.env.DB, text, category.id);
 	} catch {
 		const message =
 			"Tally couldn't save that rule, so nothing changed. Try again.";
+
 		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+
 		return renderPage(c, "learned", { learnedError: message, status: 503 });
 	}
+
 	// The category was archived after it was checked: no rule was written, so the change is refused (round 2 of #838).
 	if (!written) {
 		const message = "That category was just archived, so nothing changed.";
+
 		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+
 		return renderPage(c, "learned", { learnedError: message, status: 409 });
 	}
+
 	if (!htmx) return c.redirect("/settings/learned", 303);
 	const message = `${line.name} now goes to ${category.name} every time.`;
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
+
 	return renderPage(c, "learned");
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	const id = Number(c.req.param("id"));
 	const form = await c.req.formData();
+
 	const ids = form
 		.getAll("ids")
 		.map(Number)
 		.filter((n) => Number.isInteger(n) && n > 0);
+
 	const shown = form
 		.getAll("shown")
 		.map(Number)
 		.filter((n) => Number.isInteger(n) && n > 0);
+
 	const notes = Object.fromEntries(
 		shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
 	);
+
 	const result = await createFromSuggestion(
 		c.env.DB,
 		id,
 		{ ticked: ids, shown, notes },
 		actor(c as Context<App> & { env: Env & { DEMO: string } }),
 	);
+
 	if (!result.ok) {
 		const current = await renderPage(
 			c,
@@ -1105,8 +1188,10 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 						status: 422,
 					},
 		);
+
 		return current;
 	}
+
 	await askAgainLeftOut(
 		c.env as Env & { JEV_API_KEY?: string },
 		result.leftOut,
@@ -1115,6 +1200,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	// Only a new category starts the re-check (decision 157): an Add to or a Restore changes nothing the run would sort.
 	const created = !result.attached && !result.restored;
 	const [filedId] = result.filed;
+
 	const rechecking =
 		created && filedId !== undefined
 			? await startResortFor(
@@ -1126,15 +1212,19 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 					},
 				)
 			: null;
+
 	const count = result.moved;
 	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
+
 	const message = result.restored
 		? `Restored ${result.name} with ${transactions}`
 		: result.attached
 			? `Added ${transactions} to ${result.name}`
 			: `Created ${result.name} with ${transactions}`;
+
 	const left = leftOutSentence(result.leftOut.length);
 	const started = rechecking ? ` ${STARTED_ANNOUNCEMENT}` : "";
+
 	return done(c, message, `${message}.${left ? ` ${left}` : ""}${started}`, {
 		page: "categories",
 	});
@@ -1146,6 +1236,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
  */
 async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 	const answer = form.get("answer")?.toString() ?? "";
+
 	// Each store once, however often the form repeats it (#440).
 	const stores = [
 		...new Set(
@@ -1157,30 +1248,37 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 				),
 		),
 	];
+
 	const stale = () =>
 		renderPage(c, "categories", {
 			listError: CHANGED_SUGGESTION,
 			status: 404,
 		});
+
 	if (
 		form.get("id")?.toString() !== `new-${id}` ||
 		form.get("kind")?.toString() !== "new_category" ||
 		stores.length === 0
 	)
 		return stale();
+
 	if (answer === "ask_not_now")
 		return done(c, "Kept it as it is.", "Kept it as it is.", {
 			page: "categories",
 		});
+
 	if (answer !== "ask_yes") return stale();
+
 	const labels = await writeNeverSuggest(c.env.DB, {
 		kind: "new_category",
 		id,
 		stores,
 		today: await householdToday(c.env.DB),
 	});
+
 	if (labels === null) return stale();
 	const message = neverSuggestedMessage("new_category", labels);
+
 	return done(c, message, message, { page: "categories" });
 }
 
@@ -1188,10 +1286,12 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const db = c.env.DB;
 	const id = Number(c.req.param("id"));
 	const form = await c.req.formData();
+
 	// The question's own answer, posted from the question drawn in the card's place (decision 101).
 	if (form.get("answer")) return answerQuestion(c, id, form);
 	// The No retires the suggestion, and the question asks in the card's place (decisions 101, 120).
 	const result = await dismissSuggestion(db, id);
+
 	if (!result)
 		return renderPage(c, "categories", {
 			listError: CHANGED_SUGGESTION,
@@ -1202,16 +1302,19 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	// The No sends its card's place, so the question is drawn where the card was. A missing or non-numeric place
 	// (Number(null) is 0, so the raw text is checked first) leaves the question after every card.
 	const posted = form.get("place");
+
 	const place =
 		typeof posted === "string" && /^\d+$/.test(posted)
 			? Number(posted)
 			: undefined;
+
 	if (stores.length > 0)
 		return renderPage(c, "categories", {
 			ask: { suggestionId: id, id: `new-${id}`, name, stores, place },
 		});
 	// Nothing is left to ask about, so the toast says only what the No did: the name is never suggested again.
 	const message = `Tally won't suggest ${name} again.`;
+
 	return done(c, message, message, { page: "categories" });
 });
 
@@ -1223,6 +1326,7 @@ function done(c: Context<App>, toast: string, announce: string, view: Done) {
 		"HX-Trigger",
 		hxTrigger({ toast: { message: toast, type: "success" }, announce }),
 	);
+
 	return renderPage(c, view.page, view);
 }
 
@@ -1257,8 +1361,10 @@ const gone = (c: Context<App>) =>
 	});
 
 const idOf = (c: Context<App>) => Number(c.req.param("id"));
+
 async function find(c: Context<App>) {
 	const all = await categoryNames(c.env.DB);
+
 	return { all, category: all.find((x) => x.id === idOf(c)) };
 }
 
@@ -1268,26 +1374,35 @@ async function find(c: Context<App>) {
 // ?peopleFocus=1 focuses the page's title after Cancel.
 const numberParam = (c: Context<App>, key: string) => {
 	const n = Number(c.req.query(key));
+
 	return Number.isInteger(n) && n > 0 ? n : undefined;
 };
+
 settings.get("/settings", (c) => renderContents(c));
+
 settings.get("/settings/categories", (c) =>
 	renderCategories(c, {
 		open: numberParam(c, "open"),
 		focus: numberParam(c, "focus"),
 	}),
 );
+
 settings.get("/settings/rules", (c) => renderRules(c));
+
 settings.get("/settings/learned", (c) => renderLearned(c));
+
 settings.get("/settings/household", (c) =>
 	renderHousehold(c, {
 		focus: c.req.query("focus") === "zone" ? "zone" : undefined,
 	}),
 );
+
 settings.get("/settings/people", (c) =>
 	renderPeople(c, { peopleFocus: c.req.query("peopleFocus") === "1" }),
 );
+
 settings.get("/settings/ai", (c) => renderAi(c));
+
 settings.get("/settings/data", (c) => renderData(c));
 
 settings.get("/settings/export/transactions.csv", async (c) => {
@@ -1297,6 +1412,7 @@ settings.get("/settings/export/transactions.csv", async (c) => {
 		"Content-Disposition",
 		`attachment; filename="tally-transactions-${await householdToday(c.env.DB)}.csv"`,
 	);
+
 	return c.body(await transactionsCsv(c.env.DB));
 });
 
@@ -1306,6 +1422,7 @@ settings.get("/settings/export/tally.json", async (c) => {
 		"Content-Disposition",
 		`attachment; filename="tally-${await householdToday(c.env.DB)}.json"`,
 	);
+
 	return c.json(await tallyExport(c.env.DB));
 });
 
@@ -1318,9 +1435,11 @@ settings.get("/settings/export/tally.json", async (c) => {
 // another tab may have changed the switches since the page was drawn.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
+
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
+
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
 	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
 	const before = await readAiSwitches(c.env.DB);
@@ -1328,6 +1447,7 @@ settings.post("/settings/ai", async (c) => {
 	// with what was saved before this save.
 	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
 	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
+
 	// A flip that replaced an earlier one in the browser can still reach the server after that one was aborted, so
 	// the switch just flipped is always written, even when its value matches what the page drew.
 	const changed = Object.fromEntries(
@@ -1337,9 +1457,11 @@ settings.post("/settings/ai", async (c) => {
 				(next[f.key] !== drawn.includes(f.key) || f.key === posted),
 		).map((f) => [f.key, next[f.key]]),
 	) as Partial<AiSwitches>;
+
 	// Decision 150: the rows the switch left wait for the daily run, so setup keeps the run's words once it's back on. The
 	// wait mark goes in the save's own batch, and its guards decide whether it writes.
 	const switchesAfter = { ...before, ...changed };
+
 	const waiting =
 		!before.sortOnArrival && changed.sortOnArrival === true
 			? waitingForJevSql({
@@ -1347,12 +1469,14 @@ settings.post("/settings/ai", async (c) => {
 					income: switchesAfter.income,
 				})
 			: null;
+
 	await saveAiSwitches(
 		c.env.DB,
 		changed,
 		waiting === null ? [] : [waitsForRunStatement(c.env.DB, waiting)],
 	);
 	const now = await readAiSwitches(c.env.DB);
+
 	// The switch that was flipped keeps focus after the save (#606). A flip posts its own key (FLIPPED, from its own
 	// request). A plain Save, with no script, posts none, so it's the one that differs from what the page drew On
 	// (DRAWN_ON): another tab that saved the same value doesn't move it.
@@ -1361,11 +1485,15 @@ settings.post("/settings/ai", async (c) => {
 		AI_FEATURES.find(
 			(f) => f.key in next && next[f.key] !== drawn.includes(f.key),
 		)?.key;
+
 	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
+
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
 	).join(", ");
+
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
+
 	// The Band above Categories changes with the switches, so a change in what it says is announced too.
 	const band =
 		waitingAfter === waitingBefore
@@ -1373,6 +1501,7 @@ settings.post("/settings/ai", async (c) => {
 			: waitingAfter === 0
 				? " Nothing to check."
 				: ` ${waitingAfter} ${waitingAfter === 1 ? "suggestion" : "suggestions"} to check.`;
+
 	return done(
 		c,
 		"Saved AI suggestions",
@@ -1383,11 +1512,13 @@ settings.post("/settings/ai", async (c) => {
 
 settings.post("/settings/bank-sign-in-emails", async (c) => {
 	const form = await c.req.formData();
+
 	// A Remove button posts its address as `remove`; a Remove never changes the switch.
 	if (form.has("remove"))
 		return removeBankSignInEmail(c, String(form.get("remove") ?? ""));
 	const on = form.get("enabled") === "on";
 	await saveBankSignInEmails(c.env.DB, on);
+
 	return done(
 		c,
 		"Saved bank sign-in emails",
@@ -1402,21 +1533,27 @@ settings.post("/settings/bank-sign-in-emails", async (c) => {
 
 async function removeBankSignInEmail(c: Context<App>, posted: string) {
 	const email = posted.trim().toLowerCase();
+
 	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
 		return bankSignInEmailError(c, "Choose an address to remove.", 400);
+
 	const member = await c.env.DB.prepare(
 		"SELECT 1 FROM household_members WHERE email = ?",
 	)
 		.bind(email)
 		.first();
+
 	if (!member) return bankSignInEmailError(c, "Address not found.", 404);
 	await removeHouseholdMember(c.env.DB, email);
+
 	// The list is in address order: the address that takes the removed row's place is the next one, else the one before it.
 	const remaining = (await reconnectRecipients(c.env.DB)).results.map(
 		({ email: address }) => address,
 	);
+
 	const before = remaining.filter((address) => address < email).length;
 	const focusEmail = remaining[before] ?? remaining[before - 1];
+
 	return done(
 		c,
 		"Removed address",
@@ -1441,6 +1578,7 @@ function bankSignInEmailError(
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "error" }, announce: message }),
 	);
+
 	// The Remove that was pressed is gone from the swap, so the addresses stay open and focus goes to their summary.
 	return renderPage(c, "household", {
 		bankSignInEmailError: message,
@@ -1453,34 +1591,45 @@ function bankSignInEmailError(
 /** Which control of the bank sign-in emails block takes focus after a swap, from the page's focus. */
 function bankSignInEmailFocus(focus: View["focus"]) {
 	if (focus === "bank-sign-in-email-switch") return "switch";
+
 	if (focus === "bank-sign-in-email-summary") return "summary";
+
 	if (focus === "bank-sign-in-email-remove") return "remove";
+
 	return undefined;
 }
 
 settings.post("/settings/people", async (c) => {
 	const form = await c.req.formData();
+
 	const action = form.has("remove")
 		? "remove"
 		: String(form.get("action") ?? "");
+
 	const nameValue = String(form.get("name") ?? "");
 	const name = nameValue.trim();
 	const id = Number(form.get("person_id"));
+
 	if (action === "remove") {
 		if (!Number.isInteger(id) || id <= 1) return c.text("Not found", 404);
+
 		const person = await c.env.DB.prepare(
 			"SELECT name FROM household_people WHERE id = ?",
 		)
 			.bind(id)
 			.first<{ name: string }>();
+
 		if (!person) return c.notFound();
+
 		const [cleared] = await c.env.DB.batch([
 			c.env.DB.prepare(
 				"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0, updated_by = ?, updated_at = datetime('now') WHERE for_person_id = ?",
 			).bind(actor(c), id),
 			c.env.DB.prepare("DELETE FROM household_people WHERE id = ?").bind(id),
 		]);
+
 		const count = cleared?.meta.changes ?? 0;
+
 		return done(
 			c,
 			`Removed ${person.name}`,
@@ -1488,6 +1637,7 @@ settings.post("/settings/people", async (c) => {
 			{ page: "people", peopleAddOpen: true, peopleFocus: true },
 		);
 	}
+
 	if (!name || name.length > PERSON_NAME_MAX)
 		return renderPage(c, "people", {
 			peopleOpen: action === "rename" ? id : undefined,
@@ -1497,14 +1647,17 @@ settings.post("/settings/people", async (c) => {
 			peopleValue: nameValue,
 			status: 422,
 		});
+
 	if (action === "add") {
 		let added: number;
+
 		try {
 			const result = await c.env.DB.prepare(
 				"INSERT INTO household_people (name) VALUES (?)",
 			)
 				.bind(name)
 				.run();
+
 			added = result.meta.last_row_id;
 		} catch (error) {
 			if (nameTaken(error))
@@ -1516,6 +1669,7 @@ settings.post("/settings/people", async (c) => {
 				});
 			throw error;
 		}
+
 		return done(c, `Added ${name}`, `Added ${name} to your household.`, {
 			page: "people",
 			peopleAddOpen: true,
@@ -1523,6 +1677,7 @@ settings.post("/settings/people", async (c) => {
 			saved: { kind: "person", id: added },
 		});
 	}
+
 	if (action === "rename" && Number.isInteger(id) && id > 1) {
 		try {
 			const result = await c.env.DB.prepare(
@@ -1530,6 +1685,7 @@ settings.post("/settings/people", async (c) => {
 			)
 				.bind(name, id)
 				.run();
+
 			if (!result.meta.changes) return c.notFound();
 		} catch (error) {
 			if (nameTaken(error))
@@ -1542,6 +1698,7 @@ settings.post("/settings/people", async (c) => {
 				});
 			throw error;
 		}
+
 		return done(c, `Renamed to ${name}`, `Renamed this person to ${name}.`, {
 			page: "people",
 			peopleOpen: id,
@@ -1549,6 +1706,7 @@ settings.post("/settings/people", async (c) => {
 			saved: { kind: "person", id },
 		});
 	}
+
 	return c.text("Choose add, rename or remove.", 400);
 });
 
@@ -1556,9 +1714,11 @@ settings.post("/settings/people", async (c) => {
 // (src/dates.ts), and a transaction's own date is never converted (decision 67).
 settings.post("/settings/time-zone", async (c) => {
 	const parsed = parseTimeZone(await c.req.formData());
+
 	if (!parsed.ok)
 		return renderPage(c, "household", { zoneError: parsed.error, status: 422 });
 	await saveTimeZone(c.env.DB, parsed.zone);
+
 	// The month follows the zone, but the Household page draws only the time zone and the bank sign-in emails, so the
 	// answer carries nothing else. Categories draws the new month when it is next opened.
 	return done(
@@ -1577,8 +1737,10 @@ settings.post("/settings/time-zone", async (c) => {
 settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();
 	const parsed = parseCategory(form, await categoryNames(c.env.DB), null);
+
 	if (!parsed.ok) return retry(c, "new", form, parsed.errors);
 	let id: number | null;
+
 	try {
 		id = await addCategory(c.env.DB, parsed.value);
 	} catch (error) {
@@ -1586,8 +1748,10 @@ settings.post("/settings/categories", async (c) => {
 			return retry(c, "new", form, { name: "That name is taken." });
 		throw error;
 	}
+
 	// Another save filled the list between the form's check and this write.
 	if (id === null) return retry(c, "new", form, { name: fullMessage("add") });
+
 	return done(
 		c,
 		`Added ${parsed.value.name}`,
@@ -1598,10 +1762,13 @@ settings.post("/settings/categories", async (c) => {
 
 settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 	const { all, category } = await find(c);
+
 	if (!category || category.archived) return gone(c);
 	const form = await c.req.formData();
 	const parsed = parseCategory(form, all, category.id);
+
 	if (!parsed.ok) return retry(c, category.id, form, parsed.errors);
+
 	try {
 		await saveCategory(c.env.DB, category.id, parsed.value);
 	} catch (error) {
@@ -1609,6 +1776,7 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 			return retry(c, category.id, form, { name: "That name is taken." });
 		throw error;
 	}
+
 	// A rename marks its own row (P119 A, #71); Archive and Move take the row out of its place, so they mark nothing.
 	return done(c, `Saved ${parsed.value.name}`, `Saved ${parsed.value.name}.`, {
 		page: "categories",
@@ -1619,6 +1787,7 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 
 settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
 	const { category } = await find(c);
+
 	if (!category || category.archived) return gone(c);
 	await setArchived(
 		c.env.DB,
@@ -1626,6 +1795,7 @@ settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
 		true,
 		await householdToday(c.env.DB),
 	);
+
 	return done(
 		c,
 		`Archived ${category.name}`,
@@ -1637,10 +1807,13 @@ settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
 
 settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	const { all, category } = await find(c);
+
 	if (!category?.archived) return gone(c);
 	const problem = restoreProblem(all);
+
 	if (problem)
 		return renderPage(c, "categories", { restoreError: problem, status: 422 });
+
 	if (
 		!(await setArchived(
 			c.env.DB,
@@ -1651,12 +1824,15 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	) {
 		// Someone restored it a moment earlier, or the list filled up.
 		const now = (await find(c)).category;
+
 		if (!now?.archived) return gone(c);
+
 		return renderPage(c, "categories", {
 			restoreError: fullMessage("restore"),
 			status: 422,
 		});
 	}
+
 	return done(c, `Restored ${category.name}`, `Restored ${category.name}.`, {
 		page: "categories",
 		focus: category.id,
@@ -1668,6 +1844,7 @@ settings.post(
 	"/settings/categories/:id{[0-9]+}/move/:direction{up|down}",
 	async (c) => {
 		const { category } = await find(c);
+
 		if (!category || category.archived) return gone(c);
 		const direction = c.req.param("direction") === "up" ? "up" : "down";
 		await moveCategory(c.env.DB, category.id, direction);
@@ -1675,6 +1852,7 @@ settings.post(
 		const today = todayIn(timeZone);
 		const { active } = await settingsCategories(c.env.DB, today.slice(0, 7));
 		const position = active.findIndex((x) => x.id === category.id) + 1;
+
 		return done(
 			c,
 			`Moved ${category.name}`,

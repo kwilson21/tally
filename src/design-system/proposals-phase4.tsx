@@ -35,6 +35,7 @@ export const CATS = {
 	gas: { name: "Gas", icon: "gas", color: "cat-slate" },
 	household: { name: "Household", icon: "household", color: "cat-brown" },
 } as const;
+
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 type Trend = {
@@ -93,6 +94,7 @@ function MonthBars({
 	const top = 22;
 	const bottom = 146;
 	const slot = w / 6;
+
 	return (
 		<svg viewBox={`0 0 ${w} ${h}`} class="w-full" aria-hidden="true">
 			{[0, 1, 2, 3].map((i) => (
@@ -110,6 +112,7 @@ function MonthBars({
 				const x = (i + 6 - cents.length) * slot + slot * 0.2;
 				const bw = slot * 0.6;
 				const last = i === cents.length - 1;
+
 				return (
 					<>
 						<rect
@@ -148,12 +151,14 @@ function MonthBars({
 /** Six small bars for one category's row, last one dashed (this month so far). */
 function MiniBars({ cents }: { cents: number[] }) {
 	const max = Math.max(...cents);
+
 	return (
 		<svg viewBox="0 0 96 32" class="h-8 w-24 shrink-0" aria-hidden="true">
 			<line x1="0" x2="96" y1="31.5" y2="31.5" class="stroke-rule" />
 			{cents.map((c, i) => {
 				const barH = Math.max(1, (30 * c) / max);
 				const last = i === cents.length - 1;
+
 				return (
 					<rect
 						x={i * 16 + 3}
@@ -204,8 +209,10 @@ const BUDGET: Record<string, number> = {
 
 /** The five full months (May to September) of a trend: this month isn't over, so it isn't judged. */
 const full = (t: Trend) => t.months.slice(0, 5);
+
 const under = (t: Trend) =>
 	full(t).filter((c) => c <= (BUDGET[t.cat.name] ?? 0));
+
 const overMonths = (t: Trend) =>
 	full(t)
 		.map((c, i) => (c > (BUDGET[t.cat.name] ?? 0) ? MONTHS[i] : null))
@@ -320,6 +327,7 @@ const trendsTally = (
 		<ul class="mt-4 divide-y divide-rule border-y border-rule">
 			{TRENDS.map((t) => {
 				const over = overMonths(t);
+
 				return (
 					<li class="flex h-16 items-center gap-4">
 						<CategoryIcon icon={t.cat.icon} color={t.cat.color} />
@@ -344,11 +352,13 @@ function BudgetBars({ t }: { t: Trend }) {
 	const budget = BUDGET[t.cat.name] ?? 1;
 	const max = Math.max(budget, ...t.months) * 1.05;
 	const y = (c: number) => 31 - (30 * c) / max;
+
 	return (
 		<svg viewBox="0 0 96 32" class="h-8 w-24 shrink-0" aria-hidden="true">
 			{t.months.map((c, i) => {
 				const last = i === t.months.length - 1;
 				const over = !last && c > budget;
+
 				return (
 					<rect
 						x={i * 16 + 3}
@@ -384,6 +394,7 @@ const trendsBudgetLine = (
 		<ul class="divide-y divide-rule border-y border-rule">
 			{TRENDS.map((t) => {
 				const over = overMonths(t);
+
 				return (
 					<li class="flex h-16 items-center gap-4">
 						<CategoryIcon icon={t.cat.icon} color={t.cat.color} />
@@ -411,6 +422,7 @@ const trendsBudgetLine = (
 /** "Up $31" or "Down $28", with its arrow: a change in words, never color alone (and not a status). */
 function Change({ now, then }: { now: number; then: number }) {
 	const up = now > then;
+
 	return (
 		<span class="flex shrink-0 items-center gap-1 text-lg">
 			<Icon name={up ? "arrow-up" : "arrow-down"} class="size-4" />
@@ -568,6 +580,7 @@ const BANKS = [
 		],
 	},
 ];
+
 const NET_CENTS = 624000 + 1850000 - 134000;
 
 /** A line through the weekly net worth, on the ledger rules, with where it started and today. */
@@ -576,9 +589,11 @@ function NetLine() {
 	const min = 19000;
 	const max = 24000;
 	const y = (v: number) => 10 + ((max - v) / (max - min)) * 100;
+
 	const pts = NET.map(
 		(v, i) => `${((w - 8) * i) / (NET.length - 1) + 4},${y(v).toFixed(1)}`,
 	).join(" ");
+
 	return (
 		<svg viewBox={`0 0 ${w} 140`} class="mt-4 w-full" aria-hidden="true">
 			{[10, 43, 76, 110].map((ly) => (
@@ -604,6 +619,7 @@ function NetLine() {
 /** Month-end net worth as bars, today's month dashed. */
 function NetBars() {
 	const ends = [20300, 21200, 21700, 22300, 23100, 23400];
+
 	return (
 		<div class="mt-4">
 			<MonthBars cents={ends.map((d) => d * 100)} />
@@ -723,6 +739,7 @@ const accountPage = (
 // P27–P28: Documents.
 
 type Doc = { name: string; meta: string; note?: string };
+
 const DOCS: Doc[] = [
 	{
 		name: "chase-statement-sep.pdf",
@@ -921,6 +938,7 @@ export function SuggestedRow({
 	tag?: Child;
 }) {
 	const nameClass = `text-lg leading-6 ${maybe || plain ? "" : "underline decoration-muted decoration-dashed underline-offset-4"}`;
+
 	return (
 		<li class="flex min-h-16 items-center gap-4 py-1">
 			{cat ? (
@@ -1033,11 +1051,13 @@ export function NameChoices({
 			{n}
 		</Chip>
 	));
+
 	const tidied = (
 		<Chip type="radio" name={id} value="tidied" checked={names.length === 0}>
 			Keep “{keep}”
 		</Chip>
 	);
+
 	return (
 		<fieldset class="flex flex-col gap-2">
 			<legend class="text-base text-ink">Name</legend>
@@ -1155,6 +1175,7 @@ function pet(id: number, name: string, cents: number): ListRow {
 		categoryColor: null,
 	};
 }
+
 const PET_ROWS = [
 	pet(1, "Chewy", 6412),
 	pet(2, "Banfield Pet Hospital", 18900),

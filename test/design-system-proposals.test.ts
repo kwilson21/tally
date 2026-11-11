@@ -13,9 +13,12 @@ import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
+
 	return { res, html: await res.text() };
 };
+
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+
 // A picture of a screen, as the proposals draw it (labelled, inert).
 const PICTURE = /role="img" aria-label="[^"]*, on (a phone|desktop)"/g;
 
@@ -24,6 +27,7 @@ const block = (html: string, id: string) => {
 	const start = html.indexOf(`<section id="${id}"`);
 	expect(start, id).toBeGreaterThan(-1);
 	const next = html.indexOf("<section ", start + 1);
+
 	return html.slice(start, next < 0 ? undefined : next);
 };
 
@@ -33,6 +37,7 @@ const optionOf = (chunk: string, name: string) => {
 	const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
 	expect(at, name).toBeDefined();
 	const end = heads.find((i) => i > (at ?? 0));
+
 	return chunk.slice(at, end);
 };
 
@@ -40,6 +45,7 @@ const optionOf = (chunk: string, name: string) => {
 const optionPicks = (chunk: string) =>
 	[...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map((m) => {
 		const heading = m[1] ?? "";
+
 		return {
 			name: heading.split("<")[0] ?? "",
 			picked: heading.includes(">Picked<"),
@@ -67,11 +73,13 @@ const VOID = new Set([
 function attributes(tag: string): Map<string, string> {
 	const body = tag.replace(/^<[a-z][a-z0-9-]*/i, "").replace(/\/?>$/, "");
 	const attrs = new Map<string, string>();
+
 	// A quoted value is consumed by its own attribute, so a word inside it is never read as a name.
 	for (const m of body.matchAll(
 		/\s+([^\s=/>"']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g,
 	))
 		attrs.set((m[1] ?? "").toLowerCase(), m[2] ?? m[3] ?? m[4] ?? "");
+
 	return attrs;
 }
 
@@ -90,17 +98,21 @@ function readHtmx(source: string) {
 	const selector = source.match(
 		/#actionSelector = this\.#prefixSelector\('([^']+)'\)/,
 	)?.[1];
+
 	const prefix = source.match(/prefix: "([^"]+)"/)?.[1];
+
 	if (!selector || !prefix)
 		throw new Error(
 			"htmx.js changed shape: update readHtmx() in test/design-system-proposals.test.ts (#448)",
 		);
 	const names = [...selector.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1] ?? "");
+
 	return {
 		prefix,
 		request: names.flatMap((name) => spellings(name, prefix)),
 	};
 }
+
 const HTMX = readHtmx(htmxSource);
 
 /**
@@ -115,19 +127,24 @@ function actions(html: string) {
 	const open: { tag: string; inert: boolean }[] = [];
 	const found: { raw: string; inert: boolean }[] = [];
 	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+
 	for (const match of markup.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
 		const raw = match[0];
 		const tag = (match[1] ?? "").toLowerCase();
+
 		if (raw.startsWith("</")) {
 			expect(open.pop()?.tag, raw).toBe(tag);
 			continue;
 		}
+
 		const attrs = attributes(raw);
 		const inert = attrs.has("inert");
+
 		const submits =
 			attrs.get("type") === "submit" ||
 			attrs.get("type") === "image" ||
 			attrs.has("form");
+
 		const acts =
 			tag === "form" ||
 			[...attrs.keys()].some(
@@ -137,10 +154,14 @@ function actions(html: string) {
 					spellings("hx-boost", HTMX.prefix).some((p) => name.startsWith(p)),
 			) ||
 			((tag === "button" || tag === "input") && submits);
+
 		if (acts) found.push({ raw, inert: inert || open.some((o) => o.inert) });
+
 		if (!raw.endsWith("/>") && !VOID.has(tag)) open.push({ tag, inert });
 	}
+
 	expect(open).toEqual([]);
+
 	return found;
 }
 
@@ -152,9 +173,11 @@ function actions(html: string) {
  */
 function firesByItself(html: string): string[] {
 	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+
 	const names = ["hx-trigger", "hx-on"].flatMap((name) =>
 		spellings(name, HTMX.prefix),
 	);
+
 	return (
 		[...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)]
 			.map((m) => m[0])
@@ -178,21 +201,27 @@ function reachableInPictures(html: string): string[] {
 	const open: { tag: string; inert: boolean; picture: boolean }[] = [];
 	const found: string[] = [];
 	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+
 	for (const match of markup.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
 		const raw = match[0];
 		const tag = (match[1] ?? "").toLowerCase();
+
 		if (raw.startsWith("</")) {
 			expect(open.pop()?.tag, raw).toBe(tag);
 			continue;
 		}
+
 		const attrs = attributes(raw);
 		const inert = attrs.has("inert") || open.some((o) => o.inert);
 		const picture = attrs.get("role") === "img" || open.some((o) => o.picture);
+
 		const reachable =
 			(tag === "a" && attrs.has("href")) ||
 			["button", "input", "select", "textarea", "summary"].includes(tag) ||
 			attrs.has("tabindex");
+
 		if (reachable && picture && !inert) found.push(raw);
+
 		if (!raw.endsWith("/>") && !VOID.has(tag))
 			open.push({
 				tag,
@@ -200,7 +229,9 @@ function reachableInPictures(html: string): string[] {
 				picture: attrs.get("role") === "img",
 			});
 	}
+
 	expect(open).toEqual([]);
+
 	return found;
 }
 
@@ -209,6 +240,7 @@ describe("actions()", () => {
 		const found = actions(
 			'<form aria-label="An inert preview" hx-post="/example"></form>',
 		);
+
 		expect(found.length).toBe(1);
 		expect(found[0]?.inert).toBe(false);
 	});
@@ -223,6 +255,7 @@ describe("actions()", () => {
 		const found = actions(
 			'<form class="card inert panel" hx-post="/x"></form>',
 		);
+
 		expect(found.length).toBe(1);
 		expect(found[0]?.inert).toBe(false);
 	});
@@ -243,6 +276,7 @@ describe("actions()", () => {
 		const found = actions(
 			'<div inert=""><form hx-post="/x"><button type="submit">Go</button></form></div>',
 		);
+
 		expect(found.map((a) => a.inert)).toEqual([true, true]);
 	});
 
@@ -256,6 +290,7 @@ describe("actions()", () => {
 		const found = actions(
 			'<button type="button" hx-action="/x" hx-method="POST">Go</button>',
 		);
+
 		expect(found.length).toBe(1);
 		expect(found[0]?.inert).toBe(false);
 	});
@@ -270,6 +305,7 @@ describe("actions()", () => {
 		const found = actions(
 			'<div inert=""><button type="button" hx-action="/x" hx-method="POST">Go</button><div hx-query="/x"></div></div>',
 		);
+
 		expect(found.map((a) => a.inert)).toEqual([true, true]);
 	});
 
@@ -293,9 +329,11 @@ describe("actions()", () => {
 		const boosted = actions('<a hx-boost="true" href="/x">x</a>');
 		expect(boosted.length).toBe(1);
 		expect(boosted[0]?.inert).toBe(false);
+
 		const inherited = actions(
 			'<div hx-boost:inherited="true"><a href="/x">x</a></div>',
 		);
+
 		expect(inherited.length).toBe(1);
 		expect(inherited[0]?.raw).toContain("hx-boost:inherited");
 		expect(inherited[0]?.inert).toBe(false);
@@ -360,15 +398,19 @@ describe("GET /design-system/proposals", () => {
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
 		expect(html).not.toContain("No open proposals.");
 		expect(html).not.toContain('id="p22-counts"');
+
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
+
 		// Every proposal from P23 to P129, and P134 and P135, is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
+
 		for (let n = 23; n <= 129; n++) expect(numbers.has(n)).toBe(true);
 		expect(numbers.has(134)).toBe(true);
 		expect(numbers.has(135)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
+
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
 		// draws the pick and nothing to choose between. Every other proposal marks exactly one
@@ -382,6 +424,7 @@ describe("GET /design-system/proposals", () => {
 			const section = html.slice(start, next === -1 ? undefined : next);
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
+
 			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
 			// P125 gives each of its five options a reason too (its E is the one recommended), and P128 each of its three.
 			const eachOption =
@@ -400,6 +443,7 @@ describe("GET /design-system/proposals", () => {
 				id === "p137-rules-fold" ||
 				id === "p138-payment-list" ||
 				id === "p139-split-category";
+
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
@@ -408,6 +452,7 @@ describe("GET /design-system/proposals", () => {
 			// P34 on mark the owner's pick (decisions 72–86), and P118 to P125 mark the owner's picks (decisions 111 and 114).
 			// P60 and P111 took two picks. P118, P120 and P121 mark a pick and its desktop drawing, which is the same option.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
+
 			const twoPicks = [
 				"p60-bills-total",
 				"p111-delete-cash",
@@ -415,6 +460,7 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
+
 			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, P130 to P133 decision 121, and P136 option A decision 122.
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
@@ -423,6 +469,7 @@ describe("GET /design-system/proposals", () => {
 			// P143 (#780, decision 154) marks its option A, so it has one Picked.
 			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
+
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
 			// screen per step or per state (decision 47), P120 and P121 with two or three. P119's options are rows of
@@ -433,6 +480,7 @@ describe("GET /design-system/proposals", () => {
 				.split("<h4 ")
 				.slice(1)
 				.map((option) => option.match(PICTURE)?.length ?? 0);
+
 			// P129's pictures are rows of states, three to a row, so they sit under no one option's heading; its own test counts them.
 			expect([
 				id,
@@ -452,6 +500,7 @@ describe("GET /design-system/proposals", () => {
 				drawn.reduce((sum, count) => sum + count, 0) + shared,
 			]);
 		}
+
 		// P119's options are rows of stills (checked in its own test), so they draw no picture above.
 		expect((block(html, "p119-saved").match(/<h4 /g) ?? []).length).toBe(3);
 		// …and each picture box has something drawn in it, not an empty frame. The boxes don't add up to the
@@ -459,9 +508,11 @@ describe("GET /design-system/proposals", () => {
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
 		expect(DECIDED.length).toBe(97);
+
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
+
 			if (d.issue) expect(html).toContain(`/issues/${d.issue}"`);
 		}
 	});
@@ -476,12 +527,14 @@ describe("GET /design-system/proposals", () => {
 			["P123 ·", 530],
 			["P124 ·", 501],
 		];
+
 		for (const [prefix, issue] of shipped) {
 			const entry = DECIDED.find((d) => d.title.startsWith(prefix));
 			expect(entry, prefix).toBeDefined();
 			expect(entry?.issue, prefix).toBe(issue);
 			expect(entry?.outcome, prefix).toContain("decision 111");
 		}
+
 		const firstVisit = DECIDED.find((d) => d.title.startsWith("P124 ·"));
 		expect(firstVisit?.outcome).toContain("for the demo only");
 		expect(firstVisit?.outcome).toContain(
@@ -573,8 +626,10 @@ describe("GET /design-system/proposals", () => {
 			"P142 ·",
 			"P143 ·",
 		].map((prefix) => DECIDED.findIndex((d) => d.title.startsWith(prefix)));
+
 		for (const [i, index] of order.entries()) {
 			expect(index, String(i)).toBeGreaterThan(-1);
+
 			if (i > 0) expect(index, String(i)).toBeGreaterThan(order[i - 1] ?? -1);
 		}
 	});
@@ -586,9 +641,11 @@ describe("GET /design-system/proposals", () => {
 			"Option A: Settings becomes a short contents page",
 		);
 		expect(settings?.outcome).toContain("(decision 120).");
+
 		const suggestions = DECIDED.find(
 			(d) => d.title === "P135 · Category suggestions",
 		);
+
 		expect(suggestions?.issue).toBe(607);
 		expect(suggestions?.outcome).toContain(
 			"Create Pet Care or No, where No retires the suggestion and asks “Don't suggest Pet Care again?”;",
@@ -658,18 +715,23 @@ describe("GET /design-system/proposals", () => {
 		expect(start).toBeGreaterThan(-1);
 		const next = html.indexOf('<section id="p', start + 1);
 		const p117 = html.slice(start, next === -1 ? undefined : next);
+
 		const option = (name: string) => {
 			const heads = [...p117.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
 			const at = heads.find((i) => p117.slice(i, i + 400).includes(`>${name}`));
 			expect(at, name).toBeDefined();
 			const end = heads.find((i) => i > (at ?? 0));
+
 			return p117.slice(at, end);
 		};
+
 		const picture = (chunk: string) => {
 			const at = chunk.indexOf('data-screen="picture"');
 			expect(at).toBeGreaterThan(-1);
+
 			return chunk.slice(at);
 		};
+
 		const oneThing = picture(option("Option A · One thing"));
 		expect(oneThing).toContain("$82.17");
 		expect(oneThing).toContain("Maybe Groceries");
@@ -696,18 +758,22 @@ describe("GET /design-system/proposals", () => {
 		expect(p90?.outcome).not.toContain("on every trip there");
 		expect(p90?.outcome).not.toContain("most-used categories fill in");
 		expect(p90?.outcome).toMatch(/P117|decision 89/);
+
 		const p117Decision = DECIDED.find((entry) =>
 			entry.title.startsWith("P117 ·"),
 		);
+
 		expect(p117Decision?.issue).toBe(233);
 		expect(html).not.toContain("Its issue is written when it's built.");
 	});
 
 	it("uses unique IDs throughout the proposals page", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(
 			(match) => match[1] ?? "",
 		);
+
 		const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
 		expect(duplicates).toEqual([
 			"p27-file",
@@ -721,10 +787,13 @@ describe("GET /design-system/proposals", () => {
 		expect(duplicates).not.toContain("p90-filled-split-line-kept");
 		expect(duplicates).not.toContain("p117-split-line");
 		const idsByValue = new Map<string, number>();
+
 		for (const id of ids) idsByValue.set(id, (idsByValue.get(id) ?? 0) + 1);
 		const knownOtherPageDuplicates = new Set(duplicates);
+
 		for (const [, labelFor] of html.matchAll(/\sfor="([^"]+)"/g)) {
 			const id = labelFor ?? "";
+
 			if (knownOtherPageDuplicates.has(id)) continue;
 			expect(idsByValue.get(id)).toBe(1);
 		}
@@ -753,22 +822,29 @@ describe("GET /design-system/proposals", () => {
 
 	it("draws the owner's four polish picks (P110–P113, decision 84) as the app now words them", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
 			expect(start).toBeGreaterThan(-1);
 			const next = html.indexOf('<section id="p', start + 1);
+
 			return html.slice(start, next === -1 ? undefined : next);
 		};
+
 		// One option's heading and picture, up to the next option's heading.
 		const option = (sectionHtml: string, name: string) => {
 			const heads = [...sectionHtml.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+
 			const at = heads.find((i) =>
 				sectionHtml.slice(i, i + 400).includes(`>${name}`),
 			);
+
 			expect(at, name).toBeDefined();
 			const next = heads.find((i) => i > (at ?? 0));
+
 			return sectionHtml.slice(at, next);
 		};
+
 		const picked = (chunk: string) => chunk.includes(">Picked<");
 
 		// P110: More without Documents is picked; today's More lists it and leads to a page that isn't built.
@@ -819,8 +895,10 @@ describe("GET /design-system/proposals", () => {
 		// P112: with the off line first (picked), it sits right under the title, before the privacy text;
 		// today's page puts it after.
 		const p112 = section("p112-demo-feedback");
+
 		const off =
 			"Feedback is off in the demo. Sign in to your Tally to send it.";
+
 		const privacy = "Before a new report is sent";
 		const p112a = option(p112, "Option A · ");
 		expect(picked(p112a)).toBe(true);
@@ -844,30 +922,40 @@ describe("GET /design-system/proposals", () => {
 
 	it("draws the owner's picks on Q60–Q62 (P114–P116, decision 85) as the app will have them", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
 			expect(start).toBeGreaterThan(-1);
 			const next = html.indexOf('<section id="p', start + 1);
+
 			return html.slice(start, next === -1 ? undefined : next);
 		};
+
 		const option = (sectionHtml: string, name: string) => {
 			const heads = [...sectionHtml.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+
 			const at = heads.find((i) =>
 				sectionHtml.slice(i, i + 400).includes(`>${name}`),
 			);
+
 			expect(at, name).toBeDefined();
 			const next = heads.find((i) => i > (at ?? 0));
+
 			return sectionHtml.slice(at, next);
 		};
+
 		const picked = (chunk: string) => chunk.includes(">Picked<");
 		const recommended = (chunk: string) => chunk.includes(">Recommended<");
+
 		// An option's picture alone. The heading and note above it quote the very words asserted
 		// below, so asserting on the whole option would pass with the picture changed or emptied.
 		const picture = (chunk: string) => {
 			const at = chunk.indexOf('data-screen="picture"');
 			expect(at).toBeGreaterThan(-1);
+
 			return chunk.slice(at);
 		};
+
 		const cant = "This can&#39;t be undone.";
 
 		// P114: once Undo ships, the sheet asks only the question; Delete and Keep it are its answers.
@@ -897,8 +985,10 @@ describe("GET /design-system/proposals", () => {
 		// Where are in both pictures and use rounded-control, so the money box is found by its own
 		// markup: its box by its fixed size, its cent arrows by their outer corners.
 		const p115 = section("p115-money-corners");
+
 		const box = (pic: string) =>
 			pic.match(/<div class="([^"]*min-h-\[90px\][^"]*)"/)?.[1] ?? "";
+
 		const p115a = option(p115, "Option A · ");
 		expect(picked(p115a) && recommended(p115a)).toBe(true);
 		const p115aPicture = picture(p115a);
@@ -912,6 +1002,7 @@ describe("GET /design-system/proposals", () => {
 		expect(picked(p115b)).toBe(false);
 		const p115bPicture = picture(p115b);
 		expect(p115bPicture).toContain("data-money");
+
 		// B's wrapper turns all three of the money box's corners back to 8px, and only those.
 		for (const [control, eight] of [
 			["rounded-control", "rounded-lg"],
@@ -927,6 +1018,7 @@ describe("GET /design-system/proposals", () => {
 		const p115Ids = [...p115.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
 		expect(p115Ids.length).toBeGreaterThan(2);
 		expect(new Set(p115Ids).size).toBe(p115Ids.length);
+
 		for (const pic of [p115aPicture, p115bPicture])
 			for (const [, target] of pic.matchAll(/<label for="([^"]+)"/g))
 				expect(pic).toContain(` id="${target}"`);
@@ -952,12 +1044,15 @@ describe("GET /design-system/proposals", () => {
 
 	it("says Resend sends the reconnect email first, with Cloudflare's own as the fallback and nothing to confirm (decision 86)", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
 			expect(start).toBeGreaterThan(-1);
 			const next = html.indexOf('<section id="p', start + 1);
+
 			return html.slice(start, next === -1 ? undefined : next);
 		};
+
 		// P107: the old rule, that each address must be verified in Cloudflare Email Routing, is gone.
 		const p107 = section("p107-email-settings");
 		expect(p107).not.toContain("Email Routing");
@@ -990,13 +1085,16 @@ describe("GET /design-system/proposals", () => {
 		// rule in app.css (which sits below Tailwind's utilities) can't turn any of them back on.
 		const round = "[&amp;_*]:[corner-shape:round]";
 		const squircle = "[corner-shape:squircle]";
+
 		// From a marker to the next one: an option's heading, or a close-up's label.
 		const between = (from: string, to: string | undefined) => {
 			const at = p75.indexOf(from);
 			expect(at, from).toBeGreaterThan(-1);
 			const end = to ? p75.indexOf(to, at + 1) : -1;
+
 			return p75.slice(at, end === -1 ? undefined : end);
 		};
+
 		const todayPicture = between("Today · Round corners", "Option A · ");
 		expect(todayPicture).toContain(round);
 		expect(todayPicture).not.toContain(squircle);
@@ -1004,24 +1102,30 @@ describe("GET /design-system/proposals", () => {
 		const aPicture = between("Option A · Squircles everywhere", "Option B · ");
 		expect(aPicture).toContain(squircle);
 		expect(aPicture).not.toContain("corner-shape:round");
+
 		// B keeps the field round while the buttons and the sheet are squircles.
 		const bPicture = between(
 			"Option B · Squircles on",
 			"Today and A, side by side",
 		);
+
 		expect(bPicture).toContain(round);
 		expect(bPicture).toContain(squircle);
+
 		// The close-up's Today is forced round too, and its A is not.
 		const todayCloseUp = between(
 			'aria-label="Today · Round corners, close up"',
 			'aria-label="Option A · Squircles everywhere, close up"',
 		);
+
 		expect(todayCloseUp).toContain(round);
 		expect(todayCloseUp).not.toContain(squircle);
+
 		const aCloseUp = between(
 			'aria-label="Option A · Squircles everywhere, close up"',
 			undefined,
 		);
+
 		expect(aCloseUp).toContain(squircle);
 		expect(aCloseUp).not.toContain("corner-shape:round");
 		// The picked line stays in the decided list, and the money box is no longer waiting for #80.
@@ -1035,36 +1139,44 @@ describe("GET /design-system/proposals", () => {
 		const found = actions(html);
 		// The bill drawings' Not this one forms (the issue's case) must be among them, so the loop below can't pass by finding none.
 		expect(found.some((a) => a.raw.includes("/unlink"))).toBe(true);
+
 		// inert, not hx-ignore: a native form post still runs under hx-ignore, and the catalog CSP's form-action 'none'
 		// covers this page too but doesn't stop htmx's own request. Only inert stops both. inert stops a press or a submit,
 		// both native and htmx; it doesn't stop a trigger that fires by itself or an hx-on handler, so the page has none of those.
 		for (const action of found) expect(action.inert, action.raw).toBe(true);
 		expect(firesByItself(html)).toEqual([]);
+
 		// The prefix the test assumes is htmx's own default, so the page's htmx-config meta must not override it.
 		const config = [...html.matchAll(/<meta\b[^>]*>/gi)]
 			.map((m) => m[0])
 			.find((raw) => attributes(raw).get("name") === "htmx-config");
+
 		expect(config).toBeDefined();
 		const content = config ? attributes(config).get("content") : undefined;
 		expect(content).toBeDefined();
 		expect(content).not.toContain("prefix");
+
 		// A button with no type submits a form it sits in, so every button declares one and the walk above sees it.
 		const buttons = [...html.matchAll(/<button\b[^>]*>/gi)].map(
 			(m) => m[0] ?? "",
 		);
+
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
 	it("marks the owner's picks for P118 to P125 (decisions 111 and 114): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const picks = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
 			expect(start, id).toBeGreaterThan(-1);
 			const next = html.indexOf('<section id="p', start + 1);
+
 			return optionPicks(html.slice(start, next < 0 ? undefined : next))
 				.filter((option) => option.picked)
 				.map((option) => option.name);
 		};
+
 		expect(picks("p118-rows")).toEqual([
 			"A · Quiet chevron",
 			"Desktop · A · Quiet chevron",
@@ -1241,6 +1353,7 @@ describe("GET /design-system/proposals", () => {
 			expect(p119).not.toContain("Ruled off");
 			expect(p119).not.toContain("proposal-saved-rule");
 			expect(p119).not.toContain("proposal-saved-band");
+
 			// Each option is three stills, a fourth (replay or keyboard) and the Home still.
 			for (const name of [
 				"Today (current)",
@@ -1281,10 +1394,13 @@ describe("GET /design-system/proposals", () => {
 			expect(p119.match(/role="status"/g)?.length).toBe(12);
 			// The 4 s still has no toast: each of the three ends a crop without one.
 			const stills = p119.split('role="img" aria-label="').slice(1);
+
 			const ends = stills.filter((s) =>
 				(s.split('"')[0] ?? "").endsWith("4 seconds, the toast gone"),
 			);
+
 			expect(ends.length).toBe(3);
+
 			for (const end of ends) expect(end).not.toContain('role="status"');
 			// The 0 s toast is drawn whole: no fade or nudge on any still.
 			expect(p119).not.toContain("translate-y-[2px]");
@@ -1330,23 +1446,31 @@ describe("GET /design-system/proposals", () => {
 		expect(html).toContain(
 			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is P125 E.",
 		);
+
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
 			expect(start, id).toBeGreaterThan(-1);
 			const next = html.indexOf('<section id="p', start + 1);
+
 			return html.slice(start, next === -1 ? undefined : next);
 		};
+
 		const names = (chunk: string) =>
 			[...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map((m) => m[1] ?? "");
+
 		const pictures = (chunk: string) =>
 			chunk.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g) ?? [];
+
 		const option = (chunk: string, name: string) => {
 			const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+
 			const at = heads.find((i) =>
 				chunk.slice(i, i + 300).includes(`>${name}`),
 			);
+
 			expect(at, name).toBeDefined();
 			const end = heads.find((i) => i > (at ?? 0));
+
 			return chunk.slice(at, end);
 		};
 
@@ -1358,6 +1482,7 @@ describe("GET /design-system/proposals", () => {
 		]);
 		expect(option(more, "Option A · Contents page")).toContain(">Recommended<");
 		expect(more.match(/>Recommended</g)?.length).toBe(1);
+
 		// Each place with its icon, what it holds, and a count that says when it needs you.
 		for (const text of [
 			"3 accounts",
@@ -1373,17 +1498,21 @@ describe("GET /design-system/proposals", () => {
 		])
 			expect(more, text).toContain(text);
 		expect(pictures(more)).toHaveLength(5);
+
 		// Each option's own pictures: Today one, A three (the Accounts entry with a bank to sign in, and before a bank), B one.
 		const drawnBy = (chunk: string, name: string) =>
 			pictures(option(chunk, name)).length;
+
 		expect(drawnBy(more, "Today (current)")).toBe(1);
 		expect(drawnBy(more, "Option A · Contents page")).toBe(3);
 		expect(drawnBy(more, "Option B · Plain index")).toBe(1);
 		// Before a bank is linked, Accounts says so in muted words with no alert icon: the alert is Needs attention's alone.
 		const bankless = option(more, "Option A · Contents page");
+
 		const beforeBankAt = bankless.indexOf(
 			'aria-label="Option A, before a bank is linked, on a phone"',
 		);
+
 		expect(beforeBankAt).toBeGreaterThan(-1);
 		const beforeBank = bankless.slice(beforeBankAt);
 		expect(beforeBank).toContain("None linked yet");
@@ -1427,6 +1556,7 @@ describe("GET /design-system/proposals", () => {
 			">Recommended<",
 		);
 		expect(firstVisit.match(/>Recommended</g)?.length).toBe(1);
+
 		for (const text of [
 			"Today (after #519)",
 			"A family with no budgets sees −$2,140 in ink, since #519.",
@@ -1480,22 +1610,29 @@ describe("GET /design-system/proposals", () => {
 			const start = chunk.indexOf(`aria-label="${label}"`);
 			expect(start, label).toBeGreaterThan(-1);
 			const end = chunk.indexOf("<figure", start);
+
 			return chunk.slice(start, end === -1 ? undefined : end);
 		};
+
 		// The phone's top line: the wordmark's row, from its class to the row's closing tag.
 		const masthead = (screen: string) => {
 			const start = screen.indexOf(
 				"mb-4 flex items-center justify-between gap-3",
 			);
+
 			expect(start).toBeGreaterThan(-1);
+
 			return screen.slice(start, screen.indexOf("</div>", start));
 		};
+
 		// The desktop sidebar's second group, under its rule: How Tally works and Feedback.
 		const secondGroup = (desk: string) => {
 			const start = desk.indexOf(
 				"mt-3 flex flex-col gap-1 border-t border-rule pt-3",
 			);
+
 			expect(start).toBeGreaterThan(-1);
+
 			return desk.slice(start, desk.indexOf("</ul>", start));
 		};
 
@@ -1521,15 +1658,18 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("$480 of $1,040");
+
 		// Settings draws Gas's open row in the app's order (category-row.tsx): the Name field, then Save, Cancel and
 		// Archive, then Move up and Move down. The pill sits over Move down, so the picture has to reach it.
 		const todaySettings = picture(
 			feedback,
 			"Today (current), Settings, on a phone",
 		);
+
 		expect(todaySettings).toContain("bottom-[6.5rem]");
 		expect(todaySettings).toContain("3 suggestions to check");
 		expect(todaySettings).toContain("$1,040");
+
 		const marks = [
 			">Name</label>",
 			">Save<",
@@ -1540,8 +1680,10 @@ describe("GET /design-system/proposals", () => {
 		].map((mark) => {
 			const at = todaySettings.indexOf(mark);
 			expect(at, mark).toBeGreaterThan(-1);
+
 			return at;
 		});
+
 		expect(marks).toEqual([...marks].sort((a, b) => a - b));
 		expect(option(feedback, "Today (current)")).toContain(
 			"In Settings it sits over Move down",
@@ -1557,8 +1699,10 @@ describe("GET /design-system/proposals", () => {
 		expect(masthead(aSettings)).toContain('href="/feedback"');
 		const aScrolled = picture(feedback, "Option A, Home scrolled, on a phone");
 		expect(aScrolled).not.toContain('href="/feedback"');
+
 		for (const screen of [aTop, aSettings, aScrolled])
 			expect(screen).not.toContain("bottom-[6.5rem]");
+
 		// P123 · Options A and B on desktop: the second sidebar group under a rule, and Home's How this works link.
 		for (const label of ["Option A, on desktop", "Option B, on desktop"]) {
 			const desk = picture(feedback, label);
@@ -1569,6 +1713,7 @@ describe("GET /design-system/proposals", () => {
 			expect(desk).toContain("How this works");
 			expect(desk).not.toContain("bottom-6 right-6");
 		}
+
 		// P123 · Option B: no pill on any phone; Feedback is a row in More.
 		for (const label of [
 			"Option B, Home scrolled, on a phone",
@@ -1584,6 +1729,7 @@ describe("GET /design-system/proposals", () => {
 			firstVisit,
 			"Today (current), the family&#39;s Home, on a phone",
 		);
+
 		expect(todayFamily).toContain("−$2,140");
 		expect(todayFamily).toContain("No budgets set yet.");
 		expect(todayFamily).not.toContain("text-over");
@@ -1606,10 +1752,12 @@ describe("GET /design-system/proposals", () => {
 		expect(bOption).toContain(
 			"inline-flex min-h-11 items-center text-sm text-muted underline underline-offset-4",
 		);
+
 		const bFamily = picture(
 			firstVisit,
 			"Option B, the family&#39;s Home, on a phone",
 		);
+
 		expect(bFamily).toContain("No budgets set yet.");
 		expect(bFamily).toContain("Start your budgets from September");
 		expect(bFamily).toContain("Not set yet");
@@ -1632,6 +1780,7 @@ describe("GET /design-system/proposals", () => {
 		expect(cOption).toContain(
 			'class="text-muted underline underline-offset-4">How this works</a>',
 		);
+
 		// The demo's Band totals after matching: 10 need a category and $211 (decision 82 keeps 12 and $228 on the older proposals).
 		for (const part of [feedback, firstVisit]) {
 			expect(part).toContain("10 need a category");
@@ -1639,6 +1788,7 @@ describe("GET /design-system/proposals", () => {
 			expect(part).not.toContain("12 need a category");
 			expect(part).not.toContain("$228");
 		}
+
 		expect(
 			picture(firstVisit, "Today (current), Home top, on a phone"),
 		).toContain("10 need a category");
@@ -1652,15 +1802,18 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(firstVisit, "Option A, How Tally works, the story, on a phone"),
 		).toContain("Demo data. Nothing here is real.");
+
 		// The page keeps its How Tally works heading above Start here, as the route has it (test/how-it-works-route.test.ts:99).
 		const story = picture(
 			firstVisit,
 			"Option A, How Tally works, the story, on a phone",
 		);
+
 		expect(story).toMatch(/<h1[^>]*>How Tally works<\/h1>/);
 		expect(story.indexOf("How Tally works</h1>")).toBeLessThan(
 			story.indexOf(">Start here</h2>"),
 		);
+
 		// The lower shots are drawn as scrolled: no banner and no wordmark, since they are not the top of the page.
 		for (const label of [
 			"Option A, How Tally works, the total, on a phone",
@@ -1683,6 +1836,7 @@ describe("GET /design-system/proposals", () => {
 			{},
 			notDemo,
 		);
+
 		expect(res.status).toBe(404);
 	});
 });
@@ -1692,9 +1846,11 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 	const section = (html: string) => block(html, "p126-planned-diagram");
 	// Each option's chunk, from its heading to the next (the first chunk is the note above the first option).
 	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+
 	// The opening tags of the SVGs in a chunk, so a test can tell the lines apart by their widths.
 	const svgs = (chunk: string) =>
 		[...chunk.matchAll(/<svg\b[^>]*>/g)].map((m) => m[0]);
+
 	const count = (chunk: string, text: string) => chunk.split(text).length - 1;
 
 	it("sits among the Picked sections, newest decision first: after P127 (decision 116) and before the polish pass's picks (decision 114)", async () => {
@@ -1762,6 +1918,7 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		expect(branch).toContain(
 			"minus $270.00 for planned expenses leaves $72.51",
 		);
+
 		for (const label of [
 			"Budget",
 			"Spent",
@@ -1792,15 +1949,18 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		// The Picked pill's check icon is an svg too, so the lines are the ones that overflow visibly.
 		const tags = svgs(a).filter((tag) => tag.includes('overflow="visible"'));
 		expect(tags.length).toBe(6);
+
 		for (const tag of tags) {
 			expect(tag).toContain('aria-hidden="true"');
 			expect(tag).toContain('overflow="visible"');
 		}
+
 		expect(tags.filter((tag) => tag.includes(' width="323"')).length).toBe(3);
 		expect(tags.filter((tag) => tag.includes(' width="230"')).length).toBe(2);
 		expect(tags.filter((tag) => tag.includes(' width="345"')).length).toBe(1);
 		// Every box is main's four-box size, 93 by 60, with main's type sizes (13, 15 and 18).
 		expect(count(a, 'width="93" height="60"')).toBe(16);
+
 		for (const size of ['font-size="13"', 'font-size="15"', 'font-size="18"'])
 			expect(a).toContain(size);
 		// The owner's pick carries the Picked pill, and it is the only one on the diagram.
@@ -1855,12 +2015,16 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 
 	it("gives each picture's outer role=img the whole sum, in a hidden span its aria-describedby names", async () => {
 		const html = await drawn();
+
 		const today =
 			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due leaves $342.51 safe to spend.";
+
 		const safe =
 			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due minus $270.00 for planned expenses leaves $72.51 safe to spend.";
+
 		const six =
 			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due minus $270.00 for planned expenses minus $50.00 for the savings goal leaves $22.51 safe to spend.";
+
 		const pictures: [label: string, frame: string, sum: string][] = [
 			[
 				"Reference · Main until #600: four boxes, on desktop",
@@ -1894,11 +2058,13 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 			],
 			["Option A with a savings goal, on a phone", "p126-a-six-frame", six],
 		];
+
 		// Each picture's labelled frame, then the hidden sum it describes itself with, then its inert drawing.
 		for (const [label, frame, sum] of pictures) {
 			const at = html.indexOf(
 				`role="img" aria-label="${label}" aria-describedby="${frame}-sum"`,
 			);
+
 			expect(at, frame).toBeGreaterThan(-1);
 			const inert = html.indexOf("<div inert", at);
 			expect(inert, frame).toBeGreaterThan(at);
@@ -1906,10 +2072,12 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 				`<span id="${frame}-sum" hidden="">${sum}</span>`,
 			);
 		}
+
 		// Seven pictures, seven distinct sums: each frame's description names its own element.
 		const described = [
 			...html.matchAll(/aria-describedby="(p126-[^"]+-sum)"/g),
 		].map((m) => m[1]);
+
 		expect(described).toHaveLength(7);
 		expect(new Set(described).size).toBe(7);
 		expect(described).toEqual(pictures.map(([, frame]) => `${frame}-sum`));
@@ -1922,18 +2090,24 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		const start = html.indexOf(`<section id="${id}"`);
 		expect(start, id).toBeGreaterThan(-1);
 		const next = html.indexOf('<section id="p', start + 1);
+
 		return html.slice(start, next === -1 ? undefined : next);
 	};
+
 	// One option's heading and everything drawn under it, up to the next option's heading.
 	const option = (sectionHtml: string, name: string) => {
 		const heads = [...sectionHtml.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+
 		const at = heads.find((i) =>
 			sectionHtml.slice(i, i + 400).includes(`>${name}`),
 		);
+
 		expect(at, name).toBeDefined();
 		const next = heads.find((i) => i > (at ?? 0));
+
 		return sectionHtml.slice(at, next);
 	};
+
 	// Each picture under an option, from its label on, up to the next picture's label.
 	const pictures = (chunk: string) =>
 		chunk.split('role="img" aria-label="').slice(1);
@@ -1957,6 +2131,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("draws P120's four panel options with B recommended, and two pictures for each of A, C and Today", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p120-panel");
+
 		for (const name of [
 			"Today (current)",
 			"A · Category first",
@@ -1965,6 +2140,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		]) {
 			expect(option(s, name), name).toContain(`>${name}`);
 		}
+
 		expect(s.match(/>Recommended</g)?.length ?? 0).toBe(1);
 		expect(option(s, "B · Category leads, folds when set")).toContain(
 			">Recommended<",
@@ -1980,10 +2156,12 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 
 	it("spaces P120's desktop B like its phone picture, so the bank's text and Category don't touch", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const desk = option(
 			section(html, "p120-panel"),
 			"At 1280: B · Category leads, folds when set",
 		);
+
 		expect(desk).toContain('<div class="flex shrink-0 flex-col gap-5">');
 		expect(desk.indexOf("SQ *LOCAL BAKERY 4432")).toBeLessThan(
 			desk.indexOf(">Category</legend>"),
@@ -1993,6 +2171,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("draws Exclude from budget as a switch and the rule as a plain unticked row in A, B and C", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p120-panel");
+
 		for (const name of [
 			"A · Category first",
 			"B · Category leads, folds when set",
@@ -2026,6 +2205,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("puts the explanation under the switches in A, B and C, and keeps New category last in the grid", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p120-panel");
+
 		for (const name of [
 			"A · Category first",
 			"B · Category leads, folds when set",
@@ -2038,6 +2218,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 				).toBeGreaterThan(picture.indexOf("Count as income"));
 			}
 		}
+
 		const first = pictures(option(s, "A · Category first"))[0] ?? "";
 		expect(first).toContain("grid grid-cols-2");
 		expect(first.indexOf("New category")).toBeGreaterThan(
@@ -2047,10 +2228,12 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 
 	it("folds B's Trader Joe's category into one row, and draws a third picture of it opened", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const b = option(
 			section(html, "p120-panel"),
 			"B · Category leads, folds when set",
 		);
+
 		const all = pictures(b);
 		expect(all).toHaveLength(3);
 		expect(all[1]).toContain("Picked by Tally · 92% sure");
@@ -2065,9 +2248,11 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 
 	it("draws C's Local Bakery category open and Trader Joe's closed with its source", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const [lb = "", tj = ""] = pictures(
 			option(section(html, "p120-panel"), "C · Ruled ledger"),
 		);
+
 		expect(lb).toContain('<details class="group border-b border-rule" open=""');
 		expect(tj).not.toContain(
 			'<details class="group border-b border-rule" open=""',
@@ -2078,6 +2263,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("draws P121's three header options with A recommended, its Filters as a closed pill, and B's filters in one strip", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p121-header");
+
 		for (const name of [
 			"Today (current)",
 			"A · Filters fold away",
@@ -2085,11 +2271,14 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		]) {
 			expect(option(s, name), name).toContain(`>${name}`);
 		}
+
 		expect(s.match(/>Recommended</g)?.length ?? 0).toBe(1);
 		expect(option(s, "A · Filters fold away")).toContain(">Recommended<");
+
 		const [closed = "", open = ""] = pictures(
 			option(s, "A · Filters fold away"),
 		);
+
 		expect(closed).toContain("Filters</summary>");
 		expect(closed).not.toContain('<details class="group open:w-full" open=""');
 		expect(open).toContain('<details class="group open:w-full" open=""');
@@ -2121,8 +2310,10 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("notes under P121's Fixed line that decision 111 moved How this works to the page foot, before the first option", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p121-header");
+
 		const note =
 			'<span class="font-medium">Replaced by decision 111: </span>Since P124 A (decision 111), How this works sits at the foot of the page, not beside Add cash; Add cash keeps its own line.';
+
 		expect(s).toContain(note);
 		expect(s.indexOf(note)).toBeLessThan(s.indexOf(">Today (current)"));
 		expect(s).not.toContain("further down");
@@ -2141,14 +2332,17 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("lists the sidebar and the tabs in the pictures from nav.tsx's own items, in order", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p121-header");
+
 		const inOrder = (chunk: string, labels: string[]) => {
 			let at = -1;
+
 			for (const label of labels) {
 				const next = chunk.indexOf(`${label}</span>`, at + 1);
 				expect(next, label).toBeGreaterThan(at);
 				at = next;
 			}
 		};
+
 		inOrder(
 			option(s, "At 1280: Today (current)"),
 			SIDEBAR_ITEMS.map((item) => item.label),
@@ -2162,15 +2356,19 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	it("draws each P121 phone with the demo banner and the tab bar, and a desktop picture for each option", async () => {
 		const { html } = await get("/design-system/proposals");
 		const s = section(html, "p121-header");
+
 		// The cut-short picture of A's open Filters has no tab bar (it stops above it), so it's not one of these.
 		const phones = pictures(s).filter(
 			(p) => p.includes(", on a phone") && !p.includes("pill open"),
 		);
+
 		expect(phones).toHaveLength(3);
+
 		for (const picture of phones) {
 			expect(picture).toContain("Demo data. Nothing here is real.");
 			expect(picture).toContain(">Transactions</span>");
 		}
+
 		expect(s).toContain('aria-label="At 1280: Today (current), on desktop"');
 		expect(s).toContain(
 			'aria-label="At 1280: A · Filters fold away, on desktop"',
@@ -2189,25 +2387,31 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		expect(start).toBeGreaterThan(-1);
 		const end = html.indexOf('<section aria-labelledby="polish4-title"', start);
 		expect(end).toBeGreaterThan(start);
+
 		return html.slice(start, end);
 	};
+
 	// One option's heading and everything drawn under it, up to the next option's heading.
 	const option = (chunk: string, name: string) => {
 		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
 		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
 		expect(at, name).toBeDefined();
 		const next = heads.find((i) => i > (at ?? 0));
+
 		return chunk.slice(at, next);
 	};
+
 	// Each labelled picture in a chunk, from its label on.
 	const pictures = (chunk: string) =>
 		chunk.split('role="img" aria-label="').slice(1);
+
 	// Option A's lines 2 to 4 each name their own keyframes through a step class, so each turns found at its own point in the loop.
 	const STEP_CLASSES = [
 		"proposal-first-later",
 		"proposal-first-last",
 		"proposal-first-second-round",
 	];
+
 	const OPTIONS = [
 		"Option A · The Opening Entry",
 		"Option B · Pencil, then ink",
@@ -2238,9 +2442,11 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("draws five options: E recommended and picked (decision 114), each with its cost and its reason, all in the family's app", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		const names = [...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map(
 			(m) => m[1] ?? "",
 		);
+
 		expect(names).toEqual(OPTIONS);
 		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
 		expect(option(chunk, OPTIONS[4] ?? "")).toContain(">Recommended<");
@@ -2265,6 +2471,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			const labels = pictures(option(chunk, name)).map((p) =>
 				p.slice(0, p.indexOf('"')),
 			);
+
 			const phones = labels.filter((label) => label.endsWith(", on a phone"));
 			expect(phones, name).toHaveLength(stages[i] ?? 0);
 			// Each option's replay is labelled as one, and loops (a proposals-only class in app.css).
@@ -2292,11 +2499,14 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			const classes = [
 				...new Set(option(chunk, name).match(/proposal-first-[a-z-]+/g) ?? []),
 			].filter((cls) => !STEP_CLASSES.includes(cls));
+
 			expect(classes.length, name).toBeGreaterThan(0);
+
 			for (const cls of classes) {
 				const loop = new RegExp(
 					`\\.${cls}\\s*\\{\\s*--loop: calc\\(var\\(--duration-rising\\) \\* (\\d+)\\);`,
 				).exec(css);
+
 				expect(loop, cls).not.toBeNull();
 				expect((rising * Number(loop?.[1])) / 1000, cls).toBe(
 					i === 0 ? 8 : i === 1 ? 5 : 6,
@@ -2308,9 +2518,11 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("keeps one sample household in every option: $1,411 safe to spend, and the same 86 that need a category", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		for (const name of OPTIONS) {
 			expect(option(chunk, name), name).toContain("$1,411");
 		}
+
 		expect(chunk).toContain("86 need a category");
 		expect(chunk).toContain("$186 of this month&#39;s spending");
 		expect(chunk).toContain("$4,050");
@@ -2322,6 +2534,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("draws the rest of the brief's sample household as its figures, in the same words", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		for (const figure of [
 			"Chase · 412 lines · Jul 16 to Oct 13",
 			"Tally sorted 362 overnight",
@@ -2353,10 +2566,13 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("draws the replays from proposal-only keyframes in app.css, each one resting on its end state under reduced motion", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		const classes = [
 			...new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []),
 		].filter((cls) => !STEP_CLASSES.includes(cls));
+
 		expect(classes.length).toBeGreaterThan(0);
+
 		for (const cls of classes) {
 			expect(css, cls).toContain(`.${cls}`);
 			expect(css, cls).toMatch(new RegExp(`\\.${cls}\\s*\\{[^}]*animation:`));
@@ -2366,6 +2582,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 				),
 			);
 		}
+
 		// The P125 keyframes are proposal-only and live in their own block.
 		expect(css).toContain("Proposals only (P125)");
 	});
@@ -2394,8 +2611,10 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		const at = chunk.indexOf(`role="img" aria-label="${label}, on a phone"`);
 		expect(at, label).toBeGreaterThan(-1);
 		const next = chunk.indexOf('role="img" aria-label="', at + 1);
+
 		return chunk.slice(at, next === -1 ? undefined : next);
 	};
+
 	// Every opening tag in a chunk whose class list has `cls` as one of its classes.
 	const tagsWith = (chunk: string, cls: string) =>
 		[...chunk.matchAll(/<[a-zA-Z]+\b[^>]*>/g)]
@@ -2407,6 +2626,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("carries each option's lines from the brief, word for word, in its pictures", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		const LINES: Record<string, string[]> = {
 			[OPTIONS[0] ?? ""]: [
 				"Let Tally read first.",
@@ -2544,6 +2764,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 				"Go to Home",
 			],
 		};
+
 		for (const name of OPTIONS) {
 			for (const line of LINES[name] ?? []) {
 				expect(option(chunk, name), line).toContain(line);
@@ -2554,6 +2775,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("gives each option its idea and its cost line, as the brief words them", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		const IDEAS: Record<string, [string, string]> = {
 			[OPTIONS[0] ?? ""]: [
 				"Tally&#39;s part against yours: Tally finds your paycheck, bills and transfers, names your stores and writes a first budget, and you link a bank. Home fills itself in while Tally reads.",
@@ -2576,6 +2798,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 				"a kept record of the five strokes (one household setting), a question page, and a first-budget rule (a spec line); no polling, since the questions are ready the next morning.",
 			],
 		};
+
 		for (const name of OPTIONS) {
 			const [idea, cost] = IDEAS[name] ?? [];
 			expect(option(chunk, name), name).toContain(
@@ -2588,6 +2811,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("rests each replay on its end state in the markup, the frame reduced motion shows, so every loop has one", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		// For each replay class: the classes its element must carry, and the ones it must not, at the end state.
 		const AT_REST: Record<string, { must?: string[]; not?: string[] }> = {
 			"proposal-first-status-first": { must: ["opacity-0"] },
@@ -2618,15 +2842,21 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			"proposal-first-counter-before": { must: ["opacity-0"] },
 			"proposal-first-counter-after": { not: ["opacity-0"] },
 		};
+
 		const used = new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []);
+
 		for (const step of STEP_CLASSES) used.delete(step);
 		expect([...used].sort()).toEqual(Object.keys(AT_REST).sort());
+
 		for (const [cls, { must = [], not = [] }] of Object.entries(AT_REST)) {
 			const tags = tagsWith(chunk, cls);
 			expect(tags.length, cls).toBeGreaterThan(0);
+
 			for (const tag of tags) {
 				const classes = (/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ");
+
 				for (const m of must) expect(classes, `${cls} needs ${m}`).toContain(m);
+
 				for (const n of not)
 					expect(classes, `${cls} must not carry ${n}`).not.toContain(n);
 			}
@@ -2636,6 +2866,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("says 'pencil' in the label of every picture with a pencil state, and in words beside the pencil figures", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
+
 		for (const label of [
 			"Option B, before a bank, with the amount a pencil blank",
 			"Option B, that evening, with the amount still a pencil blank",
@@ -2650,6 +2881,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		]) {
 			picture(chunk, label);
 		}
+
 		// The strokes say they are pencil in words beside the count, and the picture that inks them says ink.
 		expect(
 			picture(chunk, "Option C, the budget walk, two strokes in pencil"),
@@ -2669,10 +2901,12 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 
 	it("writes the replay's new answer last in the ledger, under Costco · Groceries", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const replay = picture(
 			section(html),
 			"Option D, replay: a new answer and the total",
 		);
+
 		expect(replay.indexOf("Costco · Groceries")).toBeGreaterThan(-1);
 		expect(replay.indexOf("Groceries, from October")).toBeGreaterThan(
 			replay.indexOf("Costco · Groceries"),
@@ -2682,6 +2916,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("draws Option A's first picture as Tally's part and yours: six promises with blanks, then Your part, with its one button after it", async () => {
 		const { html } = await get("/design-system/proposals");
 		const before = picture(section(html), "Option A, before a bank");
+
 		const promises = [
 			"Find your paycheck",
 			"Spot your bills",
@@ -2690,13 +2925,16 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			"Sort your spending",
 			"Write your first budget",
 		];
+
 		let at = before.indexOf("Tally&#39;s part");
 		expect(at).toBeGreaterThan(-1);
+
 		for (const promise of promises) {
 			const i = before.indexOf(`>${promise}<`);
 			expect(i, promise).toBeGreaterThan(at);
 			at = i;
 		}
+
 		expect(before.match(/Not done yet/g)?.length).toBe(6);
 		// Each promise is one 44 px line (min-h-11, with py-1 and nothing more), and the headline is text-4xl.
 		expect(
@@ -2718,6 +2956,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("writes each found line's fact and draws the bank's own line struck through under it, with Tally's name and the words said aloud", async () => {
 		const { html } = await get("/design-system/proposals");
 		const evening = picture(section(html), "Option A, that evening");
+
 		for (const [bank, name] of [
 			["ACME CORP PAYROLL PPD ID 4432", "Acme Corp"],
 			["ONLINE TRANSFER TO SAV ...5678", "Transfer to Savings"],
@@ -2725,15 +2964,19 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		] as const) {
 			const at = evening.indexOf(bank);
 			expect(at, bank).toBeGreaterThan(-1);
+
 			const strike = evening.indexOf(
 				'class="absolute inset-x-0 top-1/2 h-px origin-left bg-muted',
 				at,
 			);
+
 			expect(strike, bank).toBeGreaterThan(at);
 			expect(evening.indexOf(name, strike), name).toBeGreaterThan(strike);
 		}
+
 		expect(evening.match(/Your bank wrote /g)?.length).toBe(3);
 		expect(evening.match(/; Tally reads it as /g)?.length).toBe(3);
+
 		for (const fact of [
 			"$2,450 every other Friday, from Acme Corp",
 			"8 that come back every month, about $2,062",
@@ -2746,10 +2989,12 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 
 	it("opens Plaid on Home over the dimmed Home, with a plain placeholder for Plaid's screens and no Plaid design in it", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const plaid = picture(
 			section(html),
 			"Option A, Plaid opened on Home, over the dimmed Home",
 		);
+
 		expect(plaid).toContain("Let Tally read first.");
 		expect(plaid).toContain("bg-ink/30");
 		expect(plaid).toContain("Plaid&#39;s own screens");
@@ -2767,10 +3012,12 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 
 	it("draws a minute later with the first month in: lines 1 to 4 with three found and their proofs, line 2 still waiting, and nothing from line 5 on", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const minute = picture(
 			section(html),
 			"Option A, a minute later, with the first month in",
 		);
+
 		expect(minute).toContain("Reading Chase");
 		expect(minute).toContain(
 			"142 transactions in so far, from Sep 14 to Oct 13.",
@@ -2779,6 +3026,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		expect(minute.match(/Your bank wrote /g)?.length).toBe(3);
 		expect(minute).toContain("Once all 90 days are in");
 		expect(minute.match(/Not done yet/g)?.length).toBe(1);
+
 		// Lines 5 and 6, Your part and Linked Chase wait for the evening's scrolled picture.
 		for (const later of [
 			"Sort your spending",
@@ -2796,6 +3044,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 		const evening = picture(chunk, "Option A, that evening");
+
 		for (const words of [
 			"Your last 90 days",
 			"All 412 are in, from Jul 16 to Oct 13.",
@@ -2804,6 +3053,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		]) {
 			expect(evening, words).toContain(words);
 		}
+
 		// The evening picture ends after line 4, so it has no line 5, line 6 or Your part.
 		for (const later of [
 			"Sort your spending",
@@ -2813,10 +3063,12 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		]) {
 			expect(evening, later).not.toContain(later);
 		}
+
 		const rest = picture(
 			chunk,
 			"Option A, that evening, scrolled: the rest, and your part",
 		);
+
 		expect(rest).toContain("Sort your spending");
 		expect(rest).toContain("50 of 412 sorted so far. The rest tonight.");
 		expect(rest).toContain("Write your first budget");
@@ -2826,11 +3078,14 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 
 	it("replays Option A over 8 seconds: the headline and status swap at 45%, and lines 1 to 4 turn found as the bank's lines arrive", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const replay = picture(
 			section(html),
 			"Option A, replay: Home fills itself in as the lines arrive",
 		);
+
 		expect(replay).toContain("replay");
+
 		// The headline swaps from Reading Chase to Your last 90 days; the status swaps three times, ending on the evening's words.
 		for (const words of [
 			"Reading Chase",
@@ -2841,11 +3096,13 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		]) {
 			expect(replay, words).toContain(words);
 		}
+
 		expect(replay.match(/proposal-first-title-first/g)?.length).toBe(1);
 		expect(replay.match(/proposal-first-title-last/g)?.length).toBe(1);
 		// Four lines turn found (1, 3, 4 and then 2), each with its promise leaving; the three struck lines are the three bank lines.
 		expect(replay.match(/proposal-first-promise/g)?.length).toBe(4);
 		expect(replay.match(/proposal-first-strike/g)?.length).toBe(3);
+
 		// Lines 1 to 4 only: no line 5 or 6, no sub, and no Your part.
 		for (const later of [
 			"Sort your spending",
@@ -2863,10 +3120,12 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 
 	it("hides each bank line until its line turns found, and gives each line its own keyframes so each turns at its own point in the loop", async () => {
 		const { html } = await get("/design-system/proposals");
+
 		const replay = picture(
 			section(html),
 			"Option A, replay: Home fills itself in as the lines arrive",
 		);
+
 		// The bank's own line fades in with the fact, so no promise shows a bank line under it.
 		for (const bank of [
 			"ACME CORP PAYROLL PPD ID 4432",
@@ -2878,6 +3137,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			const open = replay.lastIndexOf("<p ", at);
 			expect(replay.slice(open, at), bank).toContain("proposal-first-fact");
 		}
+
 		// Lines 2, 3 and 4 name their own keyframes through their step classes, and each name is declared in app.css.
 		for (const step of [
 			"proposal-first-second-round",
@@ -2886,10 +3146,13 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		]) {
 			expect(replay, step).toContain(step);
 		}
+
 		const names = [
 			...css.matchAll(/--kf-[a-z]+: (replay-first-[a-z0-9-]+);/g),
 		].map((m) => m[1] ?? "");
+
 		expect(names).toHaveLength(15);
+
 		for (const name of names) {
 			expect(css, name).toContain(`@keyframes ${name} {`);
 		}
@@ -2898,6 +3161,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("drops the old drawing's entry labels, headings and struck lines from Option A", async () => {
 		const { html } = await get("/design-system/proposals");
 		const a = option(section(html), OPTIONS[0] ?? "");
+
 		for (const gone of [
 			">Paid<",
 			">Comes back every month<",
@@ -2926,32 +3190,40 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 // P125, round E (#95): the stroke list, the fixes to C and D, and option E (proposal only: nothing in the app changes).
 describe("GET /design-system/proposals, P125 round E (the stroke list, C and D fixed, option E)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
+
 	const section = (html: string) => {
 		const start = html.indexOf('<section id="p125-first-week"');
 		expect(start).toBeGreaterThan(-1);
 		const end = html.indexOf('<section aria-labelledby="polish4-title"', start);
 		expect(end).toBeGreaterThan(start);
+
 		return html.slice(start, end);
 	};
+
 	// One labelled phone picture: from its label to the next picture's.
 	const picture = (chunk: string, label: string) => {
 		const at = chunk.indexOf(`role="img" aria-label="${label}, on a phone"`);
 		expect(at, label).toBeGreaterThan(-1);
 		const next = chunk.indexOf('role="img" aria-label="', at + 1);
+
 		return chunk.slice(at, next === -1 ? undefined : next);
 	};
+
 	// One option: from its heading to the next option's heading.
 	const option = (chunk: string, name: string) => {
 		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
 		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
 		expect(at, name).toBeDefined();
 		const next = heads.find((i) => i > (at ?? 0));
+
 		return chunk.slice(at, next);
 	};
+
 	// The notebook's own strokes (its tally lines), not the list's glyphs: their coordinates are the notebook's.
 	const notebookStrokes = (s: string) =>
 		s.match(/<line x1="(41|46|53|60|67)" [^>]*stroke-(ink|muted)/g)?.length ??
 		0;
+
 	// The list's glyphs that are not done yet: a dashed stroke.
 	const dashedGlyphs = (s: string) =>
 		s.match(/stroke-dasharray="3 3"/g)?.length ?? 0;
@@ -2964,10 +3236,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(dashedGlyphs(welcome)).toBe(5);
 		expect(welcome).toContain("Link your bank");
 		expect(welcome).toContain("Next");
+
 		const evening = picture(
 			chunk,
 			"Option C, that evening, one stroke in pencil",
 		);
+
 		expect(evening).toContain("Your first tally · 1 of 5");
 		expect(evening).toContain("Chase, linked");
 		expect(evening).toContain('<span class="sr-only">, done</span>');
@@ -2977,10 +3251,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 
 	it("draws C's bills step as its own picture: three strokes, step four Next, and the eight possible bills", async () => {
 		const chunk = section(await drawn());
+
 		const bills = picture(
 			chunk,
 			"Option C, the bills step, three strokes in pencil",
 		);
+
 		expect(bills).toContain(
 			"Three. Tally found 8 charges that come back every month. Keep the real ones and that&#39;s four.",
 		);
@@ -3014,20 +3290,24 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 
 	it("shows Your first tally · 2 of 5 on the Home behind the budget walk", async () => {
 		const chunk = section(await drawn());
+
 		const walk = picture(
 			chunk,
 			"Option C, the budget walk, two strokes in pencil",
 		);
+
 		expect(walk).toContain("Your first tally · 2 of 5");
 		expect(walk).toContain("Budget 1 of 12");
 	});
 
 	it("says where D's Groceries suggestion comes from, and asks a category with no history a question of its own", async () => {
 		const chunk = section(await drawn());
+
 		const question = picture(
 			chunk,
 			"Option D, a question page, the suggested amount in pencil",
 		);
+
 		expect(question).toContain(
 			"Your bank shows Groceries spent $610 in August and $674 in September.",
 		);
@@ -3038,10 +3318,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(question).toContain("Not now");
 		expect(question).toContain("4 of 14");
 		expect(question).not.toContain(">Chase · 412 lines");
+
 		const none = picture(
 			chunk,
 			"Option D, a category with no history, a blank amount",
 		);
+
 		expect(none).toContain("13 of 14");
 		expect(none).toContain(
 			"Your bank shows nothing for Date Night in August or September.",
@@ -3058,10 +3340,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 
 	it("tells D's next morning that the questions come from the last 90 days, and that the pay, the bills and the budgets come next", async () => {
 		const chunk = section(await drawn());
+
 		const morning = picture(
 			chunk,
 			"Option D, next morning, with the amount a pencil blank",
 		);
+
 		expect(morning).toContain(
 			"Tally read your last 90 days from Chase and sorted 362 overnight. It has 14 questions for you, and Safe to spend is written in at the end.",
 		);
@@ -3073,17 +3357,21 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 	it("draws option E's eight pictures and its replay, each with its words", async () => {
 		const chunk = section(await drawn());
 		const e = option(chunk, "Option E · The notebook, one question at a time");
+
 		const phones = [
 			...e.matchAll(/role="img" aria-label="([^"]*), on a phone"/g),
 		].map((m) => m[1] ?? "");
+
 		expect(phones).toHaveLength(9);
 		expect(
 			phones.filter((p) => p.toLowerCase().includes("replay")),
 		).toHaveLength(1);
+
 		const before = picture(
 			chunk,
 			"Option E, before a bank, five strokes in pencil",
 		);
+
 		expect(before).toContain("Five strokes, and you&#39;re set up.");
 		expect(before).toContain("Link a bank");
 		expect(before).toContain(
@@ -3099,10 +3387,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(evening).toContain("Nothing for you to do until then.");
 		expect(evening.match(/Tomorrow morning/g)?.length).toBe(3);
 		expect(notebookStrokes(evening)).toBe(1);
+
 		const morning = picture(
 			chunk,
 			"Option E, next morning, three things to check",
 		);
+
 		expect(morning).toContain(
 			"Tally sorted 362 overnight. Three things to check, and Safe to spend is written in at the end.",
 		);
@@ -3119,10 +3409,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(pay).toContain("Moves between your accounts · 6 left out");
 		expect(pay).toContain("1 of 5");
 		expect(notebookStrokes(pay)).toBe(1);
+
 		const budgets = picture(
 			chunk,
 			"Option E, your budgets, keep all or one at a time",
 		);
+
 		expect(budgets).toContain("Keep all 12 budgets, $4,050 a month?");
 		expect(budgets).toContain("Keep all 12");
 		expect(budgets).toContain("One at a time");
@@ -3133,9 +3425,11 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(budgets).toContain("Bills · 8 kept, about $2,062 a month");
 		expect(budgets).toContain("7 more · $1,120 a month");
 		expect(budgets).toContain("Aug $610 · Sep $674");
+
 		for (const tag of ["$650", "$320", "$180", "$1,600"]) {
 			expect(budgets, tag).toContain(tag);
 		}
+
 		expect(budgets).toContain("3 of 5");
 		expect(notebookStrokes(budgets)).toBe(3);
 		const one = picture(chunk, "Option E, one at a time, Groceries");
@@ -3159,10 +3453,12 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 			"From tomorrow this list goes, and Home is just Home.",
 		);
 		expect(notebookStrokes(thursday)).toBe(5);
+
 		const replay = picture(
 			chunk,
 			"Option E, replay: the bills question is answered, its line writes in, and its stroke inks in the notebook",
 		);
+
 		// The replay is one phone: the notebook at size-20 beside the headline, its counter going from 2 of 5 to 3 of 5.
 		expect(replay).toContain("Your first page");
 		expect(replay).toContain("size-20");
@@ -3180,6 +3476,7 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(replay).toContain("Keep these 8 as bills?");
 		expect(replay).toContain("Keep these 8");
 		expect(replay).toContain("Choose which");
+
 		// Each moving part is a replay class of its own, and the answer's stroke is drawn, not a stroke-after delay.
 		for (const cls of [
 			"proposal-first-answer",
@@ -3191,6 +3488,7 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		]) {
 			expect(replay, cls).toContain(cls);
 		}
+
 		expect(replay).not.toContain("proposal-first-stroke-after");
 		expect(replay).not.toContain("proposal-first-cross");
 	});
@@ -3221,21 +3519,26 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 	const drawn = async () => (await get("/design-system/proposals")).html;
 	// Each option's chunk, from its heading to the next (the first chunk is the note above the first option).
 	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+
 	// Each picture under an option, from its label on, up to the next picture's label.
 	const pictures = (chunk: string) =>
 		chunk.split('role="img" aria-label="').slice(1);
+
 	const captions = (chunk: string) =>
 		[...chunk.matchAll(/<figcaption[^>]*>([^<]*)<\/figcaption>/g)].map(
 			(m) => m[1] ?? "",
 		);
+
 	const AMOUNTS = ["$9,999", "−$9,999"];
 	const WIDTHS = [320, 360, 390];
+
 	// Tailwind's spacing step is 4 px: pr-16 is 64 px, pr-4 is 16 px, pr-2 is 8 px.
 	const ROOM: Record<number, string> = {
 		320: "pr-16",
 		360: "pr-4",
 		390: "pr-2",
 	};
+
 	const ROOM_PX: Record<number, number> = { 320: 64, 360: 16, 390: 8 };
 	// Option A's drawing shows from this frame width up: decision 116's 390 px edge for amounts of 7 characters or fewer.
 	const N = 390;
@@ -3297,9 +3600,11 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		expect(list[1]).toContain(`Option A · No drawing below ${N} px`);
 		expect(list[2]).toContain("Option B · A smaller drawing on phones");
 		expect(list[3]).toContain("Option C · The drawing under the amount");
+
 		const expected = WIDTHS.flatMap((w) =>
 			AMOUNTS.map((a) => `${w} px wide, with ${a}, on a phone`),
 		);
+
 		for (const option of list) {
 			const labels = pictures(option).map((p) => p.slice(0, p.indexOf('"')));
 			// A label is "<option name>, <width> px wide, with <amount>, on a phone"; names have no commas.
@@ -3318,12 +3623,14 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 			expect(frame[1]).toContain(`w-[${width}px]`);
 			expect(frame[1]).toContain("@container");
 		});
+
 		// Every frame shares one height: the tallest picture's content, measured in Chrome. Not the 420 px of
 		// the first draft, nor the 442 px before How this works, nor the 498 px before the Start here link,
 		// nor the 522 px with How this works under the status.
 		const heights = new Set(
 			frames.map((frame) => frame[1]?.match(/h-\[\d+px\]/)?.[0]),
 		);
+
 		expect(heights.size).toBe(1);
 		expect(heights.has("h-[420px]")).toBe(false);
 		expect(heights.has("h-[442px]")).toBe(false);
@@ -3334,9 +3641,11 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 
 	it("gives each width room for its widest spill, and each row's two frames fit the card", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
+
 		const wrappers = [
 			...chunk.matchAll(/<div class="([^"]*)"><div role="img"/g),
 		];
+
 		expect(wrappers.length).toBe(24);
 		wrappers.forEach(([, cls = ""], i) => {
 			const width = WIDTHS[Math.floor(i / 2) % 3] ?? 0;
@@ -3347,24 +3656,29 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 			4,
 		);
 		expect(chunk).not.toContain("grid-rows-2");
+
 		const cards = [
 			...chunk.matchAll(
 				/class="flex min-w-0 max-w-full flex-col gap-4 w-\[(\d+)px\]"/g,
 			),
 		];
+
 		expect(cards.length).toBe(4);
 		// The widest row is 390 px with 8 px of room, beside itself with a 16 px gap: 2 × 398 + 16 = 812 px.
 		const widest = Math.max(...WIDTHS.map((w) => w + (ROOM_PX[w] ?? 0)));
 		expect(2 * widest + 16).toBeLessThanOrEqual(824);
+
 		for (const [, width = "0"] of cards)
 			expect(Number(width)).toBeGreaterThanOrEqual(822);
 	});
 
 	it("keeps the minus with its number: every amount is one nowrap run", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
+
 		const amounts = [
 			...chunk.matchAll(/<p class="[^"]*whitespace-nowrap[^"]*">([^<]*)<\/p>/g),
 		].map((m) => m[1]);
+
 		expect(amounts.length).toBe(24);
 		expect(amounts.filter((a) => a === "−$9,999").length).toBe(12);
 		expect(amounts.filter((a) => a === "$9,999").length).toBe(12);
@@ -3406,6 +3720,7 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const startHere = 'href="/how-it-works#start-here"';
 		expect(chunk.match(/Demo data\. Nothing here is real\./g)?.length).toBe(24);
 		expect(chunk.match(/href="\/how-it-works#start-here"/g)?.length).toBe(24);
+
 		for (const picture of pictures(chunk)) {
 			const at = picture.indexOf(banner);
 			expect(at).toBeGreaterThan(-1);
@@ -3438,6 +3753,7 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const [, , , c = ""] = options(chunk);
 		const pictureList = pictures(c);
 		expect(pictureList.length).toBe(6);
+
 		for (const picture of pictureList) {
 			const amount = picture.search(/>−?\$9,999</);
 			const under = picture.indexOf('data-drawing="under"');
@@ -3465,12 +3781,15 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 
 	it("marks exactly one option Recommended, and all six of its pictures say Fits", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
+
 		const recommended = options(chunk).filter((o) =>
 			o.includes(">Recommended<"),
 		);
+
 		expect(recommended.length).toBe(1);
 		const own = captions(recommended[0] ?? "");
 		expect(own).toHaveLength(6);
+
 		for (const caption of own) expect(caption.endsWith(": Fits")).toBe(true);
 	});
 
@@ -3478,6 +3797,7 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const chunk = block(await drawn(), "p127-safe-small");
 		const all = captions(chunk);
 		expect(all.length).toBe(24);
+
 		for (const caption of all)
 			expect(caption).toMatch(/: (Fits|Spills \d+ px)$/);
 		// Each caption sits under its picture: the frame and its wrapper close, then the caption opens.
@@ -3491,28 +3811,34 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	const count = (text: string, part: string) => text.split(part).length - 1;
 	// Each option's chunk, from its heading to the next (the first chunk is the note above the first option).
 	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+
 	// Each status group under a picture: a div with the class mt-4, up to the end of its list.
 	const groupsOf = (chunk: string) =>
 		chunk
 			.split('<div class="mt-4">')
 			.slice(1)
 			.map((group) => group.slice(0, group.indexOf("</ul>") + "</ul>".length));
+
 	const NAMES = [
 		"Reference · Today on main",
 		"Option A · Each heading says what it counts",
 		"Option B · Paid counts its rows",
 	];
+
 	const UPCOMING_LINE = "Includes Daycare&#39;s Fridays on Oct 23 and 30";
 	const PAID_LINE = "Includes Daycare&#39;s Fridays on Oct 2 and 9";
 
 	it("sits straight after the follow-ups' Picked section, and before P128, titled and dated as the brief asks", async () => {
 		const html = await drawn();
+
 		const open = html.indexOf(
 			'<section aria-labelledby="followups-picks-title" class="mt-12">',
 		);
+
 		const start = html.indexOf(
 			'<section aria-labelledby="p136-title" class="mt-12">',
 		);
+
 		expect(open).toBeGreaterThan(-1);
 		expect(start).toBeGreaterThan(open);
 		// The follow-ups' section holds only its two drawings (P137 and P138, #644 and #645); nothing else sits before P136.
@@ -3543,11 +3869,14 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const list = options(chunk);
 		expect(list.length).toBe(3);
+
 		for (const [i, name] of NAMES.entries()) {
 			expect(list[i]).toContain(name);
+
 			const labels = [
 				...(list[i] ?? "").matchAll(/role="img" aria-label="([^"]*)"/g),
 			].map((m) => m[1]);
+
 			expect(labels).toEqual([
 				`${name} at 390 px, on a phone`,
 				`${name} at 1280 px, on desktop`,
@@ -3557,6 +3886,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("draws Bills from its Due heading to Paid this month with the demo's rows, and lists only Daycare's next Friday", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
+
 		for (const option of options(chunk)) {
 			// Daycare's Oct 16 Friday is the row; its Oct 23 and 30 Fridays, and its paid Oct 2 and 9, are not rows.
 			expect(count(option, ">Daycare</span>")).toBe(2);
@@ -3574,6 +3904,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		const [today = "", a = "", b = ""] = options(chunk);
 		expect(count(today, "$480.00 this month")).toBe(2);
 		expect(count(today, UPCOMING_LINE)).toBe(0);
+
 		for (const option of [a, b]) {
 			expect(count(option, "$480.00 this month")).toBe(2);
 			expect(count(option, UPCOMING_LINE)).toBe(2);
@@ -3583,11 +3914,13 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	it("reads Paid this month as $16.98 today and in B, and as $496.98 with its line in A, in both pictures", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const [today = "", a = "", b = ""] = options(chunk);
+
 		for (const option of [today, b]) {
 			expect(count(option, "$16.98")).toBe(2);
 			expect(count(option, "$496.98")).toBe(0);
 			expect(count(option, PAID_LINE)).toBe(0);
 		}
+
 		expect(count(a, "$496.98")).toBe(2);
 		expect(count(a, "$16.98")).toBe(0);
 		expect(count(a, PAID_LINE)).toBe(2);
@@ -3596,12 +3929,14 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	it("sets each line under its heading: A's Upcoming and Paid lines come before their rows", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const [, a = ""] = options(chunk);
+
 		for (const [heading, line] of [
 			["Upcoming</h2>", UPCOMING_LINE],
 			["Paid this month</h2>", PAID_LINE],
 		] as const) {
 			const groups = groupsOf(a ?? "").filter((g) => g.includes(heading));
 			expect(groups.length).toBe(2);
+
 			for (const group of groups)
 				expect(group.indexOf(heading)).toBeLessThan(group.indexOf(line));
 		}
@@ -3610,18 +3945,24 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	it("draws B's Paid this month with its rows and no line, and keeps Upcoming's line", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const [, , b = ""] = options(chunk);
+
 		const paid = groupsOf(b ?? "").filter((g) =>
 			g.includes("Paid this month</h2>"),
 		);
+
 		expect(paid.length).toBe(2);
+
 		for (const group of paid) {
 			expect(group).toContain("$16.98");
 			expect(group).not.toContain("Includes");
 		}
+
 		const upcoming = groupsOf(b ?? "").filter((g) =>
 			g.includes("Upcoming</h2>"),
 		);
+
 		expect(upcoming.length).toBe(2);
+
 		for (const group of upcoming) expect(group).toContain(UPCOMING_LINE);
 	});
 
@@ -3660,10 +4001,13 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	it("gives option A the Recommended and Picked pills together, and B and today's reference neither (decision 122)", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const [today = "", a = "", b = ""] = options(chunk);
+
 		const heading = (option: string) =>
 			option.slice(0, option.indexOf("</h4>"));
+
 		expect(heading(a)).toContain(">Recommended<");
 		expect(heading(a)).toContain(">Picked<");
+
 		for (const option of [today, b]) {
 			expect(heading(option)).not.toContain(">Recommended<");
 			expect(heading(option)).not.toContain(">Picked<");
@@ -3672,16 +4016,21 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("shows Bills as the current page in every picture: the phone's tab bar and the desktop sidebar", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
+
 		for (const option of options(chunk)) {
 			expect(option).toContain('<nav class="absolute inset-x-0 bottom-0');
+
 			const bar = option.slice(
 				option.indexOf('<nav class="absolute inset-x-0 bottom-0'),
 				option.indexOf("</nav>", option.indexOf('<nav class="absolute')),
 			);
+
 			const tabs = bar.split(/<li[ >]/).slice(1);
+
 			const current = tabs.filter((tab) =>
 				tab.slice(0, tab.indexOf(">")).includes("text-accent"),
 			);
+
 			expect(current.length).toBe(1);
 			expect(current[0]).toContain('data-icon="bills"');
 			expect(option).toMatch(/<a href="\/bills" class="[^"]*text-accent/);
@@ -3692,14 +4041,18 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	it("draws each bill with the demo's category icon and colour, as the seed names them", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const categories = buildSeed("2026-10-15").categories;
+
 		const look = (name: string) => {
 			const category = categories.find((c) => c.name === name);
 			expect(category, name).toBeDefined();
+
 			return category;
 		};
+
 		const household = look("Household");
 		const childcare = look("Childcare");
 		const kids = look("Kids");
+
 		const expected: [string, { icon: string; color: string } | undefined][] = [
 			["Internet", household],
 			["Streaming", household],
@@ -3707,13 +4060,16 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 			["Daycare", childcare],
 			["Soccer league", kids],
 		];
+
 		for (const option of options(chunk)) {
 			for (const [name, category] of expected) {
 				const rows = option
 					.split(/<li[ >]/)
 					.filter((li) => li.includes(`>${name}</span>`));
+
 				// One row per picture: the phone's and the desktop's.
 				expect(rows.length, name).toBe(2);
+
 				for (const row of rows) {
 					expect(row, name).toContain(`data-icon="${category?.icon}"`);
 					expect(row, name).toContain(`text-${category?.color}`);
@@ -3724,6 +4080,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("links each drawn bill to its demo bill, by the id src/demo/reset.ts gives it", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
+
 		const demo: [string, number][] = [
 			["Internet", 5],
 			["Daycare", 8],
@@ -3731,18 +4088,22 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 			["Streaming", 1],
 			["Water", 2],
 		];
+
 		for (const [name, id] of demo) {
 			expect(resetSource, name).toMatch(
 				new RegExp(`\\[\\s*${id},\\s*"${name}"`),
 			);
 		}
+
 		for (const option of options(chunk)) {
 			for (const [name, id] of demo) {
 				const rows = option
 					.split(/<li[ >]/)
 					.filter((li) => li.includes(`>${name}</span>`));
+
 				// One row per picture: the phone's and the desktop's.
 				expect(rows.length, name).toBe(2);
+
 				for (const row of rows)
 					expect(row, name).toContain(`href="/bills/${id}"`);
 			}
@@ -3751,12 +4112,14 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("draws the demo's Planned group between Upcoming and Paid this month in every picture, with its two plans", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
+
 		for (const option of options(chunk)) {
 			expect(count(option, ">Car registration<")).toBe(2);
 			expect(count(option, ">Lawn service<")).toBe(2);
 			expect(count(option, "$90.00 this month")).toBe(2);
 			expect(count(option, "Set aside for September")).toBe(2);
 			expect(count(option, "Set aside for October")).toBe(2);
+
 			for (const picture of option.split('role="img" aria-label="').slice(1)) {
 				const upcoming = picture.indexOf("Upcoming</h2>");
 				const planned = picture.indexOf("Planned</h2>");
@@ -3765,10 +4128,13 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 				expect(upcoming).toBeLessThan(planned);
 				expect(planned).toBeLessThan(paid);
 			}
+
 			const planGroups = groupsOf(option).filter((g) =>
 				g.includes("Planned</h2>"),
 			);
+
 			expect(planGroups.length).toBe(2);
+
 			for (const group of planGroups) {
 				expect(group).toContain(">Car registration<");
 				expect(group).toContain(">Lawn service<");
@@ -3778,10 +4144,12 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("lists P136 in the decisions file as decision 122, after decision 119, with option A's words", () => {
 		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
+
 		const row =
 			rows.find((line) =>
 				line.startsWith("| 122 | 2026-10-15 | The owner's pick on P136 (#602)"),
 			) ?? "";
+
 		expect(row).not.toBe("");
 		expect(rows.indexOf(row)).toBeGreaterThan(
 			rows.findIndex((line) => line.startsWith("| 119 | ")),
@@ -3804,41 +4172,51 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 // P128 (#72 and #516): where the keyboard shortcuts list lives, drawn for the owner's sign-off. Proposal only: nothing in the app changes.
 describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
+
 	const section = (html: string) => {
 		const start = html.indexOf('<section id="p128-keys"');
 		expect(start).toBeGreaterThan(-1);
 		const end = html.indexOf('<section aria-labelledby="p129-title"', start);
 		expect(end).toBeGreaterThan(start);
+
 		return html.slice(start, end);
 	};
+
 	// One option: from its heading to the next option's heading (the last runs to the section's end).
 	const option = (chunk: string, name: string) => {
 		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
 		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
 		expect(at, name).toBeDefined();
 		const next = heads.find((i) => i > (at ?? 0));
+
 		return chunk.slice(at, next);
 	};
+
 	// The ledger row that holds some words: from the row's opening tag to its end.
 	const rowOf = (chunk: string, words: string) => {
 		const at = chunk.indexOf(words);
 		expect(at, words).toBeGreaterThan(-1);
+
 		return chunk.slice(
 			chunk.lastIndexOf("<li", at),
 			chunk.indexOf("</li>", at),
 		);
 	};
+
 	// One picture, from its label to the end of its figure, so no other picture or caption comes in.
 	const pictureOf = (chunk: string, label: string) => {
 		const at = chunk.indexOf(`role="img" aria-label="${label}"`);
 		expect(at, label).toBeGreaterThan(-1);
+
 		return chunk.slice(at, chunk.indexOf("</figure>", at));
 	};
+
 	// Every disclosure that holds the keys: its opening tag (attributes only) and its summary.
 	const keyDisclosures = (chunk: string) =>
 		[...chunk.matchAll(/<details([^>]*)><summary[\s\S]*?<\/summary>/g)].filter(
 			(m) => m[0].includes("Keyboard shortcuts"),
 		);
+
 	const isOpen = (attrs: string) => /\sopen\b/.test(attrs);
 
 	it("sits before P129 and above P127 and P126 (decisions 118, 117, 116, 115), as the picked proposal with its heading and line", async () => {
@@ -3879,9 +4257,11 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 
 	it("draws three options, C recommended and picked, A and B with neither, each with a note, a trade-off and a why", async () => {
 		const chunk = section(await drawn());
+
 		const names = [...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map(
 			(m) => (m[1] ?? "").split("<")[0],
 		);
+
 		expect(names).toEqual([
 			"A · A sidebar line that opens in place",
 			"B · At the foot of the page",
@@ -3892,6 +4272,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		const c = option(chunk, "C · A sheet");
 		expect(c).toContain(">Recommended<");
 		expect(c).toContain(">Picked<");
+
 		for (const name of [
 			"A · A sidebar line that opens in place",
 			"B · At the foot of the page",
@@ -3900,18 +4281,22 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			expect(opt, name).not.toContain(">Recommended<");
 			expect(opt, name).not.toContain(">Picked<");
 		}
+
 		expect(chunk.match(/Trade-off: /g)?.length).toBe(3);
 		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(3);
 	});
 
 	it("draws the one open More, shared by every option, above the options, with the whole ledger", async () => {
 		const chunk = section(await drawn());
+
 		const lead = chunk.indexOf(
 			'<p class="max-w-prose text-sm">In every option, below lg (a phone, a narrow window or a tablet with a keyboard), More&#39;s contents end in a Keyboard shortcuts row: the same details, opening the same ledger.</p>',
 		);
+
 		const at = chunk.indexOf(
 			'role="img" aria-label="All options, More with Keyboard shortcuts open, on a phone"',
 		);
+
 		const first = chunk.indexOf("<h4 ");
 		expect(lead).toBeGreaterThan(chunk.indexOf("Already fixed by the spec"));
 		expect(at).toBeGreaterThan(lead);
@@ -3923,10 +4308,12 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		expect(shared).toContain(
 			"Keys don&#39;t work while you&#39;re typing in a field. In a sheet, Escape closes it.",
 		);
+
 		// Exactly one More picture in the section is open, and it is this one.
 		const more = [
 			...chunk.matchAll(/role="img" aria-label="([^"]*More[^"]*)"/g),
 		].map((m) => m[1] ?? "");
+
 		expect(
 			more.filter((label) =>
 				/<details class="group"[^>]*\sopen\b/.test(pictureOf(chunk, label)),
@@ -3942,6 +4329,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		expect(a.match(PICTURE)?.length).toBe(3);
 		expect(b.match(PICTURE)?.length).toBe(3);
 		expect(c.match(PICTURE)?.length).toBe(4);
+
 		// Home's pictures draw no How this works link: the foot pictures carry it, Home's status does not.
 		for (const label of [
 			"A, the sidebar closed, on desktop",
@@ -3953,6 +4341,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 				'aria-label="How this works: the budget"',
 			);
 		}
+
 		expect(a).toContain(
 			'role="img" aria-label="A, the sidebar closed, on desktop"',
 		);
@@ -3980,15 +4369,18 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 
 	it("draws More below lg in each option: Accounts, Settings, How Tally works, then Keyboard shortcuts closed, with the Feedback pill in the top line", async () => {
 		const chunk = section(await drawn());
+
 		for (const name of ["A", "B", "C"]) {
 			const more = pictureOf(chunk, `${name}, More, on a phone`);
 			expect(more, name).toContain(">More</h1>");
+
 			const at = [
 				"Accounts",
 				"Settings",
 				"How Tally works",
 				"Keyboard shortcuts",
 			].map((words) => more.indexOf(words));
+
 			expect(
 				at.every((i) => i > -1),
 				name,
@@ -4006,6 +4398,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 
 	it("draws the same ledger of keys in each open list, with its words, and no to-confirm tags or needs-your-yes line", async () => {
 		const chunk = section(await drawn());
+
 		for (const name of ["A · A sidebar", "B · At the foot", "C · A sheet"]) {
 			const opt = option(chunk, name);
 			expect(opt, name).not.toContain("to confirm");
@@ -4033,6 +4426,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			summaries.filter((s) => s.includes("Keyboard shortcuts")).length,
 		).toBe(9);
 		expect(found.length).toBe(9);
+
 		for (const m of found) {
 			expect(m[1], m[0]).toContain('class="group"');
 			expect(m[0], m[0]).toContain("m9 18 6-6-6-6");
@@ -4040,22 +4434,28 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			expect(m[0], m[0]).toContain("list-none");
 			expect(m[0], m[0]).toContain("[&amp;::-webkit-details-marker]:hidden");
 		}
+
 		// Open: A's sidebar, B's foot and the shared More.
 		expect(found.filter((m) => isOpen(m[1] ?? "")).length).toBe(3);
 	});
 
 	it("draws the full sidebar in every desktop picture, with Keyboard shortcuts in the sidebar only in A's", async () => {
 		const chunk = section(await drawn());
+
 		const desktop = [
 			...chunk.matchAll(/role="img" aria-label="([^"]*, on desktop)"/g),
 		].map((m) => m[1] ?? "");
+
 		expect(desktop.length).toBe(6);
+
 		for (const label of desktop) {
 			const frame = pictureOf(chunk, label);
+
 			const aside = frame.slice(
 				frame.indexOf("<aside"),
 				frame.indexOf("</aside>"),
 			);
+
 			expect(aside, label).toContain("How Tally works");
 			expect(aside, label).toContain("Feedback");
 			expect(aside.includes("Keyboard shortcuts"), label).toBe(
@@ -4066,6 +4466,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 
 	it("draws B's foot and C's fallback foot with How this works as the short-ruled link", async () => {
 		const chunk = section(await drawn());
+
 		for (const label of [
 			"B, the foot closed, on desktop",
 			"B, the foot open, on desktop",
@@ -4092,9 +4493,11 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		const body = sheet.match(/<div class="([^"]*\boverflow-y-auto\b[^"]*)"/);
 		expect(body?.[1] ?? "").toMatch(/\bp-5\b/);
 		expect(body?.[1] ?? "").not.toMatch(/\bp-6\b/);
+
 		const ledgerEnd = sheet.indexOf(
 			"Keys don&#39;t work while you&#39;re typing in a field.",
 		);
+
 		expect(ledgerEnd).toBeGreaterThan(-1);
 		const footer = sheet.indexOf("border-t border-rule", ledgerEnd);
 		expect(footer).toBeGreaterThan(ledgerEnd);
@@ -4115,11 +4518,13 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			"Over Home on a phone: the sheet",
 		);
 		const sheet = pictureOf(chunk, "C, the sheet open, on a phone");
+
 		// The panel: the phone sheet's rounded top corners, 754px at most (the BottomSheet's max height on an 844px
 		// screen), and no rule on its edge. It has no side corner, since it is drawn from the screen's foot.
 		const panel = sheet.match(
 			/<div class="([^"]*\binset-x-0 bottom-0\b[^"]*)"/,
 		);
+
 		expect(panel, "panel").not.toBeNull();
 		expect(panel?.[1] ?? "").toMatch(/\brounded-t-sheet\b/);
 		expect(panel?.[1] ?? "").toMatch(/\bmax-h-\[754px\]/);
@@ -4133,9 +4538,11 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		// The body keeps BottomSheet's p-5, and the footer sits under the ledger on a rule.
 		const body = sheet.match(/<div class="([^"]*\boverflow-y-auto\b[^"]*)"/);
 		expect(body?.[1] ?? "").toMatch(/\bp-5\b/);
+
 		const ledgerEnd = sheet.indexOf(
 			"Keys don&#39;t work while you&#39;re typing in a field.",
 		);
+
 		expect(ledgerEnd).toBeGreaterThan(-1);
 		const footer = sheet.indexOf("border-t border-rule", ledgerEnd);
 		expect(footer).toBeGreaterThan(ledgerEnd);
@@ -4189,15 +4596,18 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 
 	it("gives every picture frame position, so an absolutely placed child can't escape its clip and widen the page at 390", async () => {
 		const html = await drawn();
+
 		// Opening tags, matched attribute by attribute, so a `>` inside a class can't cut a tag short.
 		const tags = [
 			...html.matchAll(
 				/<([a-z][a-z0-9]*)((?:\s+[a-zA-Z:_-]+(?:="[^"]*")?)*)\s*\/?>/g,
 			),
 		].filter((m) => /\srole="img"/.test(m[2] ?? ""));
+
 		const clipped = tags.filter((m) =>
 			/\sclass="[^"]*\boverflow-hidden\b/.test(m[2] ?? ""),
 		);
+
 		expect(clipped.length).toBeGreaterThan(0);
 		expect(
 			clipped
@@ -4210,14 +4620,17 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 // P129 (#80): the money input, state by state, drawn for the owner's pick. Proposal only: nothing in src/views changes.
 describe("GET /design-system/proposals, P129 (the money input, state by state, #80)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
+
 	// P129's section: from its heading to P127's (Home's budget list behind each sheet holds a section of its own).
 	const section = (html: string) => {
 		const start = html.indexOf('<section aria-labelledby="p129-title"');
 		const end = html.indexOf('<section aria-labelledby="p127-title"');
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
+
 		return html.slice(start, end);
 	};
+
 	// The five states, in order, as each row's label is drawn.
 	const STATES = [
 		"Empty",
@@ -4226,33 +4639,43 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		"At $0: the minus buttons are off",
 		"Error: “six hundred” isn’t an amount",
 	];
+
 	// The state's words as the picture labels spell them.
 	const TAGS = ["empty", "with cents", "equal to last month", "at $0", "error"];
+
 	// One state's row: from its label to the next state's label; the last runs to the fixed behaviours.
 	const row = (chunk: string, i: number) => {
 		const from = chunk.indexOf(`>${STATES[i]}</p>`);
+
 		const to =
 			i < STATES.length - 1
 				? chunk.indexOf(`>${STATES[i + 1]}</p>`)
 				: chunk.indexOf("Fixed with either option");
+
 		expect(from, STATES[i]).toBeGreaterThan(-1);
 		expect(to, STATES[i]).toBeGreaterThan(from);
+
 		return chunk.slice(from, to);
 	};
+
 	// Every picture's label and kind, in drawing order. A phone and a desktop picture can share a label, so the kind is part of the key.
 	const PICTURE_LABEL = /aria-label="([^"]*), on (a phone|desktop)"/g;
+
 	// The phone pictures in a chunk, by label, in drawing order.
 	const labels = (chunk: string) =>
 		[...chunk.matchAll(PICTURE_LABEL)]
 			.filter((m) => m[2] === "a phone")
 			.map((m) => m[1]);
+
 	// One picture's markup, by label and kind: from its label to the next picture of either kind, or to the chunk's end.
 	const picture = (chunk: string, label: string, kind = "a phone") => {
 		const found = [...chunk.matchAll(PICTURE_LABEL)];
 		const at = found.findIndex((m) => m[1] === label && m[2] === kind);
 		expect(at, `${label}, on ${kind}`).toBeGreaterThan(-1);
+
 		return chunk.slice(found[at]?.index ?? 0, found[at + 1]?.index);
 	};
+
 	// The buttons with a data-nudge attribute (− and + and the cent arrows), each with whether the disabled
 	// attribute is on it (Hono writes it as disabled="", and the disabled: class variant has a colon after it).
 	const nudges = (chunk: string) =>
@@ -4262,34 +4685,43 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 				disabled: /\sdisabled(=""|\s|>)/.test(m[0] ?? ""),
 			}),
 		);
+
 	// The whole button that holds `words`.
 	const chipOf = (markup: string, words: string) => {
 		const at = markup.indexOf(words);
 		expect(at, words).toBeGreaterThan(-1);
 		const open = markup.lastIndexOf("<button", at);
+
 		return markup.slice(open, markup.indexOf("</button>", at));
 	};
+
 	// The class of the div that opens just before `words` (a chip row, say).
 	const rowClassBefore = (markup: string, words: string) => {
 		const at = markup.indexOf(words);
 		expect(at, words).toBeGreaterThan(-1);
 		const open = markup.lastIndexOf('<div class="', at) + '<div class="'.length;
+
 		return markup.slice(open, markup.indexOf('"', open));
 	};
+
 	// The class of the error line under the box.
 	const errorClass = (markup: string) =>
 		markup.match(/<p [^>]*class="([^"]*)"[^>]*>Enter a dollar amount/)?.[1] ??
 		"";
+
 	// The class tokens of a chip's check: the span that holds the check icon, so its slot's classes show whether it's laid out and when it shows.
 	const checkTokens = (chip: string) =>
 		(chip.match(/<span class="([^"]*)"><svg/)?.[1] ?? "").split(" ");
+
 	const CHECK = "M20 6 9 17l-5-5";
 
 	it("sits after P128 and before P127 (decision 116), titled and dated as the brief asks", async () => {
 		const html = await drawn();
+
 		const start = html.indexOf(
 			'<section aria-labelledby="p129-title" class="mt-12">',
 		);
+
 		expect(start).toBeGreaterThan(-1);
 		expect(start).toBeGreaterThan(html.indexOf('<section id="p128-keys"'));
 		expect(start).toBeLessThan(
@@ -4350,16 +4782,19 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		});
 		expect(labels(chunk)).toHaveLength(15);
 		expect(chunk).not.toContain(", on a phone, on a phone");
+
 		// At 1280, the cents and the equal-to-last-month rows each add Today and A as desktop pictures; the other rows have none.
 		const desk = [...chunk.matchAll(/aria-label="([^"]*), on desktop"/g)].map(
 			(m) => m[1],
 		);
+
 		expect(desk).toEqual([
 			"Today on main, with cents",
 			"Option A, with cents",
 			"Today on main, equal to last month",
 			"Option A, equal to last month",
 		]);
+
 		for (const i of [0, 3, 4]) {
 			expect(row(chunk, i), STATES[i]).not.toContain(", on desktop");
 		}
@@ -4367,12 +4802,15 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 
 	it("draws every phone picture on the 390 by 844 phone, with a backdrop over the whole phone, banner and wordmark included, and the sheet reaching the foot", async () => {
 		const chunk = section(await drawn());
+
 		const phones = STATES.flatMap((_, i) => [
 			`Today on main, ${TAGS[i]}`,
 			`Option A, ${TAGS[i]}`,
 			`Option B, ${TAGS[i]}`,
 		]);
+
 		expect(phones).toHaveLength(15);
+
 		for (const label of phones) {
 			const phone = picture(chunk, label);
 			// The frame is the whole 390 by 844 phone, with its 1px border around it.
@@ -4390,10 +4828,12 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 				phone.indexOf("absolute inset-0 bg-ink/30"),
 				label,
 			).toBeGreaterThan(Math.max(banner, wordmark));
+
 			// One sheet, pinned to the foot and starting 144px down: the wordmark row's 120px, then 24px.
 			const panels = [
 				...phone.matchAll(/class="([^"]*rounded-t-sheet[^"]*)"/g),
 			].map((m) => m[1] ?? "");
+
 			expect(panels, label).toHaveLength(1);
 			expect(panels[0], label).toContain("absolute inset-x-0 bottom-0 top-36 ");
 			// No wrapper that clips the backdrop to the lower part of the phone.
@@ -4404,22 +4844,27 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 
 	it("draws Today and Option A at 1280 as a panel on Home's budget list, with the same bodies as the phone sheets", async () => {
 		const chunk = section(await drawn());
+
 		const cents = picture(
 			row(chunk, 1),
 			"Today on main, with cents",
 			"desktop",
 		);
+
 		const centsA = picture(row(chunk, 1), "Option A, with cents", "desktop");
+
 		const last = picture(
 			row(chunk, 2),
 			"Today on main, equal to last month",
 			"desktop",
 		);
+
 		const lastA = picture(
 			row(chunk, 2),
 			"Option A, equal to last month",
 			"desktop",
 		);
+
 		for (const desk of [cents, centsA, last, lastA]) {
 			// The panel is BottomSheet's right-hand one (its lg: classes), and the page behind it is dimmed.
 			expect(desk).toContain("w-[28rem]");
@@ -4429,6 +4874,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 			expect(desk).toContain("inert");
 			expect(desk).toContain('data-screen="picture"');
 		}
+
 		// Today's desktop pictures are the real money input; A's hold the check and the Round to chip where they belong.
 		expect(cents).toContain("data-money");
 		expect(last).toContain("data-money");
@@ -4444,6 +4890,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		expect(chipOf(lastA, "Last month:")).toContain('aria-pressed="true"');
 		// Each desktop picture has its own ids, so none repeats on the page.
 		const html = await drawn();
+
 		for (const id of [
 			"p129-today-cents-desk",
 			"p129-a-cents-desk",
@@ -4456,8 +4903,10 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 
 	it("draws Today's pictures as the real money input, with its chips, Round to and error as they are", async () => {
 		const chunk = section(await drawn());
+
 		const today = (i: number) =>
 			picture(row(chunk, i), `Today on main, ${TAGS[i]}`);
+
 		// Empty: the muted 0.00 placeholder (decision 117), Round to kept but hidden, and both chips offered.
 		expect(today(0)).toContain("data-money");
 		expect(today(0)).toContain('placeholder="0.00"');
@@ -4482,6 +4931,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		// Error: the words the parser gives sit under the box, and all four steps are off (decision 117).
 		expect(today(4)).toContain('role="alert"');
 		expect(today(4)).toContain("Enter a dollar amount, like 250 or 250.50.");
+
 		for (const nudge of ["100", "1", "-1", "-100"]) {
 			expect(nudges(today(4)).find((n) => n.nudge === nudge)?.disabled).toBe(
 				true,
@@ -4524,6 +4974,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 	it("option A: both chips hold their check's slot, so a chip keeps its width when it's pressed", async () => {
 		const chunk = section(await drawn());
 		const withCents = picture(row(chunk, 1), "Option A, with cents");
+
 		for (const words of ["Last month:", "3-month average:"]) {
 			const tokens = checkTokens(chipOf(withCents, words));
 			expect(tokens, words).toContain("invisible");
@@ -4573,10 +5024,12 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		// B keeps A's other changes: the placeholder, the check and the four steps off.
 		expect(b).toContain('placeholder="0.00"');
 		expect(nudges(error).every((s) => s.disabled)).toBe(true);
+
 		const bLast = chipOf(
 			picture(row(chunk, 2), "Option B, equal to last month"),
 			"Last month:",
 		);
+
 		expect(checkTokens(bLast)).toContain("group-aria-pressed:visible");
 		expect(checkTokens(bLast)).toContain("invisible");
 		expect(checkTokens(bLast)).not.toContain("hidden");
@@ -4591,6 +5044,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		expect(chunk).toContain(
 			"Fixed with either option (keyboard and screen-reader paths)",
 		);
+
 		for (const item of [
 			"When − or ▼ reaches $0 while it has focus, focus moves to its pair instead of being dropped.",
 			"↑ and ↓ in the field are announced.",
@@ -4605,14 +5059,17 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 
 describe("GET /design-system/proposals, the second design audit (#603, #604, #605)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
+
 	// The Picked section (P130 to P133), from its heading to the P134 and P135 section.
 	const pickedSection = (html: string) => {
 		const start = html.indexOf('<section aria-labelledby="audit2-picks-title"');
 		const end = html.indexOf('<section aria-labelledby="audit3-title"');
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
+
 		return html.slice(start, end);
 	};
+
 	// One proposal's block, in the section it is drawn in, from its specimen to the next one in that section.
 	const specimen = (html: string, id: string) => {
 		const body = pickedSection(html);
@@ -4620,17 +5077,22 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(start, id).toBeGreaterThan(-1);
 		// A proposal's pictures may hold real components that draw a section (PlanBand, TrendGroup), so the next proposal is the cut.
 		const next = body.indexOf('<section id="', start + 1);
+
 		return body.slice(start, next < 0 ? undefined : next);
 	};
+
 	// One picture's markup, from its label up to the next picture's label.
 	const picture = (chunk: string, label: string) => {
 		const start = chunk.indexOf(`role="img" aria-label="${label}"`);
 		expect(start, label).toBeGreaterThan(-1);
+
 		const next = chunk
 			.slice(start + 1)
 			.search(/role="img" aria-label="[^"]*, on (?:a phone|desktop)"/);
+
 		return chunk.slice(start, next < 0 ? undefined : start + 1 + next);
 	};
+
 	// Every picture's label in a chunk, in drawing order.
 	const labelsOf = (chunk: string) =>
 		[
@@ -4638,6 +5100,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 				/role="img" aria-label="([^"]*, on (?:a phone|desktop))"/g,
 			),
 		].map((m) => m[1] ?? "");
+
 	const count = (text: string, needle: string) => text.split(needle).length - 1;
 	const PHONE = ", on a phone";
 	const DESK = ", on desktop";
@@ -4646,9 +5109,11 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		const html = await drawn();
 		expect(html).not.toContain('aria-labelledby="audit2-title"');
 		expect(html).not.toContain("Open: the month dots");
+
 		const picked = html.indexOf(
 			'<section aria-labelledby="audit2-picks-title"',
 		);
+
 		const audit = html.indexOf('<section aria-labelledby="audit3-title"');
 		expect(picked).toBeGreaterThan(
 			html.indexOf('<section aria-labelledby="p136-title"'),
@@ -4663,6 +5128,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(html).toContain(
 			'<p class="mt-2 max-w-prose text-muted">Drawn Oct 15. The owner&#39;s picks, marked Picked, are decision 121: P130 A, one Why per page; P131 A, a quiet ledger of months; P132 A, one line names the cause; P133 A, marks in outline.</p>',
 		);
+
 		for (const id of [
 			"p130-why",
 			"p131-bill-page",
@@ -4689,10 +5155,12 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("names each proposal's options in order, with one Recommended pill per proposal", async () => {
 		const html = await drawn();
+
 		const names = (id: string) =>
 			[...specimen(html, id).matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map(
 				(m) => (m[1] ?? "").split("<")[0],
 			);
+
 		expect(names("p130-why")).toEqual([
 			"Today (current)",
 			"Option A · One Why, beside the summary",
@@ -4715,6 +5183,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			"Option D · Filled tokens",
 			"Option E · Mini bars",
 		]);
+
 		for (const id of [
 			"p130-why",
 			"p131-bill-page",
@@ -4764,6 +5233,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		const bills = picture(chunk, `Option B, Bills&#39; top${PHONE}`);
 		const links = bills.match(/<a href="\/how-it-works#bills"[^>]*>/g) ?? [];
 		expect(links.length).toBe(2);
+
 		for (const link of links) {
 			expect(link).toContain("text-muted");
 			expect(link).not.toContain("text-accent");
@@ -4778,10 +5248,12 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(trends).toContain("Worth a look");
 		const links = trends.match(/<a href="\/how-it-works#trends"[^>]*>/g) ?? [];
 		expect(links.length).toBe(3);
+
 		for (const link of links) {
 			expect(link).toContain("text-muted");
 			expect(link).not.toContain("text-accent");
 		}
+
 		expect(trends).toContain('aria-label="Why? this month against last"');
 		expect(trends).toContain('aria-label="Why? going well"');
 		expect(trends).toContain('aria-label="Why? worth a look"');
@@ -4789,6 +5261,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("writes P130's three Trends pictures from the demo's October: $1,665 spent, both October so far amounts, and no $2,535", async () => {
 		const chunk = specimen(await drawn(), "p130-why");
+
 		for (const label of [
 			`Today, Trends&#39; top${PHONE}`,
 			`Option A, Trends&#39; top${PHONE}`,
@@ -4807,6 +5280,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("writes P130's group headings in cents, $757.49 and $305.00, on every Bills picture", async () => {
 		const chunk = specimen(await drawn(), "p130-why");
+
 		for (const label of [
 			`Today, Bills&#39; top${PHONE}`,
 			`Option A, Bills&#39; top${PHONE}`,
@@ -4845,10 +5319,12 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(closed).toMatch(
 			/<summary[\s\S]*group-open:rotate-90[\s\S]*<\/summary>/,
 		);
+
 		const opened = picture(
 			chunk,
 			`Option A, a bill&#39;s page, with April to August opened${PHONE}`,
 		);
+
 		expect(opened).toContain('<details class="group" open');
 		// The five months under the fold each say Link a payment in muted words, not terracotta ones.
 		expect(
@@ -4861,6 +5337,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("draws P131 A's October as a paid row that opens its payment, with the check and the row arrow, in all three Option A pictures", async () => {
 		const chunk = specimen(await drawn(), "p131-bill-page");
+
 		for (const label of [
 			`Option A, a bill&#39;s page${PHONE}`,
 			`Option A, a bill&#39;s page, with April to August opened${PHONE}`,
@@ -4871,6 +5348,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 				picture(chunk, label).match(
 					/<li><details class="group"[\s\S]*?<\/summary>/,
 				)?.[0] ?? "";
+
 			expect(row, label).toContain("October");
 			expect(row, label).toContain("Paid Oct 15 · $2.99");
 			expect(row, label).toContain('class="text-ok"');
@@ -4900,6 +5378,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	it("says each year cell's status in words: paid, due, or no payment linked", async () => {
 		const chunk = specimen(await drawn(), "p131-bill-page");
 		const bills = picture(chunk, `Option B, a bill&#39;s page${PHONE}`);
+
 		for (const words of [
 			"September, no payment linked",
 			"October, paid",
@@ -4924,9 +5403,11 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	it("puts P132 A's cause sentence under the number and stamp, above the bars, in September and in the decided list", async () => {
 		const chunk = specimen(await drawn(), "p132-month-result");
 		const sep = picture(chunk, `Option A, September${PHONE}`);
+
 		const sentence = sep.indexOf(
 			"Most of it had no budget: Childcare $960 and Rent $1,200.",
 		);
+
 		const bars = sep.indexOf('aria-label="Spent against each budget:');
 		expect(sentence).toBeGreaterThan(-1);
 		expect(bars).toBeGreaterThan(sentence);
@@ -4934,28 +5415,34 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(entry?.outcome).toContain(
 			"under the number and stamp, above the bars",
 		);
+
 		const row = decisions
 			.split("\n")
 			.find((line) => line.startsWith("| 121 | 2026-10-15 |"));
+
 		expect(row).toContain("under the number and stamp, above the bars");
 	});
 
 	it("keeps P132 A's link to Not budgeted muted, not ink", async () => {
 		const chunk = specimen(await drawn(), "p132-month-result");
+
 		const link =
 			picture(chunk, `Option A, September${PHONE}`).match(
 				/<a href="#p132-a-sep-not-budgeted"[^>]*>/,
 			)?.[0] ?? "";
+
 		expect(link).toContain("text-muted");
 		expect(link).not.toContain("text-ink");
 	});
 
 	it("works each month's result from every budget row: September $2,134 over, the sample month $168 over", async () => {
 		const chunk = specimen(await drawn(), "p132-month-result");
+
 		const sample = picture(
 			chunk,
 			`Option A, a month over budget, sample numbers${PHONE}`,
 		);
+
 		expect(sample).toContain(">$168<");
 		expect(sample).not.toContain("$220");
 		expect(picture(chunk, `Option A, September${PHONE}`)).toContain(">$2,134<");
@@ -4964,10 +5451,12 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("writes the cause sentence from integer cents, with Most of it only when the causes are over half", async () => {
 		const { monthCause: rule } = await import("../src/budgets/month-cause");
+
 		const monthCause = (
 			causes: Parameters<typeof rule>[0],
 			overCents: number,
 		) => rule(causes, overCents)?.text ?? "";
+
 		expect(
 			monthCause(
 				[
@@ -5009,10 +5498,12 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("leaves out a category with a net refund from the causes, whether or not it has a budget", async () => {
 		const { monthCause: rule } = await import("../src/budgets/month-cause");
+
 		const monthCause = (
 			causes: Parameters<typeof rule>[0],
 			overCents: number,
 		) => rule(causes, overCents)?.text ?? "";
+
 		expect(
 			monthCause(
 				[
@@ -5029,9 +5520,11 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("draws P133 A, C, D and E with three labelled pictures each: October and September at 390 px, October at 1280 px", async () => {
 		const chunk = specimen(await drawn(), "p133-month-dots");
+
 		const labels = labelsOf(chunk).filter((label) =>
 			label.startsWith("Option "),
 		);
+
 		expect(labels).toEqual(
 			["A", "C", "D", "E"].flatMap((x) => [
 				`Option ${x}, the month dots, October${PHONE}`,
@@ -5043,11 +5536,13 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("marks each finished month of A, C, D and E in October: three under, two over, the empty April and the current month", async () => {
 		const chunk = specimen(await drawn(), "p133-month-dots");
+
 		for (const x of ["A", "C", "D", "E"]) {
 			const october = picture(
 				chunk,
 				`Option ${x}, the month dots, October${PHONE}`,
 			);
+
 			expect(count(october, 'data-mark="under"'), x).toBe(3);
 			expect(count(october, 'data-mark="over"'), x).toBe(2);
 			expect(count(october, 'data-mark="empty"'), x).toBe(1);
@@ -5062,22 +5557,27 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			// Every month is a 44px link to that month.
 			const links = october.match(/<a href="\/\?month=[^"]*"[^>]*>/g) ?? [];
 			expect(links.length, x).toBe(7);
+
 			for (const link of links) expect(link, x).toContain("min-h-11 w-11");
 		}
 	});
 
 	it("draws one ring per disc: October's accent when it is shown and current, September's ink when shown", async () => {
 		const chunk = specimen(await drawn(), "p133-month-dots");
+
 		// One month's own link, from its href to its closing tag, so the other six months' rings are not counted.
 		const linkTo = (shot: string, month: string) => {
 			const at = shot.indexOf(`<a href="/?month=${month}"`);
 			expect(at, month).toBeGreaterThan(-1);
+
 			return shot.slice(at, shot.indexOf("</a>", at));
 		};
+
 		const october = linkTo(
 			picture(chunk, `Option A, the month dots, October${PHONE}`),
 			"2026-10",
 		);
+
 		expect(october).toContain("ring-accent");
 		expect(october).not.toContain("ring-ink");
 		expect(october).not.toContain("border-ink");
@@ -5088,6 +5588,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			chunk,
 			`Option A, the month dots, September${PHONE}`,
 		);
+
 		const shownSeptember = linkTo(september, "2026-09");
 		expect(shownSeptember).toContain("ring-ink");
 		expect(shownSeptember).not.toContain("ring-accent");
@@ -5115,10 +5616,13 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	it("draws the next arrow dashed and faded on October's strips, and solid on September's", async () => {
 		const chunk = specimen(await drawn(), "p133-month-dots");
 		const dashed = "border-dashed border-rule text-muted/40";
+
 		for (const label of labelsOf(chunk)) {
 			const shot = picture(chunk, label);
+
 			if (label.includes(", the month dots, October"))
 				expect(shot, label).toContain(dashed);
+
 			if (label.includes(", the month dots, September"))
 				expect(shot, label).not.toContain(dashed);
 		}
@@ -5146,16 +5650,20 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	it("draws the Today pictures' month dots as hand-drawn grey discs, with no mark from the real strip", async () => {
 		const html = await drawn();
 		const dots = specimen(html, "p133-month-dots");
+
 		const todayLabels = labelsOf(dots).filter((label) =>
 			label.startsWith("Today, the month dots"),
 		);
+
 		expect(todayLabels).toHaveLength(3);
 		const p132 = specimen(html, "p132-month-result");
+
 		const todayShots = [
 			...todayLabels.map((label) => picture(dots, label)),
 			picture(p132, `Today, September${PHONE}`),
 			picture(p132, `Today, September${DESK}`),
 		];
+
 		for (const shot of todayShots) {
 			expect(shot).not.toContain("data-mark=");
 			expect(shot).toContain("bg-muted/45");
@@ -5164,13 +5672,17 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 
 	it("marks P133 A Picked and Recommended, C not recommended, and C, D and E not picked", async () => {
 		const chunk = specimen(await drawn(), "p133-month-dots");
+
 		const headings = [...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map(
 			(m) => m[1] ?? "",
 		);
+
 		const option = (letter: string) =>
 			headings.find((h) => h.includes(`Option ${letter} ·`)) ?? "";
+
 		expect(option("A")).toContain(">Picked<");
 		expect(option("A")).toContain(">Recommended<");
+
 		for (const letter of ["C", "D", "E"])
 			expect(option(letter), letter).not.toContain(">Picked<");
 		expect(option("C")).not.toContain(">Recommended<");
@@ -5210,6 +5722,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		]);
 		expect(last.map((d) => d.issue)).toEqual([603, 604, 605, 605]);
 		expect(last[3]?.title).toBe("P133 · The month dots");
+
 		for (const entry of last)
 			expect(entry.outcome, entry.title).toContain("(decision 121)");
 		expect(last[3]?.outcome).toContain("C, D and E stay drawn, not picked.");
@@ -5222,6 +5735,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(row).toBeGreaterThan(at("| 120 |"));
 		expect(row).toBeLessThan(at("| 122 |"));
 		const last = rows[row] ?? "";
+
 		for (const text of [
 			"**P130 A (#603):**",
 			"**P131 A (#604):**",
@@ -5239,40 +5753,52 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 and #607)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
 	const esc = (words: string) => words.replaceAll("'", "&#39;");
+
 	// The audit's section, from its heading to the next section's heading (P128's, which follows it).
 	const audit = (html: string) => {
 		const start = html.indexOf(
 			'<section aria-labelledby="audit3-title" class="mt-12">',
 		);
+
 		const end = html.indexOf("<section aria-labelledby=", start + 1);
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
+
 		return html.slice(start, end);
 	};
+
 	// The names of the options marked Recommended, in drawing order.
 	const recommendedOf = (chunk: string) =>
 		[...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)]
 			.filter((m) => (m[1] ?? "").includes(">Recommended<"))
 			.map((m) => (m[1] ?? "").split("<")[0]);
+
 	// Each picture's label and kind, in drawing order: a phone and a desktop picture can share a label.
 	const PICTURE = /aria-label="([^"]*), on (a phone|desktop)"/g;
+
 	const labels = (chunk: string) =>
 		[...chunk.matchAll(PICTURE)].map((m) => `${m[1]}, on ${m[2]}`);
+
 	// One picture's markup: from its label to the next picture's label, or to the chunk's end.
 	const picture = (chunk: string, label: string) => {
 		const found = [...chunk.matchAll(PICTURE)];
 		const at = found.findIndex((m) => `${m[1]}, on ${m[2]}` === label);
 		expect(at, label).toBeGreaterThan(-1);
+
 		return chunk.slice(found[at]?.index ?? 0, found[at + 1]?.index);
 	};
+
 	// Each word's first place in the markup, in the order given, so a list's order can be checked.
 	const inOrder = (markup: string, words: string[]) => {
 		const at = words.map((word) => markup.indexOf(esc(word)));
+
 		for (const [i, index] of at.entries()) {
 			expect(index, words[i]).toBeGreaterThan(-1);
+
 			if (i > 0) expect(index, words[i]).toBeGreaterThan(at[i - 1] ?? -1);
 		}
 	};
+
 	// A's contents rows, each section's name then its live count, as More lists them (P122 A).
 	const CONTENTS_ROWS = [
 		"Categories",
@@ -5288,10 +5814,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		"Your data",
 		"Download",
 	];
+
 	// Pet Care's rows, newest first, as the demo's Settings card and Suggestions page list them.
 	const PET_ROWS_NEWEST_FIRST = ["Banfield Pet Hospital", "Petsmart", "Chewy"];
 	// The bank sign-in emails' recipients, as catalog.tsx's sample has them (the demo has no household members).
 	const RECIPIENTS = ["alex@example.com", "sam@example.com", "jo@example.com"];
+
 	// The five AI switches' hints, in Settings' order, as settings.tsx's AI_FEATURES words them.
 	const AI_HINTS = [
 		"Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
@@ -5300,9 +5828,11 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		"Spots paychecks and other money coming in.",
 		"Sorts them right after each sync, not only overnight.",
 	];
+
 	// The Suggestions page's own chrome, as src/routes/suggestions.tsx draws it: Settings' link, then the count, then the card.
 	const SETTINGS_LINK =
 		'<a href="/settings" class="inline-flex min-h-11 items-center text-accent">Settings</a>';
+
 	const expectSuggestionsChrome = (markup: string, card: string) => {
 		const link = markup.indexOf(SETTINGS_LINK);
 		const count = markup.indexOf("Suggestions · 1 of 5");
@@ -5319,26 +5849,32 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const html = await drawn();
 		const top = html.indexOf(">Proposals</h1>");
 		const p136 = html.indexOf('<section aria-labelledby="p136-title"');
+
 		const picked = html.indexOf(
 			'<section aria-labelledby="audit2-picks-title"',
 		);
+
 		const audit = html.indexOf(
 			'<section aria-labelledby="audit3-title" class="mt-12">',
 		);
+
 		const p128 = html.indexOf(
 			'<section aria-labelledby="p128-title" class="mt-12">',
 		);
+
 		const p129 = html.indexOf('<section aria-labelledby="p129-title"');
 		const p127 = html.indexOf('<section aria-labelledby="p127-title"');
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
+
 		// Between the intro and the follow-ups' section sit only the Picked sections (P139, #660; P140, #719; P142, #770, decision 148)
 		// and their specimens, and between the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
 			'<section aria-labelledby="followups-picks-title" class="mt-12">',
 		);
+
 		expect(open).toBeGreaterThan(top);
 		expect(
 			html.slice(top, open).match(/<section aria-labelledby="[^"]*"/g),
@@ -5386,6 +5922,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const html = await drawn();
 		const settings = block(html, "p134-settings");
 		const suggestions = block(html, "p135-suggestions");
+
 		for (const [chunk, option] of [
 			[settings, "Option A · A contents page, each section its own page"],
 			[suggestions, "Option A · One card, one set of words, everywhere"],
@@ -5459,6 +5996,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("lists A's contents rows in order, each with its live count in words, under the 5-suggestions Band", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const contents = picture(
 			optionOf(
 				settings,
@@ -5466,12 +6004,14 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 			"Option A, contents, on a phone",
 		);
+
 		expect(contents).toContain("5 suggestions to check");
 		inOrder(contents, CONTENTS_ROWS);
 	});
 
 	it("draws A's contents at 1280 in a 900px window, so all six rows and Your data's Download show", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const desktop = picture(
 			optionOf(
 				settings,
@@ -5479,6 +6019,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 			"Option A, contents, on desktop",
 		);
+
 		// The contents list needs about 650px; a 560px window cut off Your data.
 		expect(desktop).toContain("h-[900px]");
 		inOrder(desktop, CONTENTS_ROWS);
@@ -5486,10 +6027,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws A's Household with its recipients and a switch just flipped, its toast, and no Save button", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const option = optionOf(
 			settings,
 			"Option A · A contents page, each section its own page",
 		);
+
 		const household = picture(option, "Option A, Household, on a phone");
 		expect(household).toContain('role="switch"');
 		expect(household).toContain("Bank sign-in emails");
@@ -5497,6 +6040,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const after = household.slice(household.indexOf('role="switch"'));
 		expect(after).toContain(`Goes to ${RECIPIENTS.join(", ")}`);
 		expect(after).toContain("Who gets them");
+
 		for (const email of RECIPIENTS) expect(after).toContain(email);
 		expect(after.match(/>Remove<span class="sr-only"> [^<]+<\/span>/g)).toEqual(
 			RECIPIENTS.map(
@@ -5514,11 +6058,14 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws today's Household with the app's own bank sign-in emails block, its Save, and no invented hint", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const today = picture(
 			optionOf(settings, "Reference · Today on main"),
 			"Reference, Settings Household, on a phone",
 		);
+
 		expect(today).toContain("Who gets them");
+
 		for (const email of RECIPIENTS) expect(today).toContain(email);
 		expect(today).toContain(">Save<");
 		expect(today).not.toContain("Tells everyone in the household");
@@ -5527,6 +6074,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 	it("keeps each AI switch's hint in today's picture and Option B's: five aria-describedby hints, the sentences in order", async () => {
 		const settings = block(await drawn(), "p134-settings");
 		const option = optionOf(settings, "Option B · One page, tidied");
+
 		for (const pic of [
 			picture(
 				optionOf(settings, "Reference · Today on main"),
@@ -5541,14 +6089,17 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws the app's own AI tally in today's and Option B's AI pictures: In October, its three lines and Why? what Tally did, and today's after Save", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const today = picture(
 			optionOf(settings, "Reference · Today on main"),
 			"Reference, Settings AI suggestions, on a phone",
 		);
+
 		const b = picture(
 			optionOf(settings, "Option B · One page, tidied"),
 			"Option B, AI suggestions, on a phone",
 		);
+
 		for (const pic of [today, b]) {
 			expect(pic).toContain("In October");
 			expect(pic).toContain("Sorted 23 transactions · you changed 2");
@@ -5561,6 +6112,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 				"Off means your rules and choices only. Nothing already decided changes.",
 			);
 		}
+
 		expect(today.indexOf(">Save<")).toBeGreaterThan(-1);
 		expect(today.indexOf(">Save<")).toBeLessThan(today.indexOf("In October"));
 		expect(b).not.toContain(">Save<");
@@ -5569,10 +6121,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 	it("draws the Suggestions page with its real chrome in each of its four pictures, with no h1 of its own", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
 		const reference = optionOf(suggestions, "Reference · Today on main");
+
 		const a = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		const b = optionOf(suggestions, "Option B · One place to answer");
 		expectSuggestionsChrome(
 			picture(reference, "Reference, Suggestions page, on a phone"),
@@ -5594,6 +6148,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws A's rules with each Remove a quiet muted link, the rule naming its category once, and Never suggest as one muted line", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const rules = picture(
 			optionOf(
 				settings,
@@ -5601,6 +6156,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 			"Option A, rules, on a phone",
 		);
+
 		// The demo's three Always rules, A to Z, as the local demo's Settings lists them (seed.ts).
 		inOrder(rules, [
 			"City Gym · Always Household · 2 transactions",
@@ -5609,16 +6165,20 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		]);
 		expect(rules).not.toContain("Costco");
 		expect(rules).not.toContain("Shell");
+
 		const remove = rules.match(
 			/<a [^>]*class="([^"]*)"[^>]*>Remove<span class="sr-only"> [^<]+<\/span><\/a>/,
 		);
+
 		expect(remove, "Remove as a link").not.toBeNull();
+
 		// Each Remove's accessible name carries its merchant, as the app's own Remove does (spec §7, decision 120).
 		const removeNames = [
 			...rules.matchAll(
 				/<a [^>]*>Remove<span class="sr-only"> ([^<]+)<\/span><\/a>/g,
 			),
 		].map((m) => m[1]);
+
 		expect(removeNames).toEqual([
 			"City Gym",
 			"Procreate Dreams",
@@ -5641,6 +6201,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws each rule's visible line hidden from speech, with its spoken sentence beside it, and reads each rule row as the spec says", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const rules = picture(
 			optionOf(
 				settings,
@@ -5648,31 +6209,39 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 			"Option A, rules, on a phone",
 		);
+
 		const NAMES = ["City Gym", "Procreate Dreams", "YouTube Premium"];
+
 		for (const name of NAMES) {
 			// The visible line is aria-hidden, and its spoken sentence is the sr-only span right after it.
 			expect(rules, name).toContain(
 				`<span aria-hidden="true">${name} · Always Household · 2 transactions</span><span class="sr-only">${name} is always Household, 2 transactions</span>`,
 			);
 		}
+
 		inOrder(
 			rules,
 			NAMES.map((name) => `${name} is always Household, 2 transactions`),
 		);
 		// What a screen reader reads of each row: its hidden line and icon left out, its tags stripped.
 		const list = rules.slice(rules.indexOf("<ul"), rules.indexOf("</ul>"));
+
 		const items = [...list.matchAll(/<li [^>]*>[\s\S]*?<\/li>/g)].map(
 			(m) => m[0],
 		);
+
 		expect(items).toHaveLength(3);
+
 		for (const [i, item] of items.entries()) {
 			const name = NAMES[i] ?? "";
+
 			const spoken = item
 				.replace(/<span aria-hidden="true">[\s\S]*?<\/span>/g, "")
 				.replace(/<svg[\s\S]*?<\/svg>/g, "")
 				.replace(/<[^>]+>/g, "")
 				.replace(/\s+/g, " ")
 				.trim();
+
 			expect(
 				spoken.startsWith(`${name} is always Household, 2 transactions`),
 				name,
@@ -5684,6 +6253,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws Household's category icon in cat-brown before each rule's line, in the rules' order", async () => {
 		const settings = block(await drawn(), "p134-settings");
+
 		const rules = picture(
 			optionOf(
 				settings,
@@ -5691,16 +6261,21 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 			"Option A, rules, on a phone",
 		);
+
 		const names = ["City Gym", "Procreate Dreams", "YouTube Premium"];
+
 		// CategoryIcon's span in Household's colour, as the app draws a category's icon.
 		const icons = [
 			...rules.matchAll(/<span class="shrink-0 text-cat-brown">/g),
 		].map((m) => m.index ?? -1);
+
 		expect(icons).toHaveLength(3);
+
 		for (const [i, name] of names.entries()) {
 			const line = rules.indexOf(`${name} · Always`);
 			expect(line, name).toBeGreaterThan(-1);
 			expect(icons[i], name).toBeLessThan(line);
+
 			if (i > 0) {
 				expect(icons[i], name).toBeGreaterThan(
 					rules.indexOf(`${names[i - 1]} · Always`),
@@ -5772,10 +6347,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws A's Categories page at 390 as its own page: the back link, its title, the seven categories, then the card under the list", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
+
 		const option = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		const page = picture(option, "Option A, Categories page, on a phone");
 		// Unscrolled, so the demo banner shows; the card's lower part falls below the fold, as on a real phone.
 		expect(page).toContain("Demo data. Nothing here is real.");
@@ -5796,10 +6373,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws A's Settings card further down Categories, with no heading of its own, Childcare and Rent before the card", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
+
 		const option = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		const card = picture(option, "Option A, Settings card, on a phone");
 		// Scrolled: no banner, and the first five categories are above it.
 		expect(card).not.toContain("Demo data. Nothing here is real.");
@@ -5816,6 +6395,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const ids = [
 			...audit(await drawn()).matchAll(/ id="(cat-\d+-[^"]+)"/g),
 		].map((m) => m[1]);
+
 		expect(ids.length).toBeGreaterThan(0);
 		expect(new Set(ids).size).toBe(ids.length);
 	});
@@ -5836,14 +6416,17 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws A's one set of words across its three places and the Suggestions page at 1280", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
+
 		const option = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		const settingsCard = picture(option, "Option A, Settings card, on a phone");
 		const page = picture(option, "Option A, Suggestions page, on a phone");
 		const organize = picture(option, "Option A, Organize, on a phone");
 		const desk = picture(option, "Option A, Suggestions page, on desktop");
+
 		for (const pic of [settingsCard, page, desk]) {
 			expect(pic).toContain("A new category: Pet Care");
 			expect(pic).toContain("Create Pet Care");
@@ -5857,6 +6440,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			);
 			expect(pic).toContain('aria-label="Why? suggested categories"');
 		}
+
 		// The guess line is muted: the sparkles icon and "Tally's guess" in a text-muted paragraph, on every card.
 		for (const pic of [settingsCard, page, organize, desk]) {
 			expect(pic).toMatch(
@@ -5865,6 +6449,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 				),
 			);
 		}
+
 		expect(organize).toContain("Create Pet Care");
 		expect(organize).toContain(esc("Tally's guess"));
 		expect(organize).toContain(
@@ -5875,10 +6460,13 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		// Suggestions pages alone, as the route draws it.
 		expect(organize).not.toContain("Why?");
 		expect(organize).not.toContain(">No</button>");
+
 		for (const pic of [page, desk]) expect(pic).toContain(">Skip</a>");
+
 		for (const pic of [settingsCard, organize]) {
 			expect(pic).not.toContain(">Skip</a>");
 		}
+
 		for (const pic of [settingsCard, page, organize, desk]) {
 			expect(pic).not.toContain("Yes, create");
 			expect(pic).not.toContain("Maybe new");
@@ -5889,23 +6477,29 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("draws one unticked row on A's Suggestions page at 390, Chewy's, with its optional note under the label in the same row, and no other picture has one", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
+
 		const option = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		const page = picture(option, "Option A, Suggestions page, on a phone");
+
 		// Three checkboxes, and only Chewy's (transaction 7101, the last row) is unticked.
 		const boxes = [...page.matchAll(/<input type="checkbox"[^>]*>/g)].map(
 			(m) => m[0],
 		);
+
 		expect(boxes).toHaveLength(3);
 		const unticked = boxes.filter((box) => !box.includes(" checked"));
 		expect(unticked).toHaveLength(1);
 		const chewy = page.indexOf(">Chewy</span>");
+
 		const row = page.slice(
 			page.lastIndexOf("<li>", chewy),
 			page.indexOf("</li>", chewy),
 		);
+
 		expect(row).toContain(unticked[0]);
 		// The note's wrapper follows Chewy's label, inside the same row, and the field names the transaction.
 		const labelEnd = row.indexOf("</label>") + "</label>".length;
@@ -5926,10 +6520,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(page.indexOf('id="p135-a-note-7101"')).toBeLessThan(
 			page.indexOf(esc("Untick any that don't belong.")),
 		);
+
 		// No other option's picture has the field: not A's Categories page, the Settings card, Organize, the 1280 picture, or B.
 		// Today's reference keeps the hidden note fields its card has always drawn, so it is left out of this check.
 		for (const label of labels(suggestions)) {
 			if (label.startsWith("Reference,")) continue;
+
 			if (label === "Option A, Suggestions page, on a phone") continue;
 			expect(picture(suggestions, label), label).not.toContain(
 				"A note for Chewy",
@@ -5939,10 +6535,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("keeps today's reference card's own note fields, note-7101 to note-7103, and gives A's unticked note a new id", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
+
 		const reference = picture(
 			optionOf(suggestions, "Reference · Today on main"),
 			"Reference, Settings card, on a phone",
 		);
+
 		for (const id of [7101, 7102, 7103]) {
 			expect(reference, `note-${id}`).toContain(`id="note-${id}"`);
 		}
@@ -5950,10 +6548,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	it("says in A's note that an unticked row keeps its optional note, and that the Settings card sits on A's Categories page", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
+
 		const note = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		expect(note).toContain(
 			esc(
 				"An unticked row keeps its optional note, as today's card does, and Tally sorts it again with it.",
@@ -5969,10 +6569,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 	it("lists Pet Care's rows newest first in every card and on the Suggestions pages, as the demo does", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
 		const reference = optionOf(suggestions, "Reference · Today on main");
+
 		const option = optionOf(
 			suggestions,
 			"Option A · One card, one set of words, everywhere",
 		);
+
 		inOrder(
 			picture(reference, "Reference, Settings card, on a phone"),
 			PET_ROWS_NEWEST_FIRST,
@@ -6012,6 +6614,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 	it("records P135's answer as No in decision 120's row, the word the owner picked", () => {
 		const row =
 			decisions.split("\n").find((line) => line.startsWith("| 120 |")) ?? "";
+
 		expect(row).toContain(
 			"then Create {name} or No, with decision 89's Why? after No",
 		);
@@ -6024,14 +6627,18 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const html = await drawn();
 		const settings = block(html, "p134-settings");
 		const suggestions = block(html, "p135-suggestions");
+
 		// The sidebar's second group, under its rule, from its class to the list's end.
 		const secondGroup = (desk: string) => {
 			const start = desk.indexOf(
 				"mt-3 flex flex-col gap-1 border-t border-rule pt-3",
 			);
+
 			expect(start).toBeGreaterThan(-1);
+
 			return desk.slice(start, desk.indexOf("</ul>", start));
 		};
+
 		const desks = [
 			picture(
 				optionOf(settings, "Reference · Today on main"),
@@ -6056,6 +6663,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 				"Option A, Suggestions page, on desktop",
 			),
 		];
+
 		for (const desk of desks) {
 			expect(secondGroup(desk)).toContain('href="/how-it-works"');
 			expect(secondGroup(desk)).toContain("How Tally works");
@@ -6069,6 +6677,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			spec
 				.split("\n")
 				.find((line) => line.startsWith("**New category suggestions")) ?? "";
+
 		expect(paragraph).toContain("Create Pet Care or No (decision 120)");
 		expect(paragraph).toContain('"Why?" link after No');
 		expect(paragraph).toContain("can still Create it or answer No");
@@ -6092,6 +6701,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			spec
 				.split("\n")
 				.find((line) => line.startsWith("| **More → Settings** |")) ?? "";
+
 		expect(row).toContain(
 			"the one review screen for every waiting suggestion: names, categories, new categories, income and transfers (§8.6, decision 120)",
 		);
@@ -6111,19 +6721,24 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 	const count = (text: string, part: string) => text.split(part).length - 1;
 	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
 	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+
 	// The eight rules of How Tally works' Budget and safe to spend, read from the live page: each <li> of its first
 	// list, with the whitespace the JSX leaves between its lines collapsed. A reworded rule fails here, not in the drawing.
 	const liveRules = async () => {
 		const page = (await get("/how-it-works")).html;
+
 		const budget = page.slice(
 			page.indexOf('<section id="budget"'),
 			page.indexOf('<section id="transactions"'),
 		);
+
 		const list = budget.slice(budget.indexOf("<ul "), budget.indexOf("</ul>"));
+
 		return [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) =>
 			(m[1] ?? "").replace(/\s+/g, " ").trim(),
 		);
 	};
+
 	const labelsOf = (chunk: string) =>
 		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map((m) => m[1]);
 
@@ -6137,12 +6752,14 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		"Planned.",
 		"Daily amount.",
 	];
+
 	const P137_TODAY = "Today";
 	const P137_A = "A · The rules fold under the picture";
 	const P137_B = "B · Each rule named, folded";
 	const P138_TODAY = "Today";
 	const P138_A = "A · The closest five as rows, then Show all";
 	const P138_B = "B · The closest five, and a search over all of them";
+
 	// The closest five charges, in the picker's order (planPaymentCandidates sorts by the amount's distance from $90).
 	const FIVE = [
 		"Mario&#39;s Pizza",
@@ -6151,9 +6768,11 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		"Chevron",
 		"Shell",
 	];
+
 	// A payment row's label, as PaymentRow draws it (Select mode's mark and focus ring; & is escaped in the HTML).
 	const PAYMENT_ROW =
 		'<label class="group relative flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink has-[:focus-visible]:[&amp;_.selection-mark]:outline-2 has-[:focus-visible]:[&amp;_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&amp;_.selection-mark]:outline-accent">';
+
 	// The desktop sidebar's links for the two pages these pictures name: the current one in accent, the rest in ink.
 	const SIDEBAR = (href: string, color: "text-accent" | "text-ink") =>
 		`href="${href}" class="flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${color}"`;
@@ -6170,9 +6789,11 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		expect(html).not.toContain(
 			"Open: from the second design audit, the rules and the payment list",
 		);
+
 		const picks = html.indexOf(
 			'<section aria-labelledby="followups-picks-title" class="mt-12">',
 		);
+
 		const p137 = html.indexOf('<section id="p137-rules-fold"');
 		const p138 = html.indexOf('<section id="p138-payment-list"');
 		expect(picks).toBeGreaterThan(-1);
@@ -6185,6 +6806,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 
 	it("marks option A as the one Picked on P137 and P138, and today and B carry no Picked pill", async () => {
 		const html = await drawn();
+
 		for (const [id, a] of [
 			["p137-rules-fold", P137_A],
 			["p138-payment-list", P138_A],
@@ -6202,12 +6824,14 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 
 	it("records decision 126 in the decisions file between 124 and 127, with both picks, the Not picked options and the Why", () => {
 		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
+
 		const row =
 			rows.find((line) =>
 				line.startsWith(
 					"| 126 | 2026-10-16 | The owner's picks from the second audit's follow-ups",
 				),
 			) ?? "";
+
 		expect(row).not.toBe("");
 		expect(rows.indexOf(row)).toBeGreaterThan(
 			rows.findIndex((line) => line.startsWith("| 124 | ")),
@@ -6215,6 +6839,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		expect(rows.indexOf(row)).toBeLessThan(
 			rows.findIndex((line) => line.startsWith("| 127 | ")),
 		);
+
 		for (const text of [
 			"**P137 A (#644):**",
 			"**P138 A (#645):**",
@@ -6274,6 +6899,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 			"Today at 390 px, on a phone",
 			"Today at 1280 px, on desktop",
 		]);
+
 		for (const name of [P137_A, P137_B]) {
 			const option = name === P137_A ? a : b;
 			expect(labelsOf(option)).toEqual([
@@ -6292,6 +6918,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		// Today's list shows each rule at 390 and at 1280 px. A's and B's folds hold the same list in the DOM whether
 		// shut or open (FoldedRow keeps its contents in place, as Settings' folds do), so each rule appears in both states.
 		const [today = "", a = "", b = ""] = options(chunk);
+
 		for (const rule of rules) {
 			expect(count(today, rule)).toBe(2);
 			expect(count(a, rule)).toBe(4);
@@ -6330,6 +6957,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 				"The exact rules: budget, spent, left, income, cash, Safe to spend, planned, daily amount",
 			),
 		).toBe(4);
+
 		for (const name of RULE_NAMES)
 			expect(
 				count(b.slice(cut), `<span class="font-semibold">${name}</span>`),
@@ -6403,21 +7031,25 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		expect(count(head, 'name="transaction_id"')).toBe(5);
 		expect(count(head, PAYMENT_ROW)).toBe(5);
 		let last = -1;
+
 		for (const name of FIVE) {
 			const at = head.indexOf(name);
 			expect(at, name).toBeGreaterThan(last);
 			last = at;
 		}
+
 		// Closed, the picture has the five rows and the fold's summary; the fifteen rows sit inside the closed details.
 		expect(count(closed, 'name="transaction_id"')).toBe(20);
 		expect(count(closed, '<details class="group border-b border-rule">')).toBe(
 			1,
 		);
+
 		// Opened, the fold shows its fifteen rows after the summary, with the same radio and label markup.
 		const opened = a.slice(
 			a.indexOf(`${P138_A}, opened at 390 px`),
 			a.indexOf(`${P138_A}, opened at 1280 px`),
 		);
+
 		expect(count(opened, 'name="transaction_id"')).toBe(20);
 		expect(
 			count(opened, '<details class="group border-b border-rule" open="">'),
@@ -6468,6 +7100,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		expect(typed.indexOf("Farmers market")).toBeLessThan(
 			typed.indexOf("Farmers mkt"),
 		);
+
 		for (const name of FIVE) expect(typed).not.toContain(name);
 	});
 
@@ -6477,6 +7110,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		const pictures = b.split('role="img"').slice(1, 5);
 		expect(pictures).toHaveLength(4);
 		const targets = new Set<string>();
+
 		for (const pic of pictures) {
 			// The reply replaces the fieldset's contents, and hx-select-oob refreshes the count above it, so a live region is never swapped.
 			const target = /hx-target="#([^"]+)"/.exec(pic)?.[1] ?? "";
@@ -6498,6 +7132,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 			// Each picture has one Link payment button, and only when it has rows to link.
 			expect(count(pic, ">Link payment</span>")).toBe(1);
 		}
+
 		expect(targets.size).toBe(4);
 	});
 
@@ -6505,8 +7140,10 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		const chunk = block(await drawn(), "p138-payment-list");
 		const pictures = chunk.split('role="img"').slice(1);
 		expect(pictures).toHaveLength(10);
+
 		const bills =
 			'<a href="/bills" class="inline-flex min-h-11 items-center text-accent">Bills</a>';
+
 		expect(count(chunk, bills)).toBe(10);
 		expect(
 			count(
@@ -6521,6 +7158,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 			),
 		).toBe(10);
 		expect(chunk).not.toContain('<p class="font-serif text-5xl');
+
 		for (const pic of pictures) {
 			expect(pic.indexOf(bills)).toBeLessThan(pic.indexOf("<h1 "));
 			// The button's wrapper is a plain div, as the live picker draws it: no class, and no mt-4 above the button.
@@ -6537,6 +7175,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		expect(count(closed, 'class="peer sr-only"')).toBe(20);
 		expect(count(closed, "group-has-[:checked]:flex")).toBe(20);
 		expect(count(closed, PAYMENT_ROW)).toBe(20);
+
 		// B's rows have the same at each size, and each picture has as many marks as rows.
 		for (const pic of b.split('role="img"').slice(1, 5)) {
 			const rows = count(pic, 'name="transaction_id"');
@@ -6551,6 +7190,7 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		// Five desktop pictures, each with How Tally works in accent; no other sidebar link is in accent.
 		expect(count(chunk, SIDEBAR("/how-it-works", "text-accent"))).toBe(5);
 		expect(count(chunk, SIDEBAR("/how-it-works", "text-ink"))).toBe(0);
+
 		for (const item of SIDEBAR_ITEMS)
 			expect(count(chunk, SIDEBAR(item.href, "text-accent")), item.label).toBe(
 				0,
@@ -6582,23 +7222,29 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 	const shots = (chunk: string) => chunk.split("<figure").slice(1);
 	// An option's note: what sits above its first picture.
 	const noteOf = (option: string) => option.slice(0, option.indexOf("<figure"));
+
 	// Every opening tag of one kind, read through attributes(), so a value's own words never count.
 	const tags = (chunk: string, tag: string) =>
 		[...chunk.matchAll(new RegExp(`<${tag}\\b[^>]*>`, "g"))].map((m) => m[0]);
+
 	// The radios that are checked, as [name, value] pairs.
 	const checkedOf = (chunk: string) =>
 		tags(chunk, "input")
 			.map((tag) => attributes(tag))
 			.filter((a) => a.get("type") === "radio" && a.has("checked"))
 			.map((a) => [a.get("name") ?? "", a.get("value") ?? ""]);
+
 	const LABELS = (chunk: string) =>
 		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
+
 	const P139 = "p139-split-category";
+
 	// The specimen alone: block() runs to the next section, which takes the Picked section's closing tag with it.
 	const specimenOf = (html: string) => {
 		const chunk = block(html, P139);
+
 		return chunk.slice(0, chunk.lastIndexOf("</section>"));
 	};
 
@@ -6621,9 +7267,11 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 	it("opens P140's Picked section beside P139's, titled and dated, citing decision 133 (#719)", async () => {
 		const html = await drawn();
 		const open = html.indexOf('<section aria-labelledby="p140-title"');
+
 		const next = html.indexOf(
 			'<section aria-labelledby="followups-picks-title"',
 		);
+
 		expect(open).toBeGreaterThan(html.indexOf('aria-labelledby="p139-title"'));
 		expect(open).toBeGreaterThan(-1);
 		expect(open).toBeLessThan(next);
@@ -6635,10 +7283,12 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 	it("draws P140 as one visual specimen with Today, A (picked, recommended) and B, each at 390 px, with the real Your banks list and no poll", async () => {
 		const html = await drawn();
 		const start = html.indexOf('<section id="p140-banks"');
+
 		const chunk = html.slice(
 			start,
 			html.indexOf('<section aria-labelledby="p142-title"'),
 		);
+
 		expect(chunk).toContain("P140 · A new family&#39;s banks");
 		const named = options(chunk);
 		expect(named.length).toBe(3);
@@ -6663,10 +7313,12 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 	it("keeps Today's five lines as they were drawn: When it's done on pay, bills and budgets, whatever the live first week says now (P140)", async () => {
 		const html = await drawn();
 		const start = html.indexOf('<section id="p140-banks"');
+
 		const chunk = html.slice(
 			start,
 			html.indexOf('<section aria-labelledby="p142-title"'),
 		);
+
 		const today = options(chunk)[0] ?? "";
 		expect(today).toContain(">Today</h4>");
 		expect(count(today, "When it&#39;s done")).toBe(3);
@@ -6702,10 +7354,12 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		]);
 		expect(tags(today, "select").length).toBe(4);
 		expect(count(today, ">Pick a category</option>")).toBe(4);
+
 		const selected = tags(today, "option")
 			.map((tag) => attributes(tag))
 			.filter((a) => a.has("selected"))
 			.map((a) => a.get("value"));
+
 		expect(selected).toEqual(["1", "1"]);
 	});
 
@@ -6721,6 +7375,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 	it("draws A's category as a folded row for each part, open as it opens and folded after Part 1's pick", async () => {
 		const [, a = ""] = options(specimenOf(await drawn()));
 		const [open390, open1280, folded390, folded1280] = shots(a);
+
 		for (const pic of [open390, open1280, folded390, folded1280]) {
 			expect(
 				count(pic ?? "", '<span class="text-muted">Part 1 category</span>'),
@@ -6730,6 +7385,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 			).toBe(1);
 			expect(tags(pic ?? "", "details").length).toBe(2);
 		}
+
 		for (const pic of [open390, open1280]) {
 			for (const details of tags(pic ?? "", "details"))
 				expect(attributes(details).has("open")).toBe(true);
@@ -6737,6 +7393,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 				count(pic ?? "", '<span class="truncate text-lg">Groceries</span>'),
 			).toBe(0);
 		}
+
 		for (const pic of [folded390, folded1280]) {
 			const [part1 = "", part2 = ""] = tags(pic ?? "", "details");
 			expect(attributes(part1).has("open")).toBe(false);
@@ -6754,6 +7411,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 			"B · A compact grid per part at 390 px, on a phone",
 			"B · A compact grid per part at 1280 px, on desktop",
 		]);
+
 		for (const pic of shots(b)) {
 			expect(count(pic, "grid grid-cols-2 gap-2")).toBe(2);
 			expect(tags(pic, "details").length).toBe(0);
@@ -6762,12 +7420,15 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 
 	it("gives each part's grid its own radio name, so every name is one part of one picture, seven chips each", async () => {
 		const chunk = specimenOf(await drawn());
+
 		const names = tags(chunk, "input")
 			.map((tag) => attributes(tag))
 			.filter((a) => a.get("type") === "radio")
 			.map((a) => a.get("name") ?? "");
+
 		const distinct = [...new Set(names)];
 		expect(distinct.length).toBe(12);
+
 		for (const name of distinct) {
 			expect(name).toMatch(/^p139-[a-z0-9-]+-(390|1280)-part-[01]$/);
 			expect(names.filter((n) => n === name).length).toBe(7);
@@ -6785,6 +7446,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		expect(checkedOf(folded1280 ?? "")).toEqual([
 			["p139-a-folded-1280-part-0", "1"],
 		]);
+
 		for (const pic of shots(b))
 			expect(checkedOf(pic)).toEqual([
 				[
@@ -6812,13 +7474,16 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const chunk = specimenOf(await drawn());
 		const desks = shots(chunk).filter((s) => s.includes("on desktop"));
 		expect(desks.length).toBe(4);
+
 		for (const desk of desks) {
 			expect(count(desk, "w-[28rem]")).toBe(1);
 			expect(count(desk, "rounded-l-sheet")).toBe(1);
 			expect(desk).toContain("Transactions");
 		}
+
 		const phones = shots(chunk).filter((s) => s.includes("on a phone"));
 		expect(phones.length).toBe(4);
+
 		for (const phone of phones) expect(phone).not.toContain("w-[28rem]");
 	});
 
@@ -6826,11 +7491,13 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const chunk = specimenOf(await drawn());
 		const notes = options(chunk).map(noteOf);
 		expect(notes.length).toBe(3);
+
 		for (const note of notes) {
 			expect(note).toContain("measured on the drawing");
 			expect(note).toContain("scrolls past 90% of the screen");
 			expect(note).toContain("guessed part");
 		}
+
 		// The guess is words only: the demo has no mixed trip, so no dashed part is drawn.
 		expect(chunk).not.toContain("border-dashed");
 	});
@@ -6848,6 +7515,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const chunk = specimenOf(await drawn());
 		const ids = [...chunk.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1] ?? "");
 		expect(new Set(ids).size).toBe(ids.length);
+
 		for (const [, target] of chunk.matchAll(/\sfor="([^"]+)"/g))
 			expect(ids).toContain(target);
 	});
@@ -6858,16 +7526,21 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 	const count = (text: string, part: string) => text.split(part).length - 1;
 	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
 	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+
 	const LABELS = (chunk: string) =>
 		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
+
 	const P142 = "p142-setup";
+
 	// The specimen alone: block() runs to the next section, which takes the wrapping section's closing tag with it.
 	const specimenOf = (html: string) => {
 		const chunk = block(html, P142);
+
 		return chunk.slice(0, chunk.lastIndexOf("</section>"));
 	};
+
 	// One phone's picture by its label, the text between its <figure and the next one.
 	const pictureNamed = (chunk: string, label: string) =>
 		chunk
@@ -6963,6 +7636,7 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 		);
 		expect(today).toContain("Five strokes, and you&#39;re set up.");
 		expect(today).not.toContain("none done");
+
 		for (const words of [
 			"Welcome to Tally.",
 			"Step 2 of 4 · Your pay",
@@ -6972,6 +7646,7 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 			"$1,284",
 		])
 			expect(a).toContain(words);
+
 		for (const words of [
 			"keeps count",
 			"Five strokes",
@@ -7041,6 +7716,7 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 	it("draws A's welcome pictures, phone and desktop, with the notebook at size-16 and not size-20 (P142, #770)", async () => {
 		const chunk = specimenOf(await drawn());
 		const phone = pictureNamed(chunk, "A, the welcome");
+
 		const desktop =
 			chunk
 				.split("<figure")
@@ -7048,11 +7724,13 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 				.find((picture) =>
 					picture.includes('aria-label="A, the welcome, on desktop"'),
 				) ?? "";
+
 		// The notebook is the picture's 120-square drawing; its svg carries the box's size class.
 		const notebookClasses = (picture: string) =>
 			[...picture.matchAll(/<svg class="([^"]*)" viewBox="0 0 120 120"/g)].map(
 				(m) => m[1] ?? "",
 			);
+
 		expect(phone).not.toBe("");
 		expect(desktop).not.toBe("");
 		expect(notebookClasses(phone)).toEqual(["size-16 shrink-0"]);
@@ -7063,6 +7741,7 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 		const chunk = specimenOf(await drawn());
 		const pictures = chunk.split("<figure").slice(1);
 		expect(pictures.length).toBe(13);
+
 		for (const picture of pictures)
 			expect(picture).toContain('href="/feedback"');
 		expect(count(chunk, 'href="/feedback"')).toBe(13);
@@ -7093,6 +7772,7 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 		const row = decisions
 			.split("\n")
 			.find((line) => line.startsWith("| 148 |"));
+
 		expect(row, "decision 148's row").toBeDefined();
 		expect(row).toContain("P142");
 		expect(row).toContain("#770");
@@ -7108,11 +7788,14 @@ describe("GET /design-system/proposals, P143 (net worth on the day a new account
 	const drawn = async () => (await get("/design-system/proposals")).html;
 	const count = (text: string, part: string) => text.split(part).length - 1;
 	const P143 = "p143-net-worth";
+
 	// The specimen alone: block() runs to the next section, which takes the wrapping section's closing tag with it.
 	const specimenOf = (html: string) => {
 		const chunk = block(html, P143);
+
 		return chunk.slice(0, chunk.lastIndexOf("</section>"));
 	};
+
 	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
 	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
 
@@ -7191,6 +7874,7 @@ describe("GET /design-system/proposals, P143 (net worth on the day a new account
 		const chunk = specimenOf(await drawn());
 		const rules = [...chunk.matchAll(/How Tally works, Net worth/g)];
 		expect(rules.length).toBe(3);
+
 		for (const rule of rules) {
 			const at = rule.index ?? 0;
 			expect(chunk.slice(at, at + 200)).not.toContain("<a ");
@@ -7212,6 +7896,7 @@ describe("GET /design-system/proposals, P143 (net worth on the day a new account
 		const row = decisions
 			.split("\n")
 			.find((line) => line.startsWith("| 154 |"));
+
 		expect(row, "decision 154's row").toBeDefined();
 		expect(
 			row?.startsWith("| 154 | 2026-10-30 | The owner's picks on #780"),

@@ -10,6 +10,7 @@ const STATES = [
 	"login_broken_and_needs_relink",
 	"disconnected",
 ] as const;
+
 const EVENTS = [
 	"LOGIN_BROKEN",
 	"RELINK_NEEDED",

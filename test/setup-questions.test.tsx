@@ -32,15 +32,18 @@ const formsOf = (markup: string) =>
 		attrs: match[1] ?? "",
 		body: match[2] ?? "",
 	}));
+
 /** One attribute of an opening tag's attributes, or undefined. */
 const attr = (attrs: string, name: string) =>
 	attrs.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
+
 /** The hidden fields of a form's markup, as name and value pairs. */
 const hiddenOf = (body: string) =>
 	[...body.matchAll(/<input type="hidden"([^>]*)>/g)].map((match) => ({
 		name: attr(match[1] ?? "", "name"),
 		value: attr(match[1] ?? "", "value"),
 	}));
+
 /** Every button on the screen: its attributes and its text. */
 const buttonsOf = (markup: string) =>
 	[...markup.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map(
@@ -49,24 +52,29 @@ const buttonsOf = (markup: string) =>
 			text: (match[2] ?? "").replace(/<[^>]+>/g, "").trim(),
 		}),
 	);
+
 /** Every link that is drawn as a text button, by its text and href. */
 const linksOf = (markup: string) =>
 	[...markup.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map((match) => ({
 		attrs: match[1] ?? "",
 		text: (match[2] ?? "").replace(/<[^>]+>/g, "").trim(),
 	}));
+
 /** Every id the markup draws. */
 const idsOf = (markup: string) =>
 	[...markup.matchAll(/\sid="([^"]*)"/g)].map((match) => match[1] ?? "");
+
 /** The h1's opening tag, and whether it takes focus. */
 const headingOf = (markup: string) => {
 	const tag = markup.match(/<h1\b[^>]*>/)?.[0] ?? "";
+
 	return {
 		text: markup.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? "",
 		focused: /\sautofocus/.test(tag),
 		tabindex: attr(tag.slice(3), "tabindex"),
 	};
 };
+
 /** The field whose input is the one the markup marks with autofocus, or none. */
 const focusedField = (markup: string) =>
 	markup.match(/<input\b[^>]*\sautofocus[^>]*>/)?.[0] ?? null;
@@ -81,12 +89,14 @@ const EVERY_OTHER_FRIDAY = [
 	"2026-09-25",
 	"2026-10-09",
 ];
+
 const PAY: PayMerchant = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
 	deposits: EVERY_OTHER_FRIDAY.map((date) => ({ date, cents: 245000 })),
 	ids: EVERY_OTHER_FRIDAY.map((_, i) => i + 1),
 };
+
 const ONE_PAY: PayMerchant = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
@@ -105,6 +115,7 @@ const charge = (
 	chargeCount: 2,
 	...over,
 });
+
 /** Eight charges Tally keeps in one tap: five shown and three folded. */
 const KEEP: BillSuggestion[] = [
 	charge({ displayName: "Netflix", amountCents: 1549, dueDay: 5 }),
@@ -116,12 +127,14 @@ const KEEP: BillSuggestion[] = [
 	charge({ displayName: "Cloud storage", amountCents: 1600, dueDay: 17 }),
 	charge({ displayName: "Magazine", amountCents: 1600, dueDay: 22 }),
 ];
+
 const GYM = charge({ displayName: "Gym", amountCents: 4500, categoryId: null });
 
 const MONTHS_AUG_SEP = [
 	{ month: "2026-08", spentCents: 61000 },
 	{ month: "2026-09", spentCents: 67400 },
 ];
+
 const GROCERIES: BudgetAsk = {
 	id: 1,
 	name: "Groceries",
@@ -130,6 +143,7 @@ const GROCERIES: BudgetAsk = {
 	months: MONTHS_AUG_SEP,
 	suggestion: { amountCents: 65000, months: MONTHS_AUG_SEP },
 };
+
 const GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
@@ -141,6 +155,7 @@ const GAS: BudgetAsk = {
 	],
 	suggestion: null,
 };
+
 /** Twelve suggestions that sum to $4,050 a month: five shown, seven folded. */
 const TWELVE: BudgetAsk[] = [
 	[1, "Groceries", "groceries", "cat-blue", 65000],
@@ -217,11 +232,14 @@ describe("SetupPay", () => {
 			"2026-10-02",
 			"2026-10-09",
 		];
+
 		const cents = [230000, 240000, 260000, 250000, 245000, 255000, 235000];
+
 		const merchant: PayMerchant = {
 			...PAY,
 			deposits: dates.map((date, i) => ({ date, cents: cents[i] ?? 0 })),
 		};
+
 		const markup = pay({ merchant });
 		expect(markup).toContain("$2,300 to $2,600");
 		expect(markup).toContain("7 times since Jul 3");
@@ -259,9 +277,11 @@ describe("SetupPay", () => {
 	it("answers Yes and No with name answer, in the screen's foot", () => {
 		const markup = pay();
 		const yes = buttonsOf(markup).find((b) => b.text === "Yes, that's my pay");
+
 		const no = buttonsOf(markup).find(
 			(b) => b.text === "No, it's something else",
 		);
+
 		expect(yes?.attrs).toContain('name="answer"');
 		expect(yes?.attrs).toContain('value="yes"');
 		expect(no?.attrs).toContain('name="answer"');
@@ -448,9 +468,11 @@ describe("SetupBudgets", () => {
 		const all = buttonsOf(markup).find((b) => b.text === "Keep all 12");
 		expect(all?.attrs).toContain('name="answer"');
 		expect(all?.attrs).toContain('value="all"');
+
 		const one = linksOf(markup).find(
 			(link) => link.text === "Go one at a time",
 		);
+
 		expect(attr(one?.attrs ?? "", "href")).toBe("/setup?budgets=one");
 	});
 
@@ -469,6 +491,7 @@ describe("SetupBudgets", () => {
 		const markup = budgets({
 			skipped: [skippedPay(), skippedBills(1)],
 		});
+
 		expect(markup).toContain("Your pay");
 		expect(markup).toContain("Your bills");
 		expect(markup).toContain("1 more waits in");
@@ -519,9 +542,11 @@ describe("SetupOneBudget", () => {
 		expect(markup).toContain("<details");
 		expect(markup).not.toMatch(/<details[^>]* open/);
 		expect(markup).toContain("Another amount");
+
 		const [another] = formsOf(markup).filter((form) =>
 			form.body.includes('name="budget"'),
 		);
+
 		expect(another?.body).toContain('value="another"');
 		expect(markup).toContain("Save this budget");
 		expect(markup).toMatch(/<input[^>]*id="budget-1"[^>]*name="budget"/);
@@ -532,12 +557,14 @@ describe("SetupOneBudget", () => {
 
 	it("opens Another amount when it is asked to, and on a refused amount, which takes focus in the field", () => {
 		expect(one({ amountOpen: true })).toMatch(/<details[^>]* open/);
+
 		const refused = one({
 			error: {
 				text: "Enter a dollar amount, like 250 or 250.50.",
 				typed: "lots",
 			},
 		});
+
 		expect(refused).toMatch(/<details[^>]* open/);
 		expect(refused).toContain('role="alert"');
 		expect(refused).toContain("Enter a dollar amount, like 250 or 250.50.");
@@ -609,6 +636,7 @@ describe("SetupOneBudget", () => {
 				typed: "lots",
 			},
 		});
+
 		expect(markup).toContain('value="lots"');
 		expect(focusedField(markup)).toContain('id="budget-3"');
 		expect(headingOf(markup).focused).toBe(false);
@@ -705,6 +733,7 @@ describe("SetupSavings", () => {
 				typed: "0",
 			},
 		});
+
 		expect(refused).toContain(
 			"Enter an amount greater than $0, or choose Not now.",
 		);
@@ -718,6 +747,7 @@ describe("SetupSavings", () => {
 		const markup = savings({
 			skipped: [skippedBudgets("every-category-budgeted")],
 		});
+
 		expect(markup).toContain("Your budgets");
 		expect(markup).toContain("Every category already has a budget.");
 		expect(markup.indexOf("Every category already has a budget.")).toBeLessThan(
@@ -747,6 +777,7 @@ describe("SkippedSteps", () => {
 		const markup = html(
 			SkippedSteps({ notes: [skippedPay(), skippedBills(2)] }),
 		);
+
 		expect(markup).toContain('<ul class="mt-4 space-y-1 text-sm text-muted">');
 		expect(markup).toContain('<span class="text-ink">Your pay</span>');
 		expect(markup).toContain('<span class="text-ink">Your bills</span>');
@@ -768,6 +799,7 @@ describe("SkippedSteps", () => {
 				notes: [skippedPay(), skippedBills(1), skippedBudgets("no-categories")],
 			}),
 		);
+
 		expect(markup.match(/<li\b/g)).toHaveLength(3);
 	});
 });
@@ -846,6 +878,7 @@ describe("ids and form references across the screens", () => {
 	it("points every form= attribute at a form with that id, in every screen", () => {
 		for (const markup of screens("x")) {
 			const formIds = idsOf(markup);
+
 			for (const [, target] of markup.matchAll(/\sform="([^"]*)"/g)) {
 				expect(formIds).toContain(target);
 			}
@@ -860,6 +893,7 @@ describe("ids and form references across the screens", () => {
 		expect(pay.slice(pay.indexOf('id="setup-foot"'))).toContain(
 			"Yes, that's my pay",
 		);
+
 		const one = html(
 			SetupOneBudget({
 				ask: GROCERIES,
@@ -870,6 +904,7 @@ describe("ids and form references across the screens", () => {
 				amountOpen: false,
 			}),
 		);
+
 		expect(one.slice(one.indexOf('id="setup-foot"'))).toContain("Yes, $650");
 	});
 });
@@ -884,6 +919,7 @@ describe("long names wrap inside the setup screens", () => {
 		const markup = html(
 			SetupPay({ merchant: { ...PAY, key: LONG, name: LONG }, focus: false }),
 		);
+
 		expect(markup).toContain(
 			`<p class="min-w-0 wrap-break-word font-medium">${LONG}</p>`,
 		);
@@ -901,6 +937,7 @@ describe("long names wrap inside the setup screens", () => {
 				focus: false,
 			}),
 		);
+
 		expect(markup).toMatch(
 			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*"><p>${LONG}</p>`),
 		);
@@ -916,6 +953,7 @@ describe("long names wrap inside the setup screens", () => {
 				focus: false,
 			}),
 		);
+
 		expect(markup).toMatch(
 			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*"><p>${LONG}</p>`),
 		);
@@ -933,6 +971,7 @@ describe("long names wrap inside the setup screens", () => {
 				amountOpen: false,
 			}),
 		);
+
 		expect(markup).toContain(LONG);
 		expect(markup).toMatch(/<h1 class="[^"]*\bwrap-anywhere\b[^"]*"/);
 	});

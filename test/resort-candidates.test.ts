@@ -19,6 +19,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -66,6 +67,7 @@ async function tx(fields: Fields = {}): Promise<number> {
 			fields.jevAlsoCategoryId ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -122,18 +124,21 @@ describe("resortCandidates: the waiting rules", () => {
 			categoryId: eatingOut,
 			categorySource: "user",
 		});
+
 		const rule = await tx({
 			plaidCategory: HINT,
 			confidence: 0.4,
 			categoryId: eatingOut,
 			categorySource: "merchant_rule",
 		});
+
 		const bill = await tx({
 			plaidCategory: HINT,
 			confidence: 0.4,
 			categoryId: eatingOut,
 			categorySource: "bill",
 		});
+
 		const rows = await candidates();
 		expect(ids(rows)).not.toContain(user);
 		expect(ids(rows)).not.toContain(rule);
@@ -159,10 +164,12 @@ describe("resortCandidates: the waiting rules", () => {
 		const pending = await tx({ plaidCategory: HINT, pending: 1 });
 		const split = await tx({ plaidCategory: HINT, isSplit: 1 });
 		const part = await tx({ plaidCategory: HINT, parentId: split });
+
 		const failed = await tx({
 			plaidCategory: HINT,
 			jevFailedAt: "2026-10-03 10:00:00",
 		});
+
 		const rows = await candidates();
 		expect(ids(rows)).not.toContain(filed);
 		expect(ids(rows)).not.toContain(pending);
@@ -173,12 +180,14 @@ describe("resortCandidates: the waiting rules", () => {
 
 	it("returns nothing when the new category is archived or does not exist", async () => {
 		await tx({ plaidCategory: HINT });
+
 		const missing = await resortCandidates(db, {
 			filedId: filed,
 			newCategoryId: 999_999,
 			cameFromCategoryId: eatingOut,
 			queueIds: [],
 		});
+
 		expect(missing).toEqual([]);
 		await db
 			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
@@ -201,6 +210,7 @@ describe("resortCandidates: the two ways a row is related", () => {
 			jevCategoryId: eatingOut,
 			confidence: 0.3,
 		});
+
 		expect(ids(await candidates())).toContain(same);
 	});
 
@@ -210,6 +220,7 @@ describe("resortCandidates: the two ways a row is related", () => {
 			jevCategoryId: groceries,
 			confidence: 0.3,
 		});
+
 		expect(ids(await candidates())).not.toContain(other);
 	});
 
@@ -220,11 +231,13 @@ describe("resortCandidates: the two ways a row is related", () => {
 			)
 			.bind(filed)
 			.run();
+
 		const noHint = await tx({
 			plaidCategory: null,
 			jevCategoryId: groceries,
 			confidence: 0.3,
 		});
+
 		expect(ids(await candidates())).not.toContain(noHint);
 	});
 
@@ -243,12 +256,14 @@ describe("resortCandidates: the two ways a row is related", () => {
 describe("resortCandidates: the cap and the order", () => {
 	it("caps the candidates at 100", async () => {
 		expect(RESORT_CANDIDATE_MAX).toBe(100);
+
 		for (let i = 0; i < 120; i++) {
 			await tx({
 				plaidCategory: HINT,
 				date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
 			});
 		}
+
 		expect((await candidates()).length).toBe(100);
 	});
 
@@ -269,6 +284,7 @@ describe("resortCandidates: the cap and the order", () => {
 			jevCategoryId: eatingOut,
 			jevMixed: 0.2,
 		});
+
 		await env.DB.prepare(
 			"UPDATE transactions SET jev_attempts = 2 WHERE id = ?",
 		)
@@ -295,6 +311,7 @@ describe("resortCandidates: the cap and the order", () => {
 			raw: "CHECKCARD 1002 CVS",
 			amount: 2900,
 		});
+
 		const found = (await candidates()).find((r) => r.id === row);
 		expect(found).toMatchObject({
 			rawName: "CHECKCARD 1002 CVS",

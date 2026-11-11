@@ -15,6 +15,7 @@ describe("TextInput", () => {
 				maxlength={40}
 			/>,
 		);
+
 		expect(html).toContain('<label for="name"');
 		expect(html).toContain('value="Food"');
 		expect(html).toContain('maxlength="40"');
@@ -33,6 +34,7 @@ describe("TextInput", () => {
 		const html = renderToString(
 			<TextInput id="name" label="Name" error="Required" />,
 		);
+
 		expect(html).toContain('aria-invalid="true"');
 		expect(html).toContain('aria-describedby="name-error"');
 		expect(html).toContain('role="alert"');
@@ -56,6 +58,7 @@ describe("TextInput", () => {
 		const html = renderToString(
 			<TextInput id="merchant" label="Merchant" hint="Helpful text" />,
 		);
+
 		expect(html).toContain('aria-describedby="merchant-hint"');
 		expect(html).toContain('<p id="merchant-hint" class="text-sm text-muted">');
 	});
@@ -69,6 +72,7 @@ describe("TextInput", () => {
 				error="Required"
 			/>,
 		);
+
 		expect(html).toContain('aria-describedby="merchant-hint merchant-error"');
 		expect(html.indexOf('id="merchant-hint"')).toBeLessThan(
 			html.indexOf('role="alert"'),

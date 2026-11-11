@@ -5,10 +5,13 @@ import raw from "../wrangler.jsonc?raw";
 function stripJsoncComments(text: string): string {
 	let out = "";
 	let inString = false;
+
 	for (let i = 0; i < text.length; i++) {
 		const c = text[i];
+
 		if (inString) {
 			out += c;
+
 			if (c === "\\") out += text[++i];
 			else if (c === '"') inString = false;
 		} else if (c === '"') {
@@ -23,6 +26,7 @@ function stripJsoncComments(text: string): string {
 			out += c;
 		}
 	}
+
 	return out;
 }
 
@@ -117,6 +121,7 @@ describe("stripJsoncComments", () => {
 	it("keeps // and /* inside strings, and drops real comments anywhere", () => {
 		const text =
 			'{ "url": "https://a/*b*/", // trailing\n /* block */ "n": 1 }';
+
 		expect(JSON.parse(stripJsoncComments(text))).toEqual({
 			url: "https://a/*b*/",
 			n: 1,

@@ -33,12 +33,15 @@ import {
 import { page as billsPage } from "./bills";
 
 type App = { Bindings: Env };
+
 export const plans = new Hono<App>();
 
 /** The months a plan can be set aside in: this month and the next eleven, plus the plan's own month when earlier. */
 function monthOptions(current: string, own?: string): PlanMonthOption[] {
 	const months = own && own < current ? [own] : [];
+
 	for (let i = 0; i < 12; i++) months.push(monthsBefore(current, -i));
+
 	return months.map((month) => ({
 		value: month,
 		label: `${monthName(month)} ${month.slice(0, 4)}`,
@@ -52,12 +55,14 @@ function withToast(
 	announce = toast.message,
 ) {
 	response.headers.set("HX-Trigger", hxTrigger({ toast, announce }));
+
 	return response;
 }
 
 /** Bills' page as a plan's answer, whose address is Bills' (as a bill's answer sets it, #87). */
 function atBills(response: Response) {
 	response.headers.set("HX-Push-Url", "/bills");
+
 	return response;
 }
 
@@ -76,6 +81,7 @@ async function sheetPage(
 ) {
 	const month = today.slice(0, 7);
 	const { plan, errors = {}, deleteConfirm = false, opener = false } = options;
+
 	const values: PlanValues =
 		options.values ??
 		(plan
@@ -85,6 +91,7 @@ async function sheetPage(
 					month: plan.month,
 				}
 			: { name: "", amount: "", month });
+
 	const paidBy =
 		plan?.transactionId && plan.paidDate && plan.paidAmountCents != null
 			? {
@@ -93,6 +100,7 @@ async function sheetPage(
 					amountCents: plan.paidAmountCents,
 				}
 			: undefined;
+
 	const sheet = (
 		<PlanSheet
 			plan={plan}
@@ -104,9 +112,11 @@ async function sheetPage(
 			opener={opener}
 		/>
 	);
+
 	// Opened from the plan's own page, the sheet stays over that page, so a redraw keeps the page under it.
 	if (opener && plan)
 		return planPage(c, plan.id, undefined, false, false, sheet);
+
 	return billsPage(c, { plan: sheet }, today);
 }
 
@@ -121,13 +131,17 @@ function planForm(form: Record<string, unknown>, month: string, own?: string) {
 		amount: String(form.amount ?? "").trim(),
 		month: String(form.month ?? "").trim(),
 	};
+
 	const errors: Record<string, string> = {};
+
 	if (!values.name) errors.name = "Say what it's for.";
 	else if (values.name.length > PLAN_NAME_MAX)
 		errors.name = `Keep the name under ${PLAN_NAME_MAX} characters.`;
 	let amountCents = 0;
+
 	try {
 		amountCents = toCents(values.amount);
+
 		if (!Number.isSafeInteger(amountCents))
 			errors.amount = "Enter a smaller amount in dollars and cents.";
 		else if (amountCents <= 0)
@@ -135,10 +149,13 @@ function planForm(form: Record<string, unknown>, month: string, own?: string) {
 	} catch {
 		errors.amount = "Enter an amount greater than $0.";
 	}
+
 	const offered = monthOptions(month, own).some(
 		(option) => option.value === values.month,
 	);
+
 	if (!offered) errors.month = "Choose a month.";
+
 	return {
 		values,
 		errors,
@@ -153,6 +170,7 @@ function planForm(form: Record<string, unknown>, month: string, own?: string) {
 // Specific paths first: /plans/new and /plans/undo-delete are not plan ids.
 plans.get("/plans/new", async (c) => {
 	const today = await householdToday(c.env.DB);
+
 	return sheetPage(
 		c,
 		{ values: { name: "", amount: "", month: today.slice(0, 7) } },
@@ -162,14 +180,18 @@ plans.get("/plans/new", async (c) => {
 
 plans.post("/plans", async (c) => {
 	const today = await householdToday(c.env.DB);
+
 	const { values, errors, fields } = planForm(
 		await c.req.parseBody(),
 		today.slice(0, 7),
 	);
+
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { values, errors }, today);
 	await insertPlan(c.env.DB, fields, actor(c));
+
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+
 	return withToast(atBills(await billsPage(c, undefined, today)), {
 		message: `Planned ${fields.name}, ${formatCents(fields.amountCents)}.`,
 		type: "success",
@@ -179,12 +201,16 @@ plans.post("/plans", async (c) => {
 plans.post("/plans/undo-delete", async (c) => {
 	const form = await c.req.parseBody();
 	const token = typeof form.token === "string" ? form.token : undefined;
+
 	const restored =
 		token && /^[0-9a-f-]{36}$/i.test(token)
 			? await restorePlanDelete(c.env.DB, token)
 			: null;
+
 	const today = await householdToday(c.env.DB);
+
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+
 	// Every answer ends the Undo toast it answers, so undoDone names its token (toast.js).
 	return withToast(
 		atBills(await billsPage(c, undefined, today)),
@@ -204,7 +230,9 @@ plans.post("/plans/undo-delete", async (c) => {
 
 plans.get("/plans/:id/edit", async (c) => {
 	const plan = await loadPlan(c.env.DB, Number(c.req.param("id")));
+
 	if (!plan) return c.notFound();
+
 	return sheetPage(
 		c,
 		{ plan, opener: c.req.query("opener") === "plan" },
@@ -214,7 +242,9 @@ plans.get("/plans/:id/edit", async (c) => {
 
 plans.get("/plans/:id/delete", async (c) => {
 	const plan = await loadPlan(c.env.DB, Number(c.req.param("id")));
+
 	if (!plan) return c.notFound();
+
 	return sheetPage(
 		c,
 		{
@@ -241,11 +271,14 @@ async function planPage(
 	sheet?: Child,
 ) {
 	const plan = await loadPlan(c.env.DB, id);
+
 	if (!plan) return c.notFound();
 	const today = await householdToday(c.env.DB);
+
 	const candidates = plan.transactionId
 		? []
 		: await planPaymentCandidates(c.env.DB, plan);
+
 	return c.html(
 		<Layout
 			title={`${plan.name} · Tally`}
@@ -333,33 +366,44 @@ plans.get("/plans/:id", (c) => planPage(c, Number(c.req.param("id"))));
 plans.post("/plans/:id/link", async (c) => {
 	const id = Number(c.req.param("id"));
 	const plan = await loadPlan(c.env.DB, id);
+
 	if (!plan) return c.notFound();
 	const transaction = Number((await c.req.parseBody()).transaction_id);
+
 	const linked =
 		Number.isInteger(transaction) &&
 		transaction > 0 &&
 		(await linkPlanPayment(c.env.DB, id, transaction));
+
 	// Linking stays on the plan's page, which now shows it paid (decision 101), as the bill page's link does.
 	if (linked) {
 		if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
+
 		return withToast(await planPage(c, id), {
 			message: "Payment linked",
 			type: "success",
 		});
 	}
+
 	// A plan paid by the time its link is sent says so first, as a paid bill month does (decision 82, #623).
 	// It is read again here, so a link that lands after the route's first load gets the same sentence.
 	const now = await loadPlan(c.env.DB, id);
+
 	if (!now) return c.notFound();
+
 	if (now.transactionId) return planPage(c, id, `${now.name} is already paid.`);
+
 	// The refusal names what the payment already pays, in the bill side's words (decision 82).
 	const paid = Number.isInteger(transaction)
 		? await paysBillOrPlan(c.env.DB, transaction)
 		: null;
+
 	if (paid === "bill")
 		return planPage(c, id, "That payment already pays a bill.");
+
 	if (paid === "plan")
 		return planPage(c, id, "That payment already pays a planned expense.");
+
 	return planPage(
 		c,
 		id,
@@ -370,6 +414,7 @@ plans.post("/plans/:id/link", async (c) => {
 plans.post("/plans/:id/unlink", async (c) => {
 	const id = Number(c.req.param("id"));
 	const plan = await loadPlan(c.env.DB, id);
+
 	if (!plan) return c.notFound();
 	// The plan's own page and its sheet both unlink, and each answers with the view it came from (decision 101), as Link does.
 	const form = await c.req.parseBody();
@@ -378,18 +423,23 @@ plans.post("/plans/:id/unlink", async (c) => {
 	const opener = form.opener === "plan";
 	const unlinked = await unlinkPlanPayment(c.env.DB, id);
 	const today = await householdToday(c.env.DB);
+
 	if (!c.req.header("HX-Request"))
 		return c.redirect(onPage ? `/plans/${id}` : "/bills", 303);
 	const toast = { message: "Payment unlinked", type: "success" };
+
 	// A stale sheet's second Unlink finds the plan unpaid already: the redrawn page shows it, and no toast claims an unlink.
 	// With no toast to say so, the page takes focus on its Link a payment heading instead.
 	if (onPage) {
 		const page = await planPage(c, id, undefined, false, !unlinked);
+
 		return unlinked ? withToast(page, toast) : page;
 	}
+
 	// On the sheet, which stays open on the plan, now unpaid.
 	const fresh = (await loadPlan(c.env.DB, id)) ?? plan;
 	const sheet = await sheetPage(c, { plan: fresh, opener }, today);
+
 	return unlinked ? withToast(sheet, toast) : sheet;
 });
 
@@ -399,7 +449,9 @@ plans.post("/plans/:id/move", async (c) => {
 	const month = today.slice(0, 7);
 	const plan = await loadPlan(c.env.DB, id);
 	const moved = plan ? await movePlanToMonth(c.env.DB, id, month) : false;
+
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+
 	return withToast(
 		atBills(await billsPage(c, undefined, today)),
 		moved && plan
@@ -421,18 +473,22 @@ const PLAN_GONE = "That planned expense is already gone.";
 async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 	const id = Number(c.req.param("id"));
 	const plan = await loadPlan(c.env.DB, id);
+
 	if (!plan) return c.notFound();
 	const token = await holdPlanDelete(c.env.DB, id);
 	const today = await householdToday(c.env.DB);
+
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	const deleted = `${verb} ${plan.name}, ${formatCents(plan.amountCents)}.`;
 	const response = atBills(await billsPage(c, undefined, today));
+
 	if (!token) {
 		return withToast(response, {
 			message: PLAN_GONE,
 			type: "error",
 		});
 	}
+
 	// The announcement names the Undo's window, as the cash delete's does (#342).
 	return withToast(
 		response,
@@ -448,42 +504,53 @@ async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 }
 
 plans.post("/plans/:id/delete", (c) => deletePlan(c, "Deleted"));
+
 // The Band's Drop: the answer deletes the plan, through the same Undo as a Delete.
 plans.post("/plans/:id/drop", (c) => deletePlan(c, "Dropped"));
 
 plans.post("/plans/:id", async (c) => {
 	const id = Number(c.req.param("id"));
 	const plan = await loadPlan(c.env.DB, id);
+
 	if (!plan) return c.notFound();
 	const today = await householdToday(c.env.DB);
 	const form = await c.req.parseBody();
 	// A save from the plan's own page (Edit planned expense) answers with that page, as the sheet's close returns there (#87).
 	const opener = form.opener === "plan";
+
 	const { values, errors, fields } = planForm(
 		form,
 		today.slice(0, 7),
 		plan.month,
 	);
+
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { plan, values, errors, opener }, today);
 	const { saved, unlinked } = await updatePlan(c.env.DB, id, fields);
+
 	// Deleted after this save read it: the answer is the gone one a delete gives, never "Saved" or the plan's address (#202).
 	if (!saved) {
 		if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+
 		return withToast(atBills(await billsPage(c, undefined, today)), {
 			message: PLAN_GONE,
 			type: "error",
 		});
 	}
+
 	const message = `Saved ${fields.name}.${unlinked ? " Its payment is no longer linked." : ""}`;
+
 	if (opener) {
 		if (!c.req.header("HX-Request"))
 			return c.redirect(`/plans/${id}?focus=edit-plan`, 303);
 		const page = await planPage(c, id, undefined, true);
 		page.headers.set("HX-Push-Url", `/plans/${id}`);
+
 		return withToast(page, { message, type: "success" });
 	}
+
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+
 	return withToast(atBills(await billsPage(c, undefined, today)), {
 		message,
 		type: "success",

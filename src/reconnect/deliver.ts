@@ -36,6 +36,7 @@ export type DeliverOptions = {
 async function errorName(response: Response): Promise<string | null> {
 	try {
 		const body = (await response.json()) as { name?: unknown };
+
 		return typeof body.name === "string" ? body.name : null;
 	} catch {
 		return null;
@@ -74,6 +75,7 @@ export async function deliver(
 ): Promise<{ delivered: boolean; kinds: string[]; held?: true }> {
 	const kinds: string[] = [];
 	let delivered = false;
+
 	if (env.RESEND_API_KEY) {
 		const response = await fetchImpl("https://api.resend.com/emails", {
 			method: "POST",
@@ -85,18 +87,23 @@ export async function deliver(
 			},
 			body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 		}).catch(() => null);
+
 		delivered = response?.ok ?? false;
+
 		const noAnswer = response
 			? `resend ${response.status}`
 			: "resend timeout or error";
+
 		if (!delivered && options.onlyResend)
 			// A kept try: Resend may hold the send whatever it answered, so the caller keeps its words and tries again.
 			return { delivered: false, kinds: [noAnswer], held: true };
+
 		if (!delivered && idempotencyKey) {
 			// Resend may already hold this send (decision 146). Only invalid_idempotent_request says this body was never sent
 			// under the key, so only it falls back; every other conflict, and no answer, is a failed try with no fallback.
 			const conflict =
 				response?.status === 409 ? await errorName(response) : null;
+
 			if (
 				!response ||
 				(response.status === 409 && conflict !== "invalid_idempotent_request")
@@ -104,11 +111,13 @@ export async function deliver(
 				// `held`: Resend may already hold this send, so the caller keeps its words and tries again with the same key.
 				return { delivered: false, kinds: [noAnswer], held: true };
 		}
+
 		if (!delivered) kinds.push(noAnswer);
 	} else if (options.onlyResend) {
 		// No Resend key: no answer can show the kept send was never made, so it is held, and Cloudflare's email is not used.
 		return { delivered: false, kinds: ["no provider configured"], held: true };
 	}
+
 	if (!delivered && env.EMAIL) {
 		try {
 			await env.EMAIL.send({ to: recipient, from: FROM, ...email });
@@ -117,7 +126,9 @@ export async function deliver(
 			kinds.push("email fallback error");
 		}
 	}
+
 	if (!delivered && kinds.length === 0) kinds.push("no provider configured");
+
 	return { delivered, kinds };
 }
 
@@ -132,7 +143,9 @@ export function logDeliveries(
 	const failures = failureKinds.size
 		? ` (${[...failureKinds].join(", ")})`
 		: "";
+
 	const summary = `${label}: ${sent} sent, ${failed} failed${failures}`;
+
 	if (failed) console.error(summary);
 	else console.log(summary);
 }

@@ -8,18 +8,22 @@ import { home } from "../src/routes/home";
 // is plain Home. Before that, a family's setup is on its own pages (/setup, setup-route.test.ts), and Home sends them there.
 // Home loads no Plaid Link: it has no Link a bank any more.
 const family = { ...env, DEMO: "false" } as unknown as Env;
+
 const plaidFamily = {
 	...family,
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 } as unknown as Env;
+
 const PLAID_MODULE = 'src="/js/plaid-link.js"';
 
 const page = async (bindings: Env) => {
 	const res = await home.request("/", {}, bindings);
+
 	return (await res.text()).replaceAll("&#39;", "'");
 };
+
 const writeRecord = (value: unknown) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -118,6 +122,7 @@ describe("Home's sheets and Home itself load no Plaid (#678, decision 148)", () 
 			budgets: {},
 		});
 	};
+
 	const firstCategory = async () =>
 		(
 			await env.DB.prepare(
@@ -152,6 +157,7 @@ describe("Home's sheets and Home itself load no Plaid (#678, decision 148)", () 
 		async (_, pathFor) => {
 			await answeredHome();
 			const path = pathFor(await firstCategory());
+
 			const html = await (
 				await home.request(
 					path,
@@ -159,6 +165,7 @@ describe("Home's sheets and Home itself load no Plaid (#678, decision 148)", () 
 					plaidFamily,
 				)
 			).text();
+
 			expect(html).not.toContain("Link a bank");
 			expect(html).not.toContain(PLAID_MODULE);
 		},
@@ -181,6 +188,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 			"UPDATE plaid_items SET last_synced_at = NULL, history_complete_at = NULL",
 		).run();
 	};
+
 	/** Every connected bank's history is in and nothing waits for Jev: the questions are open (the ready phase). */
 	const historyInAndSorted = async () => {
 		await env.DB.prepare(
@@ -193,12 +201,14 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
 		).run();
 	};
+
 	/** Every bank disconnected: the before phase. */
 	const noBank = async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 	};
+
 	/** The first category's id: the budget routes' :id. */
 	const firstCategory = async () =>
 		(
@@ -208,6 +218,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 				id: number;
 			}>()
 		)?.id ?? 1;
+
 	/** The rows a save writes, so a save that goes to setup can be seen to write nothing. */
 	const savedRows = async () =>
 		JSON.stringify([
@@ -222,6 +233,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 				).all()
 			).results,
 		]);
+
 	/** A save as the Home sheets and the nudge send it: htmx, form-encoded, from this origin. */
 	const save = (
 		path: string,
@@ -241,6 +253,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 			},
 			bindings,
 		);
+
 	/** Setup done on `day`: all four strokes drawn, with no budget answers kept. */
 	const answeredOn = (day: string) => ({
 		strokes: { bank: day, pay: day, bills: day, budgets: day },
@@ -259,6 +272,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 				{},
 				family,
 			);
+
 			expect(res.status).toBe(303);
 			expect(res.headers.get("Location")).toBe("/setup");
 		});
@@ -269,6 +283,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 				{ headers: { "HX-Request": "true" } },
 				family,
 			);
+
 			expect(res.status).toBe(204);
 			expect(res.headers.get("HX-Redirect")).toBe("/setup");
 		});
@@ -298,6 +313,7 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 			const res = await save(`/budget/${await firstCategory()}`, {
 				budget: "12.345",
 			});
+
 			expect(res.status).toBe(204);
 			expect(res.headers.get("HX-Redirect")).toBe("/setup");
 		});
@@ -306,11 +322,13 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 	it("GET /budget/:id before a bank is 303 to /setup", async () => {
 		await noBank();
 		await writeRecord({ strokes: {}, budgets: {} });
+
 		const res = await home.request(
 			`/budget/${await firstCategory()}`,
 			{},
 			family,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/setup");
 	});
@@ -318,11 +336,13 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 	it("GET /budget/:id once the questions are open is 303 to /setup", async () => {
 		await historyInAndSorted();
 		await writeRecord({ strokes: { bank: today() }, budgets: {} });
+
 		const res = await home.request(
 			`/budget/${await firstCategory()}`,
 			{},
 			family,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/setup");
 	});
@@ -331,11 +351,13 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 		it("GET /budget/:id once setup is done draws the sheet as today", async () => {
 			await historyInAndSorted();
 			await writeRecord(answeredOn(today()));
+
 			const res = await home.request(
 				`/budget/${await firstCategory()}`,
 				{},
 				family,
 			);
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("Location")).toBeNull();
 			expect(await res.text()).toContain('role="dialog"');
@@ -344,10 +366,12 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 		it("GET /budget/:id in the demo draws the sheet, whatever the record says", async () => {
 			await readingOneBank();
 			await writeRecord({ strokes: { bank: today() }, budgets: {} });
+
 			const res = await home.request(`/budget/${await firstCategory()}`, {}, {
 				...env,
 				DEMO: "true",
 			} as unknown as Env);
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("Location")).toBeNull();
 			expect(await res.text()).toContain('role="dialog"');
@@ -356,9 +380,11 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 		it("a save once setup is done still saves, and says so", async () => {
 			await historyInAndSorted();
 			await writeRecord(answeredOn(today()));
+
 			const res = await save(`/budget/${await firstCategory()}`, {
 				budget: "650",
 			});
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("HX-Trigger")).toContain("Saved the");
 		});

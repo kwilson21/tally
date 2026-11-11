@@ -14,6 +14,7 @@ describe("BudgetDiagram with a planned expense", () => {
 				plannedCents: 18000,
 			}),
 		);
+
 		expect(html).toContain("minus $142.00 for bills due");
 		expect(html).toContain("minus $180.00 for planned expenses");
 		expect(html).toContain(">Bills due<");
@@ -30,6 +31,7 @@ describe("BudgetDiagram with a planned expense", () => {
 				safeToSpendCents: 79800,
 			}),
 		);
+
 		expect(html).toContain("minus $142.00 for bills due");
 		expect(html).not.toContain("planned expenses");
 		expect(html).not.toContain(">Planned<");
@@ -41,8 +43,10 @@ const wrapLines = (widths: number[], column: number) =>
 	widths.reduce<number[][]>((lines, width) => {
 		const last = lines.at(-1);
 		const used = last?.reduce((sum, w) => sum + w, 0) ?? 0;
+
 		if (last && used + width <= column) last.push(width);
 		else lines.push([width]);
+
 		return lines;
 	}, []);
 
@@ -55,36 +59,44 @@ describe("BudgetDiagram keeps each box at its size and wraps on every screen (de
 		plannedCents: 18000,
 		safeToSpendCents: 61800,
 	};
+
 	const plain = {
 		totalBudgetCents: 140000,
 		totalSpentCents: 46000,
 		safeToSpendCents: 79800,
 	};
+
 	const savings = {
 		totalBudgetCents: 140000,
 		totalSpentCents: 46000,
 		savingsGoalCents: 50000,
 		safeToSpendCents: 29800,
 	};
+
 	/** Each box's own drawing, in order: an SVG that is aria-hidden, because the wrapper is the one labelled picture. */
 	const unitSvgs = (html: string) =>
 		[...html.matchAll(/<svg aria-hidden="true"[\s\S]*?<\/svg>/g)].map(
 			(found) => found[0],
 		);
+
 	const openTag = (svg: string) => svg.match(/^<svg[^>]*>/)?.[0] ?? "";
+
 	const widthOf = (svg: string) =>
 		Number(openTag(svg).match(/ width="(\d+)"/)?.[1]);
+
 	const text = (html: string) =>
 		html
 			.replace(/<[^>]+>/g, " ")
 			.replace(/\s+/g, " ")
 			.trim();
+
 	const desc = (html: string) =>
 		html.match(/<span id="[^"]*-desc"[^>]*>([^<]+)</)?.[1] ?? "";
 
 	it("draws the five boxes as units of their own, 93 wide for Budget and 115 with their operators, 68 tall", () => {
 		const svgs = unitSvgs(String(BudgetDiagram(planned)));
 		expect(svgs.map(widthOf)).toEqual([93, 115, 115, 115, 115]);
+
 		for (const svg of svgs) {
 			expect(openTag(svg)).toContain('height="68"');
 			expect(openTag(svg)).toContain('class="shrink-0"');
@@ -101,6 +113,7 @@ describe("BudgetDiagram keeps each box at its size and wraps on every screen (de
 				safeToSpendCents: 56800,
 			}),
 		);
+
 		expect(unitSvgs(html).map(widthOf)).toEqual([93, 115, 115, 115, 115, 115]);
 		expect(html.match(/role="img"/g)).toHaveLength(1);
 		const wrapper = html.match(/<div role="img"[^>]*>/)?.[0] ?? "";
@@ -128,6 +141,7 @@ describe("BudgetDiagram keeps each box at its size and wraps on every screen (de
 				safeToSpendCents: -5000,
 			}),
 		);
+
 		expect(html).toContain("stroke-over");
 		expect(html).not.toContain("stroke-ok");
 	});
@@ -184,11 +198,13 @@ describe("BudgetDiagram keeps each box at its size and wraps on every screen (de
 				[93, 115, 115, 115, 115, 115],
 			],
 		];
+
 		for (const [name, html, widths] of cases) {
 			expect(unitSvgs(html).map(widthOf), name).toEqual(widths);
 			expect(wrapLines(widths, 768).length, name).toBe(1);
 			expect(wrapLines(widths, 350).length, name).toBeGreaterThan(1);
 		}
+
 		// Four boxes at 390 put "= Safe to spend" alone on line 2; six put Planned, Savings goal and Safe to spend there.
 		expect(wrapLines([93, 115, 115, 115], 350)).toEqual([
 			[93, 115, 115],
@@ -212,6 +228,7 @@ describe("BudgetDiagram keeps each box at its size and wraps on every screen (de
 
 	it("gives two diagrams with different ids no duplicate id attribute", () => {
 		const first = String(BudgetDiagram({ ...planned, id: "budget-a" }));
+
 		const second = String(
 			BudgetDiagram({
 				totalBudgetCents: 140000,
@@ -220,9 +237,11 @@ describe("BudgetDiagram keeps each box at its size and wraps on every screen (de
 				id: "budget-b",
 			}),
 		);
+
 		const ids = [...`${first}${second}`.matchAll(/ id="([^"]+)"/g)].map(
 			(found) => found[1],
 		);
+
 		expect(ids).toEqual([
 			"budget-a-title",
 			"budget-a-desc",

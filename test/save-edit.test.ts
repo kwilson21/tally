@@ -148,11 +148,13 @@ describe("saveEdit", () => {
 			updated_by: "demo",
 		});
 		expect(await needsCategoryCount(db, "2026-09")).toBe(9);
+
 		const summary = summarizeMonth({
 			month: "2026-09",
 			...(await loadMonth(db, "2026-09")),
 			unpaidDueBillsCents: 0,
 		});
+
 		// Eating Out's rows dated up to the 22nd are $336, and the Bakery's $12 makes $348 (the demo's paced spending, #322).
 		expect(
 			summary.categories.find((c) => c.id === EATING_OUT)?.spentCents,
@@ -191,6 +193,7 @@ describe("saveEdit", () => {
 				"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
 			)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"UPDATE transactions SET updated_by = 'earlier' WHERE parent_id = ?",
@@ -250,10 +253,12 @@ describe("saveEdit", () => {
 				"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
 			)
 			.first<{ id: number }>();
+
 		const child = await db
 			.prepare("SELECT id FROM transactions WHERE parent_id = ? LIMIT 1")
 			.bind(parent?.id)
 			.first<{ id: number }>();
+
 		const states = async () =>
 			(
 				await db
@@ -263,6 +268,7 @@ describe("saveEdit", () => {
 					.bind(parent?.id)
 					.all<{ excluded: number }>()
 			).results;
+
 		await saveEdit(db, child?.id as number, edit({ excluded: true }), "part");
 		expect(await states()).toEqual([{ excluded: 1 }]);
 		await saveEdit(db, child?.id as number, edit({ excluded: false }), "part");
@@ -295,6 +301,7 @@ describe("saveEdit", () => {
 				.bind("TRADER JOE'S #552")
 				.all<{ id: number }>()
 		).results.map((r) => r.id);
+
 		expect(ids.length).toBeGreaterThan(3);
 		const [edited, personal, ...others] = ids as [number, number, ...number[]];
 		await db
@@ -317,6 +324,7 @@ describe("saveEdit", () => {
 			.prepare("SELECT default_category_id FROM merchants WHERE raw_name = ?")
 			.bind("TRADER JOE'S #552")
 			.first<{ default_category_id: number }>();
+
 		expect(merchant?.default_category_id).toBe(GAS);
 		expect(await row(edited)).toMatchObject({
 			category_id: GAS,
@@ -326,6 +334,7 @@ describe("saveEdit", () => {
 			category_id: 1,
 			category_source: "user",
 		});
+
 		for (const id of others) {
 			expect(await row(id)).toMatchObject({
 				category_id: GAS,
@@ -345,10 +354,12 @@ describe("saveEdit", () => {
 			.run();
 		const id = await idOf("PAYPAL *XYZSHOP");
 		await saveEdit(db, id, edit({ displayName: "XYZ Shop" }), "demo");
+
 		const { rows } = await listTransactions(
 			db,
 			parseFilters(new URLSearchParams("q=paypal"), "2026-09"),
 		);
+
 		expect(rows.map((r) => r.displayName)).toEqual(["XYZ Shop"]);
 	});
 
@@ -371,6 +382,7 @@ describe("saveEdit", () => {
 
 	it("keeps a Kind and For a person cleared, when Jev answers later (#304)", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
+
 		const untouched = (
 			await db
 				.prepare(
@@ -379,6 +391,7 @@ describe("saveEdit", () => {
 				.bind(id)
 				.first<{ id: number }>()
 		)?.id as number;
+
 		await db.batch([
 			db
 				.prepare(
@@ -416,8 +429,10 @@ describe("saveEdit", () => {
 				noteWorthWriting: null,
 			},
 		])?.run();
+
 		const details =
 			"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?";
+
 		expect(await db.prepare(details).bind(id).first()).toEqual({
 			kind: null,
 			kind_guessed: 0,
@@ -442,6 +457,7 @@ describe("saveEdit", () => {
 			.run();
 		// With the Details switch off the guess is drawn as Not known, so the form posts Kind empty both ways.
 		const posted = new FormData();
+
 		for (const [key, value] of Object.entries({
 			details_visible: "0",
 			kind_was: "",
@@ -453,6 +469,7 @@ describe("saveEdit", () => {
 		}))
 			posted.set(key, value);
 		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+
 		if (!parsed.ok) throw new Error("expected the form to parse");
 		await saveEdit(db, id, parsed.value, "demo");
 		expect(
@@ -480,6 +497,7 @@ describe("saveEdit", () => {
 			.run();
 		// The guess is drawn as Not known, so picking Subscription posts against an empty kind_was.
 		const posted = new FormData();
+
 		for (const [key, value] of Object.entries({
 			details_visible: "0",
 			kind_was: "",
@@ -491,6 +509,7 @@ describe("saveEdit", () => {
 		}))
 			posted.set(key, value);
 		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+
 		if (!parsed.ok) throw new Error("expected the form to parse");
 		await saveEdit(db, id, parsed.value, "demo");
 		expect(
@@ -518,6 +537,7 @@ describe("saveEdit", () => {
 			.run();
 		// The guess is drawn as No one, so picking Person 1 posts against an empty for_person_id_was.
 		const posted = new FormData();
+
 		for (const [key, value] of Object.entries({
 			details_visible: "0",
 			kind_was: "",
@@ -529,6 +549,7 @@ describe("saveEdit", () => {
 		}))
 			posted.set(key, value);
 		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+
 		if (!parsed.ok) throw new Error("expected the form to parse");
 		await saveEdit(db, id, parsed.value, "demo");
 		expect(
@@ -556,6 +577,7 @@ describe("saveEdit", () => {
 			.run();
 		// Details shown: the guesses are drawn as they are, so an untouched save re-posts them unchanged.
 		const posted = new FormData();
+
 		for (const [key, value] of Object.entries({
 			details_visible: "1",
 			kind_was: "subscription",
@@ -567,6 +589,7 @@ describe("saveEdit", () => {
 		}))
 			posted.set(key, value);
 		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+
 		if (!parsed.ok) throw new Error("expected the form to parse");
 		await saveEdit(db, id, parsed.value, "demo");
 		expect(
@@ -623,6 +646,7 @@ describe("saveEdit recounts a linked credit when this save makes it count with i
 		const bank = await db
 			.prepare("SELECT id FROM accounts WHERE type != 'cash' LIMIT 1")
 			.first<{ id: number }>();
+
 		if (!bank) throw new Error("bank account missing");
 		// A $50 purchase whose whole $50 is already refunded by REFUND, and a $20 credit linked to it
 		// that is marked as income, so it doesn't count against the purchase.

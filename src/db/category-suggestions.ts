@@ -21,23 +21,28 @@ export type NoneFitTransaction = {
 	merchantKey: string;
 	merchant: string;
 };
+
 export async function noneFitTransactions(
 	db: D1Database,
 ): Promise<NoneFitTransaction[]> {
 	const theme = `COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")})`;
+
 	// A store with a "Never suggest" line for a new category is never grouped (decision 101).
 	const eligible = `t.jev_none_fit = 1 AND t.category_confidence >= ? AND t.jev_category_id IS NULL
 		AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_suggestion_id IS NULL
 		AND t.amount_cents > 0 AND t.pending = 0 AND t.excluded = 0 AND t.flag_income = 0
 		AND t.is_split = 0 AND t.parent_id IS NULL
 		AND NOT ${neverSuggestedSql("t", "new_category")}`;
+
 	const { results: groups } = await db
 		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3
 			ORDER BY count DESC, theme LIMIT 10`)
 		.bind(JEV_THRESHOLD)
 		.all<{ theme: string; count: number }>();
+
 	if (!groups.length) return [];
+
 	const { results } = await db
 		.prepare(`SELECT t.id, ${theme} theme, ${merchantKeySql("t")} merchantKey,
 			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant, ${ownNameSql("t")} ownName
@@ -46,6 +51,7 @@ export async function noneFitTransactions(
 		WHERE ${eligible} ORDER BY t.date DESC, t.id DESC LIMIT 500`)
 		.bind(JSON.stringify(groups.map((group) => group.theme)), JEV_THRESHOLD)
 		.all<NoneFitTransaction & { ownName: string | null }>();
+
 	// A one-off name is the name a person typed, so the model sees it exactly as typed; the rest are tidied.
 	return results.map(({ ownName, ...row }) => ({
 		...row,
@@ -54,6 +60,7 @@ export async function noneFitTransactions(
 }
 
 const placeholders = () => `SELECT value FROM json_each(?)`;
+
 export async function saveSuggestion(
 	db: D1Database,
 	name: string | null,
@@ -63,11 +70,13 @@ export async function saveSuggestion(
 	if (!ids.length) return null;
 	const cleaned = name?.trim() ?? "";
 	const currentAvoid = [...new Set([...avoid, ...(await namesToAvoid(db))])];
+
 	const safeName =
 		cleaned &&
 		!currentAvoid.some((n) => n.toLowerCase() === cleaned.toLowerCase())
 			? cleaned
 			: "";
+
 	if (safeName) {
 		const existing = await db
 			.prepare(
@@ -75,6 +84,7 @@ export async function saveSuggestion(
 			)
 			.bind(safeName)
 			.first<{ id: number }>();
+
 		if (existing) {
 			await db
 				.prepare(
@@ -82,11 +92,14 @@ export async function saveSuggestion(
 				)
 				.bind(existing.id, JSON.stringify(ids), JEV_THRESHOLD)
 				.run();
+
 			return existing.id;
 		}
 	}
+
 	const status = safeName ? "pending" : "none";
 	const eligible = `id IN (${placeholders()}) AND category_confidence >= ? AND jev_none_fit=1 AND jev_category_id IS NULL AND amount_cents>0 AND pending=0 AND excluded=0 AND flag_income=0 AND is_split=0 AND parent_id IS NULL AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`;
+
 	try {
 		const results = await db.batch([
 			db
@@ -114,8 +127,11 @@ export async function saveSuggestion(
 					status,
 				),
 		]);
+
 		const id = (results[1]?.results as { id: number }[] | undefined)?.[0]?.id;
+
 		if (id) return id;
+
 		return (
 			(
 				await db
@@ -129,12 +145,14 @@ export async function saveSuggestion(
 	} catch (error) {
 		// A concurrent nightly run may win the partial unique index; attach this group to that row.
 		if (!safeName || !/UNIQUE/i.test(String(error))) throw error;
+
 		const existing = await db
 			.prepare(
 				"SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status='pending'",
 			)
 			.bind(safeName)
 			.first<{ id: number }>();
+
 		if (!existing) throw error;
 		await db
 			.prepare(
@@ -142,6 +160,7 @@ export async function saveSuggestion(
 			)
 			.bind(existing.id, JSON.stringify(ids), JEV_THRESHOLD)
 			.run();
+
 		return existing.id;
 	}
 }
@@ -152,6 +171,7 @@ export async function namesToAvoid(db: D1Database): Promise<string[]> {
 			"SELECT name FROM categories UNION SELECT name FROM category_suggestions WHERE status = 'dismissed'",
 		)
 		.all<{ name: string }>();
+
 	return results.map((row) => row.name);
 }
 
@@ -166,15 +186,18 @@ export async function purchaseNamesToAvoid(db: D1Database): Promise<string[]> {
 			"SELECT name FROM categories WHERE archived = 1 UNION SELECT name FROM category_suggestions WHERE status = 'dismissed'",
 		)
 		.all<{ name: string }>();
+
 	return results.map((row) => row.name);
 }
 
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
+
 /** The pending suggestions to show, and how many more wait beyond the limit. */
 export type PendingSuggestionPage = {
 	suggestions: PendingSuggestion[];
 	more: number;
 };
+
 /** How many suggestions Settings lists; the review screen asks every one, so it passes no limit. */
 export const SETTINGS_SUGGESTION_LIMIT = 10;
 
@@ -199,7 +222,9 @@ export type SuggestionFilter = { merchantKeys: string[] } | { id: number };
  */
 function filterClause(only?: SuggestionFilter): [string, unknown[]] {
 	if (!only) return ["", []];
+
 	if ("id" in only) return ["AND cs.id = ?", [only.id]];
+
 	return [
 		`AND EXISTS (SELECT 1 FROM transactions k WHERE k.category_suggestion_id = cs.id AND ${suggestedRowSql("k")}
 			AND NOT ${neverSuggestedSql("k", "new_category")} AND ${merchantKeySql("k")} IN (SELECT value FROM json_each(?)))`,
@@ -231,6 +256,7 @@ export async function pendingSuggestionPage(
 	]);
 	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
 	const [onlyClause, onlyBinds] = filterClause(only);
+
 	const { results: suggestions } = await db
 		.prepare(
 			`WITH candidates AS (
@@ -244,7 +270,9 @@ export async function pendingSuggestionPage(
 		)
 		.bind(...onlyBinds, limit)
 		.all<{ id: number; name: string; n: number; total: number }>();
+
 	if (!suggestions.length) return { suggestions: [], more: 0 };
+
 	const { results } = await db
 		.prepare(`WITH pending AS (
 			SELECT value AS id FROM json_each(?)
@@ -277,13 +305,17 @@ export async function pendingSuggestionPage(
 				ownName: string | null;
 			}
 		>();
+
 	const byId = new Map<number, PendingSuggestion>();
+
 	for (const row of results) {
 		let suggestion = byId.get(row.id);
+
 		if (!suggestion) {
 			suggestion = { id: row.id, name: row.name, rows: [] };
 			byId.set(row.id, suggestion);
 		}
+
 		const { transactionId, n: _n, total: _total, ownName, ...tx } = row;
 		suggestion.rows.push({
 			...tx,
@@ -299,6 +331,7 @@ export async function pendingSuggestionPage(
 			pending: !!tx.pending,
 		});
 	}
+
 	return {
 		suggestions: [...byId.values()],
 		more: Math.max(0, (suggestions[0]?.total ?? 0) - byId.size),
@@ -325,6 +358,7 @@ export type CreateResult =
 	  }
 	// "empty": no ticked purchase could be filed; Organize, which ticks them all, reads it as changed elsewhere.
 	| { ok: false; reason: "gone" | "empty" | "invalid"; error?: string };
+
 export async function createFromSuggestion(
 	db: D1Database,
 	id: number,
@@ -343,8 +377,10 @@ export async function createFromSuggestion(
 		)
 		.bind(id)
 		.first<{ name: string }>();
+
 	if (!s) return { ok: false, reason: "gone" };
 	const name = tidyName(s.name);
+
 	const attached = (
 		await db
 			.prepare(
@@ -354,11 +390,14 @@ export async function createFromSuggestion(
 			.bind(id, JSON.stringify(input.shown))
 			.all<{ id: number }>()
 	).results.map((row) => row.id);
+
 	if (input.whole && attached.length !== new Set(input.shown).size)
 		return { ok: false, reason: "empty", error: NOTHING_TICKED };
 	const ticked = input.ticked.filter((tx) => attached.includes(tx));
+
 	if (!ticked.length)
 		return { ok: false, reason: "empty", error: NOTHING_TICKED };
+
 	if (Object.values(input.notes).some((note) => note.length > NOTE_MAX))
 		return {
 			ok: false,
@@ -376,15 +415,19 @@ export async function createFromSuggestion(
 	// Every write below finds the category by `named` (defined with the writes), so it finds the row the family stored,
 	// whatever capitals or accents the suggestion has now.
 	const target = existing?.name ?? name;
+
 	if (existing?.archived) {
 		const problem = restoreProblem(categories);
+
 		if (problem) return { ok: false, reason: "invalid", error: problem };
 	}
+
 	if (!existing && active >= MAX_ACTIVE)
 		return { ok: false, reason: "invalid", error: fullMessage("add") };
 	// Any path may restore a category inside the write, so its archive period closes on the household's date, as
 	// setArchived closes it (spec §5).
 	const restoredOn = await householdToday(db);
+
 	const notes = Object.entries(input.notes)
 		.filter(
 			([tx, note]) =>
@@ -393,11 +436,15 @@ export async function createFromSuggestion(
 				note.trim(),
 		)
 		.map(([tx, note]) => ({ id: Number(tx), note: note.trim() }));
+
 	const token = `${Date.now()}-${Math.random()}`;
+
 	const gate =
 		"EXISTS (SELECT 1 FROM category_suggestions WHERE id=? AND status='pending' AND decided_at=?)";
+
 	const createdGate =
 		"EXISTS (SELECT 1 FROM category_suggestions WHERE id=? AND status='created' AND decided_at=?)";
+
 	// A category has the suggested name when its key matches (migration 0052) or, for a key still as 0052's lower() left
 	// it, its stored name matches ignoring A to Z case (migration 0005): the two names the insert's unique indexes refuse.
 	const named = "(name_key = ? OR name = ? COLLATE NOCASE)";
@@ -406,6 +453,7 @@ export async function createFromSuggestion(
 	// archived one the read saw (then the lowest id). An active one always wins.
 	const pick = `(SELECT id FROM categories WHERE ${named} ORDER BY archived ASC, (id = ?) DESC, id LIMIT 1)`;
 	const pickBinds = [...namedBinds, existing?.id ?? null];
+
 	// Both statements are in every write, the restore first, so the path is decided inside the write (decision
 	// 110). The restore brings the picked category back only while it is archived. Because the pick prefers an
 	// active one, `archived = 1` on it means no active category has the name, so an active duplicate always gets the
@@ -421,6 +469,7 @@ export async function createFromSuggestion(
 				AND EXISTS (SELECT 1 FROM transactions WHERE category_suggestion_id = ? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 		)
 		.bind(...pickBinds, id, token, id, JSON.stringify(ticked));
+
 	const create = db
 		.prepare(
 			`INSERT INTO categories (name,name_key,icon,color,sort_order) SELECT ?,?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE ${named}) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
@@ -437,7 +486,9 @@ export async function createFromSuggestion(
 			id,
 			JSON.stringify(ticked),
 		);
+
 	let results: D1Result[];
+
 	try {
 		results = await db.batch([
 			db
@@ -515,6 +566,7 @@ export async function createFromSuggestion(
 			return { ok: false, reason: "invalid", error: "That name is taken." };
 		throw error;
 	}
+
 	// The batch's results by position; the claim (0) is not read. The release (1) is checked first (#705).
 	const [
 		,
@@ -527,13 +579,16 @@ export async function createFromSuggestion(
 		,
 		leftOutResult,
 	] = results;
+
 	if ((releaseResult?.meta.changes ?? 0) > 0)
 		return { ok: false, reason: "empty", error: NOTHING_TICKED };
+
 	if ((flipResult?.meta.changes ?? 0) === 0) {
 		const stillPending = await db
 			.prepare("SELECT status FROM category_suggestions WHERE id=?")
 			.bind(id)
 			.first<{ status: string }>();
+
 		if (stillPending?.status !== "pending")
 			return { ok: false, reason: "gone" };
 		// The words come from a fresh read, not from the read above, since the family may have changed the categories
@@ -541,24 +596,31 @@ export async function createFromSuggestion(
 		const all = await categoryNames(db);
 		const now = all.find((c) => sameName(c.name, name));
 		const full = all.filter((c) => !c.archived).length >= MAX_ACTIVE;
+
 		if (now?.archived && full)
 			return { ok: false, reason: "invalid", error: fullMessage("restore") };
+
 		if (!now && full)
 			return { ok: false, reason: "invalid", error: fullMessage("add") };
+
 		if (!existing && now)
 			return { ok: false, reason: "invalid", error: "That name is taken." };
+
 		return { ok: false, reason: "empty", error: NOTHING_TICKED };
 	}
+
 	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that
 	// arrived after the page was drawn, is still cleared by the write above (its NULL confidence sends it to the
 	// night), but it is not named.
 	const leftOut = ((leftOutResult?.results as { id: number }[]) ?? []).filter(
 		(row) => attached.includes(row.id),
 	);
+
 	// The write itself decides the path, so the flags come from its own statements (decision 110): a restore changed
 	// a row, or the create did, or neither did and the ticks joined the active category with that name (decision 101).
 	const restored = (restoreResult?.meta.changes ?? 0) > 0;
 	const joined = !restored && (createResult?.meta.changes ?? 0) === 0;
+
 	// A joined or restored category is named as the family stored it, whatever capitals the suggestion has. It is read
 	// after the write, so the name is the one the family has once the write has run.
 	const stored =
@@ -570,6 +632,7 @@ export async function createFromSuggestion(
 					.bind(...namedBinds, existing?.id ?? null)
 					.first<{ name: string }>()
 			: null;
+
 	return {
 		ok: true,
 		name: stored?.name ?? target,
@@ -593,5 +656,6 @@ export async function dismissSuggestion(
 		)
 		.bind(id)
 		.first<{ name: string }>();
+
 	return result ?? null;
 }

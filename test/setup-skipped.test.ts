@@ -101,9 +101,11 @@ const modelOf = (over: Partial<FirstPageModel> = {}): FirstPageModel => ({
 });
 
 const PAY_ANSWERED = { payAnswered: true };
+
 const BILLS_KEPT = {
 	ledger: [{ id: "bills", text: "Bills · 1 kept, about $15 a month" }],
 };
+
 const BILL: BillSuggestion = {
 	rawName: "NETFLIX",
 	displayName: "Netflix",
@@ -134,6 +136,7 @@ describe("skippedNotes", () => {
 		const notes = skippedNotes(
 			modelOf({ budgets: budgetsAsked(), waiting: [BILL, BILL] }),
 		);
+
 		expect(notes).toEqual([skippedPay(), skippedBills(2)]);
 	});
 
@@ -202,6 +205,7 @@ describe("skippedNotes", () => {
 				notes: ["Your pay", "Your bills", "Your budgets"],
 			},
 		];
+
 		it.each(cases)(
 			"pay asked $pay, bills asked $bills, budgets asked $budgets: $notes",
 			({ pay, bills, budgets, notes }) => {
@@ -212,6 +216,7 @@ describe("skippedNotes", () => {
 					budgetsAnswered: budgets,
 					waiting: [],
 				});
+
 				expect(stepsOf(skippedNotes(model))).toEqual(notes);
 			},
 		);
@@ -220,6 +225,7 @@ describe("skippedNotes", () => {
 			const notes = skippedNotes(
 				modelOf({ budgets: budgetsNothing("no-categories") }),
 			);
+
 			expect(notes.at(-1)).toEqual(skippedBudgets("no-categories"));
 		});
 
@@ -231,6 +237,7 @@ describe("skippedNotes", () => {
 					waiting: [BILL, BILL, BILL],
 				}),
 			);
+
 			expect(notes).toEqual([
 				skippedBills(3),
 				skippedBudgets("every-category-budgeted"),

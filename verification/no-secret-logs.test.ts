@@ -17,6 +17,7 @@ const ROOT = path.join(import.meta.dirname, "..");
 /** The files the rule covers, as paths from the repo root with the source text. */
 function appFiles(): { file: string; text: string }[] {
 	const files: { file: string; text: string }[] = [];
+
 	for (const [dir, pattern] of [
 		["src", /\.(?:ts|tsx)$/],
 		["public", /\.js$/],
@@ -25,13 +26,16 @@ function appFiles(): { file: string; text: string }[] {
 			recursive: true,
 		}) as string[]) {
 			const parts = entry.split(path.sep);
+
 			// The vendored libraries (htmx, html2canvas) are not ours to audit.
 			if (dir === "public" && parts[0] === "vendor") continue;
+
 			if (!pattern.test(entry) || entry.endsWith(".d.ts")) continue;
 			const file = path.posix.join(dir, parts.join("/"));
 			files.push({ file, text: readFileSync(path.join(ROOT, file), "utf8") });
 		}
 	}
+
 	return files;
 }
 
@@ -47,6 +51,7 @@ function excuse(findings: Finding[]): Finding[] {
 				f.call === e.call &&
 				f.problems.every((problem) => e.allows.includes(problem)),
 		);
+
 		return matches.length === 1 ? matches : [];
 	});
 }
@@ -72,11 +77,14 @@ const EXCEPTIONS = [
 // A name that says a secret, or a part of a transaction.
 const SECRET =
 	/token|secret|api[_-]?key|private[_-]?key|authorization|password|credential|bearer/i;
+
 const TRANSACTION =
 	/raw_?name|merchant|amount|description|bank_?text|memo|payee|counterparty|account_?(?:number|id)/i;
+
 // Words that name a transaction's free text; matched as whole words of a name, so `note` and `rowNote` but not `denote`.
 const TRANSACTION_WORDS = new Set(["note", "notes"]);
 const ERROR_NAMES = new Set(["e", "err", "error", "cause"]);
+
 // A whole record passed as an argument: `console.log(transaction)`.
 const RECORD_NAMES = new Set([
 	"transaction",
@@ -116,6 +124,7 @@ type Node = {
 	end: number;
 	[key: string]: unknown;
 };
+
 const isNode = (value: unknown): value is Node =>
 	typeof value === "object" &&
 	value !== null &&
@@ -124,17 +133,21 @@ const isNode = (value: unknown): value is Node =>
 /** The direct child nodes of a node. */
 function children(node: Node): Node[] {
 	const out: Node[] = [];
+
 	for (const [key, value] of Object.entries(node)) {
 		if (key === "type" || key === "start" || key === "end") continue;
+
 		if (Array.isArray(value)) out.push(...value.filter(isNode));
 		else if (isNode(value)) out.push(value);
 	}
+
 	return out;
 }
 
 /** Every node under (and including) this one. */
 function* descendants(node: Node): Generator<Node> {
 	yield node;
+
 	for (const child of children(node)) yield* descendants(child);
 }
 
@@ -144,7 +157,9 @@ const name = (node: unknown): string | null =>
 /** The name a property is reached by: `.x`, or `["x"]` with a quoted name. */
 function propertyName(member: Node): string | null {
 	const property = member.property;
+
 	if (!member.computed) return name(property);
+
 	return isNode(property) &&
 		property.type === "Literal" &&
 		typeof property.value === "string"
@@ -163,30 +178,37 @@ const nameWords = (identifier: string) =>
 /** The identifiers and property names an expression reaches, never the words inside its quoted text. */
 function namesIn(expression: Node): string[] {
 	const names: string[] = [];
+
 	for (const node of descendants(expression)) {
 		if (node.type === "Identifier") names.push(String(node.name));
 		else if (node.type === "MemberExpression") {
 			const property = propertyName(node);
+
 			if (property) names.push(property);
 		}
 	}
+
 	return names;
 }
 
 /** The names along a plain path: `a.b.c` is [a, b, c]; null when the node is not a plain path. */
 function pathNames(node: Node): string[] | null {
 	if (node.type === "Identifier") return [String(node.name)];
+
 	if (node.type === "MemberExpression" && isNode(node.object)) {
 		const head = pathNames(node.object);
 		const property = propertyName(node);
+
 		return head && property ? [...head, property] : null;
 	}
+
 	return null;
 }
 
 /** A plain path whose last name is in `set`. */
 const endsInName = (node: Node, set: Set<string>) => {
 	const names = pathNames(node);
+
 	return names !== null && set.has(names.at(-1) ?? "");
 };
 
@@ -196,18 +218,23 @@ const wholeRecord = (node: Node) => endsInName(node, RECORD_NAMES);
 /** A whole error or its message or stack: `error`, `result.error`, `error.message`, `String(error)`. */
 function wholeError(node: Node): boolean {
 	const names = pathNames(node);
+
 	if (names) {
 		const last = names.at(-1) ?? "";
+
 		if (ERROR_NAMES.has(last)) return true;
+
 		return (
 			["message", "stack"].includes(last) && ERROR_NAMES.has(names.at(-2) ?? "")
 		);
 	}
+
 	if (node.type === "CallExpression")
 		return (
 			name(node.callee) === "String" &&
 			(node.arguments as Node[]).some(wholeError)
 		);
+
 	return false;
 }
 
@@ -221,6 +248,7 @@ function* valuesOf(node: Node): Generator<Node> {
 		case "ArrayExpression":
 			for (const element of node.elements as unknown[])
 				if (isNode(element)) yield* valuesOf(element);
+
 			return;
 		case "ObjectExpression":
 			for (const property of node.properties as Node[]) {
@@ -228,17 +256,21 @@ function* valuesOf(node: Node): Generator<Node> {
 					yield* valuesOf(property.argument as Node);
 				else if (isNode(property.value)) yield* valuesOf(property.value);
 			}
+
 			return;
 		case "TemplateLiteral":
 			for (const part of node.expressions as Node[]) yield* valuesOf(part);
+
 			return;
 		case "ConditionalExpression":
 			yield* valuesOf(node.consequent as Node);
 			yield* valuesOf(node.alternate as Node);
+
 			return;
 		case "LogicalExpression":
 			yield* valuesOf(node.left as Node);
 			yield* valuesOf(node.right as Node);
+
 			return;
 		case "SpreadElement":
 		case "AwaitExpression":
@@ -247,6 +279,7 @@ function* valuesOf(node: Node): Generator<Node> {
 		case "TSNonNullExpression":
 		case "TSSatisfiesExpression":
 			yield* valuesOf((node.argument ?? node.expression) as Node);
+
 			return;
 		default:
 			yield node;
@@ -257,7 +290,9 @@ function* valuesOf(node: Node): Generator<Node> {
 function argumentProblems(argument: Node): string[] {
 	const found = new Set<string>();
 	const names = namesIn(argument);
+
 	if (names.some((n) => SECRET.test(n))) found.add("names a secret");
+
 	if (
 		names.some(
 			(n) =>
@@ -266,10 +301,13 @@ function argumentProblems(argument: Node): string[] {
 		)
 	)
 		found.add("names part of a transaction");
+
 	for (const value of valuesOf(argument)) {
 		if (wholeError(value)) found.add("prints a whole error");
+
 		if (wholeRecord(value)) found.add("passes a whole record");
 	}
+
 	for (const node of descendants(argument)) {
 		if (
 			node.type === "CallExpression" &&
@@ -280,12 +318,14 @@ function argumentProblems(argument: Node): string[] {
 		)
 			found.add("serialises a value");
 	}
+
 	return [...found];
 }
 
 /** `console`, or the same object reached through a global: `window.console`, `globalThis.console`, `self.console`. */
 function isConsoleObject(node: Node): boolean {
 	if (name(node) === "console") return true;
+
 	return (
 		node.type === "MemberExpression" &&
 		propertyName(node) === "console" &&
@@ -307,18 +347,24 @@ function auditSource(file: string, text: string): Finding[] {
 		: file.endsWith(".js")
 			? "js"
 			: "ts";
+
 	const program = parseAst(text, { lang }) as unknown as Node;
 	const wrappers = WRAPPERS.filter((w) => file === w.file).map((w) => w.name);
 	const findings: Finding[] = [];
+
 	for (const node of descendants(program)) {
 		if (node.type !== "CallExpression" || !isNode(node.callee)) continue;
 		const callee = node.callee;
+
 		const isConsole =
 			callee.type === "MemberExpression" &&
 			isNode(callee.object) &&
 			isConsoleObject(callee.object);
+
 		const isWrapper = wrappers.includes(name(callee) ?? "");
+
 		if (!isConsole && !isWrapper) continue;
+
 		const problems = [
 			...new Set(
 				(node.arguments as Node[]).flatMap((argument) =>
@@ -326,6 +372,7 @@ function auditSource(file: string, text: string): Finding[] {
 				),
 			),
 		];
+
 		findings.push({
 			where: `${file}:${text.slice(0, node.start).split("\n").length}`,
 			file,
@@ -333,6 +380,7 @@ function auditSource(file: string, text: string): Finding[] {
 			problems,
 		});
 	}
+
 	return findings;
 }
 
@@ -440,9 +488,11 @@ describe("the check itself", () => {
 
 	it("excuses a call only when it appears exactly once", () => {
 		const call = EXCEPTIONS[0] as (typeof EXCEPTIONS)[number];
+
 		const findings = [
 			{ where: "a:1", file: call.file, call: call.call, problems: call.allows },
 		];
+
 		expect(excuse(findings)).toHaveLength(1);
 		expect(excuse([...findings, ...findings])).toHaveLength(0);
 		expect(excuse([])).toHaveLength(0);
@@ -507,6 +557,7 @@ describe("the check itself", () => {
 			"src/x.ts",
 			"console.error(f(')'), 'a)b'); console.log('next')",
 		);
+
 		expect(calls.map((c) => c.call)).toEqual([
 			"console.error(f(')'), 'a)b')",
 			"console.log('next')",
@@ -530,6 +581,7 @@ describe("what the app logs", () => {
 		const offenders = findings.filter(
 			(finding) => finding.problems.length > 0 && !excused(finding),
 		);
+
 		expect(
 			offenders.map(
 				(f) => `${f.where}: ${f.problems.join(", ")}: ${f.call.slice(0, 80)}`,
@@ -545,6 +597,7 @@ describe("what the app logs", () => {
 						f.file === e.file && f.call === e.call && f.problems.length > 0,
 				).length !== 1,
 		);
+
 		expect(stale.map((e) => e.file)).toEqual([]);
 	});
 });

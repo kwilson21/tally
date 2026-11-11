@@ -49,12 +49,14 @@ describe("migration 0016: preserve historic credit decisions", () => {
 
 	it("keeps a historic refund reviewed and counting after a changed-amount sync", async () => {
 		const encrypted = await encryptToken("secret-access-token", KEY);
+
 		const item = await db
 			.prepare(
 				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', 'historic-item') RETURNING id",
 			)
 			.bind(encrypted)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"INSERT INTO accounts (id, plaid_item_id, plaid_account_id, name, type) VALUES (999, ?, 'historic-account', 'Checking', 'depository')",
@@ -70,6 +72,7 @@ describe("migration 0016: preserve historic credit decisions", () => {
 		expect(backfill).toBeDefined();
 		await db.prepare(backfill as string).run();
 		const beforeCorrection = await spent();
+
 		const plaidFetch = vi.fn(async (url: RequestInfo | URL) => {
 			if (String(url).endsWith("/accounts/get")) {
 				return Response.json({
@@ -83,6 +86,7 @@ describe("migration 0016: preserve historic credit decisions", () => {
 					],
 				});
 			}
+
 			return Response.json({
 				added: [],
 				modified: [

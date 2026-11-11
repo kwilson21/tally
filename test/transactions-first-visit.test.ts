@@ -14,14 +14,17 @@ const demo = { ...env, DEMO: "true" } as unknown as Env;
 
 // A signed-in family member, as the Access middleware sets one, so writes have an actor.
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 app.use("*", async (c, next) => {
 	c.set("actor", "family@example.com");
 	await next();
 });
+
 app.route("/", transactions);
 
 async function get(path: string, bindings: Env = family) {
 	const res = await app.request(path, {}, bindings);
+
 	return { res, html: await res.text() };
 }
 
@@ -38,14 +41,17 @@ async function post(path: string, body: Record<string, string>) {
 		},
 		family,
 	);
+
 	return { res, html: await res.text() };
 }
 
 const NO_BANK = "Link a bank to see transactions.";
 const NO_BANK_HINT = "Tally can only read them; it can&#39;t move money.";
 const IMPORTING = "Importing your transactions…";
+
 const IMPORTING_HINT =
 	"Your bank sends about 90 days of them. It usually takes a few minutes.";
+
 const NO_MATCH = "No transactions match these filters.";
 
 // EmptyState's accent marks: the add sign's circle, and the magnifier's.
@@ -155,12 +161,14 @@ describe("the first visit, a bank linked and nothing arrived yet", () => {
 		expect(html).toContain(MAGNIFIER);
 		expect(html).not.toContain(ADD_SIGN);
 		expect(html).not.toContain(NO_BANK);
+
 		// The only way to Accounts is the sidebar and tabs, not a button in the empty list. The page's foot
 		// (How this works, under its rule) comes after the list, so the list ends where the rule starts.
 		const list = html.slice(
 			html.indexOf('aria-label="Results"'),
 			html.indexOf('w-12 border-t border-muted"'),
 		);
+
 		expect(list).not.toContain("<a");
 		waiting(html);
 	});
@@ -215,6 +223,7 @@ describe("once there is any transaction, in any month", () => {
 
 	it("keeps today's no results for a search that matches nothing", async () => {
 		await oneOldTransaction();
+
 		for (const path of [
 			"/transactions?month=all&q=zzz",
 			"/transactions?month=all&category=2",
@@ -243,6 +252,7 @@ describe("once there is any transaction, in any month", () => {
 describe("the demo", () => {
 	it("keeps today's no results over its seeded transactions", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+
 		for (const path of ["/transactions?q=zzz", "/transactions?month=2020-01"]) {
 			const { html } = await get(path, demo);
 			expect(html).toContain(NO_MATCH);
@@ -266,17 +276,22 @@ describe("the empty-list check", () => {
 	/** Every statement the page runs, recorded. */
 	function recorded() {
 		const sql: string[] = [];
+
 		const db = new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop === "prepare")
 					return (statement: string) => {
 						sql.push(statement);
+
 						return target.prepare(statement);
 					};
+
 				const value = Reflect.get(target, prop);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		});
+
 		return { sql, bindings: { ...family, DB: db } as unknown as Env };
 	}
 
@@ -337,6 +352,7 @@ describe("the page after the first cash entry", () => {
 			...cash,
 			merchant: "",
 		});
+
 		expect(res.status).toBe(422);
 		expect(res.headers.get("HX-Retarget")).toBeNull();
 		expect(html).toContain("Enter where you spent it.");
@@ -345,15 +361,18 @@ describe("the page after the first cash entry", () => {
 
 	it("brings the first visit back, whole, when the last transaction is deleted", async () => {
 		await post("/transactions/cash", cash);
+
 		const id = (
 			await env.DB.prepare("SELECT id FROM transactions").first<{
 				id: number;
 			}>()
 		)?.id;
+
 		const { res, html } = await post(`/transactions/${id}/delete`, {
 			back: "/transactions",
 			confirm: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Retarget")).toBe("#main");
 		expect(res.headers.get("HX-Reswap")).toBe("innerHTML");
@@ -365,37 +384,46 @@ describe("the page after the first cash entry", () => {
 	it("deleting one of several leaves the swap on #page", async () => {
 		await post("/transactions/cash", cash);
 		await post("/transactions/cash", cash);
+
 		const id = (
 			await env.DB.prepare("SELECT id FROM transactions").first<{
 				id: number;
 			}>()
 		)?.id;
+
 		const { res, html } = await post(`/transactions/${id}/delete`, {
 			back: "/transactions",
 			confirm: "1",
 		});
+
 		expect(res.headers.get("HX-Retarget")).toBeNull();
 		expect(html).toContain("Farmers market");
 	});
 
 	it("restores the first-visit controls when undoing the only transaction", async () => {
 		await post("/transactions/cash", cash);
+
 		const id = (
 			await env.DB.prepare("SELECT id FROM transactions").first<{
 				id: number;
 			}>()
 		)?.id;
+
 		if (!id) throw new Error("cash entry missing");
+
 		const deleted = await post(`/transactions/${id}/delete`, {
 			back: "/transactions",
 			confirm: "1",
 		});
+
 		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.undo as string;
+
 		const restored = await post("/transactions/undo-cash-delete", {
 			token,
 			back: "/transactions",
 		});
+
 		expect(restored.res.status).toBe(200);
 		expect(restored.res.headers.get("HX-Retarget")).toBe("#main");
 		expect(restored.res.headers.get("HX-Reswap")).toBe("innerHTML");
@@ -408,6 +436,7 @@ describe("the page after the first cash entry", () => {
 	it("keeps undo on #page when other transactions remain", async () => {
 		await post("/transactions/cash", cash);
 		await post("/transactions/cash", cash);
+
 		const id = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions ORDER BY id LIMIT 1",
@@ -415,17 +444,22 @@ describe("the page after the first cash entry", () => {
 				id: number;
 			}>()
 		)?.id;
+
 		if (!id) throw new Error("cash entry missing");
+
 		const deleted = await post(`/transactions/${id}/delete`, {
 			back: "/transactions",
 			confirm: "1",
 		});
+
 		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.undo as string;
+
 		const restored = await post("/transactions/undo-cash-delete", {
 			token,
 			back: "/transactions",
 		});
+
 		expect(restored.res.headers.get("HX-Retarget")).toBeNull();
 		expect(restored.res.headers.get("HX-Reswap")).toBeNull();
 	});

@@ -8,12 +8,14 @@ export type CashValues = {
 	category: string;
 	note: string;
 };
+
 export type CashErrors = Partial<Record<keyof CashValues, string>>;
 
 /** The earliest date a cash entry can have: ten years before the household's today. */
 function earliestCashDate(today: string) {
 	const earliest = new Date(`${today}T00:00:00Z`);
 	earliest.setUTCFullYear(earliest.getUTCFullYear() - 10);
+
 	return earliest.toISOString().slice(0, 10);
 }
 
@@ -26,23 +28,28 @@ export function parseCashDateAmount(
 	const errors: Pick<CashErrors, "date" | "amount"> = {};
 	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
 	const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
 	const realDate =
 		match !== null &&
 		!Number.isNaN(parsedDate.getTime()) &&
 		parsedDate.toISOString().slice(0, 10) === date;
+
 	if (!realDate || date > today)
 		errors.date = "Choose today or an earlier date.";
 	else if (date < earliestCashDate(today))
 		errors.date = "Choose a date within the last 10 years.";
 	let cents = 0;
+
 	try {
 		cents = toCents(amount);
+
 		if (!Number.isSafeInteger(cents))
 			errors.amount = "Enter a smaller amount in dollars and cents.";
 		else if (cents <= 0) errors.amount = "Enter an amount greater than zero.";
 	} catch {
 		errors.amount = "Enter an amount in dollars and cents.";
 	}
+
 	return { errors, amountCents: cents };
 }
 
@@ -55,14 +62,18 @@ export function parseCash(
 	const parsedAmount = parseCashDateAmount(values.date, values.amount, today);
 	Object.assign(errors, parsedAmount.errors);
 	const merchant = values.merchant.trim();
+
 	if (!merchant) errors.merchant = "Enter where you spent it.";
 	else if (merchant.length > CASH_MERCHANT_MAX)
 		errors.merchant = `Use ${CASH_MERCHANT_MAX} characters or fewer.`;
 	const categoryId = Number(values.category);
+
 	if (!categoryIds.includes(categoryId))
 		errors.category = "Pick a category from the list.";
+
 	if (values.note.length > NOTE_MAX)
 		errors.note = `Use ${NOTE_MAX} characters or fewer.`;
+
 	return Object.keys(errors).length
 		? { ok: false as const, errors }
 		: {
@@ -133,6 +144,7 @@ export async function saveCash(
 				value.note,
 			),
 	]);
+
 	const stored = entryKey
 		? await db
 				.prepare(
@@ -146,6 +158,7 @@ export async function saveCash(
 					categoryId: number;
 				}>()
 		: null;
+
 	// With no entry key nothing guards the insert, so it always lands. D1 returns the batch's results in
 	// statement order, so results[1] is the transaction's own insert and its last_row_id is the new row.
 	const row = stored ?? {
@@ -154,5 +167,6 @@ export async function saveCash(
 		amountCents: value.amountCents,
 		categoryId: value.categoryId,
 	};
+
 	return { ...row, inserted: (results[1]?.meta.changes ?? 0) > 0 };
 }

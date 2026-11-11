@@ -175,9 +175,11 @@ describe("readFinish", () => {
 
 	it("still gives the finish when a new deposit arrives unanswered after the budgets stroke", async () => {
 		await writeRecord(drawn({ bills: { kept: 2, cents: 3000 } }));
+
 		const account = await db
 			.prepare("SELECT id FROM accounts ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, flag_transfer) VALUES (?, 'finish-deposit', ?, -245000, 'NEW PAYER', NULL, NULL, 90, 1, 0)",

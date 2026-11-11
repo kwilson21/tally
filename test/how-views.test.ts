@@ -23,6 +23,7 @@ describe("TransactionRow's bank text (Start here, #502)", () => {
 			row: bakery,
 			bankText: false,
 		}).toString();
+
 		expect(html).toContain("Needs category");
 		expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
 	});
@@ -38,9 +39,11 @@ describe("ThingsToTry", () => {
 	it("is the three things to do under a heading, each linking to where it's done (spec §9)", async () => {
 		const html = await ThingsToTry().toString();
 		expect(html).toMatch(/<h3[^>]*>Three things to try<\/h3>/);
+
 		const links = [...html.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)</g)].map(
 			(m) => [m[1], m[2]],
 		);
+
 		expect(links).toEqual([
 			["/transactions?uncategorized=1", "Give a transaction a category"],
 			["/transactions/110?uncategorized=1", "Set a rule for a merchant"],
@@ -67,6 +70,7 @@ describe("ThingsToTry", () => {
 
 	it("gives every link a 44px touch target", async () => {
 		const html = await ThingsToTry().toString();
+
 		for (const a of html.match(/<a [^>]*>/g) ?? []) {
 			expect(a).toContain("min-h-11");
 		}
@@ -79,6 +83,7 @@ describe("DemoBanner", () => {
 		expect(html).toContain("Demo data. Nothing here is real. ·");
 		const link = html.match(/<a [^>]*>Start here<\/a>/)?.[0] ?? "";
 		expect(link).toContain('href="/how-it-works#start-here"');
+
 		for (const word of ["min-h-11", "text-ink", "underline"]) {
 			expect(link).toContain(word);
 		}
@@ -110,6 +115,7 @@ describe("StartHere", () => {
 				safeToSpendCents: START_HERE.safeToSpendCents,
 			}).toString(),
 		);
+
 		expect(html).toContain(
 			"what their bank sent this October, and what Tally wrote down.",
 		);
@@ -157,11 +163,13 @@ describe("StartHere", () => {
 
 	it("strikes each bank line, says so for a screen reader, and puts Tally's row for it under the line", async () => {
 		const html = await view();
+
 		const pairs = [
 			...html.matchAll(
 				/<s class="decoration-muted">([^<]+)<\/s>[\s\S]*?data-transaction="(\d+)"/g,
 			),
 		].map((m) => [m[1], Number(m[2])]);
+
 		expect(pairs).toEqual([
 			["ACME CORP PAYROLL", 901],
 			["ONLINE TRANSFER TO SAV ...5678", 902],
@@ -197,6 +205,7 @@ describe("StartHere", () => {
 	it("gives the three things to try under their heading, and every link a 44px target", async () => {
 		const html = await view();
 		expect(html).toContain("Three things to try");
+
 		for (const a of html.match(/<a [^>]*>/g) ?? []) {
 			expect(a).toContain("min-h-11");
 		}
@@ -244,6 +253,7 @@ describe("WhyLink", () => {
 		const html = String(
 			await WhyLink({ section: "categorization", topic: "Tally's guess" }),
 		);
+
 		expect(html).toContain('href="/how-it-works#categorization"');
 		expect(html).toContain('aria-label="Why? Tally&#39;s guess"');
 		expect(html).toContain("min-h-11");
@@ -265,6 +275,7 @@ describe("SystemDiagram", () => {
 
 	it("shows every part of the system", async () => {
 		const html = await SystemDiagram().toString();
+
 		for (const label of [
 			"Your bank",
 			"(via Plaid)",

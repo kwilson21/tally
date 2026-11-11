@@ -27,6 +27,7 @@ export const CATEGORY_SUGGESTION_STATES = [
 	"dismissed",
 	"none",
 ] as const;
+
 export type CategorySuggestionState =
 	(typeof CATEGORY_SUGGESTION_STATES)[number];
 

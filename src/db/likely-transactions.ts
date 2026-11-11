@@ -109,6 +109,7 @@ async function matchingSuggestionIds(
 			"SELECT id, name FROM category_suggestions WHERE status = 'pending'",
 		)
 		.all<{ id: number; name: string }>();
+
 	return results
 		.filter((sug) => sameName(tidyName(sug.name), categoryName))
 		.map((sug) => sug.id);
@@ -125,6 +126,7 @@ async function likelyBinds(
 	today: string,
 ): Promise<[number, string, string, string]> {
 	const thisMonth = today.slice(0, 7);
+
 	return [
 		savedId,
 		thisMonth,
@@ -166,6 +168,7 @@ export async function likelyTransactions(
 	today: string,
 ): Promise<LikelyRow[]> {
 	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
+
 	const { results } = await db
 		.prepare(
 			`${LIKELY_SELECT} ${LIKELY_WHERE}
@@ -173,6 +176,7 @@ export async function likelyTransactions(
 		)
 		.bind(...(await likelyBinds(db, savedId, categoryName, today)))
 		.all<LikelyRecord>();
+
 	return results.map(
 		({
 			merchantName,
@@ -191,6 +195,7 @@ export async function likelyTransactions(
 				rawName: row.rawName,
 				namesOn,
 			});
+
 			return {
 				...row,
 				// A guessed note is hidden while the details switch is off, and dashed while it is on (as the list does).
@@ -227,7 +232,9 @@ export async function likelyStill(
 	},
 ): Promise<number[]> {
 	const ids = tickedIds(input.ticked);
+
 	if (ids.length === 0) return [];
+
 	const { results } = await db
 		.prepare(
 			`SELECT t.id AS id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
@@ -235,6 +242,7 @@ export async function likelyStill(
 		)
 		.bind(...(await panelBinds(db, input)), JSON.stringify(ids))
 		.all<{ id: number }>();
+
 	return results.map((row) => row.id);
 }
 
@@ -259,7 +267,9 @@ export async function addLikely(
 	},
 ): Promise<{ moved: number; name: string | null }> {
 	const ids = tickedIds(input.ticked);
+
 	if (ids.length === 0) return { moved: 0, name: null };
+
 	// The write applies the panel's own rules, in the same statement, so a row that changed since the read
 	// (excluded, income, pending, or its guess withdrawn) is left alone, and so is every row when the category
 	// was archived or renamed since the read. ?1-?7 are the panel's parameters and category (panelBinds), ?8 the
@@ -275,7 +285,10 @@ export async function addLikely(
 		)
 		.bind(...(await panelBinds(db, input)), JSON.stringify(ids), input.actor)
 		.all<{ name: string }>();
+
 	const [stored] = results;
+
 	if (!stored) return { moved: 0, name: null };
+
 	return { moved: results.length, name: stored.name };
 }

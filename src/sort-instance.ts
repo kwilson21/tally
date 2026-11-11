@@ -112,8 +112,10 @@ export async function runSortInstance(
 			`sorting: stopped ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
+
 	// A re-sort's re-ask finishes its run once its groups are done, even when some rows were never asked (decision 160).
 	const reask = params.reask;
+
 	if (reask) {
 		try {
 			await runStep("reask-finish", REASK_STEPS.finish, async () => {
@@ -122,6 +124,7 @@ export async function runSortInstance(
 					now: Date.now(),
 					instanceKey: options.runId,
 				});
+
 				return true;
 			});
 		} catch (error) {
@@ -130,6 +133,7 @@ export async function runSortInstance(
 			);
 		}
 	}
+
 	if (!params.night) return;
 
 	// Production only: the demo has no banks, so it has no import waiting for the daily run. Once nothing waits for Jev, the
@@ -142,6 +146,7 @@ export async function runSortInstance(
 					env.DB,
 					waitingForJevSql(switches),
 				).run();
+
 				return true;
 			});
 		} catch (error) {
@@ -159,6 +164,7 @@ export async function runSortInstance(
 				deadline: now() + runTimeBudgetMs,
 				now,
 			});
+
 			return true;
 		});
 	} catch (error) {
@@ -175,6 +181,7 @@ export async function runSortInstance(
 				deadline: now() + runTimeBudgetMs,
 				now,
 			});
+
 			return true;
 		});
 	} catch (error) {

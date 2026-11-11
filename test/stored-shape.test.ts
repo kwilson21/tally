@@ -44,6 +44,7 @@ describe("the basic guards", () => {
 
 describe("isShape", () => {
 	type Thing = { id: number; name: string | null; tags?: string[] };
+
 	const isThing = isShape<Thing>({
 		id: isNumber,
 		name: isNullable(isString),
@@ -59,6 +60,7 @@ describe("isShape", () => {
 		expect(isThing({ id: "1", name: null })).toBe(false);
 		expect(isThing({ name: null })).toBe(false);
 		expect(isThing({ id: 1, name: null, tags: [1] })).toBe(false);
+
 		for (const value of [null, 1, "a", [], undefined])
 			expect(isThing(value)).toBe(false);
 	});

@@ -354,6 +354,7 @@ describe("monthBars", () => {
 			{ month: "2026-09", cents: 286000, partial: false },
 			{ month: "2026-10", cents: 124000, partial: true },
 		]);
+
 		expect(bars).toHaveLength(2);
 		expect(bars[0]).toMatchObject({
 			amount: "$2,860",
@@ -385,6 +386,7 @@ describe("monthBars", () => {
 			},
 			{ month: "2026-10", cents: 124000, partial: true },
 		]);
+
 		expect(bars.map((b) => b.part)).toEqual([true, false]);
 		// Still a month that's over: a solid edge, not dashed.
 		expect(bars[0]?.dashed).toBe(false);
@@ -425,6 +427,7 @@ const MONTHS = [
 	"2026-09",
 	"2026-10",
 ];
+
 const SERIES: Record<number, number[]> = {
 	[GROCERIES]: [82000, 79000, 84500, 81000, 86000, 19600],
 	[EATING_OUT]: [21000, 24500, 28000, 31800, 36500, 9200],
@@ -432,6 +435,7 @@ const SERIES: Record<number, number[]> = {
 	[GAS]: [18000, 17500, 19000, 17200, 18500, 4800],
 	[HOUSEHOLD]: [14000, 19000, 12000, 16000, 15000, 3000],
 };
+
 const spendRows = (series: Record<number, number[]>): MonthSpend[] =>
 	Object.entries(series).flatMap(([id, cents]) =>
 		cents.map((c, i) => ({
@@ -440,6 +444,7 @@ const spendRows = (series: Record<number, number[]>): MonthSpend[] =>
 			cents: c,
 		})),
 	);
+
 const BUDGETS: BudgetAmount[] = [
 	{ categoryId: GROCERIES, effectiveMonth: "2026-01", amountCents: 90000 },
 	{ categoryId: EATING_OUT, effectiveMonth: "2026-01", amountCents: 30000 },
@@ -473,7 +478,9 @@ function input(over: Partial<TrendsInput> = {}): TrendsInput {
 
 function full(over: Partial<TrendsInput> = {}) {
 	const page = buildTrends(input(over));
+
 	if (page.kind !== "full") throw new Error(`expected full, got ${page.kind}`);
+
 	return page;
 }
 
@@ -521,6 +528,7 @@ describe("buildTrends: each category's change, biggest first", () => {
 			spend: spendRows(SERIES).filter((r) => r.categoryId !== GAS),
 			sameDays: [{ categoryId: GROCERIES, cents: 22400 }],
 		});
+
 		const names = page.changes.map((c) => c.name);
 		expect(names).not.toContain("Gas");
 		expect(names).not.toContain("Needs a category");
@@ -536,6 +544,7 @@ describe("buildTrends: each category's change, biggest first", () => {
 			],
 			sameDays: [...input().sameDays, { categoryId: OLD, cents: 5000 }],
 		});
+
 		expect(page.changes.find((c) => c.name === "Old")).toMatchObject({
 			nowCents: 0,
 			thenCents: 5000,
@@ -569,6 +578,7 @@ describe("buildTrends: each category's change, biggest first", () => {
 				(r) => !(r.categoryId === GAS && r.month === "2026-10"),
 			),
 		});
+
 		expect(page.changes.find((c) => c.name === "Gas")).toMatchObject({
 			nowCents: 0,
 			thenCents: 5200,
@@ -580,6 +590,7 @@ describe("buildTrends: each category's change, biggest first", () => {
 		const page = full({
 			sameDays: [{ categoryId: GAS, cents: 4800 }],
 		});
+
 		expect(page.changes.find((c) => c.name === "Gas")).toMatchObject({
 			direction: "same",
 			words: "No change",
@@ -622,6 +633,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 			...SERIES,
 			[GAS]: [18000, 18000, 18000, 18000, 18000, 99999],
 		};
+
 		const page = full({ spend: spendRows(series) });
 		expect(page.worthALook.map((r) => r.name)).not.toContain("Gas");
 	});
@@ -631,6 +643,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 			...SERIES,
 			[GROCERIES]: [64000, 65500, 67000, 68500, 69000, 20000],
 		};
+
 		const page = full({ spend: spendRows(series) });
 		// June to September: three rises in a row (May, Tally's first month, isn't judged).
 		expect(page.worthALook.map((r) => [r.name, r.line])).toContainEqual([
@@ -651,6 +664,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 
 	it("gives no note to a row that isn't in Worth a look", () => {
 		const page = full();
+
 		for (const row of [...page.goingWell, ...page.others])
 			expect(row.note).toBeNull();
 	});
@@ -668,6 +682,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 					})),
 				],
 			}).worthALook.find((r) => r.name === "Groceries");
+
 		const rising = [64000, 65500, 95000, 96000, 97000, 20000];
 		// Under $980 four months running, and up three: the note.
 		expect(groceries(rising, [["2026-01", 98000]])?.note).toBe(
@@ -696,6 +711,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 				a.categoryId === GAS ? { ...a, effectiveMonth: "2026-08" } : a,
 			),
 		});
+
 		expect(page.goingWell.map((r) => r.name)).not.toContain("Gas");
 		expect(page.others.map((r) => r.name)).toContain("Gas");
 	});
@@ -720,6 +736,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 				[EATING_OUT]: [17000, 19500, 24000, 21500, 24900, 9200],
 			}),
 		});
+
 		// June's 19500 is under 20000; July, August and September are under 25000: four under, and
 		// not rising (August fell).
 		expect(page.goingWell).toHaveLength(1);
@@ -740,6 +757,7 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 				{ month: "2026-06", categoryId: OLD, cents: 1000 },
 			],
 		});
+
 		const names = [...page.goingWell, ...page.worthALook].map((r) => r.name);
 		expect(names).not.toContain("Old");
 		// It spent in the window, so it is still a row among the others.
@@ -750,16 +768,19 @@ describe("buildTrends: Going well, Worth a look and the rest", () => {
 		const page = full({
 			categories: [...CATEGORIES, category(7, "Pets")],
 		});
+
 		expect(page.others.map((r) => r.name)).not.toContain("Pets");
 	});
 
 	it("leaves out an archived category with no spending in the six months altogether", () => {
 		const page = full();
+
 		const everyone = [
 			...page.goingWell,
 			...page.worthALook,
 			...page.others,
 		].map((r) => r.name);
+
 		expect(everyone).not.toContain("Old");
 	});
 
@@ -835,6 +856,7 @@ describe("buildTrends: months before there's history", () => {
 				],
 			}),
 		);
+
 		// Last month is the part month, so there's no comparison: no sentence, no same-days sides, but
 		// this month so far is still the headline.
 		expect(page).not.toHaveProperty("sentence");
@@ -869,6 +891,7 @@ describe("buildTrends: months before there's history", () => {
 				],
 			}),
 		);
+
 		expect(page).toMatchObject({
 			kind: "early",
 			months: [{ month: "2026-10", cents: 3000, partial: true }],
@@ -882,6 +905,7 @@ describe("buildTrends: months before there's history", () => {
 				spend: [{ month: "2026-10", categoryId: GROCERIES, cents: 3000 }],
 			}),
 		);
+
 		// No last month at all: this month so far, with nothing to compare it with.
 		expect(page).not.toHaveProperty("sentence");
 		expect(page).toMatchObject({
@@ -907,6 +931,7 @@ describe("buildTrends: months before there's history", () => {
 			firstDate: "2026-08-20",
 			spend: spendRows(SERIES).filter((r) => r.month >= "2026-08"),
 		});
+
 		expect(page.sentence).not.toBeNull();
 		// One judged month is no run of three.
 		expect(page.goingWell).toEqual([]);
@@ -931,6 +956,7 @@ describe("buildTrends: months before there's history", () => {
 				],
 			}),
 		);
+
 		expect(page).toMatchObject({
 			kind: "early",
 			startMonthName: "September",
@@ -946,14 +972,18 @@ describe("buildTrends: months before there's history", () => {
 			{ month: "2026-09", categoryId: GROCERIES, cents: 20000 },
 			{ month: "2026-10", categoryId: GROCERIES, cents: 3000 },
 		];
+
 		const onTheFirst = buildTrends(
 			input({ firstDate: "2026-09-01", spend: rows }),
 		);
+
 		expect(onTheFirst.kind).toBe("full");
 		expect(onTheFirst).toMatchObject({ lastMonthName: "September" });
+
 		const onThe12th = buildTrends(
 			input({ firstDate: "2026-09-12", spend: rows }),
 		);
+
 		expect(onThe12th.kind).toBe("early");
 		expect(onThe12th).not.toHaveProperty("sentence");
 	});
@@ -965,12 +995,14 @@ describe("buildTrends: months before there's history", () => {
 				spend: [{ month: "2026-10", categoryId: GROCERIES, cents: 3000 }],
 			}),
 		);
+
 		expect(page).toMatchObject({
 			kind: "early",
 			startMonthName: "October",
 			months: [{ month: "2026-10", cents: 3000, partial: true }],
 			label: "All spending by month: October so far $30.",
 		});
+
 		if (page.kind !== "early") throw new Error("expected early");
 		expect(page.months[0]).not.toHaveProperty("part");
 	});
@@ -987,6 +1019,7 @@ describe("buildTrends: months before there's history", () => {
 				],
 			}),
 		);
+
 		expect(page.kind).toBe("early");
 		expect(page).not.toHaveProperty("sentence");
 		expect(page).not.toHaveProperty("changes");
@@ -1012,6 +1045,7 @@ describe("buildTrends: the month's first days", () => {
 			today: "2026-10-01",
 			sameDays: [{ categoryId: GROCERIES, cents: 1000 }],
 		});
+
 		expect(page.caption).toBe("Oct 1 against Sep 1");
 	});
 

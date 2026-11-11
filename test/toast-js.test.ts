@@ -28,6 +28,7 @@ let activeDocument: { activeElement: unknown } | null = null;
 
 /** The selector toast.js asks for a saved row's mark: .row-saved or .row-saved-undo. */
 const SAVED_ROWS = ".row-saved, .row-saved-undo";
+
 /** Whether a node carries a saved row's mark. */
 const isSavedRow = (node: FakeNode) =>
 	node.className
@@ -101,9 +102,11 @@ class FakeNode extends EventTarget {
 	querySelector(selector: string): FakeNode | null {
 		const [, tag = "", conditions = ""] =
 			selector.match(/^(\w+)((?:\[[^\]]+\])*)$/) ?? [];
+
 		const wanted = [...conditions.matchAll(/\[([^=\]]+)(?:=([^\]]+))?\]/g)].map(
 			([, name = "", value]) => ({ name, value }),
 		);
+
 		const matches = (node: FakeNode) =>
 			node.tag === tag &&
 			wanted.every(
@@ -111,6 +114,7 @@ class FakeNode extends EventTarget {
 					node.attrs.has(name) &&
 					(value === undefined || node.attrs.get(name) === value),
 			);
+
 		return this.children.flatMap((child) => child.all()).find(matches) ?? null;
 	}
 	/** The words a reader would hear: this node's own text and its children's, in order. */
@@ -208,6 +212,7 @@ async function page({
 	const heading = new FakeNode("h1");
 	const inertFrame = new FakeNode("div");
 	inertFrame.setAttribute("inert", "");
+
 	// closest("[inert]") finds the frame a drawing sits in, as a browser's closest() does.
 	const sheetSection = sheet
 		? Object.assign(new FakeNode("section"), {
@@ -215,12 +220,15 @@ async function page({
 					inertSheet && selector === "[inert]" ? inertFrame : null,
 			})
 		: null;
+
 	const sheetTitle = sheet ? new FakeNode("h2") : null;
+
 	if (sheetSection && sheetTitle) {
 		sheetSection.setAttribute("data-sheet", "");
 		sheetSection.setAttribute("aria-labelledby", "sheet-title");
 		sheetTitle.id = "sheet-title";
 	}
+
 	// The page's own nodes, where a test draws the rows a save's reply swaps in (and the marks they carry).
 	const pageRoot = new FakeNode("main");
 	const documentElement = new FakeNode("html");
@@ -236,8 +244,10 @@ async function page({
 					detail: (event as CustomEvent).detail,
 				}),
 			);
+
 		return sendFromBody(event);
 	};
+
 	const document = Object.assign(documentTarget, {
 		body,
 		documentElement,
@@ -273,11 +283,14 @@ async function page({
 		createTextNode: (text: string) =>
 			Object.assign(new FakeNode("#text"), { textContent: text }),
 	});
+
 	// htmx replacing the body's children (a body swap, or a history restore) puts a new #toasts in place.
 	const swapBody = () => {
 		toasts = new FakeNode("div");
+
 		return toasts;
 	};
+
 	vi.stubGlobal("document", document);
 	activeDocument = document;
 	vi.stubGlobal("location", { search: "", pathname: "/", hash: "" });
@@ -303,6 +316,7 @@ async function page({
 	);
 	vi.resetModules();
 	await load?.();
+
 	return {
 		document,
 		documentElement,
@@ -335,6 +349,7 @@ const fire = (target: EventTarget, name: string, detail: unknown) =>
 const status = (code: number, method = "POST") => ({
 	ctx: { request: { method }, response: { status: code } },
 });
+
 /** ...and for a request that never got an answer. */
 const dropped = (method = "POST") => ({
 	ctx: { request: { method } },
@@ -359,8 +374,10 @@ describe("a saved row's mark", () => {
 		const row = new FakeNode("div");
 		row.className = mark;
 		pageRoot.append(row);
+
 		return row;
 	};
+
 	/** An Undo toast: it keeps its own mark for its ten seconds. */
 	const undoToast = (target: EventTarget, undo = "token") =>
 		fire(target, "toast", {
@@ -368,7 +385,9 @@ describe("a saved row's mark", () => {
 			undo,
 			undoExpiresInMs: 10000,
 		});
+
 	type Doc = EventTarget & { createTextNode: (text: string) => FakeNode };
+
 	/**
 	 * A save's reply, as htmx runs it: its swap starts (htmx:before:swap), draws its row with the mark, then settles
 	 * (htmx:before:settle) with the row among its new content. Its own toast comes after, in finish.
@@ -385,8 +404,10 @@ describe("a saved row's mark", () => {
 			newContent: [document.createTextNode("\n"), row],
 			settleTasks: [],
 		});
+
 		return { ctx, row };
 	};
+
 	/** htmx's end of a reply: its HX-Trigger toast (if it sends one), then its finally event, then the run ends. */
 	const finish = async (
 		document: EventTarget,
@@ -586,6 +607,7 @@ describe("a saved row's mark", () => {
 beforeEach(() => {
 	vi.useFakeTimers();
 });
+
 afterEach(() => {
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
@@ -616,16 +638,20 @@ describe("a request that never reached Tally", () => {
 		const paths = [
 			...String(Icon({ name: "alert" })).matchAll(/ d="([^"]+)"/g),
 		];
+
 		expect(paths.length).toBeGreaterThan(0);
+
 		for (const [, d] of paths) expect(toastSource).toContain(`"${d}"`);
 		const { document, toasts } = await page();
 		fire(document, "htmx:error", {
 			ctx: {},
 			error: new TypeError("Failed to fetch"),
 		});
+
 		const svg = (toasts.children[0] as FakeNode)
 			.all()
 			.find((n) => n.tag === "svg");
+
 		expect(svg?.attrs.get("stroke-width")).toBe("1.75");
 		expect(svg?.attrs.get("stroke")).toBe("currentColor");
 		const drawn = (svg?.children ?? []).map((n) => n.attrs.get("d"));
@@ -667,10 +693,13 @@ describe("a request that timed out", () => {
 				),
 			},
 		};
+
 		return ctx;
 	};
+
 	const start = (document: EventTarget, ctx: object) =>
 		fire(document, "htmx:before:request", { ctx });
+
 	const end = (document: EventTarget, ctx: object) =>
 		fire(document, "htmx:finally:request", { ctx });
 
@@ -762,6 +791,7 @@ describe("a list that polls itself (P140 A)", () => {
 	const quietList = () => {
 		const list = new FakeNode("section");
 		list.setAttribute("data-quiet", "");
+
 		return list;
 	};
 
@@ -874,12 +904,14 @@ describe("what the toast says depends on what was being done", () => {
 describe("several failures at once", () => {
 	it("show one toast, not a stack of the same words, and again once it has gone", async () => {
 		const { document, toasts } = await page();
+
 		for (let i = 0; i < 3; i++) {
 			fire(document, "htmx:error", {
 				ctx: {},
 				error: new TypeError("Failed to fetch"),
 			});
 		}
+
 		expect(toasts.children).toHaveLength(1);
 		vi.advanceTimersByTime(4000);
 		expect(toasts.children).toHaveLength(0);
@@ -922,9 +954,11 @@ describe("several failures at once", () => {
 		const { document, toasts } = await page();
 		fire(document, "htmx:response:error", status(500));
 		vi.advanceTimersByTime(3500);
+
 		for (let i = 0; i < 3; i++) {
 			fire(document, "htmx:response:error", status(500));
 		}
+
 		expect(toasts.children).toHaveLength(1);
 		// The first toast's timer fires at t=4000; the burst's one toast has its own 4 seconds.
 		vi.advanceTimersByTime(500);
@@ -1009,9 +1043,11 @@ describe("the toasts the server sends", () => {
 			undoExpiresInMs: 10000,
 			undoAction: "/bills/1/undo-unlink",
 		});
+
 		const form = (toasts.children[0] as FakeNode)
 			.all()
 			.find((node) => node.tag === "form");
+
 		expect(form?.action).toBe("/bills/1/undo-unlink");
 		expect(form?.attrs.get("hx-post")).toBe("/bills/1/undo-unlink");
 		expect(form?.attrs.get("hx-select")).toBe("#page");
@@ -1088,9 +1124,11 @@ describe("the address an Undo goes back to (#704)", () => {
 			undo: "token",
 			undoExpiresInMs: 10000,
 		});
+
 		const form = (toasts.children[0] as FakeNode)
 			.all()
 			.find((node) => node.tag === "form");
+
 		return form?.children.find((node) => node.name === "back")?.value;
 	}
 
@@ -1192,11 +1230,13 @@ describe("only the newest plain or error toast shows", () => {
 
 	it("keeps the first bill Undo toast when a second Not this one's Undo toast comes", async () => {
 		const { body, toasts } = await page();
+
 		const notThisOne = {
 			message: "Payment unlinked",
 			undoExpiresInMs: 10000,
 			undoAction: "/bills/1/undo-unlink",
 		};
+
 		fire(body, "toast", { ...notThisOne, undo: "1.first" });
 		const first = toasts.children[0];
 		fire(body, "toast", { ...notThisOne, undo: "1.second" });
@@ -1212,6 +1252,7 @@ describe("focus on an Undo toast", () => {
 			undo: "token",
 			undoExpiresInMs: 10000,
 		});
+
 	const undoButton = (toast: FakeNode) =>
 		toast.all().find((node) => node.tag === "button");
 
@@ -1288,12 +1329,14 @@ describe("focus on an Undo toast", () => {
 // sheet's own heading, not to the Transactions heading behind it.
 describe("focus from an Undo toast while a sheet is open", () => {
 	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+
 	const undoToast = (body: EventTarget) =>
 		fire(body, "toast", {
 			message: "Deleted Coffee, $5.00.",
 			undo: TOKEN,
 			undoExpiresInMs: 10000,
 		});
+
 	const undoButton = (toast: FakeNode) =>
 		toast.all().find((node) => node.tag === "button") as FakeNode;
 
@@ -1301,6 +1344,7 @@ describe("focus from an Undo toast while a sheet is open", () => {
 		const { body, document, toasts, heading, sheetTitle } = await page({
 			sheet: true,
 		});
+
 		const title = sheetTitle as FakeNode;
 		const headingFocus = vi.spyOn(heading, "focus");
 		const titleFocus = vi.spyOn(title, "focus");
@@ -1320,6 +1364,7 @@ describe("focus from an Undo toast while a sheet is open", () => {
 		const { body, document, toasts, heading, sheetTitle } = await page({
 			sheet: true,
 		});
+
 		const title = sheetTitle as FakeNode;
 		const headingFocus = vi.spyOn(heading, "focus");
 		undoToast(body);
@@ -1340,6 +1385,7 @@ describe("focus from an Undo toast while a sheet is open", () => {
 		const { body, document, toasts, heading, sheetTitle } = await page({
 			sheet: true,
 		});
+
 		const title = sheetTitle as FakeNode;
 		const headingFocus = vi.spyOn(heading, "focus");
 		const titleFocus = vi.spyOn(title, "focus");
@@ -1365,6 +1411,7 @@ describe("focus from an Undo toast while a sheet is open", () => {
 			sheet: true,
 			inertSheet: true,
 		});
+
 		const title = sheetTitle as FakeNode;
 		const headingFocus = vi.spyOn(heading, "focus");
 		const titleFocus = vi.spyOn(title, "focus");
@@ -1385,6 +1432,7 @@ describe("focus from an Undo toast while a sheet is open", () => {
 // drops focus to the body, so the bill's title takes it.
 describe("a bill's Undo answer ends its toast", () => {
 	const TOKEN = "12.9401.1791234567";
+
 	const billUndoToast = (body: EventTarget) =>
 		fire(body, "toast", {
 			message: "Payment unlinked. Undo for 10 seconds.",
@@ -1402,6 +1450,7 @@ describe("a bill's Undo answer ends its toast", () => {
 			const { body, document, toasts, heading } = await page({
 				billPage: true,
 			});
+
 			const titleFocus = vi.spyOn(heading, "focus");
 			billUndoToast(body);
 			const undo = toasts.children[0] as FakeNode;
@@ -1427,6 +1476,7 @@ describe("a bill's Undo answer ends its toast", () => {
 // Its focus goes to the Transactions heading, since the disabled Undo had dropped it to the page body.
 describe("a cash entry's refused Undo ends its toast", () => {
 	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+
 	const cashUndoToast = (body: EventTarget) =>
 		fire(body, "toast", {
 			message: "Deleted Coffee, $5.00.",
@@ -1467,12 +1517,14 @@ describe("a cash entry's refused Undo ends its toast", () => {
 describe("an Undo answered after its toast's time ran out (#444)", () => {
 	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
 	const BILL_TOKEN = "12.9401.1791234567";
+
 	const cashUndoToast = (body: EventTarget) =>
 		fire(body, "toast", {
 			message: "Deleted Coffee, $5.00.",
 			undo: TOKEN,
 			undoExpiresInMs: 10000,
 		});
+
 	const billUndoToast = (body: EventTarget) =>
 		fire(body, "toast", {
 			message: "Payment unlinked. Undo for 10 seconds.",
@@ -1480,8 +1532,10 @@ describe("an Undo answered after its toast's time ran out (#444)", () => {
 			undoExpiresInMs: 10000,
 			undoAction: "/bills/1/undo-unlink",
 		});
+
 	const undoButton = (form: FakeNode) =>
 		form.children.find((node) => node.tag === "button") as FakeNode;
+
 	/** Presses the toast's Undo, then lets its ten seconds run out with no answer: focus is left on the body. */
 	function undoTimedOut(
 		body: EventTarget,
@@ -1494,6 +1548,7 @@ describe("an Undo answered after its toast's time ran out (#444)", () => {
 		document.activeElement = body;
 		vi.advanceTimersByTime(10000);
 		expect(toasts.children).not.toContain(undo);
+
 		return form;
 	}
 
@@ -1530,6 +1585,7 @@ describe("an Undo answered after its toast's time ran out (#444)", () => {
 			const { body, document, toasts, heading } = await page({
 				billPage: true,
 			});
+
 			const titleFocus = vi.spyOn(heading, "focus");
 			billUndoToast(body);
 			undoTimedOut(body, document, toasts);
@@ -1656,10 +1712,12 @@ describe("an Undo request that fails", () => {
 			undo: "token",
 			undoExpiresInMs: 10000,
 		});
+
 	const undoForm = (toasts: FakeNode) =>
 		(toasts.children[0] as FakeNode)
 			.all()
 			.find((node) => node.tag === "form") as FakeNode;
+
 	const undoButton = (form: FakeNode) =>
 		form.children.find((node) => node.tag === "button") as FakeNode;
 
@@ -1736,12 +1794,15 @@ describe("focus on an Undo button that a failed request turned back on", () => {
 			undo: "token",
 			undoExpiresInMs: 10000,
 		});
+
 	const undoForm = (toasts: FakeNode) =>
 		(toasts.children[0] as FakeNode)
 			.all()
 			.find((node) => node.tag === "form") as FakeNode;
+
 	const undoButton = (form: FakeNode) =>
 		form.children.find((node) => node.tag === "button") as FakeNode;
+
 	const failure = (document: EventTarget, form: FakeNode) =>
 		fire(document, "htmx:error", {
 			ctx: { sourceElement: form, request: { method: "POST" } },
@@ -1803,15 +1864,19 @@ describe("a switch whose auto-save fails goes back to how the page drew it", () 
 			checked: drawn,
 			defaultChecked: drawn,
 		});
+
 		const form = Object.assign(new FakeNode("form"), {
 			reset() {
 				input.checked = input.defaultChecked;
 			},
 		});
+
 		if (revert) form.setAttribute("data-switches-revert", "");
 		form.append(input);
+
 		return { form, input };
 	};
+
 	/** htmx 4's ctx for a switch that was flipped and posted; #handleTriggerEvent sets request.form. */
 	const flipped = (input: FakeNode, form: FakeNode, method = "POST") => ({
 		sourceElement: input,
@@ -1843,6 +1908,7 @@ describe("a switch whose auto-save fails goes back to how the page drew it", () 
 	it("puts a switch back to how the page drew it after a request times out", async () => {
 		const { document } = await page();
 		const { form, input } = switchForm({ drawn: true });
+
 		const ctx: {
 			sourceElement: FakeNode;
 			request: { method: string; form: FakeNode; abort: () => void };
@@ -1859,6 +1925,7 @@ describe("a switch whose auto-save fails goes back to how the page drew it", () 
 				),
 			},
 		};
+
 		input.checked = false;
 		fire(document, "htmx:before:request", { ctx });
 		vi.advanceTimersByTime(60000);
@@ -1913,21 +1980,26 @@ describe("a switch whose auto-save fails goes back to how the page drew it", () 
 // was pressed, once it is on again, unless the person has moved focus or the button has left the page.
 describe("focus on a guarded button that a failed request turned back on", () => {
 	const GUARD = "#suggestions-page button[type=submit]";
+
 	/** A form whose buttons are guarded, and the button pressed in it, disabled while the request runs. */
 	const guarded = (guard: string | null = GUARD) => {
 		const form = new FakeNode("form");
+
 		if (guard) form.setAttribute("hx-disable", guard);
 		const button = new FakeNode("button");
 		button.type = "submit";
 		button.disabled = true;
 		form.append(button);
+
 		return { form, button };
 	};
+
 	/** htmx 4's ctx for the request the button sent, failed with a dropped connection or a 500. */
 	const dropped = (form: FakeNode, button: FakeNode) => ({
 		sourceElement: form,
 		request: { method: "POST", submitter: button },
 	});
+
 	/** htmx's finally event, which comes before it turns the guarded buttons back on. */
 	const finish = (document: EventTarget, ctx: unknown) =>
 		fire(document, "htmx:finally:request", { ctx });
@@ -1951,10 +2023,12 @@ describe("focus on a guarded button that a failed request turned back on", () =>
 	it("gives focus back to the pressed button after a 500 reply", async () => {
 		const { body, document } = await page();
 		const { form, button } = guarded();
+
 		const ctx = {
 			...dropped(form, button),
 			response: { status: 500 },
 		};
+
 		fire(document, "htmx:response:error", { ctx });
 		document.activeElement = body;
 		finish(document, ctx);
@@ -2043,12 +2117,14 @@ describe("focus on a guarded button that a failed request turned back on", () =>
 describe("the restored entry's toast ends its own Undo toast", () => {
 	const undoToast = (body: EventTarget, token: string, message: string) =>
 		fire(body, "toast", { message, undo: token, undoExpiresInMs: 10000 });
+
 	const restored = (body: EventTarget, undoDone: string) =>
 		fire(body, "toast", {
 			message: "Restored Coffee.",
 			type: "success",
 			undoDone,
 		});
+
 	const undoButton = (toast: FakeNode) =>
 		toast.all().find((node) => node.tag === "button") as FakeNode;
 
@@ -2161,9 +2237,11 @@ describe("the announcer and the toasts, however they are sent", () => {
 
 describe("Select mode's action bar", () => {
 	const SELECTION_BAR = "--selection-bar-height";
+
 	const barAt = (height: number) => {
 		const bar = new FakeNode("div");
 		bar.offsetHeight = height;
+
 		return bar;
 	};
 
@@ -2215,6 +2293,7 @@ describe("Select mode's action bar", () => {
 			bar: barAt(113),
 			resizeObserver: false,
 		});
+
 		fire(body, "toast", { message: "Saved" });
 		expect(toasts.style.values.get(SELECTION_BAR)).toBe("113px");
 	});
@@ -2225,6 +2304,7 @@ describe("Select mode's action bar", () => {
 // covered by the sheet's heading.
 describe("a phone sheet's room follows the toasts on screen", () => {
 	const TOASTS_HEIGHT = "--toasts-height";
+
 	const undoToast = (body: EventTarget) =>
 		fire(body, "toast", {
 			message: "Deleted Coffee, $5.00.",
@@ -2262,6 +2342,7 @@ describe("a phone sheet's room follows the toasts on screen", () => {
 	it("follows the toasts when they change height, and the observer's callback never calls observe", async () => {
 		const { body, document, toasts, documentElement, resizeObservers } =
 			await page();
+
 		undoToast(body);
 		toasts.offsetHeight = 146;
 		fire(document, "htmx:error", dropped("POST"));
@@ -2298,6 +2379,7 @@ describe("a phone sheet's room follows the toasts on screen", () => {
 		const { body, toasts, documentElement } = await page({
 			resizeObserver: false,
 		});
+
 		toasts.offsetHeight = 66;
 		fire(body, "toast", { message: "Saved" });
 		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
@@ -2318,19 +2400,24 @@ describe("the first tick after Older or Newer in Select mode (#456)", () => {
 		const row = new FakeNode("li");
 		row.append(tick);
 		results.append(row);
+
 		return { results, tick };
 	};
+
 	/** Stubs requestAnimationFrame to queue its frames; the returned function runs the queued ones, as the next frame would. */
 	const stubFrames = () => {
 		const frames: Array<() => void> = [];
 		vi.stubGlobal("requestAnimationFrame", (run: () => void) => {
 			frames.push(run);
+
 			return frames.length;
 		});
+
 		return () => {
 			for (const run of frames.splice(0)) run();
 		};
 	};
+
 	/**
 	 * htmx's event once a request has ended: its ctx has the status it ended with, the element it swapped, and the
 	 * swap and response htmx gave it. A list htmx swapped in is "innerHTML show:top" (the page links' hx-swap). A 500
@@ -2426,11 +2513,14 @@ describe("Select all's focus when a count reply swaps it (#475)", () => {
 	const control = (tag: string) => {
 		const node = new FakeNode(tag);
 		node.id = "select-all-link";
+
 		return node;
 	};
+
 	/** The events htmx sends around one swap: before it swaps (focus as it was), then once every task has landed. */
 	const swapEvents = (document: EventTarget) => {
 		const ctx = { target: new FakeNode("p") };
+
 		return {
 			before: () => fire(document, "htmx:before:swap", { ctx, tasks: [] }),
 			after: () => fire(document, "htmx:after:swap", { ctx }),
@@ -2498,15 +2588,19 @@ describe("an Undo toast's label and focus (#821)", () => {
 		const { body, toasts } = await page();
 		fire(body, "toast", undoDetail());
 		const toast = toasts.children[0] as FakeNode;
+
 		const button = toast
 			.all()
 			.find((node) => node.tag === "button") as FakeNode;
+
 		expect(button.className.split(" ")).toEqual(
 			expect.arrayContaining(["min-h-11", "shrink-0", "whitespace-nowrap"]),
 		);
+
 		const words = toast.children.find(
 			(node) => node.tag === "span",
 		) as FakeNode;
+
 		expect(words.textContent).toBe(
 			"Moved 14 to Books & audio. 3 need your answer.",
 		);
@@ -2516,9 +2610,11 @@ describe("an Undo toast's label and focus (#821)", () => {
 	it("moves focus to the Undo button of an ordinary Undo toast (today's behaviour)", async () => {
 		const { body, document, toasts } = await page();
 		fire(body, "toast", undoDetail());
+
 		const button = (toasts.children[0] as FakeNode)
 			.all()
 			.find((node) => node.tag === "button");
+
 		expect(document.activeElement).toBe(button);
 	});
 
@@ -2533,9 +2629,11 @@ describe("an Undo toast's label and focus (#821)", () => {
 	it("still shows a passive Undo toast with its Undo form", async () => {
 		const { body, toasts } = await page();
 		fire(body, "toast", undoDetail({ passive: true }));
+
 		const form = (toasts.children[0] as FakeNode)
 			.all()
 			.find((node) => node.tag === "form");
+
 		expect(form?.action).toBe("/resort/undo");
 		expect(form?.children.find((node) => node.name === "token")?.value).toBe(
 			"run-token",

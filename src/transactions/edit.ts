@@ -85,8 +85,10 @@ export function merchantRuleChange(
 ): { action: "set" | "clear" | "keep"; recategorize: boolean } {
 	if (!alwaysWas && alwaysNow)
 		return { action: "set", recategorize: categoryId !== null };
+
 	if (alwaysWas && !alwaysNow && ruleCategoryWas != null)
 		return { action: "clear", recategorize: false };
+
 	// A ticked row saved with another category changes the rule to it, as a new tick does (spec §7, decision 101).
 	if (
 		alwaysWas &&
@@ -96,6 +98,7 @@ export function merchantRuleChange(
 		categoryId !== ruleCategoryWas
 	)
 		return { action: "set", recategorize: true };
+
 	return { action: "keep", recategorize: false };
 }
 
@@ -189,17 +192,22 @@ export function followsPurchaseAfterSave(
 	const linking =
 		typeof edit.refundOfId === "number" &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
+
 	const incomeChanged = edit.income !== (edit.incomeWas ?? stored.income);
 	const reviewChanged = reviewWasChanged(stored, edit);
+
 	// A review ticked as not income turns income off whatever the panel drew (saveEdit's flag_income).
 	const reviewedAsNotIncome =
 		reviewChanged && edit.creditReviewed && !edit.income;
+
 	// Unticking income on a Jev credit, with the review unticked, leaves it unreviewed (saveEdit's credit_reviewed).
 	const unreviewedByIncome =
 		incomeChanged && !edit.creditReviewed && stored.incomeSource === "jev";
+
 	// saveEdit clears only a review a person made (credit_reviewed_by = 'user'); a review Jev holds stays.
 	const reviewCleared =
 		reviewChanged && !edit.creditReviewed && stored.creditReviewedByUser;
+
 	return followsPurchase({
 		amountCents: stored.amountCents,
 		income: incomeChanged || reviewedAsNotIncome ? edit.income : stored.income,
@@ -240,16 +248,21 @@ export function excludedAfterSave(
 	const linking =
 		typeof edit.refundOfId === "number" &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
+
 	if (linking || !edit.excluded) return false;
+
 	// The lift's two triggers, as saveEdit writes them: a review ticked as not income, or income turned on.
 	const reviewedAsNotIncome =
 		reviewWasChanged(stored, edit) && edit.creditReviewed && !edit.income;
+
 	const incomeTurnedOn = edit.income && !stored.income;
+
 	const lifted =
 		stored.excluded &&
 		stored.excludedSource === "plaid" &&
 		stored.amountCents < 0 &&
 		(reviewedAsNotIncome || incomeTurnedOn);
+
 	return !lifted;
 }
 
@@ -262,8 +275,10 @@ export function parseEdit(
 	const errors: EditErrors = {};
 	const rawCategory = text(form, "category");
 	const newCategory = rawCategory === "new";
+
 	const categoryId =
 		rawCategory === "" || newCategory ? null : Number(rawCategory);
+
 	const alwaysForMerchant = form.get("always") === "1";
 	const alwaysWas = form.get("always_was") === "1";
 	const ruleCategoryWas = Number(form.get("rule_category_was")) || null;
@@ -288,18 +303,22 @@ export function parseEdit(
 	const rawPerson = text(form, "for_person_id");
 	const forPersonId = rawPerson ? Number(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
+
 	// "Rename" (decision 101): this transaction alone, unless the scope says all the merchant's. A ticked name
 	// under "Looks right" takes this choice like Save does; with nothing ticked, savePanel names the store's
 	// guess for all (src/routes/transactions.tsx).
 	const nameScope: "one" | "all" =
 		form.get("name_scope") === "all" ? "all" : "one";
+
 	const nameChanged =
 		pick === "own"
 			? nameScope === "one" || fieldChanged
 			: pickedName !== "" || keepBankName;
+
 	const detailsVisible = form.has("details_visible")
 		? form.get("details_visible") !== "0"
 		: undefined;
+
 	const hiddenUntouched = detailsVisible === false;
 	const noteWas = text(form, "note_was");
 	const kindWas = text(form, "kind_was") || null;
@@ -318,14 +337,18 @@ export function parseEdit(
 	) {
 		errors.category = "Pick a category to use for this merchant.";
 	}
+
 	if (displayName.length > DISPLAY_NAME_MAX)
 		errors.merchant = `Keep the name under ${DISPLAY_NAME_MAX} characters.`;
 	else if (pick === "own" && displayName === "")
 		errors.merchant = "Type a name here, or pick one above.";
+
 	if (note.length > NOTE_MAX)
 		errors.note = `Keep the note under ${NOTE_MAX} characters.`;
+
 	if (rawKind && !isTransactionKind(rawKind))
 		errors.kind = "Pick a kind from the list.";
+
 	if (
 		rawPerson &&
 		(!Number.isInteger(forPersonId) ||
@@ -334,6 +357,7 @@ export function parseEdit(
 		errors.forPerson = FOR_PERSON_ERROR;
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
+
 	return {
 		ok: true,
 		value: {

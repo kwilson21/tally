@@ -79,6 +79,7 @@ export function HomeTop({
 	const negative = safeToSpendCents < 0;
 	const amount = safeToSpendText(safeToSpendCents);
 	const over = hasBudgets && negative;
+
 	return (
 		<>
 			{monthHeading ?? (

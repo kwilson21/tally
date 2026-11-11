@@ -25,9 +25,11 @@ describe("CategoryGrid (#498, P120 B)", () => {
 	it("ends with New category when asked, and not otherwise", () => {
 		const plain = renderToString(<CategoryGrid categories={CATS} />);
 		expect(values(plain)).toEqual(["1", "2", "3"]);
+
 		const withNew = renderToString(
 			<CategoryGrid categories={CATS} newCategory />,
 		);
+
 		expect(values(withNew)).toEqual(["1", "2", "3", "new"]);
 		expect(withNew).toContain("New category");
 	});
@@ -36,6 +38,7 @@ describe("CategoryGrid (#498, P120 B)", () => {
 		const html = renderToString(
 			<CategoryGrid categories={CATS} leading={<span>Guess</span>} />,
 		);
+
 		expect(html.indexOf("Guess")).toBeLessThan(html.indexOf("Groceries"));
 	});
 
@@ -43,6 +46,7 @@ describe("CategoryGrid (#498, P120 B)", () => {
 		const html = renderToString(
 			<CategoryGrid categories={CATS} checkedId={2} name="category" />,
 		);
+
 		expect(html).toMatch(/value="2"[^>]*checked|checked[^>]*value="2"/);
 		expect(html.match(/name="category"/g)?.length).toBe(3);
 	});

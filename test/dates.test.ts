@@ -50,6 +50,7 @@ describe("todayIn", () => {
 
 describe("householdToday", () => {
 	const NOW = new Date("2026-11-01T03:30:00Z");
+
 	const setZone = (value: string) =>
 		env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('time_zone', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -63,6 +64,7 @@ describe("householdToday", () => {
 		const row = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'time_zone'",
 		).first<{ value: string }>();
+
 		expect(row?.value).toBe("America/New_York");
 		expect(await householdToday(env.DB, NOW)).toBe("2026-10-31");
 	});
@@ -99,6 +101,7 @@ describe("householdToday", () => {
 		const unmigrated = failing(
 			"D1_ERROR: no such table: household_settings: SQLITE_ERROR",
 		);
+
 		expect(await householdToday(unmigrated, NOW)).toBe("2026-10-31");
 	});
 

@@ -18,8 +18,10 @@ import { encryptToken } from "../src/plaid/token-crypto";
 
 const ROWS = 100;
 const KEY = btoa("01234567890123456789012345678901");
+
 /** D1 binds at most this many values to one statement (developers.cloudflare.com/d1/platform/limits, read 2026-10-13). */
 const D1_BOUND_VALUES = 100;
+
 /**
  * The statements a page's batch holds beyond its rows: the lock renewal, the cursor, and the merchant names and
  * suggestions, and the planned-expense check that unlinks a payment the bank changed. Measured at 5 to 7 on this branch, so
@@ -56,11 +58,13 @@ const response = (body: unknown) =>
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
+
 	return result?.id as number;
 }
 
@@ -70,9 +74,11 @@ async function addItem() {
  */
 function counting(db: D1Database) {
 	const batches: number[] = [];
+
 	const counted = new Proxy(db, {
 		get(target, property) {
 			const value = Reflect.get(target, property);
+
 			if (property === "prepare") {
 				return (sql: string) => {
 					const statement = target.prepare(sql);
@@ -82,21 +88,27 @@ function counting(db: D1Database) {
 							if (values.length > D1_BOUND_VALUES) {
 								throw new Error("too many SQL variables");
 							}
+
 							return bind(...values);
 						},
 					});
+
 					return statement;
 				};
 			}
+
 			if (property === "batch") {
 				return (list: D1PreparedStatement[]) => {
 					batches.push(list.length);
+
 					return target.batch(list);
 				};
 			}
+
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
+
 	return { db: counted as D1Database, batches: () => batches };
 }
 
@@ -110,11 +122,14 @@ type Page = {
 /** Plaid as the pages describe it, in order, on the one account. */
 function plaid(pages: Page[]) {
 	let served = 0;
+
 	return vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get")) {
 			return response({ accounts: [ACCOUNT] });
 		}
+
 		const page = pages[served++] ?? {};
+
 		return response({
 			added: page.added ?? [],
 			modified: page.modified ?? [],
@@ -198,6 +213,7 @@ async function seedSplit(plaidId: string, pending: boolean) {
 	)
 		.bind(plaidId, `SHOP ${plaidId}`, pending ? 1 : 0)
 		.first<{ id: number }>();
+
 	const parentId = parent?.id as number;
 	await saveSplit(
 		env.DB,
@@ -225,6 +241,7 @@ async function pendingCount() {
 	const row = await env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM transactions WHERE pending = 1",
 	).first<{ n: number }>();
+
 	return row?.n;
 }
 
@@ -240,9 +257,11 @@ describe("a page with more rows than D1 binds values to one statement (issue #41
 			[{ added: Array.from({ length: 150 }, (_, i) => plain(i)) }],
 			counted.db,
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions",
 		).first<{ n: number }>();
+
 		expect(row?.n).toBe(150);
 	});
 
@@ -260,9 +279,11 @@ describe("a page with more rows than D1 binds values to one statement (issue #41
 		const id = await addItem();
 		const fetchImpl = plaid([{}]);
 		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
+
 		const sync = fetchImpl.mock.calls.find(([url]) =>
 			String(url).endsWith("/transactions/sync"),
 		);
+
 		expect(JSON.parse(String(sync?.[1]?.body)).count).toBe(100);
 	});
 });
@@ -272,10 +293,12 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 
 	const plainRows = () => Array.from({ length: ROWS }, (_, i) => plain(i));
 	const postedRows = () => Array.from({ length: ROWS }, (_, i) => posted(i));
+
 	const modifiedRows = () =>
 		Array.from({ length: ROWS }, (_, i) =>
 			transaction({ transaction_id: `a${i}`, name: `SHOP ${i}`, amount: 7 }),
 		);
+
 	const removedRows = () => Array.from({ length: ROWS }, (_, i) => `a${i}`);
 
 	// Measured on this branch with runAfterSync off, so the batch is the page's own: per row, 9 for an added row,

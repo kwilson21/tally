@@ -13,13 +13,17 @@ const PERSON = "person@example.com";
 const RILEY = "riley@example.com";
 const ORIGIN = "http://localhost";
 const ENDPOINT = "https://fcm.googleapis.com/fcm/send/abc";
+
 // RFC 8291's receiver key and auth secret, a valid P-256 point and a 16-byte secret (see web-push.test.ts).
 const UA_PUBLIC =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+
 const AUTH = "BTBZMqHH6r4Tts7J_aSIgg";
+
 // RFC 8292's VAPID pair from Appendix A: valid keys, so the route's key check passes.
 const AS_PUBLIC =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
 const family = {
@@ -30,13 +34,17 @@ const family = {
 } as unknown as Env;
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 router.use("*", sameOrigin);
+
 router.use("*", async (c, next) => {
 	// The test's signed-in person comes from a header, so a test can send a request with no identity at all.
 	const who = c.req.header("x-test-actor");
+
 	if (who) c.set("actor", who);
 	await next();
 });
+
 router.route("/", push);
 
 const b64u = (bytes: Uint8Array) =>
@@ -90,6 +98,7 @@ const rowsFor = async () => {
 		p256dh: string;
 		auth: string;
 	}>();
+
 	return results;
 };
 
@@ -102,11 +111,14 @@ function removedRightAfterItsCheck(): D1Database {
 		get(target, prop) {
 			if (prop !== "prepare") {
 				const value = Reflect.get(target, prop, target);
+
 				return typeof value === "function" ? value.bind(target) : value;
 			}
+
 			return (sql: string) => {
 				if (!sql.includes("SELECT 1 AS present FROM household_members"))
 					return target.prepare(sql);
+
 				return {
 					bind: (...values: unknown[]) => ({
 						first: async () => {
@@ -114,12 +126,14 @@ function removedRightAfterItsCheck(): D1Database {
 								.prepare(sql)
 								.bind(...values)
 								.first();
+
 							await target
 								.prepare(
 									"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
 								)
 								.bind(PERSON)
 								.run();
+
 							return row;
 						},
 					}),
@@ -198,10 +212,12 @@ describe("POST /push/subscribe: the quiet re-post on a page load (restore=1)", (
 
 	it("answers 409 for someone else's device even when the restore's keys differ, and keeps the stored keys", async () => {
 		await subscribe(good, { who: RILEY });
+
 		const response = await subscribe(
 			{ ...good, auth: b64u(new Uint8Array(16).fill(9)), restore: "1" },
 			{ who: PERSON },
 		);
+
 		expect(response.status).toBe(409);
 		expect(await rowsFor()).toEqual([
 			{
@@ -354,6 +370,7 @@ describe("POST /push/subscribe: the encoded lengths are checked before anything 
 	 */
 	const watchDecoding = () => {
 		const spy = vi.spyOn(globalThis, "atob");
+
 		return () => spy.mock.calls.map(([text]) => String(text));
 	};
 
@@ -404,6 +421,7 @@ describe("POST /push/subscribe: the encoded lengths are checked before anything 
 
 // A multipart body that is not one, so reading it throws: an answer other than 404 shows the body was read.
 const UNREADABLE = "this is not a multipart body";
+
 const unreadable = (bindings: Env, who: string | null = PERSON) =>
 	router.request(
 		"/push/subscribe",
@@ -460,6 +478,7 @@ describe("POST /push/subscribe: the body's size is checked before it is read (41
 			...good,
 			pad: "x".repeat(4096),
 		}).toString();
+
 		expect(lengthOf(body)).not.toBe("4096");
 		expect((await postBody(body)).status).toBe(413);
 		expect(await rowsFor()).toEqual([]);
@@ -480,6 +499,7 @@ describe("POST /push/subscribe: the body's size is checked before it is read (41
 			},
 			family,
 		);
+
 		expect(response.status).toBe(413);
 	});
 
@@ -505,6 +525,7 @@ describe("POST /push/subscribe: the body's size is checked before it is read (41
 			},
 			family,
 		);
+
 		expect(response.status).toBe(413);
 		expect(await rowsFor()).toEqual([]);
 	});
@@ -524,6 +545,7 @@ describe("POST /push/subscribe: the body's size is checked before it is read (41
 			},
 			family,
 		);
+
 		expect(response.status).toBe(413);
 	});
 });
@@ -533,6 +555,7 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 		const response = await subscribe(good, {
 			bindings: { ...family, DEMO: "true" } as unknown as Env,
 		});
+
 		expect(response.status).toBe(404);
 		expect(await rowsFor()).toEqual([]);
 	});
@@ -544,6 +567,7 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 				DEMO: "false",
 			} as unknown as Env,
 		});
+
 		expect(response.status).toBe(404);
 		expect(await rowsFor()).toEqual([]);
 	});
@@ -566,6 +590,7 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 		const response = await subscribe(good, {
 			bindings: { ...family, DB: removedRightAfterItsCheck() },
 		});
+
 		expect(response.status).toBe(404);
 		expect(await rowsFor()).toEqual([]);
 	});
@@ -575,6 +600,7 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 			{ ...good, restore: "1" },
 			{ bindings: { ...family, DB: removedRightAfterItsCheck() } },
 		);
+
 		expect(response.status).toBe(409);
 		expect(await rowsFor()).toEqual([]);
 	});
@@ -613,6 +639,7 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 		for (let n = 1; n <= 5; n++) {
 			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
 		}
+
 		const response = await subscribe({ ...good, endpoint: deviceAt(6) });
 		expect(response.status).toBe(204);
 		expect(await endpointsFor(PERSON)).toEqual([
@@ -626,9 +653,11 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 
 	it("a tap that moves another person's device keeps the count at 5, and keeps the device the person tapped", async () => {
 		await seed(RILEY, 0, "2025-12-01 09:00:00");
+
 		for (let n = 1; n <= 5; n++) {
 			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
 		}
+
 		const response = await subscribe({ ...good, endpoint: deviceAt(0) });
 		expect(response.status).toBe(204);
 		// The moved device is the newest (a tap stamps it), so the oldest of the person's own devices is the one dropped.
@@ -646,6 +675,7 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 		for (let n = 1; n <= 5; n++) {
 			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
 		}
+
 		const response = await subscribe({ ...good, endpoint: deviceAt(3) });
 		expect(response.status).toBe(204);
 		expect(await endpointsFor(PERSON)).toEqual([
@@ -659,9 +689,11 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 
 	it("another person's rows are untouched by the trim", async () => {
 		await seedSix(RILEY);
+
 		for (let n = 7; n <= 11; n++) {
 			await seed(PERSON, n, `2026-01-0${n - 5} 09:00:00`);
 		}
+
 		const response = await subscribe({ ...good, endpoint: deviceAt(12) });
 		expect(response.status).toBe(204);
 		expect(await endpointsFor(PERSON)).toHaveLength(5);
@@ -670,11 +702,13 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 
 	it("a restore that changes nothing does not trim, and a restore that stores a lost device does", async () => {
 		await seedSix(PERSON);
+
 		const unchanged = await subscribe({
 			...good,
 			endpoint: deviceAt(3),
 			restore: "1",
 		});
+
 		expect(unchanged.status).toBe(204);
 		expect(await endpointsFor(PERSON)).toHaveLength(6);
 
@@ -683,6 +717,7 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 			endpoint: deviceAt(9),
 			restore: "1",
 		});
+
 		expect(restored.status).toBe(204);
 		// The restored device is the newest; the two oldest are dropped.
 		expect(await endpointsFor(PERSON)).toEqual([
@@ -698,9 +733,11 @@ describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec
 		for (let n = 1; n <= 5; n++) {
 			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
 		}
+
 		await env.DB.prepare(
 			"CREATE TRIGGER refuse_trim BEFORE DELETE ON push_subscriptions BEGIN SELECT RAISE(ABORT, 'trim refused'); END",
 		).run();
+
 		try {
 			const response = await subscribe({ ...good, endpoint: deviceAt(6) });
 			expect(response.status).toBe(500);

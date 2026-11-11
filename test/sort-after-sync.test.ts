@@ -19,6 +19,7 @@ import { recordSorting, sortInProcess } from "./record-sorting";
 // the day's cap that the nightly run shares. It never fails the sync it follows.
 
 const db = env.DB;
+
 // A sync's sorting instance runs here, in-process, with the global fetch as Jev (see record-sorting.ts).
 const sorting = recordSorting({ sort: true });
 const KEY = btoa("01234567890123456789012345678901");
@@ -41,11 +42,15 @@ const reply = (confidence: number) =>
 /** A fake Jev that answers every call and remembers whose bank text it was asked about. */
 function fakeJev(answer: () => Response = () => reply(0.95)) {
 	const asked: string[] = [];
+
 	const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
 		asked.push(JSON.parse(String(init?.body)).state.bank_description);
+
 		return answer();
 	});
+
 	vi.stubGlobal("fetch", fetchImpl);
+
 	return { fetchImpl: fetchImpl as unknown as typeof fetch, asked };
 }
 
@@ -56,16 +61,21 @@ const withKey = {
 		return env.SORT;
 	},
 };
+
 const quiet = () => {
 	vi.spyOn(console, "log").mockImplementation(() => {});
+
 	return vi.spyOn(console, "error").mockImplementation(() => {});
 };
+
 const newDay = () =>
 	db
 		.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'")
 		.run();
+
 /** The rows waiting for Jev, as the ids a sync would report for them. */
 const waitingIds = async () => (await pendingForJev(db, 1000)).map((t) => t.id);
+
 /** How many of the household day's calls are spoken for. */
 const callsUsed = async () =>
 	Number(
@@ -285,9 +295,11 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		await addPending(50);
 		// A sync's run takes 5 of the 40 (a Jev that fails after 5 answers stops it early).
 		let calls = 0;
+
 		const flaky = fakeJev(() =>
 			++calls <= 5 ? reply(0.95) : new Response("{}", { status: 503 }),
 		);
+
 		await sortAfterSync(withKey, { changedIds: await waitingIds() });
 		expect(flaky.asked).toHaveLength(6);
 		// The failed sixth call counted too, since it was asked: 34 left for the nightly run.
@@ -299,6 +311,7 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 
 	it("counts the night's sort against the same day", async () => {
 		quiet();
+
 		// A set-up household, so the usual 500 applies (the first week's larger cap is the next test's).
 		for (const stroke of STROKES) await markStroke(db, stroke, "2026-10-13");
 		// 495 of production's 500 were spent at syncs earlier today.
@@ -384,6 +397,7 @@ describe("syncItemAndSort", () => {
 			return env.SORT;
 		},
 	};
+
 	let itemId: number;
 
 	beforeEach(async () => {
@@ -394,6 +408,7 @@ describe("syncItemAndSort", () => {
 			db.prepare("DELETE FROM accounts"),
 			db.prepare("DELETE FROM plaid_items"),
 		]);
+
 		const row = await db
 			.prepare(
 				`INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id)
@@ -401,6 +416,7 @@ describe("syncItemAndSort", () => {
 			)
 			.bind(await encryptToken("token-secret", KEY))
 			.first<{ id: number }>();
+
 		itemId = row?.id as number;
 	});
 
@@ -434,8 +450,10 @@ describe("syncItemAndSort", () => {
 		} = {},
 	) {
 		const asked: string[] = [];
+
 		const tx = (item: Item) => {
 			const o = typeof item === "string" ? { name: item } : item;
+
 			return {
 				transaction_id: o.id ?? `tx-${o.name}`,
 				account_id: "account-1",
@@ -446,13 +464,17 @@ describe("syncItemAndSort", () => {
 				pending_transaction_id: o.pendingOf ?? null,
 			};
 		};
+
 		let syncCalls = 0;
+
 		const fetchImpl = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				if (String(url) === JEV_URL) {
 					asked.push(JSON.parse(String(init?.body)).state.bank_description);
+
 					return await jev();
 				}
+
 				if (String(url).endsWith("/accounts/get"))
 					return Response.json({
 						accounts: [
@@ -465,11 +487,13 @@ describe("syncItemAndSort", () => {
 						],
 					});
 				syncCalls += 1;
+
 				if (failSecondPage && syncCalls === 2)
 					return Response.json(
 						{ error_type: "API_ERROR", request_id: "request-safe" },
 						{ status: 500 },
 					);
+
 				return Response.json({
 					added: added.map(tx),
 					modified: modified.map(tx),
@@ -479,7 +503,9 @@ describe("syncItemAndSort", () => {
 				});
 			},
 		);
+
 		vi.stubGlobal("fetch", fetchImpl);
+
 		return { fetchImpl: fetchImpl as unknown as typeof fetch, asked };
 	}
 
@@ -493,11 +519,13 @@ describe("syncItemAndSort", () => {
 
 	it("sorts the transactions a sync brought in, after its own rules", async () => {
 		quiet();
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULED SHOP', ?)",
@@ -574,9 +602,11 @@ describe("syncItemAndSort", () => {
 
 	it("keeps the sync's result and its transactions when Jev is down", async () => {
 		const errors = quiet();
+
 		const { fetchImpl, asked } = fakes(["NEW SHOP"], {
 			jev: () => new Response("{}", { status: 503 }),
 		});
+
 		const synced = await syncItemAndSort(plaidEnv, itemId, fetchImpl);
 		expect(synced).toMatchObject({ added: 1, modified: 0, removed: 0 });
 		expect(asked).toEqual(["NEW SHOP"]);
@@ -667,14 +697,17 @@ describe("syncItemAndSort", () => {
 	it("applies nothing of the group under way once sorting right away is turned off partway, and the night takes the rest", async () => {
 		quiet();
 		const names = ["A", "B", "C", "D", "E"];
+
 		const { fetchImpl, asked } = fakes(names, {
 			jev: async () => {
 				// Someone turns the switch off while the second answer is on its way.
 				if (asked.length === 2)
 					await saveAiSwitches(db, { sortOnArrival: false });
+
 				return reply(0.95);
 			},
 		});
+
 		await syncItemAndSort(plaidEnv, itemId, fetchImpl);
 		// The switches are read once a group: the group under way is asked, and its save applies none of it.
 		expect(asked).toHaveLength(5);
@@ -696,9 +729,11 @@ describe("syncItemAndSort", () => {
 
 		it("is asked about like any other", async () => {
 			quiet();
+
 			const { fetchImpl, asked } = fakes([
 				{ name: "CARD SHOP", id: "pending-1", pending: true },
 			]);
+
 			await syncItemAndSort(plaidEnv, itemId, fetchImpl);
 			expect(asked).toEqual(["CARD SHOP"]);
 			expect(await row("pending-1")).toMatchObject({
@@ -710,14 +745,18 @@ describe("syncItemAndSort", () => {
 
 		it("has its answer on the posted transaction once the bank posts it, with no second call", async () => {
 			quiet();
+
 			const first = fakes([
 				{ name: "CARD SHOP", id: "pending-1", pending: true },
 			]);
+
 			await syncItemAndSort(plaidEnv, itemId, first.fetchImpl);
+
 			const second = fakes(
 				[{ name: "CARD SHOP", id: "posted-1", pendingOf: "pending-1" }],
 				{ removed: ["pending-1"] },
 			);
+
 			await syncItemAndSort(plaidEnv, itemId, second.fetchImpl);
 			expect(second.asked).toEqual([]);
 			expect(await row("pending-1")).toBeNull();
@@ -730,10 +769,13 @@ describe("syncItemAndSort", () => {
 
 		it("is asked again when the bank posts it for a different amount, as for any correction", async () => {
 			quiet();
+
 			const first = fakes([
 				{ name: "CARD SHOP", id: "pending-1", pending: true },
 			]);
+
 			await syncItemAndSort(plaidEnv, itemId, first.fetchImpl);
+
 			const second = fakes(
 				[
 					{
@@ -745,6 +787,7 @@ describe("syncItemAndSort", () => {
 				],
 				{ removed: ["pending-1"] },
 			);
+
 			await syncItemAndSort(plaidEnv, itemId, second.fetchImpl);
 			expect(second.asked).toEqual(["CARD SHOP"]);
 			expect(await row("posted-1")).toMatchObject({
@@ -756,9 +799,11 @@ describe("syncItemAndSort", () => {
 
 	it("leaves the rows of a sync that failed partway for the night, which asks about them", async () => {
 		quiet();
+
 		const { fetchImpl, asked } = fakes(["SAVED SHOP"], {
 			failSecondPage: true,
 		});
+
 		await expect(syncItemAndSort(plaidEnv, itemId, fetchImpl)).rejects.toThrow(
 			"Plaid request failed",
 		);
@@ -781,13 +826,16 @@ describe("syncItemAndSort", () => {
 	it("still throws a failed sync's own error, and sorts nothing", async () => {
 		quiet();
 		const asked: string[] = [];
+
 		const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 			if (String(url) === JEV_URL) asked.push("jev");
+
 			return Response.json(
 				{ error_type: "API_ERROR", request_id: "request-safe" },
 				{ status: 500 },
 			);
 		}) as unknown as typeof fetch;
+
 		await expect(syncItemAndSort(plaidEnv, itemId, fetchImpl)).rejects.toThrow(
 			"Plaid request failed",
 		);
