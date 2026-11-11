@@ -35,7 +35,7 @@ describe("replyOf", () => {
 	it("reads Llama and Granite's `response` string", () => {
 		expect(replyOf({ response: "Trader Joe's" })).toEqual({
 			text: "Trader Joe's",
-			shape: "response",
+			form: "response",
 		});
 	});
 
@@ -46,7 +46,7 @@ describe("replyOf", () => {
 
 		expect(replyOf(answer)).toEqual({
 			text: "Blue Bottle",
-			shape: "chat",
+			form: "chat",
 			finish: "stop",
 		});
 	});
@@ -54,7 +54,7 @@ describe("replyOf", () => {
 	it("reads a Responses-style answer (gpt-oss), by output_text or by its message items", () => {
 		expect(replyOf({ output_text: "Costco" })).toMatchObject({
 			text: "Costco",
-			shape: "responses",
+			form: "responses",
 		});
 		expect(
 			replyOf({
@@ -69,7 +69,7 @@ describe("replyOf", () => {
 					},
 				],
 			}),
-		).toMatchObject({ text: "Costco", shape: "responses" });
+		).toMatchObject({ text: "Costco", form: "responses" });
 	});
 
 	it("reports a model that spent its tokens thinking: no text, finish 'length'", () => {
@@ -84,7 +84,7 @@ describe("replyOf", () => {
 
 		expect(replyOf(answer)).toEqual({
 			text: null,
-			shape: "chat",
+			form: "chat",
 			finish: "length",
 			thoughtOnly: true,
 		});
@@ -102,7 +102,7 @@ describe("replyOf", () => {
 
 		expect(replyOf(stopped)).toEqual({
 			text: null,
-			shape: "chat",
+			form: "chat",
 			finish: "stop",
 		});
 
@@ -113,14 +113,14 @@ describe("replyOf", () => {
 
 		expect(replyOf({ output: [reasoningItem] })).toEqual({
 			text: null,
-			shape: "responses",
+			form: "responses",
 		});
 		expect(
 			replyOf({
 				output: [reasoningItem],
 				incomplete_details: { reason: "max_output_tokens" },
 			}),
-		).toEqual({ text: null, shape: "responses", thoughtOnly: true });
+		).toEqual({ text: null, form: "responses", thoughtOnly: true });
 	});
 
 	it("marks an answer that has text but was cut off at the token limit", () => {
@@ -135,7 +135,7 @@ describe("replyOf", () => {
 			}),
 		).toEqual({
 			text: "Trader Joe's\nTrader",
-			shape: "chat",
+			form: "chat",
 			finish: "length",
 			truncated: true,
 		});
@@ -146,7 +146,7 @@ describe("replyOf", () => {
 			}),
 		).toMatchObject({
 			text: "Costco\nCost",
-			shape: "responses",
+			form: "responses",
 			truncated: true,
 		});
 		// A complete answer, and a shape that reports no finish reason, are not marked.
@@ -159,10 +159,10 @@ describe("replyOf", () => {
 	});
 
 	it("gives no text for anything it doesn't know", () => {
-		expect(replyOf(null)).toMatchObject({ text: null, shape: "unknown" });
+		expect(replyOf(null)).toMatchObject({ text: null, form: "unknown" });
 		expect(replyOf({ nope: 1 })).toMatchObject({
 			text: null,
-			shape: "unknown",
+			form: "unknown",
 		});
 	});
 });
@@ -299,21 +299,21 @@ describe("formatNamesReport", () => {
 							ok: true,
 							names: ["Alpha"],
 							ms: 100,
-							shape: "response",
+							form: "response",
 						},
-						{ text: "B", ok: true, names: [], ms: 300, shape: "response" },
+						{ text: "B", ok: true, names: [], ms: 300, form: "response" },
 					],
 				},
 				{
 					key: "gemma4",
 					results: [
-						{ text: "A", ok: false, error: "boom", ms: 50, shape: "unknown" },
+						{ text: "A", ok: false, error: "boom", ms: 50, form: "unknown" },
 						{
 							text: "B",
 							ok: false,
 							thoughtOnly: true,
 							ms: 70,
-							shape: "chat",
+							form: "chat",
 							finish: "length",
 						},
 					],
@@ -452,7 +452,7 @@ describe("formatNamesReport cut-off answers", () => {
 						ok: true,
 						names: ["Alpha"],
 						ms: 10,
-						shape: "chat",
+						form: "chat",
 						finish: "stop",
 					},
 					{
@@ -460,7 +460,7 @@ describe("formatNamesReport cut-off answers", () => {
 						ok: true,
 						names: ["Beta", "Be"],
 						ms: 10,
-						shape: "chat",
+						form: "chat",
 						finish: "length",
 						truncated: true,
 					},
@@ -488,7 +488,7 @@ describe("formatNamesReport response-shape note", () => {
 		ok: true,
 		names: ["Alpha"],
 		ms: 10,
-		shape: kind,
+		form: kind,
 	});
 
 	const note = (report: string) =>

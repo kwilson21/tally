@@ -25,13 +25,13 @@ import {
 import { withTurnGuard } from "./sorting-turn";
 import {
 	type Guard,
+	hasStoredFields,
 	isArrayOf,
 	isBoolean,
 	isNullable,
 	isNumber,
 	isOptional,
 	isRecordOf,
-	isShape,
 	isString,
 	readStored,
 } from "./stored-shape";
@@ -110,9 +110,9 @@ export type MovedRecord = {
 	needAnswer: number;
 };
 
-// What the stored text is checked against when it is read. Each guard names every key of its type (isShape), so a key
+// What the stored text is checked against when it is read. Each guard names every key of its type (hasStoredFields), so a key
 // added to a type above and not here is a compile error.
-const isRunSnapshot = isShape<RunSnapshot>({
+const isRunSnapshot = hasStoredFields<RunSnapshot>({
 	id: isNumber,
 	category_id: isNullable(isNumber),
 	category_source: isNullable(isString),
@@ -127,12 +127,12 @@ const isRunSnapshot = isShape<RunSnapshot>({
 	amount_cents: isNumber,
 });
 
-const isNamedCategory = isShape<{ id: number; name: string }>({
+const isNamedCategory = hasStoredFields<{ id: number; name: string }>({
 	id: isNumber,
 	name: isString,
 });
 
-const isResortRun = isShape<ResortRun>({
+const isResortRun = hasStoredFields<ResortRun>({
 	id: isString,
 	total: isNumber,
 	done: isNumber,
@@ -152,13 +152,13 @@ const isResortRun = isShape<ResortRun>({
 	finishToken: isOptional(isString),
 });
 
-const isMovedRecord = isShape<MovedRecord>({
+const isMovedRecord = hasStoredFields<MovedRecord>({
 	runId: isString,
 	categoryId: isNumber,
 	categoryName: isString,
 	categories: isArrayOf(isString),
 	byCategory: isArrayOf(
-		isShape<{ id: number; name: string; count: number }>({
+		hasStoredFields<{ id: number; name: string; count: number }>({
 			id: isNumber,
 			name: isString,
 			count: isNumber,
@@ -168,7 +168,7 @@ const isMovedRecord = isShape<MovedRecord>({
 	until: isNullable(isNumber),
 	finalizedAt: isNumber,
 	rows: isArrayOf(
-		isShape<MovedRecord["rows"][number]>({
+		hasStoredFields<MovedRecord["rows"][number]>({
 			id: isNumber,
 			categoryId: isNumber,
 			plaid_transaction_id: isNullable(isString),

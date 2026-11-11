@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+	hasStoredFields,
 	isArrayOf,
 	isBoolean,
 	isNullable,
 	isNumber,
 	isOptional,
 	isRecordOf,
-	isShape,
 	isString,
 	readStored,
 } from "../src/db/stored-shape";
@@ -42,10 +42,10 @@ describe("the basic guards", () => {
 	});
 });
 
-describe("isShape", () => {
+describe("hasStoredFields", () => {
 	type Thing = { id: number; name: string | null; tags?: string[] };
 
-	const isThing = isShape<Thing>({
+	const isThing = hasStoredFields<Thing>({
 		id: isNumber,
 		name: isNullable(isString),
 		tags: isOptional(isArrayOf(isString)),
@@ -67,7 +67,7 @@ describe("isShape", () => {
 });
 
 describe("readStored", () => {
-	const isPair = isShape<{ a: number }>({ a: isNumber });
+	const isPair = hasStoredFields<{ a: number }>({ a: isNumber });
 
 	it("returns the value when the text is JSON of the right shape", () => {
 		expect(readStored('{"a":1}', isPair)).toEqual({ a: 1 });

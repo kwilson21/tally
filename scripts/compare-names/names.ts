@@ -118,7 +118,7 @@ export function bankTexts(seed: Seed, limit?: number): string[] {
 export type Reply = {
 	text: string | null;
 	/** `response` (Llama, Granite), `chat` (Gemma, GLM) or `responses` (gpt-oss): the three shapes seen. */
-	shape: "response" | "chat" | "responses" | "unknown";
+	form: "response" | "chat" | "responses" | "unknown";
 	finish?: string;
 	/** The model sent thinking but no answer, so it ran out of tokens before replying. */
 	thoughtOnly?: boolean;
@@ -146,14 +146,14 @@ const nonEmpty = (value: Json | undefined): string | null =>
 /** The answer's text from any of the shapes Workers AI text models return, and how it was shaped. */
 export function replyOf(answer: Json | ReadableStream): Reply {
 	// A stream has no text to read; askNames never asks for one, so this is only the type's other member.
-	if (answer instanceof ReadableStream) return { text: null, shape: "unknown" };
+	if (answer instanceof ReadableStream) return { text: null, form: "unknown" };
 
-	if (isText(answer)) return { text: nonEmpty(answer), shape: "response" };
+	if (isText(answer)) return { text: nonEmpty(answer), form: "response" };
 
-	if (!isObject(answer)) return { text: null, shape: "unknown" };
+	if (!isObject(answer)) return { text: null, form: "unknown" };
 
 	if (isText(answer.response))
-		return { text: nonEmpty(answer.response), shape: "response" };
+		return { text: nonEmpty(answer.response), form: "response" };
 
 	const choice = Array.isArray(answer.choices) ? answer.choices[0] : undefined;
 
@@ -168,7 +168,7 @@ export function replyOf(answer: Json | ReadableStream): Reply {
 			nonEmpty(fieldOf(message, "reasoning_content")) ??
 			nonEmpty(fieldOf(message, "reasoning"));
 
-		const reply: Reply = { text, shape: "chat", finish };
+		const reply: Reply = { text, form: "chat", finish };
 
 		if (text === null && thought !== null && finish === "length")
 			reply.thoughtOnly = true;
@@ -205,7 +205,7 @@ export function replyOf(answer: Json | ReadableStream): Reply {
 			incomplete === "max_output_tokens" &&
 			items.some((item) => fieldOf(item, "type") === "reasoning");
 
-		const reply: Reply = { text, shape: "responses" };
+		const reply: Reply = { text, form: "responses" };
 
 		if (thoughtOnly) reply.thoughtOnly = thoughtOnly;
 
@@ -215,7 +215,7 @@ export function replyOf(answer: Json | ReadableStream): Reply {
 		return reply;
 	}
 
-	return { text: null, shape: "unknown" };
+	return { text: null, form: "unknown" };
 }
 
 export type NameResult = {
@@ -228,7 +228,7 @@ export type NameResult = {
 	/** Cut off at the token limit with some text, so the names may be partial. */
 	truncated?: boolean;
 	ms: number;
-	shape: Reply["shape"];
+	form: Reply["form"];
 	finish?: string;
 };
 
@@ -265,7 +265,7 @@ export async function askNames(
 				text,
 				ok: false,
 				ms,
-				shape: reply.shape,
+				form: reply.form,
 				finish: reply.finish,
 				thoughtOnly: reply.thoughtOnly,
 			};
@@ -275,7 +275,7 @@ export async function askNames(
 			ok: true,
 			names: cleanSuggestedNames(reply.text, text),
 			ms,
-			shape: reply.shape,
+			form: reply.form,
 			finish: reply.finish,
 			truncated: reply.truncated,
 		};
@@ -285,7 +285,7 @@ export async function askNames(
 			ok: false,
 			error: error instanceof Error ? error.message : String(error),
 			ms: Date.now() - started,
-			shape: "unknown",
+			form: "unknown",
 		};
 	}
 }
@@ -352,7 +352,7 @@ export async function askOther(
 			ok: false,
 			error: "no usable answer (the Worker's log has the error's name)",
 			ms,
-			shape: "unknown",
+			form: "unknown",
 		};
 
 	return {
@@ -360,7 +360,7 @@ export async function askOther(
 		ok: true,
 		names: value.value ? [value.value] : [],
 		ms,
-		shape: "unknown",
+		form: "unknown",
 	};
 }
 
@@ -491,17 +491,17 @@ export function formatNamesReport(input: ReportInput): string {
 		);
 	}
 
-	const shapes = input.models.map(
+	const forms = input.models.map(
 		({ key, results }) =>
-			`- ${label(key)}: ${[...new Set(results.map((r) => r.shape))].join(", ")}`,
+			`- ${label(key)}: ${[...new Set(results.map((r) => r.form))].join(", ")}`,
 	);
 
 	const isNames = (input.task ?? "names") === "names";
 
-	if (isNames) lines.push("", "Answer shapes seen:", ...shapes);
+	if (isNames) lines.push("", "Answer shapes seen:", ...forms);
 
 	const noFinish = input.models
-		.filter(({ results }) => results.some((r) => r.shape === "response"))
+		.filter(({ results }) => results.some((r) => r.form === "response"))
 		.map(({ key }) => label(key));
 
 	if (isNames && noFinish.length > 0)

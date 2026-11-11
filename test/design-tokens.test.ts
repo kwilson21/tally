@@ -90,7 +90,7 @@ const EXCEPTIONS = new Map([
  * Files that may name corner-shape, each with its reason. The one place that turns it on for the app is
  * the squircle rule in app.css (decision 76); a file here draws corners itself, on a picture.
  */
-const CORNER_SHAPE_EXCEPTIONS = {
+const CORNER_RULE_EXCEPTIONS = {
 	"../src/design-system/proposals-corners.tsx":
 		"P75 draws round corners, squircles and a mix side by side, so it sets corner-shape on its own pictures",
 } satisfies Record<string, string>;
@@ -99,13 +99,13 @@ const CORNER_SHAPE_EXCEPTIONS = {
  * Any spelling of the property: corner-shape or a per-corner longhand like corner-top-left-shape, in
  * any case (CSS property names ignore it), or a script name like cornerShape or cornerTopLeftShape.
  */
-const CORNER_SHAPE =
+const CORNER_RULE =
 	/\bcorner-(?:[a-z]+-)*shape\b|\bcorner(?:[A-Z][a-z]+)*Shape\b/i;
 
 /** The files outside the list above that name corner-shape, with the word they use. */
-function cornerShapeProblems(file: string, text: string): string[] {
-	if (file in CORNER_SHAPE_EXCEPTIONS) return [];
-	const found = stripComments(text).match(CORNER_SHAPE)?.[0];
+function cornerRuleProblems(file: string, text: string): string[] {
+	if (file in CORNER_RULE_EXCEPTIONS) return [];
+	const found = stripComments(text).match(CORNER_RULE)?.[0];
 
 	return found ? [`${found}: only the squircle rule in app.css sets it`] : [];
 }
@@ -153,7 +153,7 @@ function cssRules(text: string): CssRule[] {
 
 /** The rules in app.css that set corner-shape. */
 const cornerRules = cssRules(stripCssComments(css)).filter((r) =>
-	CORNER_SHAPE.test(r.body),
+	CORNER_RULE.test(r.body),
 );
 
 /**
@@ -593,15 +593,15 @@ describe("design tokens (DESIGN.md)", () => {
 
 		it("fails if corner-shape is set anywhere in src/ or public/js/ but the P75 drawing", () => {
 			const all = Object.entries(SOURCES).flatMap(([file, text]) =>
-				cornerShapeProblems(file, text).map((p) => `${file}: ${p}`),
+				cornerRuleProblems(file, text).map((p) => `${file}: ${p}`),
 			);
 
 			expect(all).toEqual([]);
 
 			// Each exception has a reason and still uses the property, so a stale one is removed.
-			for (const [file, reason] of Object.entries(CORNER_SHAPE_EXCEPTIONS)) {
+			for (const [file, reason] of Object.entries(CORNER_RULE_EXCEPTIONS)) {
 				expect(reason.length).toBeGreaterThan(20);
-				expect(stripComments(SOURCES[file] ?? "")).toMatch(CORNER_SHAPE);
+				expect(stripComments(SOURCES[file] ?? "")).toMatch(CORNER_RULE);
 			}
 		});
 
@@ -617,18 +617,15 @@ describe("design tokens (DESIGN.md)", () => {
 				'el.style.setProperty("CORNER-SHAPE", "squircle");',
 				'<p class="[Corner-Bottom-Right-Shape:squircle]">',
 			])
-				expect([text, cornerShapeProblems("x.tsx", text)]).toEqual([
+				expect([text, cornerRuleProblems("x.tsx", text)]).toEqual([
 					text,
 					[expect.any(String)],
 				]);
 			expect(
-				cornerShapeProblems(
-					"x.tsx",
-					"// corner-shape: squircle, in prose\n<p>",
-				),
+				cornerRuleProblems("x.tsx", "// corner-shape: squircle, in prose\n<p>"),
 			).toEqual([]);
 			expect(
-				cornerShapeProblems(
+				cornerRuleProblems(
 					"../src/design-system/proposals-corners.tsx",
 					'<p class="[corner-shape:round]">',
 				),

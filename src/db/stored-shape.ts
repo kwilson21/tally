@@ -48,11 +48,11 @@ export const isRecordOf =
  * An object with a check for every key of T. Naming T means a key added to the type without a check is a compile error,
  * so the type and the check cannot drift apart. Keys the shape does not name are allowed.
  */
-export const isShape =
-	<T extends object>(shape: { [K in keyof T]-?: Guard<T[K]> }): Guard<T> =>
+export const hasStoredFields =
+	<T extends object>(fields: { [K in keyof T]-?: Guard<T[K]> }): Guard<T> =>
 	(value): value is T =>
 		isObject(value) &&
-		Object.entries<Guard<unknown>>(shape).every(([key, guard]) =>
+		Object.entries<Guard<unknown>>(fields).every(([key, guard]) =>
 			guard(value[key]),
 		);
 

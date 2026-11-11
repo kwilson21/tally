@@ -43,7 +43,7 @@ export function SelectField({
 	class: extra,
 	...attrs
 }: Props) {
-	const shape = VARIANT[variant];
+	const look = VARIANT[variant];
 	const border = dashed ? "border-dashed border-ink" : "";
 
 	return (
@@ -55,7 +55,7 @@ export function SelectField({
 				{...attrs}
 				class={[
 					"min-h-11 w-full max-w-full appearance-none truncate",
-					shape.box,
+					look.box,
 					border,
 					extra,
 				]
@@ -64,7 +64,7 @@ export function SelectField({
 			/>
 			<Icon
 				name="chevron"
-				class={`pointer-events-none absolute top-1/2 size-4 -translate-y-1/2 rotate-90 text-muted ${shape.arrow}`}
+				class={`pointer-events-none absolute top-1/2 size-4 -translate-y-1/2 rotate-90 text-muted ${look.arrow}`}
 			/>
 		</span>
 	);

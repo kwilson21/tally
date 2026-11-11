@@ -175,10 +175,10 @@ const one = (e: Entry, baseline = 1): List => ({
 });
 
 describe("the write-handler ratchet", () => {
-	const { found, problems: shapes } = registeredWrites(app.routes);
+	const { found, problems: malformed } = registeredWrites(app.routes);
 
 	it("holds for the real app: every write route is listed, every listed route exists", () => {
-		expect(shapes).toEqual([]);
+		expect(malformed).toEqual([]);
 		expect(ratchetProblems(found, LIST, SOURCES, TESTS)).toEqual([]);
 	});
 

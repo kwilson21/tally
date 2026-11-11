@@ -1262,7 +1262,7 @@ const periodLabel = (bill: DbBill, period: string, today: string) =>
 		: occurrenceLabel(occurrenceDate(bill, period));
 
 /** The shape of each frequency's payment keys (bill_payments.period), so a key of another shape never sets a start. */
-const periodKeyShape: Record<DbBill["frequency"], RegExp> = {
+const periodKeyPattern: Record<DbBill["frequency"], RegExp> = {
 	monthly: /^\d{4}-\d{2}$/,
 	yearly: /^\d{4}$/,
 	weekly: /^\d{4}-\d{2}-\d{2}$/,
@@ -1282,7 +1282,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 	let start = addMonths(today.slice(0, 7), -6);
 
 	for (const { period } of linked.results) {
-		if (!periodKeyShape[bill.frequency].test(period)) continue;
+		if (!periodKeyPattern[bill.frequency].test(period)) continue;
 		const month = occurrenceMonth(bill, period);
 
 		if (month < start) start = month;

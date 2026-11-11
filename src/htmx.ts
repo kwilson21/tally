@@ -3,7 +3,16 @@
  * 0x7E is written as a backslash-u escape of four hex digits (a character outside the Basic Multilingual Plane becomes two, as its UTF-16
  * units). JSON reads the escapes back to the same words, so htmx and public/js/toast.js show the same text (#521).
  */
-export function hxTrigger(trigger: Record<string, unknown>): string {
+export type HxTriggerValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| HxTriggerValue[]
+	| { [key: string]: HxTriggerValue };
+
+export function hxTrigger(trigger: { [key: string]: HxTriggerValue }): string {
 	// JSON.stringify has already escaped the control characters below 0x20, so what is left outside " " to "~" is non-ASCII.
 	return JSON.stringify(trigger).replace(
 		/[^\x20-\x7e]/g,
