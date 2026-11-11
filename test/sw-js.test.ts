@@ -6,10 +6,39 @@ import { PUSH_PAYLOAD } from "../src/first-tally/ready-push";
 // it and opens Tally, focusing and navigating an open window or opening a new one. It caches nothing and has no fetch handler.
 // Its fallback words and page are the push's own (PUSH_PAYLOAD), so the two can't drift apart.
 
-type Listener = (event: Record<string, unknown>) => void;
+/** A JSON value, as a push payload can be (an unreadable or odd one is still JSON-shaped data). */
+type PushJson =
+	| string
+	| number
+	| boolean
+	| null
+	| PushJson[]
+	| { [key: string]: PushJson };
+
+/** What a listener is handed: a push's data or a tap's notification, and waitUntil to hold the worker until a promise settles. */
+type WorkerEvent = {
+	data?: { json(): PushJson };
+	notification?: { close(): void; data?: { url: string } };
+	waitUntil(promise: Promise<unknown>): void;
+};
+
+type Listener = (event: WorkerEvent) => void;
+
+/** A window the page controls: a tap focuses it and navigates it. */
+type WindowLike = {
+	focus(): Promise<WindowLike>;
+	navigate(url: string): Promise<WindowLike>;
+};
+
+/** The options the worker passes to showNotification: the body, the tag and the page a tap opens. */
+type NotificationOptions = {
+	body?: string;
+	tag?: string;
+	data: { url: string };
+};
 
 /** The worker's global scope, faked, with the handlers the script registers. */
-function worker(windows: unknown[] = []) {
+function worker(windows: WindowLike[] = []) {
 	const listeners = new Map<string, Listener>();
 
 	const scope = {
@@ -21,13 +50,20 @@ function worker(windows: unknown[] = []) {
 			matchAll: vi.fn(async () => windows),
 			openWindow: vi.fn(async () => null),
 		},
-		registration: { showNotification: vi.fn(async () => undefined) },
+		registration: {
+			showNotification: vi.fn(
+				async (_title: string, _options: NotificationOptions) => undefined,
+			),
+		},
 	};
 
 	new Function("self", swSource)(scope);
 
 	/** Runs one event's listener and waits for everything it handed to waitUntil. */
-	const send = async (type: string, event: Record<string, unknown> = {}) => {
+	const send = async (
+		type: string,
+		event: Omit<WorkerEvent, "waitUntil"> = {},
+	) => {
 		const pending: Promise<unknown>[] = [];
 		const listener = listeners.get(type);
 
@@ -42,7 +78,7 @@ function worker(windows: unknown[] = []) {
 	return { scope, listeners, send };
 }
 
-const pushWith = (json: () => unknown) => ({ data: { json } });
+const pushWith = (json: () => PushJson) => ({ data: { json } });
 
 describe("the service worker's push", () => {
 	it("shows the notification the payload names, with its page and the one tag", async () => {
@@ -159,8 +195,7 @@ describe("the service worker's push", () => {
 			})),
 		);
 
-		for (const [, options] of scope.registration.showNotification.mock
-			.calls as unknown as [string, { data: { url: string } }][]) {
+		for (const [, options] of scope.registration.showNotification.mock.calls) {
 			expect(options.data.url).toBe(PUSH_PAYLOAD.url);
 		}
 	});

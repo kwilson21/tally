@@ -5,7 +5,40 @@ import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { FOLLOWS_PURCHASE } from "../src/db/counted-month";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { isMethod, itemAt } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
+
+/** One row of the snapshot the tests compare before and after a write. */
+type SnapshotRow = {
+	id: number;
+	category_id: number | null;
+	category_source: string | null;
+	excluded: number;
+	excluded_source: string | null;
+};
+
+/** The shape of the HX-Trigger header the routes send: the toast and the announcer line. */
+type HxTrigger = { toast?: { message: string }; announce?: string };
+
+/** True when `prop` is a member of `target`, so a Proxy can read it with a typed key. */
+function isMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
+
+/** A Proxy's read of `target`'s member `prop`: a method is bound to `target`, anything else is returned as it is. */
+function forwardMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): Target[keyof Target] | ((...args: never[]) => object) | undefined {
+	if (!isMember(target, prop)) return undefined;
+
+	const value = target[prop];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
 
 const request = async (path: string, init?: RequestInit) => {
 	const headers = new Headers(init?.headers);
@@ -157,10 +190,9 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 			headers: { "HX-Request": "true" },
 		});
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast?: { message: string };
-			announce?: string;
-		};
+		const trigger: HxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		return {
 			res,
@@ -422,14 +454,17 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 			c.set("actor", "test@example.com");
 			await next();
 		});
-		route.route("/", transactions as unknown as Hono<TestApp>);
+		route.route("/", transactions);
 
 		/**
 		 * The DB, with `rival` run just before the first statement that starts with `prefix` runs (its run, all or
 		 * first), so a change lands between the save's start and its write. The rival writes through the real
 		 * database, so it is not guarded itself.
 		 */
-		function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+		function racing(
+			prefix: string,
+			rival: () => Promise<D1Result>,
+		): D1Database {
 			let raced = false;
 
 			const fire = async () => {
@@ -444,16 +479,30 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 						if (prop === "bind")
 							return (...values: unknown[]) => guard(target.bind(...values));
 
-						if (prop === "run" || prop === "all" || prop === "first")
-							return async (...args: unknown[]) => {
+						if (prop === "run")
+							return async () => {
 								await fire();
 
-								return Reflect.apply(target[prop], target, args);
+								return target.run();
 							};
 
-						const value = Reflect.get(target, prop);
+						if (prop === "all")
+							return async () => {
+								await fire();
 
-						return typeof value === "function" ? value.bind(target) : value;
+								return target.all();
+							};
+
+						if (prop === "first")
+							return async (column?: string) => {
+								await fire();
+
+								return column === undefined
+									? target.first()
+									: target.first(column);
+							};
+
+						return forwardMember(target, prop);
 					},
 				});
 
@@ -466,9 +515,7 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 							return sql.startsWith(prefix) ? guard(statement) : statement;
 						};
 
-					const value = Reflect.get(target, prop);
-
-					return typeof value === "function" ? value.bind(target) : value;
+					return forwardMember(target, prop);
 				},
 			});
 		}
@@ -496,10 +543,9 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 				{ ...env, DB: db },
 			);
 
-			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-				toast?: { message: string };
-				announce?: string;
-			};
+			const trigger: HxTrigger = JSON.parse(
+				res.headers.get("HX-Trigger") ?? "{}",
+			);
 
 			return {
 				res,
@@ -622,9 +668,7 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 							return target.prepare(sql);
 						};
 
-					const value = Reflect.get(target, prop);
-
-					return typeof value === "function" ? value.bind(target) : value;
+					return forwardMember(target, prop);
 				},
 			});
 
@@ -824,7 +868,7 @@ describe("select several transactions", () => {
 		(
 			await env.DB.prepare(
 				"SELECT id,category_id,category_source,excluded,excluded_source FROM transactions ORDER BY id",
-			).all()
+			).all<SnapshotRow>()
 		).results;
 
 	const post = (path: string, body: URLSearchParams, hx = true) =>
@@ -973,7 +1017,9 @@ describe("select several transactions", () => {
 		const ids = await firstPageIds();
 		expect(ids.length).toBeGreaterThan(1);
 		// The sheet lists the ids in ascending order.
-		const [a, b] = ids.slice(0, 2).sort((x, y) => x - y) as [number, number];
+		const sorted = ids.slice(0, 2).sort((x, y) => x - y);
+		const a = itemAt(sorted, 0);
+		const b = itemAt(sorted, 1);
 
 		const res = await post(
 			"/transactions/select/category",
@@ -1399,14 +1445,6 @@ describe("select several transactions", () => {
 		expect(await snapshot()).toEqual(before);
 	});
 
-	type SnapshotRow = {
-		id: number;
-		category_id: number | null;
-		category_source: string | null;
-		excluded: number;
-		excluded_source: string | null;
-	};
-
 	const pageHtml = async (query: string, htmx = false) =>
 		(
 			await request(
@@ -1574,7 +1612,7 @@ describe("select several transactions", () => {
 		vi.setSystemTime(new Date("2026-10-15T16:00:00Z"));
 		await resetDemo(env.DB, "2026-10-15");
 		const ids = rowIds(await pageHtml("month=2026-10&select=1"));
-		const before = (await snapshot()) as SnapshotRow[];
+		const before = await snapshot();
 
 		const res = await post(
 			"/transactions/select/category/save",
@@ -1586,7 +1624,7 @@ describe("select several transactions", () => {
 		);
 		const beforeById = new Map(before.map((row) => [row.id, row]));
 
-		for (const row of (await snapshot()) as SnapshotRow[]) {
+		for (const row of await snapshot()) {
 			if (ids.includes(row.id)) expect(row.category_id).toBe(1);
 			else expect(row).toEqual(beforeById.get(row.id));
 		}
@@ -1819,6 +1857,13 @@ describe("select several transactions", () => {
 		/** Three rows on page 1 that link to no other row, ticked as a person's taps leave them. */
 		const pageOneTicks = async () => (await unlinkedFirstPageIds()).slice(0, 3);
 
+		/** The first two of page 1's three ticks, for tests that name exactly two rows. */
+		const twoPageOneTicks = async (): Promise<[number, number]> => {
+			const ids = await pageOneTicks();
+
+			return [itemAt(ids, 0), itemAt(ids, 1)];
+		};
+
 		/** Page 2's selectable rows: none of them is on page 1, so page 1's ticks are not on this page. */
 		const pageTwoRows = async () =>
 			rowIds(await pageHtml("month=all&page=2&select=1"));
@@ -1895,7 +1940,7 @@ describe("select several transactions", () => {
 		});
 
 		it("counts the unticked rows out, and says how many ticks are not on this page", async () => {
-			const [a, b] = (await pageOneTicks()) as [number, number];
+			const [a, b] = await twoPageOneTicks();
 			expect(await countFragment([a, b], [])).toContain(
 				'2 selected<span class="sr-only">, 2 not on this page</span>',
 			);
@@ -1908,7 +1953,7 @@ describe("select several transactions", () => {
 		});
 
 		it("takes the line away once no tick is off the page, rather than saying 0 not on this page", async () => {
-			const [a, b] = (await pageOneTicks()) as [number, number];
+			const [a, b] = await twoPageOneTicks();
 			const onPage = await countFragment([a, b], [a, b]);
 			expect(onPage).toContain(
 				'<div id="not-on-page" class="empty:hidden" hx-swap-oob="outerHTML"></div>',
@@ -2359,7 +2404,7 @@ describe("select several transactions", () => {
 			const off = await pageOneTicks();
 			const pageRows = await pageTwoRows();
 			// The page's first row is ticked already, so the link must not add it twice.
-			const ticked = [...off, pageRows[0] as number];
+			const ticked = [...off, itemAt(pageRows, 0)];
 
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ticked)}`,
@@ -2582,7 +2627,7 @@ describe("select several transactions", () => {
 
 		it("acts on exactly the 100 real ticks when one of 101 posted ids is stale", async () => {
 			const real = (await addHundredOneRows()).slice(0, 100);
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const res = await post(
 				"/transactions/select/exclude",
@@ -2590,7 +2635,7 @@ describe("select several transactions", () => {
 			);
 
 			expect(res.status).toBe(200);
-			const after = (await snapshot()) as SnapshotRow[];
+			const after = await snapshot();
 
 			const changed = after
 				.filter((row, i) => JSON.stringify(row) !== JSON.stringify(before[i]))
@@ -2696,7 +2741,7 @@ describe("select several transactions", () => {
 
 		it("sets every transaction the filters match, past 100, and leaves a split parent and every other row alone", async () => {
 			const matched = await seedMatches();
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const res = await post(
 				"/transactions/select/category/save",
@@ -2713,7 +2758,7 @@ describe("select several transactions", () => {
 			).toBe("Set 101 transactions to Groceries.");
 			const beforeById = new Map(before.map((row) => [row.id, row]));
 
-			for (const row of (await snapshot()) as SnapshotRow[]) {
+			for (const row of await snapshot()) {
 				if (matched.includes(row.id))
 					expect(row).toMatchObject({
 						category_id: 1,
@@ -2897,7 +2942,7 @@ describe("select several transactions", () => {
 
 		it("excludes every row the whole set holds past 100, and leaves a split parent and the rows the filters miss alone", async () => {
 			const matched = await seedMatches();
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const res = await post(
 				"/transactions/select/exclude",
@@ -2913,7 +2958,7 @@ describe("select several transactions", () => {
 			).toBe("Excluded 101 transactions.");
 			const beforeById = new Map(before.map((row) => [row.id, row]));
 
-			for (const row of (await snapshot()) as SnapshotRow[]) {
+			for (const row of await snapshot()) {
 				if (matched.includes(row.id))
 					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
 				else expect(row).toEqual(beforeById.get(row.id));
@@ -2935,7 +2980,7 @@ describe("select several transactions", () => {
 				).results.map((row) => row.id),
 			);
 
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const counted = Number(
 				(await wholeCount([], [], back)).match(
@@ -2954,7 +2999,7 @@ describe("select several transactions", () => {
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe(`Excluded ${counted} transactions.`);
-			const after = (await snapshot()) as SnapshotRow[];
+			const after = await snapshot();
 			expect(after.find((row) => row.id === 990)).toMatchObject({
 				excluded: 1,
 				excluded_source: "user",
@@ -2984,7 +3029,7 @@ describe("select several transactions", () => {
 				).results.map((row) => row.id),
 			);
 
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const res = await post(
 				"/transactions/select/exclude",
@@ -2997,7 +3042,7 @@ describe("select several transactions", () => {
 			).toBe(`Excluded ${matched.size + 1} transactions.`);
 			const beforeById = new Map(before.map((row) => [row.id, row]));
 
-			for (const row of (await snapshot()) as SnapshotRow[]) {
+			for (const row of await snapshot()) {
 				if (matched.has(row.id)) expect(row.excluded).toBe(1);
 				else if ([110, 990, 991].includes(row.id))
 					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
@@ -3040,7 +3085,7 @@ describe("select several transactions", () => {
 			expect(await wholeCount([], [], back)).toMatch(
 				/^(?:<span [^>]*>)?101 selected</,
 			);
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const res = await post(
 				"/transactions/select/exclude",
@@ -3055,7 +3100,7 @@ describe("select several transactions", () => {
 			expect(trigger.announce).toBe(trigger.toast.message);
 			const beforeById = new Map(before.map((row) => [row.id, row]));
 
-			for (const row of (await snapshot()) as SnapshotRow[]) {
+			for (const row of await snapshot()) {
 				if (already.includes(row.id))
 					expect(row).toEqual(beforeById.get(row.id));
 				else if (matched.includes(row.id))
@@ -3147,7 +3192,7 @@ describe("select several transactions", () => {
 
 			expect(counted).toContain("101 selected");
 			expect(counted).not.toContain("not on this page");
-			const before = (await snapshot()) as SnapshotRow[];
+			const before = await snapshot();
 
 			const res = await post(
 				"/transactions/select/category/save",
@@ -3160,7 +3205,7 @@ describe("select several transactions", () => {
 			).toBe("Set 101 transactions to Groceries.");
 			const beforeById = new Map(before.map((row) => [row.id, row]));
 
-			for (const row of (await snapshot()) as SnapshotRow[]) {
+			for (const row of await snapshot()) {
 				if (matched.includes(row.id))
 					expect(row).toMatchObject({
 						category_id: 1,

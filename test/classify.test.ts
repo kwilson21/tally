@@ -27,6 +27,7 @@ import {
 	type Questions,
 	type Row,
 } from "../src/transactions/classify";
+import { itemAt } from "./helpers/present";
 
 // classify() is the readable oracle for Tally's transaction questions. Each SQL question must give, row by row,
 // the same yes or no as classify(). The rows are (a) named rows, one per state and per contradiction the schema
@@ -79,7 +80,13 @@ const DEFAULTS: Omit<Row, "id"> = {
 	plaid_transaction_id: "plaid-x",
 };
 
-const COLS = Object.keys(DEFAULTS) as (keyof typeof DEFAULTS)[];
+/** The keys of a literal table, typed as the table's own keys (Object.keys widens them to string). */
+function keysOf<T extends object>(table: T): (keyof T)[] {
+	// SAFETY: every caller passes an object literal with no inherited keys, so Object.keys returns exactly its keys.
+	return Object.keys(table) as (keyof T)[];
+}
+
+const COLS = keysOf(DEFAULTS);
 
 const FIXED: Seed[] = [
 	{ name: "counted purchase", category_id: OTHER_CAT, category_source: "user" },
@@ -348,7 +355,7 @@ function randomSeeds(n: number): Seed[] {
 	const rnd = prng(42);
 
 	const pick = <T>(xs: readonly T[]): T =>
-		xs[Math.floor(rnd() * xs.length)] as T;
+		itemAt(xs, Math.floor(rnd() * xs.length));
 
 	// Confidence edges: 0.2, 0.4 and 0.8 sit exactly on the Maybe range's bounds.
 	const edges = [
@@ -514,6 +521,7 @@ beforeAll(async () => {
 		const id = index + 1;
 
 		const values = COLS.map((c) => {
+			// SAFETY: every column is a string, a number or null, so the seed's value (or its default) is one of those.
 			const v = (seed[c] === undefined ? DEFAULTS[c] : seed[c]) as
 				| string
 				| number
@@ -609,8 +617,9 @@ beforeAll(async () => {
 		classified.set(r.id, classify(r, ctx));
 	}
 
-	const keys = Object.keys(SQL_FOR) as (keyof Questions)[];
+	const keys = keysOf(SQL_FOR);
 	const found = await Promise.all(keys.map((k) => sqlSet(k)));
+	// SAFETY: keys holds every key of SQL_FOR and each gets its set from found, so every key of Questions is present.
 	sets = Object.fromEntries(keys.map((k, i) => [k, found[i]])) as Record<
 		keyof Questions,
 		Set<number>
@@ -639,7 +648,7 @@ const classifiedOf = (id: number): Classified => {
 // ---- the checks --------------------------------------------------------------------------------------------------------
 
 describe("classify agrees with each SQL question, row by row", () => {
-	for (const key of Object.keys(SQL_FOR) as (keyof Questions)[]) {
+	for (const key of keysOf(SQL_FOR)) {
 		it(key, () => {
 			const wrong = rows
 				.filter(

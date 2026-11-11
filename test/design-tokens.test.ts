@@ -12,10 +12,10 @@ import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
 
 // Every file that writes class names: the views and routes, and the scripts that build elements.
-const SOURCES = import.meta.glob(
+const SOURCES = import.meta.glob<string>(
 	["../src/**/*.{ts,tsx}", "../public/js/*.js"],
 	{ query: "?raw", import: "default", eager: true },
-) as Record<string, string>;
+);
 
 /** The source without comments, so prose like "rounded down" isn't read as a class. */
 const stripComments = (text: string) =>
@@ -72,25 +72,28 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
  * P115 B draws the 8px corners the owner turned down (decision 85), with three overrides on the money
  * box in its drawing; only those exact classes are allowed.
  */
-const EXCEPTIONS: Record<string, string[]> = {
-	"../public/js/toast.js": ["shadow-sm"],
-	"../src/views/month-end.tsx": ["shadow-swipe-cue"],
-	"../src/design-system/tokens.ts": ["shadow-swipe-cue"],
-	"../src/design-system/proposals-polish.tsx": [
-		"[&_[data-money]_.rounded-control]:rounded-lg",
-		"[&_[data-money]_.rounded-tr-control]:rounded-tr-lg",
-		"[&_[data-money]_.rounded-br-control]:rounded-br-lg",
+const EXCEPTIONS = new Map([
+	["../public/js/toast.js", ["shadow-sm"]],
+	["../src/views/month-end.tsx", ["shadow-swipe-cue"]],
+	["../src/design-system/tokens.ts", ["shadow-swipe-cue"]],
+	[
+		"../src/design-system/proposals-polish.tsx",
+		[
+			"[&_[data-money]_.rounded-control]:rounded-lg",
+			"[&_[data-money]_.rounded-tr-control]:rounded-tr-lg",
+			"[&_[data-money]_.rounded-br-control]:rounded-br-lg",
+		],
 	],
-};
+]);
 
 /**
  * Files that may name corner-shape, each with its reason. The one place that turns it on for the app is
  * the squircle rule in app.css (decision 76); a file here draws corners itself, on a picture.
  */
-const CORNER_SHAPE_EXCEPTIONS: Record<string, string> = {
+const CORNER_SHAPE_EXCEPTIONS = {
 	"../src/design-system/proposals-corners.tsx":
 		"P75 draws round corners, squircles and a mix side by side, so it sets corner-shape on its own pictures",
-};
+} satisfies Record<string, string>;
 
 /**
  * Any spelling of the property: corner-shape or a per-corner longhand like corner-top-left-shape, in
@@ -311,7 +314,7 @@ function pillsMadeSquircle(text: string): string[] {
 }
 
 function problems(file: string, text: string): string[] {
-	const allowed = EXCEPTIONS[file] ?? [];
+	const allowed = EXCEPTIONS.get(file) ?? [];
 	const found: string[] = [];
 
 	for (const word of words(text)) {
@@ -464,12 +467,13 @@ describe("design tokens (DESIGN.md)", () => {
 			expect(used.size).toBeGreaterThan(0);
 			expect([...used]).toContain("lg:rounded-l-sheet");
 			expect(
-				[...used]
-					.filter((cls) => movesRadiusElsewhere(cls).length > 0)
-					.map(
-						(cls) =>
-							`${cls}: the squircle rule sets corner-shape on the element with the class, not on descendants or pseudo-elements; put the radius class on the element itself`,
-					),
+				[...used].flatMap((cls) =>
+					movesRadiusElsewhere(cls).length > 0
+						? [
+								`${cls}: ${cls}: the squircle rule sets corner-shape on the element with the class, not on descendants or pseudo-elements; put the radius class on the element itself`,
+							]
+						: [],
+				),
 			).toEqual([]);
 		});
 
@@ -653,18 +657,18 @@ describe("design tokens (DESIGN.md)", () => {
 		 * Families of utilities that aren't colors, each only after its own prefix:
 		 * "bg-blend-multiply", "bg-repeat-x", "border-spacing-2", "divide-x-reverse".
 		 */
-		const NOT_COLOR_FAMILIES: Record<string, RegExp> = {
-			bg: /^(blend|clip|origin|linear|radial|conic|gradient|repeat)(-|$)/,
-			border: /^spacing(-|$)/,
-			divide: /^(x|y)(-|$)/,
-		};
+		const NOT_COLOR_FAMILIES = new Map([
+			["bg", /^(blend|clip|origin|linear|radial|conic|gradient|repeat)(-|$)/],
+			["border", /^spacing(-|$)/],
+			["divide", /^(x|y)(-|$)/],
+		]);
 
 		/** Prefixes whose next word is a color of its own: "ring-offset-paper", "text-shadow-sm". */
-		const COLOR_AFTER: Record<string, string> = {
-			ring: "offset-",
-			outline: "offset-",
-			text: "shadow-",
-		};
+		const COLOR_AFTER = new Map([
+			["ring", "offset-"],
+			["outline", "offset-"],
+			["text", "shadow-"],
+		]);
 
 		const SHADOW_SIZES = new Set(["xs", "sm", "md", "lg", "none"]);
 
@@ -676,14 +680,14 @@ describe("design tokens (DESIGN.md)", () => {
 
 			if (!match?.[1] || !match[3]) return false;
 			const prefix = match[1].startsWith("border") ? "border" : match[1];
-			const inner = COLOR_AFTER[prefix];
+			const inner = COLOR_AFTER.get(prefix);
 
 			const name =
 				inner && match[3].startsWith(inner)
 					? match[3].slice(inner.length)
 					: match[3];
 
-			if (NOT_COLOR_FAMILIES[prefix]?.test(name)) return false;
+			if (NOT_COLOR_FAMILIES.get(prefix)?.test(name)) return false;
 
 			// A text shadow's size: "text-shadow-md" (only there; "bg-md" is no color).
 			if (inner === "shadow-" && name !== match[3] && SHADOW_SIZES.has(name))
@@ -815,9 +819,11 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(
 			problems("x.tsx", 'primary: "min-h-11 rounded bg-ink"'),
 		).toHaveLength(1);
-		expect(EXCEPTIONS["../src/design-system/proposals.tsx"]).toBeUndefined();
 		expect(
-			EXCEPTIONS["../src/design-system/proposals-polish-5.tsx"],
+			EXCEPTIONS.get("../src/design-system/proposals.tsx"),
+		).toBeUndefined();
+		expect(
+			EXCEPTIONS.get("../src/design-system/proposals-polish-5.tsx"),
 		).toBeUndefined();
 	});
 

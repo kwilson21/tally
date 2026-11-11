@@ -6,6 +6,13 @@ import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
 import { setupRoute } from "../src/routes/setup";
 import { sameOrigin } from "../src/security";
+import { envWith } from "./helpers/doubles";
+
+/** The household record the setup screen reads: the step dates and the budgets that are set. */
+type FirstTally = {
+	strokes: { [step: string]: string };
+	budgets: { [category: string]: number };
+};
 
 // Setup's notify control and its script (decision 149, #772 part 2), through the routes: GET /setup draws the control while the import
 // is read and the server has VAPID keys, and its script loads on every setup page with the keys. Home has no control and loads no
@@ -21,20 +28,18 @@ const AS_PUBLIC =
 
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
-const family = { ...env, DEMO: "false" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
 
-const pushing = {
-	...family,
+const pushing = envWith(family, {
 	VAPID_PUBLIC_KEY: AS_PUBLIC,
 	VAPID_PRIVATE_KEY: AS_PRIVATE,
-} as unknown as Env;
+});
 
-const demo = {
-	...env,
+const demo = envWith(env, {
 	DEMO: "true",
 	VAPID_PUBLIC_KEY: AS_PUBLIC,
 	VAPID_PRIVATE_KEY: AS_PRIVATE,
-} as unknown as Env;
+});
 
 const CONTROL = 'data-notify="true"';
 const PUSH_MODULE = 'src="/js/push.js"';
@@ -56,7 +61,7 @@ const page = async (bindings: Env) =>
 const homePage = async (bindings: Env, path = "/") =>
 	(await home.request(path, {}, bindings)).text();
 
-const writeRecord = (value: unknown) =>
+const writeRecord = (value: FirstTally) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 	)
@@ -163,12 +168,13 @@ describe("setup's reading screen: the control and its script", () => {
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 
-		const html = await page({
-			...pushing,
-			PLAID_CLIENT_ID: "client",
-			PLAID_SECRET: "secret",
-			TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-		} as unknown as Env);
+		const html = await page(
+			envWith(pushing, {
+				PLAID_CLIENT_ID: "client",
+				PLAID_SECRET: "secret",
+				TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			}),
+		);
 
 		expect(html).toContain('src="/js/plaid-link.js"');
 		expect(html).toContain(PUSH_MODULE);

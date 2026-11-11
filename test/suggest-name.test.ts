@@ -6,6 +6,29 @@ import {
 	suggestNames,
 	suggestNote,
 } from "../src/ai/suggest-name";
+import { fakeAi } from "./helpers/doubles";
+import { present } from "./helpers/present";
+
+/** The arguments suggestNames passes Workers AI: the model, its chat input and the call's options (its timeout). */
+type NameInput = {
+	messages: { role: string; content: string }[];
+	max_tokens: number;
+	temperature: number;
+};
+
+type NameCall = [
+	model: string,
+	input: NameInput,
+	options?: { signal?: AbortSignal },
+];
+
+/** A Workers AI binding whose `run` is a mock, so a test can read the calls the code made. */
+const mockAi = (run: (...args: NameCall) => Promise<object | string | null>) =>
+	fakeAi(vi.fn(run));
+
+/** A Workers AI binding that answers every call with `answer` as its response. */
+const answering = (answer: string) =>
+	mockAi(async () => ({ response: answer }));
 
 // Workers AI suggests up to three names for a bank's text (spec §7, #33). Code decides what a
 // usable name is: the model's words are only ever candidates.
@@ -106,11 +129,8 @@ describe("cleanSuggestedNames", () => {
 });
 
 describe("suggestNames", () => {
-	const fakeAi = (run: (...args: unknown[]) => unknown) =>
-		({ run: vi.fn(run) }) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
-
 	it("asks the model once, with only the bank's text, and returns the cleaned names", async () => {
-		const ai = fakeAi(async () => ({
+		const ai = mockAi(async () => ({
 			response: "Blue Bottle Coffee\nBlue Bottle",
 		}));
 
@@ -121,10 +141,7 @@ describe("suggestNames", () => {
 		});
 		expect(ai.run).toHaveBeenCalledTimes(1);
 
-		const [model, input] = ai.run.mock.calls[0] as [
-			string,
-			{ messages: { role: string; content: string }[] },
-		];
+		const [model, input] = present(ai.run.mock.calls[0]);
 
 		expect(model).toBe(NAME_MODEL);
 		const sent = JSON.stringify(input);
@@ -138,7 +155,7 @@ describe("suggestNames", () => {
 	});
 
 	it("is ok with no names when none was usable, so the merchant isn't asked again", async () => {
-		const ai = fakeAi(async () => ({ response: "BLUE BOTTLE COF" }));
+		const ai = mockAi(async () => ({ response: "BLUE BOTTLE COF" }));
 		expect(await suggestNames(ai, "BLUE BOTTLE COF")).toEqual({
 			ok: true,
 			names: [],
@@ -146,14 +163,14 @@ describe("suggestNames", () => {
 	});
 
 	it("reports a failure when the model errors or answers with nothing to read", async () => {
-		const boom = fakeAi(async () => {
+		const boom = mockAi(async () => {
 			throw new Error("AiError: 3040: capacity temporarily exceeded");
 		});
 
 		expect(await suggestNames(boom, RAW)).toEqual({ ok: false });
-		const empty = fakeAi(async () => ({}));
+		const empty = mockAi(async () => ({}));
 		expect(await suggestNames(empty, RAW)).toEqual({ ok: false });
-		const odd = fakeAi(async () => "Blue Bottle Coffee");
+		const odd = mockAi(async () => "Blue Bottle Coffee");
 		expect(await suggestNames(odd, RAW)).toEqual({
 			ok: true,
 			names: ["Blue Bottle Coffee"],
@@ -163,7 +180,7 @@ describe("suggestNames", () => {
 	it("logs the error's name only, never the bank's text or the model's words", async () => {
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-		const ai = fakeAi(async () => {
+		const ai = mockAi(async () => {
 			throw Object.assign(new Error(`failed for ${RAW}`), { name: "AiError" });
 		});
 
@@ -176,13 +193,11 @@ describe("suggestNames", () => {
 	});
 
 	it("gives each request its own timeout, so one slow call can't hold up the night's names", async () => {
-		const ai = fakeAi(async () => ({ response: "Blue Bottle Coffee" }));
+		const ai = mockAi(async () => ({ response: "Blue Bottle Coffee" }));
 		await suggestNames(ai, RAW);
 		await suggestNames(ai, RAW);
 
-		const signals = ai.run.mock.calls.map(
-			(call) => (call[2] as { signal?: AbortSignal } | undefined)?.signal,
-		);
+		const signals = ai.run.mock.calls.map((call) => call[2]?.signal);
 
 		expect(signals[0]).toBeInstanceOf(AbortSignal);
 		expect(signals[1]).toBeInstanceOf(AbortSignal);
@@ -192,21 +207,19 @@ describe("suggestNames", () => {
 });
 
 describe("suggestNote", () => {
-	const fakeAi = (answer: string) =>
-		({
-			run: vi.fn(async () => ({ response: answer })),
-		}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
-
 	it("keeps a line that says more than the store's name", async () => {
 		expect(
-			await suggestNote(fakeAi("App or iCloud subscription"), "APPLE.COM/BILL"),
+			await suggestNote(
+				answering("App or iCloud subscription"),
+				"APPLE.COM/BILL",
+			),
 		).toEqual({ ok: true, note: "App or iCloud subscription" });
 	});
 
 	it("keeps a line that adds a word about the purchase to the store's name", async () => {
 		expect(
 			await suggestNote(
-				fakeAi("CVS Pharmacy prescription refill"),
+				answering("CVS Pharmacy prescription refill"),
 				"CVS PHARMACY #1234",
 			),
 		).toEqual({ ok: true, note: "CVS Pharmacy prescription refill" });
@@ -226,7 +239,7 @@ describe("suggestNote", () => {
 	])(
 		"drops %j for %j, since it only restates the bank text and a generic noun",
 		async (answer, rawName) => {
-			expect(await suggestNote(fakeAi(answer), rawName)).toEqual({
+			expect(await suggestNote(answering(answer), rawName)).toEqual({
 				ok: true,
 				note: null,
 			});
@@ -234,7 +247,7 @@ describe("suggestNote", () => {
 	);
 
 	it("drops a line that restates the bank text", async () => {
-		expect(await suggestNote(fakeAi("Blue Bottle"), RAW)).toEqual({
+		expect(await suggestNote(answering("Blue Bottle"), RAW)).toEqual({
 			ok: true,
 			note: null,
 		});

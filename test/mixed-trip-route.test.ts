@@ -4,6 +4,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { jevSaysMixedAmong } from "../src/db/mixed-trip";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 // The mixed-trip screens (#233, decision 113): the edit panel's quiet line, and the split that opens with Tally's
 // guessed parts, dashed, with empty amounts. Route tests, so the rendered HTML is what a person sees.
@@ -65,19 +66,29 @@ async function postLine(id: number, fields: [string, string][]) {
 }
 
 const categoryId = async (name: string) =>
-	(
+	present(
 		await db
 			.prepare("SELECT id FROM categories WHERE name = ?")
 			.bind(name)
-			.first<{ id: number }>()
-	)?.id as number;
+			.first<{ id: number }>(),
+	).id;
+
+/** The columns a test sets on the trip for its case; the rest are the Costco trip's own. */
+type TripOverrides = {
+	category_id?: number | null;
+	category_source?: string | null;
+	category_confidence?: number | null;
+	jev_category_id?: number | null;
+	jev_mixed?: number | null;
+	jev_also_category_id?: number | null;
+};
 
 /** A $214.36 Costco trip with no person's category, that Jev says looks like Groceries and Household. */
-async function mixedTrip(over: Record<string, unknown> = {}): Promise<number> {
+async function mixedTrip(over: TripOverrides = {}): Promise<number> {
 	const groceries = await categoryId("Groceries");
 	const household = await categoryId("Household");
 
-	const values: Record<string, unknown> = {
+	const values = {
 		category_id: null,
 		category_source: null,
 		category_confidence: 0.6,
@@ -110,7 +121,7 @@ async function mixedTrip(over: Record<string, unknown> = {}): Promise<number> {
 		)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row).id;
 }
 
 beforeEach(async () => {
@@ -518,14 +529,14 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		);
 		expect(openingTagWithId(away.html, "part-guess-0")).toContain('value=""');
 
-		const back = [
+		const back: [string, string][] = [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
 			["part_guess", ""],
 			["part_guess", String(household)],
 			["part_amount", ""],
 			["part_amount", ""],
-		] as [string, string][];
+		];
 
 		const again = await postLine(id, back);
 		expect(again.html).not.toContain("border-dashed");

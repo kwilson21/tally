@@ -16,6 +16,7 @@ import type {
 } from "../src/first-tally/first-page";
 import { questionHeading, questionScreen } from "../src/routes/first-page";
 import { safeToSpendText } from "../src/views/home-top";
+import { itemAt } from "./helpers/present";
 
 // The screen a model draws at /setup (P142 A, decision 148, #773): the question its step asks, one screen at a time, and the
 // heading each draws, which the in-place redraw announces. Each branch of questionScreen is drawn here, the setup finish (#774)
@@ -39,7 +40,7 @@ const charge = (name: string, amountCents: number, dueDay: number) =>
 		dueDay,
 		categoryId: 1,
 		chargeCount: 2,
-	}) as BillSuggestion;
+	}) satisfies BillSuggestion;
 
 const KEEP = [charge("Netflix", 1549, 5), charge("Spotify", 1199, 9)];
 const WAITING = [charge("Gym", 4500, 3)];
@@ -115,7 +116,7 @@ const notDone = (over: Partial<Extract<BudgetsStep, { done: false }>> = {}) =>
 		firstDate: "2026-08-01",
 		nothingAsked: null,
 		...over,
-	}) as BudgetsStep;
+	}) satisfies BudgetsStep;
 
 const render = (
 	model: FirstPageModel,
@@ -170,20 +171,20 @@ describe("questionScreen", () => {
 	});
 
 	it("keeps all the suggestions while keep all is open, in its own form to /setup/budgets", () => {
-		const markup = render(SCREENS[2]?.model as FirstPageModel);
+		const markup = render(itemAt(SCREENS, 2).model);
 		expect(h1Of(markup)).toBe(keepAllQuestion(2));
 		expect(markup).toContain('action="/setup/budgets"');
 		expect(markup).toContain("Go one at a time");
 	});
 
 	it("asks one category when keep all isn't open, with its question and no Keep all", () => {
-		const markup = render(SCREENS[3]?.model as FirstPageModel);
+		const markup = render(itemAt(SCREENS, 3).model);
 		expect(h1Of(markup)).toBe(askHeading(GAS));
 		expect(markup).not.toContain("Keep all");
 	});
 
 	it("asks the savings question once no category is left to ask", () => {
-		const markup = render(SCREENS[4]?.model as FirstPageModel);
+		const markup = render(itemAt(SCREENS, 4).model);
 		expect(h1Of(markup)).toBe("Save some each month?");
 		expect(markup).toContain('action="/setup/savings"');
 	});
@@ -245,7 +246,7 @@ describe("questionScreen", () => {
 	});
 
 	it("moves the focus from a refused amount's heading to its field, as the one-at-a-time screen does", () => {
-		const refused = render(SCREENS[3]?.model as FirstPageModel, true, {
+		const refused = render(itemAt(SCREENS, 3).model, true, {
 			budgetError: {
 				text: "Enter a dollar amount, like 250 or 250.50.",
 				typed: "lots",
@@ -258,7 +259,7 @@ describe("questionScreen", () => {
 	});
 
 	it("passes a refused Save it to the savings screen, with its words and the focus in its field", () => {
-		const markup = render(SCREENS[4]?.model as FirstPageModel, true, {
+		const markup = render(itemAt(SCREENS, 4).model, true, {
 			savingsError: {
 				text: "Enter an amount greater than $0, or choose Not now.",
 				typed: "",
@@ -336,13 +337,13 @@ describe("questionHeading", () => {
 	it("names each question's heading, as the screen draws it", () => {
 		expect(questionHeading(modelOf({ pay: [PAY] }))).toBe("Is this your pay?");
 		expect(questionHeading(modelOf({ keep: KEEP }))).toBe(keepHeading(2));
-		expect(questionHeading(SCREENS[2]?.model as FirstPageModel)).toBe(
+		expect(questionHeading(itemAt(SCREENS, 2).model)).toBe(
 			"Keep these budgets?",
 		);
-		expect(questionHeading(SCREENS[3]?.model as FirstPageModel)).toBe(
+		expect(questionHeading(itemAt(SCREENS, 3).model)).toBe(
 			"Do you want a Gas budget?",
 		);
-		expect(questionHeading(SCREENS[4]?.model as FirstPageModel)).toBe(
+		expect(questionHeading(itemAt(SCREENS, 4).model)).toBe(
 			"Save some each month?",
 		);
 	});

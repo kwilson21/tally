@@ -2,6 +2,30 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syncAllItems } from "../src/plaid/sync-all";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { isMethod, present } from "./helpers/present";
+
+/** A JSON value, as a Plaid or test response body can be. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** True when `prop` is a member of `target`, so a Proxy can read it with a typed key. */
+function isMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
+
+/** A Proxy's read of `target`'s member `prop`: a method is bound to `target`, anything else is returned as it is. */
+function forwardMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): Target[keyof Target] | ((...args: never[]) => object) | undefined {
+	if (!isMember(target, prop)) return undefined;
+
+	const value = target[prop];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
 
 const KEY = btoa("01234567890123456789012345678901");
 
@@ -13,7 +37,7 @@ const enabledEnv = {
 	TOKEN_ENCRYPTION_KEY: KEY,
 };
 
-const response = (body: unknown, status = 200) =>
+const response = (body: Json, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
@@ -35,14 +59,12 @@ async function addItem(status: "ok" | "needs_attention" = "ok") {
 		)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row).id;
 }
 
 function fakePlaid(failToken?: string) {
 	return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-		const body = JSON.parse(String(init?.body)) as {
-			access_token: string;
-		};
+		const body: { access_token: string } = JSON.parse(String(init?.body));
 
 		if (body.access_token === failToken) {
 			return response(
@@ -109,7 +131,8 @@ describe("syncAllItems", () => {
 
 		const withoutDb = {
 			...disabledEnv,
-			DB: undefined as unknown as D1Database,
+			// SAFETY: a disabled sync returns before it reads any binding, so the absent DB is never used.
+			DB: undefined as never,
 		};
 
 		expect(await syncAllItems(withoutDb, fetchImpl)).toEqual({
@@ -323,7 +346,7 @@ describe("syncAllItems", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const fetchImpl = fakePlaid();
 		fetchImpl.mockImplementation(async (url, init) => {
-			const body = JSON.parse(String(init?.body)) as { access_token: string };
+			const body: { access_token: string } = JSON.parse(String(init?.body));
 
 			if (String(url).endsWith("/accounts/get"))
 				return response({
@@ -365,7 +388,7 @@ describe("syncAllItems", () => {
 		const fetchImpl = fakePlaid();
 		let accountsCalls = 0;
 		fetchImpl.mockImplementation(async (url, init) => {
-			const body = JSON.parse(String(init?.body)) as { access_token: string };
+			const body: { access_token: string } = JSON.parse(String(init?.body));
 
 			if (String(url).endsWith("/accounts/get") && accountsCalls++ === 0) {
 				return response(
@@ -445,9 +468,7 @@ describe("syncAllItems", () => {
 					};
 				}
 
-				const value = Reflect.get(target, prop);
-
-				return typeof value === "function" ? value.bind(target) : value;
+				return forwardMember(target, prop);
 			},
 		});
 
@@ -625,9 +646,7 @@ describe("syncAllItems", () => {
 					};
 				}
 
-				const value = Reflect.get(target, prop);
-
-				return typeof value === "function" ? value.bind(target) : value;
+				return forwardMember(target, prop);
 			},
 		});
 
@@ -667,9 +686,7 @@ describe("syncAllItems and a completion that loses its lease", () => {
 		return new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop !== "prepare") {
-					const value = Reflect.get(target, prop);
-
-					return typeof value === "function" ? value.bind(target) : value;
+					return forwardMember(target, prop);
 				}
 
 				return (sql: string) => {
@@ -682,25 +699,30 @@ describe("syncAllItems and a completion that loses its lease", () => {
 						return statement;
 					}
 
-					return {
-						bind: (...values: unknown[]) => {
-							const bound = statement.bind(...values);
+					// A Proxy keeps the statement's type and changes only bind, so the newer run's lease write goes first.
+					return new Proxy(statement, {
+						get(inner, innerProp) {
+							if (innerProp !== "bind") return forwardMember(inner, innerProp);
 
-							return {
-								run: async () => {
-									fired = true;
-									await target
-										.prepare(
-											"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
-										)
-										.bind(id)
-										.run();
+							return (...values: unknown[]) => {
+								const bound = inner.bind(...values);
 
-									return bound.run();
-								},
+								return {
+									run: async () => {
+										fired = true;
+										await target
+											.prepare(
+												"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+											)
+											.bind(id)
+											.run();
+
+										return bound.run();
+									},
+								};
 							};
 						},
-					} as unknown as D1PreparedStatement;
+					});
 				};
 			},
 		});
