@@ -39,6 +39,7 @@ export async function settingsCategories(
 	db: D1Database,
 	month: string,
 ): Promise<{ active: SettingsCategory[]; archived: SettingsCategory[] }> {
+	// SAFETY: the batch below lists exactly two statements, so its results are the two D1Results typed here.
 	const [categories, amounts] = (await db.batch([
 		db.prepare(
 			"SELECT id, name, icon, color, archived FROM categories ORDER BY sort_order, name",
@@ -235,6 +236,7 @@ export async function moveCategory(
 	const to = direction === "up" ? from - 1 : from + 1;
 
 	if (from === -1 || to < 0 || to >= order.length) return;
+	// SAFETY: from and to were checked against order.length above, so both entries exist.
 	[order[from], order[to]] = [order[to] as number, order[from] as number];
 	await db.batch(
 		order.map((categoryId, i) =>

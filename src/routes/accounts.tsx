@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { addressOf } from "../address";
 import { type AppleRow, parseAppleCsv } from "../apple-card/csv";
 import { historyStart, importAppleCard } from "../apple-card/import";
@@ -272,7 +273,7 @@ function accountsPage(
 	c: Context<App>,
 	alert?: string,
 	extra: { sheet?: Child; focus?: "apple-card" } = {},
-	status = 200,
+	status: ContentfulStatusCode = 200,
 ) {
 	const plaidEnabled = enabled(c.env);
 
@@ -291,7 +292,7 @@ function accountsPage(
 				focus={extra.focus}
 			/>
 		</Layout>,
-		status as 200,
+		status,
 	);
 }
 
@@ -323,6 +324,13 @@ accounts.get("/accounts/apple-card", async (c) => {
 });
 
 /** The body's fields, or none when it can't be read as a form (the upload then says there's no file). */
+/** True for a form value that is text (a file part is not a balance). */
+function isText(
+	value: string | File | (string | File)[] | undefined,
+): value is string {
+	return typeof value === "string";
+}
+
 async function readForm(c: Context<App>) {
 	try {
 		return await c.req.parseBody();
@@ -520,7 +528,7 @@ accounts.post("/accounts/apple-card", async (c) => {
 
 	const form = await readForm(c);
 	const file = form.file;
-	const balanceText = typeof form.balance === "string" ? form.balance : "";
+	const balanceText = isText(form.balance) ? form.balance : "";
 	let fileError: string | undefined;
 	let rows: AppleRow[] | null = null;
 
@@ -775,12 +783,12 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 
 	if (item.disconnected_at !== null) return backToAccounts(c, already);
 	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
-	const plaidEnv = c.env as Env & PlaidEnv;
+	const plaidEnv: Env & PlaidEnv = c.env;
 
 	try {
 		const token = await decryptToken(
 			item.access_token_encrypted,
-			plaidEnv.TOKEN_ENCRYPTION_KEY as string,
+			plaidEnv.TOKEN_ENCRYPTION_KEY ?? "",
 		);
 
 		try {

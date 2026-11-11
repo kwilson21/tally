@@ -17,17 +17,17 @@ export const notBudgetedId = (chartId: string) => `${chartId}-not-budgeted`;
 /** The id of a finished month's Needs a category row, which its cause line links to (decision 121). */
 export const needsCategoryId = (chartId: string) => `${chartId}-needs-category`;
 
-const SHORT_NAMES: Record<string, string> = {
-	Groceries: "Groc.",
-	"Eating Out": "Eating",
-	Gas: "Gas",
-	Kids: "Kids",
-	Household: "Home",
-	Utilities: "Util.",
-	Clothing: "Cloth.",
-	Gifts: "Gifts",
-	Pets: "Pets",
-};
+const SHORT_NAMES = new Map<string, string>([
+	["Groceries", "Groc."],
+	["Eating Out", "Eating"],
+	["Gas", "Gas"],
+	["Kids", "Kids"],
+	["Household", "Home"],
+	["Utilities", "Util."],
+	["Clothing", "Cloth."],
+	["Gifts", "Gifts"],
+	["Pets", "Pets"],
+]);
 
 /** Short labels for a finished-month chart, disambiguated by the full category set. */
 export function monthEndLabels(names: string[]): string[] {
@@ -54,9 +54,7 @@ export function monthEndLabels(names: string[]): string[] {
 		if (fullSpecial[index]) return name;
 
 		if ((extra[index] ?? 0) === 0)
-			return Object.hasOwn(SHORT_NAMES, name)
-				? (SHORT_NAMES[name] ?? base)
-				: base;
+			return SHORT_NAMES.has(name) ? (SHORT_NAMES.get(name) ?? base) : base;
 
 		if (parts.length === 1) return base || name;
 		let remaining = extra[index] ?? 0;
@@ -88,8 +86,7 @@ export function monthEndLabels(names: string[]): string[] {
 
 		for (const group of duplicates) {
 			for (const index of group) {
-				if (Object.hasOwn(SHORT_NAMES, normalized[index] ?? ""))
-					fullSpecial[index] = true;
+				if (SHORT_NAMES.has(normalized[index] ?? "")) fullSpecial[index] = true;
 				else extra[index] = (extra[index] ?? 0) + 1;
 			}
 		}

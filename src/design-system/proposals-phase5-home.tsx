@@ -195,11 +195,7 @@ function Top({
 			{heading}
 			<div class="mt-2 flex items-center justify-between gap-6">
 				<div>
-					{typeof label === "string" ? (
-						<p class="text-lg text-muted">{label}</p>
-					) : (
-						label
-					)}
+					{isText(label) ? <p class="text-lg text-muted">{label}</p> : label}
 					{amount}
 				</div>
 				{/* The picture is a phone: without this, LedgerIllustration's lg: size crowds the amount at 1024px and up. */}
@@ -375,10 +371,13 @@ const SEPTEMBER_LEFT_CENTS =
 	SEPTEMBER_NO_BUDGET_CENTS;
 
 /** A finished month's sentence, in the past tense, written from its rows. */
+const isText = (value: unknown): value is string => typeof value === "string";
+
 function endedSentence(rows: Row[]) {
 	const over = rows.filter((r) => r.spentCents > r.budgetCents);
 
 	if (over.length === 0) return "Every category stayed under its budget.";
+	// SAFETY: the empty case returned above, so over has at least one row and its first is a Row.
 	const [first] = over as [Row];
 
 	return over.length === 1
@@ -899,6 +898,7 @@ const olderLink = olderHome(
 // ---------------------------------------------------------------------------------------------
 // P53: from a budget row to its transactions (gap B8, beta feedback #39).
 
+// SAFETY: OCTOBER is the month's five category rows, so index 1 (Eating Out) is a Row.
 const EATING_OUT = OCTOBER[1] as Row;
 
 /** What Eating Out spent in September, for the money input's "Last month" chip. */

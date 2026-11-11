@@ -244,6 +244,7 @@ export async function saveOrganizeGroup(
 	const results = await db.batch([...settles, ...updates]);
 
 	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
+	// SAFETY: each update statement ends in RETURNING id, so every row these results hold has an id.
 	return results
 		.slice(settles.length)
 		.flatMap((result) =>
@@ -303,6 +304,7 @@ export async function setOrganizeRule(
 	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
 
 	// Nothing is asked about a trip that looks mixed (decision 113), so a Yes on a question that went stale makes no rule either.
+	// SAFETY: savedIds is JSON.stringify of the offer's saved transaction ids, a number array (routes/organize.tsx).
 	if (await jevSaysMixedAmong(db, JSON.parse(savedIds) as number[])) return [];
 
 	// SQL can't tidy a name, so the saved keys that tidy to the offered name are read here, once, and the guard that
@@ -353,6 +355,7 @@ export async function setOrganizeRule(
 	// Only the rule's statement returns rows: the keys it wrote.
 	const [written] = await db.batch([rule, apply]);
 
+	// SAFETY: the rule statement ends in RETURNING raw_name, so every row in its results has a raw_name.
 	return ((written?.results ?? []) as { raw_name: string }[]).map(
 		(row) => row.raw_name,
 	);

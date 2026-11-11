@@ -275,6 +275,7 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
+// SAFETY: PATHS is the literal object above, so Object.keys lists exactly its keys, and IconName is keyof typeof PATHS.
 export const ICON_NAMES = Object.keys(PATHS) as IconName[];
 
 type IconProps = { name: IconName; class?: string };

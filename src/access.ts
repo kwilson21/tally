@@ -39,7 +39,16 @@ function decode(part: string): Uint8Array {
 	return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
 }
 
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+function isNumber(value: unknown): value is number {
+	return typeof value === "number";
+}
+
 function json<T>(part: string): T {
+	// SAFETY: T is Header or Claims, whose every field is unknown; each field is checked before it is used.
 	return JSON.parse(new TextDecoder().decode(decode(part))) as T;
 }
 
@@ -67,6 +76,7 @@ async function certs(domain: string, force = false): Promise<AccessKey[]> {
 
 		if (!response.ok)
 			throw new Error("Cloudflare Access certs were unavailable");
+		// SAFETY: the only field read from body is keys, and the Array.isArray(body.keys) test below checks it before it is stored.
 		const body = (await response.json()) as Certs;
 
 		if (!Array.isArray(body.keys))
@@ -131,7 +141,7 @@ export async function verifiedEmail(
 
 		if (
 			header.alg !== "RS256" ||
-			typeof header.kid !== "string" ||
+			!isText(header.kid) ||
 			header.crit !== undefined
 		) {
 			return refuse("the token's header isn't RS256 with a key id");
@@ -183,18 +193,18 @@ export async function verifiedEmail(
 		}
 
 		if (
-			typeof claims.exp !== "number" ||
+			!isNumber(claims.exp) ||
 			!Number.isFinite(claims.exp) ||
 			claims.exp < now - LEEWAY_SECONDS ||
 			(claims.nbf !== undefined &&
-				(typeof claims.nbf !== "number" ||
+				(!isNumber(claims.nbf) ||
 					!Number.isFinite(claims.nbf) ||
 					claims.nbf > now + LEEWAY_SECONDS))
 		) {
 			return refuse("the token has expired or isn't valid yet");
 		}
 
-		if (typeof claims.email !== "string" || claims.email.length === 0) {
+		if (!isText(claims.email) || claims.email.length === 0) {
 			return refuse("the token has no email");
 		}
 
@@ -221,9 +231,7 @@ export async function verifiedAccessIdentity(
 	const claims = json<Claims>(token.split(".")[1] ?? "");
 
 	const issuedAt =
-		typeof claims.iat === "number" && Number.isFinite(claims.iat)
-			? claims.iat
-			: null;
+		isNumber(claims.iat) && Number.isFinite(claims.iat) ? claims.iat : null;
 
 	return { email, issuedAt };
 }

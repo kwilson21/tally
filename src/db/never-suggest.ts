@@ -105,13 +105,15 @@ export async function removeNeverSuggest(
 	db: D1Database,
 	{ id, merchantKey, kind }: { id: number; merchantKey: string; kind: string },
 ): Promise<{ rule: NeverSuggestRule; removedCount: number } | null> {
-	if (!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind)) return null;
+	const knownKind = NEVER_SUGGEST_KINDS.find((known) => known === kind);
+
+	if (knownKind === undefined) return null;
 
 	const rule = await db
 		.prepare(
 			`${RULE_SELECT} WHERE r.id = ? AND r.merchant_key = ? AND r.kind = ?`,
 		)
-		.bind(id, merchantKey, kind)
+		.bind(id, merchantKey, knownKind)
 		.first<Row>();
 
 	if (!rule) return null;

@@ -50,7 +50,7 @@ export function resultCountParts(
 	today: string,
 	accountName: string | null = null,
 	matched: SearchMatch = NO_MATCH,
-): { before: string; figures: string; after: string } {
+) {
 	const paged = pages > 1;
 	const noun = `${TYPE_WORDS[f.show]}transaction${total === 1 ? "" : "s"}`;
 	const month = f.month === "all" ? "all months" : monthLabel(f.month, today);

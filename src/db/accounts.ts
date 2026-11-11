@@ -63,7 +63,11 @@ function baseLabel(account: LabelInput): string {
  * ("... (2)"). Only accounts that share a label are changed, one step at a time.
  */
 export function uniqueAccountLabels(accounts: LabelInput[]): string[] {
-	const bases = accounts.map(baseLabel);
+	let rows = accounts.map((account) => {
+		const base = baseLabel(account);
+
+		return { account, base, label: base };
+	});
 
 	// What each account's label becomes at each step; an account with no bank has nothing to add.
 	const steps: ((a: LabelInput, base: string) => string)[] = [
@@ -72,16 +76,18 @@ export function uniqueAccountLabels(accounts: LabelInput[]): string[] {
 			a.bank ? `${base} (${a.bank}, ${a.subtype ?? a.type})` : base,
 	];
 
-	let labels = bases;
-
 	for (const step of steps) {
-		const current = labels;
-		labels = current.map((label, i) =>
-			current.some((other, j) => j !== i && other === label)
-				? step(accounts[i] as LabelInput, bases[i] as string)
-				: label,
-		);
+		const current = rows.map((row) => row.label);
+
+		rows = rows.map((row, i) => ({
+			...row,
+			label: current.some((other, j) => j !== i && other === row.label)
+				? step(row.account, row.base)
+				: row.label,
+		}));
 	}
+
+	const labels = rows.map((row) => row.label);
 
 	// Still alike: number every one after the first, skipping a number another account already wears.
 	const used = new Set(labels);
@@ -138,6 +144,7 @@ export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 
 	return results.map((a, i) => ({
 		id: a.id,
+		// SAFETY: uniqueAccountLabels returns one label per account, in order, so labels[i] is set for each row a.
 		label: labels[i] as string,
 		disconnected: a.disconnected_at !== null,
 	}));
@@ -218,27 +225,34 @@ export function banksFromRows(results: BankRow[]): Bank[] {
 		let bank = banks.at(-1);
 
 		if (bank?.id !== row.bank_id) {
-			bank = {
+			const created: Bank = {
 				id: row.bank_id,
 				name: row.bank_name,
 				needsAttention: row.status === "needs_attention",
 				lastSyncedAt: row.last_synced_at,
-				...(row.disconnected_at !== null ? { disconnected: true } : {}),
 				accounts: [],
 			};
-			banks.push(bank);
+
+			if (row.disconnected_at !== null) created.disconnected = true;
+
+			banks.push(created);
+			bank = created;
 		}
 
 		if (row.id === null) continue;
-		bank.accounts.push({
+
+		const account: Account = {
 			id: row.id,
 			name: row.name ?? "",
 			mask: row.mask,
 			type: row.type ?? "",
 			balanceCents: row.balance_cents ?? 0,
 			isLiability: row.is_liability === 1,
-			...(row.disconnected_at !== null ? { connected: false } : {}),
-		});
+		};
+
+		if (row.disconnected_at !== null) account.connected = false;
+
+		bank.accounts.push(account);
 	}
 
 	return banks;

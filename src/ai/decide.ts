@@ -65,17 +65,8 @@ export function decide(
 	// Jev gave none, so a decision without one reads as it always did.
 	const mixed = categoriesOn ? answer.mixed : undefined;
 
-	return {
+	const decision: Decision = {
 		noneFit: answer.category.label === NONE_FIT && categoriesOn,
-		...(mixed
-			? {
-					mixedProbability: mixed.probability,
-					alsoCategoryId:
-						mixed.also !== NONE_FIT
-							? (categories.find((c) => c.name === mixed.also)?.id ?? null)
-							: null,
-				}
-			: {}),
 		categoryId: match && confident ? match.id : null,
 		suggestedCategoryId: match ? match.id : null,
 		confidence: answer.category.confidence,
@@ -90,4 +81,14 @@ export function decide(
 			income: meetsConfidenceThreshold(answer.flags.income, threshold),
 		},
 	};
+
+	if (mixed) {
+		decision.mixedProbability = mixed.probability;
+		decision.alsoCategoryId =
+			mixed.also !== NONE_FIT
+				? (categories.find((c) => c.name === mixed.also)?.id ?? null)
+				: null;
+	}
+
+	return decision;
 }

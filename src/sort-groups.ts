@@ -211,18 +211,21 @@ export type SortPlan = ReadPlan & {
 	granted: number;
 };
 
+/** A failed ask. Its fields carry the status and request id, never the key or any transaction detail. */
+type FailedAsk = {
+	id: number;
+	outcome: "failed";
+	status: number | null;
+	requestId: string | null;
+	serviceWide: boolean;
+	/** The wait Jev asked for, when it sent a readable retry-after (decision 145). */
+	retryAfterMs?: number;
+};
+
 /** What one row's ask came to. An ask step never throws: any failure is `failed`. */
 export type AskResult =
 	| { id: number; outcome: "answered"; answer: JevAnswer }
-	| {
-			id: number;
-			outcome: "failed";
-			status: number | null;
-			requestId: string | null;
-			serviceWide: boolean;
-			/** The wait Jev asked for, when it sent a readable retry-after (decision 145). */
-			retryAfterMs?: number;
-	  }
+	| FailedAsk
 	| {
 			id: number;
 			outcome: "lost" | "date-changed" | "out-of-time";
@@ -661,22 +664,22 @@ async function readGroup(
 		// changes before the save still applies its answer (a line is not part of JevSeen).
 		const learned = switches.categories ? await learnedLinesFor(db, rows) : [];
 
-		return {
-			kind: "group",
-			plan: {
-				turnId: options.turnId,
-				day,
-				timeZone,
-				switches,
-				bySync: options.bySync,
-				askUntil: Date.now() + ASK_BUDGET_MS,
-				categories,
-				people,
-				rows,
-				learned,
-				...(reask ? { reask } : {}),
-			},
+		const plan: ReadPlan = {
+			turnId: options.turnId,
+			day,
+			timeZone,
+			switches,
+			bySync: options.bySync,
+			askUntil: Date.now() + ASK_BUDGET_MS,
+			categories,
+			people,
+			rows,
+			learned,
 		};
+
+		if (reask) plan.reask = reask;
+
+		return { kind: "group", plan };
 	} catch (error) {
 		// A cleared mark must not outlive the turn: put it back first. If that fails, the turn is kept, so a retried read
 		// takes it back and restores or clears again, and the turn runs out on its own otherwise (decision 160).
@@ -773,16 +776,19 @@ async function askOne(
 				`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
 			);
 
-			return {
+			const failure: FailedAsk = {
 				id,
 				outcome: "failed",
 				status: result.status,
 				requestId: result.requestId,
 				serviceWide: serviceWide(result.status),
-				...(result.retryAfterMs === undefined
-					? {}
-					: { retryAfterMs: result.retryAfterMs }),
 			};
+
+			if (result.retryAfterMs !== undefined) {
+				failure.retryAfterMs = result.retryAfterMs;
+			}
+
+			return failure;
 		}
 
 		return { id, outcome: "answered", answer: result.answer };
@@ -1045,15 +1051,14 @@ export async function writeGroup(
 	if (reask) {
 		// The rows this group handled, for a re-sort's progress: each asked row once, except a busy one that the next group
 		// asks again (decision 145). Out-of-time and date-changed rows were not handled.
-		const handledLeaders = results
-			.filter(
-				(result) =>
-					(result.outcome === "answered" ||
-						result.outcome === "failed" ||
-						result.outcome === "lost") &&
-					!(waitsOnBusy && !stop && retryable(result)),
-			)
-			.map((result) => result.id);
+		const handledLeaders = results.flatMap((result) =>
+			(result.outcome === "answered" ||
+				result.outcome === "failed" ||
+				result.outcome === "lost") &&
+			!(waitsOnBusy && !stop && retryable(result))
+				? [result.id]
+				: [],
+		);
 
 		// Each handled leader counts with its followers (applied or restored, decision 158). A leader the cap or the budget
 		// left unhandled counts none of its followers, which are restored.

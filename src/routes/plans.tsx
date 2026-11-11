@@ -49,11 +49,22 @@ function monthOptions(current: string, own?: string): PlanMonthOption[] {
 }
 
 /** Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). */
-function withToast(
-	response: Response,
-	toast: Record<string, unknown> & { message: string },
-	announce = toast.message,
-) {
+/** True for a posted value that is text (a file part is not a token). */
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+/** A toast's words and kind, and the undo its delete or restore offers (the keys the toast listener reads). */
+type Toast = {
+	message: string;
+	type: string;
+	undo?: string;
+	undoExpiresInMs?: number;
+	undoAction?: string;
+	undoDone?: string;
+};
+
+function withToast(response: Response, toast: Toast, announce = toast.message) {
 	response.headers.set("HX-Trigger", hxTrigger({ toast, announce }));
 
 	return response;
@@ -120,12 +131,17 @@ async function sheetPage(
 	return billsPage(c, { plan: sheet }, today);
 }
 
+/** The form a plan's sheet posts: each field is text, or a file part when someone posts one. */
+type PlanFormFields = {
+	[field: string]: string | File | (string | File)[] | undefined;
+};
+
 /**
  * The fields a plan's sheet sends, checked before the write: a name, an amount above $0, and a month on offer. `own` is
  * the plan's own month when it is being saved: an earlier one stays on offer, as it is on its sheet. A new plan has none,
  * so only this month to the next eleven can be chosen.
  */
-function planForm(form: Record<string, unknown>, month: string, own?: string) {
+function planForm(form: PlanFormFields, month: string, own?: string) {
 	const values: PlanValues = {
 		name: String(form.name ?? "").trim(),
 		amount: String(form.amount ?? "").trim(),
@@ -200,7 +216,7 @@ plans.post("/plans", async (c) => {
 
 plans.post("/plans/undo-delete", async (c) => {
 	const form = await c.req.parseBody();
-	const token = typeof form.token === "string" ? form.token : undefined;
+	const token = isText(form.token) ? form.token : undefined;
 
 	const restored =
 		token && /^[0-9a-f-]{36}$/i.test(token)

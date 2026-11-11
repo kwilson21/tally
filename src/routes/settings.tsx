@@ -281,11 +281,14 @@ const DRAWN_ON = "drawnOn";
 /** The switch a flip posted, sent with that switch's own request (its hx-vals): the one that takes focus after the save. */
 const FLIPPED = "flipped";
 
+/** True for a posted value that is text (a file part is not a place). */
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
 /** The DRAWN_ON value for these switches: the keys that are On, separated by spaces. */
 const drawnOnOf = (switches: AiSwitches) =>
-	AI_FEATURES.filter((f) => switches[f.key])
-		.map((f) => f.key)
-		.join(" ");
+	AI_FEATURES.flatMap((f) => (switches[f.key] ? [f.key] : [])).join(" ");
 
 /**
  * The AI switches (#606): each switch posts its own change, the page answers with itself, focus back on the switch
@@ -1170,7 +1173,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		c.env.DB,
 		id,
 		{ ticked: ids, shown, notes },
-		actor(c as Context<App> & { env: Env & { DEMO: string } }),
+		actor(c),
 	);
 
 	if (!result.ok) {
@@ -1192,10 +1195,8 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		return current;
 	}
 
-	await askAgainLeftOut(
-		c.env as Env & { JEV_API_KEY?: string },
-		result.leftOut,
-		(work) => c.executionCtx.waitUntil(work),
+	await askAgainLeftOut(c.env, result.leftOut, (work) =>
+		c.executionCtx.waitUntil(work),
 	);
 	// Only a new category starts the re-check (decision 157): an Add to or a Restore changes nothing the run would sort.
 	const created = !result.attached && !result.restored;
@@ -1203,14 +1204,10 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 
 	const rechecking =
 		created && filedId !== undefined
-			? await startResortFor(
-					c.env as Env & { JEV_API_KEY?: string },
-					c.env.DB,
-					{
-						filedId,
-						excludeIds: [...result.leftOut, ...result.filed],
-					},
-				)
+			? await startResortFor(c.env, c.env.DB, {
+					filedId,
+					excludeIds: [...result.leftOut, ...result.filed],
+				})
 			: null;
 
 	const count = result.moved;
@@ -1304,9 +1301,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const posted = form.get("place");
 
 	const place =
-		typeof posted === "string" && /^\d+$/.test(posted)
-			? Number(posted)
-			: undefined;
+		isText(posted) && /^\d+$/.test(posted) ? Number(posted) : undefined;
 
 	if (stores.length > 0)
 		return renderPage(c, "categories", {
@@ -1346,8 +1341,8 @@ function retry(
 }
 
 /** The database refused a name that differs only in capitals: someone saved it a moment earlier. */
-const nameTaken = (error: unknown) =>
-	error instanceof Error && /UNIQUE/.test(error.message);
+const nameTaken = (cause: unknown) =>
+	cause instanceof Error && /UNIQUE/.test(cause.message);
 
 /**
  * The category was archived, restored or never existed: another screen got there first. The
@@ -1436,6 +1431,7 @@ settings.get("/settings/export/tally.json", async (c) => {
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
 
+	// SAFETY: the keys are AI_FEATURES' own keys, so the record holds exactly the switches a Partial<AiSwitches> names.
 	const next = Object.fromEntries(
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
@@ -1450,12 +1446,14 @@ settings.post("/settings/ai", async (c) => {
 
 	// A flip that replaced an earlier one in the browser can still reach the server after that one was aborted, so
 	// the switch just flipped is always written, even when its value matches what the page drew.
+	// SAFETY: the keys are AI_FEATURES' own keys that next holds, so the record holds exactly the switches a Partial<AiSwitches> names.
 	const changed = Object.fromEntries(
-		AI_FEATURES.filter(
-			(f) =>
-				f.key in next &&
-				(next[f.key] !== drawn.includes(f.key) || f.key === posted),
-		).map((f) => [f.key, next[f.key]]),
+		AI_FEATURES.flatMap((f) =>
+			f.key in next &&
+			(next[f.key] !== drawn.includes(f.key) || f.key === posted)
+				? [[f.key, next[f.key]]]
+				: [],
+		),
 	) as Partial<AiSwitches>;
 
 	// Decision 150: the rows the switch left wait for the daily run, so setup keeps the run's words once it's back on. The

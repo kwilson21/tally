@@ -6,8 +6,8 @@
 const UNIQUE = /UNIQUE/;
 const MAX_CAUSE_DEPTH = 5;
 
-export function isUniqueViolation(error: unknown): boolean {
-	let current: unknown = error;
+export function isUniqueViolation(cause: unknown): boolean {
+	let current: unknown = cause;
 
 	for (
 		let depth = 0;

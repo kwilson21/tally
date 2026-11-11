@@ -85,6 +85,9 @@ import { withTurnGuard } from "./sorting-turn";
 import { askedSql } from "./suggestions-queue";
 
 /** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
+/** Whether a value is a number, such as a purchase's or a person's id, before a rule branches on it. */
+const isNumber = (value: unknown): value is number => typeof value === "number";
+
 const EMPTY_NOTE = "(t.note IS NULL OR trim(t.note) = '')";
 
 const COUNTED_MONTH = countedMonthSql();
@@ -1040,11 +1043,11 @@ export async function getTransaction(
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	const tidied = tidyName(r.rawName);
 
-	const owned = (
-		JSON.parse(ownedJson) as { name: string; date: string; part: number }[]
-	)
-		.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
-		.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+	const owned =
+		// SAFETY: ownedJson is json_group_array of json_object rows with name, date and part (0 or 1), as the SELECT builds it.
+		(JSON.parse(ownedJson) as { name: string; date: string; part: number }[])
+			.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
+			.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
 	return {
 		...row,
@@ -1233,7 +1236,7 @@ export async function saveEdit(
 			? edit.refundOfId
 			: undefined;
 
-	const linking = typeof newLink === "number";
+	const linking = isNumber(newLink);
 
 	const incomeChanged =
 		edit.incomeWas === undefined
@@ -1777,10 +1780,10 @@ export async function saveEdit(
 
 	const results = await db
 		.batch([...correctionBefore, ...statements, ...correctionAfter])
-		.catch(async (error: unknown) => {
+		.catch(async (error) => {
 			if (
 				personChanged &&
-				typeof edit.forPersonId === "number" &&
+				isNumber(edit.forPersonId) &&
 				!(await db
 					.prepare("SELECT 1 FROM household_people WHERE id = ?")
 					.bind(edit.forPersonId)
@@ -1859,7 +1862,7 @@ export async function saveEdit(
 	// didn't fit, and then none of the others applied either.
 	const purchase = linking ? newLink : recounting;
 
-	if (typeof purchase === "number" && !own[linking ? 1 : 0]?.meta.changes)
+	if (isNumber(purchase) && !own[linking ? 1 : 0]?.meta.changes)
 		return {
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
@@ -2105,6 +2108,7 @@ const stillUnpaidStatement = (db: D1Database, lost: PartPayment[]) =>
 
 /** The bills a batch's stillUnpaidStatement returned, as the toast names them: a name and an occurrence. */
 function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
+	// SAFETY: the batch's stillUnpaidStatement is a SELECT of one column, bills, so its first row (if any) has bills.
 	const row = result?.results[0] as { bills: string | null } | undefined;
 
 	return parseUnpaidBills(row?.bills).map(({ name, period }) => ({
@@ -2510,6 +2514,7 @@ export async function saveSplit(
 
 	// The rows a statement returned with RETURNING: the refunds it changed, a refund's own row or one of its parts
 	// (parentId is the refund's id for a part). unlinkedDates counts each refund once.
+	// SAFETY: every statement passed here ends in RETURNING id, date, parent_id AS parentId (see the statements above).
 	const returnedRows = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.results ?? []) as {
 			id: number;
@@ -3128,11 +3133,11 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 		AND (SELECT name FROM household_people WHERE id = transactions.for_person_id) IS ${value("forPersonName")})`;
 }
 
+/** The guard a save adds for `seen`: its SQL and the values it binds, in order. */
+type SeenSaveGuard = { sql: string; binds: (string | number | null)[] };
+
 /** A save's guard for `seen`: its values are bound in the order the guard takes them. */
-export function seenSaveGuard(seen: JevSeen): {
-	sql: string;
-	binds: (string | number | null)[];
-} {
+export function seenSaveGuard(seen: JevSeen): SeenSaveGuard {
 	const binds: (string | number | null)[] = [];
 
 	const sql = seenMatchSql((field) => {

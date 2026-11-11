@@ -185,7 +185,7 @@ const ACCOUNTS: SeedAccount[] = [
 ];
 
 // Categorized merchants: raw name as a bank sends it → display name.
-const MERCHANTS: Record<number, [string, string][]> = {
+const MERCHANTS = {
 	[GROCERIES]: [
 		["TRADER JOE'S #552", "Trader Joe's"],
 		["COSTCO WHSE #0431", "Costco"],
@@ -212,11 +212,11 @@ const MERCHANTS: Record<number, [string, string][]> = {
 		["THE HOME DEPOT #6612", "The Home Depot"],
 		["AMAZON.COM*RT4K2", "Amazon"],
 	],
-};
+} satisfies Record<number, [string, string][]>;
 
 // Plaid's merchant_name for a few raw names, as it would send them (spec §5, decision 67). Two raw names
 // share Amazon, so they are one merchant for rules, bills and refunds. Every other transaction has none.
-const PLAID_MERCHANT_NAMES: Record<string, string> = {
+const PLAID_MERCHANT_NAMES = {
 	"TARGET T-1432": "Target",
 	"STARBUCKS STORE 5521": "Starbucks",
 	"SHELL OIL 57442": "Shell",
@@ -225,7 +225,7 @@ const PLAID_MERCHANT_NAMES: Record<string, string> = {
 	"AMZN MKTP US*2K4": "Amazon",
 	// Plaid names this one, so its first suggestion is the bank's own name (spec §8.6, #194).
 	"CHECKCARD 0921 CVS": "CVS Pharmacy",
-};
+} satisfies Record<string, string>;
 
 /** The demo's one subscription that raised its price: the bill is $15.49, the charge $17.99 (P36 B). */
 export const NETFLIX = {
@@ -237,7 +237,7 @@ export const NETFLIX = {
 
 /** The merchant key of a seeded raw name (spec §6.1): Plaid's merchant name, otherwise the raw name. */
 export const seedMerchantKey = (rawName: string) =>
-	PLAID_MERCHANT_NAMES[rawName] ?? rawName;
+	lookup(PLAID_MERCHANT_NAMES, rawName) ?? rawName;
 
 // This month, categorized: [day, rawName, categoryId, cents]. Each is dated its day of the month (the month's last day
 // at most) and is there only once that day has come, so the month fills at a family's pace and Home's forecast agrees
@@ -267,12 +267,12 @@ const THIS_MONTH: [number, string, number, number][] = [
 // Suggested names for a few of the unnamed merchants below, waiting for a person (spec §7, §8.6). They show
 // dashed in the list until a person chooses, so suggestions show right after a reset. Most are names Tally
 // "guessed", as Workers AI would suggest them; CVS's is the bank's own, Plaid's merchant name above.
-const SUGGESTED_NAMES: Record<string, string[]> = {
+const SUGGESTED_NAMES = {
 	"TST* CORNER DELI": ["Corner Deli Cafe"],
 	"SP * CRAFTSUPPLY": ["Craft Supply Co", "Craft Supply"],
 	"CHECKCARD 0921 CVS": ["CVS Pharmacy"],
 	"POS 4417 CITY PARKING": ["City Parking Garage", "City Parking Lot"],
-};
+} satisfies Record<string, string[]>;
 
 // Twelve seed rows start without categories ($121.52); bill matching categorizes two of them. They are there every day,
 // dated their day or today if that is earlier, so the ten left for a person ($104.54) are always this month's.
@@ -293,13 +293,13 @@ const UNCATEGORIZED: [number, string, number, string | null][] = [
 ];
 
 // Previous months' category totals in cents, oldest first (5 months ago → 1 month ago).
-const HISTORY: Record<number, number[]> = {
+const HISTORY = {
 	[GROCERIES]: [64000, 65500, 61000, 69000, 67200],
 	[EATING_OUT]: [17000, 19500, 21500, 24000, 26200],
 	[GAS]: [17000, 18200, 16500, 19000, 17600],
 	[KIDS]: [24000, 31000, 20500, 28000, 26000],
 	[HOUSEHOLD]: [12000, 21000, 14000, 9500, 18000],
-};
+} satisfies Record<number, number[]>;
 
 /** The day of an earlier month the soccer league is paid, which the yearly Soccer bill is linked to (reset.ts). */
 export const SOCCER_DAY = 26;
@@ -310,7 +310,7 @@ export const SOCCER_DAY = 26;
  * and test/trends-seed.test.ts checks that Trends' same-days comparison stays under $400 on its dates (spec §8.3).
  * Kids' second is the soccer league.
  */
-const HISTORY_PARTS: Record<number, [number, number][]> = {
+const HISTORY_PARTS = {
 	[GROCERIES]: [
 		[31, 17],
 		[1, 53],
@@ -336,9 +336,18 @@ const HISTORY_PARTS: Record<number, [number, number][]> = {
 		[22, 27],
 		[5, 20],
 	],
-};
+} satisfies Record<number, [number, number][]>;
+
+/** The value a table holds under `key` (a number key reads as its string), or undefined when it lists none. */
+function lookup<V>(
+	table: { readonly [key: string]: V },
+	key: number | string,
+): V | undefined {
+	return table[key];
+}
 
 export function monthOffset(today: string, monthsAgo: number): string {
+	// SAFETY: today is a YYYY-MM month string, so splitting it on "-" gives a year and a month, both numbers.
 	const [y, m] = today.split("-").map(Number) as [number, number];
 	const index = y * 12 + (m - 1) - monthsAgo;
 
@@ -374,7 +383,7 @@ function spend(
 		date,
 		amountCents,
 		rawName,
-		merchantName: PLAID_MERCHANT_NAMES[rawName] ?? null,
+		merchantName: lookup(PLAID_MERCHANT_NAMES, rawName) ?? null,
 		categoryId,
 		categorySource: categoryId === null ? null : "jev",
 		categoryConfidence: categoryId === null ? null : 0.94,
@@ -467,10 +476,10 @@ export function buildSeed(today: string): Seed {
 		const month = monthOffset(today, monthsAgo);
 
 		// Childcare has no history of its own: its Fridays are only Daycare charges, added below.
-		for (const category of CATEGORIES.filter((c) => HISTORY[c.id])) {
-			const total = HISTORY[category.id]?.[5 - monthsAgo] ?? 0;
-			const merchants = MERCHANTS[category.id] ?? [];
-			const parts = HISTORY_PARTS[category.id] ?? [];
+		for (const category of CATEGORIES.filter((c) => lookup(HISTORY, c.id))) {
+			const total = lookup(HISTORY, category.id)?.[5 - monthsAgo] ?? 0;
+			const merchants = lookup(MERCHANTS, category.id) ?? [];
+			const parts = lookup(HISTORY_PARTS, category.id) ?? [];
 			let left = total;
 			parts.forEach(([target, percent], i) => {
 				// The last part takes what is left, so the month's total is exact.
@@ -481,6 +490,7 @@ export function buildSeed(today: string): Seed {
 
 				// Two and four months ago each part goes to the next merchant, so a store's charges a month apart
 				// differ and the bill finder never takes one for a bill.
+				// SAFETY: merchants is the category's list, which MERCHANTS has for each category that has HISTORY, so it is non-empty.
 				const [rawName] = merchants[
 					(i + (monthsAgo % 2 === 0 ? 1 : 0)) % merchants.length
 				] as [string, string];
@@ -726,7 +736,7 @@ export function buildSeed(today: string): Seed {
 			key: seedMerchantKey(rawName),
 			displayName,
 			defaultCategoryId: null,
-			suggestedNames: SUGGESTED_NAMES[rawName],
+			suggestedNames: lookup(SUGGESTED_NAMES, rawName),
 		})),
 		{
 			key: "Farmers market",

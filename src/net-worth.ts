@@ -244,6 +244,7 @@ export function netWorthView(
 		endLabel: isToday ? "Today" : shortDay(last.date, today),
 		description: `Net worth over time. ${sentence} It was ${whole(first.cents)} on ${shortDay(first.date, today)} and ${isToday ? "is" : "was"} ${whole(last.cents)} ${isToday ? "today" : `on ${shortDay(last.date, today)}`}.`,
 		points: coordinates.map((c) => `${c.x},${c.y}`).join(" "),
+		// SAFETY: `last` is points.at(-1) and is defined above, and coordinates has one entry per point, so its last entry exists.
 		end: coordinates.at(-1) as { x: number; y: number },
 	};
 }

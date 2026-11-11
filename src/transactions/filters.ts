@@ -22,7 +22,7 @@ export const SHOW_LABELS: Record<Show, string> = {
 };
 
 const isShow = (value: string | null): value is Show =>
-	SHOWS.includes(value as Show);
+	SHOWS.some((show) => show === value);
 
 export type Filters = {
 	q: string;

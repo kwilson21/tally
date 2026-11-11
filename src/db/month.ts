@@ -52,6 +52,7 @@ export async function loadMonth(
 ): Promise<MonthData> {
 	// db.batch() returns D1Result[], not a fixed-length tuple, so noUncheckedIndexedAccess treats each
 	// destructured element as possibly undefined; the query list above guarantees all four.
+	// SAFETY: the batch holds exactly the four queries above, in this order, and db.batch answers with one result for each.
 	const [categories, amounts, transactions, savingsGoal] = (await db.batch([
 		db
 			.prepare(
@@ -95,12 +96,15 @@ export async function loadMonth(
 	])) as [D1Result, D1Result, D1Result, D1Result];
 
 	return {
+		// SAFETY: the first query selects id, name, icon, color and archived (0 or 1), the columns CategoryRow reads.
 		categories: (
 			categories.results as (Omit<CategoryRow, "archived"> & {
 				archived: number;
 			})[]
 		).map((c) => ({ ...c, archived: c.archived === 1 })),
+		// SAFETY: the second query selects categoryId, effectiveMonth and amountCents under the names BudgetAmount reads.
 		amounts: amounts.results as BudgetAmount[],
+		// SAFETY: the third query selects categoryId, amountCents, income and linked (each 0 or 1 for the flags) under those names.
 		transactions: (
 			transactions.results as {
 				categoryId: number | null;
@@ -109,6 +113,7 @@ export async function loadMonth(
 				linked: number;
 			}[]
 		).map((t) => ({ ...t, income: t.income === 1, linked: t.linked === 1 })),
+		// SAFETY: the fourth query selects amountCents and has LIMIT 1, so its first row (if any) has that amountCents.
 		savingsGoalCents:
 			(savingsGoal.results[0] as { amountCents: number } | undefined)
 				?.amountCents ?? null,

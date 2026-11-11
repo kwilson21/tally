@@ -12,6 +12,23 @@ type PlaidErrorBody = {
 	request_id?: unknown;
 };
 
+/** A JSON value, as a Plaid request body carries it. */
+type JsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| JsonValue[]
+	| { [field: string]: JsonValue | undefined };
+
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+function isErrorBody(value: unknown): value is PlaidErrorBody {
+	return typeof value === "object" && value !== null;
+}
+
 export class PlaidError extends Error {
 	readonly error_type?: string;
 	readonly error_code?: string;
@@ -20,19 +37,16 @@ export class PlaidError extends Error {
 	constructor(body: PlaidErrorBody = {}) {
 		super("Plaid request failed");
 		this.name = "PlaidError";
-		this.error_type =
-			typeof body.error_type === "string" ? body.error_type : undefined;
-		this.error_code =
-			typeof body.error_code === "string" ? body.error_code : undefined;
-		this.request_id =
-			typeof body.request_id === "string" ? body.request_id : undefined;
+		this.error_type = isText(body.error_type) ? body.error_type : undefined;
+		this.error_code = isText(body.error_code) ? body.error_code : undefined;
+		this.request_id = isText(body.request_id) ? body.request_id : undefined;
 	}
 }
 
 export async function plaidPost<T>(
 	env: PlaidEnv,
 	path: string,
-	body: Record<string, unknown>,
+	body: { [field: string]: JsonValue | undefined },
 	fetchImpl: typeof fetch = fetch,
 ): Promise<T> {
 	const baseUrl =
@@ -66,13 +80,10 @@ export async function plaidPost<T>(
 	}
 
 	if (!response.ok) {
-		throw new PlaidError(
-			typeof parsed === "object" && parsed !== null
-				? (parsed as PlaidErrorBody)
-				: {},
-		);
+		throw new PlaidError(isErrorBody(parsed) ? parsed : {});
 	}
 
+	// SAFETY: T is the response shape the caller names for this Plaid path, and parsed is that path's JSON body.
 	return parsed as T;
 }
 
@@ -114,7 +125,7 @@ export const getItem = (
 	plaidPost<{
 		item: {
 			institution_id?: string | null;
-			error?: Record<string, unknown> | null;
+			error?: object | null;
 		};
 	}>(env, "/item/get", { access_token: accessToken }, fetchImpl);
 

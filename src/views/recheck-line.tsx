@@ -51,13 +51,14 @@ export const RECHECK_PAGES = {
 
 export type RecheckPage = keyof typeof RECHECK_PAGES;
 
+const isRecheckPage = (raw: string): raw is RecheckPage =>
+	Object.hasOwn(RECHECK_PAGES, raw);
+
 /** The page a poll's `p` names, or undefined for a key that is not on the list (never an element it was not given). */
 export const recheckPage = (
 	raw: string | undefined,
 ): RecheckPage | undefined =>
-	raw !== undefined && Object.hasOwn(RECHECK_PAGES, raw)
-		? (raw as RecheckPage)
-		: undefined;
+	raw !== undefined && isRecheckPage(raw) ? raw : undefined;
 
 /**
  * The sentence alone, the part that polls. `polls` is false for a picture in the catalog, which fires nothing by itself

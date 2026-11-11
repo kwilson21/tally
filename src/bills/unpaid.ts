@@ -47,8 +47,10 @@ export function unpaidBillsSentence(bills: UnpaidBill[]): string {
 const isUnpaidBill = (value: unknown): value is UnpaidBill =>
 	typeof value === "object" &&
 	value !== null &&
-	typeof (value as UnpaidBill).name === "string" &&
-	typeof (value as UnpaidBill).period === "string";
+	"name" in value &&
+	typeof value.name === "string" &&
+	"period" in value &&
+	typeof value.period === "string";
 
 /** The bills a purchase's bank change stored, read back for its note; nothing for none or a damaged value. */
 export function parseUnpaidBills(

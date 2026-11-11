@@ -223,7 +223,11 @@ export function Phone({
 function Tabs({ current }: { current: NavKey }) {
 	const tabs = [
 		...SIDEBAR_ITEMS.slice(0, 4),
-		{ key: "more", label: "More", icon: "more" as IconName },
+		{ key: "more", label: "More", icon: "more" } satisfies {
+			key: string;
+			label: string;
+			icon: IconName;
+		},
 	];
 
 	return (

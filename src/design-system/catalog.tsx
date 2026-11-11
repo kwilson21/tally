@@ -2334,6 +2334,7 @@ const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
 const OFF_PAGE_IDS = Array.from({ length: 76 }, (_, i) => 201 + i);
 
 /** The transaction a category was just made from, and the likely ones after it (decision 76). */
+// SAFETY: TRANSACTION_ROWS is the mock's sample list (imported above), and the catalog draws its first row here.
 const LIKELY_BASE = (TRANSACTION_ROWS[0] as (typeof TRANSACTION_ROWS)[number])
 	.row;
 
@@ -4367,7 +4368,7 @@ function Rows() {
 const REVIEW_TODAY = "2026-10-11";
 
 // The review screen's items, as the queue hands them to the components (#195): one of each kind.
-const reviewItems: Record<string, SuggestionItem> = {
+const reviewItems = {
 	income: {
 		kind: "income",
 		id: "income-1",
@@ -4468,7 +4469,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 			owned: 0,
 		},
 	},
-};
+} satisfies Record<string, SuggestionItem>;
 
 const reviewCategories = [
 	{ id: 2, name: "Eating Out" },
@@ -4500,6 +4501,7 @@ const audibleCategories = [
 ];
 
 function SuggestionsReview() {
+	// SAFETY: each review item cast here is one of reviewItems above, and reviewItems.newCategory is the new_category item the Extract names.
 	return (
 		<Group id="suggestions-review" title="Suggestions review">
 			<Specimen
@@ -4717,7 +4719,7 @@ function SuggestionsReview() {
 						target="never-suggest-list"
 					/>
 					<NeverSuggestList
-						rules={[] as NeverSuggestRule[]}
+						rules={[] satisfies NeverSuggestRule[]}
 						today="2026-10-10"
 						target="never-suggest-list"
 					/>
@@ -5984,13 +5986,15 @@ function Controls() {
 				components={["FormField"]}
 				sentence="A labeled control, with its error shown in role=“alert”."
 			>
-				{[
-					["Default", "ds-name", "Groceries", undefined],
-					["With an error", "ds-name-error", "", "Give the category a name."],
-				].map(([label, id, value, error]) => (
-					<State label={label as string}>
+				{(
+					[
+						["Default", "ds-name", "Groceries", undefined],
+						["With an error", "ds-name-error", "", "Give the category a name."],
+					] as const
+				).map(([label, id, value, error]) => (
+					<State label={label}>
 						<TextInput
-							id={id as string}
+							id={id}
 							label="Name"
 							value={value}
 							autocomplete="off"
@@ -7297,8 +7301,14 @@ function fullTrends(): Extract<TrendsPage, { kind: "full" }> {
 }
 
 const TRENDS_FULL = fullTrends();
+
+// SAFETY: the mock's Trends sample (TRENDS_INPUT, imported above) has a goingWell row, and the catalog draws the first one.
 const GOING_WELL_ROW = TRENDS_FULL.goingWell[0] as TrendRowData;
+
+// SAFETY: the mock's Trends sample (TRENDS_INPUT, imported above) has a worthALook row, and the catalog draws the first one.
 const WORTH_A_LOOK_ROW = TRENDS_FULL.worthALook[0] as TrendRowData;
+
+// SAFETY: the mock's Trends sample (TRENDS_INPUT, imported above) has an others row, and the catalog draws the first one.
 const OTHER_ROW = TRENDS_FULL.others[0] as TrendRowData;
 
 const monthPoints = (cents: number[]): MonthPoint[] =>
@@ -7924,6 +7934,7 @@ function TrendsGroup() {
 	const firstMonth = earlyPage(TRENDS_FIRST_MONTH_INPUT);
 	const empty = buildTrends(TRENDS_EMPTY_INPUT);
 
+	// SAFETY: TRENDS_FULL.changes has the mock's first change row, which the ChangeRow below draws.
 	return (
 		<Group id="trends" title="Trends">
 			<Specimen
@@ -8777,32 +8788,34 @@ const SETUP_CHARGES: BillSuggestion[] = [
 ];
 
 /** Twelve suggestions that sum to $4,050 a month (405000 cents), each from August and September (the 12 budgets picture). */
-const SETUP_TWELVE: BudgetAsk[] = [
-	[1, "Groceries", "groceries", "cat-blue", 65000, 61000, 67400],
-	[2, "Eating Out", "eating-out", "cat-plum", 23000, 21800, 23100],
-	[3, "Gas", "gas", "cat-slate", 17000, 16200, 17100],
-	[4, "Kids", "kids", "cat-ochre", 29000, 28000, 29600],
-	[5, "Car & Transport", "car", "cat-ochre", 34000, 33000, 34800],
-	[6, "Utilities", "utilities", "cat-blue", 18000, 17000, 17600],
-	[7, "Subscriptions", "subscriptions", "cat-plum", 6000, 5200, 5800],
-	[8, "Shopping", "shopping", "cat-slate", 22000, 21000, 22600],
-	[9, "Personal Care", "personal-care", "cat-ochre", 9000, 7800, 8400],
-	[10, "Health", "health", "cat-brown", 12000, 10400, 11700],
-	[11, "Entertainment", "entertainment", "cat-blue", 15000, 14000, 15000],
-	[12, "Rent", "rent", "cat-brown", 155000, 154000, 156000],
-].map(([id, name, icon, color, cents, aug, sep]) => {
+const SETUP_TWELVE: BudgetAsk[] = (
+	[
+		[1, "Groceries", "groceries", "cat-blue", 65000, 61000, 67400],
+		[2, "Eating Out", "eating-out", "cat-plum", 23000, 21800, 23100],
+		[3, "Gas", "gas", "cat-slate", 17000, 16200, 17100],
+		[4, "Kids", "kids", "cat-ochre", 29000, 28000, 29600],
+		[5, "Car & Transport", "car", "cat-ochre", 34000, 33000, 34800],
+		[6, "Utilities", "utilities", "cat-blue", 18000, 17000, 17600],
+		[7, "Subscriptions", "subscriptions", "cat-plum", 6000, 5200, 5800],
+		[8, "Shopping", "shopping", "cat-slate", 22000, 21000, 22600],
+		[9, "Personal Care", "personal-care", "cat-ochre", 9000, 7800, 8400],
+		[10, "Health", "health", "cat-brown", 12000, 10400, 11700],
+		[11, "Entertainment", "entertainment", "cat-blue", 15000, 14000, 15000],
+		[12, "Rent", "rent", "cat-brown", 155000, 154000, 156000],
+	] as const
+).map(([id, name, icon, color, cents, aug, sep]) => {
 	const months = [
-		{ month: "2026-08", spentCents: aug as number },
-		{ month: "2026-09", spentCents: sep as number },
+		{ month: "2026-08", spentCents: aug },
+		{ month: "2026-09", spentCents: sep },
 	];
 
 	return {
-		id: id as number,
-		name: name as string,
-		icon: icon as string,
-		color: color as string,
+		id,
+		name,
+		icon,
+		color,
 		months,
-		suggestion: { amountCents: cents as number, months },
+		suggestion: { amountCents: cents, months },
 	};
 });
 
@@ -8823,6 +8836,7 @@ const FINISH_BUDGETS = finishBudgetsLine(12, 405000);
 const FINISH_SAVINGS = finishSavingsLine(15000);
 
 function FirstWeekGroup() {
+	// SAFETY: SETUP_CHARGES[0] is the Netflix charge the one-charge state below keeps as a bill.
 	return (
 		<Group id="first-week" title="A new family's first week">
 			<Specimen

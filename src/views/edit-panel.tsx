@@ -117,6 +117,9 @@ function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
  * The list address with `focus` set, so the list it draws puts focus on that row or control. A sheet's close
  * asks for it, as a plain link without JavaScript and as its htmx swap with it.
  */
+/** Whether a value is a number, such as a split row's parent id when it has one. */
+const isNumber = (value: unknown): value is number => typeof value === "number";
+
 export function withFocus(href: string, focus: string | number): string {
 	return `${href}${href.includes("?") ? "&" : "?"}focus=${focus}`;
 }
@@ -125,17 +128,14 @@ export function withFocus(href: string, focus: string | number): string {
  * Closing a sheet swaps the list back in and returns focus to this transaction's row; the pushed URL
  * stays clean.
  */
-export function listCloseAttrs(
-	back: string,
-	id: number,
-): Record<string, string> {
+export function listCloseAttrs(back: string, id: number) {
 	return {
 		"hx-get": withFocus(back, id),
 		"hx-target": "#page",
 		"hx-select": "#page",
 		"hx-swap": "outerHTML",
 		"hx-push-url": back,
-	};
+	} satisfies Record<string, string>;
 }
 
 /**
@@ -817,7 +817,7 @@ export function EditSheet({
 							rename={{
 								merchant: tx.nameChoices.merchantLabel,
 								total: tx.nameChoices.total,
-								part: typeof tx.parentId === "number",
+								part: isNumber(tx.parentId),
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
 								// The note is drawn as if every control the edit reads were off, and the hooks hide it while one of them blocks the

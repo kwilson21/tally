@@ -53,6 +53,7 @@ export function buildClusters<T extends ClusterRow>(
 	const held = new Set<number>();
 
 	for (const group of groupBySameCleanedText(rows)) {
+		// SAFETY: groupBySameCleanedText puts the very row objects it was given into its groups, and rows is a T[], so each group row is a T.
 		const [leader, ...others] = group.rows as T[];
 
 		if (!leader) continue;

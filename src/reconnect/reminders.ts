@@ -81,6 +81,7 @@ export async function runReconnectReminders(
 
 		if (!claim.meta.changes) continue;
 
+		// SAFETY: the SQL above builds accounts with json_object('name', ..., 'mask', ...), so each entry has a name and a mask.
 		const input = {
 			bank: bank.institution_name,
 			lastSyncedAt: bank.last_synced_at,

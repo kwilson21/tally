@@ -57,7 +57,7 @@ import {
 	SuggestionCard,
 } from "../views/suggestion-review";
 
-type App = { Bindings: Env };
+type App = { Bindings: Env & { JEV_API_KEY?: string; AI?: Ai } };
 
 const PATH = "/settings/suggestions";
 
@@ -150,10 +150,12 @@ function queryOf(url: string): URLSearchParams {
 }
 
 /** What the address says about the review: the items set aside, and those set aside again. */
+type RequestedReview = { skipped: string[]; again: string[] };
+
 function requestedReview(
 	url: string,
 	queue: SuggestionItem[],
-): { skipped: string[]; again: string[] } {
+): RequestedReview {
 	const ids = new Set(queue.map((item) => item.id));
 	const skipped = requestedKeys(url, "skip", ids);
 	const skippedSet = new Set(skipped);
@@ -554,7 +556,7 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 	// An answered or unknown item gets nothing: the name is read from the item here, never from the address.
 	if (item?.kind !== "category") return c.body(null);
 	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
-	const ai = (c.env as Env & { AI?: Ai }).AI;
+	const ai = c.env.AI;
 	const name = await suggestedCategoryName(db, ai, item);
 
 	// The name is asked and kept as it was (decision 161); a name that is the guess itself draws nothing (decision 166),
@@ -594,7 +596,7 @@ suggestions.post(PATH, async (c) => {
 	const form = await c.req.formData();
 	const answer = form.get("answer")?.toString() ?? "";
 	const id = form.get("id")?.toString() ?? "";
-	const who = actor(c as Context<App> & { env: Env & { DEMO: string } });
+	const who = actor(c);
 	const today = await householdToday(db);
 	const queue = await suggestionQueue(db);
 
@@ -659,11 +661,9 @@ suggestions.post(PATH, async (c) => {
 			),
 		];
 
-		if (
-			!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind) ||
-			stores.length === 0
-		)
-			return stale();
+		const knownKind = NEVER_SUGGEST_KINDS.find((known) => known === kind);
+
+		if (knownKind === undefined || stores.length === 0) return stale();
 
 		if (answer === "ask_not_now") {
 			const message = "Kept it as it is.";
@@ -685,7 +685,7 @@ suggestions.post(PATH, async (c) => {
 			return stale();
 
 		const labels = await writeNeverSuggest(db, {
-			kind: kind as NeverSuggestKind,
+			kind: knownKind,
 			id: Number(found[2]),
 			stores,
 			today,
@@ -695,7 +695,7 @@ suggestions.post(PATH, async (c) => {
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
 
-		return done(neverSuggestedMessage(kind as NeverSuggestKind, labels), after);
+		return done(neverSuggestedMessage(knownKind, labels), after);
 	}
 
 	// The "N more look like this" card (decision 157, step A), drawn after a create. "No" moves on and records nothing,
@@ -963,7 +963,7 @@ suggestions.post(PATH, async (c) => {
 				// The card's same-text peers (the "N more look like this" offer) are read before the run starts and kept out of
 				// it, so the card still offers them to the person (#842 round 2).
 				const rechecking = result.created
-					? await startResortFor(c.env as Env & { JEV_API_KEY?: string }, db, {
+					? await startResortFor(c.env, db, {
 							filedId: item.transactionId,
 							excludeIds: (
 								(await moreLikeThis(db, item.transactionId))?.rows ?? []
@@ -1072,10 +1072,8 @@ suggestions.post(PATH, async (c) => {
 					});
 				}
 
-				await askAgainLeftOut(
-					c.env as Env & { JEV_API_KEY?: string },
-					result.leftOut,
-					(work) => c.executionCtx.waitUntil(work),
+				await askAgainLeftOut(c.env, result.leftOut, (work) =>
+					c.executionCtx.waitUntil(work),
 				);
 				// Only a new category starts the re-check (decision 157): a restore or an Add to changes nothing it would sort.
 				const created = !result.attached && !result.restored;
@@ -1083,14 +1081,10 @@ suggestions.post(PATH, async (c) => {
 
 				const rechecking =
 					created && filedId !== undefined
-						? await startResortFor(
-								c.env as Env & { JEV_API_KEY?: string },
-								db,
-								{
-									filedId,
-									excludeIds: [...result.leftOut, ...result.filed],
-								},
-							)
+						? await startResortFor(c.env, db, {
+								filedId,
+								excludeIds: [...result.leftOut, ...result.filed],
+							})
 						: null;
 
 				const after = await suggestionQueue(db);

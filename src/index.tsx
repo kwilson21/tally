@@ -34,7 +34,12 @@ import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
 import { startSorting } from "./sort-start";
 
+/** What Cloudflare's send answers with: the message's id, which Tally never reads. */
+type EmailSent = { messageId?: string } | void;
+
 type AppEnv = Env & {
+	ACCESS_TEAM_DOMAIN?: string;
+	ACCESS_AUD?: string;
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 	APP_VERSION?: string;
@@ -46,7 +51,7 @@ type AppEnv = Env & {
 			subject: string;
 			html: string;
 			text: string;
-		}): Promise<unknown>;
+		}): Promise<EmailSent>;
 	};
 };
 
@@ -63,7 +68,7 @@ type ScheduledEnv = PlaidEnv & {
 			subject: string;
 			html: string;
 			text: string;
-		}): Promise<unknown>;
+		}): Promise<EmailSent>;
 	};
 	JEV_API_KEY?: string;
 	/** The sorting Workflow (decision 139): the 09:00 run starts the night's instance. */
@@ -184,9 +189,8 @@ app.use("*", async (c, next) => {
 	}
 
 	const identity = await verifiedAccessIdentity(c.req.raw, {
-		ACCESS_TEAM_DOMAIN: (c.env as Env & { ACCESS_TEAM_DOMAIN?: string })
-			.ACCESS_TEAM_DOMAIN,
-		ACCESS_AUD: (c.env as Env & { ACCESS_AUD?: string }).ACCESS_AUD,
+		ACCESS_TEAM_DOMAIN: c.env.ACCESS_TEAM_DOMAIN,
+		ACCESS_AUD: c.env.ACCESS_AUD,
 	});
 
 	if (!identity) return c.text("Sign in through Cloudflare Access.", 403);

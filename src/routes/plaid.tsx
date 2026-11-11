@@ -13,6 +13,7 @@ import {
 	exchangePublicToken,
 	getInstitutionName,
 	getItem,
+	type LinkTokenRequest,
 	type PlaidEnv,
 	PlaidError,
 	removeItem,
@@ -48,14 +49,29 @@ async function clientUserId(email: string) {
 	).join("");
 }
 
-function linkFailure(error: unknown) {
-	logPlaidRequestId(error);
+/** True for a value that is text (a file part is not a token). */
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+/** The Link request with the webhook URL, when one is set. */
+function withWebhook(
+	webhookUrl: string | undefined,
+	request: LinkTokenRequest,
+): LinkTokenRequest {
+	if (webhookUrl) request.webhook = webhookUrl;
+
+	return request;
+}
+
+function linkFailure(cause: unknown) {
+	logPlaidRequestId(cause);
 
 	return <p role="alert">Couldn't link the bank. Try again.</p>;
 }
 
-function repairFailure(error: unknown) {
-	logPlaidRequestId(error);
+function repairFailure(cause: unknown) {
+	logPlaidRequestId(cause);
 
 	return <p role="alert">Couldn't fix the connection. Try again.</p>;
 }
@@ -75,9 +91,9 @@ async function storedItem(db: D1Database, id: string) {
 		}>();
 }
 
-function logPlaidRequestId(error: unknown) {
-	if (error instanceof PlaidError && error.request_id) {
-		console.error("Plaid request failed", { request_id: error.request_id });
+function logPlaidRequestId(cause: unknown) {
+	if (cause instanceof PlaidError && cause.request_id) {
+		console.error("Plaid request failed", { request_id: cause.request_id });
 	}
 }
 
@@ -94,14 +110,16 @@ plaid.post("/plaid/link-token", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 
 	try {
-		const result = await createLinkToken(c.env, {
-			user: { client_user_id: await clientUserId(actor(c)) },
-			client_name: "Tally",
-			products: ["transactions"],
-			country_codes: ["US"],
-			language: "en",
-			...(c.env.PLAID_WEBHOOK_URL ? { webhook: c.env.PLAID_WEBHOOK_URL } : {}),
-		});
+		const result = await createLinkToken(
+			c.env,
+			withWebhook(c.env.PLAID_WEBHOOK_URL, {
+				user: { client_user_id: await clientUserId(actor(c)) },
+				client_name: "Tally",
+				products: ["transactions"],
+				country_codes: ["US"],
+				language: "en",
+			}),
+		);
 
 		return c.json({ link_token: result.link_token });
 	} catch (error) {
@@ -120,17 +138,19 @@ plaid.post("/plaid/items/:id/link-token", async (c) => {
 	try {
 		const accessToken = await decryptToken(
 			item.access_token_encrypted,
-			c.env.TOKEN_ENCRYPTION_KEY as string,
+			c.env.TOKEN_ENCRYPTION_KEY ?? "",
 		);
 
-		const result = await createLinkToken(c.env, {
-			user: { client_user_id: await clientUserId(actor(c)) },
-			client_name: "Tally",
-			access_token: accessToken,
-			country_codes: ["US"],
-			language: "en",
-			...(c.env.PLAID_WEBHOOK_URL ? { webhook: c.env.PLAID_WEBHOOK_URL } : {}),
-		});
+		const result = await createLinkToken(
+			c.env,
+			withWebhook(c.env.PLAID_WEBHOOK_URL, {
+				user: { client_user_id: await clientUserId(actor(c)) },
+				client_name: "Tally",
+				access_token: accessToken,
+				country_codes: ["US"],
+				language: "en",
+			}),
+		);
 
 		return c.json({ link_token: result.link_token });
 	} catch (error) {
@@ -149,7 +169,7 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 	try {
 		const accessToken = await decryptToken(
 			item.access_token_encrypted,
-			c.env.TOKEN_ENCRYPTION_KEY as string,
+			c.env.TOKEN_ENCRYPTION_KEY ?? "",
 		);
 
 		const result = await getItem(c.env, accessToken);
@@ -173,7 +193,7 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 
 		if (repaired === "lost-race") return c.html(repairFailure(null), 502);
 		c.executionCtx.waitUntil(
-			syncItemAndSort(c.env, item.id).catch((error: unknown) => {
+			syncItemAndSort(c.env, item.id).catch((error) => {
 				logPlaidRequestId(error);
 			}),
 		);
@@ -213,7 +233,7 @@ plaid.post("/plaid/exchange", async (c) => {
 		return c.html(linkFailure(undefined), 422);
 	}
 
-	if (typeof publicToken !== "string" || publicToken.length === 0) {
+	if (!isText(publicToken) || publicToken.length === 0) {
 		return c.html(linkFailure(undefined), 422);
 	}
 
@@ -244,7 +264,7 @@ plaid.post("/plaid/exchange", async (c) => {
 
 			const encrypted = await encryptToken(
 				exchanged.access_token,
-				c.env.TOKEN_ENCRYPTION_KEY as string,
+				c.env.TOKEN_ENCRYPTION_KEY ?? "",
 			);
 
 			// D1 returns the batch's results in statement order, so the first is the bank's insert and its last_row_id is the new row.
@@ -270,7 +290,7 @@ plaid.post("/plaid/exchange", async (c) => {
 
 		// Plaid sends SYNC_UPDATES_AVAILABLE only after an Item's first /transactions/sync, so linking starts that sync (spec §10).
 		c.executionCtx.waitUntil(
-			syncItemAndSort(c.env, itemId).catch((error: unknown) => {
+			syncItemAndSort(c.env, itemId).catch((error) => {
 				logPlaidRequestId(error);
 			}),
 		);

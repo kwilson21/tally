@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import type { Child } from "hono/jsx";
 import { actor } from "../actor";
 import { addressOf } from "../address";
 import { type UnpaidBill, unpaidBillsSentence } from "../bills/unpaid";
@@ -172,7 +173,7 @@ import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 
-type App = { Bindings: Env };
+type App = { Bindings: Env & { JEV_API_KEY?: string } };
 
 /**
  * The sentence after a saved exclusion, for the rows that still count because they pay a bill or a planned expense
@@ -195,8 +196,7 @@ const isDemo = (c: Context<App>) => c.env.DEMO === "true";
 
 /** Whether Jev answers categories now: its key is set and the categories switch is on, the test settings' Jev run makes too. */
 const jevAnswersCategories = async (c: Context<App>) =>
-	Boolean((c.env as Env & { JEV_API_KEY?: string }).JEV_API_KEY) &&
-	(await readAiSwitches(c.env.DB)).categories;
+	Boolean(c.env.JEV_API_KEY) && (await readAiSwitches(c.env.DB)).categories;
 
 /** Consecutive rows that share a date, in list order. */
 function byDay(rows: ListRow[]): [string, ListRow[]][] {
@@ -214,7 +214,7 @@ function byDay(rows: ListRow[]): [string, ListRow[]][] {
 
 type ListOptions = {
 	/** The edit sheet to show over the list, given the active categories and the household's date. */
-	sheet?: (categories: Category[], today: string) => unknown;
+	sheet?: (categories: Category[], today: string) => Child;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
 	/**
@@ -1205,12 +1205,15 @@ const LIST_OOB = [
 
 const NONE_SELECTED = "Select at least one transaction.";
 
+/** Whether a form value is text (a file or a missing field is not). */
+const isText = (value: unknown): value is string => typeof value === "string";
+
 /** Positive whole-number ids, once each; each value may be one id or "1,2,3". */
 function parseIds(values: (string | File)[]) {
 	const ids = new Set<number>();
 
 	for (const value of values) {
-		if (typeof value !== "string") continue;
+		if (!isText(value)) continue;
 
 		for (const part of value.split(",")) {
 			const id = /^\d{1,15}$/.test(part.trim()) ? Number(part) : 0;
@@ -1768,16 +1771,12 @@ const FOCUS_ADD_CASH = "add-cash";
 const FOCUS_SEARCH = "search";
 
 /** The Likely sheet's close keeps the saved row's element and names it, so its tick runs on to the toast's end. */
-function savedCloseAttrs(
-	back: string,
-	id: number,
-	savedAt: number,
-): Record<string, string> {
+function savedCloseAttrs(back: string, id: number, savedAt: number) {
 	return {
 		...listCloseAttrs(back, id),
 		"hx-get": `${withFocus(back, id)}&saved=${id}&saved-at=${savedAt}`,
 		"hx-swap": "outerMorph",
-	};
+	} satisfies Record<string, string>;
 }
 
 /** The purchase the panel's "This refunds…" answer names: a field left out keeps the saved link, an empty one unlinks. */
@@ -2854,8 +2853,7 @@ function unlinkedSentence(
 		refunds,
 		unpaidBillsSentence(bills),
 	]
-		.filter(Boolean)
-		.map((sentence) => ` ${sentence}`)
+		.flatMap((sentence) => (sentence ? [` ${sentence}`] : []))
 		.join("");
 }
 
@@ -2970,8 +2968,7 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 function pendingEditOf(form: FormData): string {
 	const fields = new URLSearchParams();
 	form.forEach((value, key) => {
-		if (key !== "change_parts" && typeof value === "string")
-			fields.append(key, value);
+		if (key !== "change_parts" && isText(value)) fields.append(key, value);
 	});
 
 	return fields.toString();
@@ -3152,9 +3149,11 @@ async function savePanel(
 			creditReviewedProvided:
 				form.get("creditReviewedVisible") === "1" || form.has("creditReviewed"),
 			refundOfId,
+			// SAFETY: the panel posts kind from its radio inputs, one per TRANSACTION_KINDS value (edit-panel.tsx), so it is an Edit["kind"].
 			kind: form.has("kind")
 				? (form.get("kind")?.toString() as Edit["kind"])
 				: tx.kind,
+			// SAFETY: kind_was is the panel's hidden copy of the kind it drew, a TRANSACTION_KINDS value or empty for a row with none (edit-panel.tsx).
 			kindWas: form.get("kind_was")?.toString() as Edit["kindWas"],
 			forPersonId: form.has("for_person_id")
 				? Number(form.get("for_person_id")) || null
@@ -3224,12 +3223,15 @@ async function savePanel(
 		newCategoryError ||
 		(cashParsed && Object.keys(cashParsed.errors).length)
 	)
-		return showErrors({
-			...(parsed.ok ? {} : parsed.errors),
-			...(refundOk ? {} : { refund: "Pick a purchase from the list." }),
-			...(newCategoryError ? { newCategory: newCategoryError } : {}),
-			...(cashParsed?.errors ?? {}),
-		});
+		return showErrors(
+			Object.assign(
+				{},
+				parsed.ok ? {} : parsed.errors,
+				refundOk ? {} : { refund: "Pick a purchase from the list." },
+				newCategoryError ? { newCategory: newCategoryError } : {},
+				cashParsed?.errors ?? {},
+			),
+		);
 
 	// With a correction, the linked refunds and the parts are checked against the amount in the same batch (saveEdit),
 	// and a refusal draws the split sheet with the posted parts, so they are not checked here.
@@ -3270,22 +3272,25 @@ async function savePanel(
 
 	// The link is written only when it changes. A refund that is more than what's left of its
 	// purchase is refused by the write itself, with nothing saved (spec §8.5).
+	const editToSave = {
+		...edit,
+		refundOfId: refundOfId === current ? undefined : refundOfId,
+	};
+
+	if (cashParsed) {
+		Object.assign(editToSave, {
+			cashDate: cashValues?.date,
+			cashAmountCents: cashParsed.amountCents,
+		});
+	}
+
 	const result = await saveEdit(
 		c.env.DB,
 		tx.id,
-		{
-			...edit,
-			refundOfId: refundOfId === current ? undefined : refundOfId,
-			...(cashParsed
-				? {
-						cashDate: cashValues?.date,
-						cashAmountCents: cashParsed.amountCents,
-					}
-				: {}),
-		},
+		editToSave,
 		actor(c),
 		correction?.split,
-	).catch(async (error: unknown) => {
+	).catch(async (error) => {
 		// A save that throws files nothing, so a category made for it goes too.
 		if (made) await unmakeCategory(c.env.DB, made.id);
 		throw error;
@@ -3857,7 +3862,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	const wasFirstVisit = (await firstVisitFor(c)) !== null;
 
 	const restored =
-		typeof token === "string" && /^[0-9a-f-]{36}$/i.test(token)
+		isText(token) && /^[0-9a-f-]{36}$/i.test(token)
 			? await restoreCashDelete(c.env.DB, token)
 			: null;
 
@@ -3868,7 +3873,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	const restoredNow = restored && !restored.alreadyRestored ? restored : null;
 	// Every answer ends the Deleted toast it answers, so undoDone names the posted token on each one (#397, #444).
 	// JSON drops it when the token is missing, since there is no Undo to name.
-	const undoDone = typeof token === "string" ? token : undefined;
+	const undoDone = isText(token) ? token : undefined;
 	c.header(
 		"HX-Trigger",
 		hxTrigger(

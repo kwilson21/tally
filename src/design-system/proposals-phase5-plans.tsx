@@ -322,6 +322,7 @@ const BILLS: BillRowData[] = [
 	},
 ];
 
+// SAFETY: BILLS lists the three bills drawn here in this order (Electric, Internet, Swim lessons), so these are its first three rows.
 const [ELECTRIC, INTERNET, SWIM] = BILLS as [
 	BillRowData,
 	BillRowData,

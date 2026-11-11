@@ -56,7 +56,12 @@ function decode(part: string): Uint8Array {
 	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+const isText = (value: unknown): value is string => typeof value === "string";
+
+const isNumber = (value: unknown): value is number => typeof value === "number";
+
 function json<T>(part: string): T {
+	// SAFETY: T is Header or Claims, whose fields are all unknown, so any parsed object fits T; each field is checked before use.
 	return JSON.parse(new TextDecoder().decode(decode(part))) as T;
 }
 
@@ -156,7 +161,7 @@ export async function verifyPlaidWebhook(
 
 		if (
 			header.alg !== "ES256" ||
-			typeof header.kid !== "string" ||
+			!isText(header.kid) ||
 			header.kid.length === 0 ||
 			header.kid.length > 128 ||
 			header.crit !== undefined
@@ -186,11 +191,11 @@ export async function verifyPlaidWebhook(
 		const now = Date.now() / 1000;
 
 		if (
-			typeof claims.iat !== "number" ||
+			!isNumber(claims.iat) ||
 			!Number.isFinite(claims.iat) ||
 			claims.iat < now - MAX_AGE_SECONDS ||
 			claims.iat > now + MAX_FUTURE_SECONDS ||
-			typeof claims.request_body_sha256 !== "string" ||
+			!isText(claims.request_body_sha256) ||
 			!LOWERCASE_SHA256.test(claims.request_body_sha256)
 		) {
 			return "invalid";

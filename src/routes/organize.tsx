@@ -37,7 +37,7 @@ import { OrganizeNewCategoryCard } from "../views/suggestion-card";
 import { TextInput } from "../views/text-input";
 import { CHANGED_SUGGESTION } from "./suggestions";
 
-type App = { Bindings: Env };
+type App = { Bindings: Env & { JEV_API_KEY?: string } };
 
 type Category = { id: number; name: string; icon: string; color: string };
 
@@ -441,10 +441,8 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 		return refused(result.error ?? "That category couldn't be made.");
 	}
 
-	await askAgainLeftOut(
-		c.env as Env & { JEV_API_KEY?: string },
-		result.leftOut,
-		(work) => c.executionCtx.waitUntil(work),
+	await askAgainLeftOut(c.env, result.leftOut, (work) =>
+		c.executionCtx.waitUntil(work),
 	);
 	// Only a new category starts the re-check (decision 157): an Add to or a Restore changes nothing the run would sort.
 	const created = !result.attached && !result.restored;
@@ -452,14 +450,10 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 
 	const rechecking =
 		created && filedId !== undefined
-			? await startResortFor(
-					c.env as Env & { JEV_API_KEY?: string },
-					c.env.DB,
-					{
-						filedId,
-						excludeIds: [...result.leftOut, ...result.filed],
-					},
-				)
+			? await startResortFor(c.env, c.env.DB, {
+					filedId,
+					excludeIds: [...result.leftOut, ...result.filed],
+				})
 			: null;
 
 	const count = result.moved;

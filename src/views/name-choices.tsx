@@ -19,6 +19,11 @@ import { WhyLink } from "./why-link";
 export const SUGGESTED_NAME_CLASS =
 	"underline decoration-muted decoration-dashed underline-offset-4";
 
+/** True for a note that is plain text, not a note with its own class. */
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
 /**
  * In the list, before a name Tally guessed (P87 B, decision 80): the sparkles icon, and "Tally's guess"
  * read out, since an icon says nothing aloud.
@@ -153,8 +158,9 @@ function Choice({
 			<span class="flex min-w-0 flex-col wrap-anywhere">
 				<span>{children}</span>
 				{notes.map((note) => {
-					const { text, class: hook = "" } =
-						typeof note === "string" ? { text: note, class: "" } : note;
+					const { text, class: hook = "" } = isText(note)
+						? { text: note, class: "" }
+						: note;
 
 					return (
 						<span class={`text-sm text-muted ${hook}`.trim()}>{text}</span>

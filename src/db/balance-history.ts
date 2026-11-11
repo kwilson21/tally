@@ -61,17 +61,19 @@ function accountSources(
 	banks: Bank[],
 	appleCard: AppleCardAccount | null,
 ): AccountSource[] {
-	const sources: AccountSource[] = banks
-		.filter((bank) => !bank.disconnected)
-		.map(
-			(bank): AccountSource => ({
-				name: bank.name,
-				verb: "linked",
-				accountIds: bank.accounts
-					.filter((account) => account.connected !== false)
-					.map((account) => account.id),
-			}),
-		);
+	const sources: AccountSource[] = banks.flatMap((bank): AccountSource[] =>
+		bank.disconnected
+			? []
+			: [
+					{
+						name: bank.name,
+						verb: "linked",
+						accountIds: bank.accounts
+							.filter((account) => account.connected !== false)
+							.map((account) => account.id),
+					},
+				],
+	);
 
 	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
 		sources.push({
@@ -107,8 +109,10 @@ export async function accountsWithHistory(
 		appleCardStatement(db),
 	]);
 
+	// SAFETY: each statement of the batch above returns the rows its own SELECT names, so these are the typed row shapes.
 	const banks = banksFromRows((bankResult?.results ?? []) as BankRow[]);
 
+	// SAFETY: the Apple Card statement of the batch above returns AppleCardRow rows; [0] is its one row or undefined.
 	const appleCard = appleCardFromRow(
 		((cardResult?.results ?? []) as AppleCardRow[])[0],
 	);
@@ -117,6 +121,7 @@ export async function accountsWithHistory(
 		.filter((account) => account.connected !== false)
 		.map((account) => account.id);
 
+	// SAFETY: the balance statement of the batch above returns HistoryRow rows.
 	const rows: BalanceRow[] = (
 		(balanceResult?.results ?? []) as HistoryRow[]
 	).map((r) => ({

@@ -22,20 +22,28 @@ export function monthCauses(
 	uncategorizedCents: number,
 ): MonthCause[] {
 	return [
-		...rows
-			.filter((row) => row.spentCents > row.budgetCents)
-			.map((row) => ({
-				name: row.name,
-				cents: row.spentCents - row.budgetCents,
-				kind: "over" as const,
-			})),
-		...unbudgeted
-			.filter((row) => row.spentCents > 0)
-			.map((row) => ({
-				name: row.name,
-				cents: row.spentCents,
-				kind: "unbudgeted" as const,
-			})),
+		...rows.flatMap((row) =>
+			row.spentCents > row.budgetCents
+				? [
+						{
+							name: row.name,
+							cents: row.spentCents - row.budgetCents,
+							kind: "over" as const,
+						},
+					]
+				: [],
+		),
+		...unbudgeted.flatMap((row) =>
+			row.spentCents > 0
+				? [
+						{
+							name: row.name,
+							cents: row.spentCents,
+							kind: "unbudgeted" as const,
+						},
+					]
+				: [],
+		),
 		...(uncategorizedCents > 0
 			? [
 					{
@@ -62,9 +70,9 @@ export function monthCause(
 ): { text: string; lead: string; named: NamedCause[] } | null {
 	if (overCents <= 0) return null;
 
+	// The index keeps each cause's place in the input, which orders ties the same way as its place among the causes above 0.
 	const largest = causes
-		.filter((cause) => cause.cents > 0)
-		.map((cause, index) => ({ cause, index }))
+		.flatMap((cause, index) => (cause.cents > 0 ? [{ cause, index }] : []))
 		.sort((a, b) => b.cause.cents - a.cause.cents || a.index - b.index)
 		.slice(0, 2)
 		.sort((a, b) => a.index - b.index)

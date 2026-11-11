@@ -49,11 +49,14 @@ export function cleanText(text: string): string {
  * number (counted as a spreadsheet counts records, the header 1), and the record is left out of `out`: its text can't
  * be read.
  */
-function records(text: string): {
+/** What records() reads: the records, the open record's number or null, and the indexes of malformed records. */
+type CsvRecords = {
 	out: string[][];
 	open: number | null;
 	malformed: Set<number>;
-} {
+};
+
+function records(text: string): CsvRecords {
 	const out: string[][] = [];
 	const malformed = new Set<number>();
 	let record: string[] = [];

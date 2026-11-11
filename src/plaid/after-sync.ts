@@ -13,16 +13,21 @@ import { applyMerchantRules } from "../db/transactions";
  *
  * An Apple Card upload's added rows get these same steps (spec §8.10), so this list is the only place they are named.
  */
-export async function afterSyncSteps(db: D1Database): Promise<{
+/** Which steps failed, and the first thrown value when one did (the caller rethrows it). */
+type AfterSyncSteps = {
 	rulesFailed: boolean;
 	billsFailed: boolean;
 	error?: unknown;
-}> {
+};
+
+export async function afterSyncSteps(db: D1Database): Promise<AfterSyncSteps> {
 	// Each step runs even if the other fails, so a rule error never leaves a bill unmatched; the first
 	// failure is returned with the flags, so the caller can say which step failed.
 	const failures: unknown[] = [];
 
-	const failed = async (step: () => Promise<unknown>): Promise<boolean> => {
+	const failed = async <Result>(
+		step: () => Promise<Result>,
+	): Promise<boolean> => {
 		try {
 			await step();
 

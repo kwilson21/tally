@@ -16,9 +16,12 @@ export type DeliveryEnv = {
 			subject: string;
 			html: string;
 			text: string;
-		}): Promise<unknown>;
+		}): Promise<EmailSent>;
 	};
 };
+
+/** What Cloudflare's send answers with: the message's id, which Tally never reads. */
+type EmailSent = { messageId?: string } | void;
 
 /** What a send may be told (decision 146). */
 export type DeliverOptions = {
@@ -33,11 +36,17 @@ export type DeliverOptions = {
  * The error name Resend gives an error answer (its body's `name`, such as invalid_idempotent_request), or null when the body
  * has none. A body that can't be read is no name.
  */
+const hasTextName = (body: unknown): body is { name: string } =>
+	typeof body === "object" &&
+	body !== null &&
+	"name" in body &&
+	typeof body.name === "string";
+
 async function errorName(response: Response): Promise<string | null> {
 	try {
-		const body = (await response.json()) as { name?: unknown };
+		const body: unknown = await response.json();
 
-		return typeof body.name === "string" ? body.name : null;
+		return hasTextName(body) ? body.name : null;
 	} catch {
 		return null;
 	}
@@ -77,14 +86,18 @@ export async function deliver(
 	let delivered = false;
 
 	if (env.RESEND_API_KEY) {
+		const headers = {
+			Authorization: `Bearer ${env.RESEND_API_KEY}`,
+			"Content-Type": "application/json",
+		};
+
+		if (idempotencyKey)
+			Object.assign(headers, { "Idempotency-Key": idempotencyKey });
+
 		const response = await fetchImpl("https://api.resend.com/emails", {
 			method: "POST",
 			signal: timeoutSignal(10_000),
-			headers: {
-				Authorization: `Bearer ${env.RESEND_API_KEY}`,
-				"Content-Type": "application/json",
-				...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-			},
+			headers,
 			body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 		}).catch(() => null);
 

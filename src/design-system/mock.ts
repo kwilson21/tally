@@ -525,14 +525,14 @@ export const TRANSACTIONS_EXAMPLE = {
 	needsCategory: 12,
 };
 
-export const EXCLUSIONS_EXAMPLE: {
-	counted: number;
-	heldForReview: number;
-	breakdown: ExcludedBreakdown;
-} = {
+export const EXCLUSIONS_EXAMPLE = {
 	counted: 88,
 	heldForReview: 2,
 	breakdown: { transfer: 3, reimbursement: 1, byPerson: 2 },
+} satisfies {
+	counted: number;
+	heldForReview: number;
+	breakdown: ExcludedBreakdown;
 };
 
 export const CATEGORIES_EXAMPLE = {
@@ -642,6 +642,7 @@ const TREND_MONTHS_MOCK = [
 const TREND_SPEND: MonthSpend[] = [
 	...TREND_SERIES.flatMap(([categoryId, cents]) =>
 		cents.map((c, i) => ({
+			// SAFETY: TREND_MONTHS_MOCK has six months and every TREND_SERIES row has six amounts, so index i is in range.
 			month: TREND_MONTHS_MOCK[i] as string,
 			categoryId,
 			cents: c,

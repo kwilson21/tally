@@ -37,6 +37,31 @@ export const INSTRUCTIONS = [
 	"If you are not sure, reply with fewer names. Never explain.",
 ].join(" ");
 
+/** A parsed JSON value: the widest shape a model's answer can take once its parts are checked. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** What the name model answers with (its Workers AI output), a JSON value a test or a caller passes, or nothing. */
+type AiAnswer =
+	| Json
+	| AiModels[typeof NAME_MODEL]["postProcessedOutputs"]
+	| ReadableStream
+	| undefined;
+
+const isText = (value: AiAnswer): value is string => typeof value === "string";
+
+/** An object that is not an array: the only kind of answer that can carry a `response` field. */
+const isRecord = (value: AiAnswer): value is Record<string, Json> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** The text an answer carries: the answer itself, or its response field. Any other answer carries none. */
+function answerText(answer: AiAnswer): string | undefined {
+	if (isText(answer)) return answer;
+
+	const response = isRecord(answer) ? answer.response : undefined;
+
+	return isText(response) ? response : undefined;
+}
+
 export type SuggestResult =
 	| { ok: true; names: string[] }
 	/** The call failed (or answered with nothing to read), so the merchant is asked about again later. */
@@ -50,7 +75,7 @@ export async function suggestNames(
 	ai: Ai,
 	rawName: string,
 ): Promise<SuggestResult> {
-	let answer: unknown;
+	let answer: AiAnswer;
 
 	try {
 		answer = await ai.run(
@@ -73,12 +98,9 @@ export async function suggestNames(
 		return { ok: false };
 	}
 
-	const text =
-		typeof answer === "string"
-			? answer
-			: (answer as { response?: unknown } | null)?.response;
+	const text = answerText(answer);
 
-	if (typeof text !== "string") return { ok: false };
+	if (text === undefined) return { ok: false };
 
 	return { ok: true, names: cleanSuggestedNames(text, rawName) };
 }
@@ -179,12 +201,9 @@ export async function suggestNote(
 			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
 		);
 
-		const text =
-			typeof answer === "string"
-				? answer
-				: (answer as { response?: unknown } | null)?.response;
+		const text = answerText(answer);
 
-		if (typeof text !== "string") return { ok: false };
+		if (text === undefined) return { ok: false };
 
 		const note = text
 			.split(/\r?\n/)[0]
@@ -213,11 +232,11 @@ export async function suggestNote(
 }
 
 export function cleanCategoryName(
-	answer: unknown,
+	answer: AiAnswer,
 	avoid: string[],
 	choices: string[] = [],
 ): string | null {
-	if (typeof answer !== "string") return null;
+	if (!isText(answer)) return null;
 
 	for (const raw of answer.split(/\r?\n/)) {
 		const name = raw
@@ -484,12 +503,9 @@ export async function suggestCategoryName(
 			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
 		);
 
-		const text =
-			typeof answer === "string"
-				? answer
-				: (answer as { response?: unknown } | null)?.response;
+		const text = answerText(answer);
 
-		if (typeof text !== "string") return { ok: false };
+		if (text === undefined) return { ok: false };
 
 		return {
 			ok: true,
@@ -512,7 +528,14 @@ export async function suggestCategoryName(
 const choiceLabel = (name: string) => oneLine(boundaryValue(oneLine(name)));
 
 const choiceLine = (choices: string[]) =>
-	choices.slice(0, MAX_ACTIVE).map(choiceLabel).filter(Boolean).join("; ");
+	choices
+		.slice(0, MAX_ACTIVE)
+		.flatMap((choice) => {
+			const label = choiceLabel(choice);
+
+			return label ? [label] : [];
+		})
+		.join("; ");
 
 /** Marks a model puts before a list item ("1.", "-", "•") and quotes it wraps a name in. */
 const LIST_MARK = /^\s*(?:[-•·]|\*(?=\s)|\d+[.)])\s*/;
@@ -534,10 +557,10 @@ const sameAsTidied = (name: string, tidied: string) =>
  * isn't text gives none.
  */
 export function cleanSuggestedNames(
-	answer: unknown,
+	answer: AiAnswer,
 	rawName: string,
 ): string[] {
-	if (typeof answer !== "string") return [];
+	if (!isText(answer)) return [];
 	const raw = rawName.trim().toLowerCase();
 	const tidied = tidyName(rawName);
 	const names: string[] = [];

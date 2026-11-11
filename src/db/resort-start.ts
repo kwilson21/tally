@@ -58,8 +58,8 @@ export async function runningRecheck(
 }
 
 /** A error's name for the log: never its message, which could carry row text. */
-const errorName = (error: unknown): string =>
-	error instanceof Error ? error.name : "unknown";
+const errorName = (cause: unknown): string =>
+	cause instanceof Error ? cause.name : "unknown";
 
 /**
  * Ends a run that this call wrote but whose instance never started, so the line never sticks. Best effort: a failure is
@@ -98,6 +98,9 @@ async function orphanRun(
 	}
 }
 
+/** The run this call's instances were added to: null until one is, then null again once it is finished. */
+type OwedRun = { runId: string | null };
+
 /**
  * Starts the re-check for the category the row `filedId` was just filed in. Returns the run's id when there is one to
  * show (a new run, or a join: a join with nothing new shows the line without starting an instance), or null when
@@ -115,7 +118,7 @@ export async function startResortFor(
 	}: { filedId: number; excludeIds?: readonly number[]; now?: number },
 ): Promise<string | null> {
 	// The run this call added instances to, while its own instance is still owed.
-	const owed: { runId: string | null } = { runId: null };
+	const owed: OwedRun = { runId: null };
 
 	try {
 		return await startFor(env, db, { filedId, excludeIds, now }, owed);
