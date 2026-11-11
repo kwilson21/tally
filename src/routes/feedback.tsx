@@ -361,11 +361,10 @@ function diagnosticLines(item: FeedbackRow) {
 export async function fileFeedbackIssue(
 	db: D1Database,
 	token: string,
-	row: FeedbackRow | Record<string, unknown>,
+	row: FeedbackRow,
 	fetchImpl: typeof fetch = fetch,
 ) {
-	// SAFETY: the callers pass a feedback row from a `SELECT * FROM feedback` query, so it holds every FeedbackRow column.
-	const item = row as FeedbackRow;
+	const item = row;
 
 	const claim = await db
 		.prepare(

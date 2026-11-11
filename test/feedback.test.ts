@@ -20,6 +20,9 @@ import {
 import { envWith, fakeFetch } from "./helpers/doubles";
 import { present } from "./helpers/present";
 
+/** A stored feedback row, as fileFeedbackIssue takes it. */
+type FiledRow = Parameters<typeof fileFeedbackIssue>[2];
+
 const BASE = "http://tally.test";
 
 function productionApp(
@@ -701,7 +704,7 @@ it("files the expected GitHub issue without logging the token or message", async
 	)
 		.bind("This does not work at all")
 		.run();
-	const row = await env.DB.prepare("SELECT * FROM feedback").first();
+	const row = await env.DB.prepare("SELECT * FROM feedback").first<FiledRow>();
 
 	if (!row) throw new Error("feedback fixture was not inserted");
 
@@ -761,7 +764,7 @@ it("adds only approved coarse technical fields and no replay link to the private
 			"https://us.i.posthog.com/replay/fake-session-123",
 		)
 		.run();
-	const row = await env.DB.prepare("SELECT * FROM feedback").first();
+	const row = await env.DB.prepare("SELECT * FROM feedback").first<FiledRow>();
 
 	if (!row) throw new Error("feedback fixture was not inserted");
 
@@ -1093,7 +1096,10 @@ describe("feedback filing safeguards", () => {
 		const message = `${"x".repeat(59)}😀\n second line`;
 		await insertOld(1);
 		await env.DB.prepare("UPDATE feedback SET message = ?").bind(message).run();
-		const row = await env.DB.prepare("SELECT * FROM feedback").first();
+
+		const row = await env.DB.prepare(
+			"SELECT * FROM feedback",
+		).first<FiledRow>();
 
 		if (!row) throw new Error("missing fixture");
 
