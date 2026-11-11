@@ -35,4 +35,16 @@ export default defineConfig({
 		"anti-slop/require-readable-spacing": "error",
 		"anti-slop/require-safety-comment-for-type-assertion": "error",
 	},
+	overrides: [
+		{
+			// Plain JavaScript has no type predicates, so a typeof check is the only way it can tell what it was given.
+			files: ["public/**/*.js", "scripts/**/*.mjs"],
+			rules: { "anti-slop/no-runtime-typeof": "off" },
+		},
+		{
+			// These are the feedback form's own sanitizers: they are the parse at the boundary, so they take anything.
+			files: ["public/js/feedback-privacy.d.ts"],
+			rules: { "anti-slop/no-unknown-parameters": "off" },
+		},
+	],
 });

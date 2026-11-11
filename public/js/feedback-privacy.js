@@ -338,7 +338,13 @@ export function sanitizeReplayFixture(input) {
 		})
 		.filter((node) => node !== null);
 
-	return { route, kind, ...(target ? { target } : {}), nodes };
+	const fixture = { route, kind };
+
+	if (target) fixture.target = target;
+
+	fixture.nodes = nodes;
+
+	return fixture;
 }
 
 export function installFeedbackMessageReview(doc = document) {

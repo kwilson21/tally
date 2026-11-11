@@ -48,6 +48,9 @@ const WORKERS_AI: Record<Exclude<ModelId, "jev">, string> = {
 /** The household's one person, as every household starts with (migrations/0030). */
 const OPTIONS = { details: true, people: [{ id: 1, name: "Everyone" }] };
 
+/** Any JSON value, as a response body or a request body holds it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
 /**
  * Workers AI as the fetch askJev expects: the same body with `model` set to the selector. A throw is left to
  * askJev, which reports it as no response, as it does for a Jev timeout. Workers AI takes no key, so the
@@ -59,7 +62,8 @@ export function viaWorkersAI(
 	selector: string,
 ): FetchLike {
 	return async (_url, init) => {
-		const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+		// SAFETY: askJev sends JSON.stringify of one object literal (categorize.ts), so the parsed body is a JSON object.
+		const body = JSON.parse(String(init?.body)) as { [key: string]: Json };
 
 		const answer = await ai.run(
 			modelId,
@@ -76,12 +80,13 @@ type Recorder = {
 	/** The last response body, kept so an unreadable one can be saved. */
 	body?: string;
 	unreadable?: string;
-	usage?: unknown;
+	usage?: Json;
 };
 
-const usageOf = (text: string): unknown => {
+const usageOf = (text: string): Json | undefined => {
 	try {
-		return (JSON.parse(text) as { usage?: unknown }).usage;
+		// SAFETY: JSON.parse returns a JSON value, so `usage`, when the body has one, is a JSON value (or absent).
+		return (JSON.parse(text) as { usage?: Json }).usage;
 	} catch {
 		return undefined;
 	}
@@ -228,7 +233,7 @@ export async function runComparison(
 const isOneOf = <T extends string>(
 	values: readonly T[],
 	value: string,
-): value is T => (values as readonly string[]).includes(value);
+): value is T => values.some((item) => item === value);
 
 export default {
 	async fetch(request: Request, env: CompareEnv): Promise<Response> {

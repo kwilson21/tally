@@ -15,7 +15,11 @@ export function installFeedbackMessageReview(doc?: Document): void;
 export const SAFE_COPY: Readonly<Record<string, string>>;
 
 export function buildSafeScreenshotTree(root: unknown): SafeCaptureNode[];
-export function sanitizeReplayFixture(input: Record<string, unknown>): {
+
+/** A parsed JSON value. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+export function sanitizeReplayFixture(input: { [key: string]: Json }): {
 	route: string;
 	kind: "snapshot" | "click" | "scroll";
 	target?: string;

@@ -57,7 +57,12 @@ export const CANDIDATES = {
 
 export type CandidateKey = keyof typeof CANDIDATES;
 
+// SAFETY: CANDIDATES is one literal object, so Object.keys lists exactly its own keys, each a CandidateKey.
 const KEYS = Object.keys(CANDIDATES) as CandidateKey[];
+
+/** Whether `value` is one of the models `?models=` may name (the same test as KEYS.includes). */
+const isCandidateKey = (value: string): value is CandidateKey =>
+	KEYS.some((key) => key === value);
 
 /** What production allows an answer (suggest-name.ts): the default budget to compare against. */
 const PRODUCTION_TOKENS = 60;
@@ -99,9 +104,11 @@ export function bankTexts(seed: Seed, limit?: number): string[] {
 	const all = [
 		...seed.transactions.map((transaction) => transaction.rawName),
 		...EXTRA_TEXTS,
-	]
-		.map((text) => text.trim())
-		.filter(Boolean);
+	].flatMap((text) => {
+		const trimmed = text.trim();
+
+		return trimmed ? [trimmed] : [];
+	});
 
 	const unique = [...new Set(all)];
 
@@ -119,80 +126,93 @@ export type Reply = {
 	truncated?: boolean;
 };
 
-const nonEmpty = (value: unknown): string | null =>
-	typeof value === "string" && value.trim() ? value : null;
+/** Any JSON value: a model's answer once it has been read from the response. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const isText = (value: Json | undefined): value is string =>
+	typeof value === "string";
+
+/** A JSON object; an array counts too, as it did when fields were read off the answer directly. */
+const isObject = (value: Json | undefined): value is { [key: string]: Json } =>
+	typeof value === "object" && value !== null;
+
+/** A field of a JSON object, or undefined when the value has no fields (a string, a number, null). */
+const fieldOf = (value: Json | undefined, key: string): Json | undefined =>
+	isObject(value) ? value[key] : undefined;
+
+const nonEmpty = (value: Json | undefined): string | null =>
+	isText(value) && value.trim() ? value : null;
 
 /** The answer's text from any of the shapes Workers AI text models return, and how it was shaped. */
-export function replyOf(answer: unknown): Reply {
-	if (typeof answer === "string")
-		return { text: nonEmpty(answer), shape: "response" };
+export function replyOf(answer: Json | ReadableStream): Reply {
+	// A stream has no text to read; askNames never asks for one, so this is only the type's other member.
+	if (answer instanceof ReadableStream) return { text: null, shape: "unknown" };
 
-	if (answer === null || typeof answer !== "object")
-		return { text: null, shape: "unknown" };
-	const body = answer as Record<string, unknown>;
+	if (isText(answer)) return { text: nonEmpty(answer), shape: "response" };
 
-	if (typeof body.response === "string")
-		return { text: nonEmpty(body.response), shape: "response" };
+	if (!isObject(answer)) return { text: null, shape: "unknown" };
 
-	const choice = Array.isArray(body.choices)
-		? (body.choices[0] as Record<string, unknown> | undefined)
-		: undefined;
+	if (isText(answer.response))
+		return { text: nonEmpty(answer.response), shape: "response" };
+
+	const choice = Array.isArray(answer.choices) ? answer.choices[0] : undefined;
 
 	if (choice) {
-		const message = (choice.message ?? {}) as Record<string, unknown>;
-		const text = nonEmpty(message.content);
+		const message = fieldOf(choice, "message");
+		const text = nonEmpty(fieldOf(message, "content"));
 
-		const finish =
-			typeof choice.finish_reason === "string"
-				? choice.finish_reason
-				: undefined;
+		const rawFinish = fieldOf(choice, "finish_reason");
+		const finish = isText(rawFinish) ? rawFinish : undefined;
 
 		const thought =
-			nonEmpty(message.reasoning_content) ?? nonEmpty(message.reasoning);
+			nonEmpty(fieldOf(message, "reasoning_content")) ??
+			nonEmpty(fieldOf(message, "reasoning"));
 
-		return {
-			text,
-			shape: "chat",
-			finish,
-			...(text === null && thought !== null && finish === "length"
-				? { thoughtOnly: true }
-				: {}),
-			...(text !== null && finish === "length" ? { truncated: true } : {}),
-		};
+		const reply: Reply = { text, shape: "chat", finish };
+
+		if (text === null && thought !== null && finish === "length")
+			reply.thoughtOnly = true;
+
+		if (text !== null && finish === "length") reply.truncated = true;
+
+		return reply;
 	}
 
-	if (typeof body.output_text === "string" || Array.isArray(body.output)) {
-		const items = Array.isArray(body.output) ? (body.output as unknown[]) : [];
+	if (isText(answer.output_text) || Array.isArray(answer.output)) {
+		const rawItems = answer.output;
+		const items: Json[] = Array.isArray(rawItems) ? rawItems : [];
 
-		const parts = items
-			.filter((item) => (item as { type?: string })?.type === "message")
-			.flatMap((item) => {
-				const content = (item as { content?: unknown }).content;
+		const parts = items.flatMap((item) => {
+			if (fieldOf(item, "type") !== "message") return [];
 
-				return Array.isArray(content) ? content : [];
-			})
-			.map((part) => nonEmpty((part as { text?: unknown })?.text))
-			.filter((part): part is string => part !== null);
+			const content = fieldOf(item, "content");
 
-		const text = nonEmpty(body.output_text) ?? (parts.join("\n") || null);
+			if (!Array.isArray(content)) return [];
 
-		const incomplete = (
-			body.incomplete_details as { reason?: unknown } | null | undefined
-		)?.reason;
+			return content.flatMap((part) => {
+				const text = nonEmpty(fieldOf(part, "text"));
+
+				return text === null ? [] : [text];
+			});
+		});
+
+		const text = nonEmpty(answer.output_text) ?? (parts.join("\n") || null);
+
+		const incomplete = fieldOf(answer.incomplete_details, "reason");
 
 		const thoughtOnly =
 			text === null &&
 			incomplete === "max_output_tokens" &&
-			items.some((item) => (item as { type?: string })?.type === "reasoning");
+			items.some((item) => fieldOf(item, "type") === "reasoning");
 
-		return {
-			text,
-			shape: "responses",
-			...(thoughtOnly ? { thoughtOnly } : {}),
-			...(text !== null && incomplete === "max_output_tokens"
-				? { truncated: true }
-				: {}),
-		};
+		const reply: Reply = { text, shape: "responses" };
+
+		if (thoughtOnly) reply.thoughtOnly = thoughtOnly;
+
+		if (text !== null && incomplete === "max_output_tokens")
+			reply.truncated = true;
+
+		return reply;
 	}
 
 	return { text: null, shape: "unknown" };
@@ -222,6 +242,8 @@ export async function askNames(
 	const started = Date.now();
 
 	try {
+		// SAFETY: runNamesComparison passes askNames only CANDIDATES ids, which the CANDIDATES test checks are catalog models, so
+		// modelId is typed as a key of AiModels; the `as` only types the string for ai.run. The body is production's request (suggest-name.ts), and no one input type covers every catalog model, so it is `never`.
 		const answer = await ai.run(
 			modelId as keyof AiModels,
 			{
@@ -273,6 +295,12 @@ export type Task = "names" | "notes" | "categories";
 
 const TASKS: Task[] = ["names", "notes", "categories"];
 
+/** Whether `value` is one of the tasks `?task=` may name (the same test as TASKS.includes). */
+const isTask = (value: string): value is Task =>
+	TASKS.some((task) => task === value);
+
+// SAFETY: runNamesComparison passes askOther only CANDIDATES ids, which the CANDIDATES test checks are catalog models, so
+// modelId is a key of AiModels; the object has only `run`, the one member suggestNote and suggestCategoryName call (src/ai/suggest-name.ts).
 /**
  * An Ai that asks `modelId` wherever production's code asks for NAME_MODEL, so production's own note and
  * category-name functions run unchanged (their prompts are not copied here) against a candidate.
@@ -281,7 +309,7 @@ const withModel = (ai: Ai, modelId: string): Ai =>
 	({
 		run: (_model: string, body: never, options?: never) =>
 			ai.run(modelId as keyof AiModels, body, options),
-	}) as unknown as Ai;
+	}) as Ai;
 
 /**
  * One model, one bank text, through production's note prompt (suggestNote) or its per-purchase category-name
@@ -349,16 +377,17 @@ export async function runNamesComparison(
 	slice: Slice = {},
 	today: string = todayIn(DEFAULT_TIME_ZONE),
 ): Promise<string> {
-	const keys = slice.models ?? KEYS;
-	const unknown = keys.filter((key) => !KEYS.includes(key as CandidateKey));
+	const chosen: string[] = slice.models ?? KEYS;
+	const unknown = chosen.filter((key) => !isCandidateKey(key));
 
 	if (unknown.length > 0)
 		throw new Error(
 			`Unknown model ${unknown.join(", ")}. Choose from ${KEYS.join(", ")}.`,
 		);
-	const task = slice.task ?? "names";
+	const keys = chosen.filter(isCandidateKey);
+	const task: string = slice.task ?? "names";
 
-	if (!TASKS.includes(task as Task))
+	if (!isTask(task))
 		throw new Error(`Unknown task ${task}. Choose from ${TASKS.join(", ")}.`);
 	const tokens = slice.tokens ?? PRODUCTION_TOKENS;
 	const seed = buildSeed(today);
@@ -366,20 +395,14 @@ export async function runNamesComparison(
 	const categories = demoCategories(seed);
 	const models: ReportModel[] = [];
 
-	for (const key of keys as CandidateKey[]) {
+	for (const key of keys) {
 		const results: NameResult[] = [];
 
 		for (const text of texts) {
 			results.push(
 				task === "names"
 					? await askNames(env.AI, CANDIDATES[key].id, text, tokens)
-					: await askOther(
-							task as Exclude<Task, "names">,
-							env.AI,
-							CANDIDATES[key].id,
-							text,
-							categories,
-						),
+					: await askOther(task, env.AI, CANDIDATES[key].id, text, categories),
 			);
 		}
 
@@ -387,7 +410,7 @@ export async function runNamesComparison(
 		models.push({ key, results });
 	}
 
-	return formatNamesReport({ today, tokens, models, task: task as Task });
+	return formatNamesReport({ today, tokens, models, task });
 }
 
 export type ReportModel = { key: string; results: NameResult[] };
@@ -428,11 +451,12 @@ function show(result: NameResult | undefined): string {
 
 /** The summary table, then every bank text with each model's names beside it. */
 export function formatNamesReport(input: ReportInput): string {
-	const label = (key: string) =>
-		(CANDIDATES as Record<string, { label: string }>)[key]?.label ?? key;
+	const candidateOf = (key: string) =>
+		isCandidateKey(key) ? CANDIDATES[key] : undefined;
 
-	const idOf = (key: string) =>
-		(CANDIDATES as Record<string, { id: string }>)[key]?.id ?? key;
+	const label = (key: string) => candidateOf(key)?.label ?? key;
+
+	const idOf = (key: string) => candidateOf(key)?.id ?? key;
 
 	const lines = [
 		HEADINGS[input.task ?? "names"],

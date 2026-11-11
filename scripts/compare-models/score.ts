@@ -275,9 +275,9 @@ export function summarize(rows: Row[]): Summary {
 	const flagOutcomes = answered.flatMap((a) => Object.values(a.flags));
 	const confidences = answered.map((a) => a.confidence);
 
-	const times = rows
-		.filter((r) => r.outcome !== SKIPPED_OUTCOME)
-		.map((r) => r.ms);
+	const times = rows.flatMap((r) =>
+		r.outcome !== SKIPPED_OUTCOME ? [r.ms] : [],
+	);
 
 	return {
 		worked: answered.length,
