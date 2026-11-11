@@ -1,13 +1,50 @@
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
+import { present } from "../test/helpers/present";
 
 const source = await readFile(
 	new URL("../public/js/feedback-diagnostics.js", import.meta.url),
 	"utf8",
 );
 
-function runClient({ preview = false, previewValue = null } = {}) {
+/** A preview the module stored earlier: its image and when it was taken. */
+type StoredPreview = { image: string; at: number };
+
+type ClientOptions = { preview?: boolean; previewValue?: StoredPreview | null };
+
+/** A form field as the module reads it: a text value, or a checkbox state. */
+type FieldState = { value?: string; checked?: boolean };
+
+/** The event a handler receives; a window error event carries the thrown error. */
+type BrowserEvent = { error?: { name: string } };
+
+type Handler = (event?: BrowserEvent) => void;
+
+/** The part of a created element the module touches: its children, the href it sets, and the methods it calls. */
+type ElementStub = {
+	tag: string;
+	children: ElementStub[];
+	href?: string;
+	style: { cssText: string };
+	setAttribute(): void;
+	append(...children: ElementStub[]): void;
+	addEventListener(): void;
+	remove(): void;
+};
+
+/** The feedback form as the module reads it, plus the preview it prepends. */
+type FormStub = {
+	querySelector(selector: string): FieldState | null | undefined;
+	addEventListener(name: string, handler: Handler): void;
+	prepend(node: ElementStub): void;
+	preview?: ElementStub;
+};
+
+function runClient({
+	preview = false,
+	previewValue = null,
+}: ClientOptions = {}) {
 	const moduleSource = source
 		.replace(/^import[\s\S]*?;\s*/, "")
 		.replace(
@@ -15,37 +52,40 @@ function runClient({ preview = false, previewValue = null } = {}) {
 			`const screenshotEnabled = ${preview};`,
 		);
 
-	const fields: Record<string, { value?: string; checked?: boolean }> = {
+	const fields = {
 		from: { value: "/source" },
 		return_to: { value: "/source?adjust=1" },
 		client_context: { value: "stale technical details" },
 		include_diagnostics: { checked: false },
-	};
+	} satisfies Record<string, FieldState>;
 
-	const formHandlers: Record<string, (event?: unknown) => void> = {};
-	const windowHandlers: Record<string, (event?: unknown) => void> = {};
+	const fieldNamed = (name: string): FieldState | undefined =>
+		Object.entries(fields).find(([key]) => key === name)?.[1];
 
-	const form: Record<string, unknown> = {
+	const formHandlers: Record<string, Handler> = {};
+	const windowHandlers: Record<string, Handler> = {};
+
+	const form: FormStub = {
 		querySelector(selector: string) {
 			const name = selector.match(/name="([^"]+)"/)?.[1];
 
-			return name ? fields[name] : null;
+			return name ? fieldNamed(name) : null;
 		},
-		addEventListener(name: string, handler: (event?: unknown) => void) {
+		addEventListener(name: string, handler: Handler) {
 			formHandlers[name] = handler;
 		},
-		prepend(node: Record<string, unknown>) {
+		prepend(node: ElementStub) {
 			this.preview = node;
 		},
 	};
 
-	function element(tag: string) {
+	function element(tag: string): ElementStub {
 		return {
 			tag,
-			children: [] as Record<string, unknown>[],
+			children: [],
 			style: { cssText: "" },
 			setAttribute() {},
-			append(...children: Record<string, unknown>[]) {
+			append(...children: ElementStub[]) {
 				this.children.push(...children);
 			},
 			addEventListener() {},
@@ -73,7 +113,7 @@ function runClient({ preview = false, previewValue = null } = {}) {
 	};
 
 	const window = {
-		addEventListener(name: string, handler: (event?: unknown) => void) {
+		addEventListener(name: string, handler: Handler) {
 			windowHandlers[name] = handler;
 		},
 		html2canvas: async () => ({
@@ -123,9 +163,7 @@ describe("feedback diagnostics browser behavior", () => {
 			},
 		});
 
-		const preview = f.form.preview as {
-			children: { tag: string; href?: string }[];
-		};
+		const preview = present(f.form.preview);
 
 		const retake = preview.children.find((child) => child.tag === "a");
 		expect(retake?.href).toBe("/source?adjust=1");

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
 import { fileFeedbackIssue } from "../src/routes/feedback";
+import { envOnly, fakeFetch } from "../test/helpers/doubles";
 
 vi.mock("../src/access", () => ({
 	verifiedAccessIdentity: async () => ({
@@ -37,7 +38,7 @@ app.get("/__feedback-fragment-fixture", (c) =>
 );
 
 function bindings(flags: Record<string, string> = {}) {
-	return { DEMO: "false", ...flags } as Env;
+	return envOnly({ DEMO: "false", ...flags });
 }
 
 describe("actual app diagnostics middleware", () => {
@@ -132,7 +133,8 @@ function fakeDb() {
 		},
 	};
 
-	return { db: db as unknown as D1Database, binds, statements };
+	// SAFETY: the tests here set no FEEDBACK_GITHUB_TOKEN, so the routes reach only prepare, bind and run on this stub, and it supplies those three.
+	return { db: db as D1Database, binds, statements };
 }
 
 describe("feedback route privacy", () => {
@@ -219,11 +221,11 @@ describe("feedback route privacy", () => {
 				replay_url: "https://replay.example/replay/private-session",
 				attempts: 0,
 			},
-			(async (_url, init) => {
+			fakeFetch(async (_url, init) => {
 				body = String(init?.body);
 
 				return new Response(JSON.stringify({ number: 2 }), { status: 201 });
-			}) as typeof fetch,
+			}),
 		);
 
 		for (const secret of [
@@ -328,11 +330,11 @@ describe("feedback route privacy", () => {
 				page: "/transactions?q=SECRET-merchant#SECRET-note",
 				device: "Fixture",
 			},
-			(async (_url, init) => {
+			fakeFetch(async (_url, init) => {
 				body = String(init?.body);
 
 				return new Response(JSON.stringify({ number: 1 }), { status: 201 });
-			}) as typeof fetch,
+			}),
 		);
 		expect(body).toContain("transactions");
 		expect(body).not.toContain("SECRET");

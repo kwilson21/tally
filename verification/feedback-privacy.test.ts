@@ -152,7 +152,10 @@ describe("cleaned-message confirmation", () => {
 			createElement: () => ({ textContent: "" }),
 		};
 
-		installFeedbackMessageReview(doc as never);
+		// SAFETY: installFeedbackMessageReview reads only doc.querySelector and doc.createElement, and the stub above supplies both.
+		installFeedbackMessageReview(
+			doc as Parameters<typeof installFeedbackMessageReview>[0],
+		);
 		let prevented = false;
 		listeners.get("submit")?.({
 			preventDefault: () => {

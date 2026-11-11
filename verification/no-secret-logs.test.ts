@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseAst } from "vitest/node";
+import { itemAt } from "../test/helpers/present";
 
 // The rule (CLAUDE.md): never log tokens or transaction details. A log line is fixed words and, at most, an error's name,
 // a count or an id the person already sees. This parses every file of the app's own code (src, and the scripts under public
@@ -23,8 +24,9 @@ function appFiles(): { file: string; text: string }[] {
 		["public", /\.js$/],
 	] as const) {
 		for (const entry of readdirSync(path.join(ROOT, dir), {
+			encoding: "utf8",
 			recursive: true,
-		}) as string[]) {
+		})) {
 			const parts = entry.split(path.sep);
 
 			// The vendored libraries (htmx, html2canvas) are not ours to audit.
@@ -118,17 +120,43 @@ const RECORD_NAMES = new Set([
 	"results",
 ]);
 
+/** What an AST field holds: a child node, a list of them, or a leaf value. */
+type Field =
+	| Node
+	| Field[]
+	| string
+	| number
+	| boolean
+	| bigint
+	| RegExp
+	| null
+	| undefined;
+
 type Node = {
 	type: string;
 	start: number;
 	end: number;
-	[key: string]: unknown;
+	[key: string]: Field;
 };
 
-const isNode = (value: unknown): value is Node =>
+/** The root of a parsed file: the syntax tree the parser returns. */
+type Parsed = ReturnType<typeof parseAst>;
+
+const isNode = (value: Field | Parsed): value is Node =>
 	typeof value === "object" &&
 	value !== null &&
-	typeof (value as Node).type === "string";
+	"type" in value &&
+	typeof value.type === "string";
+
+/** A string leaf. This is the one place the file checks a value's type at run time. */
+function isText(value: Field): value is string {
+	return typeof value === "string";
+}
+
+/** The child nodes in a list field; holes and leaves in the list are skipped. */
+function nodesOf(value: Field): Node[] {
+	return Array.isArray(value) ? value.filter(isNode) : [];
+}
 
 /** The direct child nodes of a node. */
 function children(node: Node): Node[] {
@@ -151,7 +179,7 @@ function* descendants(node: Node): Generator<Node> {
 	for (const child of children(node)) yield* descendants(child);
 }
 
-const name = (node: unknown): string | null =>
+const name = (node: Field): string | null =>
 	isNode(node) && node.type === "Identifier" ? String(node.name) : null;
 
 /** The name a property is reached by: `.x`, or `["x"]` with a quoted name. */
@@ -162,7 +190,7 @@ function propertyName(member: Node): string | null {
 
 	return isNode(property) &&
 		property.type === "Literal" &&
-		typeof property.value === "string"
+		isText(property.value)
 		? property.value
 		: null;
 }
@@ -231,8 +259,7 @@ function wholeError(node: Node): boolean {
 
 	if (node.type === "CallExpression")
 		return (
-			name(node.callee) === "String" &&
-			(node.arguments as Node[]).some(wholeError)
+			name(node.callee) === "String" && nodesOf(node.arguments).some(wholeError)
 		);
 
 	return false;
@@ -243,33 +270,34 @@ function wholeError(node: Node): boolean {
  * template parts, spread arguments, the branches of a condition, either side of `&&`/`||`/`??`, and a cast or
  * `await` around a value all carry the value through to the log.
  */
-function* valuesOf(node: Node): Generator<Node> {
+function* valuesOf(node: Field): Generator<Node> {
+	if (!isNode(node)) return;
+
 	switch (node.type) {
 		case "ArrayExpression":
-			for (const element of node.elements as unknown[])
-				if (isNode(element)) yield* valuesOf(element);
+			for (const element of nodesOf(node.elements)) yield* valuesOf(element);
 
 			return;
 		case "ObjectExpression":
-			for (const property of node.properties as Node[]) {
+			for (const property of nodesOf(node.properties)) {
 				if (property.type === "SpreadElement")
-					yield* valuesOf(property.argument as Node);
-				else if (isNode(property.value)) yield* valuesOf(property.value);
+					yield* valuesOf(property.argument);
+				else yield* valuesOf(property.value);
 			}
 
 			return;
 		case "TemplateLiteral":
-			for (const part of node.expressions as Node[]) yield* valuesOf(part);
+			for (const part of nodesOf(node.expressions)) yield* valuesOf(part);
 
 			return;
 		case "ConditionalExpression":
-			yield* valuesOf(node.consequent as Node);
-			yield* valuesOf(node.alternate as Node);
+			yield* valuesOf(node.consequent);
+			yield* valuesOf(node.alternate);
 
 			return;
 		case "LogicalExpression":
-			yield* valuesOf(node.left as Node);
-			yield* valuesOf(node.right as Node);
+			yield* valuesOf(node.left);
+			yield* valuesOf(node.right);
 
 			return;
 		case "SpreadElement":
@@ -278,7 +306,7 @@ function* valuesOf(node: Node): Generator<Node> {
 		case "TSAsExpression":
 		case "TSNonNullExpression":
 		case "TSSatisfiesExpression":
-			yield* valuesOf((node.argument ?? node.expression) as Node);
+			yield* valuesOf(node.argument ?? node.expression);
 
 			return;
 		default:
@@ -348,11 +376,15 @@ function auditSource(file: string, text: string): Finding[] {
 			? "js"
 			: "ts";
 
-	const program = parseAst(text, { lang }) as unknown as Node;
-	const wrappers = WRAPPERS.filter((w) => file === w.file).map((w) => w.name);
+	const parsed = parseAst(text, { lang });
+
+	if (!isNode(parsed))
+		throw new Error(`${file}: the parser returned no syntax tree`);
+
+	const wrappers = WRAPPERS.flatMap((w) => (file === w.file ? [w.name] : []));
 	const findings: Finding[] = [];
 
-	for (const node of descendants(program)) {
+	for (const node of descendants(parsed)) {
 		if (node.type !== "CallExpression" || !isNode(node.callee)) continue;
 		const callee = node.callee;
 
@@ -367,7 +399,7 @@ function auditSource(file: string, text: string): Finding[] {
 
 		const problems = [
 			...new Set(
-				(node.arguments as Node[]).flatMap((argument) =>
+				nodesOf(node.arguments).flatMap((argument) =>
 					argumentProblems(argument),
 				),
 			),
@@ -487,7 +519,7 @@ describe("the check itself", () => {
 	});
 
 	it("excuses a call only when it appears exactly once", () => {
-		const call = EXCEPTIONS[0] as (typeof EXCEPTIONS)[number];
+		const call = itemAt(EXCEPTIONS, 0);
 
 		const findings = [
 			{ where: "a:1", file: call.file, call: call.call, problems: call.allows },
