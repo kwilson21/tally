@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
+import { envWith } from "./helpers/doubles";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -15,24 +16,22 @@ const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const apple = (day: string) =>
 	`${day.slice(5, 7)}/${day.slice(8, 10)}/${day.slice(0, 4)}`;
 
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 
 const PLAID_LINK_SCRIPT =
 	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
 
-const plaidBindings = {
-	...family,
+const plaidBindings = envWith(family, {
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-} as unknown as Env;
+});
 
-const noPlaid = {
-	...family,
+const noPlaid = envWith(family, {
 	PLAID_CLIENT_ID: undefined,
 	PLAID_SECRET: undefined,
-} as unknown as Env;
+});
 
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 
@@ -108,11 +107,11 @@ async function post(
 	bindings: Env = family,
 	htmx = true,
 ) {
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		"content-type": "application/x-www-form-urlencoded",
-	};
+	});
 
-	if (htmx) headers["HX-Request"] = "true";
+	if (htmx) headers.set("HX-Request", "true");
 
 	const res = await app.request(
 		path,
@@ -122,6 +121,36 @@ async function post(
 	);
 
 	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
+}
+
+/** Whether `prop` is a member of the D1 binding, so a Proxy over it may read it. */
+function isD1Member(
+	target: D1Database,
+	prop: string | symbol,
+): prop is keyof D1Database {
+	return prop in target;
+}
+
+/** Whether a D1 member is a function, so a Proxy can bind it to the real database. */
+function isFunction<Value>(
+	value: Value,
+): value is Extract<Value, CallableFunction> {
+	return typeof value === "function";
+}
+
+/** A member of the D1 binding: each one is a method, bound to the real database by d1Member. */
+type D1Member = D1Database[keyof D1Database];
+
+/** The real D1 member `prop`, with a function bound to the real database; undefined when there is none. */
+function d1Member(
+	target: D1Database,
+	prop: string | symbol,
+): D1Member | undefined {
+	if (!isD1Member(target, prop)) return undefined;
+
+	const value = target[prop];
+
+	return isFunction(value) ? value.bind(target) : value;
 }
 
 /** A database whose batch first runs `before`, as another tab does between this request's read and its batch. */
@@ -135,9 +164,7 @@ function racedDb(before: string): D1Database {
 					return target.batch(statements);
 				};
 
-			const value = Reflect.get(target, prop, target);
-
-			return typeof value === "function" ? value.bind(target) : value;
+			return d1Member(target, prop);
 		},
 	});
 }
@@ -267,10 +294,11 @@ describe("Remove Apple Card (#766)", () => {
 	it("says it's already removed when another tab keeps the card between this request's read and its batch, and changes nothing", async () => {
 		const history = await cardHistoryCount();
 
-		const { res } = await post("/accounts/apple-card/remove", "", {
-			...family,
-			DB: racedDb(OTHER_TAB_KEEPS),
-		} as unknown as Env);
+		const { res } = await post(
+			"/accounts/apple-card/remove",
+			"",
+			envWith(family, { DB: racedDb(OTHER_TAB_KEEPS) }),
+		);
 
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Apple Card is already removed.",
@@ -290,10 +318,11 @@ describe("Remove Apple Card (#766)", () => {
 	it("says it's already removed when another tab keeps the card while this request deletes it, and deletes nothing", async () => {
 		const history = await cardHistoryCount();
 
-		const { res } = await post("/accounts/apple-card/remove", "delete=yes", {
-			...family,
-			DB: racedDb(OTHER_TAB_KEEPS),
-		} as unknown as Env);
+		const { res } = await post(
+			"/accounts/apple-card/remove",
+			"delete=yes",
+			envWith(family, { DB: racedDb(OTHER_TAB_KEEPS) }),
+		);
 
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Apple Card is already removed.",
@@ -315,16 +344,15 @@ describe("Remove Apple Card (#766)", () => {
 						return target.batch(statements);
 					};
 
-				const value = Reflect.get(target, prop, target);
-
-				return typeof value === "function" ? value.bind(target) : value;
+				return d1Member(target, prop);
 			},
 		});
 
-		const { res } = await post("/accounts/apple-card/remove", "delete=yes", {
-			...family,
-			DB: deleted,
-		} as unknown as Env);
+		const { res } = await post(
+			"/accounts/apple-card/remove",
+			"delete=yes",
+			envWith(family, { DB: deleted }),
+		);
 
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
@@ -392,11 +420,11 @@ describe("Remove Apple Card (#766)", () => {
 	});
 
 	it("works without Plaid: the remove isn't gated on Plaid's enabled()", async () => {
-		const res = await app.request("/accounts/apple-card/remove", {}, {
-			...family,
-			PLAID_CLIENT_ID: undefined,
-			PLAID_SECRET: undefined,
-		} as unknown as Env);
+		const res = await app.request(
+			"/accounts/apple-card/remove",
+			{},
+			envWith(family, { PLAID_CLIENT_ID: undefined, PLAID_SECRET: undefined }),
+		);
 
 		expect(res.status).toBe(200);
 	});
@@ -431,16 +459,16 @@ describe("Remove Apple Card (#766)", () => {
 			get(target, prop) {
 				if (prop === "batch")
 					return () => Promise.reject(new Error("D1 is down"));
-				const value = Reflect.get(target, prop, target);
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return d1Member(target, prop);
 			},
 		});
 
-		const { res, html } = await post("/accounts/apple-card/remove", "", {
-			...plaidBindings,
-			DB: failingDb,
-		} as unknown as Env);
+		const { res, html } = await post(
+			"/accounts/apple-card/remove",
+			"",
+			envWith(plaidBindings, { DB: failingDb }),
+		);
 
 		expect(res.status).toBe(502);
 		expect(html).toContain("Couldn't remove Apple Card. Try again.");
@@ -468,9 +496,7 @@ describe("Remove Apple Card (#766)", () => {
 						return target.prepare(sql);
 					};
 
-				const value = Reflect.get(target, prop, target);
-
-				return typeof value === "function" ? value.bind(target) : value;
+				return d1Member(target, prop);
 			},
 		});
 
@@ -479,7 +505,7 @@ describe("Remove Apple Card (#766)", () => {
 		const { res, html } = await post(
 			"/accounts/apple-card/remove",
 			"delete=yes",
-			{ ...family, DB: downAfterBatch } as unknown as Env,
+			envWith(family, { DB: downAfterBatch }),
 		);
 
 		expect(res.status).toBe(502);

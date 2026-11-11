@@ -10,6 +10,7 @@ import { resetDemo } from "../src/demo/reset";
 import {
 	type AskResult,
 	nextWait,
+	type SortOptions,
 	type StepRunner,
 	sortGroups,
 } from "../src/sort-groups";
@@ -67,6 +68,15 @@ async function addWaiting(n: number): Promise<number[]> {
 	}
 
 	return ids;
+}
+
+/** The id of the `index`th row a test inserted. The row exists, so a missing one is a broken test. */
+function idAt(ids: readonly number[], index: number): number {
+	const id = ids[index];
+
+	if (id === undefined) throw new Error(`no inserted row at index ${index}`);
+
+	return id;
 }
 
 const categoryOf = async (id: number) =>
@@ -187,7 +197,7 @@ describe("sortGroups with a fake step runner", () => {
 		expect(asks).toHaveLength(1);
 		expect(asks[0]?.attempts).toBe(1);
 		expect(done.asked).toBe(1);
-		expect(await categoryOf(ids[0] as number)).toBeNull();
+		expect(await categoryOf(idAt(ids, 0))).toBeNull();
 	});
 
 	it("an ask step at attempt 2 makes no Jev call and gives the row no failure mark", async () => {
@@ -214,7 +224,7 @@ describe("sortGroups with a fake step runner", () => {
 			.first<{ f: string | null }>();
 
 		expect(failed?.f).toBeNull();
-		expect(await categoryOf(ids[1] as number)).toBeNull();
+		expect(await categoryOf(idAt(ids, 1))).toBeNull();
 	});
 
 	it("replaying the same step results makes no Jev call and writes nothing again", async () => {
@@ -266,7 +276,7 @@ describe("sortGroups with a fake step runner", () => {
 			runId: "run-18",
 		});
 
-		for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+		for (const id of ids) expect(await categoryOf(id)).toBeNull();
 
 		const logged = await db
 			.prepare(
@@ -488,9 +498,9 @@ describe("sortGroups with a fake step runner", () => {
 
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		expect(done.asked).toBe(2);
-		expect(await categoryOf(ids[2] as number)).not.toBeNull();
-		expect(await categoryOf(ids[1] as number)).toBeNull();
-		expect(await categoryOf(ids[0] as number)).toBeNull();
+		expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+		expect(await categoryOf(idAt(ids, 1))).toBeNull();
+		expect(await categoryOf(idAt(ids, 0))).toBeNull();
 		// Three calls were reserved and two were used (one answer, one lost), so one is given back.
 		expect(await callsUsed()).toBe(2);
 		expect(await turnRow()).toBeNull();
@@ -741,7 +751,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(attemptsOf(fake, "group-1-write")).toBe(3);
 
-		for (const id of ids) expect(await categoryOf(id as number)).not.toBeNull();
+		for (const id of ids) expect(await categoryOf(id)).not.toBeNull();
 		expect(await logged(ids)).toBe(3);
 		expect(await callsUsed()).toBe(3);
 		expect(await recordOf("run-again:1")).toBeNull();
@@ -809,7 +819,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			expect(fake.names()).not.toContain("group-2-read");
 			expect(await logged(ids)).toBe(0);
 
-			for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+			for (const id of ids) expect(await categoryOf(id)).toBeNull();
 			// The save never gave the calls back, so they stay counted for the day (decision 143).
 			expect(await callsUsed()).toBe(3);
 			// Each failed batch rolled its take back, so the turn is as the read left it.
@@ -862,7 +872,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				},
 			});
 
-			const runStep = (async (name, config, fn) =>
+			const runStep: StepRunner = async (name, config, fn) =>
 				fake.runStep(name, config, async (ctx) => {
 					const result = await fn(ctx);
 
@@ -871,7 +881,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 						afterFirstSave = await detailsOf(ids);
 
 					return result;
-				})) as StepRunner;
+				});
 
 			await sortGroups(
 				withKey,
@@ -902,7 +912,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
 
-		const runStep = (async (name, config, fn) => {
+		const runStep: StepRunner = async (name, config, fn) => {
 			const result = await fake.runStep(name, config, fn);
 
 			if (name === "group-1-write") {
@@ -917,7 +927,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			}
 
 			return result;
-		}) as StepRunner;
+		};
 
 		await expect(
 			sortGroups(
@@ -1015,7 +1025,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			expect(await takeSortingTurn(db, "other:1")).toBe(true);
 			expect(await logged(ids)).toBe(0);
 
-			for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+			for (const id of ids) expect(await categoryOf(id)).toBeNull();
 		} finally {
 			await db.prepare("DROP TRIGGER fail_log").run();
 		}
@@ -1024,13 +1034,15 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 	it("a person's category set between a failed save and its next try wins", async () => {
 		const ids = await addWaiting(3);
 
-		const personal = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order DESC LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const personalRow = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order DESC LIMIT 1",
+			)
+			.first<{ id: number }>();
+
+		if (!personalRow) throw new Error("the household has no active category");
+
+		const personal = personalRow.id;
 
 		const fake = fakeSteps({
 			throws: { "group-1-write": 1 },
@@ -1055,8 +1067,8 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			},
 		);
 
-		expect(await categoryOf(ids[1] as number)).toBe(personal);
-		expect(await logged([ids[1] as number])).toBe(0);
+		expect(await categoryOf(idAt(ids, 1))).toBe(personal);
+		expect(await logged([idAt(ids, 1)])).toBe(0);
 		expect(done.asked).toBe(3);
 	});
 
@@ -1207,7 +1219,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		"a row whose %s changed after the read keeps no answer, and the rest of the group is saved",
 		async (_label, sql, before) => {
 			const ids = await addWaiting(3);
-			const target = ids[1] as number;
+			const target = idAt(ids, 1);
 
 			if (before) await changeRow(before, target);
 
@@ -1232,8 +1244,8 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			expect(fetchImpl).toHaveBeenCalledTimes(3);
 			expect(await categoryOf(target)).toBeNull();
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(ids[0] as number)).not.toBeNull();
-			expect(await categoryOf(ids[2] as number)).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
 			expect(done).toEqual({ asked: 3, applied: 2 });
 			expect(await callsUsed()).toBe(3);
 		},
@@ -1241,7 +1253,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 
 	it("a credit a person reviewed, asked only for its category, keeps no answer once its note changed", async () => {
 		const ids = await addWaiting(3);
-		const credit = ids[2] as number;
+		const credit = idAt(ids, 2);
 		await changeRow(
 			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 			credit,
@@ -1274,19 +1286,23 @@ describe("a changed row keeps no answer (decision 143)", () => {
 	});
 
 	it("a split part keeps no answer once its parent's own name changed", async () => {
-		const parent = (await db
+		const parent = await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, is_split, own_name) VALUES (1, ?, -1000, 'SPLIT STEP PARENT', 1, 'Parent name') RETURNING id",
 			)
 			.bind(TODAY)
-			.first<{ id: number }>()) as { id: number };
+			.first<{ id: number }>();
 
-		const part = (await db
+		if (!parent) throw new Error("the parent insert returned no row");
+
+		const part = await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, ?, -400, 'SPLIT STEP PARENT', ?) RETURNING id",
 			)
 			.bind(TODAY, parent.id)
-			.first<{ id: number }>()) as { id: number };
+			.first<{ id: number }>();
+
+		if (!part) throw new Error("the part insert returned no row");
 
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
@@ -1312,7 +1328,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 	it("a row whose kind changed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = ids[1] as number;
+		const target = idAt(ids, 1);
 
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
@@ -1344,14 +1360,14 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			)?.d;
 
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a row whose person was renamed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = ids[1] as number;
+		const target = idAt(ids, 1);
 		await changeRow(
 			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
 			target,
@@ -1386,14 +1402,14 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			)?.d;
 
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a row whose account type changed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = ids[1] as number;
+		const target = idAt(ids, 1);
 		await changeRow(
 			"UPDATE transactions SET account_id = 2 WHERE id = ?",
 			target,
@@ -1426,7 +1442,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			)?.d;
 
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
@@ -1434,20 +1450,19 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
 
-		const runStep = (async (name, config, fn) =>
+		const runStep: StepRunner = async (name, config, fn) =>
 			fake.runStep(name, config, async (ctx) => {
 				const result = await fn(ctx);
 
-				const read = result as unknown as {
-					kind?: string;
-					plan?: { rows: { seen?: unknown }[] };
-				};
-
-				if (name === "group-1-read" && read.kind === "group")
-					for (const row of read.plan?.rows ?? []) delete row.seen;
+				if (
+					name === "group-1-read" &&
+					isGroupRead(result) &&
+					result.kind === "group"
+				)
+					for (const row of result.plan?.rows ?? []) delete row.seen;
 
 				return result;
-			})) as StepRunner;
+			});
 
 		const done = await sortGroups(
 			withKey,
@@ -1469,20 +1484,19 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
 
-		const runStep = (async (name, config, fn) =>
+		const runStep: StepRunner = async (name, config, fn) =>
 			fake.runStep(name, config, async (ctx) => {
 				const result = await fn(ctx);
 
-				const read = result as unknown as {
-					kind?: string;
-					plan?: { rows: { seen?: unknown }[] };
-				};
-
-				if (name === "group-1-read" && read.kind === "group")
-					for (const row of read.plan?.rows ?? []) delete row.seen;
+				if (
+					name === "group-1-read" &&
+					isGroupRead(result) &&
+					result.kind === "group"
+				)
+					for (const row of result.plan?.rows ?? []) delete row.seen;
 
 				return result;
-			})) as StepRunner;
+			});
 
 		await sortGroups(
 			withKey,
@@ -1529,32 +1543,43 @@ describe("a changed row keeps no answer (decision 143)", () => {
 	});
 });
 
+/** A group read's result, as the tests look at it: its kind, and the plan's rows whose seen fields a test drops. */
+type GroupRead = { kind?: string; plan?: { rows: { seen?: unknown }[] } };
+
+/** Whether a step's result is an object, so the test can read its fields. */
+function isGroupRead(value: unknown): value is GroupRead {
+	return typeof value === "object" && value !== null;
+}
+
 type Answer = { choice: string; confidence: number; also?: string };
 
 /** A Jev reply with a category answer, and the other category it names when `also` is given (the mixed trip, #233). */
-const answerReply = ({ choice, confidence, also }: Answer) =>
-	new Response(
-		JSON.stringify({
-			answers: {
-				category: { type: "choice", choice, confidence },
-				...(also
-					? {
-							mixed: { type: "noul", noul: 0.9 },
-							also_category: { type: "choice", choice: also, confidence: 0.9 },
-						}
-					: {}),
-				transfer: { type: "noul", noul: 0.01 },
-				reimbursement: { type: "noul", noul: 0.01 },
-				income: { type: "noul", noul: 0.01 },
-			},
-		}),
-		{ status: 200 },
-	);
+const answerReply = ({ choice, confidence, also }: Answer) => {
+	const category = { type: "choice", choice, confidence };
+
+	const flags = {
+		transfer: { type: "noul", noul: 0.01 },
+		reimbursement: { type: "noul", noul: 0.01 },
+		income: { type: "noul", noul: 0.01 },
+	};
+
+	const answers = also
+		? {
+				category,
+				mixed: { type: "noul", noul: 0.9 },
+				also_category: { type: "choice", choice: also, confidence: 0.9 },
+				...flags,
+			}
+		: { category, ...flags };
+
+	return new Response(JSON.stringify({ answers }), { status: 200 });
+};
 
 describe("a category archived or removed since the read keeps no answer (decision 143)", () => {
 	/** Jev's answer for the row whose bank text is `bank`, and `others` for every other row. */
 	const perRow = (bank: string, answer: Answer, others: Answer) =>
 		vi.fn(async (_url: string, init?: RequestInit) => {
+			// SAFETY: sortGroups sends Jev each row's state as JSON, and that state always carries bank_description.
 			const sent = JSON.parse(String(init?.body)) as {
 				state: { bank_description: string };
 			};
@@ -1599,7 +1624,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 		"a row whose answer names %s, archived between the read and the save, keeps no answer and no log row, and the rest of the group is saved",
 		async (_label, answer, archived) => {
 			const ids = await addWaiting(3);
-			const target = ids[1] as number;
+			const target = idAt(ids, 1);
 
 			const fake = fakeSteps({
 				beforeAttempt: async (name, attempt) => {
@@ -1625,9 +1650,9 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				confidence: null,
 			});
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(ids[0] as number)).not.toBeNull();
-			expect(await categoryOf(ids[2] as number)).not.toBeNull();
-			expect(await logged([ids[0] as number, ids[2] as number])).toBe(2);
+			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+			expect(await logged([idAt(ids, 0), idAt(ids, 2)])).toBe(2);
 			expect(await callsUsed()).toBe(3);
 		},
 	);
@@ -1649,7 +1674,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 		async (_label, answer) => {
 			expect((await makeCategory(db, { name: PROBE })).ok).toBe(true);
 			const ids = await addWaiting(3);
-			const target = ids[1] as number;
+			const target = idAt(ids, 1);
 
 			// Two tries at most: before the fix the batch fails on the removed category's foreign key every time.
 			const fake = fakeSteps({
@@ -1678,16 +1703,16 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				confidence: null,
 			});
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(ids[0] as number)).not.toBeNull();
-			expect(await categoryOf(ids[2] as number)).not.toBeNull();
-			expect(await logged([ids[0] as number, ids[2] as number])).toBe(2);
+			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+			expect(await logged([idAt(ids, 0), idAt(ids, 2)])).toBe(2);
 			expect(await callsUsed()).toBe(3);
 		},
 	);
 
 	it("a credit asked only for its category keeps no answer when its category was archived since the read", async () => {
 		const ids = await addWaiting(3);
-		const credit = ids[2] as number;
+		const credit = idAt(ids, 2);
 		await changeRow(
 			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 			credit,
@@ -1743,7 +1768,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 
 		expect(done).toEqual({ asked: 3, applied: 3 });
 
-		for (const id of ids) expect(await categoryOf(id as number)).not.toBeNull();
+		for (const id of ids) expect(await categoryOf(id)).not.toBeNull();
 		expect(await logged(ids)).toBe(3);
 	});
 });
@@ -1824,14 +1849,25 @@ describe("nextWait: when a busy Jev is asked again (decision 145)", () => {
 		answer: ANSWER,
 	});
 
-	const failed = (status: number | null, retryAfterMs?: number): AskResult => ({
-		id: 99,
-		outcome: "failed",
-		status,
-		requestId: null,
-		serviceWide: true,
-		...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-	});
+	const failed = (status: number | null, retryAfterMs?: number): AskResult => {
+		if (retryAfterMs === undefined)
+			return {
+				id: 99,
+				outcome: "failed",
+				status,
+				requestId: null,
+				serviceWide: true,
+			};
+
+		return {
+			id: 99,
+			outcome: "failed",
+			status,
+			requestId: null,
+			serviceWide: true,
+			retryAfterMs,
+		};
+	};
 
 	/** Groups that each only failed, one after another. */
 	const failedGroups = (n: number): AskResult[][] =>
@@ -1978,13 +2014,13 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		ids: number[],
 		runId: string,
 		sleep?: (name: string, ms: number) => Promise<void>,
-	) =>
-		sortGroups(withKey, fake.runStep, fetchImpl, {
-			rulesApplied: true,
-			onlyIds: ids,
-			runId,
-			...(sleep ? { sleep } : {}),
-		});
+	) => {
+		const options: SortOptions = { rulesApplied: true, onlyIds: ids, runId };
+
+		if (sleep) options.sleep = sleep;
+
+		return sortGroups(withKey, fake.runStep, fetchImpl, options);
+	};
 
 	it("waits out a 429 and asks the row again: the 26th call answers 429, all 30 are sorted, one 30 s wait", async () => {
 		const ids = await addWaiting(30);
