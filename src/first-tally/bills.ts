@@ -63,11 +63,17 @@ export function keepReply(kept: number, changed: number): string {
 	return `${keptWords} ${askedPart}`;
 }
 
+/** The two halves splitKeepable returns: the one-tap answer, and the charges that stay in Possible bills. */
+type SplitKeepable = { keep: BillSuggestion[]; waiting: BillSuggestion[] };
+
+/** A double-ruled total's two lines: the count and the amount. */
+type TotalLine = { label: string; amount: string };
+
 /** The found charges, split: `keep` is the one-tap answer, and `waiting` stays in Possible bills. */
 export function splitKeepable(
 	suggestions: BillSuggestion[],
 	activeNames: string[],
-): { keep: BillSuggestion[]; waiting: BillSuggestion[] } {
+): SplitKeepable {
 	const keep: BillSuggestion[] = [];
 	const waiting: BillSuggestion[] = [];
 
@@ -149,10 +155,7 @@ export function billsLead(count: number): string {
  * The bills card's double-ruled total (P142 A): the count of the charges the screen keeps, and their monthly total in whole
  * dollars as billsLedgerLine words it ("8 bills", "about $1,972 a month"; "1 bill" for one).
  */
-export function billsTotalLine(
-	count: number,
-	cents: number,
-): { label: string; amount: string } {
+export function billsTotalLine(count: number, cents: number): TotalLine {
 	return {
 		label: count === 1 ? "1 bill" : `${count} bills`,
 		amount: `about ${wholeDollars(cents)} a month`,

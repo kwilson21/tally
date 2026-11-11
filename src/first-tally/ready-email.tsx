@@ -133,22 +133,28 @@ type KeptTry = { mail: Mail; at: string };
  */
 type LegacyTry = { line: string; at: string };
 
+/** A stored kept try's fields, each checked where it is read: a whole email, a read line and a time. */
+type StoredTry = { mail?: unknown; line?: unknown; at?: unknown };
+
+/** The fields of a stored email, each checked where it is read. */
+type StoredMail = { subject?: unknown; html?: unknown; text?: unknown };
+
+/** True for a stored JSON object (not null). Its fields are checked where they are read. */
+const isStored = <Stored extends object>(value: unknown): value is Stored =>
+	typeof value === "object" && value !== null;
+
+/** True for a value stored as text. */
+const isText = (value: unknown): value is string => typeof value === "string";
+
 /** The kept tries still stored as only a read line, by the address's hash (none in a record that keeps whole emails). */
 function legacyTriesOf(record: FirstTally | null): [string, LegacyTry][] {
 	const tries: [string, LegacyTry][] = [];
 
 	for (const [hash, entry] of Object.entries(record?.heldReadyEmail ?? {})) {
-		const { mail, line, at } = entry as {
-			mail?: unknown;
-			line?: unknown;
-			at?: unknown;
-		};
+		// The legacy line is not in the record's type, so the entry is read as the fields it may hold, each checked here.
+		const { mail, line, at }: StoredTry = entry;
 
-		if (
-			mail === undefined &&
-			typeof line === "string" &&
-			typeof at === "string"
-		)
+		if (mail === undefined && isText(line) && isText(at))
 			tries.push([hash, { line, at }]);
 	}
 
@@ -235,24 +241,26 @@ async function keptTryOf(
 
 	if (!row?.held) return null;
 
-	const entry = (JSON.parse(row.held) as Record<string, unknown>)[
-		await addressHashOf(address)
-	];
+	const held: unknown = JSON.parse(row.held);
 
-	if (typeof entry !== "object" || entry === null) return null;
-	const { mail, line, at } = entry as Record<string, unknown>;
+	const entry = isStored<{ [hash: string]: StoredTry | undefined }>(held)
+		? held[await addressHashOf(address)]
+		: undefined;
 
-	if (typeof at !== "string") return null;
+	if (!isStored<StoredTry>(entry)) return null;
 
-	if (mail === undefined && typeof line === "string")
+	const { mail, line, at } = entry;
+
+	if (!isText(at)) return null;
+
+	if (mail === undefined && isText(line))
 		return { mail: renderReadyEmail(line), at };
 
-	if (typeof mail !== "object" || mail === null) return null;
-	const { subject, html, text } = mail as Record<string, unknown>;
+	if (!isStored<StoredMail>(mail)) return null;
 
-	return typeof subject === "string" &&
-		typeof html === "string" &&
-		typeof text === "string"
+	const { subject, html, text } = mail;
+
+	return isText(subject) && isText(html) && isText(text)
 		? { mail: { subject, html, text }, at }
 		: null;
 }
@@ -312,7 +320,7 @@ export function renderReadyEmail(read: string): Mail {
 	// The component has no async parts, so its JSX node renders synchronously to a string.
 	const html = (<ReadyEmail read={read} />).toString();
 
-	if (typeof html !== "string")
+	if (!isText(html))
 		throw new Error("The ready email must render without async parts");
 
 	return { subject: SUBJECT, html, text };

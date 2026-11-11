@@ -101,7 +101,7 @@ export async function saveSuggestion(
 	const eligible = `id IN (${placeholders()}) AND category_confidence >= ? AND jev_none_fit=1 AND jev_category_id IS NULL AND amount_cents>0 AND pending=0 AND excluded=0 AND flag_income=0 AND is_split=0 AND parent_id IS NULL AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`;
 
 	try {
-		const results = await db.batch([
+		const results = await db.batch<{ id: number }>([
 			db
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id=NULL WHERE id IN (${placeholders()}) AND category_suggestion_id IN (SELECT id FROM category_suggestions WHERE status='none')`,
@@ -128,7 +128,7 @@ export async function saveSuggestion(
 				),
 		]);
 
-		const id = (results[1]?.results as { id: number }[] | undefined)?.[0]?.id;
+		const id = results[1]?.results?.[0]?.id;
 
 		if (id) return id;
 
@@ -487,10 +487,10 @@ export async function createFromSuggestion(
 			JSON.stringify(ticked),
 		);
 
-	let results: D1Result[];
+	let results: D1Result<{ id: number }>[];
 
 	try {
-		results = await db.batch([
+		results = await db.batch<{ id: number }>([
 			db
 				.prepare(
 					"UPDATE category_suggestions SET decided_at=? WHERE id=? AND status='pending' AND decided_at IS NULL",
@@ -612,8 +612,8 @@ export async function createFromSuggestion(
 	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that
 	// arrived after the page was drawn, is still cleared by the write above (its NULL confidence sends it to the
 	// night), but it is not named.
-	const leftOut = ((leftOutResult?.results as { id: number }[]) ?? []).filter(
-		(row) => attached.includes(row.id),
+	const leftOut = (leftOutResult?.results ?? []).filter((row) =>
+		attached.includes(row.id),
 	);
 
 	// The write itself decides the path, so the flags come from its own statements (decision 110): a restore changed
@@ -637,9 +637,7 @@ export async function createFromSuggestion(
 		ok: true,
 		name: stored?.name ?? target,
 		moved: filedResult?.meta.changes ?? 0,
-		filed: ((filedResult?.results as { id: number }[] | undefined) ?? []).map(
-			(row) => row.id,
-		),
+		filed: (filedResult?.results ?? []).map((row) => row.id),
 		leftOut: leftOut.map((row) => row.id),
 		attached: joined,
 		restored,

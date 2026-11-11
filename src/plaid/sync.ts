@@ -69,6 +69,13 @@ type SyncResponse = {
 /** Plaid's transactions_update_status once the Item's 90-day history is in (spec §5, #581). */
 const HISTORICAL_UPDATE_COMPLETE = "HISTORICAL_UPDATE_COMPLETE";
 
+/** The body of a /transactions/sync request. The cursor is sent only once Plaid has one. */
+type SyncRequest = {
+	access_token: string;
+	count: number;
+	cursor?: string;
+};
+
 type ItemRow = {
 	access_token_encrypted: ArrayBuffer;
 	sync_cursor: string | null;
@@ -479,7 +486,7 @@ async function handlePlaidError(
 	itemRowId: number,
 	lockId: string,
 	accessTokenEncrypted: ArrayBuffer,
-	error: unknown,
+	error: PlaidError,
 	fetchImpl?: typeof fetch,
 ): Promise<never> {
 	if (error instanceof PlaidError) {
@@ -591,6 +598,8 @@ export async function syncItem(
 				fetchImpl,
 			));
 		} catch (error) {
+			if (!(error instanceof PlaidError)) throw error;
+
 			return await handlePlaidError(
 				env,
 				itemRowId,
@@ -636,17 +645,17 @@ export async function syncItem(
 			let page: SyncResponse;
 
 			try {
+				// Pinned: each page is one D1 batch, sized for 100 rows (issue #418).
+				const request: SyncRequest = { access_token: accessToken, count: 100 };
+
+				// Plaid's cursor is empty until an Item's data is ready, and its reference documents only an omitted cursor
+				// (the entire history of updates), so an empty one is sent as none.
+				if (cursor) request.cursor = cursor;
+
 				page = await plaidPost<SyncResponse>(
 					env,
 					"/transactions/sync",
-					{
-						access_token: accessToken,
-						// Pinned: each page is one D1 batch, sized for 100 rows (issue #418).
-						count: 100,
-						// Plaid's cursor is empty until an Item's data is ready, and its reference documents only an omitted cursor
-						// (the entire history of updates), so an empty one is sent as none.
-						...(cursor ? { cursor } : {}),
-					},
+					request,
 					fetchImpl,
 				);
 			} catch (error) {
@@ -666,6 +675,8 @@ export async function syncItem(
 					holdAt = null;
 					continue;
 				}
+
+				if (!(error instanceof PlaidError)) throw error;
 
 				return await handlePlaidError(
 					env,

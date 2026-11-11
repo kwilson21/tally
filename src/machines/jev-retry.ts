@@ -23,14 +23,16 @@ export type JevRetryContext = {
 	answered: boolean;
 };
 
+const initialContext: JevRetryContext = {
+	attempts: 0,
+	categorized: false,
+	answered: false,
+};
+
 export const jevRetry = setup({}).createMachine({
 	id: "jevRetry",
 	initial: "waiting",
-	context: {
-		attempts: 0,
-		categorized: false,
-		answered: false,
-	} as JevRetryContext,
+	context: initialContext,
 	states: {
 		waiting: {
 			on: {

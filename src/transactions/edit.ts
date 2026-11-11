@@ -77,12 +77,18 @@ export type Edit = {
 };
 
 /** The edit panel changes a merchant rule only when the person changes the tick, or saves a ticked row with another category. */
+/** What a save does to the merchant's rule: set it, clear it or keep it, and whether to refile the merchant's rows. */
+type MerchantRuleChange = {
+	action: "set" | "clear" | "keep";
+	recategorize: boolean;
+};
+
 export function merchantRuleChange(
 	alwaysWas: boolean,
 	alwaysNow: boolean,
 	ruleCategoryWas: number | null | undefined,
 	categoryId: number | null,
-): { action: "set" | "clear" | "keep"; recategorize: boolean } {
+): MerchantRuleChange {
 	if (!alwaysWas && alwaysNow)
 		return { action: "set", recategorize: categoryId !== null };
 
@@ -190,7 +196,7 @@ export function followsPurchaseAfterSave(
 	>,
 ): boolean {
 	const linking =
-		typeof edit.refundOfId === "number" &&
+		isIdNumber(edit.refundOfId) &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
 
 	const incomeChanged = edit.income !== (edit.incomeWas ?? stored.income);
@@ -246,7 +252,7 @@ export function excludedAfterSave(
 	>,
 ): boolean {
 	const linking =
-		typeof edit.refundOfId === "number" &&
+		isIdNumber(edit.refundOfId) &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
 
 	if (linking || !edit.excluded) return false;
@@ -265,6 +271,14 @@ export function excludedAfterSave(
 
 	return !lifted;
 }
+
+/** True for a stored or posted id that is a number (not null or absent). */
+const isIdNumber = (value: number | null | undefined): value is number =>
+	typeof value === "number";
+
+/** True for an integer, as Number.isInteger reads it; a value that is not one (null included) is false. */
+const isWholeNumber = (value: number | null): value is number =>
+	Number.isInteger(value);
 
 /** Reads the edit form. Category ids must be live categories; lengths are limited. */
 export function parseEdit(
@@ -351,59 +365,59 @@ export function parseEdit(
 
 	if (
 		rawPerson &&
-		(!Number.isInteger(forPersonId) ||
-			(peopleIds && !peopleIds.includes(forPersonId as number)))
+		(!isWholeNumber(forPersonId) ||
+			(peopleIds && !peopleIds.includes(forPersonId)))
 	)
 		errors.forPerson = FOR_PERSON_ERROR;
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
 
-	return {
-		ok: true,
-		value: {
-			categoryId,
-			...(newCategory ? { newCategory: true } : {}),
-			alwaysForMerchant,
-			alwaysWas,
-			merchantRuleWas: ruleCategoryWas,
-			displayName: displayName || null,
-			nameChanged,
-			nameScope,
-			keepBankName,
-			note: note || null,
-			...(form.has("details_visible")
-				? {
-						noteProvided: !(
-							hiddenUntouched &&
-							((!form.has("note_was") && note === "") ||
-								(form.has("note_was") && note === noteWas))
-						),
-						detailsFieldChanged:
-							hiddenUntouched &&
-							((form.has("kind_was") && kind !== kindWas) ||
-								(form.has("for_person_id_was") && forPersonId !== personWas)),
-					}
-				: {}),
-			excluded,
-			...credit,
-			kind:
-				form.has("kind") &&
-				(!hiddenUntouched ||
-					(form.has("kind_was") ? kind !== kindWas : kind !== null))
-					? kind
-					: undefined,
-			forPersonId:
-				form.has("for_person_id") &&
-				(!hiddenUntouched ||
-					(form.has("for_person_id_was")
-						? forPersonId !== personWas
-						: forPersonId !== null))
-					? forPersonId
-					: undefined,
-			keepDetails,
-			...(detailsVisible === undefined ? {} : { detailsVisible }),
-		},
+	const value: Edit = {
+		categoryId,
+		alwaysForMerchant,
+		alwaysWas,
+		merchantRuleWas: ruleCategoryWas,
+		displayName: displayName || null,
+		nameChanged,
+		nameScope,
+		keepBankName,
+		note: note || null,
+		excluded,
+		...credit,
+		kind:
+			form.has("kind") &&
+			(!hiddenUntouched ||
+				(form.has("kind_was") ? kind !== kindWas : kind !== null))
+				? kind
+				: undefined,
+		forPersonId:
+			form.has("for_person_id") &&
+			(!hiddenUntouched ||
+				(form.has("for_person_id_was")
+					? forPersonId !== personWas
+					: forPersonId !== null))
+				? forPersonId
+				: undefined,
+		keepDetails,
 	};
+
+	if (newCategory) value.newCategory = true;
+
+	if (form.has("details_visible")) {
+		value.noteProvided = !(
+			hiddenUntouched &&
+			((!form.has("note_was") && note === "") ||
+				(form.has("note_was") && note === noteWas))
+		);
+		value.detailsFieldChanged =
+			hiddenUntouched &&
+			((form.has("kind_was") && kind !== kindWas) ||
+				(form.has("for_person_id_was") && forPersonId !== personWas));
+	}
+
+	if (detailsVisible !== undefined) value.detailsVisible = detailsVisible;
+
+	return { ok: true, value };
 }
 
 const LIST_URL = /^\/transactions(\?[^#]*)?$/;

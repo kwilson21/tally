@@ -1,7 +1,10 @@
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
 
-type Row = Record<string, unknown>;
+/** A JSON value, as a row kept in a hold's JSON column reads back. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+type Row = { [key: string]: Json };
 
 type Snapshot = {
 	transaction: Row;

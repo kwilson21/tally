@@ -67,16 +67,19 @@ export async function categorizePending(
 	} finally {
 		// A re-sort's run finishes once its groups are done, even when they threw (decision 160). This sort's own id is
 		// its instance key, so the run finalizes once every instance it started has finished. finishRun is idempotent.
-		if (reask)
-			await finishRun(env.DB, {
-				runId: reask.runId,
-				now: Date.now(),
-				instanceKey: runId,
-			}).catch((error: unknown) =>
+		if (reask) {
+			try {
+				await finishRun(env.DB, {
+					runId: reask.runId,
+					now: Date.now(),
+					instanceKey: runId,
+				});
+			} catch (error) {
 				console.error(
 					`reask: finish failed ${error instanceof Error ? error.name : "unknown"}`,
-				),
-			);
+				);
+			}
+		}
 	}
 
 	if (done.asked > 0)

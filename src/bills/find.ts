@@ -57,7 +57,9 @@ export function findBillSuggestions(
 		if (list.length < 2) continue;
 		// The newest charge must repeat an earlier one (other purchases may fall between),
 		// so a store that once matched by chance doesn't show up.
-		const latest = list[list.length - 1] as BillFindingCharge;
+		const latest = list.at(-1);
+
+		if (latest === undefined) continue;
 
 		const partner = list.slice(0, -1).some((previous) => {
 			const days = dayNumber(latest.date) - dayNumber(previous.date);

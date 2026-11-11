@@ -37,13 +37,16 @@ export function cadenceOf(dates: string[]): string | null {
 
 	if (sorted.length < 2) return null;
 
-	const gaps = sorted
-		.slice(1)
-		.map((date, i) => dayNumber(date) - dayNumber(sorted[i] as string));
+	const gaps = sorted.flatMap((date, i) => {
+		const earlier = sorted[i - 1];
+
+		return earlier === undefined ? [] : [dayNumber(date) - dayNumber(earlier)];
+	});
 
 	const every = (low: number, high: number) =>
 		gaps.every((gap) => gap >= low && gap <= high);
 
+	// SAFETY: the length check above returns for fewer than two dates, so the last date is one of the sorted dates.
 	const latest = sorted[sorted.length - 1] as string;
 
 	const oneWeekday = sorted.every(
@@ -86,7 +89,9 @@ export function paySentence({
 	deposits: PayDeposit[];
 }): string {
 	const dates = deposits.map((deposit) => deposit.date).sort();
+	// SAFETY: payMerchants gives each merchant its first deposit before any other, so deposits, and so dates, are not empty.
 	const first = dates[0] as string;
+	// SAFETY: the same non-empty dates as the line above, so the last one exists.
 	const latest = dates[dates.length - 1] as string;
 	const since = shortDay(first, latest);
 	const count = deposits.length;
@@ -134,7 +139,9 @@ export function payLead(dates: string[]): string {
  */
 export function payCadenceLine(deposits: PayDeposit[]): string {
 	const dates = deposits.map((deposit) => deposit.date).sort();
+	// SAFETY: payMerchants gives each merchant its first deposit before any other, so deposits, and so dates, are not empty.
 	const first = dates[0] as string;
+	// SAFETY: the same non-empty dates as the line above, so the last one exists.
 	const latest = dates[dates.length - 1] as string;
 
 	if (deposits.length === 1) return `Once, on ${shortDay(first, latest)}`;
@@ -146,13 +153,13 @@ export function payCadenceLine(deposits: PayDeposit[]): string {
 		: since;
 }
 
+/** The card's three newest deposits and how many earlier ones there are. */
+type LatestDeposits = { shown: PayDeposit[]; earlier: number };
+
 /**
  * The card's deposit rows: the three latest by date, newest first, and how many earlier deposits there are ("And 4 earlier").
  */
-export function latestDeposits(deposits: PayDeposit[]): {
-	shown: PayDeposit[];
-	earlier: number;
-} {
+export function latestDeposits(deposits: PayDeposit[]): LatestDeposits {
 	const newest = [...deposits].sort((a, b) => b.date.localeCompare(a.date));
 
 	return {
@@ -181,6 +188,7 @@ export function shownPayValues({
 }): string[] {
 	return deposits.map((deposit, i) =>
 		JSON.stringify({
+			// SAFETY: payMerchants pushes one id for each deposit, in step, so ids[i] is the id of deposits[i].
 			id: ids[i] as number,
 			key,
 			date: deposit.date,

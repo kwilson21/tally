@@ -33,15 +33,23 @@ const AUTH_LENGTH = 22;
 
 const P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 
+/** One field of a parsed form: text, a file, several of either, or absent. */
+type FormFields = Record<string, string | File | (string | File)[] | undefined>;
+
+/** True for a field the browser sent as text (a file, a list or a missing field is not). */
+function isText(value: FormFields[string]): value is string {
+	return typeof value === "string";
+}
+
 /** A form field as text, or null when it is missing or a file. */
-const fieldOf = (form: Record<string, unknown>, name: string) => {
+const fieldOf = (form: FormFields, name: string) => {
 	const value = form[name];
 
-	return typeof value === "string" ? value : null;
+	return isText(value) ? value : null;
 };
 
 /** The three subscription fields as the browser sent them, or null when any one is not a valid subscription. */
-async function subscriptionOf(form: Record<string, unknown>) {
+async function subscriptionOf(form: FormFields) {
 	// Every length is checked before any field is decoded, so an oversized value costs nothing more than the check.
 	const endpoint = fieldOf(form, "endpoint");
 	const p256dh = fieldOf(form, "p256dh");
@@ -128,7 +136,7 @@ push.post("/push/subscribe", async (c) => {
 		Number(declared) > MAX_BODY_LENGTH
 	)
 		return c.body(null, 413);
-	const form = (await c.req.parseBody()) as Record<string, unknown>;
+	const form = await c.req.parseBody();
 	const subscription = await subscriptionOf(form);
 
 	if (!subscription) return c.body(null, 422);

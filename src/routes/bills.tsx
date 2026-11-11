@@ -114,6 +114,18 @@ type Category = { id: number; name: string; icon: string; color: string };
 /** An amount over $100,000.00 that the form asks about with a "Yes, $X is right" chip (P45 A). */
 type BigAmount = { cents: number; confirmed: boolean };
 
+/** The frequency names a bill can take. */
+const FREQUENCY_NAMES: readonly string[] = [
+	"monthly",
+	"yearly",
+	"weekly",
+	"biweekly",
+	"quarterly",
+];
+
+const isFrequency = (name: string): name is Values["frequency"] =>
+	FREQUENCY_NAMES.includes(name);
+
 type Values = {
 	name: string;
 	amount: string;
@@ -869,16 +881,13 @@ async function save(c: Context<App>, id?: number) {
 	const raw = (name: string) => String(form[name] ?? "").trim();
 	// The possible bill a new bill was added from: a redrawn sheet keeps it, so its close still goes there (#87).
 	const finding = raw("finding") || undefined;
+	const frequency = raw("frequency");
 
 	const values: Values = {
 		name: raw("name"),
 		amount: raw("amount"),
 		due_day: raw(raw("frequency") === "weekly" ? "weekly_day" : "due_day"),
-		frequency: (
-			["monthly", "yearly", "weekly", "biweekly", "quarterly"] as const
-		).includes(raw("frequency") as Values["frequency"])
-			? (raw("frequency") as Values["frequency"])
-			: "monthly",
+		frequency: isFrequency(frequency) ? frequency : "monthly",
 		anchor_month: raw("anchor_month"),
 		anchor_date: raw("anchor_date"),
 		category_id: raw("category_id"),
@@ -1163,9 +1172,7 @@ type LinkedPayment = {
 const monthName = (period: string, today: string) =>
 	new Intl.DateTimeFormat("en-US", {
 		month: "long",
-		...(period.slice(0, 4) === today.slice(0, 4)
-			? {}
-			: { year: "numeric" as const }),
+		year: period.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${period}-01T00:00:00Z`));
 
@@ -2026,20 +2033,23 @@ bills.post("/bills/:id/link", async (c) => {
 	// is in. It runs only when this link was made, since the DELETE needs the linked row this payment just got. The last
 	// statement reads the month as the INSERT left it, which says why a link made nothing.
 	// A plan's link that landed after the check above is refused by the INSERT's trigger (migration 0053): the same field error.
-	const batch = await c.env.DB.batch<{ unpaid: number }>([
-		c.env.DB.prepare(linkPaymentSql).bind(
-			id,
-			period,
-			transaction,
-			due,
-			manualWindow,
-		),
-		c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
-		c.env.DB.prepare(unpaidSelect).bind(id, period),
-	]).catch((error: unknown) => {
-		if (String(error).includes("already pays a planned expense")) return null;
-		throw error;
-	});
+	let batch: D1Result<{ unpaid: number }>[] | null = null;
+
+	try {
+		batch = await c.env.DB.batch<{ unpaid: number }>([
+			c.env.DB.prepare(linkPaymentSql).bind(
+				id,
+				period,
+				transaction,
+				due,
+				manualWindow,
+			),
+			c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
+			c.env.DB.prepare(unpaidSelect).bind(id, period),
+		]);
+	} catch (error) {
+		if (!String(error).includes("already pays a planned expense")) throw error;
+	}
 
 	if (!batch)
 		return billPage(
@@ -2195,7 +2205,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	// Each outcome claims only what is true of the payment: the link is back, or it stays unlinked. A month can hold
 	// other payments now (decision 101), so a restored payment never waits on them. Every answer ends this Undo's
 	// toast, so undoDone names its token on each one (#340, #397).
-	let toast: { message: string; type: "success" | "error"; undoDone?: string };
+	let toast: UndoToast;
 
 	if (restored)
 		toast = {
@@ -2225,6 +2235,20 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	return response;
 });
 
+/** An Undo toast's keys beyond its words: the Undo token, its time left and where to send it. */
+type UndoToast = {
+	message: string;
+	type: "success" | "error";
+	undoDone?: string;
+};
+
+/** The toast keys a feedback redirect adds to its message: an Undo's, or none. */
+type ExtraToast = {
+	undo?: string;
+	undoExpiresInMs?: number;
+	undoAction?: string;
+};
+
 async function feedbackRedirect(
 	c: Context<App>,
 	id: number,
@@ -2232,7 +2256,7 @@ async function feedbackRedirect(
 	today?: string,
 	announce = message,
 	// Extra toast keys, such as an Undo's (see toast.js).
-	toast: Record<string, unknown> = {},
+	toast: ExtraToast = {},
 ) {
 	if (c.req.header("HX-Request")) {
 		const response = await billPage(
@@ -2343,8 +2367,13 @@ async function currentOffer(
 // for the prices it showed, in whole cents: the occurrence's amount, the charge, and the bill's current
 // amount. Once any of them has changed, a page that has gone stale saves nothing and the person is told,
 // so no one is made to accept a price they didn't see.
-const wholeCents = (value: unknown) =>
-	typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+/** One form field as the browser sent it: text, a file, several of either, or absent. */
+type FormValue = string | File | (string | File)[] | undefined;
+
+const isText = (value: FormValue): value is string => typeof value === "string";
+
+const wholeCents = (value: FormValue) =>
+	isText(value) && /^\d+$/.test(value) ? Number(value) : Number.NaN;
 
 async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	const id = Number(c.req.param("id"));

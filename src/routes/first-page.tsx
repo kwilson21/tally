@@ -34,6 +34,7 @@ import {
 	budgetsStrokeGuard,
 	type FinishRead,
 	type FirstPageModel,
+	isSavedCents,
 	keepBills,
 	keepBudgetAnswers,
 	type PayMerchant,
@@ -606,9 +607,7 @@ firstPage.post("/setup/savings", async (c) => {
 	const kept = (await readFirstTally(db))?.savings;
 
 	const homeGoal =
-		typeof kept === "number" && (answer === "skip" || kept !== cents)
-			? kept
-			: null;
+		isSavedCents(kept) && (answer === "skip" || kept !== cents) ? kept : null;
 
 	const message =
 		homeGoal !== null
@@ -639,7 +638,7 @@ async function savingsRefused(
 	if (!(await savingsOpen(db))) {
 		const kept = (await readFirstTally(db))?.savings;
 
-		return typeof kept === "number"
+		return isSavedCents(kept)
 			? answered(c, model, homeSavingsWords(kept), "info")
 			: stale(c, model);
 	}

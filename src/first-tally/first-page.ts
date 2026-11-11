@@ -215,7 +215,11 @@ export async function answerPay(
 	who: string,
 ): Promise<number> {
 	const deposits = Object.fromEntries(
-		merchant.ids.map((id, i) => [id, merchant.deposits[i] as PayDeposit]),
+		merchant.ids.map((id, i) => [
+			id,
+			// SAFETY: payMerchants pushes one id and one deposit together for each row, so deposits[i] belongs to ids[i].
+			merchant.deposits[i] as PayDeposit,
+		]),
 	);
 
 	const shown = `[${shownPayValues(merchant).join(",")}]`;
@@ -331,6 +335,11 @@ function budgetsLedger(
 		: null;
 }
 
+/** True for a savings answer that is a goal's cents, not "skipped" (Not now) and not absent. */
+export const isSavedCents = (
+	savings: number | "skipped" | undefined,
+): savings is number => typeof savings === "number";
+
 /**
  * The ledger line of the savings answer, from its record (first_tally's `savings`): "Savings · $300 a month" for a goal kept,
  * and null for Not now, which writes no line (decision 135).
@@ -338,7 +347,7 @@ function budgetsLedger(
 function savingsLedger(
 	savings: number | "skipped" | undefined,
 ): { id: string; text: string } | null {
-	return typeof savings === "number"
+	return isSavedCents(savings)
 		? { id: "savings", text: savingsLedgerLine(savings) }
 		: null;
 }
@@ -688,9 +697,9 @@ export async function keepBudgetAnswers(
 	);
 	const results = await db.batch(statements);
 
-	return landings
-		.filter(({ at }) => (results[at]?.meta.changes ?? 0) > 0)
-		.map(({ id }) => id);
+	return landings.flatMap(({ at, id }) =>
+		(results[at]?.meta.changes ?? 0) > 0 ? [id] : [],
+	);
 }
 
 /** The active bills' names, which a found charge can't share (spec §8.5). */
@@ -715,7 +724,7 @@ async function payAndBills(db: D1Database, today: string) {
 					await loadBillSuggestions(db, today),
 					await activeBillNames(db),
 				)
-			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
+			: { keep: [], waiting: [] };
 
 	return { pay, split, done: pay.length === 0 && split.keep.length === 0 };
 }
@@ -764,7 +773,7 @@ export async function readFinish(
 					: null,
 			budgets: budgets ? finishBudgetsLine(budgets.count, budgets.cents) : null,
 			savings:
-				typeof savings === "number" && savings > 0
+				isSavedCents(savings) && savings > 0
 					? finishSavingsLine(savings)
 					: null,
 		},
@@ -851,6 +860,7 @@ export async function keepBills(
 				dueDay: suggestion.dueDay,
 				frequency: "monthly",
 				anchorMonth: null,
+				// SAFETY: keepBills gets its charges from splitKeepable's `keep`, which holds only charges with a category.
 				categoryId: suggestion.categoryId as number,
 				merchantRawName: suggestion.rawName,
 			},

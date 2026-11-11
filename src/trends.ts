@@ -121,11 +121,11 @@ export function compareSentence(
 
 export type Direction = "up" | "down" | "same";
 
+/** A category's change in words and the direction its arrow points. */
+type ChangeWords = { direction: Direction; words: string };
+
 /** A category's change in words, with the direction its arrow points: "Up $31". */
-export function changeWords(
-	nowCents: number,
-	thenCents: number,
-): { direction: Direction; words: string } {
+export function changeWords(nowCents: number, thenCents: number): ChangeWords {
 	const gap = nowCents - thenCents;
 
 	if (gap === 0) return { direction: "same", words: "No change" };
@@ -411,12 +411,17 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 	const total = (month: string) => totals.get(month) ?? 0;
 
 	// One month of a series; the part month says so, and from when.
-	const point = (m: string, monthCents: number): MonthPoint => ({
-		month: m,
-		cents: monthCents,
-		partial: m === thisMonth,
-		...(startIsPart && m === startMonth ? { part: { from: firstDate } } : {}),
-	});
+	const point = (m: string, monthCents: number): MonthPoint => {
+		const onePoint: MonthPoint = {
+			month: m,
+			cents: monthCents,
+			partial: m === thisMonth,
+		};
+
+		if (startIsPart && m === startMonth) onePoint.part = { from: firstDate };
+
+		return onePoint;
+	};
 
 	const points = (id: number | null): MonthPoint[] =>
 		months.map((m) => point(m, cents(m, id)));
@@ -503,13 +508,14 @@ export function buildTrends(input: TrendsInput): TrendsPage {
 		...shown.map((c) => ({ ...c })),
 		{ id: null, ...NEEDS_A_CATEGORY },
 	]
-		.map((c, order) => {
+		.flatMap((c, order) => {
 			const nowCents = cents(thisMonth, c.id);
 			const thenCents = before.get(c.id) ?? 0;
 
-			return { c, order, nowCents, thenCents };
+			return nowCents !== 0 || thenCents !== 0
+				? [{ c, order, nowCents, thenCents }]
+				: [];
 		})
-		.filter((e) => e.nowCents !== 0 || e.thenCents !== 0)
 		.sort(
 			(a, b) =>
 				Math.abs(b.nowCents - b.thenCents) -

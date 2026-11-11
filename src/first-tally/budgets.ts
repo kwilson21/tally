@@ -45,6 +45,14 @@ export function keepShownBudgets(
 	return current.filter((ask) => shown.has(shownBudgetValue(ask)));
 }
 
+/** True for a parsed JSON object (not null); its fields are checked where they are read. */
+const isParsedObject = <Fields extends object>(
+	value: unknown,
+): value is Fields => typeof value === "object" && value !== null;
+
+/** True for an integer. */
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+
 /**
  * The category ids a keep-all form submitted, each once, read from the values shownBudgetValue wrote (the snapshot the
  * page drew). A value that isn't one (malformed JSON, or no integer id) names no category the page showed, so it is dropped.
@@ -61,10 +69,11 @@ export function shownBudgetIds(values: string[]): number[] {
 			continue;
 		}
 
-		if (typeof parsed !== "object" || parsed === null) continue;
-		const { id } = parsed as { id?: unknown };
+		if (!isParsedObject<{ id?: unknown }>(parsed)) continue;
 
-		if (Number.isInteger(id)) ids.add(id as number);
+		const { id } = parsed;
+
+		if (isInteger(id)) ids.add(id);
 	}
 
 	return [...ids];
@@ -159,11 +168,11 @@ export function keepAllButton(count: number): string {
 	return count === 1 ? "Keep this budget" : `Keep all ${count}`;
 }
 
+/** A double-ruled total's two lines: the count and the amount. */
+type TotalLine = { label: string; amount: string };
+
 /** The setup card's double-ruled total: "12 budgets" and "$4,050 a month" (one budget in the singular). */
-export function budgetsTotalLine(
-	count: number,
-	cents: number,
-): { label: string; amount: string } {
+export function budgetsTotalLine(count: number, cents: number): TotalLine {
 	return {
 		label: count === 1 ? "1 budget" : `${count} budgets`,
 		amount: `${dollarsWords(cents)} a month`,

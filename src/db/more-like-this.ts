@@ -193,7 +193,7 @@ export async function addMoreLikeThis(
 	const filedHolds = `EXISTS (SELECT 1 FROM transactions f JOIN categories fc ON fc.id = f.category_id
 		WHERE f.id = ? AND f.category_source = 'user' AND f.category_id = ? AND fc.archived = 0)`;
 
-	const [witness, write] = await db.batch([
+	const [witness, write] = await db.batch<{ holds: number }>([
 		db
 			.prepare(`SELECT ${filedHolds} AS holds`)
 			.bind(input.filedId, filed.categoryId),
@@ -214,7 +214,7 @@ export async function addMoreLikeThis(
 			),
 	]);
 
-	const holds = (witness?.results[0] as { holds?: number } | undefined)?.holds;
+	const holds = witness?.results[0]?.holds;
 
 	if (!holds) return { ok: false, reason: "changed" };
 	const moved = write?.meta.changes ?? 0;

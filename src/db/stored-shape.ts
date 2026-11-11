@@ -15,7 +15,10 @@ export const isString: Guard<string> = (value): value is string =>
 export const isBoolean: Guard<boolean> = (value): value is boolean =>
 	typeof value === "boolean";
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+/** A JSON value, as stored text reads back. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const isObject = (value: unknown): value is { [key: string]: Json } =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The value is null, or passes `guard`. */
@@ -49,8 +52,8 @@ export const isShape =
 	<T extends object>(shape: { [K in keyof T]-?: Guard<T[K]> }): Guard<T> =>
 	(value): value is T =>
 		isObject(value) &&
-		Object.entries(shape).every(([key, guard]) =>
-			(guard as Guard<unknown>)(value[key]),
+		Object.entries<Guard<unknown>>(shape).every(([key, guard]) =>
+			guard(value[key]),
 		);
 
 /** The stored text as a T, or null when it is not JSON or is not shaped like T. The caller decides what null means. */

@@ -61,11 +61,14 @@ export type UndoOutcome = {
 	changedSince: number;
 };
 
-/** The Undo answer's words and type. An expired Undo is an error, as a refused answer is elsewhere in the app. */
-export function undoWords(outcome: UndoOutcome): {
+/** What an Undo answer says on screen, and whether it is a success, an info note or an error. */
+type UndoWords = {
 	message: string;
 	type: "success" | "info" | "error";
-} {
+};
+
+/** The Undo answer's words and type. An expired Undo is an error, as a refused answer is elsewhere in the app. */
+export function undoWords(outcome: UndoOutcome): UndoWords {
 	if (outcome.expired)
 		return { message: "Too late to undo that.", type: "error" };
 
