@@ -689,6 +689,10 @@ describe("finding bills", () => {
 // text that shares a key shares one row. An old row saved under a bank text becomes its merchant's key row
 // when Plaid first names the merchant, as a copy made by sync (test/plaid-sync.test.ts).
 describe("one merchants row per key, whatever the bank text", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	const merchantRows = async () =>
 		(
 			await db
@@ -867,6 +871,10 @@ describe("one merchants row per key, whatever the bank text", () => {
 	});
 
 	it("marks the key as Not a bill for the charges of every bank text", async () => {
+		// The route reads the real clock and looks back three months; the charges are from August and September.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
+
 		const res = await exports.default.fetch(
 			`${BASE}/bills/find/${encodeURIComponent("Comcast")}/dismiss`,
 			{
