@@ -28,6 +28,7 @@ const RESERVED = "sorting_turn_test_reservation";
 
 type State = keyof typeof sortingTurnMachine.states;
 
+// SAFETY: the keys of the machine's states object are exactly its State names, so each key is a State.
 const STATES = Object.keys(sortingTurnMachine.states) as State[];
 const EVENTS = ["TAKE", "RETAKE", "RELEASE", "HOLDS", "EXPIRE"] as const;
 

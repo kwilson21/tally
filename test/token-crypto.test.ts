@@ -60,7 +60,7 @@ describe("Plaid token encryption", () => {
 	it("rejects invalid keys without exposing them", async () => {
 		for (const invalidKey of ["not base64!", btoa("sixteen-byte-key")]) {
 			const error = await encryptToken("access-token", invalidKey).catch(
-				(reason: unknown) => reason,
+				(reason: Error) => reason,
 			);
 
 			expect(error).toEqual(

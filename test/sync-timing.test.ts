@@ -15,7 +15,7 @@ const OTHERS = Object.entries(
 		query: "?raw",
 		import: "default",
 		eager: true,
-	}) as Record<string, string>,
+	}),
 );
 
 describe("the sync timing numbers", () => {

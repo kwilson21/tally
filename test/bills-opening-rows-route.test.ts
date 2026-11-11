@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const get = async (path: string) =>
 	(await exports.default.fetch(`http://tally.test${path}`)).text();
@@ -23,9 +24,11 @@ describe("Bills' opening rows and Band on the page (issue #602)", () => {
 	afterEach(() => vi.useRealTimers());
 
 	it("opens each bill on Home's Bills due soon, ending in the row arrow", async () => {
-		const { id } = (await env.DB.prepare(
-			"SELECT id FROM bills WHERE name='Internet'",
-		).first<{ id: number }>()) as { id: number };
+		const { id } = present(
+			await env.DB.prepare("SELECT id FROM bills WHERE name='Internet'").first<{
+				id: number;
+			}>(),
+		);
 
 		const home = await get("/");
 		expect(home).toContain("Bills due soon");

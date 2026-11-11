@@ -6,7 +6,7 @@ const sources = import.meta.glob("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const STORE = "../src/plaid/item-store.ts";
 

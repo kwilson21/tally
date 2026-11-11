@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { namesToReview, settleSuggestion } from "../src/db/merchant-names";
 import { resetDemo } from "../src/demo/reset";
-import { clearMerchants, seedMerchant } from "./helpers/merchants";
+import {
+	clearMerchants,
+	type MerchantSeed,
+	seedMerchant,
+} from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // Suggested merchant names (P29 A, decision 64, #33): which names wait for a person (namesToReview) and
 // how a choice settles one (settleSuggestion). The one review screen that asks them is tested in
@@ -25,14 +30,15 @@ async function post(
 	fields: Record<string, string>,
 	htmx = false,
 ) {
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -40,6 +46,7 @@ async function post(
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast and announce keys below when a route sends them.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;
@@ -64,10 +71,14 @@ async function charges(rawName: string, count: number, merchantName?: string) {
 }
 
 /** A suggestion waiting for a person; no names is an empty answer (asked, nothing usable), which is status none. */
-const suggest = (key: string, names: string[], status = "pending") =>
+const suggest = (
+	key: string,
+	names: string[],
+	status: NonNullable<MerchantSeed["status"]> = "pending",
+) =>
 	seedMerchant(db, {
 		key,
-		status: names.length === 0 ? "none" : (status as "pending"),
+		status: names.length === 0 ? "none" : status,
 		names,
 		namesAsked: names.length === 0,
 	});
@@ -91,13 +102,14 @@ beforeEach(async () => {
 });
 
 /** The number Skip uses for a merchant, never its bank text. */
-const rowId = async (key: string) =>
-	(
-		await db
-			.prepare("SELECT rowid AS id FROM merchants WHERE raw_name = ?")
-			.bind(key)
-			.first<{ id: number }>()
-	)?.id as number;
+const rowId = async (key: string) => {
+	const row = await db
+		.prepare("SELECT rowid AS id FROM merchants WHERE raw_name = ?")
+		.bind(key)
+		.first<{ id: number }>();
+
+	return present(row).id;
+};
 
 async function twoMerchants() {
 	await charges(BLUE, 3);

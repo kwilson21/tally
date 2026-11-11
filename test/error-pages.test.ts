@@ -2,6 +2,8 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { retryHref } from "../src/error-pages";
 import { app } from "../src/index";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -18,33 +20,36 @@ const brokenWorker = () => {
 				};
 			}
 
-			const value = Reflect.get(target, prop);
+			// SAFETY: the proxy forwards only the members the code under test reads from D1Database; any other key reads as undefined on the real binding.
+			const value: unknown = target[prop as keyof D1Database];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 
-	return { ...env, DB } as Env;
+	return envWith(env, { DB });
 };
 
 const fail = (path: string, headers: Record<string, string> = {}) =>
 	app.request(`${BASE}${path}`, { headers }, brokenWorker());
 
 /** A form post that fails on the way to the database, as a plain browser form sends it. */
-const failPost = (path: string, referer?: string) =>
-	app.request(
+const failPost = (path: string, referer?: string) => {
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
+	return app.request(
 		`${BASE}${path}`,
 		{
 			method: "POST",
-			headers: {
-				Origin: BASE,
-				"content-type": "application/x-www-form-urlencoded",
-				...(referer ? { Referer: referer } : {}),
-			},
+			headers: referer ? { ...headers, Referer: referer } : headers,
 			body: "budget=350.00",
 		},
 		brokenWorker(),
 	);
+};
 
 const text = async (res: Response) => res.text();
 

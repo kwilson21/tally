@@ -30,14 +30,15 @@ const get = async (path: string) => {
 };
 
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -45,6 +46,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast and announce keys below when a route sends them.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string };
 		announce?: string;
@@ -338,12 +340,12 @@ describe("GET /budget/:id", () => {
 		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="950.00"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
 
-		for (const [delta, label] of <[string, string][]>[
+		for (const [delta, label] of [
 			["-100", `Decrease Budget from ${THIS_MONTH()} on by $1`],
 			["-1", `Decrease Budget from ${THIS_MONTH()} on by 1 cent`],
 			["1", `Increase Budget from ${THIS_MONTH()} on by 1 cent`],
 			["100", `Increase Budget from ${THIS_MONTH()} on by $1`],
-		]) {
+		] satisfies [string, string][]) {
 			expect(html).toMatch(
 				new RegExp(
 					`data-nudge="${delta}"[^>]*aria-label="${label.replace("$", "\\$")}"`,

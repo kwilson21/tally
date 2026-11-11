@@ -11,6 +11,7 @@ import {
 	payShown,
 	shownPayValues,
 } from "../src/first-tally/pay";
+import { itemAt } from "./helpers/present";
 
 // The pay step's words (P125 E, spec §8.8): what the bank shows for one merchant whose money in marked as income.
 // Every number comes from the deposits, so these tests pin the words, not a layout.
@@ -29,7 +30,7 @@ const EVERY_OTHER_FRIDAY = [
 const deposits = (dates: string[], cents: number[] | number) =>
 	dates.map((date, i) => ({
 		date,
-		cents: typeof cents === "number" ? cents : (cents[i] as number),
+		cents: Array.isArray(cents) ? itemAt(cents, i) : cents,
 	}));
 
 describe("cadenceOf", () => {

@@ -133,9 +133,7 @@ describe("Pending on a row's caption line", () => {
 	] as const)(
 		"goes first when the caption already says more: %s",
 		async (_, change, expected) => {
-			expect(await caption({ ...base, ...change } as ListRow)).toEqual([
-				...expected,
-			]);
+			expect(await caption({ ...base, ...change })).toEqual([...expected]);
 		},
 	);
 

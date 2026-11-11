@@ -9,6 +9,8 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { noneFitTransactions } from "../src/db/category-suggestions";
 import { saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { fakeFetch } from "./helpers/doubles";
+import { present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Spec §5, §7 (#51): when Jev says none of the categories fit, Tally keeps that as a fact of its own
@@ -36,16 +38,17 @@ function fakeJev(choice: string, confidence: number) {
 		});
 	});
 
-	return fetchImpl as unknown as typeof fetch & typeof fetchImpl;
+	return fakeFetch(fetchImpl);
 }
 
-const idOf = async (rawName: string) =>
-	(
-		await db
-			.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
-			.bind(rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+const idOf = async (rawName: string) => {
+	const row = await db
+		.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
+		.bind(rawName)
+		.first<{ id: number }>();
+
+	return present(row).id;
+};
 
 const marked = (id: number) =>
 	db

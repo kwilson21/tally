@@ -63,10 +63,10 @@ async function cleanup() {
 
 afterEach(cleanup);
 
-type Row = Record<string, unknown>;
+/** A row a migration test reads back: its columns are SQL values. */
+type Row = Record<string, string | number | null>;
 
-const rows = async (sql: string) =>
-	((await db.prepare(sql).all<Row>()).results ?? []) as Row[];
+const rows = async (sql: string) => (await db.prepare(sql).all<Row>()).results;
 
 async function seedBeforeMigration() {
 	await db.batch(preSchema.map((sql) => db.prepare(sql)));

@@ -4,6 +4,7 @@ import { matchBillPayments } from "../src/bills/match";
 import { billOccurrence } from "../src/bills/status";
 import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // Decision 99: removing a split, or replacing its parts, unlinks a part's bill payment and says so, as
 // refunds do (decision 60). The payment is not left to the parts' ON DELETE CASCADE, and the bills are named.
@@ -484,11 +485,12 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 		new Proxy(db, {
 			get(target, prop) {
 				if (prop === "batch") return around;
-				const value = Reflect.get(target, prop);
+				// SAFETY: the proxy forwards only the members the code under test reads from D1Database; any other key reads as undefined on the real binding.
+				const value: unknown = target[prop as keyof D1Database];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 
 	/** Runs `race`, as one batch, on the database just before the save's batch, as a competing save would, so the save reads first. */
 	const racingBatch = (race: D1PreparedStatement[]) =>

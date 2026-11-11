@@ -12,6 +12,7 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { trends } from "../src/routes/trends";
 import { sameDaysCaption } from "../src/trends";
+import { envWith } from "./helpers/doubles";
 import { pinClock } from "./pinned-clock";
 
 const get = async (path: string) => {
@@ -20,7 +21,7 @@ const get = async (path: string) => {
 	return { res, html: await res.text() };
 };
 
-const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+const notDemo = envWith(env, { DEMO: "false" });
 
 /** One list on the page: its `<section>` by the id its heading carries. */
 const section = (html: string, id: string) =>

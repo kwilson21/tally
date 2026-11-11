@@ -17,13 +17,14 @@ async function post(path: string, htmx = true) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: { Origin: BASE, ...(htmx ? { "HX-Request": "true" } : {}) },
+		headers: htmx ? { Origin: BASE, "HX-Request": "true" } : { Origin: BASE },
 	});
 
 	return { res, html: await res.text() };
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast and announce keys below when a route sends them.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;

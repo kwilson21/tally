@@ -24,14 +24,15 @@ const get = async (path: string) => {
 };
 
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -39,6 +40,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast and announce keys below when a route sends them.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;

@@ -1,4 +1,5 @@
 /** @jsxImportSource hono/jsx */
+import type { HtmlEscapedString } from "hono/utils/html";
 import { describe, expect, it } from "vitest";
 import {
 	CATEGORY_SUGGESTION_LABELS,
@@ -24,7 +25,10 @@ const naturalWidth = (html: string) =>
 	Number(html.match(/viewBox="0 0 ([\d.]+) [\d.]+"/)?.[1]);
 
 describe("Pele pictures on a phone (issue #904)", () => {
-	const pictures: [string, () => unknown][] = [
+	const pictures: [
+		string,
+		() => HtmlEscapedString | Promise<HtmlEscapedString>,
+	][] = [
 		["the system diagram", () => SystemDiagram()],
 		[
 			"the store-name machine",

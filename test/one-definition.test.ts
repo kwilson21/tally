@@ -5,7 +5,7 @@ const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 describe("one definition of a rule", () => {
 	it("defines NEEDS_CATEGORY in exactly one place, src/db/transactions.ts", () => {

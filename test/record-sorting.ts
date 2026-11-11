@@ -41,12 +41,12 @@ export function recordSorting(options: { sort?: boolean } = {}) {
 
 	beforeEach(() => {
 		create.mockClear();
-		(env as { SORT: unknown }).SORT = { create };
+		Object.assign(env, { SORT: { create } });
 	});
 	afterEach(async () => {
 		// Let the queued instances finish first, so none of them runs after the real binding is back.
 		await queue.catch(() => {});
-		(env as { SORT: unknown }).SORT = real;
+		Object.assign(env, { SORT: real });
 	});
 
 	return create;
@@ -79,5 +79,5 @@ export function sortInProcess(
 		return { id: "fake" };
 	});
 
-	return { SORT: { create } as unknown as Env["SORT"], create, runs };
+	return { SORT: Object.assign({}, env.SORT, { create }), create, runs };
 }

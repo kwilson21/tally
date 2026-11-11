@@ -1,3 +1,4 @@
+import type { HtmlEscapedString } from "hono/utils/html";
 import { describe, expect, it } from "vitest";
 import {
 	BudgetDiagram,
@@ -6,7 +7,8 @@ import {
 	TransactionsDiagram,
 } from "../src/views/how-diagrams";
 
-const render = async (el: unknown) => String(await el);
+const render = async (el: HtmlEscapedString | Promise<HtmlEscapedString>) =>
+	String(await el);
 
 /** Everything a person sees or hears: the visible text plus the title and description. */
 const words = (html: string) =>

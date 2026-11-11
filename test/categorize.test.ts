@@ -26,7 +26,16 @@ function fakeFetch(respond: () => Response | Promise<Response>) {
 	return { calls, fetchImpl };
 }
 
-const ok = (body: unknown, headers: Record<string, string> = {}) =>
+/** A JSON body, as Jev or a test sends it; an undefined field is left out of the JSON. */
+type Json =
+	| string
+	| number
+	| boolean
+	| null
+	| Json[]
+	| { [key: string]: Json | undefined };
+
+const ok = (body: Json, headers: Record<string, string> = {}) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json", ...headers },

@@ -6,12 +6,16 @@ import { deliver, type Mail } from "../src/reconnect/deliver";
 const MAIL: Mail = { subject: "Subject", html: "<p>Hi</p>", text: "Hi" };
 const timeout = () => AbortSignal.timeout(1000);
 
+/** The message deliver hands Cloudflare's email binding: the mail with its recipient and sender. */
+type CloudflareMail = Mail & { to: string; from: string };
+
 const resendOk = () =>
 	vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
 		return new Response("{}", { status: 200 });
 	});
 
 const headersOf = (fetchImpl: ReturnType<typeof resendOk>) =>
+	// SAFETY: deliver passes its headers as a plain object (src/reconnect/deliver.ts), never a Headers instance or an array, so the call's init holds a record.
 	(fetchImpl.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>;
 
 describe("deliver: Resend's Idempotency-Key", () => {
@@ -45,7 +49,7 @@ describe("deliver: Resend's Idempotency-Key", () => {
 	});
 
 	it("never sends the key to Cloudflare's email, which has no key", async () => {
-		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+		const send = vi.fn(async (_message: CloudflareMail) => ({}));
 
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, _init?: RequestInit) => {
@@ -86,7 +90,7 @@ const timedOut = () =>
 	});
 
 const cloudflareEmail = () => {
-	const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+	const send = vi.fn(async (_message: CloudflareMail) => ({}));
 
 	return { send };
 };

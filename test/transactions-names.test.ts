@@ -15,6 +15,7 @@ import {
 	seedMerchant,
 	setMerchantNames,
 } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // Suggested merchant names in the Transactions list and the edit panel (P29 A, decision 64, #33): the
 // first pending suggestion shows dashed until a person chooses, the panel offers up to three names,
@@ -41,14 +42,15 @@ async function post(
 		for (const item of Array.isArray(value) ? value : [value])
 			form.append(key, item);
 
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: form.toString(),
 	});
 
@@ -68,7 +70,7 @@ async function charge(
 		.bind(`plaid-${crypto.randomUUID()}`, date, rawName, merchantName)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row).id;
 }
 
 const suggest = (
@@ -121,7 +123,7 @@ async function splitPart(rawName = RAW): Promise<number> {
 		.bind(rawName, parent?.id)
 		.first<{ id: number }>();
 
-	return part?.id as number;
+	return present(part).id;
 }
 
 beforeEach(async () => {

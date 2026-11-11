@@ -64,14 +64,15 @@ async function post(
 			form.append(key, item);
 	}
 
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: form.toString(),
 	});
 
@@ -1598,7 +1599,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			"SELECT rowid AS id FROM merchants WHERE raw_name = 'OTHER RAW'",
 		).first<{ id: number }>();
 
-		const crafted: Record<string, string> = {
+		const crafted = {
 			"another category": `/transactions/organize?category=3&store=${store}`,
 			"a store that does not exist":
 				"/transactions/organize?category=2&store=999999",
@@ -1608,7 +1609,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			"no store": "/transactions/organize?category=2",
 			"an address from before #532, with saved ids":
 				"/transactions/organize?category=2&saved=1.2",
-		};
+		} satisfies Record<string, string>;
 
 		for (const [name, path] of Object.entries(crafted)) {
 			const { res, html } = await get(path);

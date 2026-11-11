@@ -7,6 +7,7 @@ import { markStroke, STROKES } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -30,7 +31,7 @@ const demoWithKey = { DB: db, JEV_API_KEY: "test-key", DEMO: "true" };
 
 /** Inserts `n` unsorted purchases in one batch and returns their ids, oldest first. */
 async function addWaiting(n: number): Promise<number[]> {
-	const results = await db.batch(
+	const results = await db.batch<{ id: number }>(
 		Array.from({ length: n }, (_, i) =>
 			db
 				.prepare(
@@ -40,9 +41,7 @@ async function addWaiting(n: number): Promise<number[]> {
 		),
 	);
 
-	return results.map((result) =>
-		Number((result.results[0] as { id: number }).id),
-	);
+	return results.map((result) => Number(present(result.results[0]).id));
 }
 
 const categoryOf = async (id: number) =>

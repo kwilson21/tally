@@ -32,7 +32,7 @@ async function homeOn(today: string): Promise<string> {
 }
 
 /** Home's forecast as the page says it: "under" or "over", and the whole dollars shown. */
-function forecastOf(html: string): { direction: string; cents: number } {
+function forecastOf(html: string) {
 	const match = html.match(
 		/where it ends at this pace: \$([\d,]+) (under|over) the /,
 	);

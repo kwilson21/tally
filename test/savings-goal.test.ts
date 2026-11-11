@@ -6,6 +6,8 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { home as homeRoutes } from "../src/routes/home";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 describe("savings goal history", () => {
 	it("uses the latest amount on or before the month", () => {
@@ -256,8 +258,6 @@ describe("savings goal routes", () => {
 
 		const counted = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
@@ -265,14 +265,17 @@ describe("savings goal routes", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				// SAFETY: the proxy forwards only the members the home route reads from D1Database; any other key reads as undefined on the real binding.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
-		await homeRoutes.fetch(new Request("http://tally.test/"), {
-			...env,
-			DB: counted as D1Database,
-		});
+		await homeRoutes.fetch(
+			new Request("http://tally.test/"),
+			envWith(env, { DB: counted }),
+		);
 		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
 	});
 

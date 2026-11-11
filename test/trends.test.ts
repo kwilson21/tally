@@ -22,6 +22,7 @@ import {
 	trendsAmount,
 	underBudgetRun,
 } from "../src/trends";
+import { itemAt } from "./helpers/present";
 
 describe("the rules' numbers", () => {
 	it("draws six months and needs a run of three", () => {
@@ -428,18 +429,18 @@ const MONTHS = [
 	"2026-10",
 ];
 
-const SERIES: Record<number, number[]> = {
+const SERIES = {
 	[GROCERIES]: [82000, 79000, 84500, 81000, 86000, 19600],
 	[EATING_OUT]: [21000, 24500, 28000, 31800, 36500, 9200],
 	[KIDS]: [26000, 24000, 30000, 28000, 25500, 6000],
 	[GAS]: [18000, 17500, 19000, 17200, 18500, 4800],
 	[HOUSEHOLD]: [14000, 19000, 12000, 16000, 15000, 3000],
-};
+} satisfies Record<number, number[]>;
 
 const spendRows = (series: Record<number, number[]>): MonthSpend[] =>
 	Object.entries(series).flatMap(([id, cents]) =>
 		cents.map((c, i) => ({
-			month: MONTHS[i] as string,
+			month: itemAt(MONTHS, i),
 			categoryId: Number(id),
 			cents: c,
 		})),

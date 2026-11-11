@@ -8,6 +8,7 @@ import { firstPage } from "../src/routes/first-page";
 import { home } from "../src/routes/home";
 import { plaid } from "../src/routes/plaid";
 import { setupRoute } from "../src/routes/setup";
+import { envWith } from "./helpers/doubles";
 
 // The first week from the top (P125 E, spec §8.8, decision 114), through the routes the family app mounts together: a
 // new family links a bank on Home, the questions open once the import is in, Home's Band opens the question page, and
@@ -22,8 +23,7 @@ const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 
 /** The family app's bindings, with Plaid on (as plaid-routes.test.ts sets them) and the test's own database. */
-const bindings = {
-	...env,
+const bindings = envWith(env, {
 	DB: db,
 	DEMO: "false",
 	PLAID_CLIENT_ID: "client-id",
@@ -31,7 +31,7 @@ const bindings = {
 	PLAID_ENV: "sandbox",
 	PLAID_WEBHOOK_URL: "https://tally.test/webhooks/plaid",
 	TOKEN_ENCRYPTION_KEY: KEY,
-} as unknown as Env;
+});
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 

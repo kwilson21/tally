@@ -336,7 +336,7 @@ describe("summarizeMonth limits", () => {
 		try {
 			month({ transactions: [tx(1, secret)] });
 		} catch (error) {
-			message = (error as Error).message;
+			if (error instanceof Error) message = error.message;
 		}
 
 		expect(message).not.toBe("");

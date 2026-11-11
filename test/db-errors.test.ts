@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isUniqueViolation } from "../src/db/errors";
 
 /** An error whose cause is `inner`, the way Drizzle wraps a driver error. */
-function wrap(message: string, inner: unknown): Error {
+function wrap(message: string, inner: Error): Error {
 	return new Error(message, { cause: inner });
 }
 
@@ -66,7 +66,7 @@ describe("isUniqueViolation", () => {
 
 	it("does not hang on an error whose cause is itself", () => {
 		const error = new Error("Failed query: loop");
-		(error as Error & { cause?: unknown }).cause = error;
+		error.cause = error;
 		expect(isUniqueViolation(error)).toBe(false);
 	});
 });
