@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { BillStatus } from "../src/bills/status";
-import { occurrenceKey, setAsideFor } from "../src/bills/totals";
+import {
+	MAX_COUNTED_OCCURRENCES,
+	MAX_OCCURRENCE_CENTS,
+	occurrenceKey,
+	setAsideFor,
+} from "../src/bills/totals";
 
 // What Safe to spend sets aside for bills (decision 123, #942): the unpaid part of each distinct due or overdue
 // occurrence of an active bill that is due this month, each counted once, the first one given winning a tie.
@@ -105,6 +110,60 @@ describe("setAsideFor", () => {
 				MONTH,
 			),
 		).toBe(0);
+	});
+});
+
+describe("setAsideFor's limits", () => {
+	it("adds amounts at the limits exactly", () => {
+		expect(
+			setAsideFor(
+				[
+					occ(
+						1,
+						"2026-10-05",
+						"due",
+						MAX_OCCURRENCE_CENTS,
+						-MAX_OCCURRENCE_CENTS,
+					),
+					occ(1, "2026-10-06", "due", MAX_OCCURRENCE_CENTS),
+				],
+				active,
+				MONTH,
+			),
+		).toBe(3 * MAX_OCCURRENCE_CENTS);
+	});
+
+	it("refuses an amount or a paid amount it cannot add exactly, without naming it", () => {
+		const past = MAX_OCCURRENCE_CENTS + 1;
+		for (const bad of [
+			occ(1, "2026-10-05", "due", past),
+			occ(1, "2026-10-05", "due", -past),
+			occ(1, "2026-10-05", "due", 100, past),
+			occ(1, "2026-10-05", "due", 100, -past),
+			occ(1, "2026-10-05", "due", 10.5),
+			occ(1, "2026-10-05", "due", 100, Number.NaN),
+			// One the rule would skip is refused too: every amount handed in is inside the limit.
+			occ(9, "2026-11-05", "paid", past),
+		]) {
+			let thrown: unknown;
+			try {
+				setAsideFor([bad], active, MONTH);
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).not.toMatch(/\d/);
+		}
+	});
+
+	it("refuses more occurrences than it can add exactly", () => {
+		const one = occ(1, "2026-10-05", "due", 100);
+		expect(
+			setAsideFor(Array(MAX_COUNTED_OCCURRENCES).fill(one), active, MONTH),
+		).toBe(100);
+		expect(() =>
+			setAsideFor(Array(MAX_COUNTED_OCCURRENCES + 1).fill(one), active, MONTH),
+		).toThrow(RangeError);
 	});
 });
 

@@ -39,29 +39,85 @@ export type BillOccurrence = {
 	paidCents: number;
 };
 
-/** What names one occurrence in the totals: its bill and its due date. Two occurrences share a key only when both match. */
+/**
+ * What names one occurrence in the totals: its bill and its due date. Two occurrences share a key only when both match
+ * (the id's digits end at the first colon), which test/bill-set-aside-rule.test.ts checks.
+ */
 export function occurrenceKey(billId: number, dueDate: string): string {
+	//@ extern
+	// Trusted, not checked: a number written into a template string is outside LemmaScript's model, so the prover knows
+	// only that the same bill and date give the same key (docs/verification.md, "What LemmaScript reads").
 	return `${billId}:${dueDate}`;
 }
 
 /** What is left to pay of an occurrence: its amount less what is paid, never below zero. */
 export function unpaidCents(occurrence: BillOccurrence): number {
+	//@ verify
+	//@ ensures \result === (occurrence.amountCents > occurrence.paidCents ? occurrence.amountCents - occurrence.paidCents : 0)
 	return Math.max(0, occurrence.amountCents - occurrence.paidCents);
+}
+
+/**
+ * What setAsideFor can add exactly (docs/verification.md, "Numbers"): no amount or paid amount above $100,000,000 and at
+ * most 100,000 occurrences, so what is left of one is at most 2e10 cents and the sum at most 2e15, under the 2^53 (about
+ * 9e15) a double holds exactly.
+ */
+export const MAX_OCCURRENCE_CENTS = 10_000_000_000;
+export const MAX_COUNTED_OCCURRENCES = 100_000;
+
+/** Whether an amount is a whole number of cents inside the limit. */
+function fits(cents: number): boolean {
+	return Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_OCCURRENCE_CENTS;
+}
+
+/** Refuses occurrences past the limits above. The message names no amount: bill details are never logged. */
+//@ skip
+function assertSetAsideWithinLimits(occurrences: BillOccurrence[]): void {
+	if (
+		occurrences.length > MAX_COUNTED_OCCURRENCES ||
+		!occurrences.every((o) => fits(o.amountCents) && fits(o.paidCents))
+	)
+		throw new RangeError(
+			"These bills hold more money or more rows than Tally can add up exactly.",
+		);
 }
 
 /**
  * What Safe to spend sets aside for bills (decision 123, #631): the unpaid part of each due or overdue occurrence of an
  * active bill that is due this month. Each occurrence is counted once, the first one given winning a tie, so the caller
- * gives the shown occurrences first. A bill due in a later month waits for its month.
+ * gives the shown occurrences first. A bill due in a later month waits for its month. It refuses occurrences past the
+ * limits above with a RangeError.
  */
+//@ skip
 export function setAsideFor(
 	occurrences: BillOccurrence[],
 	activeIds: Set<number>,
 	month: string,
 ): number {
+	assertSetAsideWithinLimits(occurrences);
+	return setAsideWithinLimits(occurrences, activeIds, month);
+}
+
+// Checked by LemmaScript and Dafny (decision 188). The rule, in plain words: the set-aside is exactly the sum, over the
+// occurrences, of the unpaid part (amount less paid, never below zero) of each one that is the first with its key, belongs
+// to an active bill, is due this month and is due or overdue; every other occurrence adds nothing. So an occurrence given
+// twice is counted once, the earlier one winning, and nothing paid, upcoming, inactive or due another month is counted.
+function setAsideWithinLimits(
+	occurrences: BillOccurrence[],
+	activeIds: Set<number>,
+	month: string,
+): number {
+	//@ verify
+	//@ requires occurrences.length <= MAX_COUNTED_OCCURRENCES
+	//@ requires forall(i: nat, i < occurrences.length ==> -MAX_OCCURRENCE_CENTS <= occurrences[i].amountCents && occurrences[i].amountCents <= MAX_OCCURRENCE_CENTS && -MAX_OCCURRENCE_CENTS <= occurrences[i].paidCents && occurrences[i].paidCents <= MAX_OCCURRENCE_CENTS)
+	//@ ensures \result === setAsideTo(occurrences, occurrences.length, activeIds, month)
+	//@ ensures 0 <= \result && \result <= 2 * MAX_OCCURRENCE_CENTS * occurrences.length
 	const counted = new Set<string>();
 	let setAsideCents = 0;
 	for (const occurrence of occurrences) {
+		//@ invariant forall(k: string, counted.has(k) <==> keyCountedIn(occurrences, _occurrence_idx, k))
+		//@ invariant setAsideCents === setAsideTo(occurrences, _occurrence_idx, activeIds, month)
+		//@ invariant 0 <= setAsideCents && setAsideCents <= 2 * MAX_OCCURRENCE_CENTS * _occurrence_idx
 		const key = occurrenceKey(occurrence.billId, occurrence.dueDate);
 		if (counted.has(key)) continue;
 		counted.add(key);
@@ -72,6 +128,51 @@ export function setAsideFor(
 		setAsideCents += unpaidCents(occurrence);
 	}
 	return setAsideCents;
+}
+
+// What the contract on setAsideWithinLimits compares against, written as the simplest recursions so each reads as the
+// rule it names. They are exported only so the type checker sees them used.
+
+/** Whether one of the first n occurrences has this key. */
+export function keyCountedIn(
+	occurrences: BillOccurrence[],
+	n: number,
+	key: string,
+): boolean {
+	//@ verify
+	//@ type n nat
+	//@ requires n <= occurrences.length
+	//@ decreases n
+	if (n === 0) return false;
+	const o = occurrences[n - 1] as BillOccurrence;
+	return (
+		keyCountedIn(occurrences, n - 1, key) ||
+		occurrenceKey(o.billId, o.dueDate) === key
+	);
+}
+
+/** The set-aside of the first n occurrences: each adds its unpaid part only when the rule counts it. */
+export function setAsideTo(
+	occurrences: BillOccurrence[],
+	n: number,
+	activeIds: Set<number>,
+	month: string,
+): number {
+	//@ verify
+	//@ type n nat
+	//@ requires n <= occurrences.length
+	//@ decreases n
+	if (n === 0) return 0;
+	const o = occurrences[n - 1] as BillOccurrence;
+	return (
+		setAsideTo(occurrences, n - 1, activeIds, month) +
+		(!keyCountedIn(occurrences, n - 1, occurrenceKey(o.billId, o.dueDate)) &&
+		activeIds.has(o.billId) &&
+		o.dueDate.startsWith(month) &&
+		(o.status === "due" || o.status === "overdue")
+			? unpaidCents(o)
+			: 0)
+	);
 }
 
 type BillTotalInput = {
