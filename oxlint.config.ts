@@ -37,6 +37,12 @@ export default defineConfig({
 	},
 	overrides: [
 		{
+			// The feedback form's Node suite stands in for Cloudflare Access by mocking src/access; giving identity a
+			// second way in just for this suite would be a change to how Tally reads who is signed in.
+			files: ["verification/**"],
+			rules: { "anti-slop/no-module-mocking": "off" },
+		},
+		{
 			// Plain JavaScript has no type predicates, so a typeof check is the only way it can tell what it was given.
 			files: ["public/**/*.js", "scripts/**/*.mjs"],
 			rules: { "anti-slop/no-runtime-typeof": "off" },

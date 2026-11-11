@@ -140,6 +140,7 @@ export function partsAddUp(parts: SplitPart[], parentCents: number): boolean {
 		//@ invariant sum === partSumTo(parts, i)
 		//@ invariant signed <==> forall(j: nat, j < i ==> ((parentCents < 0 && parts[j].amountCents < 0) || (parentCents >= 0 && parts[j].amountCents > 0)))
 		//@ decreases parts.length - i
+		// SAFETY: the loop runs only while i < parts.length, so parts[i] is a part.
 		const part = parts[i] as SplitPart;
 		sum = sum + part.amountCents;
 
@@ -161,6 +162,7 @@ export function partSumTo(parts: SplitPart[], n: number): number {
 	//@ requires n <= parts.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= parts.length, so parts[n - 1] is a part.
 	const part = parts[n - 1] as SplitPart;
 
 	return partSumTo(parts, n - 1) + part.amountCents;

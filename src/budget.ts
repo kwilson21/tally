@@ -281,6 +281,7 @@ export function statusSentence(
 			: "";
 
 	if (over.length === 1) {
+		// SAFETY: the length check on the line above proves `over` holds exactly one category.
 		const [only] = over as [CategorySummary];
 		const amount = -only.leftCents;
 		const text = formatCents(amount, { wholeDollars: amount % 100 === 0 });
@@ -301,6 +302,7 @@ export function outTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
 
 	return outTo(txs, n - 1) + (t.income ? 0 : t.amountCents);
@@ -313,6 +315,7 @@ export function inTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
 
 	return inTo(txs, n - 1) + (t.income ? -t.amountCents : 0);
@@ -325,6 +328,7 @@ export function uncatTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
 
 	return (
@@ -340,6 +344,7 @@ export function uncatCountTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
 
 	return (
@@ -359,6 +364,7 @@ export function catTo(
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
 
 	return (
