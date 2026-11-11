@@ -12,6 +12,7 @@ import {
 	appleCardAccount,
 	type Bank,
 	countedAccounts,
+	MAX_BALANCE_CENTS,
 	netWorthCents,
 } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
@@ -319,14 +320,15 @@ async function readForm(c: Context<App>) {
 
 /**
  * A balance as integer cents: blank is no balance, a leading minus is a credit, and anything else (or a value that isn't
- * a safe whole number of cents) is null. toCents names the text it refused, so the text is dropped, never rethrown.
+ * a safe whole number of cents, or is past $100,000,000 either way) is null. toCents names the text it refused, so the text is dropped, never rethrown.
  */
 function parseBalance(text: string): { cents: number | null } | null {
 	const trimmed = text.trim();
 	if (trimmed === "") return { cents: null };
 	try {
 		const cents = toCents(trimmed);
-		return Number.isSafeInteger(cents)
+		// Net worth refuses a balance past MAX_BALANCE_CENTS (docs/verification.md, "Numbers"), so one is never saved.
+		return Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_BALANCE_CENTS
 			? { cents: cents === 0 ? 0 : cents }
 			: null;
 	} catch {

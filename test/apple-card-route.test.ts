@@ -739,6 +739,33 @@ describe("Apple Card's upload sheet (#766)", () => {
 			expect(await cardAccount()).toBeFalsy();
 		});
 
+		it("refuses a balance past what net worth can add up exactly, with the same words, and saves nothing", async () => {
+			// netWorthCents refuses a balance above $100,000,000 (MAX_BALANCE_CENTS), so one must never be saved: it
+			// would break Accounts on every later visit.
+			for (const balance of ["100,000,000.01", "-100,000,000.01"]) {
+				const { res, html } = await post(
+					{ file: file(csv(ROW_A)), balance },
+					{ htmx: true },
+				);
+				expect(res.status).toBe(422);
+				expect(html).toContain(
+					"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
+				);
+				expect(await cardRows()).toEqual({ n: 0 });
+				expect(await cardAccount()).toBeFalsy();
+			}
+		});
+
+		it("saves a balance of exactly $100,000,000, and Accounts still draws", async () => {
+			const { res } = await post(
+				{ file: file(csv(ROW_A)), balance: "100,000,000.00" },
+				{ htmx: true },
+			);
+			expect(res.status).toBe(200);
+			expect((await cardAccount())?.balance_cents).toBe(10_000_000_000);
+			expect((await app.request("/accounts", {}, family)).status).toBe(200);
+		});
+
 		it("saves a balance typed as -0.00 as a whole 0, never a negative zero", async () => {
 			// SQLite stores -0 as 0 too, so the stored row can't tell them apart: the check is on the values bound to D1.
 			const bound: unknown[] = [];
