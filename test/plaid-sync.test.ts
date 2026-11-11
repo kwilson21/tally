@@ -24,6 +24,37 @@ import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { merchantNames } from "./helpers/merchants";
 
+// undefined is allowed as a field value: JSON.stringify leaves such a field out, as a test below relies on.
+type Json =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| Json[]
+	| { [key: string]: Json };
+
+/** The row a query returned; an error when it returned none. */
+function defined<Value>(value: Value | null | undefined): Value {
+	if (value === null || value === undefined)
+		throw new Error("the query returned no row");
+
+	return value;
+}
+
+function isDbMember(
+	target: D1Database,
+	property: PropertyKey,
+): property is keyof D1Database {
+	return property in target;
+}
+
+function isMethod<Member>(
+	value: Member,
+): value is Extract<Member, (...args: never[]) => object> {
+	return typeof value === "function";
+}
+
 const KEY = btoa("01234567890123456789012345678901");
 
 const account = (current: number | null = 12.34) => ({
@@ -35,7 +66,7 @@ const account = (current: number | null = 12.34) => ({
 	balances: { current },
 });
 
-const page = (overrides: Record<string, unknown> = {}) => ({
+const page = (overrides: Record<string, Json> = {}) => ({
 	added: [],
 	modified: [],
 	removed: [],
@@ -44,7 +75,7 @@ const page = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const transaction = (overrides: Record<string, unknown> = {}) => ({
+const transaction = (overrides: Record<string, Json> = {}) => ({
 	transaction_id: "transaction-1",
 	account_id: "account-1",
 	date: "2026-09-27",
@@ -65,17 +96,17 @@ async function addItem() {
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return defined(result).id;
 }
 
-const response = (body: unknown, status = 200) =>
+const response = (body: Json, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
 	});
 
 const plaidFetch = (
-	sync: (body: Record<string, unknown>) => Response | Promise<Response>,
+	sync: (body: Record<string, Json>) => Response | Promise<Response>,
 	accounts = [account()],
 ) =>
 	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -626,13 +657,18 @@ describe("syncItem", () => {
 				),
 			);
 
-			const [first, second] = (
+			const categoryIds = (
 				await env.DB.prepare(
 					"SELECT id FROM categories ORDER BY id LIMIT 2",
 				).all<{
 					id: number;
 				}>()
-			).results.map((r) => r.id) as [number, number];
+			).results.map((r) => r.id);
+
+			const [first, second] = [
+				defined(categoryIds[0]),
+				defined(categoryIds[1]),
+			];
 
 			await env.DB.batch([
 				env.DB.prepare(
@@ -727,11 +763,13 @@ describe("syncItem", () => {
 			),
 		);
 
-		const [rule, mine] = (
+		const categoryIds = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 			).all<{ id: number }>()
-		).results.map((r) => r.id) as [number, number];
+		).results.map((r) => r.id);
+
+		const [rule, mine] = [defined(categoryIds[0]), defined(categoryIds[1])];
 
 		await env.DB.batch([
 			env.DB.prepare(
@@ -849,7 +887,7 @@ describe("syncItem", () => {
 
 		expect(charge?.category_source).toBe("merchant_rule");
 		expect(
-			(await getTransaction(env.DB, charge?.id as number))?.displayName,
+			(await getTransaction(env.DB, defined(charge).id))?.displayName,
 		).toBe("Comcast Cable");
 		// The bill saved under the bank text still pays from the charge.
 		expect(
@@ -1351,7 +1389,14 @@ describe("syncItem", () => {
 
 		const row = await env.DB.prepare(
 			"SELECT date, amount_cents, raw_name, category_id, note, excluded FROM transactions",
-		).first<Record<string, unknown>>();
+		).first<{
+			date: string;
+			amount_cents: number;
+			raw_name: string;
+			category_id: number | null;
+			note: string | null;
+			excluded: number;
+		}>();
 
 		expect(row).toMatchObject({
 			date: "2026-09-28",
@@ -1452,7 +1497,7 @@ describe("syncItem", () => {
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
 
-		await saveJevResult(env.DB, tx?.id as number, {
+		await saveJevResult(env.DB, defined(tx).id, {
 			categoryId: null,
 			suggestedCategoryId: null,
 			confidence: 0.95,
@@ -1698,7 +1743,7 @@ describe("syncItem", () => {
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
 
-		await saveJevResult(env.DB, tx?.id as number, {
+		await saveJevResult(env.DB, defined(tx).id, {
 			categoryId: 1,
 			suggestedCategoryId: 1,
 			confidence: 0.95,
@@ -1706,7 +1751,7 @@ describe("syncItem", () => {
 		});
 		await saveEdit(
 			env.DB,
-			tx?.id as number,
+			defined(tx).id,
 			{
 				categoryId: null,
 				alwaysForMerchant: false,
@@ -1881,7 +1926,7 @@ describe("syncItem", () => {
 		const correct = (
 			item: number,
 			path: "added" | "modified",
-			t: Record<string, unknown>,
+			t: Record<string, Json>,
 		) =>
 			syncItem(
 				opts,
@@ -2050,9 +2095,11 @@ describe("syncItem", () => {
 					{ id: "refund", amount: 40, date: "2026-09-10" },
 				]);
 
-				const refund = (await env.DB.prepare(
-					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
-				).first<{ id: number }>()) as { id: number };
+				const refund = defined(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first<{ id: number }>(),
+				);
 
 				await saveSplit(
 					env.DB,
@@ -2145,9 +2192,11 @@ describe("syncItem", () => {
 					{ id: "refund", amount: 40, date: "2026-09-10" },
 				]);
 
-				const refund = (await env.DB.prepare(
-					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
-				).first<{ id: number }>()) as { id: number };
+				const refund = defined(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first<{ id: number }>(),
+				);
 
 				await saveSplit(
 					env.DB,
@@ -2176,9 +2225,11 @@ describe("syncItem", () => {
 					{ id: "refund", amount: 40, date: "2026-09-10" },
 				]);
 
-				const refund = (await env.DB.prepare(
-					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
-				).first<{ id: number }>()) as { id: number };
+				const refund = defined(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first<{ id: number }>(),
+				);
 
 				await saveSplit(
 					env.DB,
@@ -2296,7 +2347,7 @@ describe("syncItem", () => {
 
 		await saveEdit(
 			env.DB,
-			refund?.id as number,
+			defined(refund).id,
 			{
 				categoryId: null,
 				alwaysForMerchant: false,
@@ -2428,7 +2479,7 @@ describe("syncItem", () => {
 	it("moves split children with a date correction and removes them for an amount correction", async () => {
 		const item = await addItem();
 
-		const sync = (overrides: Record<string, unknown>) =>
+		const sync = (overrides: Record<string, Json>) =>
 			syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				item,
@@ -2491,7 +2542,7 @@ describe("syncItem", () => {
 	it("a second bank change keeps the category a restored purchase went back to, and its note", async () => {
 		const item = await addItem();
 
-		const sync = (overrides: Record<string, unknown>) =>
+		const sync = (overrides: Record<string, Json>) =>
 			syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				item,
@@ -2540,7 +2591,7 @@ describe("syncItem", () => {
 	});
 
 	describe("a merchant rule's category when the bank changes a purchase", () => {
-		const syncPage = (item: number, body: Record<string, unknown>) =>
+		const syncPage = (item: number, body: Record<string, Json>) =>
 			syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				item,
@@ -2560,7 +2611,7 @@ describe("syncItem", () => {
 			).first<{ id: number; account_id: number }>();
 
 			return {
-				parent: parent?.id as number,
+				parent: defined(parent).id,
 				account: parent?.account_id,
 				category: category?.id,
 			};
@@ -3048,9 +3099,11 @@ describe("syncItem", () => {
 			return new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop !== "prepare") {
-						const value = Reflect.get(target, prop);
+						if (!isDbMember(target, prop)) return undefined;
 
-						return typeof value === "function" ? value.bind(target) : value;
+						const value = target[prop];
+
+						return isMethod(value) ? value.bind(target) : value;
 					}
 
 					return (sql: string) => {
@@ -3071,7 +3124,7 @@ describe("syncItem", () => {
 									},
 								};
 							},
-						} as unknown as D1PreparedStatement;
+						};
 					};
 				},
 			});
@@ -3328,11 +3381,11 @@ describe("syncItem", () => {
 			).first();
 
 		const rowId = async () =>
-			(
+			defined(
 				await env.DB.prepare(
 					"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
-				).first<{ id: number }>()
-			)?.id as number;
+				).first<{ id: number }>(),
+			).id;
 
 		/** What the edit panel saves when a person only flips the exclude toggle. */
 		const person = async (excluded: boolean) =>
@@ -3551,8 +3604,8 @@ describe("syncItem", () => {
 				env.DB,
 				await rowId(),
 				[
-					{ amountCents: 600, categoryId: categories[0]?.id as number },
-					{ amountCents: 634, categoryId: categories[1]?.id as number },
+					{ amountCents: 600, categoryId: defined(categories[0]).id },
+					{ amountCents: 634, categoryId: defined(categories[1]).id },
 				],
 				"synthetic-person",
 			);
@@ -3643,7 +3696,7 @@ describe("syncItem", () => {
 				// The edit panel's toggle on one part includes the purchase and every part.
 				await saveEdit(
 					env.DB,
-					first as number,
+					defined(first),
 					{
 						categoryId: null,
 						alwaysForMerchant: false,
@@ -3792,7 +3845,7 @@ describe("syncItem", () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
 				const [linked] = await split();
-				await link(linked as number);
+				await link(defined(linked));
 				await syncAs(id, "modified", inCategory("LOAN_PAYMENTS"));
 				const plaid = { excluded: 1, excluded_source: "plaid" };
 				expect(await exclusion()).toEqual(plaid);
@@ -3947,8 +4000,8 @@ describe("syncItem", () => {
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
@@ -4007,8 +4060,8 @@ describe("syncItem", () => {
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
@@ -4053,8 +4106,8 @@ describe("syncItem", () => {
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
@@ -4093,8 +4146,8 @@ describe("syncItem", () => {
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
@@ -4226,8 +4279,8 @@ describe("syncItem", () => {
 			).first<{ id: number }>();
 
 			const written = await saveJevResult(env.DB, await rowId(), {
-				categoryId: category?.id as number,
-				suggestedCategoryId: category?.id as number,
+				categoryId: defined(category).id,
+				suggestedCategoryId: defined(category).id,
 				confidence: 0.95,
 				flags: { transfer: false, reimbursement: false, income: true },
 			});
@@ -4274,7 +4327,7 @@ describe("syncItem", () => {
 describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", () => {
 	const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
 
-	const payroll = (overrides: Record<string, unknown> = {}) =>
+	const payroll = (overrides: Record<string, Json> = {}) =>
 		transaction({
 			transaction_id: "payroll",
 			amount: -3000,
@@ -4304,11 +4357,11 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 		).first();
 
 	const payrollId = async () =>
-		(
+		defined(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id = 'payroll'",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 	const jevAnswer = (income: boolean) => ({
 		categoryId: null,
@@ -4784,13 +4837,13 @@ describe("syncItem reports which rows it changed", () => {
 	});
 
 	const rowId = async (plaidId: string) =>
-		(
+		defined(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id = ?",
 			)
 				.bind(plaidId)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 	const idsOf = (synced: Awaited<ReturnType<typeof syncItem>>) =>
 		"changedIds" in synced ? [...synced.changedIds].sort((a, b) => a - b) : [];

@@ -6,8 +6,36 @@ import { listTransactions, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestTransactionNotes } from "../src/suggest-names-pending";
 import { parseFilters } from "../src/transactions/filters";
+import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
+
+type AiInput = { messages: { content: string }[] };
+
+type Answer = { choice?: string; confidence?: number; noul?: number };
+
+type Answers = {
+	category: Answer;
+	transfer: Answer;
+	reimbursement: Answer;
+	income: Answer;
+	kind?: Answer;
+	for_person?: Answer;
+	note_worth_writing?: Answer;
+};
+
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+type PersonQuestions = { for_person: { criteria: Record<string, string> } };
+
+type DetailRow = {
+	note: string | null;
+	note_guessed: number;
+	kind: string | null;
+	kind_guessed: number;
+	for_person_id: number | null;
+	for_person_guessed: number;
+};
 
 const db = env.DB;
 
@@ -20,6 +48,19 @@ const textOf = (html: string) =>
 		.replace(/<[^>]+>/g, " ")
 		.replace(/\s+/g, " ")
 		.trim();
+
+function isDbMember(
+	target: D1Database,
+	property: PropertyKey,
+): property is keyof D1Database {
+	return property in target;
+}
+
+function isMethod<Member>(
+	value: Member,
+): value is Extract<Member, (...args: never[]) => object> {
+	return typeof value === "function";
+}
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
@@ -57,7 +98,9 @@ async function charge() {
 		)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	if (!row) throw new Error("the INSERT returned no row");
+
+	return row.id;
 }
 
 beforeEach(async () => {
@@ -78,17 +121,13 @@ describe("transaction detail guesses", () => {
 			.run();
 		const asked: string[] = [];
 
-		const ai = {
-			run: vi.fn(
-				async (_model: string, input: { messages: { content: string }[] }) => {
-					asked.push(
-						input.messages[1]?.content.replace("Bank text: ", "") ?? "",
-					);
+		const ai = fakeAi(
+			vi.fn(async (_model: string, input: AiInput) => {
+				asked.push(input.messages[1]?.content.replace("Bank text: ", "") ?? "");
 
-					return { response: "" };
-				},
-			),
-		} as unknown as Ai;
+				return { response: "" };
+			}),
+		);
 
 		await suggestTransactionNotes({ DB: db, AI: ai }, 3);
 		await suggestTransactionNotes({ DB: db, AI: ai }, 1);
@@ -115,8 +154,6 @@ describe("transaction detail guesses", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
@@ -124,15 +161,17 @@ describe("transaction detail guesses", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				if (!isDbMember(target, property)) return undefined;
+
+				const value = target[property];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Coffee purchase" })),
-		} as unknown as Ai;
+		const ai = fakeAi(vi.fn(async () => ({ response: "Coffee purchase" })));
 
-		await suggestTransactionNotes({ DB: counted as D1Database, AI: ai });
+		await suggestTransactionNotes({ DB: counted, AI: ai });
 		expect(statements).toBeLessThanOrEqual(45);
 	});
 
@@ -151,7 +190,7 @@ describe("transaction detail guesses", () => {
 			return { response: "Coffee purchase" };
 		});
 
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
 			asked: 5,
 			suggested: 0,
@@ -198,7 +237,7 @@ describe("transaction detail guesses", () => {
 			},
 		);
 
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 
@@ -246,9 +285,7 @@ describe("transaction detail guesses", () => {
 		await suggestTransactionNotes(
 			{
 				DB: db,
-				AI: {
-					run: async () => ({ response: "Coffee with a friend" }),
-				} as unknown as Ai,
+				AI: fakeAi(async () => ({ response: "Coffee with a friend" })),
 			},
 			1,
 		);
@@ -258,7 +295,7 @@ describe("transaction detail guesses", () => {
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.all<Record<string, unknown>>();
+			.all<DetailRow>();
 
 		expect(results[0]).toMatchObject({
 			note: "Coffee with a friend",
@@ -299,9 +336,9 @@ describe("transaction detail guesses", () => {
 			onlyIds: [id],
 		});
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Coffee with a friend" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(
+			vi.fn(async () => ({ response: "Coffee with a friend" })),
+		);
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 
@@ -314,7 +351,17 @@ describe("transaction detail guesses", () => {
 				"SELECT category_id, category_source, kind, kind_guessed, for_person_id, for_person_guessed, details_asked, note_worth_writing, note FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<{
+				category_id: number | null;
+				category_source: string | null;
+				kind: string | null;
+				kind_guessed: number;
+				for_person_id: number | null;
+				for_person_guessed: number;
+				details_asked: number;
+				note_worth_writing: number | null;
+				note: string | null;
+			}>();
 
 		expect(row).toMatchObject({
 			category_id: eatingOut?.id,
@@ -351,9 +398,7 @@ describe("transaction detail guesses", () => {
 			),
 		]);
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Uber Eats order" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(vi.fn(async () => ({ response: "Uber Eats order" })));
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([
@@ -374,9 +419,7 @@ describe("transaction detail guesses", () => {
 			),
 		]);
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Uber Eats order" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(vi.fn(async () => ({ response: "Uber Eats order" })));
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([{ note: null, note_guessed: 0 }]);
@@ -396,9 +439,7 @@ describe("transaction detail guesses", () => {
 			),
 		]);
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Uber Eats order" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(vi.fn(async () => ({ response: "Uber Eats order" })));
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([
@@ -420,9 +461,9 @@ describe("transaction detail guesses", () => {
 			),
 		]);
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Harbor Hardware purchase" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(
+			vi.fn(async () => ({ response: "Harbor Hardware purchase" })),
+		);
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 		expect(await noteRows()).toEqual([{ note: null, note_guessed: 0 }]);
@@ -447,15 +488,16 @@ describe("transaction detail guesses", () => {
 			),
 		]);
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Blue Bottle Coffee purchase" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(
+			vi.fn(async (_model: string, _input: AiInput) => ({
+				response: "Blue Bottle Coffee purchase",
+			})),
+		);
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 
 		const asked = ai.run.mock.calls.map(
-			([, input]) =>
-				(input as { messages: { content: string }[] }).messages[1]?.content,
+			([, input]) => input.messages[1]?.content,
 		);
 
 		expect(asked).toEqual(["Bank text: BL BTTL COF", "Bank text: BL BTTL COF"]);
@@ -477,15 +519,18 @@ describe("transaction detail guesses", () => {
 	});
 
 	it("asks Workers AI for a what-it-was line only where Jev says one could say more than the store's name", async () => {
-		const purchase = async (rawName: string, merchantName: string) =>
-			(
-				await db
-					.prepare(
-						"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, '2026-10-01', 1299, ?, ?) RETURNING id",
-					)
-					.bind(rawName, merchantName)
-					.first<{ id: number }>()
-			)?.id as number;
+		const purchase = async (rawName: string, merchantName: string) => {
+			const row = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, '2026-10-01', 1299, ?, ?) RETURNING id",
+				)
+				.bind(rawName, merchantName)
+				.first<{ id: number }>();
+
+			if (!row) throw new Error("the INSERT returned no row");
+
+			return row.id;
+		};
 
 		const cvs = await purchase("CVS PHARMACY #1234", "CVS Pharmacy");
 		const apple = await purchase("APPLE.COM/BILL", "Apple");
@@ -497,9 +542,9 @@ describe("transaction detail guesses", () => {
 			.run();
 
 		const fakeJev = async (_url: string, init?: RequestInit) => {
-			const body = JSON.parse(String(init?.body)) as {
-				state: { bank_description: string };
-			};
+			const body: { state: { bank_description: string } } = JSON.parse(
+				String(init?.body),
+			);
 
 			const worth =
 				body.state.bank_description === "APPLE.COM/BILL" ? 0.95 : 0.1;
@@ -536,15 +581,16 @@ describe("transaction detail guesses", () => {
 			{ id: apple, note_worth_writing: 1 },
 		]);
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "App or iCloud subscription" })),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const ai = fakeAi(
+			vi.fn(async (_model: string, _input: AiInput) => ({
+				response: "App or iCloud subscription",
+			})),
+		);
 
 		await suggestTransactionNotes({ DB: db, AI: ai });
 
 		const asked = ai.run.mock.calls.map(
-			([, input]) =>
-				(input as { messages: { content: string }[] }).messages[1]?.content,
+			([, input]) => input.messages[1]?.content,
 		);
 
 		expect(asked).toEqual(["Bank text: APPLE.COM/BILL"]);
@@ -562,7 +608,7 @@ describe("transaction detail guesses", () => {
 			.prepare(
 				"SELECT raw_name, note, note_guessed FROM transactions ORDER BY id",
 			)
-			.all<Record<string, unknown>>();
+			.all<{ raw_name: string; note: string | null; note_guessed: number }>();
 
 		expect(notes.results).toEqual([
 			{ raw_name: "CVS PHARMACY #1234", note: null, note_guessed: 0 },
@@ -738,7 +784,7 @@ describe("transaction detail guesses", () => {
 
 		await saveAiSwitches(db, { details: false });
 		let calls = 0;
-		const questions: (Record<string, unknown> | undefined)[] = [];
+		const questions: (Partial<PersonQuestions> | undefined)[] = [];
 		await categorizePending(
 			{ DB: db, JEV_API_KEY: "test-key", DEMO: "false" },
 			async (_url, init) => {
@@ -749,24 +795,23 @@ describe("transaction detail guesses", () => {
 				if (calls === 1) await saveAiSwitches(db, { details: true });
 				const detailsAsked = body.questions?.for_person !== undefined;
 
-				return Response.json({
-					answers: {
-						category: { choice: "Eating Out", confidence: 0.5 },
-						transfer: { noul: 0 },
-						reimbursement: { noul: 0 },
-						income: { noul: 0 },
-						...(detailsAsked
-							? {
-									kind: { choice: "one_off", confidence: 0.99 },
-									for_person: {
-										choice: `person:${person?.id}`,
-										confidence: 0.99,
-									},
-									note_worth_writing: { noul: 0.95 },
-								}
-							: {}),
-					},
-				});
+				const answers: Answers = {
+					category: { choice: "Eating Out", confidence: 0.5 },
+					transfer: { noul: 0 },
+					reimbursement: { noul: 0 },
+					income: { noul: 0 },
+				};
+
+				if (detailsAsked) {
+					answers.kind = { choice: "one_off", confidence: 0.99 };
+					answers.for_person = {
+						choice: `person:${person?.id}`,
+						confidence: 0.99,
+					};
+					answers.note_worth_writing = { noul: 0.95 };
+				}
+
+				return Response.json({ answers });
 			},
 			{ onlyIds: ids },
 		);
@@ -775,11 +820,9 @@ describe("transaction detail guesses", () => {
 			questions.slice(1, 25).some((q) => q?.for_person !== undefined),
 		).toBe(false);
 
-		const later = questions[25] as {
-			for_person: { criteria: Record<string, unknown> };
-		};
+		const later = questions[25]?.for_person;
 
-		expect(later.for_person.criteria[`person:${person?.id}`]).toBe("Morgan");
+		expect(later?.criteria[`person:${person?.id}`]).toBe("Morgan");
 		expect(
 			await db
 				.prepare("SELECT details_asked FROM transactions WHERE id=?")
@@ -851,9 +894,7 @@ describe("transaction detail guesses", () => {
 		expect(row).toMatchObject({ note: null, note_guessed: 0 });
 		expect(row?.note_tried_at).not.toBeNull();
 
-		const ai = {
-			run: vi.fn(async () => ({ response: "Another guess" })),
-		} as unknown as Ai;
+		const ai = fakeAi(vi.fn(async () => ({ response: "Another guess" })));
 
 		await suggestTransactionNotes({ DB: db, AI: ai }, 1);
 		expect(ai.run).not.toHaveBeenCalled();
@@ -892,7 +933,7 @@ describe("transaction detail guesses", () => {
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<DetailRow>();
 
 		expect(row).toMatchObject({
 			note: "Dinner",
@@ -907,13 +948,15 @@ describe("transaction detail guesses", () => {
 				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL, details_asked = 0",
 			)
 			.run();
-		let sentState: Record<string, unknown> | undefined;
+		let sentState: Record<string, Json> | undefined;
 		await categorizePending(
 			{ DB: db, JEV_API_KEY: "test-key" },
 			async (_url, init) => {
-				sentState = (
-					JSON.parse(String(init?.body)) as { state: Record<string, unknown> }
-				).state;
+				const body: { state: Record<string, Json> } = JSON.parse(
+					String(init?.body),
+				);
+
+				sentState = body.state;
 
 				return new Response(
 					JSON.stringify({
@@ -942,7 +985,7 @@ describe("transaction detail guesses", () => {
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<DetailRow>();
 		expect(row).toMatchObject({
 			note: "Dinner",
 			note_guessed: 1,
@@ -1077,7 +1120,7 @@ describe("transaction detail guesses", () => {
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<DetailRow>();
 
 		expect(row).toMatchObject({
 			note: "Dinner",
@@ -1118,7 +1161,7 @@ describe("transaction detail guesses", () => {
 		await suggestTransactionNotes(
 			{
 				DB: db,
-				AI: { run: async () => ({ response: "Dinner" }) } as unknown as Ai,
+				AI: fakeAi(async () => ({ response: "Dinner" })),
 			},
 			1,
 		);
@@ -1128,7 +1171,7 @@ describe("transaction detail guesses", () => {
 				"SELECT note, note_guessed, kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<DetailRow>();
 		expect(row).toMatchObject({
 			note: "Dinner",
 			note_guessed: 0,
@@ -1293,16 +1336,11 @@ describe("transaction detail guesses", () => {
 		await categorizePending(
 			{ DB: db, JEV_API_KEY: "test-key" },
 			async (_url, init) => {
-				const request = JSON.parse(String(init?.body)) as Record<
-					string,
-					unknown
-				>;
+				const request: { questions: PersonQuestions } = JSON.parse(
+					String(init?.body),
+				);
 
-				const person = (
-					request.questions as {
-						for_person: { criteria: Record<string, unknown> };
-					}
-				).for_person.criteria;
+				const person = request.questions.for_person.criteria;
 
 				const idChoice = Object.keys(person).find(
 					(key) => person[key] === "Not sure",
