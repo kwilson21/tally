@@ -8,7 +8,12 @@ import {
 	shortDay,
 	todayIn,
 } from "../src/dates";
-import { accountsByBank, netWorthCents } from "../src/db/accounts";
+import {
+	accountsByBank,
+	MAX_BALANCE_CENTS,
+	MAX_NET_WORTH_ACCOUNTS,
+	netWorthCents,
+} from "../src/db/accounts";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { chartStart } from "../src/net-worth";
@@ -39,6 +44,64 @@ describe("netWorthCents", () => {
 
 	it("is zero with no accounts", () => {
 		expect(netWorthCents([])).toBe(0);
+	});
+
+	it("counts nothing for an account that is not connected", () => {
+		expect(
+			netWorthCents([
+				{ balanceCents: 1000, isLiability: false },
+				{ balanceCents: 400, isLiability: false, connected: false },
+				{ balanceCents: 250, isLiability: true, connected: false },
+				{ balanceCents: 100, isLiability: true, connected: true },
+			]),
+		).toBe(900);
+	});
+
+	it("adds balances at the limits exactly", () => {
+		expect(
+			netWorthCents([
+				{ balanceCents: MAX_BALANCE_CENTS, isLiability: false },
+				{ balanceCents: -MAX_BALANCE_CENTS, isLiability: true },
+			]),
+		).toBe(2 * MAX_BALANCE_CENTS);
+	});
+
+	it("refuses a balance it cannot add exactly, without naming the amount", () => {
+		for (const balanceCents of [
+			MAX_BALANCE_CENTS + 1,
+			-MAX_BALANCE_CENTS - 1,
+			10.5,
+			Number.NaN,
+		]) {
+			let thrown: unknown;
+			try {
+				netWorthCents([{ balanceCents, isLiability: false }]);
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).not.toMatch(/\d/);
+		}
+		// Even one that is not connected, so the rule is one sentence: every balance handed in is inside the limit.
+		expect(() =>
+			netWorthCents([
+				{
+					balanceCents: MAX_BALANCE_CENTS + 1,
+					isLiability: false,
+					connected: false,
+				},
+			]),
+		).toThrow(RangeError);
+	});
+
+	it("refuses more accounts than it can add exactly", () => {
+		const one = { balanceCents: 1, isLiability: false };
+		expect(netWorthCents(Array(MAX_NET_WORTH_ACCOUNTS).fill(one))).toBe(
+			MAX_NET_WORTH_ACCOUNTS,
+		);
+		expect(() =>
+			netWorthCents(Array(MAX_NET_WORTH_ACCOUNTS + 1).fill(one)),
+		).toThrow(RangeError);
 	});
 });
 

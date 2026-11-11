@@ -43,6 +43,7 @@ Answer these four questions about one function. It earns a contract only if all 
 - Mark each function you verify with `//@ verify`. Once any function in a file has it, only marked ones are checked.
 - Spec helpers (a recursive `sumTo` that the contract compares against) are `//@ verify` functions marked as spec in a comment, and live next to the code they describe.
 - Use `//@ skip` for code the tool cannot read, and `//@ extern` plus a contract for a function you trust but do not check. Every `extern` carries a one-line comment saying why it is trusted.
+- `lsc check` leaves a `.dfy` and `.dfy.gen` beside the module (git-ignored). Delete them before re-checking a changed function: with a stale `.dfy` present `lsc` stops with "modifications to generated lines" and Dafny never runs, which is not the prover rejecting anything.
 - Never `//@ assume`. It tells the prover to believe something, which makes a green check meaningless. Add a helper lemma or restructure instead.
 - Keep the production code natural. A small behaviour-preserving rewrite for the tool (spelling a spread out field by field) is fine and goes in the PR description. Do not bend the code into a shape that is harder to read.
 
@@ -78,6 +79,7 @@ It means the TypeScript meets its contract for every input inside the stated bou
 |---|---|---|
 | `src/budget.ts` `summarizeMonth` | Total spent, income and uncategorized (amount and count) are each exactly the sum over the transactions; each category row's spent is exactly its category's sum; Safe to spend is the stated sum. Bound: every amount at most 1e10 cents, at most 1e5 counted transactions and 1e4 categories, enforced by `assertWithinLimits`, which throws a `RangeError`. | Decision 189, #933 |
 | `src/transactions/split.ts` `partsAddUp` | It is true exactly when there are at least two parts, each non-zero with the transaction's sign, adding up to its amount. Bound: no part above 1e10 cents and at most 1,000 parts, enforced in `parseSplit`, which refuses a split past either in words; the transaction's amount is a safe integer. | #934 |
+| `src/db/accounts.ts` `netWorthCents` | Net worth is exactly the sum of the connected accounts' balances, with each liability's balance subtracted instead of added; an account marked not connected counts for nothing. Bound: no balance above 1e10 cents and at most 1e4 accounts, enforced by `assertNetWorthWithinLimits`, which throws a `RangeError` before the sum (it checks every balance handed in, connected or not). | #944 |
 
 ## Candidates, by area
 
@@ -100,8 +102,8 @@ Assessed from reading the code on 2026-11-09, and again on 2026-11-10 (#935). "F
 | `src/transactions/refund-guards.ts` | No | One comparison; a test says it as clearly. |
 | `src/money.ts` | No | Regex and `toPrecision`; tests with edge cases instead. |
 | `src/plaid/*`, and the SQL in `src/db/*` | No | SQL. |
-| `src/db/accounts.ts` `netWorthCents` | Yes, simplest | A pure sum that lives in a mostly-SQL file: net worth is exactly the sum of connected assets less the sum of connected liabilities, and the Accounts headline (`accounts.tsx:200`) shows it directly. Short (one reduce with a nested ternary, no Map or string), so it is also the cheapest first try after #942 if a quick win is wanted (#944); `countedAccounts`, which feeds it (the Apple Card counts as debt), goes with it. |
-| other pure helpers under `src/db/*` | Unassessed | A quick search (exported functions that mention cents and take no database) found `netWorthCents` and `followsPurchase` in `counted-month.ts`; it was a heuristic, not a full read. Assess any pure helper like any other module, whatever directory it is in. |
+| `src/db/accounts.ts` `netWorthCents` | Done (#944) | A pure sum in a mostly-SQL file; the Accounts headline (`accounts.tsx:200`) shows it directly. The file needed no extraction: the SQL functions are simply not marked `//@ verify`. The `reduce` with a nested ternary became a `while` loop for the invariants, and the optional `connected` field verified as written. `countedAccounts`, which builds its input (the Apple Card counts as debt), stays with ordinary tests (`test/apple-card-net-worth.test.ts`): it gathers rows with `flatMap` and `push` and adds nothing up, so it fails question 2. |
+| other pure helpers under `src/db/*` | Unassessed | A quick search (exported functions that mention cents and take no database) found `netWorthCents` (done, above) and `followsPurchase` in `counted-month.ts`; it was a heuristic, not a full read. Assess any pure helper like any other module, whatever directory it is in. |
 
 ## Review of the decision
 
