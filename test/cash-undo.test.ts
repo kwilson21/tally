@@ -17,6 +17,55 @@ const request = async (path: string, init?: RequestInit) => {
 	return { res, html: await res.text() };
 };
 
+type Row = Record<string, string | number | null>;
+
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+type JsonObject = { [key: string]: Json };
+
+function isJsonObject(value: Json | undefined): value is JsonObject {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isText(value: Json | undefined): value is string {
+	return typeof value === "string";
+}
+
+function isMethod(value: unknown): value is (...args: never[]) => void {
+	return typeof value === "function";
+}
+
+function rowOf(row: Row | null): Row {
+	if (!row) throw new Error("row missing");
+
+	return row;
+}
+
+function cashToken(token: string | null): string {
+	if (token === null) throw new Error("cash delete token missing");
+
+	return token;
+}
+
+/** A text field of a toast in a response's HX-Trigger header, which the Worker writes as JSON. */
+function toastText(response: Response, field: "message" | "undo"): string {
+	const parsed: Json = JSON.parse(response.headers.get("HX-Trigger") ?? "{}");
+	const toast = isJsonObject(parsed) ? parsed.toast : undefined;
+	const text = isJsonObject(toast) ? toast[field] : undefined;
+
+	if (!isText(text)) throw new Error(`toast.${field} is not text`);
+
+	return text;
+}
+
+/** A D1 binding's member under this name, bound to the binding when it is a method. */
+function forward(target: D1Database, property: string | symbol) {
+	// SAFETY: these proxies forward only names a D1 binding answers (prepare, batch and the other D1 methods the code under test calls); a name it lacks reads as undefined, as it would on the binding itself.
+	const value = target[property as keyof D1Database];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
+
 beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 async function cashEntry() {
@@ -34,8 +83,6 @@ function countingDb() {
 
 	const db = new Proxy(env.DB, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
-
 			if (property === "prepare")
 				return (sql: string) => {
 					statements++;
@@ -43,11 +90,11 @@ function countingDb() {
 					return target.prepare(sql);
 				};
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return forward(target, property);
 		},
 	});
 
-	return { db: db as D1Database, statements: () => statements };
+	return { db, statements: () => statements };
 }
 
 type TestApp = { Bindings: Env; Variables: { actor: string } };
@@ -59,7 +106,7 @@ deleteRoute.use("*", async (c, next) => {
 	await next();
 });
 
-deleteRoute.route("/", transactions as unknown as Hono<TestApp>);
+deleteRoute.route("/", transactions);
 
 const deleteRequest = async (id: number, db: D1Database) =>
 	deleteRoute.request(
@@ -176,8 +223,7 @@ describe("cash delete undo", () => {
 		const deleted = await deleteRequest(oldParentId, env.DB);
 		tokenSpy.mockRestore();
 
-		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-			.undo as string;
+		const token = toastText(deleted, "undo");
 
 		// Guard: the stub took, so the Undo token really holds the old id's digits.
 		expect(token).toContain(String(oldParentId));
@@ -270,8 +316,7 @@ describe("cash delete undo", () => {
 				.run();
 			const deleted = await deleteRequest(originalId, env.DB);
 
-			const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-				.undo as string;
+			const token = toastText(deleted, "undo");
 
 			const replacement = await env.DB.prepare(
 				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 500, 'Replacement', 'test')",
@@ -348,7 +393,7 @@ describe("cash delete undo", () => {
 			.bind(bill.id, id)
 			.run();
 		const token = await holdCashDelete(env.DB, id, "Market");
-		const restored = await restoreCashDelete(env.DB, token as string);
+		const restored = await restoreCashDelete(env.DB, cashToken(token));
 		expect(restored).toMatchObject({ lostLinks: [] });
 		expect(
 			await env.DB.prepare(
@@ -364,8 +409,6 @@ describe("cash delete undo", () => {
 
 		const delayedDb = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						const result = await target.batch(statements);
@@ -384,9 +427,9 @@ describe("cash delete undo", () => {
 						return result;
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return forward(target, property);
 			},
-		}) as D1Database;
+		});
 
 		const deleted = await deleteRequest(id, delayedDb);
 		const feedback = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}");
@@ -398,8 +441,7 @@ describe("cash delete undo", () => {
 		const id = await cashEntry();
 		const deleted = await deleteRequest(id, env.DB);
 
-		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-			.undo as string;
+		const token = toastText(deleted, "undo");
 
 		const body = new URLSearchParams({ token, back: "/transactions" });
 
@@ -456,8 +498,7 @@ describe("cash delete undo", () => {
 			.run();
 		const deleted = await deleteRequest(id, env.DB);
 
-		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-			.undo as string;
+		const token = toastText(deleted, "undo");
 
 		const removed = await request("/settings/people", {
 			method: "POST",
@@ -504,8 +545,7 @@ describe("cash delete undo", () => {
 		const id = await cashEntry();
 		const deleted = await deleteRequest(id, env.DB);
 
-		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-			.undo as string;
+		const token = toastText(deleted, "undo");
 
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 
@@ -551,8 +591,6 @@ describe("cash delete undo", () => {
 
 		const interleavedDb = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						if (!added) {
@@ -567,9 +605,9 @@ describe("cash delete undo", () => {
 						return target.batch(statements);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return forward(target, property);
 			},
-		}) as D1Database;
+		});
 
 		const token = await holdCashDelete(interleavedDb, id, "Market");
 
@@ -620,8 +658,7 @@ describe("cash delete undo", () => {
 		);
 		const deleted = await deleteRequest(id, env.DB);
 
-		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-			.undo as string;
+		const token = toastText(deleted, "undo");
 
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
@@ -730,43 +767,37 @@ describe("cash delete undo", () => {
 		const before = {
 			parent: await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
 				.bind(id)
-				.first(),
+				.first<Row>(),
 			parts: (
 				await env.DB.prepare(
 					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
 				)
 					.bind(id)
-					.all()
+					.all<Row>()
 			).results,
 		};
 
 		const token = await holdCashDelete(env.DB, id, "Market");
 		expect(token).toBeTruthy();
-		expect(await restoreCashDelete(env.DB, token as string)).not.toBeNull();
+		expect(await restoreCashDelete(env.DB, cashToken(token))).not.toBeNull();
 
 		const restoredParent = await env.DB.prepare(
 			"SELECT * FROM transactions WHERE note='parent note'",
-		).first<Record<string, unknown>>();
+		).first<Row>();
 
 		const restoredParts = (
 			await env.DB.prepare(
 				"SELECT * FROM transactions WHERE note='part note' ORDER BY raw_name",
-			).all<Record<string, unknown>>()
+			).all<Row>()
 		).results;
 
-		const withoutIds = ({
-			id: _id,
-			parent_id: _parentId,
-			...row
-		}: Record<string, unknown>) => row;
+		const withoutIds = ({ id: _id, parent_id: _parentId, ...row }: Row) => row;
 
 		expect(restoredParent).not.toBeNull();
-		expect(withoutIds(restoredParent as Record<string, unknown>)).toEqual(
-			withoutIds(before.parent as Record<string, unknown>),
+		expect(withoutIds(rowOf(restoredParent))).toEqual(
+			withoutIds(rowOf(before.parent)),
 		);
-		expect(restoredParts.map(withoutIds)).toEqual(
-			(before.parts as Record<string, unknown>[]).map(withoutIds),
-		);
+		expect(restoredParts.map(withoutIds)).toEqual(before.parts.map(withoutIds));
 		expect(
 			restoredParts.every((part) => part.parent_id === restoredParent?.id),
 		).toBe(true);
@@ -792,7 +823,7 @@ describe("cash delete undo", () => {
 			.bind(bill.id, id)
 			.run();
 		const token = await holdCashDelete(env.DB, id, "Market");
-		await restoreCashDelete(env.DB, token as string);
+		await restoreCashDelete(env.DB, cashToken(token));
 		const response = await request(`/bills/${bill.id}`);
 		expect(response.html).toContain(bill.name);
 		expect(response.html).toContain("Paid");
@@ -1022,8 +1053,6 @@ describe("cash delete undo", () => {
 
 		const failingDb = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) =>
 						target.prepare(
@@ -1032,9 +1061,9 @@ describe("cash delete undo", () => {
 								: sql,
 						);
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return forward(target, property);
 			},
-		}) as D1Database;
+		});
 
 		await expect(restoreCashDelete(failingDb, token)).resolves.toBeNull();
 		expect(
@@ -1107,8 +1136,7 @@ describe("cash delete undo", () => {
 			body: "back=%2Ftransactions&confirm=1",
 		});
 
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+		const token = toastText(deleted.res, "undo");
 
 		await env.DB.prepare("DELETE FROM transactions WHERE id=?")
 			.bind(bank.id)
@@ -1124,8 +1152,7 @@ describe("cash delete undo", () => {
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
 
-		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.message as string;
+		const message = toastText(restored.res, "message");
 
 		expect(message).toContain("Missing partner refund");
 		expect(
@@ -1184,8 +1211,7 @@ describe("cash delete undo", () => {
 			.run();
 		const deleted = await deleteRequest(id, env.DB);
 
-		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
-			.undo as string;
+		const token = toastText(deleted, "undo");
 
 		await env.DB.prepare("UPDATE transactions SET amount_cents=100 WHERE id=?")
 			.bind(purchaseId(0))
@@ -1204,8 +1230,7 @@ describe("cash delete undo", () => {
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
 
-		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.message as string;
+		const message = toastText(restored.res, "message");
 
 		const parts = await env.DB.prepare(
 			"SELECT raw_name, refund_of_id FROM transactions WHERE raw_name LIKE 'Split refund %' ORDER BY raw_name",
@@ -1260,7 +1285,7 @@ describe("cash delete undo", () => {
 		);
 		const token = await holdCashDelete(env.DB, id, "Market");
 		const counted = countingDb();
-		await restoreCashDelete(counted.db, token as string);
+		await restoreCashDelete(counted.db, cashToken(token));
 		expect(counted.statements()).toBeLessThanOrEqual(12);
 		expect(counted.statements()).toBe(7);
 		expect(
@@ -1282,7 +1307,7 @@ describe("cash delete undo", () => {
 		);
 
 		const smallCount = countingDb();
-		await restoreCashDelete(smallCount.db, smallToken as string);
+		await restoreCashDelete(smallCount.db, cashToken(smallToken));
 		expect(smallCount.statements()).toBe(6);
 		expect(counted.statements() - smallCount.statements()).toBeLessThanOrEqual(
 			1,
@@ -1361,8 +1386,7 @@ describe("where focus goes after Undo (#397)", () => {
 			body: new URLSearchParams({ token, back }),
 		});
 
-	const tokenOf = (response: Response) =>
-		JSON.parse(response.headers.get("HX-Trigger") ?? "{}").toast.undo as string;
+	const tokenOf = (response: Response) => toastText(response, "undo");
 
 	const feedbackOf = (response: Response) =>
 		JSON.parse(response.headers.get("HX-Trigger") ?? "{}");
