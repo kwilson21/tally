@@ -37,9 +37,13 @@ const post = async (path: string, fields: Record<string, string>) => {
 
 beforeEach(async () => resetDemo(env.DB, "2026-10-07"));
 
-const scheduledWith = handler as unknown as {
-	scheduled(controller: { cron: string }, env: unknown): Promise<unknown>;
-};
+// The Worker's scheduled handler, with DEMO as a string: a production deploy has DEMO "false", where the generated Env types only the demo's "true".
+const scheduledWith: {
+	scheduled(
+		controller: ScheduledController,
+		env: Omit<Env, "DEMO"> & { DEMO: string; RESEND_API_KEY?: string },
+	): Promise<void>;
+} = handler;
 
 describe("reconnect reminder schedule", () => {
 	it("uses household local dates for the three day cadence across UTC boundaries and DST", async () => {
@@ -53,7 +57,7 @@ describe("reconnect reminder schedule", () => {
 
 		const sendAt = async (date: string) =>
 			runReconnectReminders(
-				{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+				{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 				async () => {
 					sent.push(date);
 
@@ -84,8 +88,6 @@ describe("reconnect reminder schedule", () => {
 
 		const db = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						const statement = target.prepare(sql);
@@ -107,25 +109,29 @@ describe("reconnect reminder schedule", () => {
 															return bound.run();
 														};
 
-													const result = Reflect.get(bound, method);
+													if (method === "first")
+														return bound.first.bind(bound);
 
-													return typeof result === "function"
-														? result.bind(bound)
-														: result;
+													if (method === "all") return bound.all.bind(bound);
+
+													return undefined;
 												},
 											});
-									const result = Reflect.get(inner, key);
 
-									return typeof result === "function"
-										? result.bind(inner)
-										: result;
+									if (key === "first") return inner.first.bind(inner);
+
+									if (key === "all") return inner.all.bind(inner);
+
+									return undefined;
 								},
 							});
 
 						return statement;
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				if (property === "batch") return target.batch.bind(target);
+
+				return undefined;
 			},
 		});
 
@@ -133,7 +139,7 @@ describe("reconnect reminder schedule", () => {
 		const production = { DB: db, DEMO: "false", RESEND_API_KEY: "test-key" };
 		await expect(
 			runReconnectReminders(
-				production as never,
+				production,
 				async () => {
 					sends.push("first");
 
@@ -143,7 +149,7 @@ describe("reconnect reminder schedule", () => {
 			),
 		).rejects.toThrow();
 		await runReconnectReminders(
-			production as never,
+			production,
 			async () => {
 				sends.push("second");
 
@@ -164,7 +170,7 @@ describe("reconnect reminder schedule", () => {
 						throw new Error("fallback unavailable");
 					},
 				},
-			} as never,
+			},
 			async () => new Response("failed", { status: 503 }),
 			new Date("2026-10-09T13:00:00Z"),
 		);
@@ -199,7 +205,7 @@ describe("reconnect reminder schedule", () => {
 
 		vi.stubGlobal("fetch", fetcher);
 		await scheduledWith.scheduled(
-			{ cron: "0 10 * * *" },
+			{ cron: "0 10 * * *", scheduledTime: 0, noRetry() {} },
 			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 		);
 		expect(fetcher).toHaveBeenCalledTimes(1);
@@ -223,7 +229,7 @@ describe("reconnect reminder schedule", () => {
 		).run();
 		const production = { ...env, DEMO: "false", RESEND_API_KEY: "test-key" };
 		await runReconnectReminders(
-			production as never,
+			production,
 			async (_url, init) => {
 				sent.push(String(init?.body));
 
@@ -233,7 +239,7 @@ describe("reconnect reminder schedule", () => {
 		);
 		expect(sent).toHaveLength(1);
 		await runReconnectReminders(
-			production as never,
+			production,
 			async () => {
 				sent.push("unexpected");
 
@@ -243,7 +249,7 @@ describe("reconnect reminder schedule", () => {
 		);
 		expect(sent).toHaveLength(1);
 		await runReconnectReminders(
-			production as never,
+			production,
 			async (_url, init) => {
 				sent.push(String(init?.body));
 
@@ -256,7 +262,7 @@ describe("reconnect reminder schedule", () => {
 			"UPDATE plaid_items SET status = 'ok' WHERE id = 901",
 		).run();
 		await runReconnectReminders(
-			production as never,
+			production,
 			async () => {
 				sent.push("unexpected");
 
@@ -269,7 +275,7 @@ describe("reconnect reminder schedule", () => {
 			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status, disconnected_at) VALUES (902, 'Wells Fargo', X'', 'dana@example.com', 'needs_attention', '2026-10-06')",
 		).run();
 		await runReconnectReminders(
-			production as never,
+			production,
 			async () => {
 				sent.push("unexpected");
 
@@ -306,8 +312,9 @@ describe("reconnect reminder schedule", () => {
 
 		const sendAt = (date: string) =>
 			runReconnectReminders(
-				production as never,
+				production,
 				async (_url, init) => {
+					// SAFETY: deliver.ts sends Resend a JSON body whose `to` is the one recipient's address, a string.
 					const body = JSON.parse(String(init?.body)) as { to: string };
 					attempted.push(`resend:${body.to}`);
 
@@ -377,7 +384,7 @@ describe("reconnect reminder schedule", () => {
 				DEMO: "false",
 				RESEND_API_KEY: "test-key",
 				EMAIL: { send: fallback },
-			} as never,
+			},
 			stalledFetch,
 			new Date("2026-10-07T13:00:00Z"),
 			() => AbortSignal.timeout(10),
@@ -417,7 +424,7 @@ describe("reconnect reminder schedule", () => {
 		).run();
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		await runReconnectReminders(
-			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async () => new Response("{}", { status: 200 }),
 			new Date("2026-10-07T13:00:00Z"),
 			() => AbortSignal.timeout(10),
@@ -434,7 +441,7 @@ describe("reconnect reminder schedule", () => {
 			...env,
 			DEMO: "false",
 			RESEND_API_KEY: "test-key",
-		} as never;
+		};
 
 		const mustNotSend = async () => {
 			throw new Error("must not send");
@@ -488,7 +495,7 @@ describe("reconnect reminder schedule", () => {
 		).run();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 		await runReconnectReminders(
-			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async () => new Response("{}", { status: 422 }),
 			new Date("2026-10-07T13:00:00Z"),
 			() => AbortSignal.timeout(10),
@@ -527,8 +534,9 @@ describe("reconnect reminder schedule", () => {
 		};
 
 		await runReconnectReminders(
-			production as never,
+			production,
 			async (_url, init) => {
+				// SAFETY: deliver.ts sends Resend a JSON body whose `to` is one recipient's address, a string; the expect below checks it.
 				const body = JSON.parse(String(init?.body)) as {
 					to: string[] | string;
 				};
@@ -542,7 +550,7 @@ describe("reconnect reminder schedule", () => {
 		expect(sentTo.sort()).toEqual(["dana@example.com", "riley@example.com"]);
 		await saveBankSignInEmails(env.DB, false);
 		await runReconnectReminders(
-			production as never,
+			production,
 			async () => {
 				throw new Error("must not send");
 			},
@@ -550,7 +558,7 @@ describe("reconnect reminder schedule", () => {
 		);
 		await saveBankSignInEmails(env.DB, true);
 		await runReconnectReminders(
-			{ ...production, DEMO: "true" } as never,
+			{ ...production, DEMO: "true" },
 			async () => {
 				throw new Error("demo must not send");
 			},
@@ -636,7 +644,7 @@ describe("bank sign-in reminder Settings", () => {
 		).run();
 		const sent: string[] = [];
 		await runReconnectReminders(
-			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async (_url, init) => {
 				sent.push(JSON.parse(String(init?.body)).to);
 
@@ -969,7 +977,7 @@ describe("bank sign-in reminder Settings", () => {
 		).run();
 		const sent: string[] = [];
 		await runReconnectReminders(
-			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async (_url, init) => {
 				sent.push(String(init?.body));
 
@@ -989,7 +997,7 @@ describe("bank sign-in reminder Settings", () => {
 		).run();
 		const sent: string[] = [];
 		await runReconnectReminders(
-			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" } as never,
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async (_url, init) => {
 				sent.push(String(init?.body));
 
@@ -1011,28 +1019,14 @@ describe("bank sign-in reminder Settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_members (email) VALUES ('dana@example.com')",
 		).run();
-		let statements = 0;
-
-		const db = new Proxy(env.DB, {
-			get(target, property) {
-				const value = Reflect.get(target, property);
-
-				if (property === "prepare")
-					return (sql: string) => {
-						statements += 1;
-
-						return target.prepare(sql);
-					};
-
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
+		const prepare = vi.spyOn(env.DB, "prepare");
 
 		await runReconnectReminders(
-			{ DB: db, DEMO: "false", RESEND_API_KEY: "test-key" },
+			{ DB: env.DB, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async () => new Response("{}"),
 			new Date("2026-10-07T13:00:00Z"),
 		);
-		expect(statements).toBeLessThan(1000);
+		expect(prepare.mock.calls.length).toBeLessThan(1000);
+		prepare.mockRestore();
 	});
 });

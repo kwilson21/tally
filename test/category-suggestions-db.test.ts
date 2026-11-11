@@ -25,6 +25,14 @@ import { resetDemo } from "../src/demo/reset";
 const db = env.DB;
 const CHECKING = 1;
 
+/** A value the test's own setup created: a missing one means the setup broke, so the test fails here. */
+function known<Value>(value: Value | null | undefined): Value {
+	if (value === null || value === undefined)
+		throw new Error("the test's setup did not create this value");
+
+	return value;
+}
+
 type Over = {
 	rawName?: string;
 	merchantName?: string | null;
@@ -141,8 +149,36 @@ const categories = async () =>
 			}>()
 	).results;
 
+/** One of the other member's writes, each of which the tests here make: a category change or an insert. */
+type Write = () => Promise<boolean | number | D1Result | undefined>;
+
+type Method = (...args: never[]) => void;
+
+function isMember<Target extends object>(
+	target: Target,
+	property: PropertyKey,
+): property is keyof Target {
+	return property in target;
+}
+
+function isMethod(value: unknown): value is Method {
+	return typeof value === "function";
+}
+
+/** A member of a database or statement as a proxy hands it on: a method bound to its target, anything else as it is. */
+function member<Target extends object>(
+	target: Target,
+	property: PropertyKey,
+): Target[keyof Target] | Method | undefined {
+	if (!isMember(target, property)) return undefined;
+
+	const value = target[property];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
+
 /** Another member's writes land between a save's read and its batch; only that save runs against the proxy. */
-function racing(...between: (() => Promise<unknown>)[]) {
+function racing(...between: Write[]) {
 	return new Proxy(db, {
 		get(target, property) {
 			if (property === "batch")
@@ -152,11 +188,9 @@ function racing(...between: (() => Promise<unknown>)[]) {
 					return db.batch(statements);
 				};
 
-			const value = Reflect.get(target, property);
-
-			return typeof value === "function" ? value.bind(target) : value;
+			return member(target, property);
 		},
-	}) as D1Database;
+	});
 }
 
 beforeEach(async () => {
@@ -315,8 +349,8 @@ describe("saveSuggestion", () => {
 		const a = await add();
 		const b = await add({ rawName: "HULU" });
 		const c = await add({ rawName: "SPOTIFY" });
-		const id = await saveSuggestion(db, "Subscriptions", [a, b, c]);
-		expect(await suggestion(id as number)).toMatchObject({
+		const id = known(await saveSuggestion(db, "Subscriptions", [a, b, c]));
+		expect(await suggestion(id)).toMatchObject({
 			name: "Subscriptions",
 			status: "pending",
 			decided_at: null,
@@ -335,8 +369,8 @@ describe("saveSuggestion", () => {
 			await add({ rawName: "SPOTIFY" }),
 		];
 
-		const id = await saveSuggestion(db, null, rows);
-		expect(await suggestion(id as number)).toMatchObject({
+		const id = known(await saveSuggestion(db, null, rows));
+		expect(await suggestion(id)).toMatchObject({
 			name: "",
 			status: "none",
 		});
@@ -406,14 +440,14 @@ describe("saveSuggestion", () => {
 			];
 
 			return {
-				id: await saveSuggestion(db, "Subscriptions", items),
+				id: known(await saveSuggestion(db, "Subscriptions", items)),
 				made: items,
 			};
 		})();
 
 		await saveSplit(
 			db,
-			made[0] as number,
+			known(made[0]),
 			[
 				{ categoryId: 1, amountCents: 750 },
 				{ categoryId: 2, amountCents: 750 },
@@ -422,16 +456,16 @@ describe("saveSuggestion", () => {
 		);
 		expect(
 			(await pendingSuggestions(db)).flatMap((s) => s.rows.map((r) => r.id)),
-		).not.toContain(made[0]);
+		).not.toContain(known(made[0]));
 		expect(
 			await createFromSuggestion(
 				db,
-				id as number,
+				id,
 				{ ticked: made, shown: made, notes: {} },
 				"person",
 			),
 		).toMatchObject({ ok: true, moved: 2 });
-		expect((await row(made[0] as number))?.category_suggestion_id).toBeNull();
+		expect((await row(known(made[0])))?.category_suggestion_id).toBeNull();
 	});
 
 	it("keeps a suggestion available while any eligible purchase remains", async () => {
@@ -441,7 +475,7 @@ describe("saveSuggestion", () => {
 			await add({ rawName: "SPOTIFY" }),
 		];
 
-		const id = (await saveSuggestion(db, "Subscriptions", items)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", items));
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
@@ -462,22 +496,22 @@ describe("saveSuggestion", () => {
 			];
 
 			return {
-				id: await saveSuggestion(db, "Subscriptions", items),
+				id: known(await saveSuggestion(db, "Subscriptions", items)),
 				made: items,
 			};
 		})();
 
 		const result = await createFromSuggestion(
 			db,
-			id as number,
+			id,
 			{ ticked: made.slice(0, 2), shown: made.slice(0, 3), notes: {} },
 			"person",
 		);
 
 		// Only the shown row the person unticked is named; the row that wasn't shown is cleared but not counted.
-		expect(result).toMatchObject({ ok: true, leftOut: [made[2]] });
+		expect(result).toMatchObject({ ok: true, leftOut: [known(made[2])] });
 
-		for (const tx of [made[2] as number, made[3] as number])
+		for (const tx of [known(made[2]), known(made[3])])
 			expect((await row(tx))?.category_suggestion_id).toBeNull();
 	});
 
@@ -489,7 +523,7 @@ describe("saveSuggestion", () => {
 			await add({ rawName: "MAX" }),
 		];
 
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 		await db
 			.prepare(
 				`CREATE TRIGGER exclude_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET excluded=1 WHERE category_suggestion_id=NEW.id; END`,
@@ -517,7 +551,7 @@ describe("saveSuggestion", () => {
 			await add({ rawName: "MAX" }),
 		];
 
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 		await db
 			.prepare(
 				`CREATE TRIGGER dismiss_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE category_suggestions SET status='dismissed' WHERE id=NEW.id; END`,
@@ -549,7 +583,7 @@ describe("saveSuggestion", () => {
 		];
 
 		// tidyName reads "École" as it is, so the suggestion keeps its capital; the other save files "école".
-		const id = (await saveSuggestion(db, "École", made)) as number;
+		const id = known(await saveSuggestion(db, "École", made));
 		// The other save files an active "école" (its key is "école") after the page was drawn and before this write.
 		// The write finds it by its key, as the read would have, so the ticks join it (decision 101) instead of failing.
 		await db
@@ -589,7 +623,7 @@ describe("saveSuggestion", () => {
 			await add({ rawName: "MAX" }),
 		];
 
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 		await db
 			.prepare(
 				`CREATE TRIGGER take_name_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES(NEW.name,'tag','cat-blue',99); END`,
@@ -628,7 +662,7 @@ describe("saveSuggestion", () => {
 			await add({ rawName: "MAX" }),
 		];
 
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 		const active = (await categories()).filter((c) => !c.archived).length;
 
 		for (let i = active; i < 49; i++)
@@ -673,13 +707,15 @@ describe("namesToAvoid", () => {
 			await add({ rawName: "SPOTIFY" }),
 		]);
 
-		const dismissed = await saveSuggestion(db, "Pet Care", [
-			await add({ rawName: "CHEWY" }),
-			await add({ rawName: "BANFIELD" }),
-			await add({ rawName: "PETSMART" }),
-		]);
+		const dismissed = known(
+			await saveSuggestion(db, "Pet Care", [
+				await add({ rawName: "CHEWY" }),
+				await add({ rawName: "BANFIELD" }),
+				await add({ rawName: "PETSMART" }),
+			]),
+		);
 
-		await dismissSuggestion(db, dismissed as number);
+		await dismissSuggestion(db, dismissed);
 		const avoid = await namesToAvoid(db);
 		expect(avoid).toEqual(
 			expect.arrayContaining([
@@ -710,13 +746,15 @@ describe("purchaseNamesToAvoid", () => {
 			await add({ rawName: "SPOTIFY" }),
 		]);
 
-		const dismissed = await saveSuggestion(db, "Pet Care", [
-			await add({ rawName: "CHEWY" }),
-			await add({ rawName: "BANFIELD" }),
-			await add({ rawName: "PETSMART" }),
-		]);
+		const dismissed = known(
+			await saveSuggestion(db, "Pet Care", [
+				await add({ rawName: "CHEWY" }),
+				await add({ rawName: "BANFIELD" }),
+				await add({ rawName: "PETSMART" }),
+			]),
+		);
 
-		await dismissSuggestion(db, dismissed as number);
+		await dismissSuggestion(db, dismissed);
 		const avoid = await purchaseNamesToAvoid(db);
 		expect(avoid).toEqual(expect.arrayContaining(["Gas", "Pet Care"]));
 
@@ -740,7 +778,7 @@ describe("pendingSuggestions: what Settings shows", () => {
 				}),
 			);
 
-		return { id: (await saveSuggestion(db, name, made)) as number, made };
+		return { id: known(await saveSuggestion(db, name, made)), made };
 	}
 
 	it("lists each pending suggestion with the transactions behind it, newest first", async () => {
@@ -839,8 +877,6 @@ describe("pendingSuggestions: what Settings shows", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements++;
@@ -848,9 +884,9 @@ describe("pendingSuggestions: what Settings shows", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return member(target, property);
 			},
-		}) as D1Database;
+		});
 
 		const result = await pendingSuggestionPage(counted);
 		expect(result.suggestions).toHaveLength(10);
@@ -859,24 +895,51 @@ describe("pendingSuggestions: what Settings shows", () => {
 	});
 });
 
-/** The database, with every row a query returns recorded in `seen`, so a test can see what was loaded. */
-function recordingDb(seen: Record<string, unknown>[]): D1Database {
-	const wrap = (statement: D1PreparedStatement) => ({
-		raw: statement,
-		bind: (...values: unknown[]) => wrap(statement.bind(...values)),
-		all: async () => {
-			const result = await statement.all();
-			seen.push(...(result.results as Record<string, unknown>[]));
+/** The columns the recording helper's readers select: a transaction's id, or a merchant key and its id. */
+type RecordedRow = {
+	transactionId?: number;
+	merchantKey?: string;
+	id?: number;
+};
 
-			return result;
+function isRecordedRow(value: unknown): value is RecordedRow {
+	return typeof value === "object" && value !== null;
+}
+
+/** The database, with every row a query returns recorded in `seen`, so a test can see what was loaded. */
+function recordingDb(seen: RecordedRow[]): D1Database {
+	return new Proxy(db, {
+		get(target, property) {
+			if (property === "prepare")
+				return (sql: string) => recordingStatement(target.prepare(sql), seen);
+
+			return member(target, property);
 		},
 	});
+}
 
-	return {
-		prepare: (sql: string) => wrap(db.prepare(sql)),
-		batch: (statements: { raw: D1PreparedStatement }[]) =>
-			db.batch(statements.map((statement) => statement.raw)),
-	} as unknown as D1Database;
+/** A statement whose binds stay recording, and whose `all` records the rows it reads. */
+function recordingStatement(
+	statement: D1PreparedStatement,
+	seen: RecordedRow[],
+): D1PreparedStatement {
+	return new Proxy(statement, {
+		get(target, property) {
+			if (property === "bind")
+				return (...values: unknown[]) =>
+					recordingStatement(target.bind(...values), seen);
+
+			if (property === "all")
+				return async () => {
+					const result = await target.all();
+					seen.push(...result.results.filter(isRecordedRow));
+
+					return result;
+				};
+
+			return member(target, property);
+		},
+	});
 }
 
 describe("newCategoryItem: the one suggestion Organize's card asks about", () => {
@@ -889,14 +952,16 @@ describe("newCategoryItem: the one suggestion Organize's card asks about", () =>
 
 	/** A pending suggestion with its own purchases, made directly: saveSuggestion needs three eligible charges. */
 	async function suggestionWith(name: string, purchases: Over[]) {
-		const id = (
-			await db
-				.prepare(
-					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
-				)
-				.bind(name)
-				.first<{ id: number }>()
-		)?.id as number;
+		const id = known(
+			(
+				await db
+					.prepare(
+						"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
+					)
+					.bind(name)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		const purchaseIds: number[] = [];
 
@@ -950,15 +1015,15 @@ describe("newCategoryItem: the one suggestion Organize's card asks about", () =>
 			hotelRow("PET HOTEL 2"),
 		]);
 
-		const seen: Record<string, unknown>[] = [];
+		const seen: RecordedRow[] = [];
 		await newCategoryItem(recordingDb(seen), { merchantKeys: [PET_HOTEL] });
 
 		// Purchase rows are the ones a query returns with a transaction id: transactionId, or merchantKey's id.
 		const read = seen.flatMap((row) =>
 			"transactionId" in row
-				? [row.transactionId as number]
+				? [row.transactionId]
 				: "merchantKey" in row
-					? [row.id as number]
+					? [row.id]
 					: [],
 		);
 
@@ -992,7 +1057,7 @@ describe("createFromSuggestion", () => {
 
 		for (let i = 0; i < n; i++)
 			made.push(await add({ rawName: `SHOP ${i}`, date: `2026-09-${10 + i}` }));
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 
 		return { id, made };
 	}
@@ -1012,7 +1077,7 @@ describe("createFromSuggestion", () => {
 			ok: true,
 			name: "Subscriptions",
 			moved: 3,
-			leftOut: [made[3]],
+			leftOut: [known(made[3])],
 		});
 		const all = await categories();
 		expect(all).toHaveLength(had + 1);
@@ -1048,7 +1113,7 @@ describe("createFromSuggestion", () => {
 					split_removed_bills: string | null;
 				}>();
 
-		for (const tx of [made[0], made[3]] as number[])
+		for (const tx of [known(made[0]), known(made[3])])
 			await db
 				.prepare(
 					'UPDATE transactions SET split_removed_from_cents = 18742, split_removed_bills = \'[{"name":"Water","period":"2026-09"}]\' WHERE id = ?',
@@ -1063,14 +1128,14 @@ describe("createFromSuggestion", () => {
 			"person@example.com",
 		);
 
-		expect(await row(made[0] as number)).toMatchObject({
+		expect(await row(known(made[0]))).toMatchObject({
 			category_source: "user",
 		});
-		expect(await removed(made[0] as number)).toEqual({
+		expect(await removed(known(made[0]))).toEqual({
 			split_removed_bills: null,
 			split_removed_from_cents: null,
 		});
-		expect(await removed(made[3] as number)).toEqual({
+		expect(await removed(known(made[3]))).toEqual({
 			split_removed_bills: '[{"name":"Water","period":"2026-09"}]',
 			split_removed_from_cents: 18742,
 		});
@@ -1084,11 +1149,11 @@ describe("createFromSuggestion", () => {
 			{
 				ticked: made.slice(0, 3),
 				shown: made,
-				notes: { [made[3] as number]: "  Birthday present  " },
+				notes: { [known(made[3])]: "  Birthday present  " },
 			},
 			"person",
 		);
-		expect(await row(made[3] as number)).toMatchObject({
+		expect(await row(known(made[3]))).toMatchObject({
 			category_id: null,
 			category_source: null,
 			note: "Birthday present",
@@ -1099,7 +1164,7 @@ describe("createFromSuggestion", () => {
 		const { id, made } = await pending();
 		await db
 			.prepare("UPDATE transactions SET note = 'Gift' WHERE id = ?")
-			.bind(made[3])
+			.bind(known(made[3]))
 			.run();
 		await createFromSuggestion(
 			db,
@@ -1107,11 +1172,11 @@ describe("createFromSuggestion", () => {
 			{
 				ticked: made.slice(0, 3),
 				shown: made,
-				notes: { [made[3] as number]: "   " },
+				notes: { [known(made[3])]: "   " },
 			},
 			"person",
 		);
-		expect((await row(made[3] as number))?.note).toBe("Gift");
+		expect((await row(known(made[3])))?.note).toBe("Gift");
 	});
 
 	it("ignores a note written for a ticked transaction", async () => {
@@ -1119,10 +1184,10 @@ describe("createFromSuggestion", () => {
 		await createFromSuggestion(
 			db,
 			id,
-			{ ticked: made, shown: made, notes: { [made[0] as number]: "ignored" } },
+			{ ticked: made, shown: made, notes: { [known(made[0])]: "ignored" } },
 			"person",
 		);
-		expect((await row(made[0] as number))?.note).toBeNull();
+		expect((await row(known(made[0])))?.note).toBeNull();
 	});
 
 	it("asks for at least one tick, and creates nothing without one", async () => {
@@ -1151,7 +1216,7 @@ describe("createFromSuggestion", () => {
 		const result = await createFromSuggestion(
 			db,
 			id,
-			{ ticked: [made[0] as number, stranger], shown: made, notes: {} },
+			{ ticked: [known(made[0]), stranger], shown: made, notes: {} },
 			"person",
 		);
 
@@ -1165,7 +1230,7 @@ describe("createFromSuggestion", () => {
 			.prepare(
 				"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 			)
-			.bind(made[0])
+			.bind(known(made[0]))
 			.run();
 
 		const result = await createFromSuggestion(
@@ -1176,7 +1241,7 @@ describe("createFromSuggestion", () => {
 		);
 
 		expect(result).toMatchObject({ ok: true, moved: 3 });
-		expect(await row(made[0] as number)).toMatchObject({
+		expect(await row(known(made[0]))).toMatchObject({
 			category_id: 2,
 			category_source: "merchant_rule",
 		});
@@ -1212,10 +1277,9 @@ describe("createFromSuggestion", () => {
 
 		const hidden = await add({ rawName: "CHEWY.COM" });
 
-		const id = (await saveSuggestion(db, "Subscriptions", [
-			...shown,
-			hidden,
-		])) as number;
+		const id = known(
+			await saveSuggestion(db, "Subscriptions", [...shown, hidden]),
+		);
 
 		await addNeverSuggest(db, {
 			merchantKey: "CHEWY.COM",
@@ -1227,14 +1291,14 @@ describe("createFromSuggestion", () => {
 			db,
 			id,
 			{
-				ticked: [shown[0] as number],
+				ticked: [known(shown[0])],
 				shown: [...shown, hidden],
 				notes: {},
 			},
 			"person",
 		);
 
-		expect(result).toMatchObject({ ok: true, leftOut: [shown[1]] });
+		expect(result).toMatchObject({ ok: true, leftOut: [known(shown[1])] });
 		expect(await row(hidden)).toMatchObject({
 			category_suggestion_id: null,
 			category_confidence: null,
@@ -1287,8 +1351,8 @@ describe("createFromSuggestion", () => {
 				db,
 				id,
 				{
-					ticked: [made[2] as number],
-					shown: [made[2] as number],
+					ticked: [known(made[2])],
+					shown: [known(made[2])],
 					notes: {},
 					whole: true,
 				},
@@ -1296,7 +1360,7 @@ describe("createFromSuggestion", () => {
 			);
 
 			expect(result).toMatchObject({ ok: true, moved: 1, leftOut: [] });
-			expect(await row(made[2] as number)).toMatchObject({
+			expect(await row(known(made[2]))).toMatchObject({
 				category_id: expect.any(Number),
 				category_source: "user",
 			});
@@ -1308,7 +1372,7 @@ describe("createFromSuggestion", () => {
 				.prepare(
 					"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
 				)
-				.bind(made[0])
+				.bind(known(made[0]))
 				.run();
 
 			const result = await createFromSuggestion(
@@ -1335,7 +1399,7 @@ describe("createFromSuggestion", () => {
 			const { id, made } = await pending();
 			await db
 				.prepare(
-					`CREATE TRIGGER save_one_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ${made[0]}; END`,
+					`CREATE TRIGGER save_one_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ${known(made[0])}; END`,
 				)
 				.run();
 
@@ -1369,7 +1433,7 @@ describe("createFromSuggestion", () => {
 						.prepare(
 							"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
 						)
-						.bind(made[0])
+						.bind(known(made[0]))
 						.run(),
 				),
 				id,
@@ -1394,7 +1458,7 @@ describe("createFromSuggestion", () => {
 				await add({ rawName: "MAX", date: "2026-09-12" }),
 			];
 
-			const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+			const id = known(await saveSuggestion(db, "Subscriptions", made));
 
 			const result = await createFromSuggestion(
 				racing(() =>
@@ -1424,7 +1488,7 @@ describe("createFromSuggestion", () => {
 				const { id, made } = await pending();
 				await db
 					.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
-					.bind(made[0])
+					.bind(known(made[0]))
 					.run();
 
 				const result = await createFromSuggestion(
@@ -1454,7 +1518,7 @@ describe("createFromSuggestion", () => {
 					racing(() =>
 						db
 							.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
-							.bind(made[0])
+							.bind(known(made[0]))
 							.run(),
 					),
 					id,
@@ -1483,20 +1547,22 @@ describe("createFromSuggestion", () => {
 				made.push(
 					await add({ rawName: `CHEWY ${i}`, date: `2026-09-${10 + i}` }),
 				);
-			const id = (await saveSuggestion(db, "Pet Care", made)) as number;
+			const id = known(await saveSuggestion(db, "Pet Care", made));
 
 			return { id, made };
 		}
 
 		/** Pet Care as the family had it: its own icon, colour and a budget, archived on July 15. */
 		async function archivedPetCare(): Promise<number> {
-			const id = (
-				await db
-					.prepare(
-						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Pet Care', 'pet care', 'home', 'cat-plum', 40) RETURNING id",
-					)
-					.first<{ id: number }>()
-			)?.id as number;
+			const id = known(
+				(
+					await db
+						.prepare(
+							"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Pet Care', 'pet care', 'home', 'cat-plum', 40) RETURNING id",
+						)
+						.first<{ id: number }>()
+				)?.id,
+			);
 
 			await db
 				.prepare(
@@ -1549,7 +1615,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: false,
 				restored: true,
 			});
@@ -1593,7 +1659,7 @@ describe("createFromSuggestion", () => {
 					category_source: "user",
 					updated_by: "person@example.com",
 				});
-			expect(await row(made[2] as number)).toMatchObject({ category_id: null });
+			expect(await row(known(made[2]))).toMatchObject({ category_id: null });
 			expect(await suggestion(id)).toMatchObject({ status: "created" });
 		});
 
@@ -1692,7 +1758,7 @@ describe("createFromSuggestion", () => {
 			const archived = await archivedPetCare();
 			await db
 				.prepare(
-					`CREATE TRIGGER save_one_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ${made[0]}; END`,
+					`CREATE TRIGGER save_one_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ${known(made[0])}; END`,
 				)
 				.run();
 
@@ -1737,7 +1803,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: true,
 				restored: false,
 			});
@@ -1745,7 +1811,7 @@ describe("createFromSuggestion", () => {
 			expect(await periods(archived)).toEqual([
 				{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
 			]);
-			expect(await row(made[0] as number)).toMatchObject({
+			expect(await row(known(made[0]))).toMatchObject({
 				category_id: archived,
 			});
 		});
@@ -1772,7 +1838,7 @@ describe("createFromSuggestion", () => {
 			const made2 = (await categories()).find((c) => c.name === "Pet Care");
 			expect(made2).toBeDefined();
 			expect(made2?.id).not.toBe(archived);
-			expect(await row(made[0] as number)).toMatchObject({
+			expect(await row(known(made[0]))).toMatchObject({
 				category_id: made2?.id,
 			});
 			expect((await categories()).find((c) => c.id === archived)).toMatchObject(
@@ -1787,7 +1853,8 @@ describe("createFromSuggestion", () => {
 			const result = await createFromSuggestion(
 				racing(
 					() => setArchived(db, archived, false, "2026-09-01"),
-					() => saveCategory(db, archived, { name: "Pets" }),
+					() =>
+						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
 				),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
@@ -1799,7 +1866,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: false,
 				restored: false,
 			});
@@ -1843,12 +1910,12 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: true,
 				restored: false,
 			});
 			expect((await categories()).length).toBe(count);
-			expect(await row(made[0] as number)).toMatchObject({
+			expect(await row(known(made[0]))).toMatchObject({
 				category_id: archived,
 			});
 			expect(await periods(archived)).toEqual([
@@ -1864,7 +1931,8 @@ describe("createFromSuggestion", () => {
 			const result = await createFromSuggestion(
 				racing(
 					() => setArchived(db, archived, false, "2026-09-01"),
-					() => saveCategory(db, archived, { name: "Pets" }),
+					() =>
+						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
 					() => setArchived(db, archived, true, "2026-09-02"),
 				),
 				id,
@@ -1881,7 +1949,7 @@ describe("createFromSuggestion", () => {
 			});
 			const madeNew = (await categories()).find((c) => c.name === "Pet Care");
 			expect(madeNew?.id).not.toBe(archived);
-			expect(await row(made[0] as number)).toMatchObject({
+			expect(await row(known(made[0]))).toMatchObject({
 				category_id: madeNew?.id,
 			});
 			expect((await categories()).find((c) => c.id === archived)).toMatchObject(
@@ -1902,21 +1970,23 @@ describe("createFromSuggestion", () => {
 				made.push(
 					await add({ rawName: `CAFE ${i}`, date: `2026-09-${10 + i}` }),
 				);
-			const id = (await saveSuggestion(db, name, made)) as number;
+			const id = known(await saveSuggestion(db, name, made));
 
 			return { id, made };
 		}
 
 		/** École archived on July 15 under the given name key: the key a save, or the 0052 backfill, left it with. */
 		async function archivedEcole(key: string): Promise<number> {
-			const id = (
-				await db
-					.prepare(
-						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', ?, 'home', 'cat-plum', 40) RETURNING id",
-					)
-					.bind(key)
-					.first<{ id: number }>()
-			)?.id as number;
+			const id = known(
+				(
+					await db
+						.prepare(
+							"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', ?, 'home', 'cat-plum', 40) RETURNING id",
+						)
+						.bind(key)
+						.first<{ id: number }>()
+				)?.id,
+			);
 
 			await setArchived(db, id, true, "2026-07-15");
 
@@ -1930,7 +2000,9 @@ describe("createFromSuggestion", () => {
 			const today = await householdToday(db);
 
 			const result = await createFromSuggestion(
-				racing(() => saveCategory(db, archived, { name: "école" })),
+				racing(() =>
+					saveCategory(db, archived, { name: "école" }).then(() => undefined),
+				),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person@example.com",
@@ -1941,7 +2013,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "école",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: false,
 				restored: true,
 			});
@@ -1959,7 +2031,7 @@ describe("createFromSuggestion", () => {
 					category_source: "user",
 					updated_by: "person@example.com",
 				});
-			expect(await row(made[2] as number)).toMatchObject({ category_id: null });
+			expect(await row(known(made[2]))).toMatchObject({ category_id: null });
 			expect(await suggestion(id)).toMatchObject({ status: "created" });
 		});
 
@@ -1969,7 +2041,9 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racing(() => saveCategory(db, archived, { name: "Ecole" })),
+				racing(() =>
+					saveCategory(db, archived, { name: "Ecole" }).then(() => undefined),
+				),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person",
@@ -1980,7 +2054,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "École",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: false,
 				restored: false,
 			});
@@ -2024,7 +2098,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "École",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: false,
 				restored: true,
 			});
@@ -2041,13 +2115,15 @@ describe("createFromSuggestion", () => {
 		it("files the ticks into an active École still under the key lower() left it with, for the suggestion école", async () => {
 			const { id, made } = await ecole("école");
 
-			const school = (
-				await db
-					.prepare(
-						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 100) RETURNING id",
-					)
-					.first<{ id: number }>()
-			)?.id;
+			const school = known(
+				(
+					await db
+						.prepare(
+							"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 100) RETURNING id",
+						)
+						.first<{ id: number }>()
+				)?.id,
+			);
 
 			const count = (await categories()).length;
 
@@ -2063,7 +2139,7 @@ describe("createFromSuggestion", () => {
 				filed: made.slice(0, 2),
 				name: "École",
 				moved: 2,
-				leftOut: [made[2]],
+				leftOut: [known(made[2])],
 				attached: true,
 				restored: false,
 			});
@@ -2095,7 +2171,7 @@ describe("createFromSuggestion", () => {
 			/** The family's categories and the suggestion as the page was drawn. */
 			arrange: () => Promise<Setup>;
 			/** Another member's writes, landing between this save's read and its batch. */
-			between?: (s: Setup) => (() => Promise<unknown>)[];
+			between?: (s: Setup) => Write[];
 			result: (s: Setup, today: string) => Filed | Refused;
 			/** The category the two ticks land in, by name after the save; null when nothing is filed. */
 			ticksIn: string | null;
@@ -2138,14 +2214,16 @@ describe("createFromSuggestion", () => {
 		});
 
 		const insertCategory = async (name: string, key: string, sort: number) =>
-			(
-				await db
-					.prepare(
-						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?) RETURNING id",
-					)
-					.bind(name, key, sort)
-					.first<{ id: number }>()
-			)?.id as number;
+			known(
+				(
+					await db
+						.prepare(
+							"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?) RETURNING id",
+						)
+						.bind(name, key, sort)
+						.first<{ id: number }>()
+				)?.id,
+			);
 
 		it.each<Decision>([
 			{
@@ -2259,7 +2337,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { pet } };
 				},
 				between: (s) => [
-					() => setArchived(db, s.cats.pet as number, true, "2026-09-01"),
+					() => setArchived(db, known(s.cats.pet), true, "2026-09-01"),
 				],
 				result: (s) => filed(s, "Pet Care", { restored: true }),
 				ticksIn: "Pet Care",
@@ -2281,7 +2359,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, s.cats.archived as number, false, "2026-09-01"),
+					() => setArchived(db, known(s.cats.archived), false, "2026-09-01"),
 				],
 				result: (s) => filed(s, "Pet Care", { attached: true }),
 				ticksIn: "Pet Care",
@@ -2303,8 +2381,11 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, s.cats.archived as number, false, "2026-09-01"),
-					() => saveCategory(db, s.cats.archived as number, { name: "Pets" }),
+					() => setArchived(db, known(s.cats.archived), false, "2026-09-01"),
+					() =>
+						saveCategory(db, known(s.cats.archived), { name: "Pets" }).then(
+							() => undefined,
+						),
 				],
 				result: (s) => filed(s, "Pet Care"),
 				ticksIn: "Pet Care",
@@ -2365,7 +2446,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { pet } };
 				},
 				between: (s) => [
-					() => setArchived(db, s.cats.pet as number, true, "2026-09-01"),
+					() => setArchived(db, known(s.cats.pet), true, "2026-09-01"),
 					() => insertCategory("Replacement", "replacement", 999),
 				],
 				result: () => refused(FULL_RESTORE),
@@ -2387,8 +2468,11 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, s.cats.archived as number, false, "2026-09-01"),
-					() => saveCategory(db, s.cats.archived as number, { name: "Pets" }),
+					() => setArchived(db, known(s.cats.archived), false, "2026-09-01"),
+					() =>
+						saveCategory(db, known(s.cats.archived), { name: "Pets" }).then(
+							() => undefined,
+						),
 				],
 				result: () => refused(FULL_ADD),
 				ticksIn: null,
@@ -2532,7 +2616,7 @@ describe("createFromSuggestion", () => {
 			{
 				ticked: made.slice(0, 3),
 				shown: made,
-				notes: { [made[3] as number]: "x".repeat(501) },
+				notes: { [known(made[3])]: "x".repeat(501) },
 			},
 			"person",
 		);
@@ -2542,7 +2626,7 @@ describe("createFromSuggestion", () => {
 			reason: "invalid",
 			error: "Keep each note under 500 characters.",
 		});
-		expect((await row(made[0] as number))?.category_id).toBeNull();
+		expect((await row(known(made[0])))?.category_id).toBeNull();
 	});
 
 	it("saves notes for 300 unticked transactions in a fixed number of statements", async () => {
@@ -2550,13 +2634,11 @@ describe("createFromSuggestion", () => {
 
 		for (let i = 0; i < 301; i++)
 			made.push(await add({ rawName: `SHOP ${i}`, date: "2026-09-10" }));
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 		let statements = 0;
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements++;
@@ -2564,9 +2646,9 @@ describe("createFromSuggestion", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return member(target, property);
 			},
-		}) as D1Database;
+		});
 
 		const notes = Object.fromEntries(
 			made.slice(1).map((tx) => [tx, `Note for ${tx}`]),
@@ -2575,7 +2657,7 @@ describe("createFromSuggestion", () => {
 		const result = await createFromSuggestion(
 			counted,
 			id,
-			{ ticked: [made[0] as number], shown: made, notes },
+			{ ticked: [known(made[0])], shown: made, notes },
 			"person",
 		);
 
@@ -2585,8 +2667,8 @@ describe("createFromSuggestion", () => {
 		// way, and the household's time zone is read on every save, since any save may restore a category. None of it grows
 		// with the notes.
 		expect(statements).toBeLessThanOrEqual(16);
-		expect((await row(made[300] as number))?.note).toBe(
-			`Note for ${made[300]}`,
+		expect((await row(known(made[300])))?.note).toBe(
+			`Note for ${known(made[300])}`,
 		);
 	});
 
@@ -2610,7 +2692,7 @@ describe("createFromSuggestion", () => {
 					{
 						ticked: made.slice(0, 3),
 						shown: made,
-						notes: { [made[3] as number]: "Gift" },
+						notes: { [known(made[3])]: "Gift" },
 					},
 					"person",
 				),
@@ -2627,7 +2709,7 @@ describe("createFromSuggestion", () => {
 				category_id: null,
 				category_suggestion_id: id,
 			});
-		expect((await row(made[3] as number))?.note).toBeNull();
+		expect((await row(known(made[3])))?.note).toBeNull();
 	});
 
 	it("adds the ticked ones to the active category whose accented name differs only in capitals, instead of making a second", async () => {
@@ -2711,14 +2793,16 @@ describe("createFromSuggestion", () => {
 	it("restores the archived category with the name in other accented capitals, as stored, instead of making a second", async () => {
 		const { id, made } = await pending();
 
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES (?, 'tag', 'cat-blue', 102, 1) RETURNING id",
-				)
-				.bind("École")
-				.first<{ id: number }>()
-		)?.id as number;
+		const archived = known(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES (?, 'tag', 'cat-blue', 102, 1) RETURNING id",
+					)
+					.bind("École")
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await db
 			.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
@@ -2746,7 +2830,7 @@ describe("createFromSuggestion", () => {
 		expect((await categories()).find((c) => c.id === archived)?.archived).toBe(
 			0,
 		);
-		expect(await row(made[0] as number)).toMatchObject({
+		expect(await row(known(made[0]))).toMatchObject({
 			category_id: archived,
 		});
 	});
@@ -2760,7 +2844,7 @@ describe("dismissSuggestion", () => {
 			await add({ rawName: "SPOTIFY" }),
 		];
 
-		const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+		const id = known(await saveSuggestion(db, "Subscriptions", made));
 		const had = (await categories()).length;
 		expect(await dismissSuggestion(db, id)).toEqual({ name: "Subscriptions" });
 		expect(await suggestion(id)).toMatchObject({ status: "dismissed" });
@@ -2773,11 +2857,13 @@ describe("dismissSuggestion", () => {
 	});
 
 	it("says nothing was there when it was already decided", async () => {
-		const id = (await saveSuggestion(db, "Subscriptions", [
-			await add(),
-			await add({ rawName: "HULU" }),
-			await add({ rawName: "SPOTIFY" }),
-		])) as number;
+		const id = known(
+			await saveSuggestion(db, "Subscriptions", [
+				await add(),
+				await add({ rawName: "HULU" }),
+				await add({ rawName: "SPOTIFY" }),
+			]),
+		);
 
 		await dismissSuggestion(db, id);
 		expect(await dismissSuggestion(db, id)).toBeNull();

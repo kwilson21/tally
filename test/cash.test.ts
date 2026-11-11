@@ -25,6 +25,17 @@ async function request(path: string, init?: RequestInit) {
 	return { res, html: await res.text() };
 }
 
+/** A row of `SELECT *` or a column alias query: every value is a SQL string, number or null. */
+type SqlRow = Record<string, string | number | null>;
+
+/** The row a query returned; fails the test when the query returned none. */
+function requireRow<Row>(row: Row | null | undefined): Row {
+	if (row === null || row === undefined)
+		throw new Error("expected the query to return a row");
+
+	return row;
+}
+
 beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
 describe("adding cash", () => {
@@ -362,11 +373,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Bill-linked cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9600,'Linked cash bill',1850,5,'monthly',1,'BILL-LINKED CASH')",
@@ -455,11 +466,11 @@ describe("cash lifecycle", () => {
 
 		expect(created.res.status).toBe(200);
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Editable cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const monthSummary = async () => {
 			const data = await loadMonth(env.DB, "2026-10");
@@ -520,13 +531,13 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		return (
+		return requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(merchant)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 	};
 
 	it("refuses an amount of zero in the edit panel and keeps the amount", async () => {
@@ -617,6 +628,7 @@ describe("cash lifecycle", () => {
 	it("treats a cash entry deleted while it is being saved as an error, not a refund refusal", async () => {
 		const id = await createCash("Vanishing cash", "18.50");
 
+		// SAFETY: saveEdit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -626,7 +638,7 @@ describe("cash lifecycle", () => {
 
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		await expect(
 			saveEdit(
@@ -664,11 +676,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Future guard' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
 		tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
@@ -695,7 +707,7 @@ describe("cash lifecycle", () => {
 			"SELECT t.id, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id LIMIT 1",
 		).first<{ id: number; bank: string }>();
 
-		const bankId = bankRow?.id as number;
+		const bankId = requireRow(bankRow).id;
 		const bankPanel = await request(`/transactions/${bankId}`);
 		expect(bankPanel.html).toContain(
 			`From ${bankRow?.bank}. Its date and amount stay as the bank sent them. If something&#39;s off, you can split it, exclude it, or count it in another month.`,
@@ -745,11 +757,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Split edit' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await saveSplit(
 			env.DB,
@@ -922,11 +934,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Split part cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await saveSplit(
 			env.DB,
@@ -938,13 +950,13 @@ describe("cash lifecycle", () => {
 			"demo",
 		);
 
-		const part = (
+		const part = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id=? ORDER BY id LIMIT 1",
 			)
 				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const panel = await request(`/transactions/${part}`);
 		expect(panel.res.status).toBe(200);
@@ -992,11 +1004,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Ten year cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const today = todayIn(DEFAULT_TIME_ZONE);
 
@@ -1067,11 +1079,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Month move cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const loadSpent = async () => {
 			const data = await loadMonth(env.DB, today.slice(0, 7));
@@ -1118,11 +1130,11 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Refund guard cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,?, -1500, 'Cash refund', ?, 1 FROM transactions WHERE id=?",
@@ -1218,13 +1230,13 @@ describe("cash lifecycle", () => {
 		const before = {
 			parent: await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
 				.bind(entry.id)
-				.first(),
+				.first<SqlRow>(),
 			parts: (
 				await env.DB.prepare(
 					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
 				)
 					.bind(entry.id)
-					.all()
+					.all<SqlRow>()
 			).results,
 		};
 
@@ -1267,29 +1279,24 @@ describe("cash lifecycle", () => {
 			"SELECT * FROM transactions WHERE raw_name=? AND is_split=1 ORDER BY id DESC LIMIT 1",
 		)
 			.bind(name)
-			.first<Record<string, unknown>>();
+			.first<SqlRow>();
 
 		const restoredParts = (
 			await env.DB.prepare(
 				"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
 			)
 				.bind(restoredParent?.id)
-				.all<Record<string, unknown>>()
+				.all<SqlRow>()
 		).results;
 
-		const withoutIds = ({
-			id: _id,
-			parent_id: _parentId,
-			...row
-		}: Record<string, unknown>) => row;
+		const withoutIds = ({ id: _id, parent_id: _parentId, ...row }: SqlRow) =>
+			row;
 
 		expect(restoredParent).not.toBeNull();
-		expect(withoutIds(restoredParent as Record<string, unknown>)).toEqual(
-			withoutIds(before.parent as Record<string, unknown>),
+		expect(withoutIds(requireRow(restoredParent))).toEqual(
+			withoutIds(requireRow(before.parent)),
 		);
-		expect(restoredParts.map(withoutIds)).toEqual(
-			(before.parts as Record<string, unknown>[]).map(withoutIds),
-		);
+		expect(restoredParts.map(withoutIds)).toEqual(before.parts.map(withoutIds));
 	});
 
 	it("is left out of Accounts and net worth", async () => {
@@ -1373,11 +1380,11 @@ describe("cash lifecycle", () => {
 			category: "1",
 		});
 
-		const id = (
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Rule cash shop' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const key = (
 			await env.DB.prepare(
@@ -1680,8 +1687,9 @@ describe("cash lifecycle", () => {
 			body: "back=%2Ftransactions&confirm=1",
 		});
 
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+		const token: string = JSON.parse(
+			deleted.res.headers.get("HX-Trigger") ?? "{}",
+		).toast.undo;
 
 		await env.DB.prepare(
 			"UPDATE cash_delete_holds SET created_at=? WHERE token=?",
@@ -1746,8 +1754,9 @@ describe("cash lifecycle", () => {
 			body: "back=%2Ftransactions&confirm=1",
 		});
 
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+		const token: string = JSON.parse(
+			deleted.res.headers.get("HX-Trigger") ?? "{}",
+		).toast.undo;
 
 		const otherTransaction = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE id!=? LIMIT 1",
@@ -1812,11 +1821,11 @@ describe("cash lifecycle", () => {
 			});
 
 		const farmersMarket = async () =>
-			(
+			requireRow(
 				await env.DB.prepare(
 					"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Farmers market'",
-				).first<{ id: number }>()
-			)?.id as number;
+				).first<{ id: number }>(),
+			).id;
 
 		const dialog = (html: string) =>
 			html.slice(html.indexOf('role="dialog"'), html.lastIndexOf("</section>"));
@@ -1998,7 +2007,7 @@ describe("cash lifecycle", () => {
 
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: key },
-			item?.id as number,
+			requireRow(item).id,
 			fetchImpl,
 		);
 		expect(
@@ -2136,7 +2145,7 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 
 		const split = await saveSplit(
 			env.DB,
-			parent?.id as number,
+			requireRow(parent).id,
 			[
 				{ categoryId: 1, amountCents: 1200 },
 				{ categoryId: 2, amountCents: 800 },
@@ -2284,26 +2293,30 @@ describe("the cash form's Category group", () => {
 describe("changing a split cash entry's parts (Change the parts)", () => {
 	const today = () => todayIn(DEFAULT_TIME_ZONE);
 
-	const post = (path: string, fields: [string, string][], htmx = true) =>
-		request(path, {
-			method: "POST",
-			redirect: "manual",
-			headers: {
-				Origin: BASE,
-				...(htmx ? { "HX-Request": "true" } : {}),
-				"content-type": "application/x-www-form-urlencoded",
-			},
-			body: new URLSearchParams(fields),
+	const post = (path: string, fields: [string, string][], htmx = true) => {
+		const headers = new Headers({
+			Origin: BASE,
+			"content-type": "application/x-www-form-urlencoded",
 		});
 
+		if (htmx) headers.set("HX-Request", "true");
+
+		return request(path, {
+			method: "POST",
+			redirect: "manual",
+			headers,
+			body: new URLSearchParams(fields),
+		});
+	};
+
 	const idByName = async (merchant: string) =>
-		(
+		requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(merchant)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 	const partsOf = async (id: number) =>
 		(
@@ -2375,7 +2388,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.bind(b?.id, id)
 			.run();
 
-		return { id, a: a?.id as number, b: b?.id as number };
+		return { id, a: requireRow(a).id, b: requireRow(b).id };
 	};
 
 	const BILL = 9950;
@@ -2421,10 +2434,10 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["total", total],
 			["amount_was", amountWas],
 			...extra,
-			...parts.flatMap(([partId, category, amount]) => [
-				["part_id", partId] as [string, string],
-				["part_category", category] as [string, string],
-				["part_amount", amount] as [string, string],
+			...parts.flatMap(([partId, category, amount]): [string, string][] => [
+				["part_id", partId],
+				["part_category", category],
+				["part_amount", amount],
 			]),
 		]);
 
@@ -3335,11 +3348,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		});
 		const plain = await idByName("Plain cash");
 
-		const bank = (
+		const bank = requireRow(
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t JOIN accounts ac ON ac.id = t.account_id WHERE ac.type <> 'cash' AND t.parent_id IS NULL AND t.is_split = 0 AND t.flag_income = 0 ORDER BY t.id LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const before = await stateOf(id);
 
@@ -3385,13 +3398,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Out of date");
 		const before = await stateOf(id);
 
-		const foreign = (
+		const foreign = requireRow(
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.id <> ? ORDER BY t.id LIMIT 1",
 			)
 				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const cases: { name: string; run: () => Promise<{ res: Response }> }[] = [
 			{
@@ -3435,6 +3448,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("refuses a correction when a part was added at the same moment, and writes nothing from it", async () => {
 		const { id, a, b } = await splitCash("Racing part");
 
+		// SAFETY: correctCashSplit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -3454,7 +3468,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		await expect(
 			correctCashSplit(
@@ -3521,6 +3535,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("refuses a correction with two new parts when another part is added at the same moment, and writes nothing", async () => {
 		const { id, a, b } = await splitCash("Racing two new parts");
 
+		// SAFETY: correctCashSplit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -3535,7 +3550,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		await expect(
 			correctCashSplit(
@@ -3571,6 +3586,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("refuses a same-total correction with two new parts when another part is added at the same moment, and writes nothing", async () => {
 		const { id, a, b } = await splitCash("Racing same total");
 
+		// SAFETY: correctCashSplit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -3590,7 +3606,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		await expect(
 			correctCashSplit(
@@ -3933,8 +3949,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 					totalCents: 10000,
 					amountWasCents: 9000,
 					parts: [
-						{ id: a?.id as number, categoryId: 1, amountCents: 6000 },
-						{ id: b?.id as number, categoryId: 5, amountCents: 3000 },
+						{ id: requireRow(a).id, categoryId: 1, amountCents: 6000 },
+						{ id: requireRow(b).id, categoryId: 5, amountCents: 3000 },
 						{ id: null, categoryId: 5, amountCents: 1000 },
 					],
 				},
@@ -3978,8 +3994,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"demo",
 		);
 		const [partA, partB] = await partsOf(id);
-		const a = partA?.id as number;
-		const b = partB?.id as number;
+		const a = requireRow(partA).id;
+		const b = requireRow(partB).id;
 		expect([await dismissalsOn(a), await dismissalsOn(b)]).toEqual([1, 1]);
 
 		await expect(
@@ -3999,13 +4015,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			),
 		).resolves.toEqual({ saved: true });
 
-		const added = (
+		const added = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)",
 			)
 				.bind(id, a, b)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		expect([
 			await dismissalsOn(added),
@@ -4120,11 +4136,11 @@ describe("a bank transaction split into parts", () => {
 			"SELECT t.id, t.amount_cents AS amountCents, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id WHERE t.parent_id IS NULL AND t.is_split = 0 AND a.type <> 'cash' AND ABS(t.amount_cents) >= 2 ORDER BY t.id LIMIT 1",
 		).first<{ id: number; amountCents: number; bank: string }>();
 
-		const amount = bank?.amountCents as number;
+		const amount = requireRow(bank).amountCents;
 		const half = Math.trunc(amount / 2);
 		await saveSplit(
 			env.DB,
-			bank?.id as number,
+			requireRow(bank).id,
 			[
 				{ amountCents: half, categoryId: 1 },
 				{ amountCents: amount - half, categoryId: 5 },

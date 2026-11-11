@@ -33,7 +33,7 @@ const bytesOf = (text: string) => {
 
 type Ev = { type: string; target?: El; detail?: unknown };
 
-type Handler = (event: Ev) => unknown;
+type Handler = (event: Ev) => void;
 
 /** A tiny element: attributes, children, the hidden and disabled flags, and the selectors push.js uses ([name] and [name="v"]). */
 class El {
@@ -203,7 +203,7 @@ function subscriptionWith(
 
 	return {
 		endpoint,
-		options: { applicationServerKey: bytes.buffer as ArrayBuffer },
+		options: { applicationServerKey: bytes.buffer },
 		getKey: (name: string) => (name === "p256dh" ? p256dh.buffer : auth.buffer),
 		unsubscribe: vi.fn(async () => true),
 		toJSON: () => ({ endpoint, keys: { p256dh: "P", auth: "A" } }),
@@ -219,7 +219,7 @@ function paddedJsonSubscription() {
 
 	return {
 		endpoint,
-		options: { applicationServerKey: bytesOf(AS_PUBLIC).buffer as ArrayBuffer },
+		options: { applicationServerKey: bytesOf(AS_PUBLIC).buffer },
 		unsubscribe: vi.fn(async () => true),
 		toJSON: () => ({
 			endpoint,
@@ -230,13 +230,47 @@ function paddedJsonSubscription() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** The element a test selects. It must be on the page, so a missing one fails the test here. */
+function must(el: El | null): El {
+	if (!el) throw new Error("the element is not on the page");
+
+	return el;
+}
+
+/** The form a call posted. push.js always posts URLSearchParams, so any other body fails the test here. */
+function formOf(init: RequestInit | undefined): URLSearchParams {
+	if (!(init?.body instanceof URLSearchParams))
+		throw new Error("the call did not post a form");
+
+	return init.body;
+}
+
+/** The arguments of the nth call to a mock. The call must have happened, so a missing one fails the test here. */
+function callArgs<Args extends unknown[]>(
+	mock: { mock: { calls: Args[] } },
+	n: number,
+): Args {
+	const args = mock.mock.calls[n];
+
+	if (!args) throw new Error(`the mock was not called ${n + 1} times`);
+
+	return args;
+}
+
+type SubscribeOptions = {
+	userVisibleOnly: boolean;
+	applicationServerKey: Uint8Array;
+};
+
+/** A subscription as the fake browser hands it out (either shape subscriptionWith or paddedJsonSubscription makes). */
+type FakeSubscription =
+	| ReturnType<typeof subscriptionWith>
+	| ReturnType<typeof paddedJsonSubscription>;
+
 type Options = {
 	permission?: "default" | "granted" | "denied";
-	subscription?:
-		| ReturnType<typeof subscriptionWith>
-		| ReturnType<typeof paddedJsonSubscription>
-		| null;
-	subscribe?: () => Promise<unknown>;
+	subscription?: FakeSubscription | null;
+	subscribe?: (options: SubscribeOptions) => Promise<FakeSubscription>;
 	userAgent?: string;
 	/** navigator.maxTouchPoints: an iPad in desktop mode reports Macintosh with touch points, a real Mac reports 0. */
 	maxTouchPoints?: number;
@@ -263,7 +297,10 @@ async function page(options: Options = {}) {
 		"https://push.example.test/send/fresh",
 	);
 
-	const subscribe = vi.fn(options.subscribe ?? (async () => fresh));
+	const subscribe = vi.fn<
+		(options: SubscribeOptions) => Promise<FakeSubscription>
+	>(options.subscribe ?? (async () => fresh));
+
 	const getSubscription = vi.fn(async () => options.subscription ?? null);
 	const registration = { pushManager: { subscribe, getSubscription } };
 	const register = vi.fn(async () => registration);
@@ -286,7 +323,7 @@ async function page(options: Options = {}) {
 	// A page load's quiet re-post (restore=1) answers restoreStatus when given, and a tap's save answers saveStatus.
 	const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
 		const restore =
-			(init?.body as URLSearchParams | undefined)?.get("restore") === "1";
+			init?.body instanceof URLSearchParams && init.body.get("restore") === "1";
 
 		if (restore && options.restoreError) throw new TypeError("network down");
 
@@ -488,17 +525,15 @@ describe("the notify control on a page: what the browser already has", () => {
 		expect(shown(control, "on")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
 		expect(fetch).toHaveBeenCalledOnce();
-		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		const [url, init] = callArgs(fetch, 0);
 		expect(url).toBe("/push/subscribe");
-		expect(init.method).toBe("POST");
-		expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
-			"application/x-www-form-urlencoded",
-		);
-		expect((init.body as URLSearchParams).get("endpoint")).toBe(
-			subscription.endpoint,
-		);
+		expect(init?.method).toBe("POST");
+		// SAFETY: push.js sends its headers as one plain object literal (its fetch call), so they are a Record<string, string>.
+		const headers = init?.headers as Record<string, string>;
+		expect(headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+		expect(formOf(init).get("endpoint")).toBe(subscription.endpoint);
 		// A page load only restores the row (restore=1): the server never moves a device to whoever is looking at it.
-		expect((init.body as URLSearchParams).get("restore")).toBe("1");
+		expect(formOf(init).get("restore")).toBe("1");
 		expect(subscribe).not.toHaveBeenCalled();
 	});
 
@@ -609,12 +644,12 @@ describe("the notify control on a page: what the browser already has", () => {
 			saveStatus: 201,
 		});
 
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(fetch).toHaveBeenCalledTimes(2);
-		const [url, tap] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+		const [url, tap] = callArgs(fetch, 1);
 		expect(url).toBe("/push/subscribe");
-		expect((tap.body as URLSearchParams).get("restore")).toBeNull();
+		expect(formOf(tap).get("restore")).toBeNull();
 		expect(shown(control, "on")).toBe(true);
 		expect(dom.focused).toEqual([
 			control.querySelector('[data-notify-state="on"]'),
@@ -667,9 +702,7 @@ describe("the notify control's tap", () => {
 		dom.click(button);
 		expect(subscribe).toHaveBeenCalledOnce();
 
-		const [options] = subscribe.mock.calls[0] as unknown as [
-			{ userVisibleOnly: boolean; applicationServerKey: Uint8Array },
-		];
+		const [options] = callArgs(subscribe, 0);
 
 		expect(options.userVisibleOnly).toBe(true);
 		expect(options.applicationServerKey).toEqual(bytesOf(AS_PUBLIC));
@@ -678,12 +711,12 @@ describe("the notify control's tap", () => {
 
 	it("posts a form of the subscription when granted, then shows On and moves focus to it", async () => {
 		const { dom, control, fetch } = await page();
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(fetch).toHaveBeenCalledOnce();
-		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		const [url, init] = callArgs(fetch, 0);
 		expect(url).toBe("/push/subscribe");
-		const body = init.body as URLSearchParams;
+		const body = formOf(init);
 		expect(body.get("endpoint")).toBe("https://push.example.test/send/fresh");
 		expect(body.get("p256dh")).toBeTruthy();
 		expect(body.get("auth")).toBeTruthy();
@@ -701,11 +734,11 @@ describe("the notify control's tap", () => {
 			subscribe: async () => paddedJsonSubscription(),
 		});
 
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(fetch).toHaveBeenCalledOnce();
-		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-		const body = init.body as URLSearchParams;
+		const [, init] = callArgs(fetch, 0);
+		const body = formOf(init);
 		expect(body.get("p256dh")).toBe(OTHER_KEY);
 		expect(body.get("auth")).toBe("BTBZMqHH6r4Tts7J_aSIgg");
 		expect(shown(control, "on")).toBe(true);
@@ -719,15 +752,15 @@ describe("the notify control's tap", () => {
 
 		await flush();
 		expect(fetch).toHaveBeenCalledOnce();
-		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-		const body = init.body as URLSearchParams;
+		const [, init] = callArgs(fetch, 0);
+		const body = formOf(init);
 		expect(body.get("restore")).toBe("1");
 		expect(body.get("p256dh")).toBe(OTHER_KEY);
 		expect(body.get("auth")).toBe("BTBZMqHH6r4Tts7J_aSIgg");
 	});
 
 	it("shows the busy state while the subscribe is pending, and clears it once saved", async () => {
-		let finish: (value: unknown) => void = () => {};
+		let finish: (value: FakeSubscription) => void = () => {};
 
 		const { dom, control } = await page({
 			subscribe: () =>
@@ -736,7 +769,7 @@ describe("the notify control's tap", () => {
 				}),
 		});
 
-		const button = control.querySelector("[data-notify-on]") as El;
+		const button = must(control.querySelector("[data-notify-on]"));
 		dom.click(button);
 		expect(button.disabled).toBe(true);
 		expect(button.getAttribute("aria-busy")).toBe("true");
@@ -756,7 +789,7 @@ describe("the notify control's tap", () => {
 			},
 		});
 
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(shown(control, "blocked")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
@@ -777,7 +810,7 @@ describe("the notify control's tap", () => {
 			},
 		});
 
-		const button = control.querySelector("[data-notify-on]") as El;
+		const button = must(control.querySelector("[data-notify-on]"));
 		dom.click(button);
 		await flush();
 		expect(shown(control, "off")).toBe(true);
@@ -798,7 +831,7 @@ describe("the notify control's tap", () => {
 			subscribe: async () => subscribed,
 		});
 
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(subscribed.unsubscribe).toHaveBeenCalledOnce();
 		expect(shown(control, "off")).toBe(true);
@@ -823,7 +856,7 @@ describe("the notify control's tap", () => {
 		});
 
 		expect(shown(control, "off")).toBe(true);
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(existing.unsubscribe).not.toHaveBeenCalled();
 		expect(shown(control, "off")).toBe(true);
@@ -851,7 +884,7 @@ describe("the notify control's tap", () => {
 			subscribe: async () => fresh,
 		});
 
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(fresh.unsubscribe).toHaveBeenCalledOnce();
 		expect(existing.unsubscribe).not.toHaveBeenCalled();
@@ -868,7 +901,7 @@ describe("the notify control's tap", () => {
 			subscribe: async () => fresh,
 		});
 
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		await flush();
 		expect(fresh.unsubscribe).toHaveBeenCalledOnce();
 		expect(shown(control, "off")).toBe(true);
@@ -880,7 +913,7 @@ describe("the notify control's tap", () => {
 			subscribe: async () => subscriptionWith(AS_PUBLIC),
 		});
 
-		const button = control.querySelector("[data-notify-on]") as El;
+		const button = must(control.querySelector("[data-notify-on]"));
 		// Enter or Space on a focused button is the keyboard's tap; the busy state then disables that focused button.
 		button.focus();
 		dom.click(button);
@@ -898,7 +931,7 @@ describe("the notify control's tap", () => {
 			},
 		});
 
-		const button = control.querySelector("[data-notify-on]") as El;
+		const button = must(control.querySelector("[data-notify-on]"));
 		button.focus();
 		dom.click(button);
 		await flush();
@@ -918,7 +951,7 @@ describe("the notify control's tap", () => {
 			subscribe: async () => subscriptionWith(AS_PUBLIC),
 		});
 
-		const button = control.querySelector("[data-notify-on]") as El;
+		const button = must(control.querySelector("[data-notify-on]"));
 		button.focus();
 		dom.click(button);
 		// The person tabs to a link while the save is out, so focus is on something of theirs.
@@ -931,7 +964,7 @@ describe("the notify control's tap", () => {
 
 	it("announces On, and does not focus, when the control has left the page while the tap was saved", async () => {
 		const { dom, control } = await page();
-		dom.click(control.querySelector("[data-notify-on]") as El);
+		dom.click(must(control.querySelector("[data-notify-on]")));
 		control.remove();
 		await flush();
 		expect(dom.focused).toEqual([]);

@@ -1,3 +1,4 @@
+import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
@@ -17,14 +18,76 @@ const b64 = (value: Uint8Array) =>
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
 
-const json64 = (value: unknown) => b64(encoder.encode(JSON.stringify(value)));
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const json64 = (value: Json) => b64(encoder.encode(JSON.stringify(value)));
+
+/** A value the test's own insert returned: a missing one means the setup broke, so the test fails here. */
+function known<Value>(value: Value | null | undefined): Value {
+	if (value === null || value === undefined)
+		throw new Error("the test's setup did not create this value");
+
+	return value;
+}
+
+type Method = (...args: never[]) => void;
+
+function isMember<Target extends object>(
+	target: Target,
+	property: PropertyKey,
+): property is keyof Target {
+	return property in target;
+}
+
+function isMethod(value: unknown): value is Method {
+	return typeof value === "function";
+}
+
+/** A member of a database or statement as a proxy hands it on: a method bound to its target, anything else as it is. */
+function member<Target extends object>(
+	target: Target,
+	property: PropertyKey,
+): Target[keyof Target] | Method | undefined {
+	if (!isMember(target, property)) return undefined;
+
+	const value = target[property];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
+
+/** A statement whose `bind` is replaced by `bind`; every other member is the real statement's. */
+function rebinding(
+	statement: D1PreparedStatement,
+	bind: (...values: unknown[]) => { run: () => Promise<D1Result> },
+): D1PreparedStatement {
+	return new Proxy(statement, {
+		get(target, property) {
+			if (property === "bind") return bind;
+
+			return member(target, property);
+		},
+	});
+}
+
+/** An ExecutionContext whose waitUntil promises are kept in `promises`, so the test can await them. */
+function collectingContext(promises: Promise<unknown>[]): ExecutionContext {
+	const ctx = createExecutionContext();
+	ctx.waitUntil = (promise) => {
+		promises.push(promise);
+	};
+
+	return ctx;
+}
 
 async function signer() {
-	const pair = (await crypto.subtle.generateKey(
+	const pair = await crypto.subtle.generateKey(
 		{ name: "ECDSA", namedCurve: "P-256" },
 		true,
 		["sign", "verify"],
-	)) as CryptoKeyPair;
+	);
+
+	if (!("privateKey" in pair))
+		throw new Error("ECDSA generateKey returns a key pair");
 
 	const kid = crypto.randomUUID();
 
@@ -238,11 +301,12 @@ describe("Plaid webhook route", () => {
 			.run();
 		const sign = await signer();
 
+		// JSON.stringify leaves out an undefined error, so the body is the same as without the key.
 		const body = JSON.stringify({
 			item_id: "item-1",
 			webhook_type: "ITEM",
 			webhook_code: webhookCode,
-			...(errorCode !== undefined ? { error: { error_code: errorCode } } : {}),
+			error: errorCode === undefined ? undefined : { error_code: errorCode },
 		});
 
 		const { token, jwk } = await sign(body);
@@ -333,11 +397,7 @@ describe("Plaid webhook route", () => {
 
 		const racing = new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop !== "prepare") {
-					const value = Reflect.get(target, prop);
-
-					return typeof value === "function" ? value.bind(target) : value;
-				}
+				if (prop !== "prepare") return member(target, prop);
 
 				return (sql: string) => {
 					const statement = target.prepare(sql);
@@ -351,29 +411,27 @@ describe("Plaid webhook route", () => {
 						return statement;
 					}
 
-					return {
-						bind: (...values: unknown[]) => {
-							const bound = statement.bind(...values);
+					return rebinding(statement, (...values: unknown[]) => {
+						const bound = statement.bind(...values);
 
-							const race = async () => {
-								fired.count += 1;
-								await target
-									.prepare(
-										"UPDATE plaid_items SET attention_held = 1 - attention_held WHERE id = ?",
-									)
-									.bind(row?.id)
-									.run();
-							};
+						const race = async () => {
+							fired.count += 1;
+							await target
+								.prepare(
+									"UPDATE plaid_items SET attention_held = 1 - attention_held WHERE id = ?",
+								)
+								.bind(known(row).id)
+								.run();
+						};
 
-							return {
-								run: async () => {
-									await race();
+						return {
+							run: async () => {
+								await race();
 
-									return bound.run();
-								},
-							};
-						},
-					} as unknown as D1PreparedStatement;
+								return bound.run();
+							},
+						};
+					});
 				};
 			},
 		});
@@ -428,13 +486,13 @@ describe("Plaid webhook route", () => {
 				.run();
 			const sign = await signer();
 
+			// JSON.stringify leaves out an undefined error, so the body is the same as without the key.
 			const body = JSON.stringify({
 				item_id: "item-1",
 				webhook_type: "ITEM",
 				webhook_code: "ERROR",
-				...(webhookError !== undefined
-					? { error: { error_code: webhookError } }
-					: {}),
+				error:
+					webhookError === undefined ? undefined : { error_code: webhookError },
 			});
 
 			const { token, jwk } = await sign(body);
@@ -448,11 +506,7 @@ describe("Plaid webhook route", () => {
 			vi.stubGlobal("fetch", fetchMock);
 			const promises: Promise<unknown>[] = [];
 
-			const ctx = {
-				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-				passThroughOnException() {},
-				props: {},
-			} as unknown as ExecutionContext;
+			const ctx = collectingContext(promises);
 
 			expect(
 				(
@@ -519,11 +573,7 @@ describe("Plaid webhook route", () => {
 		);
 		const promises: Promise<unknown>[] = [];
 
-		const ctx = {
-			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-			passThroughOnException() {},
-			props: {},
-		} as unknown as ExecutionContext;
+		const ctx = collectingContext(promises);
 
 		expect(
 			(
@@ -573,11 +623,7 @@ describe("Plaid webhook route", () => {
 
 		const racing = new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop !== "prepare") {
-					const value = Reflect.get(target, prop);
-
-					return typeof value === "function" ? value.bind(target) : value;
-				}
+				if (prop !== "prepare") return member(target, prop);
 
 				return (sql: string) => {
 					const statement = target.prepare(sql);
@@ -589,24 +635,22 @@ describe("Plaid webhook route", () => {
 						return statement;
 					}
 
-					return {
-						bind: (...values: unknown[]) => {
-							const bound = statement.bind(...values);
+					return rebinding(statement, (...values: unknown[]) => {
+						const bound = statement.bind(...values);
 
-							return {
-								run: async () => {
-									landed = true;
-									await target
-										.prepare(
-											"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL",
-										)
-										.run();
+						return {
+							run: async () => {
+								landed = true;
+								await target
+									.prepare(
+										"UPDATE plaid_items SET status = 'ok', attention_login = 0, attention_held = 0, reconnect_emailed_at = NULL",
+									)
+									.run();
 
-									return bound.run();
-								},
-							};
-						},
-					} as unknown as D1PreparedStatement;
+								return bound.run();
+							},
+						};
+					});
 				};
 			},
 		});
@@ -672,11 +716,7 @@ describe("Plaid webhook route", () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const promises: Promise<unknown>[] = [];
 
-		const ctx = {
-			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-			passThroughOnException() {},
-			props: {},
-		} as unknown as ExecutionContext;
+		const ctx = collectingContext(promises);
 
 		expect(
 			(
@@ -742,11 +782,7 @@ describe("Plaid webhook route", () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const promises: Promise<unknown>[] = [];
 
-		const ctx = {
-			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-			passThroughOnException() {},
-			props: {},
-		} as unknown as ExecutionContext;
+		const ctx = collectingContext(promises);
 
 		expect(
 			(
@@ -805,9 +841,9 @@ describe("Plaid webhook route", () => {
 
 					// The good sync (or relink) completes while Plaid's error is being confirmed; the state stays ok.
 					if (landing === "sync") {
-						await markSyncSucceeded(env.DB, row?.id as number, "lease-x");
+						await markSyncSucceeded(env.DB, known(row).id, "lease-x");
 					} else {
-						await clearAttention(env.DB, row?.id as number);
+						await clearAttention(env.DB, known(row).id);
 					}
 
 					return Response.json({
@@ -818,11 +854,7 @@ describe("Plaid webhook route", () => {
 			const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 			const promises: Promise<unknown>[] = [];
 
-			const ctx = {
-				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-				passThroughOnException() {},
-				props: {},
-			} as unknown as ExecutionContext;
+			const ctx = collectingContext(promises);
 
 			expect(
 				(
@@ -953,11 +985,7 @@ describe("Plaid webhook route", () => {
 		vi.stubGlobal("fetch", fetchMock);
 		const promises: Promise<unknown>[] = [];
 
-		const ctx = {
-			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-			passThroughOnException() {},
-			props: {},
-		} as unknown as ExecutionContext;
+		const ctx = collectingContext(promises);
 
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1039,11 +1067,7 @@ describe("Plaid webhook route", () => {
 			);
 			const promises: Promise<unknown>[] = [];
 
-			const ctx = {
-				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-				passThroughOnException() {},
-				props: {},
-			} as unknown as ExecutionContext;
+			const ctx = collectingContext(promises);
 
 			vi.spyOn(console, "log").mockImplementation(() => {});
 			expect(
@@ -1141,11 +1165,7 @@ describe("Plaid webhook route", () => {
 		);
 		const promises: Promise<unknown>[] = [];
 
-		const ctx = {
-			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-			passThroughOnException() {},
-			props: {},
-		} as unknown as ExecutionContext;
+		const ctx = collectingContext(promises);
 
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -1286,11 +1306,7 @@ describe("Plaid webhook sorting what arrived", () => {
 		);
 		const promises: Promise<unknown>[] = [];
 
-		const ctx = {
-			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
-			passThroughOnException() {},
-			props: {},
-		} as unknown as ExecutionContext;
+		const ctx = collectingContext(promises);
 
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});

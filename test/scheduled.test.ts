@@ -16,6 +16,7 @@ import {
 	suggestMerchantNames,
 } from "../src/suggest-names-pending";
 import { fakeSteps } from "./fake-sort-steps";
+import { envWith, fakeAi, fakeFetch } from "./helpers/doubles";
 import { merchantNames } from "./helpers/merchants";
 import { recordSorting, sortInProcess } from "./record-sorting";
 
@@ -34,16 +35,27 @@ async function resetDemo(
 	await saveAiSwitches(db, { details: false });
 }
 
-// The Workers runtime supports scheduled() on the Worker's own export, but the
-// generated Fetcher type only declares fetch() and connect().
-const worker = exports.default as unknown as {
-	scheduled(options: { cron?: string }): Promise<unknown>;
+/** A member of the database that is a method: a proxy binds it to the real database, so its `this` is right. */
+function isMethod(value: unknown): value is (...args: never[]) => void {
+	return typeof value === "function";
+}
+
+// SAFETY: the Workers runtime supports scheduled() on the Worker's own export; the generated type only declares
+// fetch() and connect().
+const worker = exports.default as typeof exports.default & {
+	scheduled(options: { cron?: string }): Promise<object>;
 };
 
-/** The same entry point with an environment of the test's choosing, production's say, which `worker` can't take. */
-const scheduledWith = handler as unknown as {
-	scheduled(controller: { cron: string }, env: unknown): Promise<unknown>;
-};
+/** The controller the Workers runtime gives scheduled(). The handler reads only its cron. */
+const controllerAt = (cron: string): ScheduledController => ({
+	cron,
+	scheduledTime: Date.now(),
+	noRetry() {},
+});
+
+/** The Worker's scheduled handler, run with a controller for `cron` and the environment the test gives it. */
+const runCron = (cron: string, workerEnv: Env = env) =>
+	handler.scheduled(controllerAt(cron), workerEnv);
 
 /** What Jev answers: nothing sure, so a call asked costs its queries and changes no category. */
 const jevAnswer = () =>
@@ -61,9 +73,10 @@ const jevAnswer = () =>
 
 /** A fake Workers AI that always gives the same answer, and remembers each ask. */
 const aiThatSays = (response: string) =>
-	({ run: vi.fn(async () => ({ response })) }) as unknown as Ai & {
-		run: ReturnType<typeof vi.fn>;
-	};
+	fakeAi(vi.fn(async () => ({ response })));
+
+/** The chat input the code under test sends Workers AI: its messages, with the role and content of each. */
+type AiInput = { messages: { role: string; content: string }[] };
 
 /** The night the 09:00 runs below sync for, as UTC dates (the cron's own day, not a household day). */
 const NIGHT = "2026-10-13";
@@ -121,16 +134,15 @@ describe("scheduled handler", () => {
 			unpaidDueBillsCents: 0,
 		});
 
-		await scheduledWith.scheduled(
-			{ cron: "0 8 * * *" },
-			{
-				...env,
+		await runCron(
+			"0 8 * * *",
+			envWith(env, {
 				DEMO: "true",
 				PLAID_SECRET: undefined,
 				PLAID_CLIENT_ID: undefined,
 				JEV_API_KEY: undefined,
 				AI: undefined,
-			},
+			}),
 		);
 
 		const suggestion = await env.DB.prepare(
@@ -359,7 +371,7 @@ describe("scheduled handler", () => {
 			await runScheduled({
 				...prodEnv,
 				SORT: sortInProcess(prodEnv, {
-					fetchImpl: fetchImpl as unknown as typeof fetch,
+					fetchImpl: fakeFetch(fetchImpl),
 				}).SORT,
 			});
 
@@ -376,7 +388,7 @@ describe("scheduled handler", () => {
 
 		await runScheduled(
 			{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
-			fetchImpl as unknown as typeof fetch,
+			fakeFetch(fetchImpl),
 		);
 
 		expect(fetchImpl).not.toHaveBeenCalled();
@@ -400,9 +412,9 @@ describe("scheduled handler: which run a cron starts", () => {
 			.mockImplementation(async () => jevAnswer());
 
 		const ai = aiThatSays("Some Place Name");
-		await scheduledWith.scheduled(
-			{ cron },
-			{ ...env, DEMO: "false", JEV_API_KEY: "jev", AI: ai },
+		await runCron(
+			cron,
+			envWith(env, { DEMO: "false", JEV_API_KEY: "jev", AI: ai }),
 		);
 
 		return { jev: jev.mock.calls.length, names: ai.run.mock.calls.length };
@@ -463,17 +475,16 @@ describe("scheduled handler: the minute run for the ready email (decision 146)",
 			.spyOn(globalThis, "fetch")
 			.mockImplementation(async () => Response.json({}, { status: 200 }));
 
-		const minuteEnv = {
-			...env,
+		const minuteEnv = envWith(env, {
 			DEMO: "false",
 			RESEND_API_KEY: "key",
 			EMAIL: undefined,
-		};
+		});
 
-		await scheduledWith.scheduled({ cron: "* * * * *" }, minuteEnv);
+		await runCron("* * * * *", minuteEnv);
 		expect(resend).toHaveBeenCalledTimes(1);
 		expect(create).not.toHaveBeenCalled();
-		await scheduledWith.scheduled({ cron: "* * * * *" }, minuteEnv);
+		await runCron("* * * * *", minuteEnv);
 		expect(resend).toHaveBeenCalledTimes(1);
 		vi.restoreAllMocks();
 	});
@@ -487,9 +498,9 @@ describe("scheduled handler: the minute run for the ready email (decision 146)",
 			.spyOn(globalThis, "fetch")
 			.mockImplementation(async () => Response.json({}, { status: 200 }));
 
-		await scheduledWith.scheduled(
-			{ cron: "* * * * *" },
-			{ ...env, DEMO: "true", RESEND_API_KEY: "key" },
+		await runCron(
+			"* * * * *",
+			envWith(env, { DEMO: "true", RESEND_API_KEY: "key" }),
 		);
 		expect(resend).not.toHaveBeenCalled();
 		expect(create).not.toHaveBeenCalled();
@@ -512,7 +523,7 @@ it("logs a night that fails to start by its error name, and the feedback retry s
 	await expect(
 		runScheduled(
 			{ ...env, DEMO: "false", FEEDBACK_GITHUB_TOKEN: "token" },
-			github as unknown as typeof fetch,
+			fakeFetch(github),
 		),
 	).resolves.toBeUndefined();
 
@@ -611,13 +622,13 @@ describe("scheduled handler: merchant names", () => {
 		]);
 
 		// A note's call answers empty, so it is tried and not asked again; a name's call answers a name.
-		const ai = {
-			run: vi.fn(async (_model: string, input: unknown) => ({
+		const ai = fakeAi(
+			vi.fn(async (_model: string, input: AiInput) => ({
 				response: JSON.stringify(input).includes("NOTE SHOP")
 					? ""
 					: "Some Place Name",
 			})),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		);
 
 		await runNight({ ...env, DEMO: "false", AI: ai });
 		const asked = ai.run.mock.calls.map(([, input]) => JSON.stringify(input));
@@ -739,13 +750,13 @@ describe("scheduled handler: merchant names", () => {
 
 		const fetchImpl = fakeBanks(3, note);
 
-		const ai = {
-			run: vi.fn(async () => {
+		const ai = fakeAi(
+			vi.fn(async () => {
 				note("names");
 
 				return { response: "Some Place Name" };
 			}),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		);
 
 		const prodEnv = {
 			...env,
@@ -756,7 +767,7 @@ describe("scheduled handler: merchant names", () => {
 			FEEDBACK_GITHUB_TOKEN: "token",
 		};
 
-		await runScheduled(prodEnv, fetchImpl as unknown as typeof fetch);
+		await runScheduled(prodEnv, fakeFetch(fetchImpl));
 
 		// No "other" request either: Jev, which the run never asks, would be one.
 		expect(order).toEqual(["plaid", "feedback"]);
@@ -771,13 +782,13 @@ describe("scheduled handler: merchant names", () => {
 		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
 		const order: string[] = [];
 
-		const ai = {
-			run: vi.fn(async () => {
+		const ai = fakeAi(
+			vi.fn(async () => {
 				order.push("names");
 
 				return { response: "Blue Bottle Coffee" };
 			}),
-		} as unknown as Ai;
+		);
 
 		const fetchImpl = vi.fn(async () => {
 			order.push("jev");
@@ -814,11 +825,11 @@ describe("scheduled handler: merchant names", () => {
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
-		const ai = {
-			run: vi.fn(async () => {
+		const ai = fakeAi(
+			vi.fn(async () => {
 				throw new Error("capacity");
 			}),
-		} as unknown as Ai;
+		);
 
 		const fetchImpl = vi.fn(async () => jevAnswer());
 		await expect(
@@ -845,8 +856,6 @@ describe("scheduled handler: merchant names", () => {
 	const dbThatFailsTheSort = () =>
 		new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						if (/FROM categories WHERE archived = 0/.test(sql))
@@ -855,9 +864,12 @@ describe("scheduled handler: merchant names", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				// SAFETY: a name D1Database lacks reads as undefined at run time, and isMethod passes undefined through unchanged.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
 
 	it("still makes the names in the night's instance when the sort throws, and logs only the error's name", async () => {
 		await oneUnnamedCharge();
@@ -955,18 +967,16 @@ describe("scheduled handler: new category suggestions", () => {
 
 	/** A fake Workers AI that says which kind of question it heard, and answers a category question with `name`. */
 	const aiThatHears = (heard: string[], name = "Subscriptions") =>
-		({
-			run: vi.fn(async (_model: string, input: unknown) => {
-				const user = (
-					input as { messages: { role: string; content: string }[] }
-				).messages.find((m) => m.role === "user")?.content;
+		fakeAi(
+			vi.fn(async (_model: string, input: AiInput) => {
+				const user = input.messages.find((m) => m.role === "user")?.content;
 
 				const kind = user?.startsWith("Places:") ? "categories" : "names";
 				heard.push(kind);
 
 				return { response: kind === "categories" ? name : "Some Place Name" };
 			}),
-		}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		);
 
 	it("makes them last in the night's instance, after the Jev pass and the names, and creates no category", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
@@ -1067,13 +1077,13 @@ describe("scheduled handler: new category suggestions", () => {
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
-		const ai = {
-			run: vi.fn(async () => {
+		const ai = fakeAi(
+			vi.fn(async () => {
 				throw Object.assign(new Error("failed for Stream A"), {
 					name: "AiError",
 				});
 			}),
-		} as unknown as Ai;
+		);
 
 		await expect(
 			runNight({ ...env, DEMO: "false", AI: ai }),
@@ -1109,8 +1119,6 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 
 		const counted = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
@@ -1118,11 +1126,14 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				// SAFETY: a name D1Database lacks reads as undefined at run time, and isMethod passes undefined through unchanged.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
-		return { db: counted as D1Database, statements: () => statements };
+		return { db: counted, statements: () => statements };
 	}
 
 	it("cleans old cash snapshots in a fixed number of statements and keeps today's", async () => {
@@ -1207,8 +1218,8 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		const counted = countingDb();
 		let calls = 0;
 
-		const ai = {
-			run: vi.fn(async () => {
+		const ai = fakeAi(
+			vi.fn(async () => {
 				calls += 1;
 
 				// Every odd call fails, so three never fail in a row and all 100 are asked: 20 batches, each with both.
@@ -1216,7 +1227,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 
 				return { response: "Some Place Name" };
 			}),
-		} as unknown as Ai;
+		);
 
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
@@ -1234,7 +1245,7 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 
 		// DEMO is "true" here, and there are no Plaid secrets: this is the demo's run.
 		const demoEnv = { ...env, DB: counted.db, AI: ai, JEV_API_KEY: "jev" };
-		await runScheduled(demoEnv, jev as unknown as typeof fetch);
+		await runScheduled(demoEnv, fakeFetch(jev));
 
 		expect(jev).not.toHaveBeenCalled();
 		expect(ai.run).not.toHaveBeenCalled();
@@ -1397,7 +1408,7 @@ const answeredHousehold = async () => {
 };
 
 /** The production run's environment: Plaid on, no Jev key, and the given AI binding (none by default). */
-const production = (extra: Record<string, unknown> = {}) => ({
+const production = () => ({
 	...env,
 	DEMO: "false",
 	PLAID_CLIENT_ID: "client",
@@ -1405,7 +1416,6 @@ const production = (extra: Record<string, unknown> = {}) => ({
 	TOKEN_ENCRYPTION_KEY: KEY,
 	JEV_API_KEY: undefined,
 	AI: undefined,
-	...extra,
 });
 
 /** Jev's switches for a night test: categories on or off, the others off. */
@@ -1436,7 +1446,7 @@ describe("scheduled handler: the 09:00 run keeps no first-night sync (decision 1
 
 		await runScheduled(
 			{ ...prod, SORT: night.SORT },
-			plaidBank("CHASE", { added: 2 }) as unknown as typeof fetch,
+			fakeFetch(plaidBank("CHASE", { added: 2 })),
 			runAt("2026-10-13T09:00:00Z"),
 		);
 		expect(night.create).toHaveBeenCalledWith({

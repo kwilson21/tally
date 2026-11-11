@@ -7,6 +7,7 @@ import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
+import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
 
@@ -25,6 +26,14 @@ const CHASE = "CHASE CARD PAYMENT";
 const LUPITA = "SQ *LUPITAS TAQ 2210";
 const BLUE = "BLUE BOTTLE COF";
 
+/** The value a query found, or a throw when it found no row, so the test fails at its own setup. */
+function present<T>(value: T | null | undefined): T {
+	if (value === null || value === undefined)
+		throw new Error("the test's setup found no row");
+
+	return value;
+}
+
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
 
@@ -41,14 +50,17 @@ async function post(
 	for (const [key, value] of Object.entries(fields))
 		for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
 
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: body.toString(),
 	});
 
@@ -56,6 +68,7 @@ async function post(
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: src/htmx.ts writes HX-Trigger as JSON with only the toast and announce keys, and "{}" when neither is set.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;
@@ -188,14 +201,20 @@ async function oneOfEach() {
 	};
 }
 
+/** One column's value as D1 returns it: the column types these tests read, and null for an empty one. */
+type Cell = number | string | null;
+
+/** A row the tests read by column name. */
+type Line = Record<string, Cell>;
+
 const row = (sql: string, ...binds: unknown[]) =>
 	db
 		.prepare(sql)
 		.bind(...binds)
-		.first<Record<string, unknown>>();
+		.first<Line>();
 
 /** The fields a Never suggest Remove form posts for one line: its id, store and kind (decision 101). */
-const removal = (line: Record<string, unknown> | null) => ({
+const removal = (line: Line | null) => ({
 	id: String(line?.id),
 	merchant_key: String(line?.merchant_key),
 	kind: String(line?.kind),
@@ -1409,9 +1428,11 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 
 /** The purchases a new-category form ticks: the checkbox values that carry `checked`. */
 const checkedTicks = (html: string) =>
-	[...html.matchAll(/<input[^>]*name="ticked"[^>]*>/g)]
-		.filter((input) => /\schecked(=|\s|\/|>)/.test(input[0]))
-		.map((input) => Number(/value="(\d+)"/.exec(input[0])?.[1]));
+	[...html.matchAll(/<input[^>]*name="ticked"[^>]*>/g)].flatMap((input) =>
+		/\schecked(=|\s|\/|>)/.test(input[0])
+			? [Number(/value="(\d+)"/.exec(input[0])?.[1])]
+			: [],
+	);
 
 describe("new category answers that are refused keep the ticks", () => {
 	it("draws no tick after a refusal when none was ticked, rather than ticking them all again", async () => {
@@ -1439,11 +1460,13 @@ describe("new category answers that are refused keep the ticks", () => {
 			)
 			.run();
 
-		const active = (
-			await db
-				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
-				.first<{ n: number }>()
-		)?.n as number;
+		const active = present(
+			(
+				await db
+					.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
+					.first<{ n: number }>()
+			)?.n,
+		);
 
 		for (let i = active; i < 50; i++)
 			await db
@@ -1507,13 +1530,15 @@ describe("a new category the family already has is added to, and the button says
 	it("reads 'Restore' with the family's name for an archived category (decision 110)", async () => {
 		const ids = await oneOfEach();
 
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await setArchived(db, archived, true, "2026-07-15");
 		const { html } = await newCategoryPage(ids);
@@ -1531,13 +1556,15 @@ describe("a new category the family already has is added to, and the button says
 			.run();
 
 		// The archived 'École' has the lower id, as the 0052 backfill left it, and the active 'école' is the one to add to.
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 99) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 99) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await setArchived(db, archived, true, "2026-07-15");
 		await db
@@ -1555,13 +1582,15 @@ describe("Yes on an archived category restores it, with the ticked purchases (de
 	it("brings it back with the ticked purchases in it, and says how many", async () => {
 		const ids = await oneOfEach();
 
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await setArchived(db, archived, true, "2026-07-15");
 
@@ -1661,6 +1690,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 			vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 				if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
 
+				// SAFETY: categorize.ts sends Jev a JSON body whose state carries bank_description, the only field this fake reads.
 				const body = JSON.parse(String(init?.body)) as {
 					state: { bank_description: string };
 				};
@@ -1687,7 +1717,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 
 	async function answerYes(
 		fields: Record<string, string | string[]>,
-		bindings: Record<string, unknown>,
+		bindings: Partial<Env> & { JEV_API_KEY?: string },
 	) {
 		const body = new URLSearchParams();
 
@@ -1794,7 +1824,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 	 * The DB, with `rival` run just before the first `run()` of a statement whose SQL starts with `prefix`:
 	 * the change lands between the route's queue read and its write.
 	 */
-	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+	function racing(prefix: string, rival: () => Promise<D1Result>): D1Database {
 		let raced = false;
 		// The statements a batch runs are the real ones, and a batch that holds a racing write fires the rival first.
 		const real = new WeakMap<object, D1PreparedStatement>();
@@ -1823,9 +1853,11 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 							return prop === "run" ? target.run() : target.all();
 						};
 
-					const value = Reflect.get(target, prop);
+					if (prop === "first") return target.first.bind(target);
 
-					return typeof value === "function" ? value.bind(target) : value;
+					if (prop === "raw") return target.raw.bind(target);
+
+					return undefined;
 				},
 			});
 
@@ -1849,9 +1881,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 						return target.batch(statements.map((s) => real.get(s) ?? s));
 					};
 
-				const value = Reflect.get(target, prop);
-
-				return typeof value === "function" ? value.bind(target) : value;
+				return undefined;
 			},
 		});
 	}
@@ -2489,14 +2519,14 @@ describe("the primary Yes sits on its own full-width row, No under it (P42 A)", 
 		async (_card, earlier) => {
 			const ids = await oneOfEach();
 
-			const keys: Record<string, number> = {
-				income: ids.income,
-				transfer: ids.transfer,
-				category: ids.category,
-			};
+			const keys = new Map([
+				["income", ids.income],
+				["transfer", ids.transfer],
+				["category", ids.category],
+			]);
 
 			const skip = earlier
-				.map((kind) => `skip=${kind}-${keys[kind]}`)
+				.map((kind) => `skip=${kind}-${keys.get(kind)}`)
 				.join("&");
 
 			const { html } = await get(
@@ -3293,7 +3323,8 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 // The Maybe card's three answers (decision 156): Yes, a suggested new category opened in place, and Something else's
 // one select. A create makes an active category with no budget and files the purchase in it, in one batch.
 describe("a Maybe card's new category answers (decision 156)", () => {
-	const countOf = async (sql: string) => (await row(sql))?.n as number;
+	const countOf = async (sql: string) =>
+		present((await db.prepare(sql).first<{ n: number }>())?.n);
 
 	/** The category card's purchase, with the two cards before it answered past (the first pass of the queue). */
 	async function categoryCard() {
@@ -3486,10 +3517,10 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 	it("the lazy name is asked once for a transaction, however often its row is drawn (decision 161)", async () => {
 		const { id } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		const run = vi.fn(async () => "Books & audio");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
 
 		try {
 			const first = await get(`/settings/suggestions/new-category?id=${id}`);
@@ -3505,11 +3536,11 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 	it("a lazy name that is an active category reads Existing category, Save and next, and is announced as one (decision 165)", async () => {
 		const { id, ids } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		// Workers AI answers in another capitalisation: the family's own spelling is what the row shows.
 		const run = vi.fn(async () => "groceries");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
 
 		try {
 			const { res, html } = await get(
@@ -3538,9 +3569,9 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 	it("a lazy name that is new keeps New category, Create and next, and says so in the announcer", async () => {
 		const { id } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
-		holder.AI = { run: vi.fn(async () => "Books & audio") } as unknown as Ai;
+		holder.AI = fakeAi(vi.fn(async () => "Books & audio"));
 
 		try {
 			const { res, html } = await get(
@@ -3829,10 +3860,10 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 	it("the lazy request returns the no-name response for a name that is the guess, with no announcement", async () => {
 		const { id } = await eatingOutCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		const run = vi.fn(async () => "eating out");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
 
 		try {
 			const { res, html } = await get(
@@ -3851,10 +3882,10 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 	it("the name is still asked once and kept as it was asked, and a later draw reads it with no call", async () => {
 		const { ids, id } = await eatingOutCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		const run = vi.fn(async () => "Eating Out");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
 
 		try {
 			await get(`/settings/suggestions/new-category?id=${id}`);

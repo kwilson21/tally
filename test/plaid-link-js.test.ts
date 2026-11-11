@@ -3,9 +3,37 @@ import { setupPlaidLink } from "../public/js/plaid-link.js";
 
 const genericFailure = "Couldn't link the bank. Try again.";
 
+/** An element a request comes from, as the tests fake it: the htmx source or a delegated click's target. */
+type RequestSource = {
+	isConnected?: boolean;
+	disabled?: boolean;
+	hasAttribute?: (name: string) => boolean;
+};
+
+/** The context htmx hands a request's listeners: the response and its trigger header, when there was a response. */
+type RequestCtx = {
+	response?: { status: number };
+	text?: string;
+	hx?: { trigger?: string };
+};
+
+/** A script element the SDK loader adds to the document. */
+type Script = {
+	src: string;
+	async?: boolean;
+	onload?: () => void;
+	onerror?: () => void;
+};
+
+type ScriptElement = Script & {
+	role?: string;
+	textContent: string;
+	setAttribute: (name: string, value: string) => void;
+};
+
 type RequestEvent = {
-	target?: unknown;
-	detail?: { ctx?: unknown };
+	target?: RequestSource;
+	detail?: { ctx?: RequestCtx };
 	defaultPrevented: boolean;
 	preventDefault: () => void;
 };
@@ -13,7 +41,7 @@ type RequestEvent = {
 type RequestListener = (event: RequestEvent) => void;
 
 /** A cancelable htmx event, as htmx 4 dispatches one on the element it concerns (htmx.js #trigger). */
-function requestEvent(target?: unknown, ctx?: unknown): RequestEvent {
+function requestEvent(target?: RequestSource, ctx?: RequestCtx): RequestEvent {
 	const event: RequestEvent = {
 		target,
 		detail: { ctx },
@@ -40,7 +68,7 @@ function elementListeners() {
 		removeEventListener: vi.fn((name: string, listener: RequestListener) => {
 			listeners.get(name)?.delete(listener);
 		}),
-		dispatchRequest: (name: string, ctx: unknown) => {
+		dispatchRequest: (name: string, ctx: RequestCtx) => {
 			for (const listener of listeners.get(name) ?? [])
 				listener(requestEvent(undefined, ctx));
 		},
@@ -107,16 +135,19 @@ function harness({
 	};
 } = {}) {
 	let click: () => Promise<void> = async () => {};
-	let delegatedClick: (event: unknown) => Promise<void> = async () => {};
+
+	let delegatedClick: (event: {
+		target: { closest: (selector: string) => RequestSource | undefined };
+	}) => Promise<void> = async () => {};
 
 	let linkOptions:
 		| {
 				onSuccess: (token: string) => Promise<void>;
-				onExit: (error?: unknown) => void;
+				onExit: (error?: Error) => void;
 		  }
 		| undefined;
 
-	type RequestListener = (event: { detail?: { ctx?: unknown } }) => void;
+	type RequestListener = (event: { detail?: { ctx?: RequestCtx } }) => void;
 
 	const listeners = new Map<string, Set<RequestListener>>();
 
@@ -138,7 +169,7 @@ function harness({
 		removeEventListener: vi.fn((name: string, listener: RequestListener) => {
 			listeners.get(name)?.delete(listener);
 		}),
-		dispatchRequest: (name: string, ctx: unknown) => {
+		dispatchRequest: (name: string, ctx: RequestCtx) => {
 			for (const listener of listeners.get(name) ?? []) {
 				listener({ detail: { ctx } });
 			}
@@ -222,21 +253,13 @@ function harness({
 	// The document's own listeners: the click delegate, and the before-request guard for Home's waiting refreshes.
 	const documentEvents = elementListeners();
 
+	const injectedScripts: Script[] = [];
+
 	const document = {
 		body,
-		injectedScripts: [] as Array<{
-			src: string;
-			async?: boolean;
-			onload?: () => void;
-			onerror?: () => void;
-		}>,
+		injectedScripts,
 		head: {
-			appendChild(script: {
-				src: string;
-				async?: boolean;
-				onload?: () => void;
-				onerror?: () => void;
-			}) {
+			appendChild(script: Script) {
 				document.injectedScripts.push(script);
 			},
 		},
@@ -270,12 +293,12 @@ function harness({
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
 				return liveRepairError;
 		},
-		createElement: () => ({
+		createElement: (): ScriptElement => ({
 			src: "",
 			async: false,
-			onload: undefined as (() => void) | undefined,
-			onerror: undefined as (() => void) | undefined,
-			role: undefined as string | undefined,
+			onload: undefined,
+			onerror: undefined,
+			role: undefined,
 			setAttribute(name: string, value: string) {
 				if (name === "role") this.role = value;
 			},
@@ -283,7 +306,7 @@ function harness({
 		}),
 	};
 
-	const fetch = vi.fn(async (url: string) => {
+	const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
 		if (url === "/accounts") return refreshResponse;
 
 		if (url === "/") return homeRefreshResponse;
@@ -353,24 +376,27 @@ function harness({
 		}
 	}
 
-	if (sdkLoaded) (globalThis as { Plaid?: unknown }).Plaid = { create };
-	else delete (globalThis as { Plaid?: unknown }).Plaid;
+	if (sdkLoaded) Object.assign(globalThis, { Plaid: { create } });
+	else Reflect.deleteProperty(globalThis, "Plaid");
 	const process = vi.fn();
 
 	// htmx 4 sends no request for a source that is no longer in the document: its #handleTriggerEvent returns when
 	// !elt.isConnected (node_modules/htmx.org/dist/htmx.js). The fake refuses one the same way, so an exchange that
 	// depends on a redrawn button fails here as it would in the browser.
 	const htmxAjax = vi.fn(
-		async (method: string, url: string, options: { source?: unknown }) => {
-			if ((options.source as { isConnected?: boolean })?.isConnected === false)
-				return;
+		async (
+			method: string,
+			url: string,
+			options: { source?: { isConnected?: boolean } },
+		) => {
+			if (options.source?.isConnected === false) return;
 
-			// The harness's mock, called as htmx calls it (its union type is not callable directly).
-			const send = ajax as unknown as (
+			// SAFETY: ajax is the vi.fn each test passes in as the harness's htmx.ajax, and htmxAjax calls it with the same (method, url, options) htmx sends.
+			const send = ajax as (
 				method: string,
 				url: string,
-				options: unknown,
-			) => unknown;
+				options: { source?: { isConnected?: boolean } },
+			) => void;
 
 			return send(method, url, options);
 		},
@@ -387,7 +413,7 @@ function harness({
 		ajax,
 		body,
 		/** The before-request event htmx 4 dispatches on a request's source, and whether a listener cancelled it. */
-		beforeRequest: (source: unknown) => {
+		beforeRequest: (source: RequestSource) => {
 			const event = requestEvent(source);
 
 			for (const listener of documentEvents.listeners.get(
@@ -403,7 +429,7 @@ function harness({
 		repairError,
 		repairedHeading,
 		children,
-		click: (target: unknown = button) =>
+		click: (target: RequestSource = button) =>
 			delegatedClick({
 				target: {
 					closest: (selector: string) =>
@@ -411,7 +437,7 @@ function harness({
 				},
 			}),
 		directClick: () => click(),
-		repairClick: (target: unknown = repairButton) =>
+		repairClick: (target: RequestSource = repairButton) =>
 			delegatedClick({
 				target: {
 					closest: (selector: string) =>
@@ -446,7 +472,7 @@ function harness({
 }
 
 afterEach(() => {
-	delete (globalThis as { Plaid?: unknown }).Plaid;
+	Reflect.deleteProperty(globalThis, "Plaid");
 });
 
 describe("plaid-link.js", () => {
@@ -460,7 +486,7 @@ describe("plaid-link.js", () => {
 		);
 		expect(h.fetch).not.toHaveBeenCalled();
 
-		(globalThis as { Plaid?: unknown }).Plaid = { create: h.create };
+		Object.assign(globalThis, { Plaid: { create: h.create } });
 		h.document.injectedScripts[0]?.onload?.();
 		await pending;
 		expect(h.fetch).toHaveBeenCalledWith("/plaid/link-token", {
@@ -477,7 +503,7 @@ describe("plaid-link.js", () => {
 
 		const retry = h.click();
 		expect(h.document.injectedScripts).toHaveLength(2);
-		(globalThis as { Plaid?: unknown }).Plaid = { create: h.create };
+		Object.assign(globalThis, { Plaid: { create: h.create } });
 		h.document.injectedScripts[1]?.onload?.();
 		await retry;
 		expect(h.fetch).toHaveBeenCalledWith("/plaid/link-token", {
@@ -500,7 +526,9 @@ describe("plaid-link.js", () => {
 					_method: string,
 					_url: string,
 					options: {
-						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+						source: {
+							dispatchRequest: (name: string, ctx: RequestCtx) => void;
+						};
 					},
 				) => {
 					const ctx = {
@@ -588,7 +616,9 @@ describe("plaid-link.js", () => {
 					_method: string,
 					_url: string,
 					options: {
-						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+						source: {
+							dispatchRequest: (name: string, ctx: RequestCtx) => void;
+						};
 					},
 				) => {
 					options.source.dispatchRequest("htmx:finally:request", {});
@@ -640,7 +670,7 @@ describe("plaid-link.js", () => {
 
 		it("shows an alert and leaves the repair button enabled when Plaid is missing", async () => {
 			const h = harness();
-			delete (globalThis as { Plaid?: unknown }).Plaid;
+			Reflect.deleteProperty(globalThis, "Plaid");
 			const pending = h.repairClick();
 			h.document.injectedScripts[0]?.onerror?.();
 			await pending;
@@ -910,7 +940,7 @@ describe("plaid-link.js", () => {
 
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {
 		const h = harness();
-		delete (globalThis as { Plaid?: unknown }).Plaid;
+		Reflect.deleteProperty(globalThis, "Plaid");
 		const pending = h.click();
 		h.document.injectedScripts[0]?.onerror?.();
 		await pending;
@@ -1120,7 +1150,9 @@ describe("plaid-link.js", () => {
 					_method: string,
 					_url: string,
 					options: {
-						source: { dispatchRequest: (name: string, ctx: unknown) => void };
+						source: {
+							dispatchRequest: (name: string, ctx: RequestCtx) => void;
+						};
 					},
 				) => {
 					const ctx = {
@@ -1275,9 +1307,7 @@ describe("plaid-link.js", () => {
 
 		/** The POSTs to /home/seen the page has sent, as fetch was called. */
 		const pingsOf = (h: ReturnType<typeof harness>) =>
-			h.fetch.mock.calls
-				.filter(([url]) => url === "/home/seen")
-				.map((call) => call as unknown as [string, RequestInit]);
+			h.fetch.mock.calls.filter(([url]) => url === "/home/seen");
 
 		it("cancels a request from an element that waits for the link, while a link is running", async () => {
 			const h = harness();
@@ -1358,7 +1388,11 @@ describe("plaid-link.js", () => {
 			const cancelled: boolean[] = [];
 
 			const ajax = vi.fn(
-				async (_method: string, _url: string, options: { source: unknown }) => {
+				async (
+					_method: string,
+					_url: string,
+					options: { source: RequestSource },
+				) => {
 					cancelled.push(h.beforeRequest(options.source).defaultPrevented);
 					h.button.dispatchRequest("htmx:finally:request", linked());
 				},
@@ -1395,7 +1429,7 @@ describe("plaid-link.js", () => {
 					_method: string,
 					_url: string,
 					options: {
-						source: { dispatchRequest: (n: string, c: unknown) => void };
+						source: { dispatchRequest: (n: string, c: RequestCtx) => void };
 					},
 				) => {
 					options.source.dispatchRequest("htmx:after:request", linked());
@@ -1426,7 +1460,7 @@ describe("plaid-link.js", () => {
 					_method: string,
 					_url: string,
 					options: {
-						source: { dispatchRequest: (n: string, c: unknown) => void };
+						source: { dispatchRequest: (n: string, c: RequestCtx) => void };
 					},
 				) => {
 					options.source.dispatchRequest("htmx:after:request", linked());

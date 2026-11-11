@@ -18,6 +18,35 @@ import { encryptToken } from "../src/plaid/token-crypto";
 const KEY = btoa("01234567890123456789012345678901");
 const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
 
+/** A JSON value, as a Plaid request or response carries one. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** A Plaid payload: an object of JSON values, such as a sync page or one transaction's overrides. */
+type JsonObject = { [key: string]: Json };
+
+/** A row of `SELECT *` or a column alias query: every value is a SQL string, number or null. */
+type SqlRow = Record<string, string | number | null>;
+
+/** A row of `SELECT *` from transactions: its id is a number, and the other columns are SQL values. */
+type TransactionRow = { id: number } & SqlRow;
+
+/** The row a query returned; fails the test when the query returned none. */
+function requireRow<Row>(row: Row | null | undefined): Row {
+	if (row === null || row === undefined)
+		throw new Error("expected the query to return a row");
+
+	return row;
+}
+
+/** The id at `index` of a list of ids; fails the test when there is no row there. */
+function idAt(ids: readonly number[], index: number): number {
+	const id = ids[index];
+
+	if (id === undefined) throw new Error(`no row at index ${index}`);
+
+	return id;
+}
+
 const account = {
 	account_id: "account-1",
 	name: "Everyday",
@@ -27,7 +56,7 @@ const account = {
 	balances: { current: 100 },
 };
 
-const page = (overrides: Record<string, unknown> = {}) => ({
+const page = (overrides: JsonObject = {}) => ({
 	added: [],
 	modified: [],
 	removed: [],
@@ -37,7 +66,7 @@ const page = (overrides: Record<string, unknown> = {}) => ({
 });
 
 /** A pending charge by default; `posted` turns it into the posted twin of "pending-1". */
-const pendingTx = (overrides: Record<string, unknown> = {}) => ({
+const pendingTx = (overrides: JsonObject = {}) => ({
 	transaction_id: "pending-1",
 	account_id: "account-1",
 	date: "2026-09-27",
@@ -50,7 +79,7 @@ const pendingTx = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const postedTx = (overrides: Record<string, unknown> = {}) =>
+const postedTx = (overrides: JsonObject = {}) =>
 	pendingTx({
 		transaction_id: "posted-1",
 		pending: false,
@@ -59,16 +88,14 @@ const postedTx = (overrides: Record<string, unknown> = {}) =>
 		...overrides,
 	});
 
-const response = (body: unknown, status = 200) =>
+const response = (body: Json, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
 	});
 
 /** Plaid answers /accounts/get with its account and /transactions/sync with whatever `sync` returns. */
-const plaidFetch = (
-	sync: (body: Record<string, unknown>) => Response | Promise<Response>,
-) =>
+const plaidFetch = (sync: (body: JsonObject) => Response | Promise<Response>) =>
 	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get"))
 			return response({ accounts: [account] });
@@ -76,7 +103,7 @@ const plaidFetch = (
 		return sync(JSON.parse(String(init?.body)));
 	});
 
-const onePage = (overrides: Record<string, unknown>) =>
+const onePage = (overrides: JsonObject) =>
 	plaidFetch(() => response(page(overrides)));
 
 async function addItem() {
@@ -88,13 +115,13 @@ async function addItem() {
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return requireRow(result).id;
 }
 
 const row = (plaidId: string) =>
 	env.DB.prepare("SELECT * FROM transactions WHERE plaid_transaction_id = ?")
 		.bind(plaidId)
-		.first<Record<string, unknown>>();
+		.first<TransactionRow>();
 
 const count = async (sql: string, ...args: unknown[]) =>
 	(
@@ -107,7 +134,7 @@ const count = async (sql: string, ...args: unknown[]) =>
 async function syncPending(item: number, overrides = {}) {
 	await syncItem(opts, item, onePage({ added: [pendingTx(overrides)] }));
 
-	return (await row("pending-1"))?.id as number;
+	return requireRow(await row("pending-1")).id;
 }
 
 /** The bank posts "pending-1" as "posted-1" and drops the pending id, as Plaid documents. */
@@ -156,7 +183,7 @@ async function splitInto(parent: number, a: number, b: number) {
 			)
 			.first<{ id: number }>();
 
-		ids.push(part?.id as number);
+		ids.push(requireRow(part).id);
 	}
 
 	return ids;
@@ -170,7 +197,7 @@ async function addRefund(purchase: number, cents = -300) {
 		.bind(cents, purchase, purchase)
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return requireRow(result).id;
 }
 
 async function addBillLinkedTo(
@@ -379,10 +406,10 @@ describe("when the bank posts a pending transaction", () => {
 				],
 			}),
 		);
-		const pendingPurchase = (await row("pending-1"))?.id as number;
-		const purchase = (await row("purchase"))?.id as number;
+		const pendingPurchase = requireRow(await row("pending-1")).id;
+		const purchase = requireRow(await row("purchase")).id;
 		const refundOfPending = await addRefund(pendingPurchase);
-		const pendingRefund = (await row("pending-refund"))?.id as number;
+		const pendingRefund = requireRow(await row("pending-refund")).id;
 		await env.DB.prepare(
 			"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 		)
@@ -471,7 +498,7 @@ describe("when the bank posts a pending transaction", () => {
 		)
 			.bind(id)
 			.run();
-		const refundOfPart = await addRefund(parts[0] as number, -100);
+		const refundOfPart = await addRefund(idAt(parts, 0), -100);
 
 		await post(item, { amount: 15 });
 
@@ -599,7 +626,7 @@ describe("a pending transaction the bank drops", () => {
 		await addBillLinkedTo(id);
 		const parts = await splitInto(id, 600, 634);
 		const refundOfPending = await addRefund(id);
-		const refundOfPart = await addRefund(parts[1] as number, -50);
+		const refundOfPart = await addRefund(idAt(parts, 1), -50);
 
 		expect(
 			await syncItem(
@@ -800,7 +827,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			}),
 		);
 
-		return { pending: id, posted: (await row("posted-1"))?.id as number };
+		return { pending: id, posted: requireRow(await row("posted-1")).id };
 	}
 
 	const refundOf = async (id: number) =>
@@ -1659,7 +1686,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
 				.bind(plaidId)
-				.first<Record<string, unknown>>();
+				.first<SqlRow>();
 
 		it("moves the pending row's name and its Tally answer, replacing the posted row's Jev answer for the old name", async () => {
 			const item = await addItem();
@@ -1905,7 +1932,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			.bind(name, transactionId)
 			.first<{ id: number }>();
 
-		return row?.id as number;
+		return requireRow(row).id;
 	}
 
 	const planPayer = async (planId: number) =>
@@ -2004,7 +2031,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			item,
 			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
 		);
-		const payment = (await row("posted-1"))?.id as number;
+		const payment = requireRow(await row("posted-1")).id;
 
 		return { payment, plan: await planPaidBy(payment) };
 	}
@@ -2070,7 +2097,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		);
 
 		const [part] = await splitInto(
-			(await row("posted-1"))?.id as number,
+			requireRow(await row("posted-1")).id,
 			600,
 			634,
 		);
@@ -2096,7 +2123,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			item,
 			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
 		);
-		const whole = (await row("posted-1"))?.id as number;
+		const whole = requireRow(await row("posted-1")).id;
 		const plan = await planPaidBy(whole);
 		await splitInto(whole, 600, 634);
 		await syncItem(
@@ -2209,7 +2236,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const purchase = (await row("purchase"))?.id as number;
+		const purchase = requireRow(await row("purchase")).id;
 		await env.DB.prepare(
 			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
 		)
@@ -2246,8 +2273,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const a = (await row("purchase-a"))?.id as number;
-		const b = (await row("purchase-b"))?.id as number;
+		const a = requireRow(await row("purchase-a")).id;
+		const b = requireRow(await row("purchase-b")).id;
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
@@ -2482,7 +2509,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const parts = await splitInto(ids.pending, 600, 634);
-		const refundOfPart = await addRefund(parts[0] as number, -100);
+		const refundOfPart = await addRefund(idAt(parts, 0), -100);
 
 		await post(item, { amount: 15 });
 
@@ -2579,11 +2606,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const ids = await bothStored(item, {}, { amount: 15 });
 		await splitInto(ids.pending, 600, 634);
 
-		const suggestion = (
+		const suggestion = requireRow(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = 0.4, jev_category_id = 3, category_suggestion_id = ?, jev_none_fit = 1 WHERE id = ?",
@@ -2637,11 +2664,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const ids = await bothStored(item, {}, { amount: 15 });
 		await splitInto(ids.pending, 600, 634);
 
-		const suggestion = (
+		const suggestion = requireRow(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Garden Supplies', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await env.DB.batch([
 			env.DB.prepare(
@@ -2700,7 +2727,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const purchase = (await row("purchase-a"))?.id as number;
+		const purchase = requireRow(await row("purchase-a")).id;
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
@@ -2734,7 +2761,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const purchase = (await row("purchase-a"))?.id as number;
+		const purchase = requireRow(await row("purchase-a")).id;
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
@@ -2763,7 +2790,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
 				.bind(plaidId)
-				.first<Record<string, unknown>>();
+				.first<SqlRow>();
 
 		/** Jev's answer on the posted row, made for the name it had before the pending row's name came. */
 		const jevAnswer = (id: number) =>
@@ -3054,11 +3081,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 			await post(item);
 
-			expect(await partState(parts[0] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 0))).toMatchObject({
 				excluded: 0,
 				excluded_source: "user",
 			});
-			expect(await partState(parts[1] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 1))).toMatchObject({
 				excluded: 1,
 				excluded_source: "user",
 			});
@@ -3087,11 +3114,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 			await post(item, { amount: -42 });
 
-			expect(await partState(parts[0] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 0))).toMatchObject({
 				credit_reviewed: 1,
 				credit_reviewed_by: "user",
 			});
-			expect(await partState(parts[1] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 1))).toMatchObject({
 				credit_reviewed: 0,
 				credit_reviewed_by: null,
 			});
@@ -3154,7 +3181,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 			await post(item);
 
-			expect(await partState(parts[0] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 0))).toMatchObject({
 				excluded: 0,
 				excluded_source: "user",
 			});
@@ -3619,7 +3646,7 @@ describe("Plaid's transfer exclusion and a pending transaction's posting", () =>
 	it("keeps a credit a person reviewed counted when the posted row is a transfer stored first (decision 70)", async () => {
 		const item = await addItem();
 		const credit = { ...TRANSFER_IN, amount: -42 };
-		const pending = await postedFirst(item, credit as typeof SHOP, credit);
+		const pending = await postedFirst(item, credit, credit);
 		expect(await row("posted-1")).toMatchObject({
 			excluded: 1,
 			excluded_source: "plaid",
