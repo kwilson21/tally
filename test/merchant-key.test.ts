@@ -866,7 +866,15 @@ describe("one merchants row per key, whatever the bank text", () => {
 		]);
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("marks the key as Not a bill for the charges of every bank text", async () => {
+		// The route reads the real today and looks three months back, so the clock is held on TODAY: without it the
+		// 2026-08-10 charge left that window on 2026-11-11 and the suggestion, and this test, went with it.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
 		const res = await exports.default.fetch(
 			`${BASE}/bills/find/${encodeURIComponent("Comcast")}/dismiss`,
 			{
