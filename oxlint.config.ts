@@ -1,7 +1,7 @@
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
-	plugins: [],
+	plugins: ["oxc"],
 	categories: { correctness: "off" },
 	ignorePatterns: [
 		".claude/**",
