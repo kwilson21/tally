@@ -36,14 +36,17 @@ async function postResponse(
 	fields: URLSearchParams,
 	htmx = true,
 ) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+		Origin: BASE,
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	return exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-			Origin: BASE,
-		},
+		headers,
 		body: fields,
 	});
 }

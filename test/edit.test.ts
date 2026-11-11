@@ -240,11 +240,11 @@ describe("followsPurchaseAfterSave: whether a linked credit counts with its purc
 	const PURCHASE_ID = 9001;
 
 	// A linked, reviewed credit that is not income, as the panel first drew it.
-	const stored = {
+	const stored: Parameters<typeof followsPurchaseAfterSave>[0] = {
 		amountCents: -2000,
 		refundOfId: PURCHASE_ID,
 		income: false,
-		incomeSource: "user" as string | null,
+		incomeSource: "user",
 		creditReviewed: true,
 		creditReviewedByUser: true,
 	};
@@ -356,19 +356,19 @@ describe("followsPurchaseAfterSave: whether a linked credit counts with its purc
 
 describe("excludedAfterSave: whether a row is excluded once saved, with a review lifting Plaid's exclusion (decision 70)", () => {
 	// A credit Plaid excluded, as the panel first drew it: the Exclude chip on, and no review.
-	const stored = {
+	const stored: Parameters<typeof excludedAfterSave>[0] = {
 		amountCents: -650,
 		excluded: true,
-		excludedSource: "plaid" as string | null,
-		refundOfId: null as number | null,
+		excludedSource: "plaid",
+		refundOfId: null,
 		income: false,
 		creditReviewedByUser: false,
 	};
 
 	// The panel's answers when nothing was changed.
-	const unchanged = {
+	const unchanged: Parameters<typeof excludedAfterSave>[1] = {
 		excluded: true,
-		refundOfId: null as number | null,
+		refundOfId: null,
 		income: false,
 		creditReviewed: false,
 		creditReviewedWas: false,

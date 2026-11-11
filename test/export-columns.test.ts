@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EXPORT_COLUMNS, OWN_STATEMENTS } from "../src/settings/export";
 
 // A live column the JSON export leaves out on purpose: table -> column -> one-line reason.
-const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
+const NAMED_OMISSIONS = {
 	transactions: {
 		entry_key:
 			"The Add cash form's one-time key, so a double submit records one entry (migration 0019); not family data.",
@@ -66,10 +66,10 @@ const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
 		claim:
 			"A random token that lets one request finish the row (migration 0063, decision 161); not family data (decision 185).",
 	},
-};
+} satisfies Record<string, Record<string, string>>;
 
 // An app table the JSON export leaves out on purpose: table -> one-line reason.
-const NOT_EXPORTED: Record<string, string> = {
+const NOT_EXPORTED = {
 	push_subscriptions:
 		"Each device's push endpoint and keys are device tokens, like the access token (export.ts comment, spec §5, decision 149).",
 	cash_delete_holds:
@@ -78,7 +78,7 @@ const NOT_EXPORTED: Record<string, string> = {
 		"A ten-second undo snapshot for a deleted plan, removed by each later delete (spec §5, decision 101).",
 	feedback:
 		"Left out of the download by the owner's choice (decision 185); the in-app feedback form has its own privacy handling (decision 61).",
-};
+} satisfies Record<string, string>;
 
 type Lists = {
 	namedOmissions: Record<string, Record<string, string>>;
@@ -191,7 +191,7 @@ describe("JSON export column guard", () => {
 		const exportedColumns: Record<string, string[]> = {};
 
 		// Every table the download reads, whether from EXPORT_COLUMNS or its own statement, is held to the same rule.
-		const selects: Record<string, string> = {
+		const selects = {
 			...Object.fromEntries(
 				Object.entries(EXPORT_COLUMNS).map(([table, columns]) => [
 					table,

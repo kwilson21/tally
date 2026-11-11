@@ -5,6 +5,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { SHOW_LABELS, SHOWS } from "../src/transactions/filters";
 import { FilterSelect } from "../src/views/filter-select";
+import { itemAt, present } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 // Some describe bodies read "today" when the file loads, so the clock is pinned now as well as before each test (#808).
@@ -377,10 +378,14 @@ describe("GET /transactions", () => {
 
 	it("names the filters in the count, so two filters with the same count still read differently (#56)", async () => {
 		// Every earlier month has three transactions in each category.
-		const [y, m] = todayIn(DEFAULT_TIME_ZONE)
+
+		const monthParts = todayIn(DEFAULT_TIME_ZONE)
 			.slice(0, 7)
 			.split("-")
-			.map(Number) as [number, number];
+			.map(Number);
+
+		const y = itemAt(monthParts, 0);
+		const m = itemAt(monthParts, 1);
 
 		const last =
 			m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
@@ -531,7 +536,7 @@ describe("GET /transactions", () => {
 		const home = (await get("/")).html;
 		const href = home.match(/href="(\/transactions\/organize)"/)?.[1];
 		expect(href).toBe("/transactions/organize");
-		expect((await get(href as string)).html).toMatch(/<h1[^>]*>Organize<\/h1>/);
+		expect((await get(present(href))).html).toMatch(/<h1[^>]*>Organize<\/h1>/);
 		expect(rowCount((await get("/transactions?uncategorized=1")).html)).toBe(
 			10,
 		);
@@ -543,7 +548,9 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 	const today = todayIn(DEFAULT_TIME_ZONE);
 	const THIS = today.slice(0, 7);
 	const THIS_NAME = monthLabel(THIS, today);
-	const [year, monthNumber] = THIS.split("-").map(Number) as [number, number];
+	const monthParts = THIS.split("-").map(Number);
+	const year = itemAt(monthParts, 0);
+	const monthNumber = itemAt(monthParts, 1);
 
 	const LAST =
 		monthNumber === 1
@@ -968,7 +975,7 @@ describe("GET /transactions: Account and Show", () => {
 			id: string,
 			name: string,
 			label: string,
-			options: unknown[],
+			options: { value: string | number; label: string }[],
 			selected: string | number | null,
 		) =>
 			String(
@@ -976,7 +983,7 @@ describe("GET /transactions: Account and Show", () => {
 					id,
 					name,
 					label,
-					options: options as { value: string | number; label: string }[],
+					options,
 					selected,
 				}),
 			);

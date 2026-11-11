@@ -1,5 +1,6 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
+import type { AnyStateMachine } from "xstate";
 import {
 	CATEGORY_SUGGESTION_LABELS,
 	categorySuggestionMachine,
@@ -11,10 +12,7 @@ import {
 } from "../src/machines/merchant-suggestion";
 import { MachineDiagram, machineSource } from "../src/views/machine-diagram";
 
-const draw = (
-	machine: typeof merchantSuggestionMachine,
-	labels: Record<string, string>,
-) =>
+const draw = (machine: AnyStateMachine, labels: Record<string, string>) =>
 	String(
 		MachineDiagram({ id: "d", title: "A test machine", machine, labels }),
 	).replaceAll("&#39;", "'");
@@ -27,7 +25,7 @@ const MACHINES = [
 describe("MachineDiagram", () => {
 	it("draws a box for every state and says every arrow in a sentence, read from the machine", () => {
 		for (const [machine, labels] of MACHINES) {
-			const html = draw(machine as typeof merchantSuggestionMachine, labels);
+			const html = draw(machine, labels);
 			const { nodes, edges } = machineGraph(machine);
 			expect(html.match(/class="pele-node pele-state[ "]/g)).toHaveLength(
 				nodes.length,
@@ -66,7 +64,7 @@ describe("MachineDiagram", () => {
 
 	it("keeps every word inside the picture's frame", () => {
 		for (const [machine, labels] of MACHINES) {
-			const html = draw(machine as typeof merchantSuggestionMachine, labels);
+			const html = draw(machine, labels);
 			const frame = html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
 			const width = Number(frame?.[1]);
 			const height = Number(frame?.[2]);

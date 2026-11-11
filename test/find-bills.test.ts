@@ -8,6 +8,7 @@ import {
 } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const charge = (date: string, amountCents = 1000): BillFindingCharge => ({
 	rawName: "GYM",
@@ -578,11 +579,7 @@ describe("finding bills", () => {
 			"SELECT id, account_id, date FROM transactions WHERE raw_name='SPLIT GYM' ORDER BY date DESC LIMIT 1",
 		).all<{ id: number; account_id: number; date: string }>();
 
-		const parent = results[0] as {
-			id: number;
-			account_id: number;
-			date: string;
-		};
+		const parent = present(results[0]);
 
 		await env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=?").bind(

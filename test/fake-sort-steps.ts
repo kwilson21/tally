@@ -32,11 +32,16 @@ export function fakeSteps(
 	const cache = new Map<string, unknown>();
 	const steps: RecordedStep[] = [];
 
-	const runStep: StepRunner = async (name, config, fn) => {
+	const runStep: StepRunner = async <T extends Rpc.Serializable<T>>(
+		name: string,
+		config: StepConfig,
+		fn: (ctx: { attempt: number }) => Promise<T>,
+	): Promise<T> => {
 		if (cache.has(name)) {
 			steps.push({ name, config, attempts: 0, cached: true });
 
-			return cache.get(name) as never;
+			// SAFETY: cache.set stores only what fn returned under this name, so a cached value is the T that fn returns.
+			return cache.get(name) as T;
 		}
 
 		const record: RecordedStep = { name, config, attempts: 0, cached: false };
@@ -65,7 +70,7 @@ export function fakeSteps(
 				if (options.replayAfter?.includes(name))
 					await fn({ attempt: attempt + 1 });
 
-				return result as never;
+				return result;
 			} catch (error) {
 				if (attempt > limit) throw error;
 			}

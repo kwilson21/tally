@@ -4,6 +4,7 @@ import { askAgain, askAgainMany } from "../src/categorize-pending";
 import { resetDemo } from "../src/demo/reset";
 import { sortAfterSync } from "../src/plaid/sort-after-sync";
 import { startSorting } from "../src/sort-start";
+import { itemAt, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
@@ -47,8 +48,7 @@ describe("a sync hands all of its rows to one Workflow instance", () => {
 		await sortAfterSync(sortEnv(), { changedIds: ids(3000) });
 		expect(create).toHaveBeenCalledTimes(1);
 
-		const params = (create.mock.calls[0] as unknown as [{ params: unknown }])[0]
-			.params;
+		const params = itemAt(create.mock.calls, 0)[0].params;
 
 		expect(JSON.stringify(params).length).toBeLessThan(1_048_576);
 	});
@@ -85,7 +85,7 @@ describe("ask again hands its rows to one Workflow instance, with no cap", () =>
 	it("clears the left-out marks and makes one create with every id, bySync off", async () => {
 		// Three unsorted rows that Jev was unsure of: the marks that keep them from being asked.
 		const rows = (
-			await db.batch(
+			await db.batch<{ id: number }>(
 				Array.from({ length: 3 }, (_, i) =>
 					db
 						.prepare(
@@ -94,7 +94,7 @@ describe("ask again hands its rows to one Workflow instance, with no cap", () =>
 						.bind(TODAY, `AGAIN ${i}`),
 				),
 			)
-		).map((result) => Number((result.results[0] as { id: number }).id));
+		).map((result) => Number(present(result.results[0]).id));
 
 		await askAgainMany(sortEnv(), rows);
 		expect(create).toHaveBeenCalledTimes(1);

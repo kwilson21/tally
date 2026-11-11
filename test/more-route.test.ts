@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { destinations } from "../src/routes/destinations";
+import { envWith } from "./helpers/doubles";
 
 // More as a contents page (P122 A, decision 111): the live folios come from the same reads Accounts
 // and Settings make, so the three pages can't disagree.
 const BASE = "http://tally.test";
-const family = { ...env, DEMO: "false" };
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
@@ -16,12 +16,15 @@ const get = async (path: string) => {
 };
 
 /** More with the family app's bindings, or with `overrides` on top of them. */
-const moreIn = async (overrides: Record<string, unknown> = {}) =>
+const moreIn = async (
+	overrides: Partial<Env> & { APP_VERSION?: string } = {},
+) =>
 	(
-		await destinations.request("/more", {}, {
-			...family,
-			...overrides,
-		} as unknown as Env)
+		await destinations.request(
+			"/more",
+			{},
+			envWith(env, { DEMO: "false", ...overrides }),
+		)
 	).text();
 
 /** The ruled list of places, without the rest of the page. */

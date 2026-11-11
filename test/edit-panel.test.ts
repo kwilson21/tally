@@ -4,6 +4,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { seedMerchant } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // The edit panel leads with its category (P120 B, decision 111): the name is the one headline, the category
 // is open while it needs one and folds to a row once it's set, and Exclude and Count as income are switches.
@@ -62,11 +63,11 @@ let bakery: number;
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	await saveAiSwitches(env.DB, { details: false });
-	bakery = (
+	bakery = present(
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
-		).first<{ id: number }>()
-	)?.id as number;
+		).first<{ id: number }>(),
+	).id;
 });
 
 /** Local Bakery picked by Tally as Groceries, 92% sure: a categorized transaction. */
@@ -226,11 +227,11 @@ describe("the category leads the panel (P120 B)", () => {
 	it("opens the category row when a save posts a category archived since the panel opened", async () => {
 		await pickedByTally();
 
-		const groceriesId = (
+		const groceriesId = present(
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Groceries'",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE name = 'Groceries'",

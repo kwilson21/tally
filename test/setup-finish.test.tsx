@@ -1,4 +1,6 @@
 /** @jsxImportSource hono/jsx */
+
+import type { JSX } from "hono/jsx";
 import { describe, expect, it } from "vitest";
 import {
 	finishBillsLine,
@@ -14,7 +16,7 @@ import { SetupFinish } from "../src/views/setup-finish";
 // what each step set up as ruled rows, and Go to Home at the foot. Drawn from the same words as the finish's own lines.
 
 // Hono writes an apostrophe as &#39; and a negative Safe to spend with U+2212, so the markup is asserted as it is written.
-const html = (node: unknown) => String(node);
+const html = (node: JSX.Element) => String(node);
 
 /** The h1's opening tag, its text and whether it takes focus. */
 const headingOf = (markup: string) => {

@@ -1,3 +1,4 @@
+import type { HtmlEscapedString } from "hono/utils/html";
 import { describe, expect, it } from "vitest";
 import { netWorthView } from "../src/net-worth";
 import { AccountRow } from "../src/views/account-row";
@@ -5,7 +6,10 @@ import { AccountsTop } from "../src/views/accounts-top";
 import { BankGroup } from "../src/views/bank-group";
 import { NetWorthChart } from "../src/views/net-worth-chart";
 
-const render = async (node: unknown) => String(await node);
+/** What a Hono JSX component returns: its markup, or a promise of it. */
+type Markup = HtmlEscapedString | Promise<HtmlEscapedString>;
+
+const render = async (node: Markup) => String(await node);
 
 // The Accounts screen's pieces (round 5 study, spec §8): net worth, accounts grouped by bank, Fix connection.
 describe("AccountRow", () => {

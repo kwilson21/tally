@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 import { setArchived } from "../src/db/categories";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
+import { isMethod } from "./helpers/present";
 
 const db = env.DB;
 
@@ -218,8 +219,6 @@ describe("firstCountedMonth query count", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
@@ -228,11 +227,14 @@ describe("firstCountedMonth query count", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				// SAFETY: firstCountedMonth reads only D1Database members; a name it never reads is looked up here and found undefined, as on D1.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
-		expect(await firstCountedMonth(counted as D1Database)).toBe("2026-08");
+		expect(await firstCountedMonth(counted)).toBe("2026-08");
 		expect(statements).toBe(1);
 
 		const plan = await db

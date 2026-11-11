@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { peleSvg } from "../src/views/pele-diagram";
+import { present } from "./helpers/present";
 
 const SOURCE = `flowchart TB
   a["First"] --> b["Second"]
@@ -70,7 +71,7 @@ describe("peleSvg", () => {
 			const svg = peleSvg(source, { id: "d", title: "t", desc: "d" });
 
 			for (const [, name] of svg.matchAll(/var\((--_[a-z]+)/g))
-				expect(defined.has(name as string)).toBe(true);
+				expect(defined.has(present(name))).toBe(true);
 		}
 	});
 

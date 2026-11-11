@@ -12,7 +12,7 @@ const SRC = import.meta.glob(["../src/**/*.{ts,tsx}"], {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
@@ -20,15 +20,22 @@ const get = async (path: string) => {
 	return { res, html: await res.text() };
 };
 
+function formHeaders(htmx: boolean) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
+	return headers;
+}
+
 async function post(path: string, fields: Record<string, string>, htmx = true) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: formHeaders(htmx),
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -36,6 +43,7 @@ async function post(path: string, fields: Record<string, string>, htmx = true) {
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: HX-Trigger is the JSON the app's own routes write, with the toast and announce keys this type names.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string };
 		announce?: string;

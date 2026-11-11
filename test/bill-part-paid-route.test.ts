@@ -14,17 +14,18 @@ const today = TODAY;
 const PERIOD = today.slice(0, 7);
 const DUE = `${PERIOD}-01`;
 
-const post = (path: string, body?: Record<string, string>) =>
-	exports.default.fetch(`${BASE}${path}`, {
+const post = (path: string, body?: Record<string, string>) => {
+	const headers = new Headers({ Origin: BASE, "HX-Request": "true" });
+
+	if (body) headers.set("content-type", "application/x-www-form-urlencoded");
+
+	return exports.default.fetch(`${BASE}${path}`, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"HX-Request": "true",
-			...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
-		},
+		headers,
 		body: body ? new URLSearchParams(body) : undefined,
 	});
+};
 
 const get = async (path: string) =>
 	(await exports.default.fetch(`${BASE}${path}`)).text();

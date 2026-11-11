@@ -43,7 +43,7 @@ const SOURCES = import.meta.glob(["../src/**/*.{ts,tsx}"], {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const HEADER_NAME = /"HX-Trigger(?:-After-(?:Swap|Settle))?"/g;
 const HELPED = /"HX-Trigger(?:-After-(?:Swap|Settle))?"\s*[,:]\s*hxTrigger\(/y;

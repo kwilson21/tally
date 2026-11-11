@@ -1,4 +1,6 @@
 /** @jsxImportSource hono/jsx */
+
+import type { JSX } from "hono/jsx";
 import { describe, expect, it } from "vitest";
 import { SetupScreen } from "../src/views/setup-screen";
 import {
@@ -8,7 +10,7 @@ import {
 } from "../src/views/setup-welcome";
 
 // A setup screen's frame (P142 A, decision 148): its body, then its foot. On a phone the foot is pinned to the screen's foot.
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+const html = (node: JSX.Element) => String(node).replaceAll("&#39;", "'");
 
 /** The opening tag of the element with this id. */
 const tagWithId = (markup: string, id: string) =>

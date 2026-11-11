@@ -15,7 +15,7 @@ import { TextInput } from "../src/views/text-input";
 const SOURCES = import.meta.glob(
 	["../src/views/*.tsx", "../src/routes/*.tsx"],
 	{ query: "?raw", import: "default", eager: true },
-) as Record<string, string>;
+);
 
 const OPTIONS = [
 	{ value: "1", label: "Groceries" },

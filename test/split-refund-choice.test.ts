@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { loadMonth } from "../src/db/month";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 const db = env.DB;
 const GROCERIES = 1;
@@ -289,11 +290,12 @@ const racingWithAll = (races: [string, (number | null)[]][]) =>
 					return env.DB.batch(statements);
 				};
 
-			const value = Reflect.get(target, prop);
+			// SAFETY: the statements under test read only D1Database members, and a name they never read is undefined here, as on D1.
+			const value: unknown = target[prop as keyof D1Database];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as unknown as D1Database;
+	});
 
 /** racingWithAll for one competing statement. */
 const racingWith = (race: string, bind: (number | null)[]) =>

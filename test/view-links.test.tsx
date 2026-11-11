@@ -4,7 +4,7 @@ import { ViewLinks } from "../src/views/view-links";
 
 const props = { madeHref: "/transactions", bankHref: "/transactions?raw=1" };
 
-const nav = (current: "made" | "bank", extra: object = {}) =>
+const nav = (current: "made" | "bank", extra: { id?: string } = {}) =>
 	String(ViewLinks({ ...props, current, ...extra }));
 
 const links = (html: string) =>
@@ -62,7 +62,7 @@ const SRC = import.meta.glob(["../src/**/*.{ts,tsx,css}"], {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 describe("the link names in src", () => {
 	it("appear in no source file under the old words", () => {

@@ -82,11 +82,12 @@ describe("readAiSwitches", () => {
 	});
 
 	it("fails rather than guess when the database can't be read, so a run never calls an AI the household turned off", async () => {
+		// SAFETY: readAiSwitches calls only prepare on this stub, and prepare throws before anything is returned.
 		const broken = {
-			prepare: () => {
+			prepare: (_query: string): D1PreparedStatement => {
 				throw new Error("D1_ERROR: network connection lost");
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		await expect(readAiSwitches(broken)).rejects.toThrow("network connection");
 	});

@@ -752,7 +752,8 @@ describe("importAppleCard: size", () => {
 			batch: (statements: D1PreparedStatement[]) => db.batch(statements),
 		};
 
-		return { wrapped: wrapped as unknown as D1Database, insertStatements };
+		// SAFETY: importAppleCard calls only prepare and batch on this wrapper; no other D1Database member is read.
+		return { wrapped: wrapped as D1Database, insertStatements };
 	}
 
 	it("stores 250 rows in one call, and returns their ids", async () => {

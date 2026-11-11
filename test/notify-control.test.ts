@@ -1,8 +1,12 @@
+import type { HtmlEscapedString } from "hono/utils/html";
 import { describe, expect, it } from "vitest";
 import type { SetupView } from "../src/first-tally/setup";
 import type { YourBank } from "../src/first-tally/your-banks";
 import { NotifyControl, type NotifyShown } from "../src/views/notify-control";
 import { SetupReading } from "../src/views/setup-reading";
+
+/** What a Hono JSX component returns: its markup, or a promise of it. */
+type Markup = HtmlEscapedString | Promise<HtmlEscapedString>;
 
 // The notify control (decision 149, N1): "Notify me on this device" under Home's first-week setup while the questions are not
 // yet open. Four states, each hidden until push.js shows one, so with no JavaScript, or in a browser without Web Push, nothing
@@ -14,7 +18,7 @@ const VAPID =
 
 const STATES: NotifyShown[] = ["off", "on", "iphone", "blocked"];
 
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+const html = (node: Markup) => String(node).replaceAll("&#39;", "'");
 
 const control = async (shown?: NotifyShown) =>
 	html(await NotifyControl({ vapidKey: VAPID, shown }));

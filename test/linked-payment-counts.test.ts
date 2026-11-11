@@ -18,6 +18,7 @@ import { loadTrends } from "../src/db/trends";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 import { rowCaption } from "../src/views/transaction-row";
+import { present } from "./helpers/present";
 
 // Spec §6.1 rule 4 and §8.5: a payment linked to a bill counts in Spent, whatever its exclusion, so the
 // bill counts once. It is decided where spending is read; linking and unlinking never write the
@@ -139,12 +140,10 @@ describe("a payment linked to a bill", () => {
 				categoryName: "Household",
 				billName: "Mortgage",
 			});
-			expect(rowCaption(row as NonNullable<typeof row>).caption).toBe(
+			expect(rowCaption(present(row)).caption).toBe(
 				"Household · paid Mortgage bill",
 			);
-			expect(rowCaption(row as NonNullable<typeof row>).kind).not.toBe(
-				"excluded",
-			);
+			expect(rowCaption(present(row)).kind).not.toBe("excluded");
 
 			await unlink().run();
 			expect(await readings()).toEqual(before);
@@ -156,9 +155,7 @@ describe("a payment linked to a bill", () => {
 			expect(await stored(9501)).toEqual([exclusion]);
 			const after = await rowOf(9501);
 			expect(after).toMatchObject({ excluded: true, paysBill: false });
-			expect(rowCaption(after as NonNullable<typeof after>).caption).toBe(
-				"Excluded",
-			);
+			expect(rowCaption(present(after)).caption).toBe("Excluded");
 		},
 	);
 

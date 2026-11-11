@@ -10,6 +10,7 @@ import {
 	merchantNames,
 	seedMerchant,
 } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // Names Workers AI suggested are saved under each bank text (spec §7). When Plaid later gives several bank
 // texts one merchant name in one sync, on any of its pages, sync starts that merchant's row from their rows: each
@@ -41,7 +42,10 @@ const transaction = (
 	personal_finance_category: { primary: "FOOD_AND_DRINK" },
 });
 
-const response = (body: unknown) =>
+/** A JSON value: what a Plaid or Jev reply body holds. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const response = (body: Json) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json" },
@@ -56,7 +60,7 @@ async function addItem() {
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return present(result).id;
 }
 
 const ACCOUNT = {
@@ -69,7 +73,7 @@ const ACCOUNT = {
 };
 
 type Page = {
-	added?: unknown[];
+	added?: Json[];
 	hasMore?: boolean;
 };
 
@@ -97,7 +101,7 @@ async function syncPages(id: number, pages: Page[]) {
 }
 
 /** A sync whose one page holds these transactions. */
-const sync = (id: number, added: unknown[]) => syncPages(id, [{ added }]);
+const sync = (id: number, added: Json[]) => syncPages(id, [{ added }]);
 
 /** A merchant's row and names as the sync left them, or null when it has no row. */
 const row = async (key: string) => {

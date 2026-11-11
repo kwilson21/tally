@@ -32,6 +32,7 @@ async function post(path: string, fields: Record<string, string>) {
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: HX-Trigger is the JSON the app's own routes write, with the toast and announce keys this type names.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: {
 			message: string;

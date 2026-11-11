@@ -21,6 +21,8 @@ import { resetDemo } from "../src/demo/reset";
 import { forecastMonth } from "../src/home-forecast";
 import { formatCents } from "../src/money";
 import { home as homeRoute } from "../src/routes/home";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 async function home() {
@@ -53,8 +55,6 @@ describe("GET / with the demo seed", () => {
 
 			const db = new Proxy(env.DB, {
 				get(target, property) {
-					const value = Reflect.get(target, property);
-
 					if (property === "prepare")
 						return (sql: string) => {
 							statements += 1;
@@ -62,14 +62,18 @@ describe("GET / with the demo seed", () => {
 							return target.prepare(sql);
 						};
 
-					return typeof value === "function" ? value.bind(target) : value;
+					// SAFETY: the route reads only D1Database members; a name it never reads is looked up here and found undefined, as on D1.
+					const value: unknown = target[property as keyof D1Database];
+
+					return isMethod(value) ? value.bind(target) : value;
 				},
 			});
 
-			const response = await homeRoute.request("http://tally.test/", {}, {
-				...env,
-				DB: db,
-			} as Env);
+			const response = await homeRoute.request(
+				"http://tally.test/",
+				{},
+				envWith(env, { DB: db }),
+			);
 
 			expect(response.status).toBe(200);
 
@@ -591,8 +595,6 @@ describe("GET / with the demo seed", () => {
 
 		const db = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
@@ -600,7 +602,10 @@ describe("GET / with the demo seed", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				// SAFETY: the route reads only D1Database members; a name it never reads is looked up here and found undefined, as on D1.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 

@@ -88,14 +88,18 @@ describe("householdToday", () => {
 		expect(await householdToday(env.DB, NOW)).toBe("2026-10-31");
 	});
 
+	// The real binding, with only prepare replaced: its statement throws `message` when read.
 	const failing = (message: string) =>
-		({
-			prepare: () => ({
-				first: async () => {
-					throw new Error(message);
-				},
-			}),
-		}) as unknown as D1Database;
+		new Proxy(env.DB, {
+			get: (_target, property) =>
+				property === "prepare"
+					? () => ({
+							first: async () => {
+								throw new Error(message);
+							},
+						})
+					: undefined,
+		});
 
 	it("falls back to Eastern when the table doesn't exist yet", async () => {
 		const unmigrated = failing(

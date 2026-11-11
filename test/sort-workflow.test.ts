@@ -9,6 +9,9 @@ import { resetDemo } from "../src/demo/reset";
 // step's answer returns to run() and the write saves it.
 
 const db = env.DB;
+
+// The Jev key is a secret the Env type does not list; tests set and clear it on the same binding object.
+const secrets: Env & { JEV_API_KEY?: string } = env;
 const TODAY = "2026-09-22";
 
 /**
@@ -50,7 +53,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-	delete (env as { JEV_API_KEY?: string }).JEV_API_KEY;
+	delete secrets.JEV_API_KEY;
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -65,7 +68,7 @@ describe("SortWorkflow", () => {
 			.first<{ id: number }>();
 
 		const id = Number(row?.id);
-		(env as { JEV_API_KEY?: string }).JEV_API_KEY = "test-key";
+		secrets.JEV_API_KEY = "test-key";
 		const fetchJev = vi.fn(async () => jevReply());
 		vi.stubGlobal("fetch", fetchJev);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -140,7 +143,7 @@ describe("SortWorkflow", () => {
 			.first<{ id: number }>();
 
 		const id = Number(row?.id);
-		(env as { JEV_API_KEY?: string }).JEV_API_KEY = "test-key";
+		secrets.JEV_API_KEY = "test-key";
 		let call = 0;
 
 		const fetchJev = vi.fn(async () => {
