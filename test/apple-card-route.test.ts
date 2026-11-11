@@ -7,12 +7,13 @@ import { resetDemo } from "../src/demo/reset";
 import { readGateInputs } from "../src/first-tally/gate";
 import { accounts } from "../src/routes/accounts";
 import type { SortParams } from "../src/sort-start";
+import { envWith } from "./helpers/doubles";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
-const family = { ...env, DEMO: "false" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
 
 const HEADER =
 	"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)";
@@ -51,6 +52,24 @@ const ctx = () => ({
 const settled = (context: ReturnType<typeof ctx>) =>
 	Promise.all(context.waitUntil.mock.calls.map(([promise]) => promise));
 
+/** A D1 method: it takes any arguments and returns a statement, a result, a promise or a plain value. */
+type Method = (
+	...args: never[]
+) => object | string | number | boolean | null | undefined;
+
+function isMethod(value: unknown): value is Method {
+	return typeof value === "function";
+}
+
+function hasKey<T extends object>(target: T, key: PropertyKey): key is keyof T {
+	return key in target;
+}
+
+/** The member `key` of `target`, read as Reflect.get reads it with `target` as the receiver (undefined when absent). */
+function memberOf<T extends object>(target: T, key: PropertyKey) {
+	return hasKey(target, key) ? target[key] : undefined;
+}
+
 /**
  * A D1 that reports the values each statement is bound with, before D1 takes them (`record`), and otherwise is the real D1.
  * Its statements are unwrapped when batched, so the batch runs the real statements.
@@ -73,9 +92,9 @@ function recordingDb(record: (sql: string, values: unknown[]) => void) {
 									return inner.bind(...values);
 								};
 
-							const value = Reflect.get(inner, key, inner);
+							const value = memberOf(inner, key);
 
-							return typeof value === "function" ? value.bind(inner) : value;
+							return isMethod(value) ? value.bind(inner) : value;
 						},
 					});
 
@@ -87,9 +106,9 @@ function recordingDb(record: (sql: string, values: unknown[]) => void) {
 			if (prop === "batch")
 				return (statements: D1PreparedStatement[]) =>
 					target.batch(statements.map((s) => real.get(s) ?? s));
-			const value = Reflect.get(target, prop, target);
+			const value = memberOf(target, prop);
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
@@ -105,9 +124,9 @@ function failingDb(fails: string): D1Database {
 					return target.prepare(sql);
 				};
 
-			const value = Reflect.get(target, prop, target);
+			const value = memberOf(target, prop);
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
@@ -128,9 +147,9 @@ function blipDb(fails: string): D1Database {
 					return target.prepare(sql);
 				};
 
-			const value = Reflect.get(target, prop, target);
+			const value = memberOf(target, prop);
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
@@ -167,12 +186,12 @@ async function post(
 ) {
 	const { type, bytes } = await multipart(fields);
 
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		"content-type": type,
 		"content-length": options.contentLength ?? String(bytes.byteLength),
-	};
+	});
 
-	if (options.htmx) headers["HX-Request"] = "true";
+	if (options.htmx) headers.set("HX-Request", "true");
 
 	const res = await app.request(
 		"/accounts/apple-card",
@@ -207,25 +226,22 @@ function unreadable() {
 }
 
 async function postUnread(contentLength: string, htmx = false) {
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		"content-type": "multipart/form-data; boundary=x",
 		"content-length": contentLength,
-	};
+	});
 
-	if (htmx) headers["HX-Request"] = "true";
+	if (htmx) headers.set("HX-Request", "true");
 	const body = unreadable();
 
-	const res = await app.request(
-		"/accounts/apple-card",
-		{
-			method: "POST",
-			headers,
-			body: body.stream,
-			duplex: "half",
-		} as RequestInit,
-		family,
-		ctx(),
-	);
+	const init: RequestInit & { duplex: "half" } = {
+		method: "POST",
+		headers,
+		body: body.stream,
+		duplex: "half",
+	};
+
+	const res = await app.request("/accounts/apple-card", init, family, ctx());
 
 	return {
 		res,
@@ -409,15 +425,14 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 		it("hands the rows it added to the sorting Workflow once, and none when it adds nothing", async () => {
 			// The sorting binding is a plain recorder here, so no instance runs; the key lets the start go ahead.
-			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-				async () => ({ id: "fake" }),
-			);
+			const create = vi.fn<
+				(input: { params: SortParams }) => Promise<{ id: string }>
+			>(async () => ({ id: "fake" }));
 
-			const bindings = {
-				...family,
+			const bindings = envWith(family, {
 				JEV_API_KEY: "test-key",
 				SORT: { create },
-			} as unknown as Env;
+			});
 
 			await post(
 				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
@@ -583,17 +598,16 @@ describe("Apple Card's upload sheet (#766)", () => {
 				.bind(category?.id)
 				.run();
 
-			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-				async () => ({ id: "fake" }),
-			);
+			const create = vi.fn<
+				(input: { params: SortParams }) => Promise<{ id: string }>
+			>(async () => ({ id: "fake" }));
 
 			const context = ctx();
 
-			const bindings = {
-				...family,
+			const bindings = envWith(family, {
 				JEV_API_KEY: "test-key",
 				SORT: { create },
-			} as unknown as Env;
+			});
 
 			const { res } = await post(
 				{ file: file(csv(ROW_A)), balance: "" },
@@ -614,22 +628,21 @@ describe("Apple Card's upload sheet (#766)", () => {
 		});
 
 		it("saves the rows when the rules step fails, tells the sorting the rules didn't run, and logs fixed words", async () => {
-			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-				async () => ({ id: "fake" }),
-			);
+			const create = vi.fn<
+				(input: { params: SortParams }) => Promise<{ id: string }>
+			>(async () => ({ id: "fake" }));
 
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
 
 			// Only the merchant rules' statement fails to prepare; the rows are stored before the rules step runs.
-			const bindings = {
-				...family,
+			const bindings = envWith(family, {
 				DB: failingDb(
 					"WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')",
 				),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
-			} as unknown as Env;
+			});
 
 			try {
 				const { res } = await post(
@@ -671,20 +684,19 @@ describe("Apple Card's upload sheet (#766)", () => {
 		it("keeps the rows when bill matching fails once, answers the success redraw, and matches the payment in a background retry", async () => {
 			await addJuniperBill();
 
-			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-				async () => ({ id: "fake" }),
-			);
+			const create = vi.fn<
+				(input: { params: SortParams }) => Promise<{ id: string }>
+			>(async () => ({ id: "fake" }));
 
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
 
 			// Only the matcher's first read of the bills fails: the rows, the rules and the retry are the real D1's.
-			const bindings = {
-				...family,
+			const bindings = envWith(family, {
 				DB: blipDb("FROM bills WHERE active=1"),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
-			} as unknown as Env;
+			});
 
 			try {
 				const { res, html } = await post(
@@ -720,19 +732,18 @@ describe("Apple Card's upload sheet (#766)", () => {
 		it("answers the success redraw and logs fixed words when bill matching fails on its retry too", async () => {
 			await addJuniperBill();
 
-			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-				async () => ({ id: "fake" }),
-			);
+			const create = vi.fn<
+				(input: { params: SortParams }) => Promise<{ id: string }>
+			>(async () => ({ id: "fake" }));
 
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
 
-			const bindings = {
-				...family,
+			const bindings = envWith(family, {
 				DB: failingDb("FROM bills WHERE active=1"),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
-			} as unknown as Env;
+			});
 
 			try {
 				const { res } = await post(
@@ -762,21 +773,20 @@ describe("Apple Card's upload sheet (#766)", () => {
 		it("still matches the bills when the rules step fails, so a rule error never leaves a payment unmatched", async () => {
 			await addJuniperBill();
 
-			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-				async () => ({ id: "fake" }),
-			);
+			const create = vi.fn<
+				(input: { params: SortParams }) => Promise<{ id: string }>
+			>(async () => ({ id: "fake" }));
 
 			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 			const context = ctx();
 
-			const bindings = {
-				...family,
+			const bindings = envWith(family, {
 				DB: failingDb(
 					"WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')",
 				),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
-			} as unknown as Env;
+			});
 
 			try {
 				const { res } = await post(
@@ -833,7 +843,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ file: file(csv(ROW_A)), balance: "-0.00" },
 				{
 					htmx: true,
-					bindings: { ...family, DB: db } as unknown as Env,
+					bindings: envWith(family, { DB: db }),
 				},
 			);
 
@@ -903,12 +913,11 @@ describe("Apple Card's upload sheet (#766)", () => {
 				{ htmx: true },
 			);
 
-			const plaid = {
-				...family,
+			const plaid = envWith(family, {
 				PLAID_CLIENT_ID: "client",
 				PLAID_SECRET: "secret",
 				TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-			} as unknown as Env;
+			});
 
 			const html = (
 				await (await app.request("/accounts", {}, plaid)).text()

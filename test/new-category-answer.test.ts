@@ -11,12 +11,37 @@ import {
 } from "../src/db/new-category-answer";
 import { resetDemo } from "../src/demo/reset";
 import { MAX_ACTIVE } from "../src/settings/category-form";
+import { fakeAi } from "./helpers/doubles";
 
 // The Maybe card's "New category" answers (decision 156): the name a person types is checked as the category form
 // checks it, a name that is already a category files the purchase in that one, and the create and the filing are
 // one batch, so a refusal leaves nothing behind.
 
 const db = env.DB;
+
+/** The purchase the naming reads from its item (decision 161). */
+type Purchase = Parameters<typeof suggestedCategoryName>[2];
+
+/** The chat body the code under test sends Workers AI; these tests read only its messages. */
+type ChatBody = { messages: { content: string }[] };
+
+/** A Workers AI run that answers `answer` and records the model and body it was called with. */
+const recordingRun = (answer: string) =>
+	vi.fn(async (_model: string, _body: ChatBody) => answer);
+
+type RecordingRun = ReturnType<typeof recordingRun>;
+
+/** The arguments of a recorded call, number `index`; the test fails when the run was never called that often. */
+function callArgs<Args extends unknown[]>(
+	recorded: { mock: { calls: Args[] } },
+	index = 0,
+): Args {
+	const args = recorded.mock.calls[index];
+
+	if (!args) throw new Error(`the Workers AI run has no call ${index}`);
+
+	return args;
+}
 
 const CATEGORIES = [
 	{ id: 1, name: "Groceries", archived: false },
@@ -319,12 +344,7 @@ const transactionFor = async (raw: string) =>
 	)?.id ?? 0;
 
 describe("suggestedCategoryName: the one naming path, and no call when it need not run", () => {
-	let item: {
-		transactionId: number;
-		merchantKey: string;
-		merchant: string;
-		label: string;
-	};
+	let item: Purchase & { label: string };
 
 	beforeEach(async () => {
 		await resetDemo(db, "2026-09-22");
@@ -341,28 +361,25 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 		};
 	});
 
-	const fakeAi = (answer: unknown = "Books & audio") => {
-		const run = vi.fn(async () => answer);
+	const answeringAi = (answer = "Books & audio") => {
+		const run = recordingRun(answer);
 
-		return { ai: { run } as unknown as Ai, run };
+		return { ai: fakeAi(run), run };
 	};
 
 	it("suggests a name from the store's name, avoiding the family's category names", async () => {
-		const { ai, run } = fakeAi();
+		const { ai, run } = answeringAi();
 		expect(await suggestedCategoryName(db, ai, item)).toBe("Books & audio");
 		expect(run).toHaveBeenCalledTimes(1);
 
-		const [, body] = run.mock.calls[0] as unknown as [
-			string,
-			{ messages: { content: string }[] },
-		];
+		const [, body] = callArgs(run);
 
 		expect(body.messages[1]?.content).toContain("Places: Audible");
 		expect(body.messages[1]?.content).toContain("Groceries");
 	});
 
 	it("names from the store's name, never the transaction's own name or note", async () => {
-		const { ai, run } = fakeAi();
+		const { ai, run } = answeringAi();
 
 		const own = {
 			transactionId: await transactionFor("SQ *LUPITAS TAQ 2210"),
@@ -373,10 +390,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 
 		await suggestedCategoryName(db, ai, own);
 
-		const [, body] = run.mock.calls[0] as unknown as [
-			string,
-			{ messages: { content: string }[] },
-		];
+		const [, body] = callArgs(run);
 
 		expect(body.messages[1]?.content).toContain("Place: Lupitas Taqueria");
 		expect(body.messages[1]?.content).toContain(
@@ -387,7 +401,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 
 	it("makes no call when the categories switch is off", async () => {
 		await saveAiSwitches(db, { categories: false });
-		const { ai, run } = fakeAi();
+		const { ai, run } = answeringAi();
 		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
 		expect(run).not.toHaveBeenCalled();
 	});
@@ -397,7 +411,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 	});
 
 	it("gives no name when the answer is unusable", async () => {
-		const { ai } = fakeAi("None of these fit");
+		const { ai } = answeringAi("None of these fit");
 		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
 	});
 
@@ -419,7 +433,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 				suggestion?.id ?? null,
 			)
 			.run();
-		const { ai, run } = fakeAi();
+		const { ai, run } = answeringAi();
 		expect(await suggestedCategoryName(db, ai, item)).toBe("Books & audio");
 		expect(run).not.toHaveBeenCalled();
 	});
@@ -444,10 +458,10 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 		merchant: "Audible",
 	});
 
-	const aiReturning = (answer: unknown) => {
-		const run = vi.fn(async () => answer);
+	const aiReturning = (answer: string) => {
+		const run = recordingRun(answer);
 
-		return { ai: { run } as unknown as Ai, run };
+		return { ai: fakeAi(run), run };
 	};
 
 	const keptRows = async (transactionId: number) =>
@@ -492,7 +506,7 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 			throw new Error("timeout");
 		});
 
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
 		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
 		expect(run).toHaveBeenCalledTimes(1);
@@ -510,7 +524,7 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 			return "Books & audio";
 		});
 
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 
 		const answers = await Promise.all(
 			Array.from({ length: 10 }, () => suggestedCategoryName(db, ai, item)),
@@ -570,7 +584,7 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 			throw new Error("timeout");
 		});
 
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 
 		const answers = await Promise.all(
 			Array.from({ length: 5 }, () => suggestedCategoryName(db, ai, item)),
@@ -616,11 +630,7 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 			return "Books & audio";
 		});
 
-		const answerA = await suggestedCategoryName(
-			db,
-			{ run: runA } as unknown as Ai,
-			item,
-		);
+		const answerA = await suggestedCategoryName(db, fakeAi(runA), item);
 
 		// A's answer is for a purchase that is gone: it is dropped, and B's row and name are untouched.
 		expect(answerA).toBeNull();
@@ -773,18 +783,15 @@ describe("suggestedCategoryName sends the cleaned bank text with the store's nam
 		vi.spyOn(console, "error").mockImplementation(() => {});
 	});
 
-	const aiReturning = (answer: unknown = "Books & audio") => {
-		const run = vi.fn(async () => answer);
+	const aiReturning = (answer = "Books & audio") => {
+		const run = recordingRun(answer);
 
-		return { ai: { run } as unknown as Ai, run };
+		return { ai: fakeAi(run), run };
 	};
 
 	/** The user message the model was sent for a call. */
-	const sentMessage = (run: ReturnType<typeof vi.fn>) => {
-		const [, body] = run.mock.calls[0] as unknown as [
-			string,
-			{ messages: { content: string }[] },
-		];
+	const sentMessage = (run: RecordingRun) => {
+		const [, body] = callArgs(run);
 
 		return body.messages[1]?.content ?? "";
 	};
@@ -903,17 +910,14 @@ describe("suggestedCategoryName redacts the bank text before it leaves the app (
 	});
 
 	const sendFor = async (raw: string, merchant: string) => {
-		const run = vi.fn(async () => "Books & audio");
-		await suggestedCategoryName(db, { run } as unknown as Ai, {
+		const run = recordingRun("Books & audio");
+		await suggestedCategoryName(db, fakeAi(run), {
 			transactionId: await transactionFor(raw),
 			merchantKey: raw,
 			merchant,
 		});
 
-		const [, body] = run.mock.calls[0] as unknown as [
-			string,
-			{ messages: { content: string }[] },
-		];
+		const [, body] = callArgs(run);
 
 		return body.messages[1]?.content ?? "";
 	};
@@ -1014,9 +1018,11 @@ describe("the filing finds the category the family has, however its key was stor
 			name: "École",
 		});
 
+		if (!target.ok) throw new Error("the name is an existing category");
+
 		const result = await fileInNewCategory(db, {
 			transactionId: tx,
-			target: target as Extract<typeof target, { ok: true }>,
+			target,
 			today: "2026-10-02",
 			who: "Kazon",
 		});
@@ -1218,7 +1224,7 @@ describe("a Never suggest for a new category stops the row: no pending name and 
 			)
 			.run();
 		const run = vi.fn(async () => "Books & audio");
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 
 		const item = {
 			transactionId: tx?.id ?? 0,
@@ -1235,7 +1241,7 @@ describe("a Never suggest for a new category stops the row: no pending name and 
 // asked again once when those categories change (a category made, renamed, archived or restored). One answer per
 // transaction and set of categories; the claim still lets only one request ask.
 describe("suggestedCategoryName: the choices and a re-ask when the categories change (decision 165)", () => {
-	let item: { transactionId: number; merchantKey: string; merchant: string };
+	let item: Purchase;
 	const merchantKey = "AUDIBLE*TE3E10I7 WA";
 	beforeEach(async () => {
 		await resetDemo(db, "2026-09-22");
@@ -1252,19 +1258,14 @@ describe("suggestedCategoryName: the choices and a re-ask when the categories ch
 		};
 	});
 
-	const aiReturning = (answer: unknown) => {
-		const run = vi.fn(async () => answer);
+	const aiReturning = (answer: string) => {
+		const run = recordingRun(answer);
 
-		return { ai: { run } as unknown as Ai, run };
+		return { ai: fakeAi(run), run };
 	};
 
-	const userPrompt = (run: ReturnType<typeof vi.fn>, call = 0) =>
-		(
-			run.mock.calls[call] as unknown as [
-				string,
-				{ messages: { content: string }[] },
-			]
-		)[1].messages[1]?.content ?? "";
+	const userPrompt = (run: RecordingRun, call = 0) =>
+		callArgs(run, call)[1].messages[1]?.content ?? "";
 
 	const lineStarting = (text: string, prefix: string) =>
 		text.split("\n").find((l) => l.startsWith(prefix)) ?? "";
@@ -1339,7 +1340,7 @@ describe("suggestedCategoryName: the choices and a re-ask when the categories ch
 		expect(again.run).not.toHaveBeenCalled();
 	});
 
-	const changes: [string, () => Promise<unknown>][] = [
+	const changes: [string, () => Promise<D1Result>][] = [
 		["a category is made", () => addCategory("Gear")],
 		["a category is renamed", renameEatingOut],
 		["a category is archived", archiveGas],
@@ -1385,7 +1386,7 @@ describe("suggestedCategoryName: the choices and a re-ask when the categories ch
 			return "Hobby supplies";
 		});
 
-		const ai = { run } as unknown as Ai;
+		const ai = fakeAi(run);
 
 		const answers = await Promise.all(
 			Array.from({ length: 10 }, () => suggestedCategoryName(db, ai, item)),
@@ -1462,10 +1463,7 @@ describe("suggestedCategoryName: the choices and a re-ask when the categories ch
 		const { ai, run } = aiReturning("Books & audio");
 		await suggestedCategoryName(db, ai, item);
 
-		const call = run.mock.calls[0] as unknown as [
-			string,
-			{ messages: { content: string }[] },
-		];
+		const call = callArgs(run);
 
 		const all = JSON.stringify(call[1]);
 		expect(all).not.toMatch(/1499|14\.99/);
@@ -1476,7 +1474,7 @@ describe("suggestedCategoryName: the choices and a re-ask when the categories ch
 // asked against the categories before the change, so it gives no name this time; the row keeps the old key, so the
 // next draw asks once more.
 describe("suggestedCategoryName: a change to the categories while the call is in flight (decision 165)", () => {
-	let item: { transactionId: number; merchantKey: string; merchant: string };
+	let item: Purchase;
 	beforeEach(async () => {
 		await resetDemo(db, "2026-09-22");
 		await db.batch([
@@ -1508,10 +1506,10 @@ describe("suggestedCategoryName: a change to the categories while the call is in
 			.bind(item.transactionId)
 			.first<{ name: string | null; categories_key: string | null }>();
 
-	const aiReturning = (answer: unknown) => {
-		const run = vi.fn(async () => answer);
+	const aiReturning = (answer: string) => {
+		const run = recordingRun(answer);
 
-		return { ai: { run } as unknown as Ai, run };
+		return { ai: fakeAi(run), run };
 	};
 
 	it("a rename made while the call is in flight gives no name, keeps the old key, and is asked once more on the next draw", async () => {
@@ -1527,9 +1525,7 @@ describe("suggestedCategoryName: a change to the categories while the call is in
 			return "Books & audio";
 		});
 
-		expect(
-			await suggestedCategoryName(db, { run } as unknown as Ai, item),
-		).toBeNull();
+		expect(await suggestedCategoryName(db, fakeAi(run), item)).toBeNull();
 		expect(run).toHaveBeenCalledTimes(1);
 		expect(await keptRow()).toEqual({
 			name: "Books & audio",
@@ -1558,9 +1554,7 @@ describe("suggestedCategoryName: a change to the categories while the call is in
 			return "Books & audio";
 		});
 
-		expect(
-			await suggestedCategoryName(db, { run } as unknown as Ai, item),
-		).toBeNull();
+		expect(await suggestedCategoryName(db, fakeAi(run), item)).toBeNull();
 		const next = aiReturning("Hobby supplies");
 		expect(await suggestedCategoryName(db, next.ai, item)).toBe(
 			"Hobby supplies",
