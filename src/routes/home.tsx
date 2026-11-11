@@ -5,20 +5,31 @@ import { addressOf } from "../address";
 import { appleCardNotice } from "../apple-card/stale";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
-import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
+import {
+	CategoryId,
+	MAX_BUDGET_CENTS,
+	NudgeDirection,
+	parseBudgetAmount,
+} from "../budgets/amount";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
 import { appleCardUpload, bankSyncs } from "../db/accounts";
 import {
+	budgetFacts,
+	budgetFactsOf,
+	budgetSaveStatement,
+	decideAndSave,
+	savingsGoalFacts,
+	savingsGoalSaveStatement,
+} from "../db/budget-saves";
+import {
+	type BudgetCategory,
 	budgetCategory,
 	lastMonthSpentCents,
-	nudgeBudget,
-	setBudget,
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
 import { COUNTED_JOINS, countedMonthSql } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
-import { setSavingsGoal } from "../db/savings-goals";
 import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup, type SetupView } from "../first-tally/setup";
@@ -26,6 +37,14 @@ import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
+import {
+	type BudgetFacts,
+	type BudgetWrite,
+	nudgeBudget,
+	saveBudget,
+	saveSavingsGoal,
+} from "../rules/budgets";
+import { handle } from "../rules/rule";
 import {
 	asOfDate,
 	type FlaggedBank,
@@ -543,16 +562,34 @@ const closeBudgetAttrs = (categoryId: number) => ({
 	"hx-push-url": "/",
 });
 
-const idOf = (c: Context<App>) => Number(c.req.param("id"));
 /**
  * The active category a budget route is about, or null, with the household's date and current
  * month. This is the one place a budget request reads the date; it passes it on to renderHome.
  */
 async function activeCategory(c: Context<App>) {
+	const id = CategoryId.safeParse(c.req.param("id"));
+	if (!id.success) return null;
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
-	const category = await budgetCategory(c.env.DB, idOf(c), month);
+	const category = await budgetCategory(c.env.DB, id.data, month);
 	return category && !category.archived ? { category, today, month } : null;
+}
+
+/**
+ * The facts a budget rule decides from: first what the page already read with the category, then a fresh read each time
+ * the save finds they changed (decideAndSave asks again).
+ */
+function budgetFactsFrom(
+	db: D1Database,
+	category: BudgetCategory,
+	month: string,
+) {
+	let read: BudgetFacts | null = budgetFactsOf(category);
+	return async () => {
+		const facts = read ?? (await budgetFacts(db, category.id, month));
+		read = null;
+		return facts;
+	};
 }
 
 // ?focus=<id> puts focus on that row when the sheet closes.
@@ -801,7 +838,15 @@ home.post("/savings-goal", async (c) => {
 			),
 		});
 	}
-	await setSavingsGoal(c.env.DB, parsed.cents, month);
+	// The rule has no refusal, and a goal already at that amount is saved as far as the family can tell.
+	await decideAndSave(
+		async () =>
+			saveSavingsGoal.decide(
+				{ cents: parsed.cents, month },
+				await savingsGoalFacts(c.env.DB, month),
+			),
+		(save) => savingsGoalSaveStatement(c.env.DB, save),
+	);
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
 		"HX-Trigger",
@@ -860,7 +905,18 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 			),
 		});
 	}
-	await setBudget(c.env.DB, category.id, parsed.cents, month);
+	const facts = budgetFactsFrom(c.env.DB, category, month);
+	const outcome = await decideAndSave(
+		async () =>
+			saveBudget.decide(
+				{ categoryId: category.id, cents: parsed.cents, month },
+				await facts(),
+			),
+		(save) => budgetSaveStatement(c.env.DB, save),
+	);
+	// A category archived while its sheet was open is gone, as it is for a sheet opened afterwards. A budget already at
+	// that amount is saved as far as the family can tell, so it answers as a save does.
+	if (outcome.kind === "refuse") return c.notFound();
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
 		"HX-Trigger",
@@ -882,12 +938,28 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 	const toSetup = await setupFirst(c);
 	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
-	// Only a budgeted category has buttons; one without a budget gets it from its sheet.
-	if (!active || active.category.budgetCents === null) return c.notFound();
+	const way = NudgeDirection.safeParse(c.req.param("direction"));
+	if (!active || !way.success) return c.notFound();
 	const { category, today, month } = active;
-	const direction = c.req.param("direction") === "up" ? "up" : "down";
-	// Read and written in one statement, so two taps at once (two phones) both count.
-	const cents = await nudgeBudget(c.env.DB, category.id, direction, month);
+	const direction = way.data;
+	// Two taps at once (two phones) both count: the one that saves second finds the budget changed, and decides again.
+	const facts = budgetFactsFrom(c.env.DB, category, month);
+	const outcome = await decideAndSave(
+		async () =>
+			nudgeBudget.decide(
+				{ categoryId: category.id, direction, month },
+				await facts(),
+			),
+		(save) => budgetSaveStatement(c.env.DB, save),
+	);
+	// Only a budgeted category has buttons; one without a budget gets it from its sheet. The new amount, or null when the
+	// budget was already as far as it goes that way.
+	const cents = handle<BudgetWrite, number | null | undefined>(outcome, {
+		write: (save) => save.cents,
+		nothingToDo: () => null,
+		refuse: () => undefined,
+	});
+	if (cents === undefined) return c.notFound();
 	if (!c.req.header("HX-Request")) return c.redirect("/?adjust=1", 303);
 	// At a limit nothing changes, and it still says so on screen and to screen readers.
 	const limit =
