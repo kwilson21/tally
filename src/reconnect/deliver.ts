@@ -21,7 +21,7 @@ export type DeliveryEnv = {
 };
 
 /** What Cloudflare's send answers with: the message's id, which Tally never reads. */
-type EmailSent = { messageId?: string } | void;
+export type EmailSent = { messageId?: string } | void;
 
 /** What a send may be told (decision 146). */
 export type DeliverOptions = {

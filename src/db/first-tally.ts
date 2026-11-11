@@ -4,6 +4,7 @@
 // shipped has its strokes drawn with no day (migration 0057, and 0061 takes the count stroke out), so it reads as set up.
 
 import type { PayDeposit } from "../first-tally/pay";
+import type { Json } from "../json";
 
 /**
  * The four strokes of the first week (P125 E, decision 148): link a bank, your pay, your bills, and your budgets (the
@@ -124,9 +125,6 @@ export async function readFirstTally(
 
 	return row ? parseFirstTally(row.value) : null;
 }
-
-/** A parsed JSON value: what the stored first-week text holds. */
-type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 /** A field read from a stored object, which is absent when the object has no such key. */
 type StoredJson = Json | undefined;

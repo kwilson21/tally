@@ -2,6 +2,7 @@
 // a merchant from the bank's text, and decides nothing. Code checks every name it gets back
 // (`cleanSuggestedNames`), a person chooses one or none, and nothing is renamed until they do.
 
+import type { Json } from "../json";
 import { MAX_ACTIVE, sameName } from "../settings/category-form";
 import {
 	joinedOf,
@@ -36,9 +37,6 @@ export const INSTRUCTIONS = [
 	"Use normal spelling and capitals. Leave out store numbers, codes, cities, amounts and dates.",
 	"If you are not sure, reply with fewer names. Never explain.",
 ].join(" ");
-
-/** A parsed JSON value: the widest shape a model's answer can take once its parts are checked. */
-type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 /** What the name model answers with (its Workers AI output), a JSON value a test or a caller passes, or nothing. */
 type AiAnswer =

@@ -1,8 +1,6 @@
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
-
-/** A JSON value, as a row kept in a hold's JSON column reads back. */
-type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+import type { Json } from "../json";
 
 type Row = { [key: string]: Json };
 

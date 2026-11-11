@@ -1,3 +1,4 @@
+import type { Json } from "../json";
 import { sanitizeFeedbackRoute } from "./privacy";
 
 const DEVICE_CATEGORIES = new Set([
@@ -19,9 +20,6 @@ const ERROR_NAMES = new Set([
 	"TypeError",
 	"UnknownError",
 ]);
-
-/** A parsed JSON value, as the diagnostics script sends it. */
-type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 function isObjectValue(value: Json): value is { [key: string]: Json } {
 	return Boolean(value) && typeof value === "object";

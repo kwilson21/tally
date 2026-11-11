@@ -10,6 +10,7 @@ import { runReadyEmail } from "./first-tally/ready-email";
 import { runReadyPush } from "./first-tally/ready-push";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
+import type { EmailSent } from "./reconnect/deliver";
 import { runReconnectReminders } from "./reconnect/reminders";
 import { accounts } from "./routes/accounts";
 import { bills } from "./routes/bills";
@@ -33,9 +34,6 @@ import { trends } from "./routes/trends";
 import { webhooks } from "./routes/webhooks";
 import { sameOrigin, security } from "./security";
 import { startSorting } from "./sort-start";
-
-/** What Cloudflare's send answers with: the message's id, which Tally never reads. */
-type EmailSent = { messageId?: string } | void;
 
 type AppEnv = Env & {
 	ACCESS_TEAM_DOMAIN?: string;

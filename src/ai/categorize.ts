@@ -1,5 +1,7 @@
 // The only place Tally talks to Jev (CLAUDE.md, spec §7): one plain fetch per transaction,
 // asking the category and every flag together. It returns Jev's answers and decides nothing.
+
+import type { Json } from "../json";
 import { TRANSACTION_KINDS, type TransactionKind } from "../transactions/kind";
 import { type Flag, type JevAnswer, NONE_FIT } from "./decide";
 
@@ -235,7 +237,7 @@ export async function askJev(
 	// A body that is not JSON is an unusable answer like any other: the result below is ok: false with this status.
 	// SAFETY: response.json() resolves to the JSON Jev sent, and parseAnswer checks every field it reads before using it.
 	const answer = parseAnswer(
-		(await response.json().catch(() => null)) as JevJson | null,
+		(await response.json().catch(() => null)) as Json | null,
 		categories.length ? [...categories, NONE_FIT] : [],
 		options.details ? [...TRANSACTION_KINDS, "None of these"] : [],
 		options.people
@@ -249,17 +251,8 @@ export async function askJev(
 		: { ok: false, status: response.status, requestId };
 }
 
-/** A parsed JSON value, as Jev's reply is read before any of it is checked. */
-type JevJson =
-	| string
-	| number
-	| boolean
-	| null
-	| JevJson[]
-	| { [key: string]: JevJson };
-
 /** A JSON object, such as Jev's answers or one answer. */
-type JevObject = { [key: string]: JevJson };
+type JevObject = { [key: string]: Json };
 
 /**
  * Reads the answers Jev documents: a choice with a confidence, and a yes-probability per flag.
@@ -267,7 +260,7 @@ type JevObject = { [key: string]: JevJson };
  * be mistaken for "None of these fit".
  */
 function parseAnswer(
-	data: JevJson | null,
+	data: Json | null,
 	options: string[],
 	kinds: string[],
 	people: string[],

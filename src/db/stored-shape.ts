@@ -1,3 +1,4 @@
+import type { Json } from "../json";
 // Checks for JSON that was stored as text and is read back as a type. A cast (`JSON.parse(text) as Run`) claims the
 // shape without looking; these look, so a stored value of the wrong shape fails where it is read and not later, as a
 // property of undefined somewhere else. The checks name what the code reads and ignore keys it does not, because SQL
@@ -14,9 +15,6 @@ export const isString: Guard<string> = (value): value is string =>
 
 export const isBoolean: Guard<boolean> = (value): value is boolean =>
 	typeof value === "boolean";
-
-/** A JSON value, as stored text reads back. */
-type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 const isObject = (value: unknown): value is { [key: string]: Json } =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
