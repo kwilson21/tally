@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from "vitest";
 import { formatReport } from "../scripts/compare-models/report";
 import {
 	buildCases,
@@ -16,6 +24,8 @@ import worker, {
 import { JEV_URL, type JevResult } from "../src/ai/categorize";
 import { type Flag, type JevAnswer, NONE_FIT } from "../src/ai/decide";
 import { buildSeed, type Seed, type SeedTransaction } from "../src/demo/seed";
+import { fakeAi as bindingOf, fakeFetch } from "./helpers/doubles";
+import { itemAt, present } from "./helpers/present";
 
 const TODAY = "2026-10-19";
 const NAMES = ["Groceries", "Eating Out", "Household"];
@@ -67,26 +77,25 @@ const modelAnswer = (choice = "Groceries") => ({
 	usage: { input_tokens: 100, output_tokens: 1 },
 });
 
-type RunArgs = [string, Record<string, unknown>, { signal?: unknown }];
+/** A JSON value, as the Worker reads a request body. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
-/** A fake Workers AI. `run` decides each answer, and every call is recorded. */
+/** The JSON body a Workers AI call sends. */
+type Body = { [field: string]: Json };
+
+type RunOptions = { signal?: AbortSignal };
+
+type Run = (model: string, body: Body, options?: RunOptions) => Promise<object>;
+
+/** A fake Workers AI. `answer` decides each answer, and every call is recorded. */
 const fakeAi = (
-	run: (model: string, body: Record<string, unknown>) => unknown = (
-		_model,
-		body,
-	) => ({
+	answer: (model: string, body: Body) => object = (_model, body) => ({
 		...modelAnswer(),
 		model: body.model,
 	}),
-) =>
-	({
-		run: vi.fn(async (model: string, body: Record<string, unknown>) =>
-			run(model, body),
-		),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+) => bindingOf(vi.fn<Run>(async (model, body) => answer(model, body)));
 
-const callsOf = (ai: { run: ReturnType<typeof vi.fn> }) =>
-	ai.run.mock.calls as RunArgs[];
+const callsOf = (ai: { run: Mock<Run> }) => ai.run.mock.calls;
 
 const CLEF = "@cf/cloudflare/clef";
 const CLEF_FLASH = "@cf/cloudflare/clef-flash";
@@ -603,7 +612,7 @@ describe("formatReport", () => {
 			outcome,
 			ms: 120,
 			answer: answer
-				? scoreCase(cases[0] as Case, ok(answer), NAMES, 120).answer
+				? scoreCase(itemAt(cases, 0), ok(answer), NAMES, 120).answer
 				: null,
 		},
 		{ outcome: "failed: HTTP 429", ms: 80, answer: null },
@@ -754,7 +763,7 @@ describe("runComparison", () => {
 		expect(clef.every(([, body]) => body.model === "clef")).toBe(true);
 		expect(flash.every(([, body]) => body.model === "clef-flash")).toBe(true);
 		expect(
-			calls.every(([, , options]) => options.signal instanceof AbortSignal),
+			calls.every(([, , options]) => options?.signal instanceof AbortSignal),
 		).toBe(true);
 	});
 
@@ -772,14 +781,19 @@ describe("runComparison", () => {
 	});
 
 	it("sends Jev's request to JEV_URL with the bearer key", async () => {
-		const jev = vi.fn(async () => Response.json(modelAnswer()));
+		const jev = fakeFetch(
+			vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				Response.json(modelAnswer()),
+			),
+		);
+
 		await runComparison({ AI: fakeAi(), JEV_API_KEY: "test-key" }, jev, TODAY, {
 			lists: ["demo"],
 			models: ["jev"],
 		});
-		const [url, init] = jev.mock.calls[0] as unknown as [string, RequestInit];
+		const [url, init] = present(jev.mock.calls[0]);
 		expect(url).toBe(JEV_URL);
-		expect((init.headers as Record<string, string>).Authorization).toBe(
+		expect(new Headers(init?.headers).get("Authorization")).toBe(
 			"Bearer test-key",
 		);
 	});

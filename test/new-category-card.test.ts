@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 // Decision 120 (P135 A): one suggestion card wherever Tally asks, with one set of answers. Settings' No retires the
 // suggestion and asks decision 101's question in place; Organize's card creates the category and files its purchases.
@@ -18,14 +19,17 @@ async function get(path: string) {
 }
 
 async function post(path: string, fields: [string, string][], hx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (hx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(hx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -45,25 +49,25 @@ beforeEach(async () => {
 		),
 		env.DB.prepare("DELETE FROM category_suggestions"),
 	]);
-	suggestion = (
+	suggestion = present(
 		await env.DB.prepare(
 			"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-		).first<{ id: number }>()
-	)?.id as number;
-	chewy = (
+		).first<{ id: number }>(),
+	).id;
+	chewy = present(
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 6412, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
 		)
 			.bind(`${THIS}-05`, suggestion)
-			.first<{ id: number }>()
-	)?.id as number;
-	petsmart = (
+			.first<{ id: number }>(),
+	).id;
+	petsmart = present(
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 2399, 'PETSMART 0412', 'Petsmart', 1, ?) RETURNING id",
 		)
 			.bind(`${THIS}-02`, suggestion)
-			.first<{ id: number }>()
-	)?.id as number;
+			.first<{ id: number }>(),
+	).id;
 });
 
 const count = async (sql: string) =>
@@ -115,7 +119,7 @@ describe("Settings: one card, and No asks in its place", () => {
 		const no = await post(`/settings/suggestions/${suggestion}/dismiss`, []);
 
 		const stores = [...no.html.matchAll(/name="store" value="([^"]+)"/g)].map(
-			(match) => match[1] as string,
+			(match) => present(match[1]),
 		);
 
 		expect(stores.length).toBe(2);
@@ -141,7 +145,7 @@ describe("Settings: one card, and No asks in its place", () => {
 		const no = await post(`/settings/suggestions/${suggestion}/dismiss`, []);
 
 		const stores = [...no.html.matchAll(/name="store" value="([^"]+)"/g)].map(
-			(match) => match[1] as string,
+			(match) => present(match[1]),
 		);
 
 		const notNow = await post(`/settings/suggestions/${suggestion}/dismiss`, [
@@ -190,11 +194,11 @@ describe("Settings: the question is drawn where the No's card was", () => {
 
 	beforeEach(async () => {
 		// Pet Care has two purchases and Tutoring has one, so Pet Care is listed first.
-		tutoring = (
+		tutoring = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Tutoring', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 4500, 'TUTOR HUB 77', 'Tutor Hub', 1, ?)",
 		)
@@ -251,13 +255,13 @@ describe("Settings: the question is drawn where the No's card was", () => {
 	it("with more than ten waiting, the question still comes before a card that moved up into the list", async () => {
 		// Ten are listed, so Extra 9 waits behind the limit until Pet Care is answered and moves up.
 		for (let i = 1; i <= 9; i++) {
-			const id = (
+			const id = present(
 				await env.DB.prepare(
 					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
 				)
 					.bind(`Extra ${i}`)
-					.first<{ id: number }>()
-			)?.id as number;
+					.first<{ id: number }>(),
+			).id;
 
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, ?, ?, 1, ?)",
@@ -514,13 +518,13 @@ describe("Organize: the card above the chips", () => {
 	it("draws the card for Chewy, the first on screen, with many other waiting suggestions behind it", async () => {
 		// Each other suggestion is one charge from a merchant whose name sorts after Chewy and Petsmart, so Chewy stays first.
 		for (let i = 1; i <= 50; i++) {
-			const id = (
+			const id = present(
 				await env.DB.prepare(
 					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
 				)
 					.bind(`Zed ${i}`)
-					.first<{ id: number }>()
-			)?.id as number;
+					.first<{ id: number }>(),
+			).id;
 
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, ?, ?, 1, ?)",
@@ -672,13 +676,13 @@ describe("Organize: Create files only the purchases the card showed", () => {
 	it("files nothing, and draws the card with every purchase, when one was added after the card was drawn", async () => {
 		await get("/transactions/organize");
 
-		const third = (
+		const third = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 500, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
 			)
 				.bind(`${THIS}-06`, suggestion)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",

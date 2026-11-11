@@ -8,7 +8,9 @@ import {
 	suggestNightlyNames,
 	suggestTransactionNotes,
 } from "../src/suggest-names-pending";
+import { fakeAi as bindingOf } from "./helpers/doubles";
 import { merchantNames } from "./helpers/merchants";
+import { isMethod } from "./helpers/present";
 
 // The nightly names step (spec §7, §8.6, §9; #33): Workers AI is asked, once per bank text, only for a
 // merchant Plaid didn't name, and only while the names switch is on. What it says is only ever a
@@ -17,23 +19,32 @@ import { merchantNames } from "./helpers/merchants";
 const db = env.DB;
 const RAW = "SQ *BLUE BOTTLE COF 0412";
 
+/** The chat request a Workers AI binding receives: the messages, and the bank's text is in the user's one. */
+type ChatInput = { messages: { role: string; content: string }[] };
+
 /** A fake Workers AI answering each call from `answer`, which sees the bank's text. */
-const fakeAi = (answer: (text: string) => unknown = () => ({ response: "" })) =>
-	({
-		run: vi.fn(async (_model: string, input: unknown) => {
-			const text = (
-				input as { messages: { role: string; content: string }[] }
-			).messages
+const fakeAi = (
+	answer: (text: string) => { response: string } = () => ({ response: "" }),
+) =>
+	bindingOf(
+		vi.fn(async (_model: string, input: ChatInput) => {
+			const text = input.messages
 				.find((m) => m.role === "user")
 				?.content.replace("Bank text: ", "");
 
 			return answer(text ?? "");
 		}),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+	);
 
-const callsFor = (ai: { run: ReturnType<typeof vi.fn> }) =>
+/** The member of the D1 binding a Proxy trap was asked for. */
+function memberOf(target: D1Database, property: string | symbol) {
+	// SAFETY: a Proxy trap names a member of the binding it wraps, and a name the binding lacks reads as undefined.
+	return target[property as keyof D1Database];
+}
+
+const callsFor = (ai: { run: { mock: { calls: [unknown, ChatInput][] } } }) =>
 	ai.run.mock.calls.map(([, input]) =>
-		(input as { messages: { role: string; content: string }[] }).messages
+		input.messages
 			.find((m) => m.role === "user")
 			?.content.replace("Bank text: ", ""),
 	);
@@ -121,7 +132,7 @@ describe("suggestMerchantNames", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				const value = memberOf(target, property);
 
 				if (property === "prepare")
 					return (sql: string) => {
@@ -130,12 +141,12 @@ describe("suggestMerchantNames", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
-		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
+		await suggestMerchantNames({ DB: counted, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
 		// One candidate query and the names switch read, then for every five calls a switch read and three writes
 		// (the merchants upsert, the merchants' names and the failures delete): 1 + 1 + 20 × 4 = 82. A save per name
@@ -493,7 +504,7 @@ describe("suggestMerchantNames", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				const value = memberOf(target, property);
 
 				if (property === "prepare")
 					return (sql: string) => {
@@ -502,7 +513,7 @@ describe("suggestMerchantNames", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
@@ -515,9 +526,10 @@ describe("suggestMerchantNames", () => {
 			return { response: "A Name" };
 		});
 
-		expect(
-			await suggestMerchantNames({ DB: counted as D1Database, AI: ai }),
-		).toEqual({ asked: 5, suggested: 3 });
+		expect(await suggestMerchantNames({ DB: counted, AI: ai })).toEqual({
+			asked: 5,
+			suggested: 3,
+		});
 		logged.mockRestore();
 		// The candidate query, the names switch read at the start and again before the batch, then the batch's
 		// four writes: the merchants upsert, its names, the failures upsert and the failures delete. 1 + 1 + 1 + 4 = 7.
@@ -861,7 +873,7 @@ describe("suggestTransactionNotes", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				const value = memberOf(target, property);
 
 				if (property === "prepare")
 					return (sql: string) => {
@@ -870,14 +882,14 @@ describe("suggestTransactionNotes", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
 		const ai = fakeAi(() => ({ response: "Bought a gift" }));
 		expect(
 			await suggestTransactionNotes({
-				DB: counted as D1Database,
+				DB: counted,
 				AI: ai,
 			}),
 		).toEqual({ asked: nameCallLimit, suggested: nameCallLimit });
@@ -896,7 +908,9 @@ describe("suggestNightlyNames", () => {
 			: { response: "Some Place Name" };
 
 	/** How many of the night's calls were for notes, and how many for names, by the bank text each was about. */
-	const askedAbout = (ai: { run: ReturnType<typeof vi.fn> }) => {
+	const askedAbout = (ai: {
+		run: { mock: { calls: [unknown, ChatInput][] } };
+	}) => {
 		const texts = callsFor(ai);
 
 		return {
@@ -953,7 +967,7 @@ describe("suggestNightlyNames", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				const value = memberOf(target, property);
 
 				if (property === "prepare")
 					return (sql: string) => {
@@ -962,7 +976,7 @@ describe("suggestNightlyNames", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
@@ -980,7 +994,7 @@ describe("suggestNightlyNames", () => {
 			return { response: "Some Place Name" };
 		});
 
-		await suggestNightlyNames({ DB: counted as D1Database, AI: ai });
+		await suggestNightlyNames({ DB: counted, AI: ai });
 		expect(askedAbout(ai)).toEqual({ notes: 1, names: 99 });
 		// The probe (the switch read and the names query): 2. The notes' own two reads, then the note's batch (its
 		// switch read, the names it reads and its save): 5. The names' switch read and query, then for each of 20

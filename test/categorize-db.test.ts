@@ -11,6 +11,7 @@ import {
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -19,12 +20,30 @@ const EATING_OUT = 2;
 const GAS = 3;
 
 const idOf = async (rawName: string) =>
-	(
+	present(
 		await db
 			.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
 			.bind(rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+			.first<{ id: number }>(),
+	).id;
+
+/** The columns the tests read back from a transaction row. */
+type TransactionRow = {
+	amount_cents: number;
+	credit_reviewed: number;
+	category_id: number | null;
+	category_source: string | null;
+	category_confidence: number | null;
+	jev_category_id: number | null;
+	flag_transfer: number;
+	flag_reimbursement: number;
+	flag_income: number;
+	income_confidence: number | null;
+	transfer_confidence: number | null;
+	excluded: number;
+	excluded_source: string | null;
+	updated_by: string | null;
+};
 
 const row = (id: number) =>
 	db
@@ -34,7 +53,7 @@ const row = (id: number) =>
 			FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<TransactionRow>();
 
 const personEdit = {
 	categoryId: null,
@@ -142,23 +161,23 @@ describe("pendingForJev", () => {
 		// credit is still asked about for income, however its review columns read.
 		it.each([
 			{
-				shape: "credit_reviewed never set",
+				state: "credit_reviewed never set",
 				set: "credit_reviewed = NULL, credit_reviewed_by = NULL, income_source = NULL",
 			},
 			{
-				shape: "credit_reviewed 0",
+				state: "credit_reviewed 0",
 				set: "credit_reviewed = 0, credit_reviewed_by = NULL, income_source = NULL",
 			},
 			{
-				shape: "reviewed, but not by a person",
+				state: "reviewed, but not by a person",
 				set: "credit_reviewed = 1, credit_reviewed_by = NULL, income_source = NULL",
 			},
 			{
-				shape: "reviewed, and its income set by Jev",
+				state: "reviewed, and its income set by Jev",
 				set: "credit_reviewed = 1, credit_reviewed_by = NULL, income_source = 'jev'",
 			},
 		])(
-			"still asks about an older credit with $shape, for its income answer",
+			"still asks about an older credit with $state, for its income answer",
 			async ({ set }) => {
 				const id = await idOf("SQ *LOCAL BAKERY 4432");
 				await db
@@ -214,7 +233,7 @@ describe("a split purchase's category from before its split", () => {
 					over.isSplit ?? 0,
 				)
 				.run()
-		).meta.last_row_id as number;
+		).meta.last_row_id;
 
 	beforeEach(async () => {
 		await db
@@ -910,6 +929,21 @@ describe("a credit whose category Jev answered unsure, asked for its income (dec
 			.run();
 
 	// The twelve columns a catch-up save keeps as they are: Jev's category answer, its transfer answer and exclusion.
+	type CategoryAnswer = {
+		category_id: number | null;
+		category_source: string | null;
+		category_confidence: number | null;
+		jev_category_id: number | null;
+		jev_none_fit: number;
+		jev_mixed: number | null;
+		jev_also_category_id: number | null;
+		transfer_confidence: number | null;
+		flag_transfer: number;
+		flag_reimbursement: number;
+		excluded: number;
+		excluded_source: string | null;
+	};
+
 	const categoryAnswer = (id: number) =>
 		db
 			.prepare(
@@ -918,7 +952,7 @@ describe("a credit whose category Jev answered unsure, asked for its income (dec
 				FROM transactions WHERE id = ?`,
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<CategoryAnswer>();
 
 	const incomeSourceOf = (id: number) =>
 		db

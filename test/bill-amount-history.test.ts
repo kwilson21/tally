@@ -6,6 +6,7 @@ import { loadBillRows } from "../src/bills/rows";
 import { type BillFields, insertBill, updateBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // Spec §5 `bill_amounts`, §8.4 and decision 101: a bill's amount from a month on. Editing it writes this
 // month's row, earlier months keep theirs, and the bill's page, its edit sheet and its payment matching
@@ -375,7 +376,7 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 	it("writes this month's row with the amount in the same batch, when another write lands first", async () => {
 		// A competing save lands between this save's read and its write: the bill and this month's row go to $17.99.
 		const racing = new Proxy(env.DB, {
-			get(target, prop) {
+			get(target, prop: keyof D1Database) {
 				if (prop === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						await env.DB.batch([
@@ -390,11 +391,11 @@ describe("the writes keep a bill's amount rows with the bill", () => {
 						return env.DB.batch(statements);
 					};
 
-				const value = Reflect.get(target, prop);
+				const value = target[prop];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 
 		expect(
 			await updateBill(racing, BILL, fields({ dueDay: 5 }), false, "2026-10"),

@@ -9,6 +9,7 @@ import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
 import { setMerchantNames } from "./helpers/merchants";
+import { present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Spec §7, decision 79: when a person adds a clearer name or a note to a transaction that still needs
@@ -25,7 +26,31 @@ const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
 /** The background work a save handed to waitUntil, finished. */
 const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
 
-type JevBody = { state: Record<string, unknown> };
+/** The fields of Jev's question these tests read: the merchant name and the bank's own description. */
+type JevState = { merchant?: string; bank_description?: string };
+
+type JevBody = { state: JevState };
+
+/** The bindings a request is served under: the Worker's Env plus the Jev key, which the Env type does not list. */
+type Bindings = Partial<Env> & { JEV_API_KEY?: string };
+
+/** The Tally-picked and Jev-answer columns a test reads back from a transaction row. */
+type AnswerColumns = {
+	category_id: number | null;
+	category_source: string | null;
+	category_confidence: number | null;
+	category_suggestion_id: number | null;
+	jev_category_id: number | null;
+	jev_none_fit: number | null;
+};
+
+/** The columns a test reads back from a transaction row. */
+type RowColumns = {
+	category_id: number | null;
+	category_source: string | null;
+	category_confidence: number | null;
+	note: string | null;
+};
 
 /** A fake Jev: every call is recorded, and answered with Eating Out at `confidence`. */
 function fakeJev(
@@ -61,7 +86,7 @@ const reply = (confidence: number) =>
 async function save(
 	id: number,
 	fields: Record<string, string>,
-	bindings: Record<string, unknown> = { JEV_API_KEY: "jev-key" },
+	bindings: Bindings = { JEV_API_KEY: "jev-key" },
 ) {
 	const response = await transactions.request(
 		`/transactions/${id}`,
@@ -99,15 +124,17 @@ const rowOf = (id: number) =>
 			"SELECT category_id, category_source, category_confidence, note FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first();
+		.first<RowColumns>();
 
 const idOf = async (rawName: string) =>
-	(
-		await db
-			.prepare("SELECT id FROM transactions WHERE raw_name = ?")
-			.bind(rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+	present(
+		(
+			await db
+				.prepare("SELECT id FROM transactions WHERE raw_name = ?")
+				.bind(rawName)
+				.first<{ id: number }>()
+		)?.id,
+	);
 
 const callsUsed = async () =>
 	Number(
@@ -300,18 +327,20 @@ describe("adding a note to a transaction that still needs a category", () => {
 	});
 
 	it("asks nothing for a transaction that already has a category", async () => {
-		const categorized = (
-			await db
-				.prepare(
-					"SELECT id FROM transactions WHERE category_id IS NOT NULL AND is_split = 0 AND parent_id IS NULL AND amount_cents > 0 LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const categorized = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM transactions WHERE category_id IS NOT NULL AND is_split = 0 AND parent_id IS NULL AND amount_cents > 0 LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		const jev = fakeJev();
-		const before = await rowOf(categorized);
+		const before = present(await rowOf(categorized));
 		await save(categorized, {
-			category: String((before as { category_id: number }).category_id),
+			category: String(before.category_id),
 			merchant: "A clearer name",
 			note: "A note nobody had",
 		});
@@ -319,7 +348,7 @@ describe("adding a note to a transaction that still needs a category", () => {
 		expect(jev.bodies).toHaveLength(0);
 		expect(await callsUsed()).toBe(0);
 		expect(await rowOf(categorized)).toMatchObject({
-			category_id: (before as { category_id: number }).category_id,
+			category_id: before.category_id,
 			note: "A note nobody had",
 		});
 	});
@@ -482,13 +511,15 @@ describe("adding a clearer name to a transaction that still needs a category", (
 // (the key is set and the categories switch is on). With Jev off, the category Tally picked stays.
 describe("a one-off name on a category Tally picked (decision 101)", () => {
 	const firstCategory = async () =>
-		(
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 	const pickedByTally = (categoryId: number) =>
 		db
@@ -499,7 +530,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.run();
 
 	/** The edit panel as the browser gets it, with the bindings it is served under. */
-	const panel = async (bindings: Record<string, unknown>) =>
+	const panel = async (bindings: Bindings) =>
 		(
 			await transactions.request(
 				`/transactions/${bakery}?month=all`,
@@ -676,14 +707,16 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	it("folds the note on a 422 redraw that posts another category, since the save keeps that one, and Tally's category brings it back", async () => {
 		const category = await firstCategory();
 
-		const other = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
-				)
-				.bind(category)
-				.first<{ id: number }>()
-		)?.id as number;
+		const other = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
+					)
+					.bind(category)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await pickedByTally(category);
 		fakeJev();
@@ -821,7 +854,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 				"SELECT category_id, category_source, category_confidence, category_suggestion_id, jev_category_id, jev_none_fit FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<Record<string, unknown>>();
+			.first<AnswerColumns>();
 
 	/** The ids of the rows the Settings page lists behind pending suggestions. */
 	const listedRows = async () =>
@@ -1123,7 +1156,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.bind(`part-${crypto.randomUUID()}`, bakery, category)
 			.first<{ id: number }>();
 
-		const partId = part?.id as number;
+		const partId = present(part?.id);
 		const jev = fakeJev(() => reply(0.2));
 		await save(partId, {
 			category: String(category),
@@ -1250,14 +1283,16 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	it("keeps the note on a refund that follows a purchase whose category differs from the row's, since the disabled category can't block it", async () => {
 		const category = await firstCategory();
 
-		const other = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
-				)
-				.bind(category)
-				.first<{ id: number }>()
-		)?.id as number;
+		const other = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
+					)
+					.bind(category)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await pickedByTally(category);
 		await creditLinked(true);
@@ -1472,13 +1507,15 @@ describe("asking again honors what everything else does", () => {
 // pendingForJev classifies, src/transactions/rename.ts jevAsksAbout). Any other row keeps its category.
 describe("a one-off name re-guesses only where Jev can be asked (decision 101)", () => {
 	const firstCategory = async () =>
-		(
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 	/** The bakery row as Tally picked its category, with `extra` columns changed too. */
 	const pickedByTally = (categoryId: number, extra = "") =>
@@ -1709,13 +1746,15 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 
 describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)", () => {
 	const firstCategory = async () =>
-		(
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 	/** The bakery row as a bank credit that Plaid excluded (or, with `source`, someone else did), its category picked by Tally. */
 	const excludedCredit = (categoryId: number, source = "plaid") =>

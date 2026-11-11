@@ -20,6 +20,7 @@ import {
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { categoryAskedSql } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // The re-sort's run state (decision 160): the run and its progress in household_settings (`resort_run`), the rows it
 // moved in `resort_moved_<runId>`, the toast that closes it, and Undo for ten seconds after it. Nothing here calls Jev
@@ -825,6 +826,7 @@ describe("two categories in one run", () => {
 			.bind(`resort_moved_${runId}`)
 			.first<{ value: string }>();
 
+		// SAFETY: finishRun stored this record under resort_moved_<run> as JSON with a rows list of { id, categoryId }.
 		const parsed = JSON.parse(record?.value ?? "{}") as {
 			rows: { id: number; categoryId: number }[];
 		};
@@ -937,6 +939,7 @@ describe("two categories in one run", () => {
 		const result = await finishRun(db, { runId, now: T0 + 5000 });
 		expect(result.moved).toBe(2);
 
+		// SAFETY: the record under resort_moved_<run> is the JSON finishRun wrote, with a rows list of { id, categoryId }.
 		const record = JSON.parse(
 			(
 				await db
@@ -954,6 +957,7 @@ describe("two categories in one run", () => {
 
 describe("finishRun: the category a moved row actually went to", () => {
 	const recordOf = async (runId: string) =>
+		// SAFETY: the record under resort_moved_<run> is the JSON finishRun wrote, with the rows, categories and byCategory it stores.
 		JSON.parse(
 			(
 				await db
@@ -1176,6 +1180,7 @@ describe("finishRun: one finish per sorting instance", () => {
 			pending: 0,
 		});
 
+		// SAFETY: movedRecord reads the record finishRun stored as JSON, which has a rows list of { id }.
 		const parsed = JSON.parse((await movedRecord(runId)) ?? "{}") as {
 			rows: { id: number }[];
 		};
@@ -1218,6 +1223,7 @@ describe("finishRun: one finish per sorting instance", () => {
 		});
 		expect((await readRun(db))?.status).toBe("done");
 
+		// SAFETY: movedRecord reads the record finishRun stored as JSON, which has a rows list of { id }.
 		const parsed = JSON.parse((await movedRecord(runId)) ?? "{}") as {
 			rows: { id: number }[];
 		};
@@ -1283,6 +1289,7 @@ describe("finishRun: one finish per sorting instance", () => {
 			[`resort_moved_${runId}`, "resort_run"].sort(),
 		);
 
+		// SAFETY: movedRecord reads the record finishRun stored as JSON, which has a rows list of { id }.
 		const parsed = JSON.parse((await movedRecord(runId)) ?? "{}") as {
 			rows: { id: number }[];
 		};
@@ -1591,11 +1598,11 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 	});
 
 	/** A db whose next batch is preceded by `before` (the joiner that arrives between the key and the flip). */
-	function beforeNextBatch(before: () => Promise<unknown>): D1Database {
+	function beforeNextBatch(before: () => Promise<void>): D1Database {
 		let fired = false;
 
 		return new Proxy(db, {
-			get(target, prop) {
+			get(target, prop: keyof D1Database) {
 				if (prop === "batch") {
 					return async (statements: D1PreparedStatement[]) => {
 						if (!fired) {
@@ -1607,11 +1614,11 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 					};
 				}
 
-				const value = Reflect.get(target, prop, target);
+				const value = target[prop];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 	}
 
 	it("a joiner arriving between the instance's key and the flip keeps the run open", async () => {

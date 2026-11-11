@@ -5,6 +5,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { app } from "../src/index";
 import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
 import { plaid } from "../src/routes/plaid";
+import { isMethod, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -13,7 +14,18 @@ const BASE = "http://tally.test";
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const encoder = new TextEncoder();
 
-const encode = (value: unknown) =>
+/** A JSON value as these tests build or read one: a Plaid body, a JWT part or a stubbed answer. */
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+type JsonObject = { [key: string]: Json | undefined };
+
+/** The JSON object a Plaid call posted as its body, as the fetch stub reads it back. */
+function bodyOf(init: RequestInit | undefined): JsonObject {
+	// SAFETY: every Plaid call these tests stub posts its body as a JSON object, which the route builds with JSON.stringify.
+	return JSON.parse(String(init?.body)) as JsonObject;
+}
+
+const encode = (value: Json) =>
 	btoa(String.fromCharCode(...encoder.encode(JSON.stringify(value))))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
@@ -26,6 +38,7 @@ async function accessIdentity() {
 	const team = `plaid-route-${identityNumber}.cloudflareaccess.com`;
 	Object.assign(env, { ACCESS_TEAM_DOMAIN: team });
 
+	// SAFETY: generateKey for RSASSA-PKCS1-v1_5 with the sign and verify usages returns a key pair, never one key.
 	const pair = (await crypto.subtle.generateKey(
 		{
 			name: "RSASSA-PKCS1-v1_5",
@@ -56,28 +69,33 @@ async function accessIdentity() {
 		),
 	);
 
+	// SAFETY: exportKey in the jwk format returns a JSON Web Key, the object the route's key check reads.
+	const exported = (await crypto.subtle.exportKey(
+		"jwk",
+		pair.publicKey,
+	)) as JsonWebKey;
+
 	return {
 		jwt: `${signed}.${btoa(String.fromCharCode(...signature))
 			.replaceAll("+", "-")
 			.replaceAll("/", "_")
 			.replace(/=+$/, "")}`,
 		jwk: {
-			...(await crypto.subtle.exportKey("jwk", pair.publicKey)),
+			...exported,
 			kid: "plaid-route-key",
 		},
 	};
 }
 
 async function post(path: string, jwt?: string, body = "") {
-	return exports.default.fetch(BASE + path, {
-		method: "POST",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(jwt ? { "Cf-Access-Jwt-Assertion": jwt } : {}),
-		},
-		body,
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
 	});
+
+	if (jwt) headers.set("Cf-Access-Jwt-Assertion", jwt);
+
+	return exports.default.fetch(BASE + path, { method: "POST", headers, body });
 }
 
 /** Plaid's answer before an Item's data is ready, which a new bank's first sync gets (spec §10). */
@@ -94,22 +112,22 @@ const NOT_READY_PAGE = {
  * Answers the calls of a link by the URL each one ends with. The first sync's calls default to no accounts and
  * Plaid's not-ready page; `answers` replaces either or adds a call. A `Response` answer is returned as it is.
  */
-function routePlaid(jwk: object, answers: Record<string, unknown>) {
-	const routes: Record<string, unknown> = {
-		"/accounts/get": { accounts: [] },
-		"/transactions/sync": NOT_READY_PAGE,
-		...answers,
-	};
+function routePlaid(jwk: JsonWebKey, answers: Record<string, Json | Response>) {
+	const routes = new Map<string, Json | Response>([
+		["/accounts/get", { accounts: [] }],
+		["/transactions/sync", NOT_READY_PAGE],
+		...Object.entries(answers),
+	]);
 
 	return async (input: string | URL | Request) => {
 		const url = String(input);
 
 		if (url.includes("cloudflareaccess.com"))
 			return Response.json({ keys: [jwk] });
-		const ending = Object.keys(routes).find((path) => url.endsWith(path));
+		const ending = [...routes.keys()].find((path) => url.endsWith(path));
 
 		if (ending === undefined) throw new Error(`unrouted Plaid call ${url}`);
-		const answer = routes[ending];
+		const answer = routes.get(ending);
 
 		return answer instanceof Response ? answer : Response.json(answer);
 	};
@@ -182,15 +200,13 @@ describe("Plaid routes", () => {
 			.bind(await encryptToken("access-private", KEY))
 			.first<{ id: number }>();
 
-		const requests: Array<Record<string, unknown>> = [];
+		const requests: JsonObject[] = [];
 		vi.stubGlobal(
 			"fetch",
 			async (input: string | URL | Request, init?: RequestInit) => {
 				if (String(input).includes("cloudflareaccess.com"))
 					return Response.json({ keys: [jwk] });
-				requests.push(
-					JSON.parse(String(init?.body)) as Record<string, unknown>,
-				);
+				requests.push(bodyOf(init));
 
 				return Response.json({ link_token: "update-link" });
 			},
@@ -269,11 +285,11 @@ describe("Plaid routes", () => {
 			let raced = false;
 
 			return new Proxy(env.DB, {
-				get(target, prop) {
+				get(target, prop: keyof D1Database) {
 					if (prop !== "prepare") {
-						const value = Reflect.get(target, prop);
+						const value = target[prop];
 
-						return typeof value === "function" ? value.bind(target) : value;
+						return isMethod(value) ? value.bind(target) : value;
 					}
 
 					return (sql: string) => {
@@ -282,6 +298,7 @@ describe("Plaid routes", () => {
 						if (raced || !RELINK_WRITE.test(sql)) return statement;
 						raced = true;
 
+						// SAFETY: the stub has only the bind(...).run() path the relink route takes for this one guarded write.
 						return {
 							bind: (...values: unknown[]) => {
 								const bound = statement.bind(...values);
@@ -294,7 +311,7 @@ describe("Plaid routes", () => {
 									},
 								};
 							},
-						} as unknown as D1PreparedStatement;
+						} as D1PreparedStatement;
 					};
 				},
 			});
@@ -328,7 +345,7 @@ describe("Plaid routes", () => {
 				)
 				.first<{ id: number }>();
 
-			return row?.id as number;
+			return present(row?.id);
 		}
 
 		it("still answers the success path when a sync cleared the flag first", async () => {
@@ -655,7 +672,7 @@ describe("Plaid routes", () => {
 
 	it("creates a Link token with a stable non-email user id", async () => {
 		const { jwt, jwk } = await accessIdentity();
-		const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+		const requests: Array<{ url: string; body: JsonObject }> = [];
 		vi.stubGlobal(
 			"fetch",
 			async (input: string | URL | Request, init?: RequestInit) => {
@@ -663,10 +680,7 @@ describe("Plaid routes", () => {
 
 				if (url.includes("cloudflareaccess.com"))
 					return Response.json({ keys: [jwk] });
-				requests.push({
-					url,
-					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-				});
+				requests.push({ url, body: bodyOf(init) });
 
 				return Response.json({ link_token: "link-value" });
 			},
@@ -706,14 +720,12 @@ describe("Plaid routes", () => {
 			"/institutions/get_by_id": { institution: { name: "First Bank" } },
 		});
 
-		const syncBodies: Record<string, unknown>[] = [];
+		const syncBodies: JsonObject[] = [];
 		vi.stubGlobal(
 			"fetch",
 			async (input: string | URL | Request, init?: RequestInit) => {
 				if (String(input).endsWith("/transactions/sync"))
-					syncBodies.push(
-						JSON.parse(String(init?.body)) as Record<string, unknown>,
-					);
+					syncBodies.push(bodyOf(init));
 
 				return route(input);
 			},
@@ -852,9 +864,9 @@ describe("Plaid routes", () => {
 		expect(JSON.parse(record?.value ?? "null")?.strokes.bank).toBe(
 			todayIn(DEFAULT_TIME_ZONE),
 		);
-		expect(
-			await decryptToken(row?.access_token_encrypted as ArrayBuffer, KEY),
-		).toBe("access-private");
+		expect(await decryptToken(present(row?.access_token_encrypted), KEY)).toBe(
+			"access-private",
+		);
 	});
 
 	it("a bank linked after setup is done asks nothing again: the questions and the answers stay (decision 148, #578)", async () => {
@@ -960,9 +972,9 @@ describe("Plaid routes", () => {
 		}>();
 
 		expect(row?.institution_name).toBe("Your bank");
-		expect(
-			await decryptToken(row?.access_token_encrypted as ArrayBuffer, KEY),
-		).toBe("access-private");
+		expect(await decryptToken(present(row?.access_token_encrypted), KEY)).toBe(
+			"access-private",
+		);
 		expect(errors).toHaveBeenCalledTimes(1);
 		expect(errors).toHaveBeenCalledWith("Plaid request failed", {
 			request_id: "req-name-lookup",
@@ -1035,8 +1047,7 @@ describe("Plaid routes", () => {
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 
-		const plaidRequests: Array<{ url: string; body: Record<string, unknown> }> =
-			[];
+		const plaidRequests: Array<{ url: string; body: JsonObject }> = [];
 
 		await env.DB.exec(
 			"CREATE TRIGGER fail_plaid_insert BEFORE INSERT ON plaid_items BEGIN SELECT RAISE(ABORT, 'failed insert'); END",
@@ -1048,10 +1059,7 @@ describe("Plaid routes", () => {
 					return Response.json({ keys: [jwk] });
 				}
 
-				plaidRequests.push({
-					url: String(input),
-					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-				});
+				plaidRequests.push({ url: String(input), body: bodyOf(init) });
 
 				if (String(input).endsWith("/item/public_token/exchange")) {
 					return Response.json({
@@ -1157,8 +1165,7 @@ describe("Plaid routes", () => {
 			.bind(new Uint8Array([1, 2, 3]))
 			.run();
 
-		const plaidRequests: Array<{ url: string; body: Record<string, unknown> }> =
-			[];
+		const plaidRequests: Array<{ url: string; body: JsonObject }> = [];
 
 		vi.stubGlobal(
 			"fetch",
@@ -1167,10 +1174,7 @@ describe("Plaid routes", () => {
 					return Response.json({ keys: [jwk] });
 				}
 
-				plaidRequests.push({
-					url: String(input),
-					body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-				});
+				plaidRequests.push({ url: String(input), body: bodyOf(init) });
 
 				if (String(input).endsWith("/item/public_token/exchange")) {
 					return Response.json({

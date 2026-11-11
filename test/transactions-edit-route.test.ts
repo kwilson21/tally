@@ -9,10 +9,14 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { getTransaction, saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { isMethod, present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
 type TestApp = { Bindings: Env; Variables: { actor: string } };
+
+/** A row the tests read back by column name. */
+type Row = Record<string, string | number | null>;
 
 const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
@@ -24,14 +28,17 @@ async function get(path: string) {
 }
 
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -43,11 +50,12 @@ let bakery: number;
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	await saveAiSwitches(env.DB, { details: false });
-	bakery = (
-		await env.DB.prepare(
-			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
-		).first<{ id: number }>()
-	)?.id as number;
+
+	const bakeryRow = await env.DB.prepare(
+		"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+	).first<{ id: number }>();
+
+	bakery = present(bakeryRow).id;
 });
 
 describe("a bank change's bill names end when a person sets the category (decision 99)", () => {
@@ -78,9 +86,9 @@ describe("a bank change's bill names end when a person sets the category (decisi
 					.first(),
 			).toEqual({ split_removed_from_cents: null, split_removed_bills: null });
 
-			const data = (await (
+			const data: { transactions: Row[] } = await (
 				await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-			).json()) as { transactions: Record<string, unknown>[] };
+			).json();
 
 			expect(data.transactions.find((row) => row.id === bakery)).toMatchObject({
 				split_removed_bills: null,
@@ -525,7 +533,7 @@ describe("GET /transactions/:id", () => {
 				.bind(refund?.id)
 				.first(),
 		).toEqual({ refund_of_id: purchase?.id });
-		expect(await getTransaction(env.DB, refund?.id as number)).toMatchObject({
+		expect(await getTransaction(env.DB, present(refund).id)).toMatchObject({
 			refundOfId: purchase?.id,
 			merchantRuleCategoryId: 1,
 			followsPurchase: true,
@@ -1043,13 +1051,13 @@ describe("GET /transactions/:id", () => {
 	});
 
 	it("names the store in the rule tick and its hint, never a transaction's own name (#353)", async () => {
-		const merchantKey = (
-			await env.DB.prepare(
-				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
-			)
-				.bind(bakery)
-				.first<{ key: string }>()
-		)?.key as string;
+		const merchantRow = await env.DB.prepare(
+			"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+		)
+			.bind(bakery)
+			.first<{ key: string }>();
+
+		const merchantKey = present(merchantRow).key;
 
 		const savedName = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
@@ -1066,11 +1074,13 @@ describe("GET /transactions/:id", () => {
 			).bind(bakery),
 		]);
 
-		const part = (await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, '2026-10-02', 300, 'SQ *LOCAL BAKERY 4432', ?) RETURNING id",
-		)
-			.bind(bakery)
-			.first<{ id: number }>()) as { id: number };
+		const part = present(
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, '2026-10-02', 300, 'SQ *LOCAL BAKERY 4432', ?) RETURNING id",
+			)
+				.bind(bakery)
+				.first<{ id: number }>(),
+		);
 
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
@@ -1248,7 +1258,7 @@ describe("POST /transactions/:id", () => {
 				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
 			)
 				.bind(bakery)
-				.first<Record<string, unknown>>();
+				.first<Row>();
 
 			if (field === "note")
 				expect(saved).toMatchObject({ note: "New note", note_guessed: 0 });
@@ -1646,16 +1656,20 @@ describe("POST /transactions/:id", () => {
 			)
 				.bind(bakery)
 				.run();
-			await post(`/transactions/${bakery}`, {
-				merchant: "Local Bakery",
-				note: "matrix",
-				back: "/transactions",
-				income_was: String(baseIncome),
-				...(nextIncome ? { income: "1" } : {}),
-				creditReviewed_was: String(baseReview),
-				...(choice ? { creditReviewed: "1" } : {}),
-				creditReviewedVisible: "1",
-			});
+
+			const fields = new Map([
+				["merchant", "Local Bakery"],
+				["note", "matrix"],
+				["back", "/transactions"],
+				["income_was", String(baseIncome)],
+				["creditReviewed_was", String(baseReview)],
+				["creditReviewedVisible", "1"],
+			]);
+
+			if (nextIncome) fields.set("income", "1");
+
+			if (choice) fields.set("creditReviewed", "1");
+			await post(`/transactions/${bakery}`, Object.fromEntries(fields));
 			expect(
 				await env.DB.prepare(
 					"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id=?",
@@ -1998,11 +2012,11 @@ describe("who picked the category", () => {
 
 describe("excluding a transaction (spec §6, #27)", () => {
 	const transferId = async () =>
-		(
+		present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'ONLINE TRANSFER TO SAV ...5678' ORDER BY date DESC",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 	// The edit form's box, not anything in the list's filters.
 	const checkbox =
@@ -2073,11 +2087,11 @@ describe("excluding a transaction (spec §6, #27)", () => {
 
 describe("the edit panel's layout (owner's pick C, #27)", () => {
 	const reimbursement = async () =>
-		(
+		present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'DR MARTIN FAMILY PRACTICE REFUND'",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 	it("keeps each transaction detail in its own closed row", async () => {
 		const { html } = await get(`/transactions/${bakery}`);
@@ -2202,9 +2216,10 @@ describe("a For person removed while the panel is saving", () => {
 		// batch writes, the way settings removes a person between this page's load and its write.
 		let removed = false;
 
-		const removingDb = new Proxy(env.DB, {
+		const removingDb: D1Database = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				// SAFETY: the code under test reads only D1 member names (batch, prepare, ...), each a key of D1Database.
+				const value: unknown = target[property as keyof D1Database];
 
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
@@ -2223,16 +2238,16 @@ describe("a For person removed while the panel is saving", () => {
 						return target.batch(statements);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
 
 		const editRoute = new Hono<TestApp>();
 		editRoute.use("*", async (c, next) => {
 			c.set("actor", "demo");
 			await next();
 		});
-		editRoute.route("/", transactions as unknown as Hono<TestApp>);
+		editRoute.route("/", transactions);
 
 		const res = await editRoute.request(
 			`/transactions/${bakery}`,
@@ -2459,7 +2474,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 	const linkingSave = (
 		purchase: number,
 		fields: Record<string, string> = {},
-	): Record<string, string> => ({
+	) => ({
 		back: "/transactions",
 		category: "new",
 		new_category_name: NEW_NAME,
@@ -2581,9 +2596,10 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		// Sam is removed just before the save's batch writes, as settings removes a person mid-save.
 		let removed = false;
 
-		const removingDb = new Proxy(env.DB, {
+		const removingDb: D1Database = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				// SAFETY: the code under test reads only D1 member names (batch, prepare, ...), each a key of D1Database.
+				const value: unknown = target[property as keyof D1Database];
 
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
@@ -2602,16 +2618,16 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 						return target.batch(statements);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
 
 		const editRoute = new Hono<TestApp>();
 		editRoute.use("*", async (c, next) => {
 			c.set("actor", "demo");
 			await next();
 		});
-		editRoute.route("/", transactions as unknown as Hono<TestApp>);
+		editRoute.route("/", transactions);
 
 		const res = await editRoute.request(
 			`/transactions/${refund}`,

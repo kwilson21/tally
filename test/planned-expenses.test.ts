@@ -24,20 +24,32 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
+import { isMethod, present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
-const post = (path: string, form: Record<string, string>, htmx = true) =>
-	exports.default.fetch(BASE + path, {
+const post = (path: string, form: Record<string, string>, htmx = true) => {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
+	return exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			...(htmx ? { "HX-Request": "true" } : {}),
-			"content-type": "application/x-www-form-urlencoded",
-		},
+		headers,
 		body: new URLSearchParams(form),
 	});
+};
+
+/** The HX-Trigger header of a response, read as the type the test names (the keys it checks). */
+const hxTriggerOf = <Trigger extends object>(res: Response): Trigger => {
+	const header: Trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
+	return header;
+};
 
 // The month the tests plan in is the household's current month; the previous one is the month a plan ended in.
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -205,25 +217,54 @@ describe("planned payments in the budget", () => {
 		// A plan takes the payment between the matcher's read and its write: the write's guard leaves it out.
 		let raced = false;
 
-		const db = {
-			prepare: (query: string) => {
-				const statement = env.DB.prepare(query);
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop !== "prepare") {
+					const value: unknown = Object(target)[prop];
 
-				if (!query.startsWith("INSERT OR IGNORE INTO bill_payments"))
-					return statement;
+					return isMethod(value) ? value.bind(target) : value;
+				}
 
-				return {
-					bind: (...values: unknown[]) => ({
-						run: async () => {
-							raced = true;
-							await plan("Car registration", 18000, MONTH, 9707);
+				return (query: string) => {
+					const statement = target.prepare(query);
 
-							return statement.bind(...values).run();
+					if (!query.startsWith("INSERT OR IGNORE INTO bill_payments"))
+						return statement;
+
+					return new Proxy(statement, {
+						get(stmt, method) {
+							if (method !== "bind") {
+								const forwarded: unknown = Object(stmt)[method];
+
+								return isMethod(forwarded) ? forwarded.bind(stmt) : forwarded;
+							}
+
+							return (...values: unknown[]) => {
+								const bound = stmt.bind(...values);
+
+								return new Proxy(bound, {
+									get(boundStmt, name) {
+										if (name === "run")
+											return async () => {
+												raced = true;
+												await plan("Car registration", 18000, MONTH, 9707);
+
+												return boundStmt.run();
+											};
+
+										const forwarded: unknown = Object(boundStmt)[name];
+
+										return isMethod(forwarded)
+											? forwarded.bind(boundStmt)
+											: forwarded;
+									},
+								});
+							};
 						},
-					}),
-				} as unknown as D1PreparedStatement;
+					});
+				};
 			},
-		} as unknown as D1Database;
+		});
 
 		expect(await matchBillPayments(db, TODAY)).toBe(0);
 		expect(raced).toBe(true);
@@ -271,9 +312,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, LAST_MONTH);
 		const dropped = await post(`/plans/${id}/drop`, {});
 
-		const trigger = JSON.parse(dropped.headers.get("HX-Trigger") ?? "{}") as {
+		const trigger = hxTriggerOf<{
 			toast: { undo: string; undoExpiresInMs: number; message: string };
-		};
+		}>(dropped);
 
 		expect(trigger.toast.message).toBe("Dropped Car registration, $180.00.");
 		expect(trigger.toast.undoExpiresInMs).toBe(10000);
@@ -323,11 +364,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		const deleted = await post(`/plans/${id}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		await post("/plans/undo-delete", { token });
 		const again = await post("/plans/undo-delete", { token });
@@ -338,11 +377,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		const deleted = await post(`/plans/${id}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		const restored = await post("/plans/undo-delete", { token });
 		const body = await restored.text();
@@ -744,7 +781,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 		const header = ok.headers.get("HX-Trigger") ?? "";
 		expect(header).not.toMatch(/[^\x20-\x7e]/);
-		const trigger = JSON.parse(header) as { toast: { message: string } };
+		const trigger: { toast: { message: string } } = JSON.parse(header);
 		expect(trigger.toast.message).toBe("Planned Mom’s car, $10.00.");
 	});
 
@@ -1026,11 +1063,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		await env.DB.batch([
 			env.DB.prepare(
@@ -1052,11 +1087,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		const restored = await post("/plans/undo-delete", { token });
 		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
@@ -1103,11 +1136,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
 			.bind(tx)
@@ -1158,11 +1189,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 			const id = await plan("Car registration", 18000, MONTH, tx);
 			const deleted = await post(`/plans/${id}/delete`, {});
 
-			const token = (
-				JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-					toast: { undo: string };
-				}
-			).toast.undo;
+			const token = hxTriggerOf<{
+				toast: { undo: string };
+			}>(deleted).toast.undo;
 
 			await apply(tx);
 			const restored = await post("/plans/undo-delete", { token });
@@ -1188,11 +1217,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		await saveSplit(
 			env.DB,
@@ -1224,19 +1251,17 @@ describe("editing a paid plan's month keeps its payment only while the payment c
 		id: number,
 		month: string,
 		{ name = "Car registration", amount = "180", opener = false } = {},
-	) =>
-		post(`/plans/${id}`, {
-			name,
-			amount,
-			month,
-			...(opener ? { opener: "plan" } : {}),
-		});
+	) => {
+		const form = { name, amount, month };
+
+		return post(`/plans/${id}`, opener ? { ...form, opener: "plan" } : form);
+	};
 
 	const trigger = async (res: Response) =>
-		JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+		hxTriggerOf<{
 			toast: { message: string };
 			announce: string;
-		};
+		}>(res);
 
 	const linkOf = async (id: number) =>
 		(
@@ -1472,10 +1497,10 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			});
 
 		const planTrigger = async (res: Response) =>
-			JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			hxTriggerOf<{
 				toast: { message: string };
 				announce: string;
-			};
+			}>(res);
 
 		const linkOf = async (planId: number) =>
 			(
@@ -1516,11 +1541,9 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			const { tx, planId } = await splitPaidPlan(9842);
 			const deleted = await post(`/plans/${planId}/delete`, {});
 
-			const token = (
-				JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-					toast: { undo: string };
-				}
-			).toast.undo;
+			const token = hxTriggerOf<{
+				toast: { undo: string };
+			}>(deleted).toast.undo;
 
 			const restored = await planTrigger(
 				await post("/plans/undo-delete", { token }),
@@ -1660,11 +1683,12 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop === "batch") return around;
-				const value = Reflect.get(target, prop);
 
-				return typeof value === "function" ? value.bind(target) : value;
+				const value: unknown = Object(target)[prop];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 
 	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
 	const racingWith = (race: string, bind: (number | null)[]) =>
@@ -1922,11 +1946,9 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const planId = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${planId}/delete`, {});
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		await splitInTwo(tx, 12000, 18000);
 		const [first] = await partIds(tx);
@@ -2285,19 +2307,20 @@ describe("excluding a payment that a bill or a plan pays", () => {
 				"content-type": "application/x-www-form-urlencoded",
 			},
 			body: new URLSearchParams([
-				...ids.map((id) => ["ids", String(id)] as [string, string]),
+				...ids.map((id): [string, string] => ["ids", String(id)]),
 				["back", "/transactions"],
 			]),
 		});
 
 	const announced = async (ids: number[]) => {
-		const trigger = JSON.parse(
-			(await exclude(ids)).headers.get("HX-Trigger") ?? "{}",
-		);
+		const trigger = hxTriggerOf<{
+			toast: { message: string };
+			announce: string;
+		}>(await exclude(ids));
 
 		expect(trigger.toast.message).toBe(trigger.announce);
 
-		return trigger.announce as string;
+		return trigger.announce;
 	};
 
 	it("says a plan's payment still counts, and counts bills and plans together in one sentence", async () => {
@@ -2396,11 +2419,9 @@ describe("a plan's answer names its address: Bills, or the plan's own page after
 		const deleted = await post(`/plans/${id}/delete`, {});
 		expect(deleted.headers.get("HX-Push-Url")).toBe("/bills");
 
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
 
 		const undone = await post("/plans/undo-delete", { token });
 		expect(undone.headers.get("HX-Push-Url")).toBe("/bills");
@@ -2440,13 +2461,11 @@ describe("a plan's answer names its address: Bills, or the plan's own page after
 describe("a save whose plan is deleted mid-save says it is gone, not saved (Codex 4278749957)", () => {
 	const gone = "That planned expense is already gone.";
 
-	const save = (id: number, opener: boolean) =>
-		post(`/plans/${id}`, {
-			name: "Car registration",
-			amount: "180",
-			month: MONTH,
-			...(opener ? { opener: "plan" } : {}),
-		});
+	const save = (id: number, opener: boolean) => {
+		const form = { name: "Car registration", amount: "180", month: MONTH };
+
+		return post(`/plans/${id}`, opener ? { ...form, opener: "plan" } : form);
+	};
 
 	it.each([
 		{ origin: "the plan's own page", opener: true },
@@ -2506,10 +2525,10 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 		post(`/transactions/${id}`, { date, amount, back: "/transactions" });
 
 	const trigger = async (res: Promise<Response>) =>
-		JSON.parse((await res).headers.get("HX-Trigger") ?? "{}") as {
+		hxTriggerOf<{
 			toast: { message: string };
 			announce: string;
-		};
+		}>(await res);
 
 	/** A cash entry in the cash account, as Add cash stores one, dated `date`. */
 	async function cashEntry(amountCents: number, date: string) {
@@ -2574,13 +2593,13 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 		const id = await cashEntry(30000, dateIn(MONTH));
 		await splitInTwo(id);
 
-		const part = (
+		const part = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const planId = await plan("Car registration", 18000, MONTH, part);
 		const moved = await trigger(editCash(id, dateIn(LAST_MONTH), "300"));

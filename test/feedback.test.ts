@@ -17,6 +17,8 @@ import {
 	fileFeedbackIssue,
 	retryFeedback,
 } from "../src/routes/feedback";
+import { envWith, fakeFetch } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -36,20 +38,21 @@ function productionApp(
 	});
 	app.route("/", feedback);
 
+	const bindings = envWith(env, {
+		DEMO: options.demo ? "true" : "false",
+		FEEDBACK_GITHUB_TOKEN: token,
+		FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
+		FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
+		APP_VERSION: options.appVersion,
+	});
+
 	return {
 		fetch(path: string, init?: RequestInit, waitUntil = vi.fn()) {
-			return app.fetch(
-				new Request(BASE + path, init),
-				{
-					...env,
-					DEMO: options.demo ? "true" : "false",
-					FEEDBACK_GITHUB_TOKEN: token,
-					FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
-					FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
-					APP_VERSION: options.appVersion,
-				} as unknown as Env,
-				{ waitUntil, passThroughOnException() {}, props: {} },
-			);
+			return app.fetch(new Request(BASE + path, init), bindings, {
+				waitUntil,
+				passThroughOnException() {},
+				props: {},
+			});
 		},
 	};
 }
@@ -702,17 +705,17 @@ it("files the expected GitHub issue without logging the token or message", async
 
 	if (!row) throw new Error("feedback fixture was not inserted");
 
-	const fetchStub = vi.fn(
-		async () => new Response(JSON.stringify({ number: 136 }), { status: 201 }),
+	const fetchStub = fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number: 136 }), { status: 201 }),
+		),
 	);
 
 	const log = vi.spyOn(console, "info").mockImplementation(() => {});
 	await fileFeedbackIssue(env.DB, "secret-token", row, fetchStub);
 
-	const [url, init] = fetchStub.mock.calls[0] as unknown as [
-		string,
-		RequestInit,
-	];
+	const [url, init] = present(fetchStub.mock.calls[0]);
 
 	expect(url).toBe(
 		"https://api.github.com/repos/kwilson21/tally-feedback/issues",
@@ -762,13 +765,17 @@ it("adds only approved coarse technical fields and no replay link to the private
 
 	if (!row) throw new Error("feedback fixture was not inserted");
 
-	const fetchStub = vi.fn(
-		async () => new Response(JSON.stringify({ number: 147 }), { status: 201 }),
+	const fetchStub = fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number: 147 }), { status: 201 }),
+		),
 	);
 
 	await fileFeedbackIssue(env.DB, "fixture-token", row, fetchStub);
-	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	const body = JSON.parse(String(init?.body)).body as string;
+	const [, init] = present(fetchStub.mock.calls[0]);
+	const sent: { body: string } = JSON.parse(String(init?.body));
+	const body = sent.body;
 	expect(body).toContain("Device category: Unknown");
 	expect(body).toContain("Recent error category: TypeError");
 	expect(body).not.toContain("replay");
@@ -1026,8 +1033,16 @@ it("accepts a same-origin POST without an Origin header", async () => {
 		from: "/",
 	});
 
-	delete (init.headers as Record<string, string>).Origin;
-	expect((await productionApp().fetch("/feedback", init)).status).toBe(303);
+	const { headers, ...rest } = init;
+	const { Origin: _origin, ...withoutOrigin } = headers;
+	expect(
+		(
+			await productionApp().fetch("/feedback", {
+				...rest,
+				headers: withoutOrigin,
+			})
+		).status,
+	).toBe(303);
 });
 
 it("rejects paths that normalize to a protocol-relative URL", async () => {
@@ -1082,8 +1097,11 @@ describe("feedback filing safeguards", () => {
 
 		if (!row) throw new Error("missing fixture");
 
-		const fetchStub = vi.fn(
-			async () => new Response(JSON.stringify({ number: 1 }), { status: 201 }),
+		const fetchStub = fakeFetch(
+			vi.fn(
+				async (_input: RequestInfo | URL, _init?: RequestInit) =>
+					new Response(JSON.stringify({ number: 1 }), { status: 201 }),
+			),
 		);
 
 		await Promise.all([
@@ -1091,8 +1109,8 @@ describe("feedback filing safeguards", () => {
 			fileFeedbackIssue(env.DB, "token", row, fetchStub),
 		]);
 		expect(fetchStub).toHaveBeenCalledOnce();
-		const calls = fetchStub.mock.calls as unknown as [string, RequestInit][];
-		const body = JSON.parse(String(calls[0]?.[1].body));
+		const [, init] = present(fetchStub.mock.calls[0]);
+		const body = JSON.parse(String(init?.body));
 		expect(body.title).toBe(`Bug: ${"x".repeat(59)}😀`);
 		expect(body.body).toMatch(/```\n[^`]*\n```$/);
 	});
@@ -1148,14 +1166,19 @@ async function insertFeedback(message = "Why?", extra = "") {
 }
 
 const filed = (number: number) =>
-	vi.fn(async () => new Response(JSON.stringify({ number }), { status: 201 }));
+	fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number }), { status: 201 }),
+		),
+	);
 
 it("keeps #123, @someone and backticks in feedback from becoming links or breaking out", async () => {
 	await insertFeedback("See #123 and @someone ``` done");
 	const fetchStub = filed(7);
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
-	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	const { body } = JSON.parse(String(init.body));
+	const [, init] = present(fetchStub.mock.calls[0]);
+	const { body } = JSON.parse(String(init?.body));
 	expect(body).toContain("````\nSee #123 and @someone ``` done\n````");
 });
 
@@ -1220,13 +1243,16 @@ it("strips legacy query strings before filing feedback", async () => {
 		.bind("/accounts?x=`@someone")
 		.run();
 
-	const fetchStub = vi.fn(
-		async () => new Response(JSON.stringify({ number: 3 }), { status: 201 }),
+	const fetchStub = fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number: 3 }), { status: 201 }),
+		),
 	);
 
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
-	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	expect(JSON.parse(String(init.body)).body).toContain("Page: ` /accounts `");
+	const [, init] = present(fetchStub.mock.calls[0]);
+	expect(JSON.parse(String(init?.body)).body).toContain("Page: ` /accounts `");
 });
 
 it("files a report whose page has a huge number of backtick runs", async () => {

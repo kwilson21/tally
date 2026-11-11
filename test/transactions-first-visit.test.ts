@@ -4,13 +4,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 // The first visit's empty Transactions list (spec §8.5, decisions 54, 55 and 72): "nothing at all"
 // means no transaction in any month, so the family app says "Link a bank" or "Importing" instead of
 // "No transactions match".
 
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 
 // A signed-in family member, as the Access middleware sets one, so writes have an actor.
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
@@ -286,13 +288,15 @@ describe("the empty-list check", () => {
 						return target.prepare(statement);
 					};
 
-				const value = Reflect.get(target, prop);
+				// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 database it wraps
+				// is exactly what the code under test does, and an absent key reads as undefined.
+				const value: unknown = target[prop as keyof D1Database];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
-		return { sql, bindings: { ...family, DB: db } as unknown as Env };
+		return { sql, bindings: envWith(family, { DB: db }) };
 	}
 
 	it("runs only when the list is empty", async () => {
@@ -416,8 +420,10 @@ describe("the page after the first cash entry", () => {
 			confirm: "1",
 		});
 
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+		// SAFETY: a cash delete answers with an HX-Trigger header whose toast carries the undo token as a string.
+		const token: string = JSON.parse(
+			deleted.res.headers.get("HX-Trigger") ?? "{}",
+		).toast.undo;
 
 		const restored = await post("/transactions/undo-cash-delete", {
 			token,
@@ -452,8 +458,10 @@ describe("the page after the first cash entry", () => {
 			confirm: "1",
 		});
 
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+		// SAFETY: a cash delete answers with an HX-Trigger header whose toast carries the undo token as a string.
+		const token: string = JSON.parse(
+			deleted.res.headers.get("HX-Trigger") ?? "{}",
+		).toast.undo;
 
 		const restored = await post("/transactions/undo-cash-delete", {
 			token,

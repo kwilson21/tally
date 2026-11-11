@@ -3,18 +3,21 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { envWith } from "./helpers/doubles";
 
 // Home once a new family's setup is done (spec §8.8, decision 148): setup is done at the budgets stroke, and from then on Home
 // is plain Home. Before that, a family's setup is on its own pages (/setup, setup-route.test.ts), and Home sends them there.
 // Home loads no Plaid Link: it has no Link a bank any more.
-const family = { ...env, DEMO: "false" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" as const });
 
-const plaidFamily = {
-	...family,
+const plaidFamily = envWith(family, {
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-} as unknown as Env;
+});
+
+/** A JSON value as the household record stores it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 const PLAID_MODULE = 'src="/js/plaid-link.js"';
 
@@ -24,7 +27,7 @@ const page = async (bindings: Env) => {
 	return (await res.text()).replaceAll("&#39;", "'");
 };
 
-const writeRecord = (value: unknown) =>
+const writeRecord = (value: Json) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 	)
@@ -90,7 +93,7 @@ describe("Home once setup is done, and the demo", () => {
 	});
 
 	it("the demo never shows setup, even with no first_tally record", async () => {
-		const html = await page({ ...env, DEMO: "true" } as unknown as Env);
+		const html = await page(envWith(env, { DEMO: "true" as const }));
 		expect(html).not.toContain("Five strokes");
 		expect(html).not.toContain("Your first week");
 		expect(html).not.toContain('id="setup-top"');
@@ -367,10 +370,11 @@ describe("Home's routes are setup's until setup is done (decision 148, #772)", (
 			await readingOneBank();
 			await writeRecord({ strokes: { bank: today() }, budgets: {} });
 
-			const res = await home.request(`/budget/${await firstCategory()}`, {}, {
-				...env,
-				DEMO: "true",
-			} as unknown as Env);
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				envWith(env, { DEMO: "true" as const }),
+			);
 
 			expect(res.status).toBe(200);
 			expect(res.headers.get("Location")).toBeNull();

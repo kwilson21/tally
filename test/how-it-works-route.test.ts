@@ -10,6 +10,7 @@ import { destinations } from "../src/routes/destinations";
 import { home } from "../src/routes/home";
 import { howItWorks } from "../src/routes/how-it-works";
 import { transactions } from "../src/routes/transactions";
+import { envWith } from "./helpers/doubles";
 import { clearMerchants, seedMerchant } from "./helpers/merchants";
 import { pinClock } from "./pinned-clock";
 
@@ -31,7 +32,7 @@ const decodeHtml = (html: string) =>
 		.replaceAll("&quot;", '"')
 		.replaceAll("&amp;", "&");
 
-const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+const notDemo = envWith(env, { DEMO: "false" });
 
 const monthName = () =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
@@ -829,9 +830,13 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 			],
 		] as const) {
 			// The demo's banner also links to How Tally works (Start here), so the Why? link is the one that isn't that.
-			const hrefs = [...accountsHtml.matchAll(/href="(\/how-it-works#[^"]+)"/g)]
-				.map((m) => m[1])
-				.filter((href) => href !== "/how-it-works#start-here");
+			const hrefs = [
+				...accountsHtml.matchAll(/href="(\/how-it-works#[^"]+)"/g),
+			].flatMap((m) => {
+				const href = m[1] ?? "";
+
+				return href !== "/how-it-works#start-here" ? [href] : [];
+			});
 
 			expect(hrefs).toEqual(["/how-it-works#net-worth"]);
 			// The anchor is a real section id on the page it points to.
@@ -1490,7 +1495,7 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 });
 
 describe("How Tally works' first budget, in Budget and safe to spend (#774)", () => {
-	const demoBindings = { ...env, DEMO: "true" } as unknown as Env;
+	const demoBindings = envWith(env, { DEMO: "true" });
 
 	const familyPage = async () =>
 		decodeHtml(

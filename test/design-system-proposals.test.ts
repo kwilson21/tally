@@ -10,6 +10,8 @@ import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
 import css from "../src/styles/app.css?raw";
 import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
+import { envWith } from "./helpers/doubles";
+import { itemAt } from "./helpers/present";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
@@ -17,7 +19,7 @@ const get = async (path: string) => {
 	return { res, html: await res.text() };
 };
 
-const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+const notDemo = envWith(env, { DEMO: "false" });
 
 // A picture of a screen, as the proposals draw it (labelled, inert).
 const PICTURE = /role="img" aria-label="[^"]*, on (a phone|desktop)"/g;
@@ -178,18 +180,19 @@ function firesByItself(html: string): string[] {
 		spellings(name, HTMX.prefix),
 	);
 
-	return (
-		[...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)]
-			.map((m) => m[0])
-			// A switch that saves when flipped (#606) posts on its own change: a press that inert stops. Its form has no
-			// hx-trigger (htmx's default for a form is its submit), and both are checked by the inert test above.
-			.filter((raw) => !/\shx-trigger="change"/.test(raw))
-			.filter((raw) =>
-				[...attributes(raw).keys()].some((name) =>
-					names.some((p) => name.startsWith(p)),
-				),
-			)
-	);
+	return [...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)].flatMap((m) => {
+		const raw = m[0];
+
+		// A switch that saves when flipped (#606) posts on its own change: a press that inert stops. Its form has no
+		// hx-trigger (htmx's default for a form is its submit), and both are checked by the inert test above.
+		const fires =
+			!/\shx-trigger="change"/.test(raw) &&
+			[...attributes(raw).keys()].some((name) =>
+				names.some((p) => name.startsWith(p)),
+			);
+
+		return fires ? [raw] : [];
+	});
 }
 
 /**
@@ -2617,17 +2620,18 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 
 	// Every opening tag in a chunk whose class list has `cls` as one of its classes.
 	const tagsWith = (chunk: string, cls: string) =>
-		[...chunk.matchAll(/<[a-zA-Z]+\b[^>]*>/g)]
-			.map((m) => m[0])
-			.filter((tag) =>
-				(/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ").includes(cls),
-			);
+		[...chunk.matchAll(/<[a-zA-Z]+\b[^>]*>/g)].flatMap((m) => {
+			const tag = m[0];
+			const classes = (/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ");
+
+			return classes.includes(cls) ? [tag] : [];
+		});
 
 	it("carries each option's lines from the brief, word for word, in its pictures", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 
-		const LINES: Record<string, string[]> = {
+		const LINES = {
 			[OPTIONS[0] ?? ""]: [
 				"Let Tally read first.",
 				"Link your bank and Tally does the dull part: it reads your last 90 days, tidies them up and writes you a first budget. You won&#39;t type a number.",
@@ -2776,7 +2780,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 
-		const IDEAS: Record<string, [string, string]> = {
+		const IDEAS = {
 			[OPTIONS[0] ?? ""]: [
 				"Tally&#39;s part against yours: Tally finds your paycheck, bills and transfers, names your stores and writes a first budget, and you link a bank. Home fills itself in while Tally reads.",
 				"a first-budget rule (a spec line), a Home that is the entry until a budget exists, Plaid Link opened on Home (the approved plaid-link.js, loaded there while no bank is linked), and Home checking every 5 seconds while Tally reads (htmx polling, a new pattern here). The status line is the only thing read aloud: once when the first month is in and once when all 90 days are.",
@@ -2813,7 +2817,9 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		const chunk = section(html);
 
 		// For each replay class: the classes its element must carry, and the ones it must not, at the end state.
-		const AT_REST: Record<string, { must?: string[]; not?: string[] }> = {
+		type AtRest = { must?: string[]; not?: string[] };
+
+		const AT_REST = {
 			"proposal-first-status-first": { must: ["opacity-0"] },
 			"proposal-first-status-middle": { must: ["opacity-0"] },
 			"proposal-first-status-last": { not: ["opacity-0"] },
@@ -2841,14 +2847,16 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			"proposal-first-draw": { must: ["stroke-ink"] },
 			"proposal-first-counter-before": { must: ["opacity-0"] },
 			"proposal-first-counter-after": { not: ["opacity-0"] },
-		};
+		} satisfies Record<string, AtRest>;
 
 		const used = new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []);
 
 		for (const step of STEP_CLASSES) used.delete(step);
 		expect([...used].sort()).toEqual(Object.keys(AT_REST).sort());
 
-		for (const [cls, { must = [], not = [] }] of Object.entries(AT_REST)) {
+		for (const [cls, { must = [], not = [] }] of Object.entries<AtRest>(
+			AT_REST,
+		)) {
 			const tags = tagsWith(chunk, cls);
 			expect(tags.length, cls).toBeGreaterThan(0);
 
@@ -3530,16 +3538,19 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		);
 
 	const AMOUNTS = ["$9,999", "−$9,999"];
-	const WIDTHS = [320, 360, 390];
+
+	type Width = 320 | 360 | 390;
+
+	const WIDTHS: Width[] = [320, 360, 390];
 
 	// Tailwind's spacing step is 4 px: pr-16 is 64 px, pr-4 is 16 px, pr-2 is 8 px.
-	const ROOM: Record<number, string> = {
+	const ROOM: Record<Width, string> = {
 		320: "pr-16",
 		360: "pr-4",
 		390: "pr-2",
 	};
 
-	const ROOM_PX: Record<number, number> = { 320: 64, 360: 16, 390: 8 };
+	const ROOM_PX: Record<Width, number> = { 320: 64, 360: 16, 390: 8 };
 	// Option A's drawing shows from this frame width up: decision 116's 390 px edge for amounts of 7 characters or fewer.
 	const N = 390;
 	// The one frame height: the tallest picture's content, Option C's, measured in Chrome at 1280, 390 and 320 px.
@@ -3648,7 +3659,7 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 
 		expect(wrappers.length).toBe(24);
 		wrappers.forEach(([, cls = ""], i) => {
-			const width = WIDTHS[Math.floor(i / 2) % 3] ?? 0;
+			const width = itemAt(WIDTHS, Math.floor(i / 2) % 3);
 			expect(cls).toContain(ROOM[width]);
 		});
 		// The grid lays out one width per row: two columns, not the three-row flow of the first draft.
@@ -4610,9 +4621,9 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 
 		expect(clipped.length).toBeGreaterThan(0);
 		expect(
-			clipped
-				.filter((m) => !/\sclass="[^"]*\brelative\b/.test(m[2] ?? ""))
-				.map((m) => m[0]),
+			clipped.flatMap((m) =>
+				/\sclass="[^"]*\brelative\b/.test(m[2] ?? "") ? [] : [m[0]],
+			),
 		).toEqual([]);
 	});
 });
@@ -4663,9 +4674,9 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 
 	// The phone pictures in a chunk, by label, in drawing order.
 	const labels = (chunk: string) =>
-		[...chunk.matchAll(PICTURE_LABEL)]
-			.filter((m) => m[2] === "a phone")
-			.map((m) => m[1]);
+		[...chunk.matchAll(PICTURE_LABEL)].flatMap((m) =>
+			m[2] === "a phone" ? [m[1]] : [],
+		);
 
 	// One picture's markup, by label and kind: from its label to the next picture of either kind, or to the chunk's end.
 	const picture = (chunk: string, label: string, kind = "a phone") => {
@@ -5769,9 +5780,11 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 
 	// The names of the options marked Recommended, in drawing order.
 	const recommendedOf = (chunk: string) =>
-		[...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)]
-			.filter((m) => (m[1] ?? "").includes(">Recommended<"))
-			.map((m) => (m[1] ?? "").split("<")[0]);
+		[...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].flatMap((m) =>
+			(m[1] ?? "").includes(">Recommended<")
+				? [(m[1] ?? "").split("<")[0]]
+				: [],
+		);
 
 	// Each picture's label and kind, in drawing order: a phone and a desktop picture can share a label.
 	const PICTURE = /aria-label="([^"]*), on (a phone|desktop)"/g;

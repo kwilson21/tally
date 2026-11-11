@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
-import { type Decision, decide, NONE_FIT } from "../src/ai/decide";
+import {
+	type Decision,
+	decide,
+	type JevAnswer,
+	NONE_FIT,
+} from "../src/ai/decide";
 import { askAgain, categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
@@ -17,6 +22,7 @@ import {
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
 } from "../src/transactions/rule-offer";
+import { itemAt, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Mixed trips (#233, decision 113): Jev's "spans more than one category" answer and the other category it named
@@ -30,17 +36,30 @@ const today = todayIn(DEFAULT_TIME_ZONE);
 const JEV_KEY = { JEV_API_KEY: "jev-key" };
 
 const categoryIdOf = async (name: string) =>
-	(
+	present(
 		await db
 			.prepare("SELECT id FROM categories WHERE name = ?")
 			.bind(name)
-			.first<{ id: number }>()
-	)?.id as number;
+			.first<{ id: number }>(),
+	).id;
+
+/** Columns a test sets on a row: ids and probabilities, or a text source. */
+type TripColumns = Record<string, number | string | null>;
+
+/** The mixed-trip columns the tests read back from a transaction row. */
+type TripRow = {
+	category_id: number | null;
+	category_source: string | null;
+	category_confidence: number | null;
+	jev_category_id: number | null;
+	jev_mixed: number | null;
+	jev_also_category_id: number | null;
+};
 
 /** Inserts one unsorted demo-account row with the given columns and returns its id. */
 async function insertTrip(
 	rawName: string,
-	extra: Record<string, unknown> = {},
+	extra: TripColumns = {},
 ): Promise<number> {
 	const columns = [
 		"account_id",
@@ -59,7 +78,7 @@ async function insertTrip(
 		.bind(...values)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row).id;
 }
 
 const rowOf = (id: number) =>
@@ -68,10 +87,15 @@ const rowOf = (id: number) =>
 			"SELECT category_id, category_source, category_confidence, jev_category_id, jev_mixed, jev_also_category_id FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<TripRow>();
 
 /** A fake Jev answering each call with the given answers (the flags are filled in). */
-function fakeJev(answers: Record<string, unknown>) {
+/** One answer on Jev's wire: a category pick, or a yes-probability. */
+type JevWireAnswer =
+	| { type: "choice"; choice: string; confidence: number }
+	| { type: "noul"; noul: number };
+
+function fakeJev(answers: Record<string, JevWireAnswer>) {
 	return vi.fn(async (url: string) => {
 		if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
 
@@ -103,7 +127,7 @@ describe("decide reads Jev's mixed-trip answer (#233)", () => {
 		{ id: 2, name: "Household" },
 	];
 
-	const answer = (over: object = {}) => ({
+	const answer = (over: Partial<JevAnswer> = {}): JevAnswer => ({
 		category: { label: "Groceries", confidence: 0.9 },
 		flags: { transfer: 0.01, reimbursement: 0.01, income: 0.01 },
 		...over,
@@ -258,7 +282,7 @@ describe("the mixed-trip rule (#233)", () => {
 		const eating = await categoryIdOf("Eating Out");
 		const gas = await categoryIdOf("Gas");
 
-		const cases: [string, Record<string, unknown>, number][] = [
+		const cases: [string, TripColumns, number][] = [
 			[
 				"MIXED-AT-THRESHOLD",
 				{
@@ -404,7 +428,7 @@ describe("a mixed trip gets no rule question (#233)", () => {
 
 	it("offers the rule on three picks when no trip looks mixed", async () => {
 		expect(
-			await ruleOfferForTransaction(db, picks[2] as number, groceries),
+			await ruleOfferForTransaction(db, itemAt(picks, 2), groceries),
 		).toMatchObject({ categoryId: groceries, count: 3 });
 		expect(await firstRuleOfferAmong(db, picks, groceries)).toMatchObject({
 			categoryId: groceries,
@@ -414,9 +438,9 @@ describe("a mixed trip gets no rule question (#233)", () => {
 	});
 
 	it("never offers the rule on a trip Jev says looks mixed, even after a person's pick", async () => {
-		await markMixed(picks[2] as number);
+		await markMixed(itemAt(picks, 2));
 		expect(
-			await ruleOfferForTransaction(db, picks[2] as number, groceries),
+			await ruleOfferForTransaction(db, itemAt(picks, 2), groceries),
 		).toBeNull();
 		expect(await firstRuleOfferAmong(db, picks, groceries)).toBeNull();
 		expect(await jevSaysMixedAmong(db, picks)).toBe(true);
@@ -424,13 +448,13 @@ describe("a mixed trip gets no rule question (#233)", () => {
 
 	it("keeps Organize's question off a group that filed a mixed trip, on save and on reload", async () => {
 		expect(await organizeOffer(db, picks, groceries)).not.toBeNull();
-		await markMixed(picks[0] as number);
+		await markMixed(itemAt(picks, 0));
 		expect(await organizeOffer(db, picks, groceries)).toBeNull();
 	});
 
 	it("reads the mixed reading onto the transaction the edit panel shows", async () => {
-		await markMixed(picks[2] as number);
-		expect(await getTransaction(db, picks[2] as number)).toMatchObject({
+		await markMixed(itemAt(picks, 2));
+		expect(await getTransaction(db, itemAt(picks, 2))).toMatchObject({
 			jevSaysMixed: true,
 			suggestedCategoryName: "Groceries",
 			alsoCategoryName: "Household",
@@ -440,7 +464,7 @@ describe("a mixed trip gets no rule question (#233)", () => {
 			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
 			.bind(household)
 			.run();
-		expect(await getTransaction(db, picks[2] as number)).toMatchObject({
+		expect(await getTransaction(db, itemAt(picks, 2))).toMatchObject({
 			jevSaysMixed: false,
 			alsoCategoryName: null,
 		});

@@ -29,6 +29,7 @@ import {
 	organizeGroups,
 	saveOrganizeGroup,
 } from "../src/transactions/organize";
+import { itemAt, present } from "./helpers/present";
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -88,6 +89,7 @@ async function post(path: string, fields: [string, string][]) {
 		body: new URLSearchParams(fields),
 	});
 
+	// SAFETY: the app writes HX-Trigger as this toast and announce object, and a response without the header parses as null.
 	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "null") as {
 		toast: { message: string };
 		announce: string;
@@ -143,7 +145,7 @@ function inputsOf(fragment: string): [string, string][] {
 				? /\schecked(=""|=|\s|\/|>)/.test(tag)
 				: true;
 
-		return posted ? [[name, value] as [string, string]] : [];
+		return posted ? [[name, value] satisfies [string, string]] : [];
 	});
 }
 
@@ -173,7 +175,7 @@ function edited(
 	const kept = drawn.filter(([name]) => !(name in changes));
 
 	const changed = Object.entries(changes).flatMap(([name, value]) =>
-		value === undefined ? [] : [[name, value] as [string, string]],
+		value === undefined ? [] : [[name, value] satisfies [string, string]],
 	);
 
 	return [...kept, ...changed];
@@ -1484,11 +1486,15 @@ describe("splits unlink their refunds", () => {
 				"SELECT id, refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
-			.all();
+			.all<{
+				refund_of_id: number | null;
+				credit_reviewed: number;
+				credit_reviewed_by: string | null;
+			}>();
 
 		expect(parts.results).toHaveLength(2);
 
-		for (const part of parts.results as Array<Record<string, unknown>>) {
+		for (const part of parts.results) {
 			expect(part.refund_of_id).toBe(linkedRefund);
 			expect(part.credit_reviewed).toBe(1);
 			expect(part.credit_reviewed_by).toBe("user");
@@ -2279,7 +2285,7 @@ describe("refund guards", () => {
 
 			type Scenario = {
 				name: string;
-				arrange?: () => Promise<unknown>;
+				arrange?: () => Promise<void>;
 				split: Split;
 				/** The purchase the refund is linked to after the save; null unlinks it. */
 				linkTo: number | null;
@@ -2557,7 +2563,9 @@ describe("refund guards", () => {
 					const { res, html, trigger } = await save(SIX, [
 						["refund_of", s.linkTo === null ? "" : String(s.linkTo)],
 						...(s.review ? REVIEW_AS_NOT_INCOME : []),
-						...(note === null ? [] : [["note", note] as [string, string]]),
+						...(note === null
+							? []
+							: [["note", note] satisfies [string, string]]),
 					]);
 
 					if ("alert" in s.outcome) {
@@ -3064,7 +3072,7 @@ describe("refund guards", () => {
 				.bind(BIG_REFUND)
 				.all<{ id: number }>();
 
-			const big = parts[0]?.id as number;
+			const big = itemAt(parts, 0).id;
 			// The $55 part can't link to the $50 purchase, and excluding it must not reach its parent
 			// or its other part either.
 			expect(
@@ -3158,7 +3166,7 @@ describe("refund guards", () => {
 			expect(
 				await saveEdit(
 					db,
-					parts[0]?.id as number,
+					itemAt(parts, 0).id,
 					{ ...EDIT, excluded: true, refundOfId: PURCHASE },
 					"test",
 				),
@@ -3229,8 +3237,8 @@ describe("refund guards", () => {
 				),
 			).toEqual({ saved: true });
 			expect(await refundOf(REFUND)).toBe(target);
-			expect(await refundOf(second as number)).toBe(target);
-			expect(await refundOf(first as number)).toBe(AFTER_REFUND);
+			expect(await refundOf(present(second))).toBe(target);
+			expect(await refundOf(present(first))).toBe(AFTER_REFUND);
 		});
 
 		it("still refuses it, moving nothing, when the parts that move don't fit", async () => {

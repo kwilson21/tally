@@ -12,6 +12,7 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { readSetup, setupView, storedTimeMs } from "../src/first-tally/setup";
 import { flaggedBanks, homeBankNotice } from "../src/stale-bank";
+import { isMethod } from "./helpers/present";
 
 // Home's setup (P125 E, spec §8.8): what the first week shows, from the record, the banks and what Jev still owes.
 const TODAY = "2026-10-14";
@@ -19,12 +20,20 @@ const TODAY = "2026-10-14";
 /** Noon on TODAY, in UTC: the clock the sort's "recent" and "over an hour" are read against. */
 const NOW = Date.parse("2026-10-14T12:00:00Z");
 
+/** True when `prop` is a member of `target`, so reading it is a typed read. */
+function isMemberOf<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
+
 /**
  * The test database with `hook` awaited just before readSetup's repair writes stroke one (its only INSERT into the record):
  * the disconnect a last bank's removal makes between readSetup's read and that write. prepare is synchronous, so the
  * hook runs inside the statement's run. Every other call forwards to the database.
  */
-function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
+function raceBeforeBankStroke(hook: () => Promise<D1Result>): D1Database {
 	const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
 		new Proxy(statement, {
 			get(target, prop) {
@@ -40,9 +49,9 @@ function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
 					};
 				}
 
-				const value = Reflect.get(target, prop, target);
+				const value = isMemberOf(target, prop) ? target[prop] : undefined;
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
@@ -58,9 +67,9 @@ function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
 				};
 			}
 
-			const value = Reflect.get(target, prop, target);
+			const value = isMemberOf(target, prop) ? target[prop] : undefined;
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
@@ -712,8 +721,8 @@ describe("takeBackBankStrokes", () => {
 			.bind(JSON.stringify(value))
 			.run();
 
-	const read = async () =>
-		JSON.parse(
+	const read = async (): Promise<FirstTally | null> => {
+		const stored: FirstTally | null = JSON.parse(
 			(
 				await env.DB.prepare(
 					"SELECT value FROM household_settings WHERE key = 'first_tally'",
@@ -721,7 +730,10 @@ describe("takeBackBankStrokes", () => {
 					value: string;
 				}>()
 			)?.value ?? "null",
-		) as FirstTally | null;
+		);
+
+		return stored;
+	};
 
 	const lastBank = async () =>
 		(

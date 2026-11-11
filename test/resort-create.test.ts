@@ -5,6 +5,7 @@ import { moreLikeThis } from "../src/db/more-like-this";
 import { finishRun, readMoved, readRun } from "../src/db/resort-run";
 import { startResortFor } from "../src/db/resort-start";
 import { resetDemo } from "../src/demo/reset";
+import { itemAt, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Issue #821 (decisions 157, 159, 160): a Create that makes a category starts one background re-check of the rows it
@@ -17,9 +18,8 @@ const LUPITA = "SQ *LUPITAS TAQ 2210";
 const PLAID_FOOD = "FOOD_AND_DRINK";
 const create = recordSorting();
 
-type Env = { JEV_API_KEY?: string };
-
-const mutableEnv = env as unknown as Env;
+/** The test env, with the Jev key the tests set and clear. */
+const mutableEnv: typeof env & { JEV_API_KEY?: string } = env;
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path, {
@@ -39,34 +39,39 @@ async function post(
 	for (const [key, value] of Object.entries(fields))
 		for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
 
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: body.toString(),
 	});
 
 	return { res, html: await res.text() };
 }
 
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: {
-			message: string;
-			type?: string;
-			undo?: string;
-			undoExpiresInMs?: number;
-			undoAction?: string;
-			undoDone?: string;
-			passive?: boolean;
-			undoTarget?: string;
-		};
-		announce?: string;
+type HtmxTrigger = {
+	toast?: {
+		message: string;
+		type?: string;
+		undo?: string;
+		undoExpiresInMs?: number;
+		undoAction?: string;
+		undoDone?: string;
+		passive?: boolean;
+		undoTarget?: string;
 	};
+	announce?: string;
+};
+
+const trigger = (res: Response): HtmxTrigger =>
+	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 
 async function categoryId(name: string) {
 	const row = await db
@@ -131,9 +136,7 @@ const rowOf = (id: number) =>
 
 /** The run's id from the start request's create call (the instance's reask params). */
 const reaskOf = (call: number) => {
-	const input = create.mock.calls[call]?.[0] as
-		| { params: { reask?: { runId: string; ids: number[] } } }
-		| undefined;
+	const input = create.mock.calls[call]?.[0];
 
 	return input?.params.reask;
 };
@@ -290,9 +293,9 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 			)
 			.bind(eating, filed)
 			.run();
-		await startResortFor(mutableEnv as never, db, {
+		await startResortFor(mutableEnv, db, {
 			filedId: filed,
-			excludeIds: [related[0] as number],
+			excludeIds: [itemAt(related, 0)],
 			now: Date.now(),
 		});
 		expect(reaskOf(0)?.ids).toEqual([related[1]]);
@@ -461,7 +464,7 @@ describe("the progress poll (decision 159)", () => {
 			)
 			.bind(await categoryId("Groceries"), newer)
 			.run();
-		await startResortFor(mutableEnv as never, db, {
+		await startResortFor(mutableEnv, db, {
 			filedId: newer,
 			excludeIds: [],
 			now: Date.now(),
@@ -816,13 +819,13 @@ describe("the four Create paths", () => {
 	it("Settings' categories card Create starts a run for a new category", async () => {
 		const eating = await categoryId("Eating Out");
 
-		const suggestion = (
+		const suggestion = present(
 			await db
 				.prepare(
 					"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const pets = [
 			await addRow({
@@ -860,13 +863,13 @@ describe("the four Create paths", () => {
 	it("Organize's card Create starts a run for a new category", async () => {
 		const eating = await categoryId("Eating Out");
 
-		const suggestion = (
+		const suggestion = present(
 			await db
 				.prepare(
 					"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const pets = [
 			await addRow({

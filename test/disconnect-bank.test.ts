@@ -4,23 +4,20 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import {
-	answerPay,
-	type PayMerchant,
-	payMerchants,
-} from "../src/first-tally/first-page";
+import { answerPay, payMerchants } from "../src/first-tally/first-page";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
+import { envWith } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-const bindings = {
-	...env,
+const bindings = envWith(env, {
 	DEMO: "false",
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: KEY,
-} as unknown as Env;
+});
 
 async function itemId() {
 	const row = await env.DB.prepare(
@@ -38,14 +35,17 @@ async function itemId() {
 }
 
 async function post(id: number | string, body = "", htmx = false) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	return accounts.request(
 		`/accounts/${id}/disconnect`,
 		{
 			method: "POST",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				...(htmx ? { "HX-Request": "true" } : {}),
-			},
+			headers,
 			body,
 		},
 		bindings,
@@ -105,13 +105,13 @@ async function answerPayFrom(id: number) {
 		.bind(account?.id)
 		.first<{ id: number }>();
 
-	const merchant = (await payMerchants(env.DB)).find(
-		(m) => m.key === "NORTHWIND PAYROLL",
-	) as PayMerchant;
+	const merchant = present(
+		(await payMerchants(env.DB)).find((m) => m.key === "NORTHWIND PAYROLL"),
+	);
 
 	await answerPay(env.DB, merchant, "yes", "person@example.com");
 
-	return deposit?.id as number;
+	return present(deposit).id;
 }
 
 const countFor = async (id: number) =>

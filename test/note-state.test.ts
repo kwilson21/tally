@@ -9,6 +9,10 @@ import {
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
+import { isMethod, present } from "./helpers/present";
+
+/** The edit a save takes: the form's fields as the rules read them. */
+type EditInput = Parameters<typeof saveEdit>[2];
 
 const db = env.DB;
 const TODAY = "2026-10-01";
@@ -237,17 +241,16 @@ describe("a person's edit of the note", () => {
 			.run();
 	});
 
-	const edit = (over: Record<string, unknown>) =>
-		({
-			categoryId: null,
-			alwaysForMerchant: false,
-			displayName: null,
-			note: null,
-			excluded: false,
-			income: false,
-			creditReviewed: true,
-			...over,
-		}) as Parameters<typeof saveEdit>[2];
+	const edit = (over: Partial<EditInput>): EditInput => ({
+		categoryId: null,
+		alwaysForMerchant: false,
+		displayName: null,
+		note: null,
+		excluded: false,
+		income: false,
+		creditReviewed: true,
+		...over,
+	});
 
 	it("emptying a guess dismisses it and clears the note", async () => {
 		await seed(10, "guessed", {
@@ -317,7 +320,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
 
-		item = row?.id as number;
+		item = present(row).id;
 		lock += 1;
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = ? WHERE id = ?")
@@ -389,7 +392,7 @@ describe("the pending-to-posted merge picks the later note state", () => {
 			.bind(`post-${key}`)
 			.first<{ id: number }>();
 
-		return stateOf(row?.id as number);
+		return stateOf(present(row).id);
 	}
 
 	it("a person's note on the pending row beats a guess on the posted row", async () => {
@@ -473,7 +476,7 @@ describe("a save that reads a note's state before it writes", () => {
 		await seed(20, "queued");
 
 		// Workers AI stores its guess after saveEdit has read the row and before its batch runs.
-		const racing = new Proxy(db, {
+		const racing: D1Database = new Proxy(db, {
 			get(target, property) {
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
@@ -487,15 +490,16 @@ describe("a save that reads a note's state before it writes", () => {
 						return target.batch(statements);
 					};
 
-				const value = Reflect.get(target, property);
+				// SAFETY: the code under test reads only D1 member names (batch, prepare, ...), each a key of D1Database.
+				const value: unknown = target[property as keyof D1Database];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
 		// A kind-only edit: the note is not changed, so the save must not rewrite the note's state.
 		await saveEdit(
-			racing as unknown as D1Database,
+			racing,
 			idOf(20),
 			{
 				categoryId: null,
@@ -507,7 +511,7 @@ describe("a save that reads a note's state before it writes", () => {
 				creditReviewed: true,
 				kind: "one_off",
 				noteProvided: false,
-			} as Parameters<typeof saveEdit>[2],
+			},
 			"user@example.com",
 		);
 		expect(await stateOf(idOf(20))).toMatchObject({
@@ -519,7 +523,7 @@ describe("a save that reads a note's state before it writes", () => {
 		await seed(21, "guessed", { note: "Birthday cake", guessed: 1 });
 
 		// A second save clears the guess after "Looks right" has read it and before its batch runs.
-		const racing = new Proxy(db, {
+		const racing: D1Database = new Proxy(db, {
 			get(target, property) {
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
@@ -533,14 +537,15 @@ describe("a save that reads a note's state before it writes", () => {
 						return target.batch(statements);
 					};
 
-				const value = Reflect.get(target, property);
+				// SAFETY: the code under test reads only D1 member names (batch, prepare, ...), each a key of D1Database.
+				const value: unknown = target[property as keyof D1Database];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
 		await saveEdit(
-			racing as unknown as D1Database,
+			racing,
 			idOf(21),
 			{
 				categoryId: null,
@@ -551,7 +556,7 @@ describe("a save that reads a note's state before it writes", () => {
 				income: false,
 				creditReviewed: true,
 				keepDetails: true,
-			} as Parameters<typeof saveEdit>[2],
+			},
 			"user@example.com",
 		);
 		// The empty note must not become "written", which would outrank a person's real note at the next merge.

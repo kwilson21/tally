@@ -8,6 +8,7 @@ import {
 	markSyncSucceeded,
 	readConnection,
 } from "../src/plaid/item-store";
+import { isMethod, present } from "./helpers/present";
 
 const REMINDED = "2026-10-06 04:00:00";
 const LOCK = "lease-a";
@@ -44,7 +45,7 @@ async function addBank(
 		)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row?.id);
 }
 
 async function rowOf(id: number) {
@@ -369,11 +370,11 @@ function raceBefore(
 	};
 
 	return new Proxy(env.DB, {
-		get(target, prop) {
+		get(target, prop: keyof D1Database) {
 			if (prop !== "prepare") {
-				const value = Reflect.get(target, prop);
+				const value = target[prop];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			}
 
 			return (sql: string) => {
@@ -381,6 +382,7 @@ function raceBefore(
 
 				if (!sql.startsWith(prefix) || fired.count >= times) return statement;
 
+				// SAFETY: the stub has only the bind(...).run() and bind(...).first() paths the code under test takes for this SQL.
 				return {
 					bind: (...values: unknown[]) => {
 						const bound = statement.bind(...values);
@@ -398,7 +400,7 @@ function raceBefore(
 							},
 						};
 					},
-				} as unknown as D1PreparedStatement;
+				} as D1PreparedStatement;
 			};
 		},
 	});

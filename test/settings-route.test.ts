@@ -4,6 +4,7 @@ import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
 import { merchantRules } from "../src/db/merchant-rules";
 import { resetDemo } from "../src/demo/reset";
 import { seedMerchant } from "./helpers/merchants";
+import { isMethod } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -14,25 +15,33 @@ const get = async (path: string) => {
 };
 
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
 	return { res, html: await res.text() };
 }
 
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message: string };
-		announce?: string;
-	};
+type HxTrigger = {
+	toast?: { message: string };
+	announce?: string;
+};
+
+const trigger = (res: Response): HxTrigger => {
+	const header: HxTrigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
+	return header;
+};
 
 /** The page's text, without markup. */
 const textOf = (html: string) =>
@@ -234,12 +243,17 @@ describe("GET /settings", () => {
 
 		const db = new Proxy(env.DB, {
 			get(target, property) {
+				const member: unknown = Object(target)[property];
+
 				if (property !== "prepare")
-					return Reflect.get(target, property, target);
+					return isMethod(member) ? member.bind(target) : member;
 
 				return (sql: string) => {
-					const captured = { sql, values: [] as unknown[] };
+					const values: unknown[] = [];
+					const captured = { sql, values };
+
 					prepared.push(captured);
+
 					const statement = target.prepare(sql);
 
 					return new Proxy(statement, {
@@ -251,12 +265,14 @@ describe("GET /settings", () => {
 									return query.bind(...bound);
 								};
 
-							return Reflect.get(query, method, query);
+							const forwarded: unknown = Object(query)[method];
+
+							return isMethod(forwarded) ? forwarded.bind(query) : forwarded;
 						},
 					});
 				};
 			},
-		}) as D1Database;
+		});
 
 		const result = await merchantRules(db, false, "Load Merchant 007");
 		expect(result.rules).toHaveLength(1);

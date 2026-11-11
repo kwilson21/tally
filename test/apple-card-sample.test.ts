@@ -9,6 +9,8 @@ import { appleCardSample } from "../src/demo/apple-card-sample";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
 import type { SortParams } from "../src/sort-start";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -16,7 +18,7 @@ recordSorting({ sort: true });
 // The demo's Apple Card sample (spec §8.10, #766): made-up rows in Apple's layout, dated from the seeded bank's latest
 // transaction, added by the demo's Add the sample. The demo never reads a file; its body is never read.
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const demo = envWith(env, { DEMO: "true" });
 
 const ANCHOR_SQL =
 	"SELECT MAX(t.date) AS d FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id IS NOT NULL";
@@ -120,15 +122,14 @@ describe("the demo's Apple Card sample (#766)", () => {
 
 	it("hands the sample's added rows to the sorting Workflow once, as the real upload does, and none on a second press", async () => {
 		// The sorting binding is a recorder here (no instance runs); the key lets the start go ahead, as the real upload's test does.
-		const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-			async () => ({ id: "fake" }),
-		);
+		const create = vi.fn<
+			(input: { params: SortParams }) => Promise<{ id: string }>
+		>(async () => ({ id: "fake" }));
 
-		const bindings = {
-			...demo,
+		const bindings = envWith(demo, {
 			JEV_API_KEY: "test-key",
 			SORT: { create },
-		} as unknown as Env;
+		});
 
 		const press = () =>
 			app.request(
@@ -159,9 +160,11 @@ describe("the demo's Apple Card sample (#766)", () => {
 						return target.prepare(sql);
 					};
 
-				const value = Reflect.get(target, prop, target);
+				// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 database it wraps
+				// is exactly what the code under test does, and an absent key reads as undefined.
+				const value: unknown = target[prop as keyof D1Database];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
@@ -176,9 +179,9 @@ describe("the demo's Apple Card sample (#766)", () => {
 		};
 
 		// The sorting binding is a recorder, as the sort hand-off test's is.
-		const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
-			async () => ({ id: "fake" }),
-		);
+		const create = vi.fn<
+			(input: { params: SortParams }) => Promise<{ id: string }>
+		>(async () => ({ id: "fake" }));
 
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -186,13 +189,12 @@ describe("the demo's Apple Card sample (#766)", () => {
 			const res = await app.request(
 				"/accounts/apple-card",
 				{ method: "POST", headers: { "HX-Request": "true" } },
-				{
-					...demo,
+				envWith(demo, {
 					DB: db,
 					JEV_API_KEY: "test-key",
 					SORT: { create },
-				} as unknown as Env,
-				collecting as unknown as ExecutionContext,
+				}),
+				collecting,
 			);
 
 			expect(res.status).toBe(200);
@@ -276,6 +278,8 @@ describe("the demo's Apple Card sample (#766)", () => {
 			{ highWaterMark: 0 },
 		);
 
+		// SAFETY: duplex is the option a streamed request body needs in Workers, and TypeScript's RequestInit omits it;
+		// the rest of the object is a RequestInit.
 		const res = await app.request(
 			"/accounts/apple-card",
 			{

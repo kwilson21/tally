@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyPlaidWebhook } from "../src/plaid/webhook-verify";
+import { fakeFetch } from "./helpers/doubles";
+import { itemAt, present } from "./helpers/present";
 
 const encoder = new TextEncoder();
 
@@ -9,16 +11,23 @@ const b64 = (bytes: Uint8Array) =>
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
 
-const json64 = (value: unknown) => b64(encoder.encode(JSON.stringify(value)));
+/** A JSON value as the test builds it: a JWS header or claims object, where an override may leave a field unset. */
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+type JsonObject = { [key: string]: Json | undefined };
+
+const json64 = (value: JsonObject) =>
+	b64(encoder.encode(JSON.stringify(value)));
 
 async function fixture(
 	overrides: {
-		header?: Record<string, unknown>;
-		claims?: Record<string, unknown>;
+		header?: JsonObject;
+		claims?: JsonObject;
 		expiredAt?: number | null;
 		fetchStatus?: number;
 	} = {},
 ) {
+	// SAFETY: generateKey for ECDSA with the sign and verify usages returns a key pair (privateKey and publicKey), never one key.
 	const pair = (await crypto.subtle.generateKey(
 		{ name: "ECDSA", namedCurve: "P-256" },
 		true,
@@ -67,7 +76,7 @@ async function fixture(
 	return {
 		body,
 		token: `${signed}.${b64(signature)}`,
-		fetchImpl: fetchImpl as unknown as typeof fetch,
+		fetchImpl: fakeFetch(fetchImpl),
 	};
 }
 
@@ -140,7 +149,7 @@ describe("verifyPlaidWebhook", () => {
 		).toBe("invalid");
 		// Change a character in the middle: the last one carries unused bits.
 		const parts = value.token.split(".");
-		const signature = parts[2] as string;
+		const signature = itemAt(parts, 2);
 		const middle = Math.floor(signature.length / 2);
 		parts[2] = `${signature.slice(0, middle)}${signature[middle] === "A" ? "B" : "A"}${signature.slice(middle + 1)}`;
 		expect(
@@ -156,13 +165,13 @@ describe("verifyPlaidWebhook", () => {
 	it("rejects a signature whose unused trailing bits are set", async () => {
 		const value = await fixture();
 		const parts = value.token.split(".");
-		const signature = parts[2] as string;
+		const signature = itemAt(parts, 2);
 
 		// 64 bytes encode to 86 characters; the last holds 4 data bits and 2 unused ones.
 		const alphabet =
 			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-		const last = alphabet.indexOf(signature.at(-1) as string);
+		const last = alphabet.indexOf(present(signature.at(-1)));
 		parts[2] = `${signature.slice(0, -1)}${alphabet[last | 1]}`;
 		expect(
 			await verifyPlaidWebhook(

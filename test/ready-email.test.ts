@@ -13,7 +13,9 @@ import {
 } from "../src/first-tally/ready-email";
 import { PUSH_CLAIM_SQL } from "../src/first-tally/ready-push";
 import handler from "../src/index";
-import type { Mail } from "../src/reconnect/deliver";
+import type { DeliveryEnv, Mail } from "../src/reconnect/deliver";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 // The ready email (P140, decision 134, decision 146, spec §8.8): one email per person, sent by the minute run once a new
 // family's first questions are open (the 10:00 run is the backstop), and never again to an address it has reached. A person
@@ -30,13 +32,39 @@ const LINK = "https://tally.thesuperhuman.us/setup";
 const DANA = "dana@example.com";
 const RILEY = "riley@example.com";
 
-const scheduledWith = handler as unknown as {
-	scheduled(controller: { cron: string }, env: unknown): Promise<unknown>;
+// SAFETY: the Worker's default export has the scheduled handler this file calls, and nothing else of it is read.
+const scheduledWith = handler as {
+	scheduled(controller: { cron: string }, env: Env): Promise<void>;
 };
 
 type Sent = { to: string; subject: string; html: string; text: string };
 
+/** What Cloudflare's email binding is sent: the message its send takes. */
+type EmailSent = {
+	to: string;
+	from: string;
+	subject: string;
+	html: string;
+	text: string;
+};
+
+/** A JSON value, as a test writes it into first_tally (an older or merged build may have kept any shape). */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** The email a Resend request carried, as its JSON body. */
+function bodyOf(init: RequestInit | undefined): Sent {
+	// SAFETY: runReadyEmail sends Resend the body it renders, which has the recipient, subject, html and text of Sent.
+	return JSON.parse(String(init?.body)) as Sent;
+}
+
+/** The member of a D1 binding a Proxy trap was asked for. */
+function memberOf(target: D1Database, prop: string | symbol) {
+	// SAFETY: a Proxy trap names a member of the binding it wraps, and a name the binding lacks reads as undefined.
+	return target[prop as keyof D1Database];
+}
+
 /** The Idempotency-Key a request carried, or null when it carried none. */
+// SAFETY: runReadyEmail gives Resend its headers as a plain object of strings, so the record read here is that object.
 const keyOf = (init: RequestInit | undefined) =>
 	(init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"] ??
 	null;
@@ -48,7 +76,7 @@ function resendFake(status = 200) {
 
 	const fetchImpl = vi.fn(
 		async (_url: RequestInfo | URL, init?: RequestInit) => {
-			const body = JSON.parse(String(init?.body)) as Sent;
+			const body = bodyOf(init);
 			sent.push({
 				to: body.to,
 				subject: body.subject,
@@ -98,17 +126,16 @@ function firstMail(sent: Sent[]): Mail {
 }
 
 /** The production environment: Resend on, Cloudflare's email off unless a test gives it. */
-const production = (extra: Record<string, unknown> = {}) =>
-	({
-		...env,
+const production = (extra: Partial<Env & DeliveryEnv> = {}) =>
+	envWith(env, {
 		DEMO: "false",
 		RESEND_API_KEY: "test-key",
 		EMAIL: undefined,
 		...extra,
-	}) as never;
+	});
 
 /** Writes the first week's record as given (the whole JSON), replacing any record before it. */
-async function writeRecord(record: unknown) {
+async function writeRecord(record: Json) {
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM household_settings WHERE key = 'first_tally'"),
 		env.DB.prepare(
@@ -205,7 +232,7 @@ async function openHousehold({
 	record = { strokes: { bank: STROKE_ONE }, budgets: {} },
 }: {
 	members?: string[];
-	record?: unknown;
+	record?: Json;
 } = {}): Promise<number> {
 	await clearHousehold();
 	const accountId = await addBank(1, "Chase");
@@ -228,9 +255,9 @@ function failingOn(needle: string): D1Database {
 					return target.prepare(sql);
 				};
 
-			const value = Reflect.get(target, prop, target);
+			const value = memberOf(target, prop);
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
@@ -311,7 +338,7 @@ describe("the ready email: who gets it, and when", () => {
 
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 				reachedAtSend.push(
 					((await readFirstTally(env.DB))?.readyEmailedTo ?? []).includes(to),
 				);
@@ -449,9 +476,9 @@ describe("the ready email: who is still there (decision 146)", () => {
 						return target.prepare(sql);
 					};
 
-				const value = Reflect.get(target, prop, target);
+				const value = memberOf(target, prop);
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
@@ -610,7 +637,7 @@ describe("the ready email: a run that overlaps another", () => {
 		// The first run then reaches Riley from its own, older list: the claim must refuse her, so she is sent it once.
 		const firstFetch = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 
 				if (to === DANA) await runReadyEmail(production(), second.fetchImpl);
 
@@ -633,7 +660,7 @@ describe("the ready email: a question answered during a run", () => {
 		// While the email to Dana is delivered, the family answers the pay question. Riley is then never sent to, nor reached.
 		const answeredDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 
 				if (to === DANA) await markStroke(env.DB, "pay", "2026-10-14");
 
@@ -689,7 +716,7 @@ describe("the ready email: the gate and the members, checked before each address
 		// While the email to Dana is delivered, a bank is linked and its 90-day history is still loading.
 		const linkedDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 
 				if (to === DANA) await addBank(2, "Ally", { history: false });
 
@@ -708,7 +735,7 @@ describe("the ready email: the gate and the members, checked before each address
 
 		const linkedDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 
 				if (to === DANA) await addBank(2, "Ally");
 
@@ -730,7 +757,7 @@ describe("the ready email: the gate and the members, checked before each address
 		// While the email to Dana is delivered, Riley leaves the family in Settings. Her turn is then skipped.
 		const removedDuringDana = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 
 				if (to === DANA)
 					await env.DB.prepare(
@@ -867,7 +894,7 @@ describe("the ready email: a push that reached a device waits 8 minutes (decisio
 describe("the ready email: delivery", () => {
 	it("keeps the address when Cloudflare's email delivers after Resend fails", async () => {
 		await openHousehold();
-		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+		const send = vi.fn(async (_message: EmailSent) => ({}));
 		const { fetchImpl } = resendFake(500);
 		await runReadyEmail(production({ EMAIL: { send } }), fetchImpl);
 		expect(send).toHaveBeenCalledOnce();
@@ -903,7 +930,7 @@ describe("the ready email: delivery", () => {
 
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, init?: RequestInit) => {
-				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				const to = bodyOf(init).to;
 
 				return new Response("{}", { status: to === DANA ? 500 : 200 });
 			},
@@ -945,7 +972,7 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 
 	it("falls back to Cloudflare's email on a 409 invalid_idempotent_request, since that key was used with other words and this email was never sent under it, and the address is reached", async () => {
 		await openHousehold();
-		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+		const send = vi.fn(async (_message: EmailSent) => ({}));
 		await runReadyEmail(
 			production({ EMAIL: { send } }),
 			conflict("invalid_idempotent_request"),
@@ -959,7 +986,7 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		try {
-			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const send = vi.fn(async (_message: EmailSent) => ({}));
 
 			const timedOut = vi.fn(
 				async (_url: RequestInfo | URL, _init?: RequestInit) => {
@@ -987,7 +1014,7 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		try {
-			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const send = vi.fn(async (_message: EmailSent) => ({}));
 
 			const first = vi.fn(
 				async (_url: RequestInfo | URL, _init?: RequestInit) => {
@@ -1011,7 +1038,7 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		try {
-			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const send = vi.fn(async (_message: EmailSent) => ({}));
 			await runReadyEmail(
 				production({ EMAIL: { send } }),
 				conflict("concurrent_idempotent_requests"),
@@ -1049,10 +1076,6 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 				),
 		);
 
-	/** The email a try sent to Resend, as the request carried it. */
-	const bodyOf = (init: RequestInit | undefined) =>
-		JSON.parse(String(init?.body)) as Sent;
-
 	/** SHA-256 in hex of the lower-cased address: the key a held try's words are kept under (ready-email.tsx). */
 	async function addressHashOf(address: string) {
 		const digest = await crypto.subtle.digest(
@@ -1067,13 +1090,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 
 	/** The entries kept for held tries, by the address's hash: each its whole email and the time of its first held try; {} when none is kept. */
 	const heldOf = async () =>
-		(
-			(await readFirstTally(env.DB)) as
-				| (Record<string, unknown> & {
-						heldReadyEmail?: Record<string, { mail: Mail; at: string }>;
-				  })
-				| null
-		)?.heldReadyEmail ?? {};
+		(await readFirstTally(env.DB))?.heldReadyEmail ?? {};
 
 	it("a try that times out keeps its words, so the next try sends the same email under the same key, though the count has changed", async () => {
 		const accountId = await openHousehold({ members: [DANA] });
@@ -1147,8 +1164,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 
 		const HOUR_MS = 3_600_000;
 
-		const EMAIL_SENDER = () =>
-			vi.fn(async (_message: Record<string, unknown>) => ({}));
+		const EMAIL_SENDER = () => vi.fn(async (_message: EmailSent) => ({}));
 
 		/** A household whose DANA has a kept try: its whole email, and the time of its first held try `ageMs` ago. Returns that time. */
 		async function openKept(mail: Mail, ageMs: number, at?: string) {
@@ -1288,7 +1304,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 				`${new Date(Date.now() - ageMs).toISOString().slice(0, 19)}Z`;
 
 			/** A household whose DANA's kept try is the entry given, as the merged code before this stored it: `{ line, at }`. */
-			async function openHeldEntry(entry: Record<string, unknown>) {
+			async function openHeldEntry(entry: { line: string; at: string }) {
 				await openHousehold({
 					members: [DANA],
 					record: {
@@ -1467,9 +1483,9 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 								return target.prepare(sql);
 							};
 
-						const value = Reflect.get(target, prop, target);
+						const value = memberOf(target, prop);
 
-						return typeof value === "function" ? value.bind(target) : value;
+						return isMethod(value) ? value.bind(target) : value;
 					},
 				});
 
@@ -1757,7 +1773,7 @@ describe("the 10:00 run", () => {
 		vi.stubGlobal("fetch", fetchStub);
 		await scheduledWith.scheduled(
 			{ cron: "0 10 * * *" },
-			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
+			envWith(env, { DEMO: "false", RESEND_API_KEY: "test-key" }),
 		);
 		expect(fetchStub).toHaveBeenCalledOnce();
 		expect(JSON.parse(String(fetchStub.mock.calls[0]?.[1]?.body)).subject).toBe(
@@ -1773,12 +1789,11 @@ describe("the 10:00 run", () => {
 		vi.stubGlobal("fetch", fetchStub);
 		await scheduledWith.scheduled(
 			{ cron: "0 10 * * *" },
-			{
-				...env,
+			envWith(env, {
 				DB: failingOn("p.status = 'needs_attention'"),
 				DEMO: "false",
 				RESEND_API_KEY: "test-key",
-			},
+			}),
 		);
 		expect(fetchStub).toHaveBeenCalledOnce();
 		expect(log).toHaveBeenCalledWith("reconnect reminders failed Error");

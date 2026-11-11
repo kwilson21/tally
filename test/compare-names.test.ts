@@ -11,6 +11,8 @@ import {
 import { INSTRUCTIONS, NAME_MODEL } from "../src/ai/suggest-name";
 import { buildSeed } from "../src/demo/seed";
 import catalog from "../worker-configuration.d.ts?raw";
+import { fakeAi as aiDouble } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 const TODAY = "2026-11-06";
 
@@ -20,11 +22,13 @@ type Body = {
 	temperature: number;
 };
 
+type Answer = object | string | null;
+
 /** A fake Workers AI that answers every call from `answer`, which sees the model id and the body it was sent. */
-const fakeAi = (answer: (model: string, body: Body) => unknown) => {
+const fakeAi = (answer: (model: string, body: Body) => Answer) => {
 	const run = vi.fn(async (model: string, body: Body) => answer(model, body));
 
-	return { ai: { run } as unknown as Ai, run };
+	return { ai: aiDouble(run), run };
 };
 
 describe("replyOf", () => {
@@ -186,7 +190,7 @@ describe("askNames", () => {
 
 		const result = await askNames(ai, "@cf/test/model", "NETFLIX.COM", 60);
 		expect(run).toHaveBeenCalledTimes(1);
-		const [model, body] = run.mock.calls[0] as [string, Body];
+		const [model, body] = present(run.mock.calls[0]);
 		expect(model).toBe("@cf/test/model");
 		expect(body.messages).toEqual([
 			{ role: "system", content: INSTRUCTIONS },
@@ -479,12 +483,12 @@ describe("formatNamesReport cut-off answers", () => {
 });
 
 describe("formatNamesReport response-shape note", () => {
-	const result = (shape: "response" | "chat") => ({
+	const result = (kind: "response" | "chat") => ({
 		text: "A",
 		ok: true,
 		names: ["Alpha"],
 		ms: 10,
-		shape,
+		shape: kind,
 	});
 
 	const note = (report: string) =>

@@ -25,11 +25,11 @@ import {
 	budgetsStrokeGuard,
 	keepBills,
 	NO_PAY_LEFT_SQL,
-	type PayMerchant,
 	payMerchants,
 	settleAndLoad,
 } from "../src/first-tally/first-page";
 import { BANK_CONNECTED_SQL } from "../src/first-tally/gate";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 
@@ -387,13 +387,13 @@ describe("the legacy bank repair's write (#657)", () => {
 
 describe("the bills step's record (P125 E)", () => {
 	it("adds each kept bill to the count and the total in the bill's own write, and a refused name adds nothing", async () => {
-		const categoryId = (
+		const categoryId = present(
 			await db
 				.prepare(
 					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const day = "2026-10-10";
 		await keepBills(db, day, [found("KEPT ONE", "Kept One", 1549, categoryId)]);
@@ -434,7 +434,7 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 			.bind(item?.id)
 			.first<{ id: number }>();
 
-		return { item: item?.id as number, account: account?.id as number };
+		return { item: present(item).id, account: present(account).id };
 	}
 
 	/** One income deposit into a bank's account, in Plaid's sign (money in is negative); returns its transaction id. */
@@ -451,13 +451,13 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 			.bind(account, date, -cents, rawName)
 			.first<{ id: number }>();
 
-		return row?.id as number;
+		return present(row).id;
 	}
 
 	const answerMerchant = async (key: string, answer: "yes" | "no") => {
-		const merchant = (await payMerchants(db)).find(
-			(m) => m.key === key,
-		) as PayMerchant;
+		const merchant = present(
+			(await payMerchants(db)).find((m) => m.key === key),
+		);
 
 		return answerPay(db, merchant, answer, "person@example.com");
 	};
@@ -777,10 +777,12 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 
 describe("the daily run's wait mark (decision 150)", () => {
 	// Both switches are on, so the SQL is never null (null is for both off).
-	const waitingSql = waitingForJevSql({
-		categories: true,
-		income: true,
-	}) as string;
+	const waitingSql = present(
+		waitingForJevSql({
+			categories: true,
+			income: true,
+		}),
+	);
 
 	/** One imported charge Jev hasn't answered, as a sync brings one in, so the count sees it waiting (countWaitingForJev). */
 	const waitingCharge = () =>

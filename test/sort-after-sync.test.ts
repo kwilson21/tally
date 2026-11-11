@@ -12,6 +12,8 @@ import { sortAfterSync, syncItemAndSort } from "../src/plaid/sort-after-sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { runSortInstance } from "../src/sort-instance";
 import { fakeSteps } from "./fake-sort-steps";
+import { fakeFetch } from "./helpers/doubles";
+import { present } from "./helpers/present";
 import { recordSorting, sortInProcess } from "./record-sorting";
 
 // Spec §8.6, decision 68: right after a sync that brought in or changed transactions, Jev sorts what
@@ -43,15 +45,17 @@ const reply = (confidence: number) =>
 function fakeJev(answer: () => Response = () => reply(0.95)) {
 	const asked: string[] = [];
 
-	const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
-		asked.push(JSON.parse(String(init?.body)).state.bank_description);
+	const fetchImpl = vi.fn(
+		async (_url: RequestInfo | URL, init?: RequestInit) => {
+			asked.push(JSON.parse(String(init?.body)).state.bank_description);
 
-		return answer();
-	});
+			return answer();
+		},
+	);
 
 	vi.stubGlobal("fetch", fetchImpl);
 
-	return { fetchImpl: fetchImpl as unknown as typeof fetch, asked };
+	return { fetchImpl: fakeFetch(fetchImpl), asked };
 }
 
 const withKey = {
@@ -106,7 +110,7 @@ describe("sortAfterSync", () => {
 		const jev = fakeJev();
 		const [a, b, c] = await waitingIds();
 		await sortAfterSync(withKey, {
-			changedIds: [a as number, b as number, c as number],
+			changedIds: [present(a), present(b), present(c)],
 		});
 		// Three of the seed's ten unsorted transactions, each asked about once.
 		expect(jev.asked).toHaveLength(3);
@@ -417,7 +421,7 @@ describe("syncItemAndSort", () => {
 			.bind(await encryptToken("token-secret", KEY))
 			.first<{ id: number }>();
 
-		itemId = row?.id as number;
+		itemId = present(row?.id);
 	});
 
 	/** A transaction Plaid sends: just its bank text, or more, such as a pending one. */
@@ -430,6 +434,10 @@ describe("syncItemAndSort", () => {
 				pendingOf?: string;
 				amount?: number;
 		  };
+
+	function isBankText(item: Item): item is string {
+		return typeof item === "string";
+	}
 
 	/**
 	 * Plaid gives `added`, `modified` and `removed`; Jev, if asked, answers with `jev`. With
@@ -452,7 +460,7 @@ describe("syncItemAndSort", () => {
 		const asked: string[] = [];
 
 		const tx = (item: Item) => {
-			const o = typeof item === "string" ? { name: item } : item;
+			const o = isBankText(item) ? { name: item } : item;
 
 			return {
 				transaction_id: o.id ?? `tx-${o.name}`,
@@ -506,7 +514,7 @@ describe("syncItemAndSort", () => {
 
 		vi.stubGlobal("fetch", fetchImpl);
 
-		return { fetchImpl: fetchImpl as unknown as typeof fetch, asked };
+		return { fetchImpl: fakeFetch(fetchImpl), asked };
 	}
 
 	const categoryOf = (name: string) =>
@@ -827,14 +835,16 @@ describe("syncItemAndSort", () => {
 		quiet();
 		const asked: string[] = [];
 
-		const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
-			if (String(url) === JEV_URL) asked.push("jev");
+		const fetchImpl = fakeFetch(
+			vi.fn(async (url: RequestInfo | URL) => {
+				if (String(url) === JEV_URL) asked.push("jev");
 
-			return Response.json(
-				{ error_type: "API_ERROR", request_id: "request-safe" },
-				{ status: 500 },
-			);
-		}) as unknown as typeof fetch;
+				return Response.json(
+					{ error_type: "API_ERROR", request_id: "request-safe" },
+					{ status: 500 },
+				);
+			}),
+		);
 
 		await expect(syncItemAndSort(plaidEnv, itemId, fetchImpl)).rejects.toThrow(
 			"Plaid request failed",

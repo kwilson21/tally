@@ -5,6 +5,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { getTransaction, saveSplit } from "../src/db/transactions";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { present } from "./helpers/present";
 
 // Decision 99: when the bank changes a split purchase's amount, sync removes the split and the purchase's
 // note says so. A part's bill payment is unlinked then too, and the note names the bill.
@@ -16,13 +17,18 @@ const MEMBERSHIP = 9840;
 const MEMBERSHIP_JSON =
 	'[{"billId":9840,"name":"Costco membership","period":"2026"}]';
 
-const response = (body: unknown) =>
+/** A JSON value, as a Plaid answer or a stored row holds it. */
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+type JsonObject = { [key: string]: Json };
+
+const response = (body: Json) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json" },
 	});
 
-const page = (overrides: Record<string, unknown> = {}) => ({
+const page = (overrides: JsonObject = {}) => ({
 	added: [],
 	modified: [],
 	removed: [],
@@ -31,7 +37,7 @@ const page = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const transaction = (overrides: Record<string, unknown> = {}) => ({
+const transaction = (overrides: JsonObject = {}) => ({
 	transaction_id: "purchase",
 	account_id: "account-1",
 	date: "2026-09-15",
@@ -43,7 +49,7 @@ const transaction = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const plaidFetch = (sync: Record<string, unknown>) =>
+const plaidFetch = (sync: JsonObject) =>
 	vi.fn(async (url: RequestInfo | URL) => {
 		if (String(url).endsWith("/accounts/get"))
 			return response({
@@ -71,7 +77,7 @@ async function addItem() {
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return present(result).id;
 }
 
 describe("a bank change that removes a split unlinks the bill its part paid (decision 99)", () => {
@@ -93,9 +99,11 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 		const item = await addItem();
 		await syncItem(opts, item, plaidFetch({ added: [transaction()] }));
 
-		const purchase = (await env.DB.prepare(
-			"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
-		).first<{ id: number }>()) as { id: number };
+		const purchase = present(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
+			).first<{ id: number }>(),
+		);
 
 		await saveSplit(
 			env.DB,
@@ -354,9 +362,11 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 		const item = await addItem();
 		await syncItem(opts, item, plaidFetch({ added: [transaction()] }));
 
-		const purchase = (await env.DB.prepare(
-			"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
-		).first<{ id: number }>()) as { id: number };
+		const purchase = present(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
+			).first<{ id: number }>(),
+		);
 
 		await saveSplit(
 			env.DB,
@@ -393,9 +403,11 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 			plaidFetch({ added: [transaction({ amount: 1300 })] }),
 		);
 
-		const purchase = (await env.DB.prepare(
-			"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
-		).first<{ id: number }>()) as { id: number };
+		const purchase = present(
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
+			).first<{ id: number }>(),
+		);
 
 		await saveSplit(
 			env.DB,

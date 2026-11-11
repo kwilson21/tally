@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addMoreLikeThis, sameTextPeers } from "../src/db/more-like-this";
 import { resetDemo } from "../src/demo/reset";
 import type { SameTextRow } from "../src/same-text-matches";
+import { isMethod } from "./helpers/present";
 
 // "2 more look like this" (decision 157, step A): after "Create and next" files a purchase, the waiting purchases
 // with the same cleaned bank text are one card with every row ticked. Nothing moves until Add. The URL carries only
@@ -28,25 +29,30 @@ async function post(
 	for (const [key, value] of Object.entries(fields))
 		for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
 
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: body.toString(),
 	});
 
 	return { res, html: await res.text() };
 }
 
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message: string; type: string };
-		announce?: string;
-	};
+type HtmxTrigger = {
+	toast?: { message: string; type: string };
+	announce?: string;
+};
+
+const trigger = (res: Response): HtmxTrigger =>
+	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 
 /** Every URL the page draws in an attribute: links, forms and HTMX targets. None may carry bank text. */
 const urlsIn = (html: string) =>
@@ -466,15 +472,15 @@ describe("the follow-up card is the whole screen (Codex P2)", () => {
  */
 function raceAfterFiledRead(
 	real: D1Database,
-	race: () => Promise<unknown>,
+	race: () => Promise<D1Result>,
 ): D1Database {
 	const bindOf = (stmt: D1PreparedStatement): D1PreparedStatement =>
 		new Proxy(stmt, {
 			get(target, prop) {
 				if (prop !== "first") {
-					const value = Reflect.get(target, prop, target);
+					const value: unknown = Object(target)[prop];
 
-					return typeof value === "function" ? value.bind(target) : value;
+					return isMethod(value) ? value.bind(target) : value;
 				}
 
 				return async () => {
@@ -497,9 +503,9 @@ function raceAfterFiledRead(
 					return new Proxy(stmt, {
 						get(s, p) {
 							if (p !== "bind") {
-								const value = Reflect.get(s, p, s);
+								const value: unknown = Object(s)[p];
 
-								return typeof value === "function" ? value.bind(s) : value;
+								return isMethod(value) ? value.bind(s) : value;
 							}
 
 							return (...args: unknown[]) => bindOf(s.bind(...args));
@@ -507,9 +513,9 @@ function raceAfterFiledRead(
 					});
 				};
 
-			const value = Reflect.get(target, prop, target);
+			const value: unknown = Object(target)[prop];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }

@@ -22,10 +22,19 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { jevCallLimit } from "../src/sort-groups";
 import { seedMerchant } from "./helpers/merchants";
+import { isMethod, itemAt, present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
 const MONTH = "2026-09";
+
+/** True when `prop` is a member of `target`, so reading it is a typed read. */
+function isMemberOf<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
 
 /** A Jev reply: Eating Out at the given confidence, no flags. */
 const reply = (confidence: number) =>
@@ -46,10 +55,10 @@ function fakeJev(...responses: (() => Response)[]) {
 	let calls = 0;
 
 	const fetchImpl = async () => {
-		const respond = responses[Math.min(calls, responses.length - 1)];
+		const respond = itemAt(responses, Math.min(calls, responses.length - 1));
 		calls += 1;
 
-		return (respond as () => Response)();
+		return respond();
 	};
 
 	return { fetchImpl, calls: () => calls };
@@ -57,7 +66,12 @@ function fakeJev(...responses: (() => Response)[]) {
 
 const withKey = { DB: db, JEV_API_KEY: "test-key" };
 
-type SentRequest = { state: Record<string, unknown> };
+/** A JSON value, as a request body or a stored row holds it. */
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+type JsonObject = { [key: string]: Json };
+
+type SentRequest = { state: JsonObject };
 
 const countWhere = async (where: string) =>
 	(
@@ -107,7 +121,7 @@ function saveDuringFirstAnswer(
 
 	return new Proxy(db, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
+			const value = isMemberOf(target, property) ? target[property] : undefined;
 
 			if (property === "batch")
 				return async (statements: D1PreparedStatement[]) => {
@@ -121,9 +135,9 @@ function saveDuringFirstAnswer(
 					return results;
 				};
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 beforeEach(async () => {
@@ -710,7 +724,9 @@ describe("categorizePending", () => {
 
 			const counted = new Proxy(db, {
 				get(target, property) {
-					const value = Reflect.get(target, property);
+					const value = isMemberOf(target, property)
+						? target[property]
+						: undefined;
 
 					if (property === "prepare")
 						return (sql: string) => {
@@ -719,9 +735,9 @@ describe("categorizePending", () => {
 							return target.prepare(sql);
 						};
 
-					return typeof value === "function" ? value.bind(target) : value;
+					return isMethod(value) ? value.bind(target) : value;
 				},
-			}) as D1Database;
+			});
 
 			const sent: SentRequest[] = [];
 			let calls = 0;
@@ -919,7 +935,7 @@ describe("categorizePending", () => {
 
 					return reply(0.5);
 				},
-				{ rulesApplied: true, onlyIds: [target?.id as number] },
+				{ rulesApplied: true, onlyIds: [present(target).id] },
 			);
 
 			return sent?.state.merchant;
@@ -995,7 +1011,7 @@ describe("categorizePending", () => {
 			.bind(`${MONTH}-20`)
 			.first<{ id: number }>();
 
-		let sent: Record<string, unknown> | undefined;
+		let sent: JsonObject | undefined;
 		await categorizePending(
 			withKey,
 			async (_url, init) => {
@@ -1003,7 +1019,7 @@ describe("categorizePending", () => {
 
 				return reply(0.5);
 			},
-			{ rulesApplied: true, onlyIds: [target?.id as number] },
+			{ rulesApplied: true, onlyIds: [present(target).id] },
 		);
 		expect(sent?.state).toEqual({
 			bank_description: "ONE-OFF SHOP",
@@ -1092,7 +1108,7 @@ describe("categorizePending", () => {
 				.bind(`${MONTH}-20`)
 				.first<{ id: number }>();
 
-			const id = inserted?.id as number;
+			const id = present(inserted).id;
 
 			const answer = new Response(
 				JSON.stringify({
@@ -1155,7 +1171,7 @@ describe("categorizePending", () => {
 				.bind(`${MONTH}-20`)
 				.first<{ id: number }>();
 
-			const id = inserted?.id as number;
+			const id = present(inserted).id;
 
 			const answer = new Response(
 				JSON.stringify({
@@ -1332,7 +1348,7 @@ describe("categorizePending", () => {
 				.bind(`${MONTH}-20`, categorySource)
 				.first<{ id: number }>();
 
-			const id = inserted?.id as number;
+			const id = present(inserted).id;
 			const jev = fakeJev(() => reply(0.5));
 			expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
 				asked: 1,
@@ -1655,7 +1671,9 @@ describe("categorizePending", () => {
 
 			const counted = new Proxy(db, {
 				get(target, property) {
-					const value = Reflect.get(target, property);
+					const value = isMemberOf(target, property)
+						? target[property]
+						: undefined;
 
 					if (property === "prepare")
 						return (sql: string) => {
@@ -1664,11 +1682,11 @@ describe("categorizePending", () => {
 							return target.prepare(sql);
 						};
 
-					return typeof value === "function" ? value.bind(target) : value;
+					return isMethod(value) ? value.bind(target) : value;
 				},
 			});
 
-			return { db: counted as D1Database, statements: () => statements };
+			return { db: counted, statements: () => statements };
 		}
 
 		it("costs at most three queries a call, none of them for the cap", async () => {
@@ -1898,12 +1916,12 @@ describe("categorizePending", () => {
 
 		it("asks about those and leaves older waiting ones for the night", async () => {
 			quiet();
-			const [a, b, c] = await waitingIds();
+			const ids = await waitingIds();
 			const jev = fakeJev(() => reply(0.95));
 
 			const result = await categorizePending(withKey, jev.fetchImpl, {
 				rulesApplied: true,
-				onlyIds: [a as number, b as number, c as number],
+				onlyIds: [itemAt(ids, 0), itemAt(ids, 1), itemAt(ids, 2)],
 			});
 
 			expect(jev.calls()).toBe(3);
@@ -1917,10 +1935,10 @@ describe("categorizePending", () => {
 
 		it("counts only the calls it makes against the day", async () => {
 			quiet();
-			const [a, b] = await waitingIds();
+			const ids = await waitingIds();
 			await categorizePending(withKey, fakeJev(() => reply(0.95)).fetchImpl, {
 				rulesApplied: true,
-				onlyIds: [a as number, b as number],
+				onlyIds: [itemAt(ids, 0), itemAt(ids, 1)],
 			});
 			expect(await callsUsed()).toBe(2);
 		});
@@ -1934,7 +1952,8 @@ describe("categorizePending", () => {
 
 		it("skips a listed row that was already looked at, or already has a category", async () => {
 			quiet();
-			const [a, b, c] = (await waitingIds()) as [number, number, number];
+			const ids = await waitingIds();
+			const [a, b, c] = [itemAt(ids, 0), itemAt(ids, 1), itemAt(ids, 2)];
 			await db.batch([
 				db
 					.prepare(
@@ -2651,11 +2670,11 @@ describe("the AI switches", () => {
 
 		describe("saving one answer whose switches went off", () => {
 			const eatingOutId = async () =>
-				(
+				present(
 					await db
 						.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
-						.first<{ id: number }>()
-				)?.id as number;
+						.first<{ id: number }>(),
+				).id;
 
 			const answerFor = (categoryId: number): Decision => ({
 				categoryId,

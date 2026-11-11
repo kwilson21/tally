@@ -10,6 +10,7 @@ import {
 	runReadyPush,
 } from "../src/first-tally/ready-push";
 import handler from "../src/index";
+import { isMethod, itemAt } from "./helpers/present";
 
 // The ready push (decision 149, spec §8.8): once a new family's first questions are open and nobody has answered one, each
 // person whose page has not checked in for two minutes gets one push on each device they turned notifications on for. The
@@ -36,21 +37,33 @@ const AS_PUBLIC =
 
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
-const scheduledWith = handler as unknown as {
-	scheduled(controller: { cron: string }, env: unknown): Promise<unknown>;
-};
+/** A JSON value, as the first week's record stores it; an object key may hold nothing (undefined). */
+type Json =
+	| string
+	| number
+	| boolean
+	| null
+	| Json[]
+	| { [key: string]: Json | undefined };
+
+/** The Worker's scheduled entry, typed for the controller and env these tests pass it. */
+const scheduledWith: {
+	scheduled(
+		controller: { cron: string },
+		env: Parameters<typeof runReadyPush>[0],
+	): Promise<void>;
+} = handler;
 
 /** The production environment with the VAPID keys set, Resend on and Cloudflare's email off. */
-const pushing = (extra: Record<string, unknown> = {}) =>
-	({
-		...env,
-		DEMO: "false",
-		RESEND_API_KEY: "test-key",
-		EMAIL: undefined,
-		VAPID_PUBLIC_KEY: AS_PUBLIC,
-		VAPID_PRIVATE_KEY: AS_PRIVATE,
-		...extra,
-	}) as never;
+const pushing = (extra: Partial<Parameters<typeof runReadyPush>[0]> = {}) => ({
+	...env,
+	DEMO: "false",
+	RESEND_API_KEY: "test-key",
+	EMAIL: undefined,
+	VAPID_PUBLIC_KEY: AS_PUBLIC,
+	VAPID_PRIVATE_KEY: AS_PRIVATE,
+	...extra,
+});
 
 /**
  * The push services and Resend, faked. Each push endpoint answers what `answer` says (201 by default; "throw" for a fetch that
@@ -73,7 +86,8 @@ function fakeFetch({
 			const target = String(url);
 
 			if (target.startsWith("https://api.resend.com")) {
-				resent.push((JSON.parse(String(init?.body)) as { to: string }).to);
+				const message: { to: string } = JSON.parse(String(init?.body));
+				resent.push(message.to);
 
 				return new Response("{}", { status: resendStatus });
 			}
@@ -92,7 +106,7 @@ function fakeFetch({
 }
 
 /** Writes the first week's record as given (the whole JSON), replacing any record before it. */
-async function writeRecord(record: unknown) {
+async function writeRecord(record: Json) {
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM household_settings WHERE key = 'first_tally'"),
 		env.DB.prepare(
@@ -162,7 +176,7 @@ async function clearHousehold() {
 
 /** A family whose questions are open: one bank with its history in, and stroke one drawn the day before. */
 async function openHousehold(
-	record: unknown = { strokes: { bank: STROKE_ONE }, budgets: {} },
+	record: Json = { strokes: { bank: STROKE_ONE }, budgets: {} },
 ) {
 	await clearHousehold();
 	await addBank(1, "Chase");
@@ -170,57 +184,45 @@ async function openHousehold(
 	await writeRecord(record);
 }
 
-/** The database with every statement that contains `needle` throwing, so one step of a run fails and the rest still runs. */
-function failingOn(needle: string): D1Database {
+/** env.DB, with each prepare call handed to `onPrepare`, which returns the statement; every other member is the real D1's. */
+function forwardingDb(
+	onPrepare: (target: D1Database, sql: string) => D1PreparedStatement,
+): D1Database {
 	return new Proxy(env.DB, {
 		get(target, prop) {
-			if (prop === "prepare")
-				return (sql: string) => {
-					if (sql.includes(needle)) throw new Error("boom");
+			if (prop === "prepare") return (sql: string) => onPrepare(target, sql);
 
-					return target.prepare(sql);
-				};
+			const value: unknown = Object(target)[prop];
 
-			const value = Reflect.get(target, prop, target);
-
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
+	});
+}
+
+/** The database with every statement that contains `needle` throwing, so one step of a run fails and the rest still runs. */
+function failingOn(needle: string): D1Database {
+	return forwardingDb((target, sql) => {
+		if (sql.includes(needle)) throw new Error("boom");
+
+		return target.prepare(sql);
 	});
 }
 
 /** The database, counting each statement it prepares, so a test can see that a run read nothing. */
 function countingDb(counter: { statements: number }): D1Database {
-	return new Proxy(env.DB, {
-		get(target, prop) {
-			if (prop === "prepare")
-				return (sql: string) => {
-					counter.statements += 1;
+	return forwardingDb((target, sql) => {
+		counter.statements += 1;
 
-					return target.prepare(sql);
-				};
-
-			const value = Reflect.get(target, prop, target);
-
-			return typeof value === "function" ? value.bind(target) : value;
-		},
+		return target.prepare(sql);
 	});
 }
 
 /** The database, recording each statement it prepares, trimmed and in order, so a test can see what a run reads and writes when. */
 function recordingDb(statements: string[]): D1Database {
-	return new Proxy(env.DB, {
-		get(target, prop) {
-			if (prop === "prepare")
-				return (sql: string) => {
-					statements.push(sql.trim());
+	return forwardingDb((target, sql) => {
+		statements.push(sql.trim());
 
-					return target.prepare(sql);
-				};
-
-			const value = Reflect.get(target, prop, target);
-
-			return typeof value === "function" ? value.bind(target) : value;
-		},
+		return target.prepare(sql);
 	});
 }
 
@@ -690,7 +692,8 @@ describe("the ready push: every read comes before a claim", () => {
 		);
 
 		expect(claims).toHaveLength(2);
-		const [firstClaim, secondClaim] = claims as [number, number];
+		const firstClaim = itemAt(claims, 0);
+		const secondClaim = itemAt(claims, 1);
 		expect(deviceRead).toBeLessThan(firstClaim);
 		// The gate (the record, the banks and the sort count) is read again between the two claims ...
 		expect(
@@ -812,19 +815,20 @@ describe("the ready push holds the email while it is in flight, and after each a
 		await openHousehold();
 		await addMember(DANA, { seen: "-25 minutes" });
 		await addDevice(DANA, PHONE);
-		const seen: { list?: string[]; stamp?: string } = {};
+		let seenList: string[] | undefined;
+		let seenStamp: string | undefined;
 
 		const { fetchImpl } = fakeFetch({
 			beforeAnswer: async () => {
 				const record = await readFirstTally(env.DB);
-				seen.list = record?.readyPushedTo;
-				seen.stamp = record?.readyPushedAt?.[await heldKeyOf(DANA)];
+				seenList = record?.readyPushedTo;
+				seenStamp = record?.readyPushedAt?.[await heldKeyOf(DANA)];
 			},
 		});
 
 		await runReadyPush(pushing(), { fetchImpl });
-		expect(seen.list).toEqual([DANA]);
-		expect(seen.stamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+		expect(seenList).toEqual([DANA]);
+		expect(seenStamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 	});
 
 	it("an overlapping run during a push's sends does not push the person again", async () => {

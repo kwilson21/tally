@@ -3,6 +3,8 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { push } from "../src/routes/push";
 import { sameOrigin } from "../src/security";
+import { envOnly, envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 // POST /push/subscribe (decision 149): a device's push subscription, sent as a form post from the notify control (push.js). It
 // answers 422 for input that isn't a subscription, and 404 when Web Push is off (the demo, or no keys), or the person isn't
@@ -26,12 +28,12 @@ const AS_PUBLIC =
 
 const AS_PRIVATE = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 
-const family = {
+const family = envOnly({
 	DB: env.DB,
 	DEMO: "false",
 	VAPID_PUBLIC_KEY: AS_PUBLIC,
 	VAPID_PRIVATE_KEY: AS_PRIVATE,
-} as unknown as Env;
+});
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 
@@ -65,21 +67,21 @@ const postBody = (
 		who = PERSON,
 		origin = ORIGIN,
 	}: { bindings?: Env; who?: string | null; origin?: string } = {},
-) =>
-	router.request(
+) => {
+	const headers = new Headers({
+		Origin: origin,
+		"Content-Type": "application/x-www-form-urlencoded",
+		"Content-Length": lengthOf(body),
+	});
+
+	if (who !== null) headers.set("x-test-actor", who);
+
+	return router.request(
 		"/push/subscribe",
-		{
-			method: "POST",
-			headers: {
-				Origin: origin,
-				"Content-Type": "application/x-www-form-urlencoded",
-				"Content-Length": lengthOf(body),
-				...(who === null ? {} : { "x-test-actor": who }),
-			},
-			body,
-		},
+		{ method: "POST", headers, body },
 		bindings,
 	);
+};
 
 /** The subscribe form post, with the fields as push.js sends them. */
 const subscribe = (
@@ -108,17 +110,18 @@ const rowsFor = async () => {
  */
 function removedRightAfterItsCheck(): D1Database {
 	return new Proxy(env.DB, {
-		get(target, prop) {
+		get(target, prop: keyof D1Database) {
 			if (prop !== "prepare") {
-				const value = Reflect.get(target, prop, target);
+				const value = target[prop];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			}
 
 			return (sql: string) => {
 				if (!sql.includes("SELECT 1 AS present FROM household_members"))
 					return target.prepare(sql);
 
+				// SAFETY: the stub has only the bind(...).first() path the route takes for this SQL; the route calls no other statement member.
 				return {
 					bind: (...values: unknown[]) => ({
 						first: async () => {
@@ -137,7 +140,7 @@ function removedRightAfterItsCheck(): D1Database {
 							return row;
 						},
 					}),
-				} as unknown as D1PreparedStatement;
+				} as D1PreparedStatement;
 			};
 		},
 	});
@@ -422,33 +425,32 @@ describe("POST /push/subscribe: the encoded lengths are checked before anything 
 // A multipart body that is not one, so reading it throws: an answer other than 404 shows the body was read.
 const UNREADABLE = "this is not a multipart body";
 
-const unreadable = (bindings: Env, who: string | null = PERSON) =>
-	router.request(
+const unreadable = (bindings: Env, who: string | null = PERSON) => {
+	const headers = new Headers({
+		Origin: ORIGIN,
+		"Content-Type": "multipart/form-data; boundary=x",
+		"Content-Length": lengthOf(UNREADABLE),
+	});
+
+	if (who !== null) headers.set("x-test-actor", who);
+
+	return router.request(
 		"/push/subscribe",
-		{
-			method: "POST",
-			headers: {
-				Origin: ORIGIN,
-				"Content-Type": "multipart/form-data; boundary=x",
-				"Content-Length": lengthOf(UNREADABLE),
-				...(who === null ? {} : { "x-test-actor": who }),
-			},
-			body: UNREADABLE,
-		},
+		{ method: "POST", headers, body: UNREADABLE },
 		bindings,
 	);
+};
 
 describe("POST /push/subscribe: the checks before the body is read (404 without parsing)", () => {
 	it("answers 404 in the demo without reading the body", async () => {
-		expect(
-			(await unreadable({ ...family, DEMO: "true" } as unknown as Env)).status,
-		).toBe(404);
+		expect((await unreadable(envWith(family, { DEMO: "true" }))).status).toBe(
+			404,
+		);
 	});
 
 	it("answers 404 with no keys without reading the body", async () => {
 		expect(
-			(await unreadable({ DB: env.DB, DEMO: "false" } as unknown as Env))
-				.status,
+			(await unreadable(envOnly({ DB: env.DB, DEMO: "false" }))).status,
 		).toBe(404);
 	});
 
@@ -553,7 +555,7 @@ describe("POST /push/subscribe: the body's size is checked before it is read (41
 describe("POST /push/subscribe: when Web Push is off, or the person isn't a member (404)", () => {
 	it("answers 404 in the demo, whatever the keys", async () => {
 		const response = await subscribe(good, {
-			bindings: { ...family, DEMO: "true" } as unknown as Env,
+			bindings: envWith(family, { DEMO: "true" }),
 		});
 
 		expect(response.status).toBe(404);
@@ -562,10 +564,7 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 
 	it("answers 404 with no keys set", async () => {
 		const response = await subscribe(good, {
-			bindings: {
-				DB: env.DB,
-				DEMO: "false",
-			} as unknown as Env,
+			bindings: envOnly({ DB: env.DB, DEMO: "false" }),
 		});
 
 		expect(response.status).toBe(404);

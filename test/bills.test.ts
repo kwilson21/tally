@@ -9,6 +9,7 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import appCss from "../src/styles/app.css?raw";
+import { isMethod, present } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 /** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
@@ -1257,9 +1258,11 @@ describe("Bills", () => {
 			/<a[^>]*href="\/bills\?focus=add-bill"[^>]*>\s*Cancel/,
 		);
 
-		const { id } = (await env.DB.prepare(
-			"SELECT id FROM bills WHERE active=1 LIMIT 1",
-		).first<{ id: number }>()) as { id: number };
+		const { id } = present(
+			await env.DB.prepare(
+				"SELECT id FROM bills WHERE active=1 LIMIT 1",
+			).first<{ id: number }>(),
+		);
 
 		const res = await exports.default.fetch(
 			`http://tally.test/bills/${id}/deactivate`,
@@ -1330,19 +1333,22 @@ describe("Bills", () => {
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
 
-		const post = (path: string, body?: Record<string, string>) =>
-			exports.default.fetch(`http://tally.test${path}`, {
+		const post = (path: string, body?: Record<string, string>) => {
+			const headers = new Headers({
+				Origin: "http://tally.test",
+				"HX-Request": "true",
+			});
+
+			if (body)
+				headers.set("content-type", "application/x-www-form-urlencoded");
+
+			return exports.default.fetch(`http://tally.test${path}`, {
 				method: "POST",
 				redirect: "manual",
-				headers: {
-					Origin: "http://tally.test",
-					"HX-Request": "true",
-					...(body
-						? { "content-type": "application/x-www-form-urlencoded" }
-						: {}),
-				},
-				...(body ? { body: new URLSearchParams(body) } : {}),
+				headers,
+				body: body ? new URLSearchParams(body) : undefined,
 			});
+		};
 
 		const link = (transaction: number) =>
 			post("/bills/9300/link", {
@@ -2624,17 +2630,21 @@ describe("Bill guards", () => {
 			...over,
 		});
 
-	const post = (path: string, body: URLSearchParams, htmx = true) =>
-		exports.default.fetch(`http://tally.test${path}`, {
+	const post = (path: string, body: URLSearchParams, htmx = true) => {
+		const headers = new Headers({
+			"content-type": "application/x-www-form-urlencoded",
+			Origin: "http://tally.test",
+		});
+
+		if (htmx) headers.set("HX-Request", "true");
+
+		return exports.default.fetch(`http://tally.test${path}`, {
 			method: "POST",
 			redirect: "manual",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				Origin: "http://tally.test",
-				...(htmx ? { "HX-Request": "true" } : {}),
-			},
+			headers,
 			body,
 		});
+	};
 
 	const billCount = async () =>
 		(
@@ -2887,9 +2897,11 @@ describe("Bill guards", () => {
 								return target.run();
 							};
 
-						const value = Reflect.get(target, prop);
+						// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 statement
+						// it wraps is exactly what the code under test does, and an absent key reads as undefined.
+						const value: unknown = target[prop as keyof D1PreparedStatement];
 
-						return typeof value === "function" ? value.bind(target) : value;
+						return isMethod(value) ? value.bind(target) : value;
 					},
 				});
 
@@ -2930,9 +2942,11 @@ describe("Bill guards", () => {
 							return target.batch(statements.map((s) => wrapped.get(s) ?? s));
 						};
 
-					const value = Reflect.get(target, prop);
+					// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 database it wraps
+					// is exactly what the code under test does, and an absent key reads as undefined.
+					const value: unknown = target[prop as keyof D1Database];
 
-					return typeof value === "function" ? value.bind(target) : value;
+					return isMethod(value) ? value.bind(target) : value;
 				},
 			});
 

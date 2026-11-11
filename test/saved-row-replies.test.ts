@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 // P119 A (decision 111, #71): only a save's own reply marks the row it saved, with row-saved (or row-saved-undo
 // when its toast offers Undo). Cancel, Adjust's taps, a 422 redraw, archiving and the rest never mark a row.
@@ -22,14 +23,17 @@ async function post(
 	fields: Record<string, string> | [string, string][],
 	htmx = true,
 ) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -47,11 +51,11 @@ let bakery: number;
 
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
-	bakery = (
+	bakery = present(
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
-		).first<{ id: number }>()
-	)?.id as number;
+		).first<{ id: number }>(),
+	).id;
 });
 
 describe("a transaction's edit panel save marks its row", () => {
@@ -164,11 +168,11 @@ describe("a save that asks a question marks its own row, when it is the edit pan
 	let picks: number[];
 
 	beforeEach(async () => {
-		groceries = (
+		groceries = present(
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE name = 'Groceries'",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 		await env.DB.prepare("INSERT INTO merchants (raw_name) VALUES (?)")
 			.bind(MERCHANT)
 			.run();
@@ -366,11 +370,11 @@ describe("a Settings person save marks the row it changed", () => {
 	let kids: number;
 
 	beforeEach(async () => {
-		kids = (
+		kids = present(
 			await env.DB.prepare(
 				"INSERT INTO household_people (name) VALUES ('Kids') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 	});
 
 	it("marks exactly the person a rename just saved, and keeps that row open", async () => {
@@ -447,9 +451,11 @@ describe("a cash entry's Undo restore marks its row", () => {
 		});
 
 		expect(res.status).toBe(200);
-		const token = JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.undo;
 
-		return { raw_name: entry.raw_name, token: token as string };
+		const token: string = JSON.parse(res.headers.get("HX-Trigger") ?? "{}")
+			.toast.undo;
+
+		return { raw_name: entry.raw_name, token };
 	}
 
 	it("marks the restored row on the ordinary toast stay, and keeps its focus", async () => {

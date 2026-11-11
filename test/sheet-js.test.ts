@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { present } from "./helpers/present";
 
 // sheet.js is a classic script with no exports, so it runs against a small stand-in for the page, as
 // toast-js.test.ts does. htmx's events bubble, so the test sends them to document the way htmx does.
 
-const load = Object.values(import.meta.glob("../public/js/sheet.js"))[0] as
-	| (() => Promise<unknown>)
-	| undefined;
+const load = Object.values(import.meta.glob("../public/js/sheet.js"))[0];
 
 /** The document the script is running against, so a node that is focused becomes its activeElement. */
 let activeDocument: { activeElement: unknown } | null = null;
@@ -73,7 +72,7 @@ class FakeNode extends EventTarget {
 		if (name === "tabindex") this.tabIndex = defaultTabIndex(this.tag);
 	}
 	/** Whether the node is the given one or holds it, as a real node's contains() does. */
-	contains(node: unknown): boolean {
+	contains(node: FakeNode | null): boolean {
 		return node === this || this.children.some((child) => child.contains(node));
 	}
 	append(...nodes: FakeNode[]) {
@@ -280,7 +279,7 @@ async function sheetPage(
 	const doc = Object.assign(new EventTarget(), {
 		body: parts.body,
 		documentElement: parts.documentElement,
-		activeElement: parts.row as unknown,
+		activeElement: parts.row,
 		querySelector: (selector: string) => parts.body.querySelector(selector),
 		querySelectorAll: (selector: string) =>
 			parts.body.querySelectorAll(selector),
@@ -703,11 +702,10 @@ describe("sheet.js: a radio group is one Tab stop", () => {
 describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 	// A catalog drawing (SheetFrame) is a sheet inside an inert frame. It is a drawing, not the open sheet, so the
 	// script passes over it and never marks, focuses or closes it.
-	type Drawing = ReturnType<typeof drawSheet>;
 
 	it("with only the drawing on the page, marks nothing, gives it no aria-modal, and leaves focus on the row", async () => {
 		const parts = await sheetPage({ sheet: false, drawing: true });
-		const drawing = parts.drawingSheet as Drawing;
+		const drawing = present(parts.drawingSheet);
 		expect(parts.body.querySelectorAll("[data-sheet-inert]")).toEqual([]);
 		expect(parts.list.hasAttribute("inert")).toBe(false);
 		expect(drawing.section.hasAttribute("aria-modal")).toBe(false);
@@ -716,7 +714,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 
 	it("leaves Escape and Tab alone when the drawing is the only sheet", async () => {
 		const parts = await sheetPage({ sheet: false, drawing: true });
-		const drawing = parts.drawingSheet as Drawing;
+		const drawing = present(parts.drawingSheet);
 		const escapeEvent = keydown(parts.document, "Escape");
 		expect(escapeEvent.defaultPrevented).toBe(false);
 		expect(drawing.backdrop.clicks).toBe(0);
@@ -727,7 +725,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 
 	it("changes none of that when a swap or a settle runs", async () => {
 		const parts = await sheetPage({ sheet: false, drawing: true });
-		const drawing = parts.drawingSheet as Drawing;
+		const drawing = present(parts.drawingSheet);
 		swap(parts.document);
 		settle(parts.document);
 		expect(parts.body.querySelectorAll("[data-sheet-inert]")).toEqual([]);
@@ -741,7 +739,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 
 	it("with a real sheet open after the drawing, the real sheet is the modal, and the page around it is inert", async () => {
 		const parts = await sheetPage({ drawing: true });
-		const drawing = parts.drawingSheet as Drawing;
+		const drawing = present(parts.drawingSheet);
 		expect(parts.drawn?.section.getAttribute("aria-modal")).toBe("true");
 		expect(drawing.section.hasAttribute("aria-modal")).toBe(false);
 
@@ -757,7 +755,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 		}
 
 		// The drawing's frame was inert before the script ran, so sync leaves it as it is.
-		const frame = drawing.backdrop.parentElement as FakeNode;
+		const frame = present(drawing.backdrop.parentElement);
 		expect(frame.hasAttribute("inert")).toBe(true);
 		expect(frame.hasAttribute("data-sheet-inert")).toBe(false);
 	});
@@ -774,7 +772,7 @@ describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
 
 	it("Escape clicks the real sheet's backdrop, and not the drawing's", async () => {
 		const parts = await sheetPage({ drawing: true });
-		const drawing = parts.drawingSheet as Drawing;
+		const drawing = present(parts.drawingSheet);
 		const event = keydown(parts.document, "Escape");
 		expect(event.defaultPrevented).toBe(true);
 		expect(parts.drawn?.backdrop.clicks).toBe(1);

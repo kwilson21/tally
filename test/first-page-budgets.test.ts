@@ -31,6 +31,8 @@ import { readMonthSummary } from "../src/month-summary";
 import { firstPage, questionScreen } from "../src/routes/first-page";
 import { setupRoute } from "../src/routes/setup";
 import { safeToSpendText } from "../src/views/home-top";
+import { envWith } from "./helpers/doubles";
+import { isMethod, itemAt } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 // The budgets step of the question page (P125 E, spec §6 and §8.8, decision 114, #590): once pay and bills are done,
@@ -72,7 +74,7 @@ function app(DB: D1Database = db) {
 		fetch(path: string, init?: RequestInit) {
 			return router.fetch(
 				new Request(BASE + path, init),
-				{ ...env, DB, DEMO: "false" } as unknown as Env,
+				envWith(env, { DB, DEMO: "false" }),
 				{ waitUntil() {}, passThroughOnException() {}, props: {} },
 			);
 		},
@@ -98,13 +100,16 @@ async function post(
 		? fields
 		: [...fields, ["month", CUR]];
 
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await app(DB).fetch(path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(withMonth).toString(),
 	});
 
@@ -156,11 +161,25 @@ const budgetFormsOf = (html: string) =>
 /** How many times `needle` appears in `text`. */
 const countOf = (text: string, needle: string) => text.split(needle).length - 1;
 
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+const trigger = (res: Response) => {
+	const parsed: {
 		toast?: { message: string; type: string };
 		announce?: string;
-	};
+	} = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
+	return parsed;
+};
+
+/** A value a test writes into a transactions row. */
+type Cell = string | number | null;
+
+/** True when `prop` is a member of `target`, so reading it is a typed read. */
+function isMemberOf<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
 
 let seq = 0;
 
@@ -169,11 +188,11 @@ async function spend(
 	categoryId: number | null,
 	cents: number,
 	date: string,
-	over: Record<string, unknown> = {},
+	over: Record<string, Cell> = {},
 ) {
 	seq += 1;
 
-	const row: Record<string, unknown> = {
+	const row = {
 		account_id: 1,
 		plaid_transaction_id: `budgets-${seq}`,
 		date,
@@ -298,9 +317,9 @@ function raceBeforeBatch(hook: (db: D1Database) => Promise<void>): D1Database {
 				};
 			}
 
-			const value = Reflect.get(target, prop, target);
+			const value = isMemberOf(target, prop) ? target[prop] : undefined;
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
@@ -1526,7 +1545,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 			label: "Another amount",
 			path: "/setup?budgets=one",
 			answer: "another",
-			extra: [["budget", "100"]] as [string, string][],
+			extra: [["budget", "100"]] satisfies [string, string][],
 		},
 		{
 			label: "Skip",
@@ -1705,16 +1724,16 @@ describe("the savings question, the budgets step's last question (decision 135, 
 										return row;
 									};
 
-								const value = Reflect.get(inner, key, inner);
+								const value = isMemberOf(inner, key) ? inner[key] : undefined;
 
-								return typeof value === "function" ? value.bind(inner) : value;
+								return isMethod(value) ? value.bind(inner) : value;
 							},
 						});
 					};
 
-				const value = Reflect.get(target, prop, target);
+				const value = isMemberOf(target, prop) ? target[prop] : undefined;
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 	}
@@ -1729,7 +1748,8 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(focusedHeading(html)).toBe(QUESTION);
 		const forms = savingsFormsOf(html);
 		expect(forms).toHaveLength(2);
-		const [save, skip] = forms as [string, string];
+		const save = itemAt(forms, 0);
+		const skip = itemAt(forms, 1);
 		expect(save).toContain('name="goal"');
 		// Save it is drawn in the foot with form="savings", so it belongs to the savings form; Enter in its field presses it.
 		expect(html).toMatch(

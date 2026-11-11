@@ -47,7 +47,7 @@ describe("fieldCents (the field's text → cents, or null)", () => {
 
 describe("programmatic money controls", () => {
 	it("dispatches a bubbling input event after changing the field", () => {
-		const input = new EventTarget() as EventTarget & { value: string };
+		const input = Object.assign(new EventTarget(), { value: "" });
 		input.value = "1.00";
 		const events: Event[] = [];
 		input.addEventListener("input", (event) => {
@@ -175,6 +175,21 @@ describe("thirdDecimal and refusesInsert (a typed third decimal is refused)", ()
 });
 
 // The fake DOM money.js touches: the field, the steps and chips, Round to with its label, the announcer and focus.
+/** The money box a field sits in: what a test's fake DOM answers for it. */
+type MoneyBox = {
+	querySelector: (selector: string) => Control | null;
+	querySelectorAll: (selector: string) => Control[];
+};
+
+/** The keyboard parts of a key event that the arrow-key tests send. */
+type KeyInit = {
+	key: string;
+	altKey?: boolean;
+	ctrlKey?: boolean;
+	metaKey?: boolean;
+	shiftKey?: boolean;
+};
+
 type Control = {
 	dataset: Record<string, string>;
 	disabled: boolean;
@@ -188,15 +203,25 @@ type Control = {
 	dispatchEvent: (event: Event) => boolean;
 	/** The field's own parts, set by the keyboard and typing tests: a plain control matches nothing. */
 	matches?: (selector: string) => boolean;
-	closest?: (selector: string) => unknown;
+	closest?: (selector: string) => MoneyBox | null;
 	selectionStart?: number;
 	selectionEnd?: number;
 };
 
-const browser = {
-	activeElement: null as Control | null,
-	region: { textContent: "" },
+type Browser = {
+	activeElement: Control | null;
+	region: { textContent: string };
 };
+
+/** The page's state the tests share: the focused control and the announcement region. */
+function freshBrowser(): Browser {
+	return {
+		activeElement: null,
+		region: { textContent: "" },
+	};
+}
+
+const browser = freshBrowser();
 
 function control(dataset: Record<string, string> = {}): Control {
 	const el: Control = {
@@ -236,17 +261,17 @@ function widget(text: string, offer = "", credit = false) {
 		selector === "[data-roundup-label]" ? label : null;
 	const lastMonth = control({ set: "57180" });
 
-	const byId: Record<string, Control> = {
-		"[data-money-input]": input,
-		"[data-roundup]": round,
-		'[data-nudge="100"]': plus,
-		'[data-nudge="-100"]': minus,
-		'[data-nudge="1"]': up,
-		'[data-nudge="-1"]': down,
-	};
+	const byId = new Map<string, Control>([
+		["[data-money-input]", input],
+		["[data-roundup]", round],
+		['[data-nudge="100"]', plus],
+		['[data-nudge="-100"]', minus],
+		['[data-nudge="1"]', up],
+		['[data-nudge="-1"]', down],
+	]);
 
 	const root = {
-		querySelector: (selector: string) => byId[selector] ?? null,
+		querySelector: (selector: string) => byId.get(selector) ?? null,
 		querySelectorAll: (selector: string) =>
 			selector === "[data-nudge]"
 				? [minus, plus, up, down]
@@ -541,11 +566,7 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 
 	describe("the field's keys and typing: the document listeners, as events", () => {
 		/** An event sent to the field, which matches its selector and sits in its money box. */
-		function fieldEvent(
-			input: Control,
-			root: object,
-			init: Record<string, unknown>,
-		) {
+		function fieldEvent(input: Control, root: MoneyBox, init: KeyInit) {
 			input.matches = (selector) => selector === "[data-money-input]";
 			input.closest = (selector) => (selector === "[data-money]" ? root : null);
 

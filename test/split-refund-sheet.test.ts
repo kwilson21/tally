@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
+type HtmxTrigger = { toast: { message: string } };
+
 const db = env.DB;
 const BASE = "http://tally.test";
 const GROCERIES = 1;
@@ -176,9 +178,9 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 
 		expect(res.status).toBe(200);
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 5 now counts with Kids.",
@@ -206,9 +208,9 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 
 		expect(res.status).toBe(200);
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		expect(trigger.toast.message).toContain("2 refunds are no longer linked.");
 		expect(trigger.toast.message).not.toContain("The refund on");
@@ -351,9 +353,9 @@ describe("a credit that no longer follows its purchase is not asked about", () =
 
 		expect(res.status).toBe(200);
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 6 is no longer linked.",
@@ -489,9 +491,9 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 
 		expect(res.status).toBe(200);
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 7 now counts with Kids.",
@@ -517,9 +519,9 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 
 		expect(res.status).toBe(200);
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 7 is no longer linked.",
@@ -602,9 +604,9 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 
 		expect(res.status).toBe(200);
 
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
 
 		expect(
 			trigger.toast.message.match(/The refund on Sep 7 is no longer linked\./g),

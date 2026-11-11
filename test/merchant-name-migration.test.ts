@@ -48,10 +48,16 @@ async function dropScratch() {
 	]);
 }
 
-type Row = Record<string, unknown>;
+/** A column value a row holds: text, a whole number, or null. */
+type Cell = string | number | null;
 
-const rows = async (sql: string) =>
-	((await db.prepare(sql).all<Row>()).results ?? []) as Row[];
+type Row = Record<string, Cell>;
+
+/** An index as the schema check reads it: its columns are a list. */
+type IndexInfo = Record<string, Cell | Cell[]>;
+
+const rows = async (sql: string): Promise<Row[]> =>
+	(await db.prepare(sql).all<Row>()).results ?? [];
 
 /** Every column filled with something other than its default, so a dropped or reordered column shows. */
 async function seedBeforeMigration() {
@@ -260,14 +266,14 @@ const indexes = async (table: string) => {
 		`SELECT name, "unique", origin, partial FROM pragma_index_list('${table}') ORDER BY name`,
 	);
 
-	const out: Row[] = [];
+	const out: IndexInfo[] = [];
 
 	for (const index of list) {
 		const cols = await rows(
 			`SELECT name FROM pragma_index_info('${index.name}') ORDER BY seqno`,
 		);
 
-		out.push({ ...index, columns: cols.map((c) => c.name) });
+		out.push({ ...index, columns: cols.map((c) => String(c.name)) });
 	}
 
 	return out;
@@ -447,7 +453,7 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 
 		await runMigration();
 
-		const strip = (list: Row[]) =>
+		const strip = (list: IndexInfo[]) =>
 			list.map(({ name, ...rest }) => ({
 				...rest,
 				name: String(name).replace(/^sqlite_autoindex_.*$/, "sqlite_autoindex"),
@@ -541,8 +547,8 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 			["jev pick that doesn't exist", "jev_category_id", 424242],
 		];
 
-		const outcome = async (table: string, column: string, value: unknown) => {
-			const row: Record<string, unknown> = {
+		const outcome = async (table: string, column: string, value: Cell) => {
+			const row = {
 				account_id: 9001,
 				date: "2026-09-30",
 				amount_cents: 100,

@@ -11,6 +11,8 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { settings } from "../src/routes/settings";
+import { envWith } from "./helpers/doubles";
+import { isMethod, itemAt, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Settings shows each suggested new category with the transactions behind it (spec §7, §8.3, P30 A, #51):
@@ -27,26 +29,32 @@ type TestApp = { Bindings: Env; Variables: { actor: string } };
 const routeHarness = new Hono<TestApp>();
 
 routeHarness.use("*", async (c, next) => {
-	if ((c.env as { DEMO?: string }).DEMO === "false")
-		c.set("actor", "test@example.com");
+	const demo: string | undefined = c.env.DEMO;
+
+	if (demo === "false") c.set("actor", "test@example.com");
 	await next();
 });
 
-routeHarness.route("/", settings as unknown as Hono<TestApp>);
+routeHarness.route("/", settings);
 
 let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
 const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
 const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
 
+/** Bindings a test sets over the real env: any of the Worker's bindings or secrets, with DEMO as the tests write it. */
+type Bindings = Partial<
+	Omit<Env, "DEMO"> & { DEMO: string; JEV_API_KEY: string }
+>;
+
 async function request(
 	path: string,
 	init: RequestInit = {},
-	bindings: Record<string, unknown> = {},
+	bindings: Bindings = {},
 ) {
 	const res = await routeHarness.request(
 		path,
 		init,
-		{ ...env, ...bindings },
+		envWith(env, bindings),
 		ctx(),
 	);
 
@@ -59,20 +67,20 @@ const get = (path = "/settings/categories", bindings = {}) =>
 async function post(
 	path: string,
 	fields: [string, string][] = [],
-	{
-		htmx = true,
-		bindings = {},
-	}: { htmx?: boolean; bindings?: Record<string, unknown> } = {},
+	{ htmx = true, bindings = {} }: { htmx?: boolean; bindings?: Bindings } = {},
 ) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const { res, html } = await request(
 		path,
 		{
 			method: "POST",
 			redirect: "manual",
-			headers: {
-				...(htmx ? { "HX-Request": "true" } : {}),
-				"content-type": "application/x-www-form-urlencoded",
-			},
+			headers,
 			body: new URLSearchParams(fields).toString(),
 		},
 		bindings,
@@ -81,11 +89,10 @@ async function post(
 	return { res, html };
 }
 
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message: string };
-		announce?: string;
-	};
+type HtmxTrigger = { toast?: { message: string }; announce?: string };
+
+const trigger = (res: Response): HtmxTrigger =>
+	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 
 const textOf = (html: string) =>
 	html
@@ -98,8 +105,6 @@ function countingDb() {
 
 	const counted = new Proxy(db, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
-
 			if (property === "prepare")
 				return (sql: string) => {
 					statements += 1;
@@ -107,15 +112,19 @@ function countingDb() {
 					return target.prepare(sql);
 				};
 
-			return typeof value === "function" ? value.bind(target) : value;
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 
-	return { db: counted as D1Database, statements: () => statements };
+	return { db: counted, statements: () => statements };
 }
 
 /** A database whose first write batch runs `between` first: another member's writes, landing after this save's read. */
-function racedOnce(...between: (() => Promise<unknown>)[]) {
+function racedOnce(
+	...between: (() => Promise<void> | Promise<boolean>)[]
+): D1Database {
 	let raced = false;
 
 	return new Proxy(db, {
@@ -131,11 +140,11 @@ function racedOnce(...between: (() => Promise<unknown>)[]) {
 					return db.batch(statements);
 				};
 
-			const value = Reflect.get(target, property);
+			const value: unknown = Object(target)[property];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 async function bulkSuggestion(name: string, count: number) {
@@ -146,11 +155,13 @@ async function bulkSuggestion(name: string, count: number) {
 		.bind(count, name)
 		.all<{ id: number }>();
 
-	const id = (await saveSuggestion(
-		db,
-		name,
-		results.map((row) => row.id),
-	)) as number;
+	const id = present(
+		await saveSuggestion(
+			db,
+			name,
+			results.map((row) => row.id),
+		),
+	);
 
 	return { id, ids: results.map((row) => row.id) };
 }
@@ -183,7 +194,7 @@ async function petCare(name = "Pet Care") {
 	const ids: number[] = [];
 
 	for (const [raw, cents] of PETS) ids.push(await addTx(raw, cents));
-	const id = (await saveSuggestion(db, name, ids)) as number;
+	const id = present(await saveSuggestion(db, name, ids));
 
 	return { id, ids };
 }
@@ -451,8 +462,8 @@ describe("creating the category", () => {
 				category_confidence: null,
 				updated_by: "demo",
 			});
-		expect((await row(ids[3] as number))?.category_id).toBeNull();
-		expect(await row(ids[3] as number)).toMatchObject({
+		expect((await row(itemAt(ids, 3)))?.category_id).toBeNull();
+		expect(await row(itemAt(ids, 3))).toMatchObject({
 			category_confidence: null,
 			jev_none_fit: 0,
 			category_suggestion_id: null,
@@ -474,7 +485,7 @@ describe("creating the category", () => {
 
 	it("says one transaction in the singular, and the left-out ones in the plural", async () => {
 		const { id, ids } = await petCare();
-		const { res } = await create(id, [ids[0] as number], ids);
+		const { res } = await create(id, [itemAt(ids, 0)], ids);
 		expect(trigger(res).toast?.message).toBe(
 			"Created Pet Care with 1 transaction",
 		);
@@ -495,13 +506,13 @@ describe("creating the category", () => {
 	it("makes a new Pet Care, not an error, when another member restores and renames the archived one before the write (decision 110)", async () => {
 		const { id, ids } = await petCare();
 
-		const archived = (
+		const archived = present(
 			await db
 				.prepare(
 					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 40) RETURNING id",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		await setArchived(db, archived, true, "2026-07-15");
 
@@ -529,7 +540,7 @@ describe("creating the category", () => {
 		const made = await categoryNamed("Pet Care");
 		expect(made).toMatchObject({ archived: 0 });
 		expect(made?.id).not.toBe(archived);
-		expect(await row(ids[0] as number)).toMatchObject({
+		expect(await row(itemAt(ids, 0))).toMatchObject({
 			category_id: made?.id,
 			category_source: "user",
 		});
@@ -539,13 +550,13 @@ describe("creating the category", () => {
 	it("restores an active Pet Care that another member archived after the page was drawn, with the ticks in it (#522)", async () => {
 		const { id, ids } = await petCare();
 
-		const active = (
+		const active = present(
 			await db
 				.prepare(
 					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Pet Care', 'pet care', 'home', 'cat-plum', 40) RETURNING id",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		// Another member archives it once, between this save's read and its write.
 		const racing = racedOnce(() => setArchived(db, active, true, "2026-09-01"));
@@ -581,8 +592,8 @@ describe("creating the category", () => {
 		const { id, ids } = await petCare();
 
 		const bodies: {
-			state: Record<string, unknown>;
-			questions: { category: { criteria: Record<string, unknown> } };
+			state: object;
+			questions: { category: { criteria: object } };
 		}[] = [];
 
 		const jev = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -612,7 +623,7 @@ describe("creating the category", () => {
 		);
 
 		expect(res.status).toBe(200);
-		expect((await row(ids[3] as number))?.note).toBe("Birthday present");
+		expect((await row(itemAt(ids, 3)))?.note).toBe("Birthday present");
 		// The page answered before Jev was asked: the call is handed to waitUntil.
 		expect(jev).not.toHaveBeenCalled();
 		expect(waitUntil).toHaveBeenCalledTimes(1);
@@ -626,7 +637,7 @@ describe("creating the category", () => {
 		expect(Object.keys(bodies[0]?.questions.category.criteria ?? {})).toContain(
 			"Pet Care",
 		);
-		expect(await row(ids[3] as number)).toMatchObject({
+		expect(await row(itemAt(ids, 3))).toMatchObject({
 			category_source: "jev",
 		});
 	});
@@ -744,14 +755,14 @@ describe("creating the category", () => {
 		);
 		await background();
 		expect(jev).not.toHaveBeenCalled();
-		expect((await row(ids[3] as number))?.category_id).toBeNull();
+		expect((await row(itemAt(ids, 3)))?.category_id).toBeNull();
 	});
 
 	it("asks for a tick, keeping what was typed, and creates nothing", async () => {
 		const { id, ids } = await petCare();
 
 		const { res, html } = await create(id, [], ids, {
-			[ids[0] as number]: "Dog food",
+			[itemAt(ids, 0)]: "Dog food",
 		});
 
 		expect(res.status).toBe(422);
@@ -817,7 +828,7 @@ describe("creating the category", () => {
 		const { id, ids } = await petCare();
 
 		const { res, html } = await create(id, ids.slice(0, 2), ids, {
-			[ids[2] as number]: "x",
+			[itemAt(ids, 2)]: "x",
 		});
 
 		expect(JSON.stringify(trigger(res))).not.toMatch(/\bJev\b/);
@@ -836,7 +847,7 @@ describe("Never suggest lines in the card (decision 101)", () => {
 		const a1 = await addTx("CHEWY.COM", 6412);
 		const a2 = await addTx("CHEWY.COM", 4100);
 		const b = await addTx("PETSMART 0412", 2399);
-		const id = (await saveSuggestion(db, "Pet Care", [a1, a2, b])) as number;
+		const id = present(await saveSuggestion(db, "Pet Care", [a1, a2, b]));
 
 		return { id, a: [a1, a2], b };
 	}
@@ -883,12 +894,13 @@ describe("Never suggest lines in the card (decision 101)", () => {
 		await neverLine("PETSMART 0412");
 		const { res } = await create(id, ids, ids);
 		expect(res.status).toBe(200);
-		const [chewy, , petsmart] = ids;
-		expect(await row(petsmart as number)).toMatchObject({
+		const chewy = itemAt(ids, 0);
+		const petsmart = itemAt(ids, 2);
+		expect(await row(petsmart)).toMatchObject({
 			category_id: null,
 			category_source: null,
 		});
-		expect(await row(chewy as number)).toMatchObject({
+		expect(await row(chewy)).toMatchObject({
 			category_source: "user",
 		});
 	});

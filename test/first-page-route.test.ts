@@ -21,6 +21,8 @@ import {
 import { shownPayValues } from "../src/first-tally/pay";
 import { firstPage } from "../src/routes/first-page";
 import { setupRoute } from "../src/routes/setup";
+import { envWith } from "./helpers/doubles";
+import { isMethod, itemAt, present } from "./helpers/present";
 
 // The setup questions (P142 A, spec §8.8, decision 148, #773): one question at a time at /setup, each answer written to the
 // family's transactions or bills, the stroke drawn when its step is done, every swap announced. The answers are POSTs to
@@ -50,7 +52,7 @@ function app(demo: boolean, DB: D1Database = db) {
 		fetch(path: string, init?: RequestInit) {
 			return router.fetch(
 				new Request(BASE + path, init),
-				{ ...env, DB, DEMO: demo ? "true" : "false" } as unknown as Env,
+				envWith(env, { DB, DEMO: demo ? "true" : "false" }),
 				{ waitUntil() {}, passThroughOnException() {}, props: {} },
 			);
 		},
@@ -71,13 +73,16 @@ async function post(
 	htmx = false,
 	DB: D1Database = db,
 ) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await app(false, DB).fetch(path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
 
@@ -180,13 +185,16 @@ function raceBeforeBatch(hook: (db: D1Database) => Promise<void>): D1Database {
 				};
 			}
 
-			const value = Reflect.get(target, prop, target);
+			// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 database it wraps
+			// is exactly what the code under test does, and an absent key reads as undefined.
+			const value: unknown = target[prop as keyof D1Database];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 }
 
+// SAFETY: the page's HX-Trigger header is JSON whose toast and announce keys are optional, as this type says.
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
@@ -205,11 +213,14 @@ const textOf = (html: string) =>
 
 let seq = 0;
 
+/** A column value a test sets on a transaction row. */
+type Column = string | number | boolean | null;
+
 /** One imported bank line on the one connected bank (account 1). `over` sets the columns that differ. */
-async function txn(over: Record<string, unknown>) {
+async function txn(over: Record<string, Column>) {
 	seq += 1;
 
-	const row: Record<string, unknown> = {
+	const row = {
 		account_id: 1,
 		plaid_transaction_id: `first-page-${seq}`,
 		date: TODAY,
@@ -253,14 +264,15 @@ async function deposits(
 	cents: number | number[],
 	count: number,
 	days = 14,
-	over: Record<string, unknown> = {},
+	over: Record<string, Column> = {},
 ) {
 	for (let i = 0; i < count; i += 1) {
 		const date = daysBefore(TODAY, (count - 1 - i) * days);
+		const amount = Array.isArray(cents) ? itemAt(cents, i) : cents;
 		await txn({
 			raw_name: raw,
 			date,
-			amount_cents: -(typeof cents === "number" ? cents : (cents[i] as number)),
+			amount_cents: -amount,
 			flag_income: 1,
 			plaid_category: "INCOME",
 			...over,
@@ -570,7 +582,7 @@ describe("Yes and No writes", () => {
 
 	it("a second answer from a stale read changes nothing and leaves the first's record and flags agreeing", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const merchant = itemAt(await payMerchants(db), 0);
 		expect(
 			await answerPay(db, merchant, "yes", "person@example.com"),
 		).toBeGreaterThan(0);
@@ -595,7 +607,7 @@ describe("Yes and No writes", () => {
 
 	it("answers every deposit of an unchanged merchant", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const merchant = itemAt(await payMerchants(db), 0);
 		expect(await answerPay(db, merchant, "yes", "person@example.com")).toBe(2);
 	});
 
@@ -620,7 +632,7 @@ describe("Yes and No writes", () => {
 
 		it("changes nothing when a shown deposit's cents changed", async () => {
 			await deposits("ACME CORP PAYROLL", 245000, 2);
-			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			const merchant = itemAt(await payMerchants(db), 0);
 			await db
 				.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")
 				.bind(merchant.ids[0])
@@ -630,7 +642,7 @@ describe("Yes and No writes", () => {
 
 		it("changes nothing when a shown deposit's date changed", async () => {
 			await deposits("ACME CORP PAYROLL", 245000, 2);
-			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			const merchant = itemAt(await payMerchants(db), 0);
 			await db
 				.prepare("UPDATE transactions SET date = ? WHERE id = ?")
 				.bind(daysBefore(TODAY, 1), merchant.ids[0])
@@ -640,7 +652,7 @@ describe("Yes and No writes", () => {
 
 		it("changes nothing when a shown deposit's merchant key changed", async () => {
 			await deposits("ACME CORP PAYROLL", 245000, 2);
-			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			const merchant = itemAt(await payMerchants(db), 0);
 			await db
 				.prepare("UPDATE transactions SET merchant_name = 'ACME' WHERE id = ?")
 				.bind(merchant.ids[0])
@@ -651,7 +663,7 @@ describe("Yes and No writes", () => {
 
 	it("answers a No that a competing Yes beat with the page as it is, as info, and keeps the Yes", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const merchant = itemAt(await payMerchants(db), 0);
 
 		// The competing Yes lands just before this reply's own batch, so the reply's No changes no row.
 		const racing = raceBeforeBatch(async (target) => {
@@ -690,7 +702,7 @@ describe("Yes and No writes", () => {
 
 	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const merchant = itemAt(await payMerchants(db), 0);
 
 		// A deposit arrives after the question was read and before this reply's batch: the answer must leave it alone.
 		const racing = raceBeforeBatch(() =>
@@ -896,7 +908,7 @@ describe("a Yes's pay line covers only the deposits the question showed", () => 
 			raw_name: "ACME CORP",
 			date: TODAY,
 			amount_cents: -6000,
-			parent_id: parent?.id,
+			parent_id: present(parent).id,
 			flag_income: 1,
 			income_source: "user",
 		});
@@ -1010,7 +1022,7 @@ describe("A pay answer answers what the page showed", () => {
 
 	it("says the deposits changed when a sync corrects a shown deposit between the check and the answer", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const merchant = itemAt(await payMerchants(db), 0);
 
 		const racing = raceBeforeBatch(async (target) => {
 			await target
@@ -1035,7 +1047,7 @@ describe("A pay answer answers what the page showed", () => {
 
 	it("says the deposits changed when a sync renames a shown deposit's merchant between the check and the answer", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const merchant = itemAt(await payMerchants(db), 0);
 
 		const racing = raceBeforeBatch(async (target) => {
 			await target
@@ -1362,7 +1374,7 @@ describe("refunds and the Yes write", () => {
 			raw_name: "STORE REFUND",
 			date: TODAY,
 			amount_cents: -2500,
-			refund_of_id: purchase?.id,
+			refund_of_id: present(purchase).id,
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
@@ -1552,10 +1564,7 @@ describe("the pay question's scope", () => {
 
 describe("a Never suggest income line doesn't hide the pay question (#651)", () => {
 	/** An unflagged deposit Tally is unsure is income (a Maybe guess), from a merchant with a Never suggest income line. */
-	async function hiddenDeposit(
-		raw: string,
-		over: Record<string, unknown> = {},
-	) {
+	async function hiddenDeposit(raw: string, over: Record<string, Column> = {}) {
 		await deposits(raw, 245000, 2, 14, {
 			flag_income: 0,
 			income_confidence: 0.5,
@@ -1622,16 +1631,20 @@ function firstCategoryOf(html: string): number {
 
 describe("the questions at /setup, and the old page's addresses (#773)", () => {
 	/** A POST to an answer path, from the demo or the family app, with a yes answer (an answer's own check decides the rest). */
-	const answerIn = (demo: boolean, path: string, htmx = false) =>
-		app(demo).fetch(path, {
+	const answerIn = (demo: boolean, path: string, htmx = false) => {
+		const headers = new Headers({
+			"content-type": "application/x-www-form-urlencoded",
+		});
+
+		if (htmx) headers.set("HX-Request", "true");
+
+		return app(demo).fetch(path, {
 			method: "POST",
 			redirect: "manual",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				...(htmx ? { "HX-Request": "true" } : {}),
-			},
+			headers,
 			body: new URLSearchParams([["answer", "yes"]]).toString(),
 		});
+	};
 
 	const ANSWERS = [
 		"/setup/pay",

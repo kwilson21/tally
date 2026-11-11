@@ -10,13 +10,16 @@ import { resetDemo } from "../src/demo/reset";
 
 const encoder = new TextEncoder();
 
-const encode = (value: unknown) =>
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const encode = (value: Json) =>
 	btoa(String.fromCharCode(...encoder.encode(JSON.stringify(value))))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
 
 async function keys() {
+	// SAFETY: an RSASSA-PKCS1-v1_5 key generated with the sign and verify usages is a key pair, not a single key.
 	const pair = (await crypto.subtle.generateKey(
 		{
 			name: "RSASSA-PKCS1-v1_5",
@@ -42,8 +45,8 @@ async function keys() {
 async function token(
 	privateKey: CryptoKey,
 	team: string,
-	overrides: Record<string, unknown> = {},
-	header: Record<string, unknown> = {},
+	overrides: Record<string, Json> = {},
+	header: Record<string, Json> = {},
 ) {
 	const now = Math.floor(Date.now() / 1000);
 	const encodedHeader = encode({ alg: "RS256", kid: "test-key", ...header });
@@ -76,7 +79,7 @@ async function token(
 async function tokenWithPayload(
 	privateKey: CryptoKey,
 	payload: string,
-	header: Record<string, unknown> = {},
+	header: Record<string, Json> = {},
 ) {
 	const encodedHeader = encode({ alg: "RS256", kid: "test-key", ...header });
 
@@ -101,15 +104,15 @@ async function tokenWithPayload(
 		.replace(/=+$/, "")}`;
 }
 
-const request = (jwt?: string, emailHeader?: string) =>
-	new Request("https://tally.test/", {
-		headers: {
-			...(jwt ? { "Cf-Access-Jwt-Assertion": jwt } : {}),
-			...(emailHeader
-				? { "Cf-Access-Authenticated-User-Email": emailHeader }
-				: {}),
-		},
-	});
+const request = (jwt?: string, emailHeader?: string) => {
+	const headers: Record<string, string> = {};
+
+	if (jwt) headers["Cf-Access-Jwt-Assertion"] = jwt;
+
+	if (emailHeader) headers["Cf-Access-Authenticated-User-Email"] = emailHeader;
+
+	return new Request("https://tally.test/", { headers });
+};
 
 describe("verifiedEmail", () => {
 	afterEach(() => {

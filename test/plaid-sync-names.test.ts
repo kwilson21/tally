@@ -4,6 +4,7 @@ import { namesToReview } from "../src/db/merchant-names";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { suggestMerchantNames } from "../src/suggest-names-pending";
+import { fakeAi } from "./helpers/doubles";
 import {
 	assertMerchantInvariants,
 	clearMerchants,
@@ -11,13 +12,20 @@ import {
 	seedMerchant,
 	setMerchantNames,
 } from "./helpers/merchants";
+import { isMethod, present } from "./helpers/present";
 
 // Plaid's merchant name is the merchant's first suggested name (spec §8.6, decision 68, issue #194):
 // sync stores it, with no AI call, and a person still has to choose it.
 
 const KEY = btoa("01234567890123456789012345678901");
 
-const transaction = (overrides: Record<string, unknown> = {}) => ({
+/** A JSON value, as a Plaid answer holds it. */
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+/** A JSON object; a field set to undefined is left out of the body, as JSON.stringify leaves it out. */
+type JsonObject = { [key: string]: Json | undefined };
+
+const transaction = (overrides: JsonObject = {}) => ({
 	transaction_id: "transaction-1",
 	account_id: "account-1",
 	date: "2026-09-27",
@@ -29,7 +37,7 @@ const transaction = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const response = (body: unknown) =>
+const response = (body: Json) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json" },
@@ -44,7 +52,7 @@ async function addItem() {
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
 
-	return result?.id as number;
+	return present(result).id;
 }
 
 const ACCOUNT = {
@@ -57,8 +65,8 @@ const ACCOUNT = {
 };
 
 type Page = {
-	added?: unknown[];
-	modified?: unknown[];
+	added?: JsonObject[];
+	modified?: JsonObject[];
 	/** Plaid transaction ids the bank removed. */
 	removed?: string[];
 	hasMore?: boolean;
@@ -108,13 +116,21 @@ const sync = (
 	page: Omit<Page, "hasMore"> & { db?: D1Database } = {},
 ) => syncPages(id, [page], { db: page.db });
 
+/** True when `prop` is a member of `target`, so reading it is a typed read. */
+function isMemberOf<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
+
 /** The database, and how many statements the sync prepared on it (D1 allows 1,000 queries per invocation). */
 function counting(db: D1Database) {
 	let statements = 0;
 
 	const counted = new Proxy(db, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
+			const value = isMemberOf(target, property) ? target[property] : undefined;
 
 			if (property === "prepare") {
 				return (sql: string) => {
@@ -124,11 +140,11 @@ function counting(db: D1Database) {
 				};
 			}
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
 
-	return { db: counted as D1Database, statements: () => statements };
+	return { db: counted, statements: () => statements };
 }
 
 type MerchantRow = {
@@ -689,9 +705,7 @@ describe("Plaid's merchant name as the first name suggestion", () => {
 // sent no name for is asked about once, in the nightly names step.
 describe("Workers AI is asked only when Plaid sends no name", () => {
 	const aiThatSays = (response: string) =>
-		({ run: vi.fn(async () => ({ response })) }) as unknown as Ai & {
-			run: ReturnType<typeof vi.fn>;
-		};
+		fakeAi(vi.fn(async () => ({ response })));
 
 	beforeEach(async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
@@ -839,7 +853,7 @@ describe("a page of named charges stays under D1's query limit", () => {
 // One bank text's newest remaining charge decides its Plaid name (decision 79), whatever leaves the text:
 // a charge the bank removes, or one whose bank text changes.
 describe("a bank text's newest charge leaves it", () => {
-	const newest = (overrides: Record<string, unknown> = {}) =>
+	const newest = (overrides: JsonObject = {}) =>
 		transaction({
 			transaction_id: "new",
 			date: "2026-09-27",
@@ -847,7 +861,7 @@ describe("a bank text's newest charge leaves it", () => {
 			...overrides,
 		});
 
-	const older = (overrides: Record<string, unknown> = {}) =>
+	const older = (overrides: JsonObject = {}) =>
 		transaction({
 			transaction_id: "old",
 			date: "2026-08-02",
@@ -1008,7 +1022,7 @@ describe("a bank text's newest charge leaves it", () => {
 describe("a guess Workers AI made before Plaid named the text", () => {
 	const GUESS = ["Target Stores", "Target Corp"];
 
-	const unnamed = (overrides: Record<string, unknown> = {}) =>
+	const unnamed = (overrides: JsonObject = {}) =>
 		transaction({
 			transaction_id: "t1",
 			name: "TARGET 1234",

@@ -32,3 +32,12 @@ export function fakeFetch<Impl extends FetchLike>(
 	// SAFETY: callers only call it; `fetch`'s extra static members are never read by the code under test.
 	return impl as typeof fetch & Impl;
 }
+
+/** Only the given bindings, typed as the Worker's `Env`: for a test whose point is that nothing else is set. */
+export function envOnly<Bindings extends object>(
+	bindings: Bindings,
+): Env & Bindings {
+	// SAFETY: the code under test reads only the bindings the test lists; any other reads as undefined, which is
+	// what such a test is checking.
+	return bindings as Env & Bindings;
+}

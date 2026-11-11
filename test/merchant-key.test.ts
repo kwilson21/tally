@@ -21,6 +21,7 @@ import {
 	saveOrganizeGroup,
 } from "../src/transactions/organize";
 import { tidyName } from "../src/transactions/tidy-name";
+import { present } from "./helpers/present";
 
 // A transaction's merchant key is Plaid's merchant_name when there is one, otherwise its raw_name
 // (spec §6.1 rule 1, decision 67), so "TARGET 1234" and "TARGET 5678" are one merchant.
@@ -63,13 +64,20 @@ const insert = (...rows: Tx[]) =>
 		),
 	);
 
+type TxRow = {
+	category_id: number | null;
+	category_source: string | null;
+	merchant_name: string | null;
+	raw_name: string;
+};
+
 const row = (id: number) =>
 	db
 		.prepare(
 			"SELECT category_id, category_source, merchant_name, raw_name FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<TxRow>();
 
 const edit = (over: Partial<Parameters<typeof saveEdit>[2]> = {}) => ({
 	categoryId: null,
@@ -550,10 +558,7 @@ describe("refunds", () => {
 		);
 		const refund = await getTransaction(db, 8301);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8302]);
 	});
@@ -584,10 +589,7 @@ describe("refunds", () => {
 		);
 		const refund = await getTransaction(db, 8311);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8312]);
 	});
@@ -1117,11 +1119,13 @@ describe("bills saved under the bank's raw text", () => {
 
 		await insertBill(db, fields);
 
-		const id = (
-			await db.prepare("SELECT id FROM bills WHERE name = 'Internet'").first<{
-				id: number;
-			}>()
-		)?.id as number;
+		const id = present(
+			(
+				await db.prepare("SELECT id FROM bills WHERE name = 'Internet'").first<{
+					id: number;
+				}>()
+			)?.id,
+		);
 
 		expect(await flagOf(id)).toEqual({ text: "COMCAST CABLE", flag: 0 });
 
@@ -1196,10 +1200,7 @@ describe("refunds across bank texts", () => {
 		);
 		const refund = await getTransaction(db, 8771);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8773]);
 	});
@@ -1217,10 +1218,7 @@ describe("refunds across bank texts", () => {
 		);
 		const refund = await getTransaction(db, 8781);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8782]);
 	});

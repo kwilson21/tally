@@ -4,11 +4,11 @@ import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import {
 	addLikely,
 	LIKELY_LIMIT,
-	type LikelyRow,
 	likelyTransactions,
 } from "../src/db/likely-transactions";
 import { resetDemo } from "../src/demo/reset";
 import { rowCaption, TransactionRow } from "../src/views/transaction-row";
+import { isMethod, present } from "./helpers/present";
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
@@ -38,7 +38,7 @@ async function tx(
 		)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row).id;
 }
 
 async function filed(id: number) {
@@ -96,18 +96,16 @@ beforeEach(async () => {
 	await env.DB.prepare(
 		"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
 	).run();
-	pet = (
+	pet = present(
 		await env.DB.prepare(
 			"SELECT id FROM categories WHERE name = 'Pet Care'",
-		).first<{
-			id: number;
-		}>()
-	)?.id as number;
-	suggested = (
+		).first<{ id: number }>(),
+	).id;
+	suggested = present(
 		await env.DB.prepare(
 			"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-		).first<{ id: number }>()
-	)?.id as number;
+		).first<{ id: number }>(),
+	).id;
 	// The transaction the category was made from: already filed in Pet Care.
 	saved = await tx(
 		`${THIS}-12`,
@@ -300,13 +298,13 @@ describe("likelyTransactions", () => {
 	});
 
 	it("carries the date a bank change unlinked a refund, as the list does", async () => {
-		const unlinked = (
+		const unlinked = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, credit_reviewed, refund_unlinked_purchase_date) VALUES (1, ?, -700, 'BANFIELD PET HOSPITAL', 'Banfield Pet Hospital', 1, ?) RETURNING id",
 			)
 				.bind(`${THIS}-06`, `${THIS}-01`)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
 
@@ -324,11 +322,11 @@ describe("likelyTransactions", () => {
 			"Banfield Pet Hospital",
 		);
 
-		const bill = (
+		const bill = present(
 			await env.DB.prepare(
 				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Vet plan', 9000, 1, 'monthly', 'BANFIELD PLAN') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		await env.DB.prepare(
 			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'auto', 'linked')",
@@ -363,16 +361,16 @@ describe("likelyTransactions", () => {
 			.run();
 
 		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
-		const row = rows.find((found) => found.id === payment);
+		const row = present(rows.find((found) => found.id === payment));
 
 		expect(row).toMatchObject({
 			paysPlan: true,
 			planName: "Car registration",
 		});
-		const caption = rowCaption(row as LikelyRow);
+		const caption = rowCaption(row);
 		expect(caption.kind).not.toBe("excluded");
 		expect(caption.caption).toContain("paid Car registration");
-		const html = await TransactionRow({ row: row as LikelyRow }).toString();
+		const html = await TransactionRow({ row }).toString();
 		expect(html).toContain("paid Car registration");
 		expect(html).not.toContain("Excluded");
 	});
@@ -487,33 +485,33 @@ describe("addLikely", () => {
 			.bind('[{"billId":9860,"name":"Costco membership","period":"2026"}]', row)
 			.run();
 
-		const likely = (
-			await likelyTransactions(env.DB, saved, "Pet Care", TODAY)
-		).find((found) => found.id === row);
+		const likely = present(
+			(await likelyTransactions(env.DB, saved, "Pet Care", TODAY)).find(
+				(found) => found.id === row,
+			),
+		);
 
 		expect(likely?.splitRemovedFromCents).toBe(18742);
 		expect(likely?.splitRemovedBills).toBe(
 			'[{"billId":9860,"name":"Costco membership","period":"2026"}]',
 		);
-		expect(
-			await TransactionRow({ row: likely as LikelyRow }).toString(),
-		).toContain(
+		expect(await TransactionRow({ row: likely }).toString()).toContain(
 			"The bank changed this from $187.42, so its split was removed. The Costco membership bill for 2026 is no longer paid.",
 		);
 	});
 
 	it("offers and files a guess whose suggestion differs from the new category only in accented capitals", async () => {
-		const ecole = (
+		const ecole = present(
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 98) RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
-		const accented = (
+		const accented = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('école', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: accented,
@@ -543,17 +541,17 @@ describe("addLikely", () => {
 
 	it("matches a guess whose accented name is in another Unicode form than the category's", async () => {
 		// The category is composed (É as one character); the suggestion is decomposed (E and a combining accent).
-		const ecole = (
+		const ecole = present(
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 98) RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
-		const decomposed = (
+		const decomposed = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('École', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: decomposed,
@@ -764,9 +762,9 @@ function editedAfterRead(change: string, id: number): D1Database {
 						return result;
 					};
 
-				const value = Reflect.get(target, property);
+				const value: unknown = Object(target)[property];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 
@@ -783,9 +781,9 @@ function editedAfterRead(change: string, id: number): D1Database {
 						: statement;
 				};
 
-			const value = Reflect.get(target, property);
+			const value: unknown = Object(target)[property];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }

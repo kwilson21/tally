@@ -18,23 +18,25 @@ type Entry = {
 
 type List = { legacyBaseline: number; handlers: Entry[] };
 
-const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
-	query: "?raw",
-	import: "default",
-	eager: true,
-}) as Record<string, string>;
+const LIST: List = handlers;
 
-const TESTS = import.meta.glob("./**/*.test.{ts,tsx}", {
+const SOURCES = import.meta.glob<string>("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
-const ROADMAP = import.meta.glob("../ROADMAP.md", {
+const TESTS = import.meta.glob<string>("./**/*.test.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
+
+const ROADMAP = import.meta.glob<string>("../ROADMAP.md", {
+	query: "?raw",
+	import: "default",
+	eager: true,
+});
 
 const WRITES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -177,9 +179,7 @@ describe("the write-handler ratchet", () => {
 
 	it("holds for the real app: every write route is listed, every listed route exists", () => {
 		expect(shapes).toEqual([]);
-		expect(ratchetProblems(found, handlers as List, SOURCES, TESTS)).toEqual(
-			[],
-		);
+		expect(ratchetProblems(found, LIST, SOURCES, TESTS)).toEqual([]);
 	});
 
 	it("fails when a write handler is not on the list", () => {
@@ -311,11 +311,9 @@ describe("the write-handler ratchet", () => {
 	it("shows the same countdown in ROADMAP.md as the list gives", () => {
 		const text = ROADMAP["../ROADMAP.md"] ?? "";
 
-		const todo = (handlers as List).handlers.filter(
-			(e) => e.status !== "exempt",
-		);
+		const todo = LIST.handlers.filter((e) => e.status !== "exempt");
 
-		const exempt = (handlers as List).handlers.length - todo.length;
+		const exempt = LIST.handlers.length - todo.length;
 		expect(text).toContain(`Exempt routes (${exempt}) are not counted`);
 		const left = todo.filter((e) => e.status === "legacy").length;
 		expect(text).toContain(

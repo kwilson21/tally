@@ -14,6 +14,7 @@ import { resetDemo } from "../src/demo/reset";
 import { chartStart } from "../src/net-worth";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
+import { envWith } from "./helpers/doubles";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -376,6 +377,8 @@ describe("POST /accounts/sync feedback", () => {
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				if (String(url) === JEV_URL) return jev();
 
+				// SAFETY: the body is the JSON the Plaid exchange call in the code under test sends, and that call always
+				// sends an object with an access_token string.
 				const { access_token } = JSON.parse(String(init?.body)) as {
 					access_token: string;
 				};
@@ -422,7 +425,7 @@ describe("POST /accounts/sync feedback", () => {
 		return fetchImpl;
 	}
 
-	async function sync(bindings: Record<string, unknown> = {}) {
+	async function sync(bindings: Partial<Env> & { JEV_API_KEY?: string } = {}) {
 		const response = await accounts.request(
 			"/accounts/sync",
 			{ method: "POST", headers: { "HX-Request": "true" } },
@@ -796,13 +799,12 @@ describe("POST /accounts/sync feedback", () => {
 const PLAID_LINK_SCRIPT =
 	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
 
-const plaidEnabled = {
-	...env,
+const plaidEnabled = envWith(env, {
 	DEMO: "false",
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-} as unknown as Env;
+});
 
 describe("Link a bank", () => {
 	it("adds repair hooks and a busy label only when Plaid is enabled", async () => {

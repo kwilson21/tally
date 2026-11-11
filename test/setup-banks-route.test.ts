@@ -6,15 +6,19 @@ import { resetDemo } from "../src/demo/reset";
 import { runReadyEmail } from "../src/first-tally/ready-email";
 import { enabled } from "../src/routes/plaid";
 import { setupRoute } from "../src/routes/setup";
+import { envWith } from "./helpers/doubles";
+import { present } from "./helpers/present";
+
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 // The Your banks list's refresh (P140 A, decision 133): GET /setup/banks, polled every 5 seconds while a bank is being read.
 // It answers with the list and the status out of band, announces a bank that came in, redraws the whole first-week top once
 // the questions open, and redraws Home in full, without a reload, when there is no setup to draw (decision 146).
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 
-const writeRecord = (value: unknown) =>
+const writeRecord = (value: Json) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 	)
@@ -224,7 +228,7 @@ describe("GET /setup/banks: the list while a bank is read", () => {
 				.all<{ name: string }>()
 		).results.map((row) => row.name);
 
-		const message = trigger(res)?.announce as string;
+		const message: string = present(trigger(res)?.announce);
 		expect(message.startsWith(`${names[0]} is in: `)).toBe(true);
 		expect(message).toContain(`${names[1]} is in: `);
 		expect(message.split(". ").length).toBeGreaterThanOrEqual(2);
@@ -395,12 +399,11 @@ describe("GET /setup/banks: the questions open, or there is no setup", () => {
 describe("a page that stops refreshing: its check-in and the ready email (decision 146)", () => {
 	const DANA = "dana@example.com";
 
-	const production = {
-		...env,
+	const production = envWith(env, {
 		DEMO: "false",
 		RESEND_API_KEY: "test-key",
 		EMAIL: undefined,
-	} as never;
+	});
 
 	it("a slow page keeps its check-in, so its person, last checked in a minute ago, is emailed only once away ten minutes", async () => {
 		await readingBanks();
@@ -432,6 +435,7 @@ describe("a page that stops refreshing: its check-in and the ready email (decisi
 
 		const fetchImpl = vi.fn(
 			async (_url: RequestInfo | URL, init?: RequestInit) => {
+				// SAFETY: the body is the JSON the ready email sends, and that send always carries a `to` string.
 				sent.push((JSON.parse(String(init?.body)) as { to: string }).to);
 
 				return new Response("{}", { status: 200 });

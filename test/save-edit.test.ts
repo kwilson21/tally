@@ -13,6 +13,7 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { parseEdit } from "../src/transactions/edit";
 import { parseFilters } from "../src/transactions/filters";
+import { itemAt, present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -20,14 +21,27 @@ const EATING_OUT = 2;
 const GAS = 3;
 
 const idOf = async (rawName: string) =>
-	(
-		await db
-			.prepare(
-				"SELECT id FROM transactions WHERE raw_name = ? ORDER BY date DESC LIMIT 1",
-			)
-			.bind(rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+	present(
+		(
+			await db
+				.prepare(
+					"SELECT id FROM transactions WHERE raw_name = ? ORDER BY date DESC LIMIT 1",
+				)
+				.bind(rawName)
+				.first<{ id: number }>()
+		)?.id,
+	);
+
+/** The columns the row helper reads back, as the transactions table stores them. */
+type TransactionRow = {
+	category_id: number | null;
+	category_source: string | null;
+	category_confidence: number | null;
+	note: string | null;
+	excluded: number;
+	excluded_source: string | null;
+	updated_by: string | null;
+};
 
 const row = (id: number) =>
 	db
@@ -35,7 +49,7 @@ const row = (id: number) =>
 			"SELECT category_id, category_source, category_confidence, note, excluded, excluded_source, updated_by FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<TransactionRow>();
 
 const edit = (over: Partial<Parameters<typeof saveEdit>[2]> = {}) => ({
 	categoryId: null,
@@ -201,7 +215,7 @@ describe("saveEdit", () => {
 			.bind(parent?.id)
 			.run();
 
-		await saveEdit(db, parent?.id as number, edit(), "unchanged");
+		await saveEdit(db, present(parent?.id), edit(), "unchanged");
 		expect(
 			(
 				await db
@@ -215,7 +229,7 @@ describe("saveEdit", () => {
 
 		await saveEdit(
 			db,
-			parent?.id as number,
+			present(parent?.id),
 			edit({ excluded: true }),
 			"changed",
 		);
@@ -231,7 +245,7 @@ describe("saveEdit", () => {
 		).toEqual([{ updated_by: "changed" }]);
 		await saveEdit(
 			db,
-			parent?.id as number,
+			present(parent?.id),
 			edit({ excluded: true }),
 			"unchanged-again",
 		);
@@ -269,9 +283,9 @@ describe("saveEdit", () => {
 					.all<{ excluded: number }>()
 			).results;
 
-		await saveEdit(db, child?.id as number, edit({ excluded: true }), "part");
+		await saveEdit(db, present(child?.id), edit({ excluded: true }), "part");
 		expect(await states()).toEqual([{ excluded: 1 }]);
-		await saveEdit(db, child?.id as number, edit({ excluded: false }), "part");
+		await saveEdit(db, present(child?.id), edit({ excluded: false }), "part");
 		expect(await states()).toEqual([{ excluded: 0 }]);
 	});
 
@@ -303,7 +317,9 @@ describe("saveEdit", () => {
 		).results.map((r) => r.id);
 
 		expect(ids.length).toBeGreaterThan(3);
-		const [edited, personal, ...others] = ids as [number, number, ...number[]];
+		const edited = itemAt(ids, 0);
+		const personal = itemAt(ids, 1);
+		const others = ids.slice(2);
 		await db
 			.prepare("UPDATE transactions SET category_source = 'user' WHERE id = ?")
 			.bind(personal)
@@ -383,14 +399,16 @@ describe("saveEdit", () => {
 	it("keeps a Kind and For a person cleared, when Jev answers later (#304)", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 
-		const untouched = (
-			await db
-				.prepare(
-					"SELECT id FROM transactions WHERE id != ? ORDER BY id LIMIT 1",
-				)
-				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+		const untouched = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM transactions WHERE id != ? ORDER BY id LIMIT 1",
+					)
+					.bind(id)
+					.first<{ id: number }>()
+			)?.id,
+		);
 
 		await db.batch([
 			db

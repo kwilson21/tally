@@ -5,12 +5,31 @@ import {
 	matchBillPayments,
 	pickBillPayment,
 } from "../src/bills/match";
+import { isMethod } from "./helpers/present";
+
+/** env.DB with `count` run on every prepare; every other member is the real D1's. */
+function countingDb(count: () => void): D1Database {
+	return new Proxy(env.DB, {
+		get(target, property) {
+			if (property === "prepare")
+				return (sql: string) => {
+					count();
+
+					return target.prepare(sql);
+				};
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
+		},
+	});
+}
 
 /**
  * env.DB for one matcher run. `change` runs once the run has read its candidates and before it writes its links (the
  * statement that inserts them from json_each), so a test can change a payment between the two.
  */
-function changedBeforeWrite(change: () => Promise<unknown>): D1Database {
+function changedBeforeWrite(change: () => Promise<D1Result[]>): D1Database {
 	return new Proxy(env.DB, {
 		get(target, property) {
 			if (property === "prepare")
@@ -30,11 +49,11 @@ function changedBeforeWrite(change: () => Promise<unknown>): D1Database {
 					};
 				};
 
-			const value = Reflect.get(target, property, target);
+			const value: unknown = Object(target)[property];
 
-			return typeof value === "function" ? value.bind(target) : value;
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 describe("bill payment matching", () => {
@@ -221,20 +240,9 @@ describe("bill payment matching", () => {
 			await env.DB.batch(payments);
 			let statements = 0;
 
-			const counted = new Proxy(env.DB, {
-				get(target, property) {
-					if (property === "prepare")
-						return (sql: string) => {
-							statements++;
-
-							return target.prepare(sql);
-						};
-
-					const value = Reflect.get(target, property, target);
-
-					return typeof value === "function" ? value.bind(target) : value;
-				},
-			}) as D1Database;
+			const counted = countingDb(() => {
+				statements++;
+			});
 
 			await matchBillPayments(counted, "2026-01-02");
 
@@ -283,20 +291,9 @@ describe("bill payment matching", () => {
 			);
 			let statements = 0;
 
-			const counted = new Proxy(env.DB, {
-				get(target, property) {
-					if (property === "prepare")
-						return (sql: string) => {
-							statements++;
-
-							return target.prepare(sql);
-						};
-
-					const value = Reflect.get(target, property, target);
-
-					return typeof value === "function" ? value.bind(target) : value;
-				},
-			}) as D1Database;
+			const counted = countingDb(() => {
+				statements++;
+			});
 
 			expect(await matchBillPayments(counted, "2026-04-20")).toBeGreaterThan(0);
 
@@ -396,22 +393,11 @@ describe("bill payment matching", () => {
 		);
 		let statements = 0;
 
-		const counted = new Proxy(env.DB, {
-			get(target, property) {
-				const value = Reflect.get(target, property);
-
-				if (property === "prepare")
-					return (sql: string) => {
-						statements += 1;
-
-						return target.prepare(sql);
-					};
-
-				return typeof value === "function" ? value.bind(target) : value;
-			},
+		const counted = countingDb(() => {
+			statements += 1;
 		});
 
-		await matchBillPayments(counted as D1Database, "2026-04-03");
+		await matchBillPayments(counted, "2026-04-03");
 		expect(statements).toBeLessThan(1000);
 	});
 

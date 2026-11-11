@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { loadMonth } from "../src/db/month";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -56,7 +57,8 @@ describe("transaction splits", () => {
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
 		).first<{ id: number; amountCents: number }>();
 
-		const half = Math.trunc((refund?.amountCents as number) / 2);
+		const half = Math.trunc(present(refund).amountCents / 2);
+		// SAFETY: saveSplit asks this fake only for `all` on the PRAGMA table_info read; every other query goes to the real database.
 		expect(
 			await saveSplit(
 				{
@@ -64,6 +66,7 @@ describe("transaction splits", () => {
 						if (query !== "PRAGMA table_info(transactions)")
 							return env.DB.prepare(query);
 
+						// SAFETY: the PRAGMA read above calls only `all` on the statement it gets, and this object supplies exactly that.
 						return {
 							all: async () => {
 								const columns = await env.DB.prepare(query).all<{
@@ -82,16 +85,16 @@ describe("transaction splits", () => {
 									),
 								};
 							},
-						} as unknown as D1PreparedStatement;
+						} as D1PreparedStatement;
 					},
 					batch: env.DB.batch.bind(env.DB),
-				} as unknown as D1Database,
-				refund?.id as number,
+				} as D1Database,
+				present(refund).id,
 				[
 					{ categoryId: 1, amountCents: half },
 					{
 						categoryId: 5,
-						amountCents: (refund?.amountCents as number) - half,
+						amountCents: present(refund).amountCents - half,
 					},
 				],
 				"synthetic-test",
@@ -186,7 +189,7 @@ describe("transaction splits", () => {
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number }>();
 
-		const id = bakery?.id as number;
+		const id = present(bakery).id;
 		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(id)
 			.run();
@@ -221,11 +224,12 @@ describe("transaction splits", () => {
 			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; cents: number }>();
 
-		const id = bakery?.id as number;
-		const first = Math.trunc((bakery?.cents as number) / 2);
-		const second = (bakery?.cents as number) - first;
+		const id = present(bakery).id;
+		const first = Math.trunc(present(bakery).cents / 2);
+		const second = present(bakery).cents - first;
 		let raced = false;
 
+		// SAFETY: saveSplit uses only `prepare` and `batch` of the database it is given, and both are supplied here.
 		const db = {
 			prepare: (query: string) => env.DB.prepare(query),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -240,7 +244,7 @@ describe("transaction splits", () => {
 
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		expect(
 			await saveSplit(
@@ -286,14 +290,14 @@ describe("transaction splits", () => {
 			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; cents: number }>();
 
-		const id = bakery?.id as number;
+		const id = present(bakery).id;
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'jev' WHERE id = ?",
 		)
 			.bind(id)
 			.run();
-		const first = Math.trunc((bakery?.cents as number) / 2);
-		const second = (bakery?.cents as number) - first;
+		const first = Math.trunc(present(bakery).cents / 2);
+		const second = present(bakery).cents - first;
 		expect(
 			await saveSplit(
 				env.DB,
@@ -319,7 +323,7 @@ describe("transaction splits", () => {
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number }>();
 
-		const id = bakery?.id as number;
+		const id = present(bakery).id;
 
 		const bad = await post(`/transactions/${id}/split`, [
 			["part_category", "1"],
@@ -394,11 +398,11 @@ describe("transaction splits", () => {
 			"SELECT id, amount_cents AS cents FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; cents: number }>();
 
-		const id = bakery?.id as number;
+		const id = present(bakery).id;
 
 		const stale = [
 			{ categoryId: 1, amountCents: 500 },
-			{ categoryId: 5, amountCents: (bakery?.cents as number) - 400 },
+			{ categoryId: 5, amountCents: present(bakery).cents - 400 },
 		];
 
 		expect(await saveSplit(env.DB, id, stale, "test")).toEqual({
@@ -423,13 +427,13 @@ describe("transaction splits", () => {
 			"SELECT id, amount_cents AS amountCents FROM transactions WHERE amount_cents < 0 AND parent_id IS NULL AND flag_income = 0 LIMIT 1",
 		).first<{ id: number; amountCents: number }>();
 
-		const id = refund?.id as number;
+		const id = present(refund).id;
 		await env.DB.prepare(
 			"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_source = 'user' WHERE id = ?",
 		)
 			.bind(id)
 			.run();
-		const total = Math.abs(refund?.amountCents as number);
+		const total = Math.abs(present(refund).amountCents);
 		const before = await loadMonth(env.DB, "2026-09");
 
 		const totalBefore = before.transactions.reduce(
@@ -456,11 +460,16 @@ describe("transaction splits", () => {
 			"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ?",
 		)
 			.bind(id)
-			.all();
+			.all<{
+				flag_income: number;
+				income_source: string | null;
+				credit_reviewed: number | null;
+				credit_reviewed_by: string | null;
+			}>();
 
 		expect(children.results).toHaveLength(2);
 
-		for (const child of children.results as Array<Record<string, unknown>>) {
+		for (const child of children.results) {
 			expect(child).toMatchObject({
 				flag_income: 0,
 				income_source: "user",
@@ -519,11 +528,13 @@ describe("a split change says which bill payments it unlinked (decision 99)", ()
 		]);
 	});
 
-	const trigger = async (res: Response) =>
-		JSON.parse(res.headers.get("HX-Trigger") ?? "null") as {
-			toast: { message: string };
-			announce: string;
-		};
+	const trigger = async (res: Response) => {
+		const parsed: { toast: { message: string }; announce: string } = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "null",
+		);
+
+		return parsed;
+	};
 
 	/** The bank change: PURCHASE is whole again, its parts gone, and its note names the bills by id. */
 	async function bankChangeRemovedSplit(bills: string) {

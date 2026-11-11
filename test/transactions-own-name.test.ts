@@ -5,6 +5,7 @@ import { listTransactions } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 import { merchantNames, seedMerchant } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // A name a person gives one transaction only (decision 101, spec §5 and §7): "This one only" leaves the
 // merchant's name, its suggestions and the other transactions alone; "All" renames the merchant for the
@@ -22,14 +23,17 @@ async function post(
 ) {
 	const form = new URLSearchParams(fields);
 
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: form.toString(),
 	});
 
@@ -52,7 +56,7 @@ async function charge(
 		.bind(`plaid-${crypto.randomUUID()}`, date, rawName, merchantName)
 		.first<{ id: number }>();
 
-	return row?.id as number;
+	return present(row).id;
 }
 
 const suggest = (key: string, names: string[]) =>
@@ -457,13 +461,15 @@ describe("a name for one transaction (decision 101)", () => {
 			.bind(a)
 			.run();
 
-		const part = (await db
-			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+		const part = present(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
 				 VALUES (1, '2026-10-02', 650, ?, 'Amazon', ?) RETURNING id`,
-			)
-			.bind(AMAZON, a)
-			.first<{ id: number }>()) as { id: number };
+				)
+				.bind(AMAZON, a)
+				.first<{ id: number }>(),
+		);
 
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${part.id}?month=all`)
@@ -500,13 +506,15 @@ describe("a name for one transaction (decision 101)", () => {
 			.bind(a)
 			.run();
 
-		const part = (await db
-			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+		const part = present(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
 				 VALUES (1, '2026-10-02', 650, ?, 'Amazon', ?) RETURNING id`,
-			)
-			.bind(AMAZON, a)
-			.first<{ id: number }>()) as { id: number };
+				)
+				.bind(AMAZON, a)
+				.first<{ id: number }>(),
+		);
 
 		const { res } = await post(
 			`/transactions/${part.id}`,
@@ -533,7 +541,7 @@ describe("a name for one transaction (decision 101)", () => {
 			.bind(AMAZON, a)
 			.first<{ id: number }>();
 
-		expect((await rowOf(part?.id as number))?.displayName).toBe("Dog bed");
+		expect((await rowOf(present(part).id))?.displayName).toBe("Dog bed");
 	});
 
 	it("the Name row says the bank's text only for a bank row, not for a cash entry", async () => {
@@ -541,13 +549,15 @@ describe("a name for one transaction (decision 101)", () => {
 			.prepare("SELECT id FROM accounts WHERE type = 'cash' LIMIT 1")
 			.first<{ id: number }>();
 
-		const id = (await db
-			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+		const id = present(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name)
 				 VALUES (?, '2026-09-20', 2045, 'Farmers market') RETURNING id`,
-			)
-			.bind(cash?.id)
-			.first<{ id: number }>()) as { id: number };
+				)
+				.bind(cash?.id)
+				.first<{ id: number }>(),
+		);
 
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${id.id}?month=all`)
@@ -630,18 +640,18 @@ describe("a name for one transaction (decision 101)", () => {
 
 /** The toast message a save sends with its HTMX response. */
 function toastOf(res: Response): string | undefined {
-	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message?: string };
-	};
+	const trigger: { toast?: { message?: string } } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
 
 	return trigger.toast?.message;
 }
 
 /** The announcement a save sends with its HTMX response. */
 function announceOf(res: Response): string | undefined {
-	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		announce?: string;
-	};
+	const trigger: { announce?: string } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
 
 	return trigger.announce;
 }

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import migration from "../migrations/0026_bill_category.sql?raw";
 import { resetDemo } from "../src/demo/reset";
+import { itemAt, present } from "./helpers/present";
 
 beforeEach(async () => resetDemo(env.DB, "2026-09-22"));
 
@@ -229,8 +230,8 @@ describe("migration 0026: bill categories", () => {
 			const normalizedTable = (sql: string) =>
 				sql.replaceAll(/\s+/g, "").replaceAll('"', "");
 
-			expect(normalizedTable(after.tableSql as string)).toBe(
-				normalizedTable(before.tableSql as string).replace(
+			expect(normalizedTable(present(after.tableSql))).toBe(
+				normalizedTable(present(before.tableSql)).replace(
 					"'user','merchant_rule','jev'",
 					"'user','merchant_rule','jev','bill'",
 				),
@@ -300,17 +301,23 @@ describe("migration 0026: bill categories", () => {
 	});
 
 	it("backfills linked uncategorized and Jev payments, preserving other choices and links without a bill category", async () => {
-		const backfill = migration.match(
-			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
-		)?.[0];
+		const backfill = present(
+			migration.match(
+				/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
+			)?.[0],
+		);
 
 		const triggers = [
-			migration.match(
-				/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
-			)?.[0],
-			migration.match(
-				/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
-			)?.[0],
+			present(
+				migration.match(
+					/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
+				)?.[0],
+			),
+			present(
+				migration.match(
+					/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
+				)?.[0],
+			),
 		];
 
 		expect(backfill).toBeDefined();
@@ -345,7 +352,7 @@ describe("migration 0026: bill categories", () => {
 		]);
 
 		try {
-			await env.DB.prepare(backfill as string).run();
+			await env.DB.prepare(backfill).run();
 			expect(
 				(
 					await env.DB.prepare(
@@ -369,26 +376,32 @@ describe("migration 0026: bill categories", () => {
 					"DELETE FROM transactions WHERE id BETWEEN 9920 AND 9925",
 				),
 				env.DB.prepare("DELETE FROM bills WHERE id IN (9920,9921)"),
-				env.DB.prepare(triggers[0] as string),
-				env.DB.prepare(triggers[1] as string),
+				env.DB.prepare(itemAt(triggers, 0)),
+				env.DB.prepare(itemAt(triggers, 1)),
 			]);
 		}
 	});
 
 	it("backfills every category-source, link, and bill-category combination", async () => {
-		const backfill = migration.match(
-			/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
-		)?.[0];
+		const backfill = present(
+			migration.match(
+				/UPDATE transactions\s+SET category_id = \(SELECT b\.category_id[\s\S]*?;\n/,
+			)?.[0],
+		);
 
 		expect(backfill).toBeDefined();
 
 		const categoryTriggers = [
-			migration.match(
-				/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
-			)?.[0],
-			migration.match(
-				/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
-			)?.[0],
+			present(
+				migration.match(
+					/CREATE TRIGGER bill_payment_category\n[\s\S]*?END;/,
+				)?.[0],
+			),
+			present(
+				migration.match(
+					/CREATE TRIGGER bill_payment_category_on_repoint\n[\s\S]*?END;/,
+				)?.[0],
+			),
 		];
 
 		expect(categoryTriggers.every(Boolean)).toBe(true);
@@ -444,7 +457,7 @@ describe("migration 0026: bill categories", () => {
 					),
 				),
 			]);
-			await env.DB.prepare(backfill as string).run();
+			await env.DB.prepare(backfill).run();
 
 			const actual = (
 				await env.DB.prepare(
@@ -484,24 +497,28 @@ describe("migration 0026: bill categories", () => {
 				),
 				env.DB.prepare("DELETE FROM bills WHERE id IN (9930,9931)"),
 				env.DB.prepare("DELETE FROM category_suggestions WHERE id=9930"),
-				env.DB.prepare(categoryTriggers[0] as string),
-				env.DB.prepare(categoryTriggers[1] as string),
+				env.DB.prepare(itemAt(categoryTriggers, 0)),
+				env.DB.prepare(itemAt(categoryTriggers, 1)),
 			]);
 		}
 	});
 
 	it("copies transactions, self references, and bill links through the rebuild", async () => {
-		const table = migration.match(
-			/CREATE TABLE transactions_new \([\s\S]*?\n\);/,
-		)?.[0];
+		const table = present(
+			migration.match(/CREATE TABLE transactions_new \([\s\S]*?\n\);/)?.[0],
+		);
 
-		const transactionCopy = migration.match(
-			/INSERT INTO transactions_new \([\s\S]*?FROM transactions;/,
-		)?.[0];
+		const transactionCopy = present(
+			migration.match(
+				/INSERT INTO transactions_new \([\s\S]*?FROM transactions;/,
+			)?.[0],
+		);
 
-		const paymentCopy = migration.match(
-			/INSERT INTO bill_payments \(id, bill_id, period, transaction_id, matched_by, status, created_at\)[\s\S]*?FROM bill_payments_keep;/,
-		)?.[0];
+		const paymentCopy = present(
+			migration.match(
+				/INSERT INTO bill_payments \(id, bill_id, period, transaction_id, matched_by, status, created_at\)[\s\S]*?FROM bill_payments_keep;/,
+			)?.[0],
+		);
 
 		expect(table).toBeDefined();
 		expect(transactionCopy).toBeDefined();
@@ -512,14 +529,11 @@ describe("migration 0026: bill categories", () => {
 		const sourcePayments = "bill_category_migration_source_payments";
 		const targetPayments = "bill_category_migration_target_payments";
 
-		const oldTable = (table as string)
+		const oldTable = table
 			.replaceAll("transactions_new", sourceName)
 			.replace("'jev', 'bill'", "'jev'");
 
-		const newTable = (table as string).replaceAll(
-			"transactions_new",
-			targetName,
-		);
+		const newTable = table.replaceAll("transactions_new", targetName);
 
 		const newPayments = (name: string, txTable: string) =>
 			`CREATE TABLE ${name} (id INTEGER PRIMARY KEY, bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE, period TEXT NOT NULL, transaction_id INTEGER NOT NULL REFERENCES ${txTable}(id) ON DELETE CASCADE, matched_by TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL)`;
@@ -551,12 +565,12 @@ describe("migration 0026: bill categories", () => {
 			]);
 			await env.DB.batch([
 				env.DB.prepare(
-					(transactionCopy as string)
+					transactionCopy
 						.replaceAll("transactions_new", targetName)
 						.replaceAll("transactions", sourceName),
 				),
 				env.DB.prepare(
-					(paymentCopy as string)
+					paymentCopy
 						.replaceAll("bill_payments_keep", sourcePayments)
 						.replaceAll("bill_payments", targetPayments),
 				),

@@ -14,6 +14,7 @@ import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestions } from "../src/routes/suggestions";
 import { seedMerchant } from "./helpers/merchants";
+import { isMethod } from "./helpers/present";
 
 // The one review screen's queue (spec §8.6, decisions 79 and 101, issue #195): every "Maybe …" a person
 // hasn't answered, one item at a time, in the order money first, then categories, new categories, names.
@@ -1021,12 +1022,13 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 			{ waitUntil() {}, passThroughOnException() {}, props: {} },
 		);
 
-	const toastOf = (res: Response) =>
-		(
-			JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-				toast?: { message: string };
-			}
-		).toast?.message;
+	const toastOf = (res: Response) => {
+		const trigger: { toast?: { message: string } } = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
+		return trigger.toast?.message;
+	};
 
 	/** The four answers the screen writes (src/routes/suggestions.tsx): the statement each starts with, and the column it sets. */
 	const WRITES = [
@@ -1061,7 +1063,7 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 	] as const;
 
 	/** The DB, with `rival` run just before the write whose SQL starts with `prefix`: the guess moves after the queue read. */
-	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+	function racing(prefix: string, rival: () => Promise<D1Result>): D1Database {
 		let raced = false;
 		// The statements a batch runs are the real ones, and a batch that holds a racing write fires the rival first.
 		const real = new WeakMap<object, D1PreparedStatement>();
@@ -1090,9 +1092,9 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 							return prop === "run" ? target.run() : target.all();
 						};
 
-					const value = Reflect.get(target, prop);
+					const value: unknown = Object(target)[prop];
 
-					return typeof value === "function" ? value.bind(target) : value;
+					return isMethod(value) ? value.bind(target) : value;
 				},
 			});
 
@@ -1116,9 +1118,9 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 						return target.batch(statements.map((s) => real.get(s) ?? s));
 					};
 
-				const value = Reflect.get(target, prop);
+				const value: unknown = Object(target)[prop];
 
-				return typeof value === "function" ? value.bind(target) : value;
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
 	}

@@ -52,6 +52,7 @@ import { TimeZoneRow } from "../src/views/time-zone-row";
 import { TransactionRow } from "../src/views/transaction-row";
 import { TrendsScreen } from "../src/views/trends";
 import { ViewLinks } from "../src/views/view-links";
+import { envWith } from "./helpers/doubles";
 
 const BASE = "http://tally.test";
 
@@ -61,7 +62,7 @@ const get = async (path: string) => {
 	return { res, html: await res.text() };
 };
 
-const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+const notDemo = envWith(env, { DEMO: "false" });
 
 /** Every component name in DESIGN.md's Components table ("Sidebar / BottomTabs" is two). */
 function designComponents(): string[] {
@@ -636,9 +637,13 @@ describe("GET /design-system in the demo", () => {
 		expect(section).toContain(APPLE_LINE.replaceAll("'", "&#39;"));
 
 		// Each picture is described in words, the bank's words and its link included.
-		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
-			.map((m) => m[1] ?? "")
-			.filter((l) => l.includes("Home"));
+		const labels = [
+			...section.matchAll(/role="img" aria-label="([^"]*)"/g),
+		].flatMap((m) => {
+			const label = m[1] ?? "";
+
+			return label.includes("Home") ? [label] : [];
+		});
 
 		expect(labels).toHaveLength(5);
 
@@ -1571,10 +1576,14 @@ describe("GET /design-system in the demo", () => {
 		const section =
 			html.split('id="home-top"')[1]?.split("</section>")[0] ?? "";
 
-		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
-			.map((m) => m[1] ?? "")
-			// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
-			.filter((l) => l.startsWith("Home"));
+		// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
+		const labels = [
+			...section.matchAll(/role="img" aria-label="([^"]*)"/g),
+		].flatMap((m) => {
+			const label = m[1] ?? "";
+
+			return label.startsWith("Home") ? [label] : [];
+		});
 
 		// The no-budget picture (#519) has its own numbers, so the four examples of October are checked apart from it.
 		const noBudget =

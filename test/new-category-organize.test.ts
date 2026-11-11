@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { organize } from "../src/routes/organize";
+import { isMethod, present } from "./helpers/present";
 
 type TestApp = { Bindings: Env; Variables: { actor: string } };
 
@@ -75,7 +76,7 @@ async function saveWith(db: D1Database, fields: Record<string, string>) {
 		c.set("actor", "demo");
 		await next();
 	});
-	app.route("/", organize as unknown as Hono<TestApp>);
+	app.route("/", organize);
 
 	const res = await app.request(
 		"/transactions/organize",
@@ -104,8 +105,6 @@ function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
 
 	return new Proxy(env.DB, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
-
 			if (property === "batch")
 				return async (statements: D1PreparedStatement[]) => {
 					if (!raced) {
@@ -116,9 +115,11 @@ function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
 					return target.batch(statements);
 				};
 
-			return typeof value === "function" ? value.bind(target) : value;
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 /** The Harbor Supply rule as the merchants table holds it now. */
@@ -179,15 +180,19 @@ describe("a group another save files while this one saves", () => {
 			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
 		).run();
 
-		const chosen = (await env.DB.prepare(
-			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
-		).first<{ id: number }>()) as { id: number };
+		const chosen = present(
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
+			).first<{ id: number }>(),
+		);
 
-		const older = (await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-01-05', 500, 'HARBOR SUPPLY', ?, 'user') RETURNING id",
-		)
-			.bind(chosen.id)
-			.first<{ id: number }>()) as { id: number };
+		const older = present(
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-01-05', 500, 'HARBOR SUPPLY', ?, 'user') RETURNING id",
+			)
+				.bind(chosen.id)
+				.first<{ id: number }>(),
+		);
 
 		const { res } = await saveWith(otherSaveFilesFirst(true), {
 			group: "Harbor Supply",
@@ -281,11 +286,11 @@ describe("New category in Organize", () => {
 	it("a 51st active category gives the full message and makes nothing", async () => {
 		await harborCharges(2);
 
-		const active = (
+		const active = present(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
-			).first<{ n: number }>()
-		)?.n as number;
+			).first<{ n: number }>(),
+		).n;
 
 		for (let i = active; i < 50; i++)
 			await env.DB.prepare(

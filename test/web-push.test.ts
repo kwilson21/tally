@@ -8,6 +8,7 @@ import {
 	sendPush,
 	vapidAuthorization,
 } from "../src/push/web-push";
+import { present } from "./helpers/present";
 
 // Web Push without a dependency (decision 149): RFC 8291 (aes128gcm over ECDH P-256), RFC 8188 (the record and its header) and
 // RFC 8292 (the VAPID JWT). Every byte is checked against the RFC's own example: Appendix A's intermediate values, which give
@@ -97,15 +98,14 @@ async function openRecord(
 		[],
 	);
 
+	// WebCrypto names the peer key `public`; the generated type calls it `$public`, so the params are typed with both.
+	const ecdhParams: SubtleCryptoDeriveKeyAlgorithm & { public: CryptoKey } = {
+		name: "ECDH",
+		public: senderKey,
+	};
+
 	const ecdh = new Uint8Array(
-		await crypto.subtle.deriveBits(
-			{
-				name: "ECDH",
-				public: senderKey,
-			} as unknown as SubtleCryptoDeriveKeyAlgorithm,
-			uaKey,
-			256,
-		),
+		await crypto.subtle.deriveBits(ecdhParams, uaKey, 256),
 	);
 
 	const enc = new TextEncoder();
@@ -327,6 +327,18 @@ describe("vapidAuthorization (RFC 8292)", () => {
 	});
 });
 
+/** The headers a request was given. The code under test passes a plain record, so a Headers object is refused. */
+function plainHeaders(
+	headers: HeadersInit | undefined,
+): Record<string, string> {
+	const plain = present(headers);
+
+	if (plain instanceof Headers || Symbol.iterator in plain)
+		throw new Error("expected the headers as a plain record");
+
+	return plain;
+}
+
 describe("sendPush", () => {
 	let logged: unknown[][];
 	beforeEach(() => {
@@ -369,7 +381,7 @@ describe("sendPush", () => {
 		const [request] = requests;
 		expect(request?.url).toBe(SUBSCRIPTION.endpoint);
 		expect(request?.init.method).toBe("POST");
-		const headers = request?.init.headers as Record<string, string>;
+		const headers = plainHeaders(request?.init.headers);
 		expect(Object.keys(headers).sort()).toEqual(
 			[
 				"Authorization",
@@ -389,7 +401,11 @@ describe("sendPush", () => {
 	it("sends a body that the subscriber opens to the payload's JSON", async () => {
 		const { fetchImpl, requests } = answering(201);
 		await sendPush(SUBSCRIPTION, PAYLOAD, await keys(), { fetchImpl });
-		const body = new Uint8Array(requests[0]?.init.body as ArrayBuffer);
+
+		const body = new Uint8Array(
+			await new Response(requests[0]?.init.body).arrayBuffer(),
+		);
+
 		const opened = await openRecord(body, AUTH, UA_PRIVATE, UA_PUBLIC);
 		expect(JSON.parse(new TextDecoder().decode(opened))).toEqual(PAYLOAD);
 	});
@@ -486,7 +502,7 @@ describe("the VAPID header's cache (decision 149)", () => {
 			fetchImpl,
 			nowSec,
 		});
-		const headers = requests[0]?.headers as Record<string, string>;
+		const headers = plainHeaders(requests[0]?.headers);
 
 		return headers.Authorization ?? "";
 	}
@@ -495,27 +511,35 @@ describe("the VAPID header's cache (decision 149)", () => {
 	const claimsOf = (header: string) => {
 		const token = /^vapid t=([^,]+),/.exec(header)?.[1] ?? "";
 
-		return JSON.parse(
+		const claims: { aud: string; exp: number; sub: string } = JSON.parse(
 			new TextDecoder().decode(bytes(token.split(".")[1] ?? "")),
-		) as { aud: string; exp: number; sub: string };
+		);
+
+		return claims;
 	};
 
 	/** VAPID keys from a fresh P-256 pair, so a changed key is a real different key. */
 	async function freshKeys() {
-		const pair = (await crypto.subtle.generateKey(
+		const pair = await crypto.subtle.generateKey(
 			{ name: "ECDSA", namedCurve: "P-256" },
 			true,
 			["sign", "verify"],
-		)) as CryptoKeyPair;
-
-		const privateJwk = (await crypto.subtle.exportKey(
-			"jwk",
-			pair.privateKey,
-		)) as JsonWebKey;
-
-		const publicRaw = new Uint8Array(
-			(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
 		);
+
+		if (!("privateKey" in pair))
+			throw new Error("a key pair should come back as a pair");
+
+		const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+
+		if (privateJwk instanceof ArrayBuffer)
+			throw new Error("a JWK export should give a JSON Web Key");
+
+		const publicBytes = await crypto.subtle.exportKey("raw", pair.publicKey);
+
+		if (!(publicBytes instanceof ArrayBuffer))
+			throw new Error("a raw export should give bytes");
+
+		const publicRaw = new Uint8Array(publicBytes);
 
 		const made = await vapidKeys({
 			VAPID_PUBLIC_KEY: toBase64Url(publicRaw),

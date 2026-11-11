@@ -15,6 +15,8 @@ import {
 } from "../src/sort-instance";
 import type { SortParams } from "../src/sort-start";
 import { fakeSteps } from "./fake-sort-steps";
+import { fakeAi } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 // What one sorting instance does (sort-instance.ts), run through its fake step runner: the sorting groups, then the
 // night's steps for the 09:00 run's instance (decision 139).
@@ -22,6 +24,9 @@ import { fakeSteps } from "./fake-sort-steps";
 const db = env.DB;
 const TODAY = "2026-09-22";
 const NIGHT = "2026-10-13";
+
+/** The chat request a Workers AI binding receives: the messages, and the user's words are in one of them. */
+type ChatInput = { messages: { role: string; content: string }[] };
 
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
@@ -50,11 +55,9 @@ const jevAnswer = () =>
 
 /** A fake Workers AI: a category question gets `Subscriptions`, a bank text a place name. `order` hears each kind. */
 const aiThatHears = (order: string[] = []) =>
-	({
-		run: vi.fn(async (_model: string, input: unknown) => {
-			const user = (
-				input as { messages: { role: string; content: string }[] }
-			).messages.find((m) => m.role === "user")?.content;
+	fakeAi(
+		vi.fn(async (_model: string, input: ChatInput) => {
+			const user = input.messages.find((m) => m.role === "user")?.content;
 
 			const kind = user?.startsWith("Places:") ? "categories" : "names";
 			order.push(kind);
@@ -63,7 +66,7 @@ const aiThatHears = (order: string[] = []) =>
 				response: kind === "categories" ? "Subscriptions" : "Some Place Name",
 			};
 		}),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+	);
 
 /** Clears what the night would ask about, then adds one unsorted, unnamed charge per name (each from a store of its own). */
 async function onlyCharges(names: string[]) {
@@ -351,11 +354,9 @@ describe("each step's budget counts from its own start", () => {
 		let t = 0;
 		const order: string[] = [];
 
-		const ai = {
-			run: vi.fn(async (_model: string, input: unknown) => {
-				const user = (
-					input as { messages: { role: string; content: string }[] }
-				).messages.find((m) => m.role === "user")?.content;
+		const ai = fakeAi(
+			vi.fn(async (_model: string, input: ChatInput) => {
+				const user = input.messages.find((m) => m.role === "user")?.content;
 
 				order.push(user?.startsWith("Places:") ? "categories" : "names");
 				t += 5 * 60_000;
@@ -366,7 +367,7 @@ describe("each step's budget counts from its own start", () => {
 						: "Some Place Name",
 				};
 			}),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		);
 
 		await runInstance({ DB: db, DEMO: "false", AI: ai }, night, {
 			now: () => t,
@@ -453,10 +454,12 @@ describe("the night's run clears the daily run's wait mark once nothing waits (d
 		await waitingCharge();
 
 		// Both switches are on, so the SQL is never null.
-		const waitingSql = waitingForJevSql({
-			categories: true,
-			income: true,
-		}) as string;
+		const waitingSql = present(
+			waitingForJevSql({
+				categories: true,
+				income: true,
+			}),
+		);
 
 		await waitsForRunStatement(db, waitingSql).run();
 	};

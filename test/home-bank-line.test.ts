@@ -4,13 +4,14 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { bankSyncs } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { envWith } from "./helpers/doubles";
 
 // Home's picked bank alert (decision 82, P96): a connected bank that needs attention or hasn't synced
 // for 3 days gets an as-of tag and a soft alert line with Fix before the forecast.
 // Only Date is faked: the Workers runtime and D1 keep their real timers. Noon Eastern on Oct 7.
 const NOW = "2026-10-07T16:00:00Z";
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 
 async function page(bindings: Env = family) {
 	const res = await home.request("/", {}, bindings);

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
 	categoryCallLimit,
 	suggestNewCategories,
@@ -13,6 +13,8 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { tidyName } from "../src/transactions/tidy-name";
+import { fakeAi as bindingOf } from "./helpers/doubles";
+import { isMethod, present } from "./helpers/present";
 
 // The nightly step for new category suggestions (spec §7, §8.6, #51). Code finds the transactions Jev
 // was sure no category fit and groups them by theme; only a group of three or more asks Workers AI for a
@@ -23,10 +25,14 @@ const db = env.DB;
 
 type Ask = { merchants: string[]; avoid: string[]; sent: string };
 
+/** The JSON body a Workers AI call sends: its chat messages. */
+type AiInput = { messages: { role: string; content: string }[] };
+
+type FakeRun = (model: string, input: AiInput) => Promise<{ response: string }>;
+
 /** The merchants and categories Workers AI was told in one call, read from the prompt it was given. */
-const readAsk = (input: unknown): Ask => {
-	const messages = (input as { messages: { role: string; content: string }[] })
-		.messages;
+const readAsk = (input: AiInput): Ask => {
+	const { messages } = input;
 
 	const user = messages.find((m) => m.role === "user")?.content ?? "";
 
@@ -44,15 +50,17 @@ const readAsk = (input: unknown): Ask => {
 
 /** A fake Workers AI answering each call from `answer`, which sees what it was told. */
 const fakeAi = (
-	answer: (ask: Ask) => unknown = () => ({ response: "Subscriptions" }),
+	answer: (
+		ask: Ask,
+	) => { response: string } | Promise<{ response: string }> = () => ({
+		response: "Subscriptions",
+	}),
 ) =>
-	({
-		run: vi.fn(async (_model: string, input: unknown) =>
-			answer(readAsk(input)),
-		),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+	bindingOf(
+		vi.fn<FakeRun>(async (_model, input) => await answer(readAsk(input))),
+	);
 
-const asks = (ai: { run: ReturnType<typeof vi.fn> }) =>
+const asks = (ai: { run: Mock<FakeRun> }) =>
 	ai.run.mock.calls.map(([, input]) => readAsk(input));
 
 type Over = {
@@ -146,8 +154,8 @@ describe("suggestNewCategories", () => {
 	it("rechecks names after Workers AI answers before saving a pending suggestion", async () => {
 		await addMany(3);
 
-		const ai = {
-			run: vi.fn(async () => {
+		const ai = bindingOf(
+			vi.fn(async () => {
 				await db
 					.prepare(
 						"INSERT INTO categories(name,icon,color,sort_order) VALUES('Home Supplies','tag','cat-blue',99)",
@@ -156,7 +164,7 @@ describe("suggestNewCategories", () => {
 
 				return { response: "Home Supplies" };
 			}),
-		} as unknown as Ai;
+		);
 
 		await suggestNewCategories({ DB: db, AI: ai });
 		expect(
@@ -207,8 +215,6 @@ describe("suggestNewCategories", () => {
 
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
-
 				if (property === "prepare")
 					return (sql: string) => {
 						statements++;
@@ -216,9 +222,11 @@ describe("suggestNewCategories", () => {
 						return target.prepare(sql);
 					};
 
-				return typeof value === "function" ? value.bind(target) : value;
+				const value: unknown = Object(target)[property];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
 
 		const rows = await noneFitTransactions(counted);
 		expect(rows.length).toBeLessThanOrEqual(500);
@@ -438,7 +446,7 @@ describe("suggestNewCategories", () => {
 		const first = fakeAi(() => ({ response: "Pet Care" }));
 		await suggestNewCategories({ DB: db, AI: first });
 		const [made] = await pendingSuggestions(db);
-		await dismissSuggestion(db, made?.id as number);
+		await dismissSuggestion(db, present(made).id);
 
 		// Three more of another theme: the model says the dismissed name again, and Tally drops it.
 		await addMany(3, {
@@ -458,7 +466,7 @@ describe("suggestNewCategories", () => {
 			AI: fakeAi(() => ({ response: "Streaming" })),
 		});
 		const [made] = await pendingSuggestions(db);
-		await dismissSuggestion(db, made?.id as number);
+		await dismissSuggestion(db, present(made).id);
 
 		const again = fakeAi(() => ({ response: "Media" }));
 		await suggestNewCategories({ DB: db, AI: again });

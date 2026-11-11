@@ -10,6 +10,7 @@ import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { seedMerchant } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -100,11 +101,11 @@ const saveFields = (extra: Record<string, string>) => ({
 
 beforeEach(async () => {
 	await resetDemo(env.DB, TODAY);
-	bakery = (
+	bakery = present(
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
-		).first<{ id: number }>()
-	)?.id as number;
+		).first<{ id: number }>(),
+	).id;
 });
 
 describe("the New category chip in the edit panel", () => {
@@ -137,11 +138,11 @@ describe("the New category chip in the edit panel", () => {
 	});
 
 	it("a 51st active category gives the full message and saves nothing", async () => {
-		const active = (
+		const active = present(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
-			).first<{ n: number }>()
-		)?.n as number;
+			).first<{ n: number }>(),
+		).n;
 
 		for (let i = active; i < 50; i++)
 			await env.DB.prepare(
@@ -174,13 +175,13 @@ describe("the New category chip in the edit panel", () => {
 		const made = await categoryNamed("Pet Care");
 		expect(made?.archived).toBe(0);
 
-		const last = (
+		const last = present(
 			await env.DB.prepare(
 				"SELECT MAX(sort_order) AS last FROM categories WHERE id <> ?",
 			)
 				.bind(made?.id)
-				.first<{ last: number }>()
-		)?.last as number;
+				.first<{ last: number }>(),
+		).last;
 
 		expect(made?.sortOrder).toBeGreaterThan(last);
 		expect(await filedAs(bakery)).toEqual({
@@ -221,7 +222,7 @@ describe("a refused save makes no category", () => {
 		)
 			.bind(date, cents, rawName, refundOf, refundOf === null ? 0 : 1)
 			.first<{ id: number }>()
-			.then((row) => row?.id as number);
+			.then((row) => present(row).id);
 
 	it("a cash amount below its linked refunds saves nothing and makes no category", async () => {
 		const entry = await insertRow(
@@ -415,8 +416,8 @@ describe("the likely transactions after a new category", () => {
 				.bind(date, cents)
 				.first<{ id: number }>();
 
-		first = (await insert(`${THIS}-01`, 1200))?.id as number;
-		second = (await insert(`${THIS}-02`, 900))?.id as number;
+		first = present(await insert(`${THIS}-01`, 1200)).id;
+		second = present(await insert(`${THIS}-02`, 900)).id;
 	});
 
 	it("are offered after Save, ticked, and Add files only the ticked ones into the new category", async () => {
@@ -498,13 +499,13 @@ describe("the likely transactions after a new category", () => {
 		const made = await categoryNamed("Pet Care");
 
 		// Last month's charge ranks below every same-merchant row this month, so seven newer rows push it past the six.
-		const older = (
+		const older = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432') RETURNING id",
 			)
 				.bind(`${LAST}-20`)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		for (let day = 3; day <= 9; day++)
 			await env.DB.prepare(
@@ -607,19 +608,19 @@ describe("the likely transactions after a new category", () => {
 	});
 
 	it("show a guess with the Maybe chip the list shows, not the plain Needs category tag", async () => {
-		const suggestion = (
+		const suggestion = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
-		const guess = (
+		const guess = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_suggestion_id) VALUES (1, ?, 2000, 'SQ *CORNER PETS', ?) RETURNING id",
 			)
 				.bind(`${THIS}-03`, suggestion)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const saved = await post(
 			`/transactions/${bakery}`,
@@ -653,13 +654,13 @@ describe("the likely transactions after a new category", () => {
 			.bind(first)
 			.run();
 
-		const refund = (
+		const refund = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, refund_of_id, credit_reviewed) VALUES (1, ?, -500, 'SQ *LOCAL BAKERY 4432', ?, 1) RETURNING id",
 			)
 				.bind(`${THIS}-05`, first)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const saved = await post(
 			`/transactions/${bakery}`,
@@ -677,13 +678,13 @@ describe("the likely transactions after a new category", () => {
 	])(
 		"hide a guessed note while details are $details, as the list does",
 		async ({ details, shows }) => {
-			const guessed = (
+			const guessed = present(
 				await env.DB.prepare(
 					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, note_guessed, note_state) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432', 'Birthday cake', 1, 'guessed') RETURNING id",
 				)
 					.bind(`${THIS}-04`)
-					.first<{ id: number }>()
-			)?.id as number;
+					.first<{ id: number }>(),
+			).id;
 
 			await env.DB.prepare(
 				"INSERT OR REPLACE INTO household_settings (key, value) VALUES ('ai_details', ?)",
@@ -712,13 +713,13 @@ describe("the likely transactions after a new category", () => {
 
 	it("name the date and amount a cash entry was saved with in the reason, not the ones it had", async () => {
 		// A cash entry has no merchant name, so it is the same merchant as the bakery's bank rows by its raw name.
-		const entry = (
+		const entry = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES ((SELECT id FROM accounts WHERE type = 'cash'), ?, 2000, 'SQ *LOCAL BAKERY 4432') RETURNING id",
 			)
 				.bind(`${LAST}-15`)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const saved = await post(
 			`/transactions/${entry}`,

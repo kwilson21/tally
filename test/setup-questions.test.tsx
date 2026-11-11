@@ -20,11 +20,15 @@ import {
 	SkippedSteps,
 } from "../src/views/setup-questions";
 import { BILLS_STEP, BUDGETS_STEP, PAY_STEP } from "../src/views/step-bar";
+import { itemAt } from "./helpers/present";
 
 // The setup question screens (P142 A, decision 148, #773): each step's question as one screen, drawn from the same words,
 // fields and answer rules as the question page (src/routes/first-page.tsx reads these fields and values).
 
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+/** Anything the views return: a JSX element is drawn to its markup by `String`. */
+type Drawn = { toString(): string };
+
+const html = (node: Drawn) => String(node).replaceAll("&#39;", "'");
 
 /** Every form on the screen: its opening tag's attributes and its inner markup. */
 const formsOf = (markup: string) =>
@@ -156,28 +160,36 @@ const GAS: BudgetAsk = {
 	suggestion: null,
 };
 
+const budgetAsk = (
+	id: number,
+	name: string,
+	icon: string,
+	color: string,
+	amountCents: number,
+): BudgetAsk => ({
+	id,
+	name,
+	icon,
+	color,
+	months: MONTHS_AUG_SEP,
+	suggestion: { amountCents, months: MONTHS_AUG_SEP },
+});
+
 /** Twelve suggestions that sum to $4,050 a month: five shown, seven folded. */
 const TWELVE: BudgetAsk[] = [
-	[1, "Groceries", "groceries", "cat-blue", 65000],
-	[2, "Eating Out", "eating-out", "cat-plum", 23000],
-	[3, "Gas", "gas", "cat-slate", 17000],
-	[4, "Kids", "kids", "cat-ochre", 29000],
-	[5, "Car & Transport", "car", "cat-ochre", 34000],
-	[6, "Utilities", "utilities", "cat-blue", 18000],
-	[7, "Subscriptions", "subscriptions", "cat-plum", 6000],
-	[8, "Shopping", "shopping", "cat-slate", 22000],
-	[9, "Personal Care", "personal-care", "cat-ochre", 9000],
-	[10, "Health", "health", "cat-brown", 12000],
-	[11, "Entertainment", "entertainment", "cat-blue", 15000],
-	[12, "Rent", "rent", "cat-brown", 155000],
-].map(([id, name, icon, color, amountCents]) => ({
-	id: id as number,
-	name: name as string,
-	icon: icon as string,
-	color: color as string,
-	months: MONTHS_AUG_SEP,
-	suggestion: { amountCents: amountCents as number, months: MONTHS_AUG_SEP },
-}));
+	budgetAsk(1, "Groceries", "groceries", "cat-blue", 65000),
+	budgetAsk(2, "Eating Out", "eating-out", "cat-plum", 23000),
+	budgetAsk(3, "Gas", "gas", "cat-slate", 17000),
+	budgetAsk(4, "Kids", "kids", "cat-ochre", 29000),
+	budgetAsk(5, "Car & Transport", "car", "cat-ochre", 34000),
+	budgetAsk(6, "Utilities", "utilities", "cat-blue", 18000),
+	budgetAsk(7, "Subscriptions", "subscriptions", "cat-plum", 6000),
+	budgetAsk(8, "Shopping", "shopping", "cat-slate", 22000),
+	budgetAsk(9, "Personal Care", "personal-care", "cat-ochre", 9000),
+	budgetAsk(10, "Health", "health", "cat-brown", 12000),
+	budgetAsk(11, "Entertainment", "entertainment", "cat-blue", 15000),
+	budgetAsk(12, "Rent", "rent", "cat-brown", 155000),
+];
 
 describe("SetupPay", () => {
 	const pay = (props: Partial<Parameters<typeof SetupPay>[0]> = {}) =>
@@ -345,7 +357,7 @@ describe("SetupBills", () => {
 	});
 
 	it("counts one charge with the singular words", () => {
-		const markup = bills({ keep: [KEEP[0] as BillSuggestion], waiting: [] });
+		const markup = bills({ keep: [itemAt(KEEP, 0)], waiting: [] });
 		expect(markup).toContain("Keep this one as a bill?");
 		expect(markup).toContain(
 			"Tally found a charge that comes back every month.",
@@ -366,7 +378,7 @@ describe("SetupBills", () => {
 		const keeps = hiddenOf(form?.body ?? "").filter((f) => f.name === "keep");
 		expect(keeps).toHaveLength(8);
 		expect(keeps[0]?.value).toBe(
-			shownBillValue(KEEP[0] as BillSuggestion).replaceAll('"', "&quot;"),
+			shownBillValue(itemAt(KEEP, 0)).replaceAll('"', "&quot;"),
 		);
 		expect(
 			buttonsOf(markup).find((b) => b.text === "Keep these 8"),
@@ -463,7 +475,7 @@ describe("SetupBudgets", () => {
 			value: "2026-10",
 		});
 		expect(hidden.find((f) => f.name === "keep")?.value).toBe(
-			shownBudgetValue(TWELVE[0] as BudgetAsk).replaceAll('"', "&quot;"),
+			shownBudgetValue(itemAt(TWELVE, 0)).replaceAll('"', "&quot;"),
 		);
 		const all = buttonsOf(markup).find((b) => b.text === "Keep all 12");
 		expect(all?.attrs).toContain('name="answer"');

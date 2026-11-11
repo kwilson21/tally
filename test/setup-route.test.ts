@@ -8,6 +8,7 @@ import { accounts } from "../src/routes/accounts";
 import { home } from "../src/routes/home";
 import { setupRoute } from "../src/routes/setup";
 import { sameOrigin } from "../src/security";
+import { envWith } from "./helpers/doubles";
 
 // Setup on its own pages (P142 A, decision 148, spec §8.8), through the routes: the welcome before a bank, Reading your bank after
 // one, the redirects that send a family to them and back to Home, the daily run's wait (decision 150), the Your banks poll and the
@@ -17,23 +18,21 @@ const TODAY = "2026-10-14";
 
 /** Noon on TODAY, in UTC: the clock the sort's times are read against, in summer time for the zones below. */
 const NOW = Date.parse("2026-10-14T12:00:00Z");
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 
-const plaidFamily = {
-	...family,
+const plaidFamily = envWith(family, {
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-} as unknown as Env;
+});
 
 // RFC 8292's VAPID pair from Appendix A: a valid P-256 pair, so the route's key check passes.
-const VAPID = {
-	...family,
+const VAPID = envWith(family, {
 	VAPID_PUBLIC_KEY:
 		"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8",
 	VAPID_PRIVATE_KEY: "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
-} as unknown as Env;
+});
 
 const PERSON = "person@example.com";
 
@@ -71,7 +70,10 @@ const homePage = async (bindings: Env, path = "/", init?: RequestInit) => {
 	return { res, html: readable(await res.text()) };
 };
 
-const writeRecord = (value: unknown) =>
+/** A JSON value, as the stored setup record holds it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const writeRecord = (value: Json) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 	)
