@@ -24,10 +24,12 @@ import { Specimen } from "./specimen";
 const POSITIVE = formatCents(999900, { wholeDollars: true });
 const NEGATIVE = `−${POSITIVE}`;
 const DEMO_STATUS = "Eating Out is $36 over. Everything else is on track.";
+
 const OVER_STATUS =
 	"Over budget this month. Spending more takes it further over.";
 
 type Width = 320 | 360 | 390;
+
 /** Each width written out in full, so Tailwind keeps the class. */
 const FRAME_WIDTH: Record<Width, string> = {
 	320: "w-[320px]",
@@ -73,6 +75,7 @@ function Drawing({ layout }: { layout: Exclude<Layout, "under"> }) {
 		hide: "hidden @min-[390px]:block shrink-0 [&>svg]:size-28",
 		small: "shrink-0 [&>svg]:size-18",
 	}[layout];
+
 	return (
 		<div data-drawing="beside" class={look}>
 			<LedgerIllustration />
@@ -99,6 +102,7 @@ function HomeTop({
 			Safe to spend · <WhyLink section="budget" topic="safe to spend" />
 		</p>
 	);
+
 	const figure = (
 		<p
 			class={`font-serif text-6xl font-semibold tracking-tight whitespace-nowrap ${negative ? "text-over" : ""} ${headlineAmountClass(amount)}`}
@@ -106,7 +110,9 @@ function HomeTop({
 			{amount}
 		</p>
 	);
+
 	const status = negative ? OVER_STATUS : DEMO_STATUS;
+
 	return (
 		<>
 			<MonthNavigation
@@ -175,6 +181,7 @@ function Screen({
 	layout: Layout;
 }) {
 	const amount = negative ? NEGATIVE : POSITIVE;
+
 	return (
 		<div class={`w-fit max-w-full overflow-x-auto ${ROOM[width]}`}>
 			<div

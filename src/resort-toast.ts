@@ -31,15 +31,20 @@ const waitingClause = (waiting: number): string =>
  */
 export function closingToast(counts: ClosingCounts): ToastWords | null {
 	const waiting = waitingClause(counts.needAnswer);
+
 	if (counts.moved === 0) {
 		if (counts.needAnswer === 0) return null;
+
 		return { message: `Nothing moved.${waiting}`, type: "info", undo: false };
 	}
+
 	const [only] = counts.byCategory;
+
 	const head =
 		counts.byCategory.length === 1 && only
 			? `Moved ${counts.moved} to ${only.name}.`
 			: `Moved ${counts.moved} ${counts.moved === 1 ? "row" : "rows"}.`;
+
 	return { message: `${head}${waiting}`, type: "success", undo: true };
 }
 
@@ -56,18 +61,24 @@ export type UndoOutcome = {
 	changedSince: number;
 };
 
-/** The Undo answer's words and type. An expired Undo is an error, as a refused answer is elsewhere in the app. */
-export function undoWords(outcome: UndoOutcome): {
+/** What an Undo answer says on screen, and whether it is a success, an info note or an error. */
+type UndoWords = {
 	message: string;
 	type: "success" | "info" | "error";
-} {
+};
+
+/** The Undo answer's words and type. An expired Undo is an error, as a refused answer is elsewhere in the app. */
+export function undoWords(outcome: UndoOutcome): UndoWords {
 	if (outcome.expired)
 		return { message: "Too late to undo that.", type: "error" };
+
 	const stayed =
 		outcome.changedSince === 0
 			? ""
 			: ` ${outcome.changedSince} changed since, so ${outcome.changedSince === 1 ? "it" : "they"} stayed.`;
+
 	if (outcome.restored === 0)
 		return { message: `Nothing put back.${stayed}`, type: "info" };
+
 	return { message: `Put ${outcome.restored} back.${stayed}`, type: "success" };
 }

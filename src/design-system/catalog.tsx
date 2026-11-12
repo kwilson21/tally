@@ -251,7 +251,9 @@ const SUGGESTION_CARD_ROWS = CATEGORY_SUGGESTION.rows.map((row) => ({
 	amountCents: row.amountCents,
 	date: row.date,
 }));
+
 const SUGGESTION_CARD_TODAY = "2026-10-16";
+
 /** The "N more look like this" card (decision 157): two purchases with one bank text, both ticked. */
 const MORE_LIKE_THIS_ROWS = [
 	{ id: 71, name: "Audible", amountCents: 1499, date: "2026-10-05" },
@@ -640,6 +642,7 @@ function Brand() {
 
 /** The first week's fake setup (P125 E): the household's day, and the reading screen's setup view from its fields. */
 const FIRST_WEEK_TODAY = "2026-10-14";
+
 const firstWeek = (
 	phase: SetupPhase,
 	extra: Partial<SetupView> = {},
@@ -658,6 +661,7 @@ const firstWeek = (
 	runTime: "5 AM",
 	...extra,
 });
+
 /** The Your banks list's fake rows (P140 A): Chase is in, American Express is being read, and its two variants. */
 const CHASE_IN: YourBank = {
 	id: 3,
@@ -668,6 +672,7 @@ const CHASE_IN: YourBank = {
 	fresh: false,
 	count: 412,
 };
+
 /** Chase while its history comes in (the reading screen, P142 A): linked within the hour, 86 transactions so far. */
 const CHASE_READING: YourBank = {
 	...CHASE_IN,
@@ -675,6 +680,7 @@ const CHASE_READING: YourBank = {
 	fresh: true,
 	count: 86,
 };
+
 const AMEX_READING: YourBank = {
 	id: 5,
 	name: "American Express",
@@ -684,11 +690,13 @@ const AMEX_READING: YourBank = {
 	fresh: true,
 	count: 86,
 };
+
 const AMEX_PAUSED: YourBank = { ...AMEX_READING, status: "needs_attention" };
 const AMEX_PAST_HOUR: YourBank = { ...AMEX_READING, fresh: false };
 
 /** More's fake banks: two connected, and one that needs signing in in its own state (P122 A). */
 const MORE_TODAY = "2026-10-14";
+
 const moreAccount = (
 	id: number,
 	name: string,
@@ -703,6 +711,7 @@ const moreAccount = (
 	balanceCents: 100000,
 	isLiability,
 });
+
 const moreBank = (overrides: Partial<Bank>): Bank => ({
 	id: 1,
 	name: "First Harbor Bank",
@@ -714,6 +723,7 @@ const moreBank = (overrides: Partial<Bank>): Bank => ({
 	],
 	...overrides,
 });
+
 const MORE_BANKS: Bank[] = [
 	moreBank({}),
 	moreBank({
@@ -1478,6 +1488,7 @@ function Picture({ label, children }: { label: string; children?: Child }) {
 }
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+
 const HOME_MONTH_HEADING = (
 	<MonthNavigation
 		month="2026-10"
@@ -1518,12 +1529,14 @@ function describeHome({
 		...(forecast ? ["Forecast"] : dailyAmount ? [dailyAmount] : []),
 		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
+
 	// The Budget list and the foot's How this works come together, as HomeSketch draws them.
 	if (rows)
 		parts.push(
 			`Budget: ${HOME_ROWS.map((r) => `${r.name} ${whole(r.spentCents)} of ${whole(r.budgetCents)}`).join(", ")}`,
 			"How this works",
 		);
+
 	return parts.join(". ").replaceAll("..", ".");
 }
 
@@ -1648,7 +1661,9 @@ function HomeTopGroup() {
 			"hx-push-url": "/",
 		},
 	};
+
 	const refusal = parseBudgetAmount("six hundred");
+
 	const forecast = (
 		<HomeForecast
 			month="2026-10"
@@ -1663,6 +1678,7 @@ function HomeTopGroup() {
 			differenceCents={12000}
 		/>
 	);
+
 	return (
 		<Group id="home" title="Home's top">
 			<Specimen
@@ -2313,13 +2329,17 @@ function HomeTopGroup() {
 
 /** The sample page's selectable rows, 25 to a page as the list draws it. */
 const SAMPLE_PAGE_IDS = Array.from({ length: 25 }, (_, i) => 101 + i);
+
 /** Ticks on another page: not in SAMPLE_PAGE_IDS. */
 const OFF_PAGE_IDS = Array.from({ length: 76 }, (_, i) => 201 + i);
 
 /** The transaction a category was just made from, and the likely ones after it (decision 76). */
+// SAFETY: TRANSACTION_ROWS is the mock's sample list (imported above), and the catalog draws its first row here.
 const LIKELY_BASE = (TRANSACTION_ROWS[0] as (typeof TRANSACTION_ROWS)[number])
 	.row;
+
 const LIKELY_SAVED = { id: 900, date: "2026-10-12", amountCents: 18900 };
+
 const LIKELY_ROWS: LikelyRow[] = [
 	{
 		...LIKELY_BASE,
@@ -4348,7 +4368,7 @@ function Rows() {
 const REVIEW_TODAY = "2026-10-11";
 
 // The review screen's items, as the queue hands them to the components (#195): one of each kind.
-const reviewItems: Record<string, SuggestionItem> = {
+const reviewItems = {
 	income: {
 		kind: "income",
 		id: "income-1",
@@ -4449,7 +4469,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 			owned: 0,
 		},
 	},
-};
+} satisfies Record<string, SuggestionItem>;
 
 const reviewCategories = [
 	{ id: 2, name: "Eating Out" },
@@ -4481,6 +4501,7 @@ const audibleCategories = [
 ];
 
 function SuggestionsReview() {
+	// SAFETY: each review item cast here is one of reviewItems above, and reviewItems.newCategory is the new_category item the Extract names.
 	return (
 		<Group id="suggestions-review" title="Suggestions review">
 			<Specimen
@@ -4698,7 +4719,7 @@ function SuggestionsReview() {
 						target="never-suggest-list"
 					/>
 					<NeverSuggestList
-						rules={[] as NeverSuggestRule[]}
+						rules={[] satisfies NeverSuggestRule[]}
 						today="2026-10-10"
 						target="never-suggest-list"
 					/>
@@ -5965,13 +5986,15 @@ function Controls() {
 				components={["FormField"]}
 				sentence="A labeled control, with its error shown in role=“alert”."
 			>
-				{[
-					["Default", "ds-name", "Groceries", undefined],
-					["With an error", "ds-name-error", "", "Give the category a name."],
-				].map(([label, id, value, error]) => (
-					<State label={label as string}>
+				{(
+					[
+						["Default", "ds-name", "Groceries", undefined],
+						["With an error", "ds-name-error", "", "Give the category a name."],
+					] as const
+				).map(([label, id, value, error]) => (
+					<State label={label}>
 						<TextInput
-							id={id as string}
+							id={id}
 							label="Name"
 							value={value}
 							autocomplete="off"
@@ -6412,6 +6435,7 @@ function Feedback() {
 							needAnswer: 3,
 							byCategory: [{ name: "Books & audio", count: 14 }],
 						});
+
 						const several = closingToast({
 							moved: 14,
 							needAnswer: 3,
@@ -6420,16 +6444,19 @@ function Feedback() {
 								{ name: "Gifts", count: 5 },
 							],
 						});
+
 						const one = closingToast({
 							moved: 1,
 							needAnswer: 1,
 							byCategory: [{ name: "Books & audio", count: 1 }],
 						});
+
 						const none = closingToast({
 							moved: 0,
 							needAnswer: 3,
 							byCategory: [],
 						});
+
 						return [single, several, one, none].map((words) =>
 							words ? (
 								<Button
@@ -7266,13 +7293,22 @@ function AccountsGroup() {
 /** The catalog's full Trends sample, narrowed: a sample that isn't a full page is a mistake here. */
 function fullTrends(): Extract<TrendsPage, { kind: "full" }> {
 	const page = buildTrends(TRENDS_INPUT);
+
 	if (page.kind !== "full")
 		throw new Error("The catalog's Trends sample must be a full page");
+
 	return page;
 }
+
 const TRENDS_FULL = fullTrends();
+
+// SAFETY: the mock's Trends sample (TRENDS_INPUT, imported above) has a goingWell row, and the catalog draws the first one.
 const GOING_WELL_ROW = TRENDS_FULL.goingWell[0] as TrendRowData;
+
+// SAFETY: the mock's Trends sample (TRENDS_INPUT, imported above) has a worthALook row, and the catalog draws the first one.
 const WORTH_A_LOOK_ROW = TRENDS_FULL.worthALook[0] as TrendRowData;
+
+// SAFETY: the mock's Trends sample (TRENDS_INPUT, imported above) has an others row, and the catalog draws the first one.
 const OTHER_ROW = TRENDS_FULL.others[0] as TrendRowData;
 
 const monthPoints = (cents: number[]): MonthPoint[] =>
@@ -7281,6 +7317,7 @@ const monthPoints = (cents: number[]): MonthPoint[] =>
 		cents: c,
 		partial: i === cents.length - 1,
 	}));
+
 const rowOf = (
 	name: string,
 	cents: number[],
@@ -7290,6 +7327,7 @@ const rowOf = (
 	note: string | null = null,
 ): TrendRowData => {
 	const months = monthPoints(cents);
+
 	return {
 		id: 0,
 		name,
@@ -7302,13 +7340,16 @@ const rowOf = (
 		label: monthsLabel(months, "Spending"),
 	};
 };
+
 /** A row whose first month is a part month: history started on `from`, after the month's 1st. */
 const withPart = (row: TrendRowData, from: string): TrendRowData => {
 	const months = row.months.map((m, i) =>
 		i === 0 ? { ...m, part: { from } } : m,
 	);
+
 	return { ...row, months, label: monthsLabel(months, "Spending") };
 };
+
 const TREND_ROW_STATES = [
 	{
 		label: "Going well: under budget three or more months running",
@@ -7370,10 +7411,13 @@ const TREND_ROW_STATES = [
 function describeTrends(page: TrendsPage): string {
 	if (page.kind === "empty")
 		return "Trends with nothing to show yet: No spending to show yet. Trends fill in as your transactions arrive. Open Accounts";
+
 	if (page.kind === "early")
 		return `Trends with nothing to compare yet: Spent so far in ${page.monthName} ${trendsAmount(page.soFarCents)}. All spending. ${page.label} Trends fill in as months pass. Tally started in ${page.startMonthName}.`;
+
 	const rows = (list: { name: string; line: string }[]) =>
 		list.map((r) => `${r.name} ${r.line}`).join(", ");
+
 	const parts = [
 		`Spent so far in ${page.monthName} ${trendsAmount(page.soFarCents)}`,
 		page.sentence,
@@ -7388,14 +7432,17 @@ function describeTrends(page: TrendsPage): string {
 			? [`Every other category, ${page.rangeLabel}: ${rows(page.others)}`]
 			: []),
 	];
+
 	return parts.join(". ").replaceAll("..", ".");
 }
 
 /** An early-state page, for its bars; the catalog's samples are known to be early. */
 function earlyPage(input: typeof TRENDS_EARLY_INPUT) {
 	const page = buildTrends(input);
+
 	if (page.kind !== "early")
 		throw new Error("The catalog's early Trends sample must be an early page");
+
 	return page;
 }
 
@@ -7409,6 +7456,7 @@ const TRENDS_TOP_STATES = [
 function SettingsGroup() {
 	// The server's own words for an empty name, so the catalog can't drift from what Settings says.
 	const blank = parseCategory(nameForm(""), [], null);
+
 	return (
 		<Group id="settings" title="Settings">
 			<Specimen
@@ -7885,6 +7933,8 @@ function TrendsGroup() {
 	const early = earlyPage(TRENDS_EARLY_INPUT);
 	const firstMonth = earlyPage(TRENDS_FIRST_MONTH_INPUT);
 	const empty = buildTrends(TRENDS_EMPTY_INPUT);
+
+	// SAFETY: TRENDS_FULL.changes has the mock's first change row, which the ChangeRow below draws.
 	return (
 		<Group id="trends" title="Trends">
 			<Specimen
@@ -7896,6 +7946,7 @@ function TrendsGroup() {
 			>
 				{TRENDS_TOP_STATES.map(([label, now, then]) => {
 					const sentence = compareSentence(now, then, "2026-09");
+
 					return (
 						<State label={label}>
 							<Picture
@@ -8152,6 +8203,7 @@ const LEDGER_CATEGORY_NAMES = [
 	"Office",
 	"Other",
 ];
+
 const LEDGER_ICONS = [
 	"groceries",
 	"eating-out",
@@ -8168,18 +8220,22 @@ const LEDGER_ICONS = [
 	"tag",
 	"bank",
 ];
+
 const LEDGER_CATEGORIES = LEDGER_CATEGORY_NAMES.map((name, i) => ({
 	name,
 	icon: LEDGER_ICONS[i % LEDGER_ICONS.length] ?? "tag",
 	color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] ?? "cat-blue",
 }));
+
 const LEDGER_EATING_OUT = LEDGER_CATEGORIES[1] ?? LEDGER_CATEGORIES[0];
 const LEDGER_GROCERIES = LEDGER_CATEGORIES[0];
+
 /** Six categories with ids, for the category grid and the edit panel's category row (P120 B). */
 const GRID_CATEGORIES = LEDGER_CATEGORIES.slice(0, 6).map((c, i) => ({
 	...c,
 	id: i + 1,
 }));
+
 /** Tally picked Groceries for Trader Joe's (92% sure): the folded category row shows that. */
 const PICKED_GROCERIES = (
 	<>
@@ -8190,6 +8246,7 @@ const PICKED_GROCERIES = (
 		<span class="truncate text-lg">{GRID_CATEGORIES[0]?.name}</span>
 	</>
 );
+
 const LEDGER_BANK_TEXT = "CITY WATER AUTOPAY 0093 REF";
 
 /** A category as a row shows it: its icon and name, so the row says what's chosen. */
@@ -8199,6 +8256,7 @@ function LedgerChoice({
 	category?: (typeof LEDGER_CATEGORIES)[number];
 }) {
 	if (!category) return null;
+
 	return (
 		<>
 			<CategoryIcon icon={category.icon} color={category.color} />
@@ -8580,12 +8638,14 @@ const FIRST_WEEK_PAY_DEPOSITS = [
 	"2026-09-25",
 	"2026-10-09",
 ].map((date) => ({ date, cents: 245000 }));
+
 const FIRST_WEEK_PAY = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
 	deposits: FIRST_WEEK_PAY_DEPOSITS,
 	ids: FIRST_WEEK_PAY_DEPOSITS.map((_, i) => i + 1),
 };
+
 const FIRST_WEEK_GYM: BillSuggestion = {
 	rawName: "GYM",
 	bankText: "GYM",
@@ -8601,6 +8661,7 @@ const FIRST_WEEK_MONTHS = [
 	{ month: "2026-08", spentCents: 61000 },
 	{ month: "2026-09", spentCents: 67400 },
 ];
+
 const FIRST_WEEK_GROCERIES: BudgetAsk = {
 	id: 1,
 	name: "Groceries",
@@ -8609,6 +8670,7 @@ const FIRST_WEEK_GROCERIES: BudgetAsk = {
 	months: FIRST_WEEK_MONTHS,
 	suggestion: { amountCents: 65000, months: FIRST_WEEK_MONTHS },
 };
+
 const FIRST_WEEK_GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
@@ -8620,6 +8682,7 @@ const FIRST_WEEK_GAS: BudgetAsk = {
 	],
 	suggestion: null,
 };
+
 const FIRST_WEEK_NEEDS = { count: 86, meanCents: 32000 };
 
 /**
@@ -8640,12 +8703,14 @@ const SETUP_PAY_VARYING: PayMerchant = {
 	],
 	ids: [1, 2, 3, 4, 5, 6, 7],
 };
+
 const SETUP_PAY_ONCE: PayMerchant = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
 	deposits: [{ date: "2026-10-09", cents: 245000 }],
 	ids: [7],
 };
+
 /** Eight repeat charges Tally keeps in one tap: five shown, three folded (the bills step's sample). */
 const SETUP_CHARGES: BillSuggestion[] = [
 	{
@@ -8721,36 +8786,42 @@ const SETUP_CHARGES: BillSuggestion[] = [
 		chargeCount: 2,
 	},
 ];
+
 /** Twelve suggestions that sum to $4,050 a month (405000 cents), each from August and September (the 12 budgets picture). */
-const SETUP_TWELVE: BudgetAsk[] = [
-	[1, "Groceries", "groceries", "cat-blue", 65000, 61000, 67400],
-	[2, "Eating Out", "eating-out", "cat-plum", 23000, 21800, 23100],
-	[3, "Gas", "gas", "cat-slate", 17000, 16200, 17100],
-	[4, "Kids", "kids", "cat-ochre", 29000, 28000, 29600],
-	[5, "Car & Transport", "car", "cat-ochre", 34000, 33000, 34800],
-	[6, "Utilities", "utilities", "cat-blue", 18000, 17000, 17600],
-	[7, "Subscriptions", "subscriptions", "cat-plum", 6000, 5200, 5800],
-	[8, "Shopping", "shopping", "cat-slate", 22000, 21000, 22600],
-	[9, "Personal Care", "personal-care", "cat-ochre", 9000, 7800, 8400],
-	[10, "Health", "health", "cat-brown", 12000, 10400, 11700],
-	[11, "Entertainment", "entertainment", "cat-blue", 15000, 14000, 15000],
-	[12, "Rent", "rent", "cat-brown", 155000, 154000, 156000],
-].map(([id, name, icon, color, cents, aug, sep]) => {
+const SETUP_TWELVE: BudgetAsk[] = (
+	[
+		[1, "Groceries", "groceries", "cat-blue", 65000, 61000, 67400],
+		[2, "Eating Out", "eating-out", "cat-plum", 23000, 21800, 23100],
+		[3, "Gas", "gas", "cat-slate", 17000, 16200, 17100],
+		[4, "Kids", "kids", "cat-ochre", 29000, 28000, 29600],
+		[5, "Car & Transport", "car", "cat-ochre", 34000, 33000, 34800],
+		[6, "Utilities", "utilities", "cat-blue", 18000, 17000, 17600],
+		[7, "Subscriptions", "subscriptions", "cat-plum", 6000, 5200, 5800],
+		[8, "Shopping", "shopping", "cat-slate", 22000, 21000, 22600],
+		[9, "Personal Care", "personal-care", "cat-ochre", 9000, 7800, 8400],
+		[10, "Health", "health", "cat-brown", 12000, 10400, 11700],
+		[11, "Entertainment", "entertainment", "cat-blue", 15000, 14000, 15000],
+		[12, "Rent", "rent", "cat-brown", 155000, 154000, 156000],
+	] as const
+).map(([id, name, icon, color, cents, aug, sep]) => {
 	const months = [
-		{ month: "2026-08", spentCents: aug as number },
-		{ month: "2026-09", spentCents: sep as number },
+		{ month: "2026-08", spentCents: aug },
+		{ month: "2026-09", spentCents: sep },
 	];
+
 	return {
-		id: id as number,
-		name: name as string,
-		icon: icon as string,
-		color: color as string,
+		id,
+		name,
+		icon,
+		color,
 		months,
-		suggestion: { amountCents: cents as number, months },
+		suggestion: { amountCents: cents, months },
 	};
 });
+
 /** The month the setup answers take effect from: the sample's own month (October 2026). */
 const FIRST_WEEK_MONTH = FIRST_WEEK_TODAY.slice(0, 7);
+
 const SETUP_BLANK_ERROR = {
 	text: "Enter a dollar amount, like 250 or 250.50.",
 	typed: "lots",
@@ -8759,11 +8830,13 @@ const SETUP_BLANK_ERROR = {
 /** The finish's drawn rows (P142 A, decision 148, #774): the drawing's own numbers, in cents, worded by finish.ts. */
 const FINISH_PAY = (name: string) =>
 	finishPayLine({ name, deposits: FIRST_WEEK_PAY_DEPOSITS });
+
 const FINISH_BILLS = finishBillsLine(8, 124000);
 const FINISH_BUDGETS = finishBudgetsLine(12, 405000);
 const FINISH_SAVINGS = finishSavingsLine(15000);
 
 function FirstWeekGroup() {
+	// SAFETY: SETUP_CHARGES[0] is the Netflix charge the one-charge state below keeps as a bill.
 	return (
 		<Group id="first-week" title="A new family's first week">
 			<Specimen

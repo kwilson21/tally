@@ -90,6 +90,7 @@ export async function merchantNames(
 		)
 		.bind(key)
 		.all<{ name: string }>();
+
 	return results.map((row) => row.name);
 }
 
@@ -123,6 +124,7 @@ export async function assertMerchantInvariants(db: D1Database): Promise<void> {
 		(await db.prepare(sql).all<{ key: string }>()).results.map(
 			(row) => row.key,
 		);
+
 	expect(
 		await check(
 			"SELECT m.raw_name AS key FROM merchants m WHERE m.suggestion_status = 'none' AND EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = m.raw_name)",

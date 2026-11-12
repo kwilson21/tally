@@ -6,6 +6,7 @@ import { Icon } from "./icons";
 
 export function BillFindingBand({ count }: { count: number }) {
 	if (!count) return null;
+
 	return (
 		<a
 			href="/bills/find"
@@ -24,6 +25,7 @@ export function BillFindingBand({ count }: { count: number }) {
 		</a>
 	);
 }
+
 export function BillFindingRow({
 	suggestion,
 	focusAdd = false,
@@ -41,6 +43,7 @@ export function BillFindingRow({
 		// The finding the Add came from: its sheet closes back to this row (#87).
 		finding: suggestion.rawName,
 	});
+
 	return (
 		<li id={`finding-${encodeURIComponent(suggestion.rawName)}`} class="py-3">
 			<p class="flex items-baseline justify-between gap-3 text-lg">

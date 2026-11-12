@@ -31,6 +31,7 @@ export function duplicateBillName(
 	ignoreId?: number,
 ): string | undefined {
 	const wanted = sameName(name);
+
 	return bills
 		.find((b) => b.active && b.id !== ignoreId && sameName(b.name) === wanted)
 		?.name.trim();

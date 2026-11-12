@@ -60,6 +60,7 @@ export function Layout({
 	const keysOpen = query.has("keys");
 	query.delete("keys");
 	const keysCloseHref = query.size ? `${path}?${query}` : path;
+
 	return (
 		<html lang="en">
 			<head>

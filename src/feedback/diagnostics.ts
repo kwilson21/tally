@@ -1,3 +1,4 @@
+import type { Json } from "../json";
 import { sanitizeFeedbackRoute } from "./privacy";
 
 const DEVICE_CATEGORIES = new Set([
@@ -6,6 +7,7 @@ const DEVICE_CATEGORIES = new Set([
 	"Tablet browser",
 	"Unknown",
 ]);
+
 const ERROR_NAMES = new Set([
 	"AbortError",
 	"Error",
@@ -19,19 +21,28 @@ const ERROR_NAMES = new Set([
 	"UnknownError",
 ]);
 
+function isObjectValue(value: Json): value is { [key: string]: Json } {
+	return Boolean(value) && typeof value === "object";
+}
+
+function isText(value: Json | undefined): value is string {
+	return typeof value === "string";
+}
+
 /** Accept only client-side coarse fields. Raw user agents, dimensions and versions are ignored. */
-export function normalizeFeedbackContext(value: unknown, from: string) {
-	if (!value || typeof value !== "object") return null;
-	const input = value as Record<string, unknown>;
+export function normalizeFeedbackContext(value: Json, from: string) {
+	if (!isObjectValue(value)) return null;
+	const input = value;
+
 	return {
 		route: sanitizeFeedbackRoute(from),
 		deviceCategory:
-			typeof input.deviceCategory === "string" &&
+			isText(input.deviceCategory) &&
 			DEVICE_CATEGORIES.has(input.deviceCategory)
 				? input.deviceCategory
 				: "Unknown",
 		errorName:
-			typeof input.errorName === "string" && ERROR_NAMES.has(input.errorName)
+			isText(input.errorName) && ERROR_NAMES.has(input.errorName)
 				? input.errorName
 				: null,
 	};
@@ -49,6 +60,7 @@ export function screenshotPreviewEnabled(env: {
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 }) {
 	const PIXEL_CANARY_ACCEPTANCE_COMPLETE = false;
+
 	return (
 		PIXEL_CANARY_ACCEPTANCE_COMPLETE &&
 		env.FEEDBACK_SCREENSHOT_PREVIEW_ENABLED === "true"
@@ -62,6 +74,7 @@ export function replayLinksEnabled() {
 
 export function injectDiagnosticsScript(html: string, enabled: boolean) {
 	if (!enabled || !html.includes("</body>")) return html;
+
 	return html.replace(
 		"</body>",
 		'<script type="module" src="/js/feedback-diagnostics.js"></script></body>',

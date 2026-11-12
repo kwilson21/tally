@@ -14,6 +14,7 @@ import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 
 const TODAY = "2026-09-22";
+
 const list = (qs: string) =>
 	listTransactions(env.DB, parseFilters(new URLSearchParams(qs), "2026-09"));
 
@@ -117,11 +118,13 @@ describe("listTransactions", () => {
 		expect(rows.every((r) => r.categoryId === null && !r.income)).toBe(true);
 		expect(await needsCategoryCount(env.DB, "2026-09")).toBe(10);
 		const data = await loadMonth(env.DB, "2026-09");
+
 		const home = summarizeMonth({
 			month: "2026-09",
 			...data,
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(home.uncategorized.count).toBe(10);
 	});
 
@@ -307,6 +310,7 @@ describe("listTransactions: search by amount and category (#211)", () => {
 	it("never reports a category match for an amount or a raw-view search (#211)", async () => {
 		await insert(99232, 4217, "AMOUNT ROW", 1).run();
 		expect((await list("q=42.17&month=all")).matched.category).toBe(false);
+
 		const raw = await listTransactions(
 			env.DB,
 			parseFilters(
@@ -315,6 +319,7 @@ describe("listTransactions: search by amount and category (#211)", () => {
 				true,
 			),
 		);
+
 		expect(raw.matched.category).toBe(false);
 	});
 });

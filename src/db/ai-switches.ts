@@ -31,6 +31,12 @@ const KEYS: Record<keyof AiSwitches, string> = {
 	sortOnArrival: "ai_sort_on_arrival",
 };
 
+const isSwitchName = (key: string): key is keyof AiSwitches =>
+	Object.hasOwn(KEYS, key);
+
+/** The names of the switches, in KEYS' order. */
+const SWITCH_NAMES = Object.keys(KEYS).filter(isSwitchName);
+
 /**
  * Jev answers category, flags and income together, so it's asked only while one of the two switches
  * that use its answer is on; with both off it isn't asked at all (spec §8.6).
@@ -48,9 +54,9 @@ export const STILL_ON_SQL =
 /** The JSON array of setting keys for the switches given as true, for `STILL_ON_SQL`; none given is no guard. */
 export function stillOnKeys(switches: Partial<AiSwitches>): string {
 	return JSON.stringify(
-		(Object.keys(KEYS) as (keyof AiSwitches)[])
-			.filter((name) => switches[name] === true)
-			.map((name) => KEYS[name]),
+		SWITCH_NAMES.filter((name) => switches[name] === true).map(
+			(name) => KEYS[name],
+		),
 	);
 }
 
@@ -71,9 +77,11 @@ export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
 			KEYS.sortOnArrival,
 		)
 		.all<{ key: string; value: string }>();
+
 	const off = new Set(
 		results.filter((row) => row.value === "off").map((row) => row.key),
 	);
+
 	return {
 		names: !off.has(KEYS.names),
 		details: !off.has(KEYS.details),
@@ -93,9 +101,8 @@ export async function saveAiSwitches(
 	switches: Partial<AiSwitches>,
 	alongside: D1PreparedStatement[] = [],
 ): Promise<void> {
-	const given = (Object.keys(KEYS) as (keyof AiSwitches)[]).filter(
-		(name) => switches[name] !== undefined,
-	);
+	const given = SWITCH_NAMES.filter((name) => switches[name] !== undefined);
+
 	if (given.length === 0) return;
 	await db.batch([
 		...given.map((name) =>

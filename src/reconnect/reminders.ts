@@ -28,6 +28,7 @@ export async function runReconnectReminders(
 	const zone = await householdTimeZone(env.DB);
 	const today = todayIn(zone, now);
 	const cutoff = daysBefore(today, REMINDER_DAYS);
+
 	const result =
 		await env.DB.prepare(`SELECT p.id, p.institution_name, p.last_synced_at, p.reconnect_emailed_at,
 		(SELECT json_group_array(json_object('name', a.name, 'mask', a.mask)) FROM accounts a WHERE a.plaid_item_id = p.id) AS accounts
@@ -39,6 +40,7 @@ export async function runReconnectReminders(
 			reconnect_emailed_at: string | null;
 			accounts: string;
 		}>();
+
 	const banks = result.results.filter(
 		(bank) =>
 			bank.reconnect_emailed_at === null ||
@@ -47,28 +49,39 @@ export async function runReconnectReminders(
 				new Date(`${bank.reconnect_emailed_at.replace(" ", "T")}Z`),
 			) <= cutoff,
 	);
+
 	if (!banks.length) {
 		logDeliveries("reconnect reminders", 0, 0, new Set());
+
 		return;
 	}
+
 	const recipients = await reconnectRecipients(env.DB);
+
 	if (!recipients.results.length) {
 		logDeliveries("reconnect reminders", 0, 0, new Set());
+
 		return;
 	}
+
 	// Counts are per address and bank; the failure kinds name a provider status, never an address.
 	let sentCount = 0;
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
+
 	for (const bank of banks) {
 		const claimedAt = now.toISOString().replace("T", " ").slice(0, 19);
+
 		// A partial delivery keeps the claim; a failed recipient waits for the next three-day pass.
 		const claim = await env.DB.prepare(
 			"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND reconnect_emailed_at IS ? AND status = 'needs_attention' AND disconnected_at IS NULL",
 		)
 			.bind(claimedAt, bank.id, bank.reconnect_emailed_at)
 			.run();
+
 		if (!claim.meta.changes) continue;
+
+		// SAFETY: the SQL above builds accounts with json_object('name', ..., 'mask', ...), so each entry has a name and a mask.
 		const input = {
 			bank: bank.institution_name,
 			lastSyncedAt: bank.last_synced_at,
@@ -77,8 +90,10 @@ export async function runReconnectReminders(
 				mask: string | null;
 			}[],
 		};
+
 		const email = renderReconnectEmail(input, zone);
 		let sent = false;
+
 		for (const { email: recipient } of recipients.results) {
 			const outcome = await deliver(
 				env,
@@ -87,14 +102,17 @@ export async function runReconnectReminders(
 				fetchImpl,
 				timeoutSignal,
 			);
+
 			if (outcome.delivered) {
 				sentCount += 1;
 				sent = true;
 			} else {
 				failedCount += 1;
+
 				for (const kind of outcome.kinds) failureKinds.add(kind);
 			}
 		}
+
 		if (!sent)
 			await env.DB.prepare(
 				"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND reconnect_emailed_at = ? AND status = 'needs_attention' AND disconnected_at IS NULL",
@@ -102,5 +120,6 @@ export async function runReconnectReminders(
 				.bind(bank.reconnect_emailed_at, bank.id, claimedAt)
 				.run();
 	}
+
 	logDeliveries("reconnect reminders", sentCount, failedCount, failureKinds);
 }

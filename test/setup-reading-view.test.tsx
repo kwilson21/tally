@@ -22,12 +22,14 @@ const base: SetupView = {
 	waitsForRun: false,
 	runTime: "5 AM",
 };
+
 const screen = async (view: Partial<SetupView>, bankLine?: string[]) =>
 	String(
 		<SetupReading view={{ ...base, ...view }} bankLine={bankLine} />,
 	).replaceAll("&#39;", "'");
 
 const TODAY = "2026-10-05";
+
 const chase: YourBank = {
 	id: 3,
 	name: "Chase",
@@ -37,6 +39,7 @@ const chase: YourBank = {
 	fresh: false,
 	count: 412,
 };
+
 const amex: YourBank = {
 	id: 5,
 	name: "American Express",
@@ -46,6 +49,7 @@ const amex: YourBank = {
 	fresh: true,
 	count: 86,
 };
+
 const list = async (banks: YourBank[], keepPolling = false) =>
 	String(
 		<YourBanks
@@ -65,6 +69,7 @@ describe("the reading screen's status and next line, by step (decision 146)", ()
 			total: 1500,
 			refreshes: true,
 		});
+
 		expect(html).toContain("Sorting your last 90 days: 900 of 1,500 done.");
 		expect(html).toContain(
 			"Your three questions open the moment it's done, usually in a few minutes. This page updates as it goes.",
@@ -80,6 +85,7 @@ describe("the reading screen's status and next line, by step (decision 146)", ()
 			total: 1500,
 			refreshes: false,
 		});
+
 		expect(html).toContain(
 			"Sorting is taking longer than usual: 900 of 1,500.",
 		);
@@ -94,6 +100,7 @@ describe("the reading screen's status and next line, by step (decision 146)", ()
 			{ sorting: true, slow: true, sorted: 900, total: 1500 },
 			["Chase stopped updating."],
 		);
+
 		expect(html).toContain("Tally keeps trying on its own.");
 		expect(html).not.toContain("Nothing for you to do");
 	});
@@ -106,6 +113,7 @@ describe("the reading screen's status and next line, by step (decision 146)", ()
 			total: 40,
 			sorted: 0,
 		});
+
 		expect(html).toContain("Tally's reading your last 90 days from Chase.");
 		expect(html).toContain(
 			"Next it sorts them, then you answer three quick questions and your budget is ready. This page updates as it goes.",
@@ -120,6 +128,7 @@ describe("the reading screen's status and next line, by step (decision 146)", ()
 			historyIn: false,
 			refreshes: false,
 		});
+
 		expect(html).toContain("Tally's reading your last 90 days from 2 banks.");
 		expect(html).not.toContain("from Chase");
 	});
@@ -149,6 +158,7 @@ describe("the reading screen's presence check-in (decision 146)", () => {
 			sorted: 1,
 			total: 2,
 		});
+
 		expect(html).toContain('hx-vals="{&quot;step&quot;:&quot;slow&quot;}"');
 	});
 });

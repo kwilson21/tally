@@ -6,6 +6,7 @@ import { occurrenceKey, setAsideFor } from "../src/bills/totals";
 // occurrence of an active bill that is due this month, each counted once, the first one given winning a tie.
 
 const MONTH = "2026-10";
+
 const occ = (
 	billId: number,
 	dueDate: string,
@@ -13,6 +14,7 @@ const occ = (
 	amountCents: number,
 	paidCents = 0,
 ) => ({ billId, dueDate, status, amountCents, paidCents });
+
 const active = new Set([1, 2, 3]);
 
 describe("setAsideFor", () => {

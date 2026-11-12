@@ -28,10 +28,12 @@ const captionLine = (html: string) => {
 	const start = html.indexOf(
 		'<span class="flex min-w-0 items-center gap-2 leading-6">',
 	);
+
 	const end = html.indexOf(
 		'</span></span><span class="shrink-0 text-lg tabular-nums">',
 		start,
 	);
+
 	return html
 		.slice(start, end)
 		.replace(/<[^>]+>/g, "")
@@ -46,6 +48,7 @@ describe("rowCaption", () => {
 			caption: "Review credit",
 			tag: false,
 		});
+
 		const html = await TransactionRow({
 			row: {
 				...base,
@@ -54,6 +57,7 @@ describe("rowCaption", () => {
 				categoryId: 1,
 			},
 		}).toString();
+
 		expect(html).toContain("Review credit");
 		expect(html).not.toContain("Needs category");
 	});
@@ -65,6 +69,7 @@ describe("rowCaption", () => {
 			creditReviewed: false,
 			incomeConfidence: 0.71,
 		};
+
 		expect(rowCaption(row)).toMatchObject({
 			caption: "Maybe income",
 			tag: false,
@@ -91,6 +96,7 @@ describe("rowCaption", () => {
 				creditReviewed: false,
 				incomeConfidence: confidence,
 			};
+
 			expect(rowCaption(row).caption === "Maybe income").toBe(visible);
 			expect(
 				(await TransactionRow({ row }).toString()).includes("Maybe income"),
@@ -104,6 +110,7 @@ describe("rowCaption", () => {
 			income: true,
 			incomeConfidence: 0.8,
 		};
+
 		expect(rowCaption(row).caption).toBe("Income");
 		expect(await TransactionRow({ row }).toString()).not.toContain(
 			"Maybe income",
@@ -118,6 +125,7 @@ describe("rowCaption", () => {
 				creditReviewed: false,
 				incomeConfidence: confidence,
 			};
+
 			expect(rowCaption(row).caption).toBe("Maybe income");
 			expect(await TransactionRow({ row }).toString()).toContain(
 				"Maybe income",
@@ -132,6 +140,7 @@ describe("rowCaption", () => {
 			creditReviewed: false,
 			incomeConfidence: 0.5,
 		};
+
 		expect(rowCaption(row)).toMatchObject({
 			kind: "excluded",
 			caption: "Excluded",
@@ -154,6 +163,7 @@ describe("rowCaption", () => {
 				incomeConfidence: 0.5,
 				...paid,
 			};
+
 			expect(rowCaption(row)).toMatchObject({
 				kind: "needs",
 				caption: "Maybe income",
@@ -171,6 +181,7 @@ describe("rowCaption", () => {
 			incomeConfidence: 0.5,
 			jevNoneFit: true,
 		};
+
 		const html = await TransactionRow({ row }).toString();
 		expect(html).toContain("Maybe income");
 		expect(html).not.toContain("Needs category");
@@ -182,6 +193,7 @@ describe("rowCaption", () => {
 			creditReviewed: true,
 			incomeConfidence: 0.71,
 		};
+
 		expect(rowCaption(row).caption).not.toBe("Maybe income");
 		const html = await TransactionRow({ row }).toString();
 		expect(html).not.toContain("Maybe income");
@@ -193,6 +205,7 @@ describe("rowCaption", () => {
 			income: true,
 			incomeConfidence: 0.71,
 		};
+
 		expect(rowCaption(row)).toMatchObject({
 			caption: "Income",
 			kind: "income",
@@ -208,6 +221,7 @@ describe("rowCaption", () => {
 			income: true,
 			incomeConfidence: 0.95,
 		};
+
 		const html = await TransactionRow({ row }).toString();
 		expect(rowCaption(row)).toMatchObject({
 			caption: "Income",
@@ -216,12 +230,14 @@ describe("rowCaption", () => {
 		expect(html).toContain(">Income</span>");
 		expect(html).not.toContain("Maybe income");
 	});
+
 	const kids = {
 		categoryId: 4,
 		categoryName: "Kids",
 		categoryIcon: "kids",
 		categoryColor: "cat-ochre",
 	};
+
 	it("names the purchase a linked refund is for, with the year only when it differs", () => {
 		expect(
 			rowCaption({
@@ -321,6 +337,7 @@ describe("rowCaption", () => {
 			paysBill: true,
 			billName: "Electric",
 		};
+
 		expect(rowCaption({ ...payment, refundedCents: 1500 })).toEqual({
 			kind: "needs",
 			caption: "$15.00 refunded · paid Electric bill",
@@ -351,6 +368,7 @@ describe("rowCaption", () => {
 		expect(rowCaption({ ...base, displayName: "Bakery" }).caption).toBe(
 			"SQ *LOCAL BAKERY 4432",
 		);
+
 		const pending = await TransactionRow({
 			row: {
 				...base,
@@ -359,6 +377,7 @@ describe("rowCaption", () => {
 				refundPurchaseDate: "2026-09-05",
 			},
 		}).toString();
+
 		expect(pending).toContain("Pending ·");
 		expect(pending).toContain("Refund for Sep 5");
 		expect(pending).not.toContain("SQ *LOCAL BAKERY 4432");
@@ -722,6 +741,7 @@ describe("TransactionRow", () => {
 			expect(rowCaption(transaction).caption).toBe(caption);
 			const html = await TransactionRow({ row: transaction }).toString();
 			expect(html.includes("Tally&#39;s guess:")).toBe(showsGuessedNote);
+
 			if (transaction.pending) {
 				expect(html).toContain("Pending");
 				expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
@@ -741,11 +761,14 @@ describe("TransactionRow", () => {
 				categoryColor: "cat-blue",
 			},
 		}).toString();
+
 		expect(category).not.toContain("Tally&#39;s guess");
 		expect(category).not.toContain("decoration-dashed");
+
 		const note = await TransactionRow({
 			row: { ...base, note: "Dinner", noteGuessed: true },
 		}).toString();
+
 		expect(note).toContain("Tally&#39;s guess:");
 		expect(note).toContain("decoration-dashed");
 	});
@@ -758,6 +781,7 @@ describe("TransactionRow", () => {
 			maybeCategoryName: "Groceries",
 			categoryConfidence: 0.5,
 		};
+
 		const html = await TransactionRow({ row }).toString();
 		expect(html).toContain("Maybe income");
 		expect(html).not.toContain("Maybe Groceries");
@@ -767,6 +791,7 @@ describe("TransactionRow", () => {
 			name: "A category name long enough to reach the amount",
 			kind: "category",
 		}).toString();
+
 		expect(html).not.toContain("truncate");
 		expect(html).toContain("whitespace-normal break-normal");
 		// The tag's icon keeps its width, so the words take the room that is left.
@@ -777,6 +802,7 @@ describe("TransactionRow", () => {
 		const html = await TransactionRow({
 			row: { ...base, maybeCategoryName: "Groceries" },
 		}).toString();
+
 		expect(html).toMatch(
 			/<span class="flex min-w-0 items-center gap-2 leading-6 mt-1 min-h-11">/,
 		);
@@ -791,12 +817,15 @@ describe("TransactionRow", () => {
 			refundOfId: 3,
 			refundPurchaseDate: "2026-08-20",
 		};
+
 		const html = await TransactionRow({ row }).toString();
 		expect(html).toContain("Refund for Aug 20");
 		expect(html).not.toContain("Counts in");
+
 		const payment = await TransactionRow({
 			row: { ...base, countsInMonth: "2026-08" },
 		}).toString();
+
 		expect(payment).toContain("Counts in");
 	});
 
@@ -810,6 +839,7 @@ describe("TransactionRow", () => {
 				refundPurchaseDate: "2026-10-02",
 			},
 		}).toString();
+
 		expect(html).toContain("Refund for Oct 2");
 		expect(html).toContain("Counts in September");
 	});
@@ -819,6 +849,7 @@ describe("TransactionRow", () => {
 			row: { ...base, income: true, amountCents: -245000 },
 			href: "/transactions/7?uncategorized=1",
 		}).toString();
+
 		expect(html).toContain('href="/transactions/7?uncategorized=1"');
 		expect(html).toContain("+$2,450.00");
 		expect(html.match(/<a /g)).toHaveLength(1);
@@ -844,6 +875,7 @@ describe("TransactionRow", () => {
 		const html = await TransactionRow({
 			row: { ...base, displayName: "SQ *LOCAL BAKERY 4432" },
 		}).toString();
+
 		expect(html).toContain(
 			'<span class="shrink-0 text-muted">Needs category</span>',
 		);
@@ -854,6 +886,7 @@ describe("TransactionRow", () => {
 		const html = await TransactionRow({
 			row: { ...base, pending: true },
 		}).toString();
+
 		expect(html).toContain(
 			'<span class="shrink-0 text-muted">Pending · Needs category</span>',
 		);
@@ -865,6 +898,7 @@ describe("TransactionRow", () => {
 		const html = await TransactionRow({
 			row: { ...base, pending: true, splitRemovedFromCents: 1234 },
 		}).toString();
+
 		expect(captionLine(html)).toBe(
 			"Pending · Needs category · The bank changed this from $12.34, so its split was removed.",
 		);
@@ -880,6 +914,7 @@ describe("TransactionRow", () => {
 				refundedCents: 1500,
 			},
 		}).toString();
+
 		expect(captionLine(html)).toBe(
 			"Needs category · The bank changed this from $12.34, so its split was removed. · $15.00 refunded · paid Electric bill",
 		);
@@ -896,6 +931,7 @@ describe("TransactionRow", () => {
 				billName: "Electric",
 			},
 		}).toString();
+
 		expect(captionLine(html)).toBe("Refund for Sep 5 · paid Electric bill");
 		expect(html).not.toContain("Needs category");
 	});
@@ -907,6 +943,7 @@ describe("TransactionRow", () => {
 				maybeCategoryName: "Groceries",
 			},
 		}).toString();
+
 		expect(html).toContain("Maybe");
 		expect(html).not.toContain("Needs category");
 	});
@@ -915,6 +952,7 @@ describe("TransactionRow", () => {
 		const html = await TransactionRow({
 			row: { ...base, displayName: "x".repeat(48) },
 		}).toString();
+
 		expect(html).toMatch(
 			new RegExp(
 				`<span class="[^"]*\\btruncate\\b[^"]*">${"x".repeat(48)}<\\/span>`,
@@ -928,8 +966,10 @@ describe("TransactionRow", () => {
 			maybeCategoryName: "Groceries",
 			categoryConfidence: 0.6,
 		};
+
 		const needs = await TransactionRow({ row: suggested }).toString();
 		expect(needs).toContain("Maybe");
+
 		for (const row of [
 			{ ...suggested, categoryId: 1, categoryName: "Groceries" },
 			{ ...suggested, excluded: true },
@@ -950,6 +990,7 @@ describe("TransactionRow", () => {
 				refundUnlinkedPurchaseDate: "2026-09-10",
 			},
 		}).toString();
+
 		expect(html).toContain(
 			"The bank changed the Sep 10 purchase, so this refund is no longer linked",
 		);
@@ -965,6 +1006,7 @@ describe("TransactionRow", () => {
 				maybeCategoryName: "Groceries",
 			},
 		}).toString();
+
 		expect(html).toContain(
 			"The bank changed this from $12.34, so its split was removed.",
 		);
@@ -992,6 +1034,7 @@ describe("a TransactionRow that opens", () => {
 			row: base,
 			href: "/transactions/7",
 		}).toString();
+
 		expect(html).toMatch(
 			/<span class="shrink-0 text-lg tabular-nums">[^<]*<\/span><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover\/row:text-ink" viewBox="0 0 24 24"[^>]*aria-hidden="true" data-icon="chevron-right"/,
 		);
@@ -1002,6 +1045,7 @@ describe("a TransactionRow that opens", () => {
 			row: base,
 			href: "/transactions/7",
 		}).toString();
+
 		expect(html).toContain(
 			'class="flex min-h-16 items-center gap-4 text-ink no-underline group/row row-opens"',
 		);
@@ -1009,10 +1053,12 @@ describe("a TransactionRow that opens", () => {
 
 	it("has no arrow and no press on a row that opens nothing, in Select mode or as a split parent", async () => {
 		const plain = await TransactionRow({ row: base }).toString();
+
 		const selectable = await SelectableTransactionRow({
 			row: base,
 			today: "2026-09-22",
 		}).toString();
+
 		for (const html of [plain, selectable]) {
 			expect(html).not.toContain("chevron-right");
 			expect(html).not.toContain("row-opens");
@@ -1024,6 +1070,7 @@ describe("a TransactionRow that opens", () => {
 			row: base,
 			today: "2026-09-22",
 		}).toString();
+
 		expect(html).toMatch(/<label class="group\/select /);
 		expect(html).toContain(
 			'<span class="hidden group-has-[:checked]/select:flex">',
@@ -1042,6 +1089,7 @@ describe("Chip", () => {
 			checked: true,
 			children: "Excluded",
 		}).toString();
+
 		expect(html).toMatch(/<label[^>]*>[\s\S]*<input[^>]*type="checkbox"/);
 		expect(html).toContain("checked");
 		expect(html).toContain('class="sr-only"');
@@ -1054,16 +1102,19 @@ describe("Chip", () => {
 			value: "1",
 			children: "Exclude from budget",
 		}).toString();
+
 		// Always rendered; CSS shows it only while the box is checked (no JavaScript).
 		expect(toggle).toMatch(
 			/<span class="hidden group-has-\[:checked\]:inline-flex"[^>]*><svg/,
 		);
+
 		const radio = await Chip({
 			type: "radio",
 			name: "category",
 			value: "1",
 			children: "Groceries",
 		}).toString();
+
 		expect(radio).not.toContain("group-has-[:checked]:inline-flex");
 	});
 });
@@ -1076,6 +1127,7 @@ describe("FormField", () => {
 			error: "Too long.",
 			children: (a11y) => jsx("textarea", { id: "note", ...a11y }),
 		}).toString();
+
 		expect(html).toContain('<label for="note"');
 		expect(html).toMatch(
 			/<textarea[^>]*aria-describedby="note-error"[^>]*aria-invalid="true"[^>]*class="field-shake"/,
@@ -1089,6 +1141,7 @@ describe("FormField", () => {
 			label: "Search",
 			children: (a11y) => jsx("input", { id: "q", ...a11y }),
 		}).toString();
+
 		expect(html).not.toContain("aria-describedby");
 		expect(html).not.toContain("aria-invalid");
 	});

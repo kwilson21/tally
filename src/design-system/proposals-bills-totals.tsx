@@ -36,6 +36,7 @@ const INTERNET: BillRowData = {
 	dueDate: "2026-10-18",
 	...HOUSEHOLD,
 };
+
 const DAYCARE: BillRowData = {
 	id: 8,
 	name: "Daycare",
@@ -46,6 +47,7 @@ const DAYCARE: BillRowData = {
 	dueDay: 5,
 	...CHILDCARE,
 };
+
 const SOCCER: BillRowData = {
 	id: 6,
 	name: "Soccer league",
@@ -54,6 +56,7 @@ const SOCCER: BillRowData = {
 	dueDate: "2027-07-14",
 	...KIDS,
 };
+
 const STREAMING: BillRowData = {
 	id: 1,
 	name: "Streaming",
@@ -63,6 +66,7 @@ const STREAMING: BillRowData = {
 	paidDate: "2026-10-15",
 	...HOUSEHOLD,
 };
+
 const WATER: BillRowData = {
 	id: 2,
 	name: "Water",
@@ -79,6 +83,7 @@ const PLANS: PlannedRowData[] = [
 	{ id: 2, name: "Car registration", amountCents: 18000, month: "2026-09" },
 	{ id: 1, name: "Lawn service", amountCents: 9000, month: "2026-10" },
 ];
+
 const PLANNED_THIS_MONTH_CENTS = 9000;
 
 // The totals as the page adds them: Due is Internet and Daycare's Oct 16 Friday; Upcoming is Daycare's Oct 23 and 30
@@ -173,11 +178,13 @@ function Pictures({ name, totals }: { name: string; totals: Totals }) {
 }
 
 const TODAY_TOTALS: Totals = { paidCents: PAID_LISTED_CENTS };
+
 const A_TOTALS: Totals = {
 	paidCents: PAID_WITH_FRIDAYS_CENTS,
 	upcomingLine: "Includes Daycare's Fridays on Oct 23 and 30",
 	paidLine: "Includes Daycare's Fridays on Oct 2 and 9",
 };
+
 const B_TOTALS: Totals = {
 	paidCents: PAID_LISTED_CENTS,
 	upcomingLine: "Includes Daycare's Fridays on Oct 23 and 30",

@@ -7,12 +7,14 @@ import { tidyName } from "../src/transactions/tidy-name";
 
 const BASE = "http://tally.test";
 const textOf = (html: string) => html.replace(/<[^>]+>/g, "");
+
 const categoryName = async (id: number) =>
 	(
 		await env.DB.prepare("SELECT name FROM categories WHERE id = ?")
 			.bind(id)
 			.first<{ name: string }>()
 	)?.name;
+
 /** The merchant rule's category for a merchant key, or null when it has none (or no row). */
 const ruleOf = async (key: string) =>
 	(
@@ -30,6 +32,7 @@ const bakeryCharges = async () =>
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND category_id = 2 AND category_source = 'user' ORDER BY id",
 		).all<{ id: number }>()
 	).results.map((row) => row.id);
+
 /** The question's hidden store and category, as its form posts them back (#532). */
 const questionFields = (html: string) => ({
 	store:
@@ -38,12 +41,14 @@ const questionFields = (html: string) => ({
 		html.match(/<input type="hidden" name="category" value="([^"]*)"/)?.[1] ??
 		"",
 });
+
 /** The address's merchant row number, as Save names the store (#532). */
 const storeOf = (location: string) =>
 	new URL(BASE + location).searchParams.get("store") ?? "";
 
 async function get(path = "/transactions/organize") {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -53,20 +58,24 @@ async function post(
 	htmx = false,
 ) {
 	const form = new URLSearchParams();
+
 	for (const [key, value] of Object.entries(fields)) {
 		for (const item of Array.isArray(value) ? value : [value])
 			form.append(key, item);
 	}
+
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: form.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -139,13 +148,17 @@ describe("GET /transactions/organize", () => {
 
 	it("skips a group without saving it", async () => {
 		const first = (await get()).html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1];
+
 		const skipped = await get(
 			`/transactions/organize?skip=${encodeURIComponent(first ?? "")}`,
 		);
+
 		expect(skipped.html).not.toMatch(new RegExp(`<h2[^>]*>${first}</h2>`));
+
 		const unchanged = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NULL",
 		).first<{ n: number }>();
+
 		expect(unchanged?.n).toBeGreaterThan(0);
 	});
 
@@ -159,22 +172,28 @@ describe("GET /transactions/organize", () => {
 
 	it("distinguishes skipping every current group from finishing", async () => {
 		const first = await get();
+
 		const names = [...first.html.matchAll(/<h2[^>]*>([^<]+)<\/h2>/g)].map(
 			(m) => m[1],
 		);
+
 		let path = "/transactions/organize";
+
 		for (;;) {
 			const page = await get(path);
 			const name = page.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1];
+
 			if (!name) {
 				expect(page.html).toContain("You skipped the rest.");
 				expect(page.html).toContain(">Start over</a>");
 				break;
 			}
+
 			const url = new URL(BASE + path);
 			url.searchParams.append("skip", name);
 			path = url.pathname + url.search;
 		}
+
 		expect(names.length).toBeGreaterThan(0);
 	});
 });
@@ -201,17 +220,20 @@ describe("POST /transactions/organize", () => {
 
 	it("files every charge with the category and renames the store, makes no rule, and asks Always use … ?", async () => {
 		const rawNames = ["SQ *LOCAL BAKERY 4432"];
+
 		const before = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = ? AND category_id IS NULL",
 		)
 			.bind(rawNames[0])
 			.first<{ n: number }>();
+
 		const save = await post({
 			category: "2",
 			name: "The Bakery",
 			group: "Local Bakery",
 			raw_name: ["FORGED MERCHANT", ...rawNames],
 		});
+
 		// With JavaScript off the save redirects to the question's own address, which asks it.
 		expect(save.res.status).toBe(303);
 		const { html } = await followRedirect(save);
@@ -219,11 +241,13 @@ describe("POST /transactions/organize", () => {
 			`Always use ${await categoryName(2)} for The Bakery?`,
 		);
 		expect(html).toContain("Say yes and Tally sorts the next one for you.");
+
 		const saved = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = ? AND category_id = 2 AND category_source = 'user' AND updated_by = 'demo'",
 		)
 			.bind(rawNames[0])
 			.first<{ n: number }>();
+
 		expect(saved?.n).toBe(before?.n);
 		expect(
 			await env.DB.prepare(
@@ -236,12 +260,15 @@ describe("POST /transactions/organize", () => {
 
 	it("Yes makes the rule on the group's merchant, then redirects to the next store (JavaScript off)", async () => {
 		const rawNames = ["SQ *LOCAL BAKERY 4432"];
+
 		const save = await post({
 			category: "2",
 			name: "The Bakery",
 			group: "Local Bakery",
 		});
+
 		const { html: question } = await followRedirect(save);
+
 		const { res } = await post(
 			{
 				answer: "yes",
@@ -252,18 +279,23 @@ describe("POST /transactions/organize", () => {
 			},
 			"/transactions/organize/rule",
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
+
 		const settingsHtml = await (
 			await exports.default.fetch("http://tally.test/settings/rules")
 		).text();
+
 		const rules = settingsHtml.slice(
 			settingsHtml.indexOf('id="merchant-rules"'),
 		);
+
 		const bakery = rules.match(
 			/<li[^>]*>[\s\S]*?The Bakery[\s\S]*?<\/li>/,
 		)?.[0];
+
 		expect(bakery).toBeDefined();
 		expect(textOf(bakery ?? "")).toMatch(
 			/The Bakery.*Always .* · \d+ transactions?/,
@@ -285,11 +317,13 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const save = await post(
 			{ category: "2", name: "Target", group: "Target" },
 			undefined,
 			true,
 		);
+
 		const { res, html } = await post(
 			{
 				answer: "yes",
@@ -301,6 +335,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(await ruleOf("RAW ONE")).toBe(2);
 		expect(await ruleOf("RAW TWO")).toBe(2);
@@ -329,11 +364,13 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const save = await post(
 			{ category: "2", name: "Target", group: "Target" },
 			undefined,
 			true,
 		);
+
 		await env.DB.prepare(
 			"UPDATE merchants SET display_name = 'Walmart' WHERE raw_name = 'RAW TWO'",
 		).run();
@@ -371,11 +408,13 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 30000, 'RAW ONE', 3, 'jev')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const save = await post(
 			{ category: "2", name: "Target", group: "Target" },
 			undefined,
 			true,
 		);
+
 		await env.DB.prepare(
 			"UPDATE merchants SET display_name = NULL WHERE raw_name = 'RAW TWO'",
 		).run();
@@ -412,11 +451,13 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'TARGET 5678')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const save = await post(
 			{ category: "2", name: "", group: "Target" },
 			undefined,
 			true,
 		);
+
 		const { res } = await post(
 			{
 				answer: "yes",
@@ -428,6 +469,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(await ruleOf("RAW ONE")).toBe(2);
 		expect(await ruleOf("TARGET 5678")).toBe(2);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
@@ -442,6 +484,7 @@ describe("POST /transactions/organize", () => {
 	it("Not now makes no rule and moves to the next store, keeping the skips", async () => {
 		const rawNames = ["SQ *LOCAL BAKERY 4432"];
 		await post({ category: "2", name: "", group: "Local Bakery" });
+
 		const { res } = await post(
 			{
 				answer: "no",
@@ -451,6 +494,7 @@ describe("POST /transactions/organize", () => {
 			},
 			"/transactions/organize/rule?skip=Other%20store",
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe(
 			"/transactions/organize?skip=Other+store",
@@ -481,6 +525,7 @@ describe("POST /transactions/organize", () => {
 
 	it("a Yes for a category that is archived or missing makes no rule", async () => {
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+
 		const { res } = await post(
 			{
 				answer: "yes",
@@ -489,6 +534,7 @@ describe("POST /transactions/organize", () => {
 			},
 			"/transactions/organize/rule",
 		);
+
 		expect(res.status).toBe(303);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 	});
@@ -499,9 +545,11 @@ describe("POST /transactions/organize", () => {
 			undefined,
 			true,
 		);
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 3 WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND category_id = 2",
 		).run();
+
 		const { res, html } = await post(
 			{
 				answer: "yes",
@@ -513,6 +561,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 		expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -526,11 +575,13 @@ describe("POST /transactions/organize", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = 2 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).run();
+
 		const plain = await post({
 			category: "2",
 			name: "",
 			group: "Local Bakery",
 		});
+
 		expect(plain.res.status).toBe(303);
 		expect(plain.res.headers.get("Location")).toBe("/transactions/organize");
 	});
@@ -539,11 +590,13 @@ describe("POST /transactions/organize", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = 2 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).run();
+
 		const htmx = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			"/transactions/organize",
 			true,
 		);
+
 		expect(htmx.html).not.toContain("rule-offer-title");
 		expect(htmx.res.headers.get("HX-Push-Url")).toBeNull();
 		expect(
@@ -559,6 +612,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
 			toast: { type: "success" },
@@ -582,11 +636,13 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			"/transactions/organize?skip=Other%20store",
 			true,
 		);
+
 		const filed = await bakeryCharges();
 		expect(filed.length).toBeGreaterThan(0);
 		// The address names the store by one merchant row and the category, never the saved ids (#532).
@@ -612,6 +668,7 @@ describe("POST /transactions/organize", () => {
 	it("the question's Yes sets the rule for 150 merchant keys in one request", async () => {
 		const statements = [];
 		const keys = [];
+
 		for (let i = 0; i < 150; i++) {
 			const raw = `BULK MERCHANT*CODE${i}`;
 			keys.push(raw);
@@ -624,13 +681,17 @@ describe("POST /transactions/organize", () => {
 				).bind(todayIn(DEFAULT_TIME_ZONE), raw),
 			);
 		}
+
 		await env.DB.batch(statements);
+
 		const save = await post({
 			category: "2",
 			name: "",
 			group: "Bulk merchant",
 		});
+
 		const { html: question } = await followRedirect(save);
+
 		const { res } = await post(
 			{
 				answer: "yes",
@@ -641,22 +702,28 @@ describe("POST /transactions/organize", () => {
 			},
 			"/transactions/organize/rule",
 		);
+
 		expect(res.status).toBe(303);
+
 		const count = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM merchants WHERE raw_name LIKE 'BULK MERCHANT%' AND default_category_id = 2",
 		).first<{ n: number }>();
+
 		expect(count?.n).toBe(150);
 	});
 
 	it("a Yes makes the rule from the charges Save filed, never from the merchant keys the request posts (#353)", async () => {
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
 		const { html: question } = await followRedirect(save);
+
 		const merchantCount = () =>
 			env.DB.prepare("SELECT COUNT(*) AS n FROM merchants").first<{
 				n: number;
 			}>();
+
 		const before = await merchantCount();
 		const madeUp = Array.from({ length: 3000 }, (_, i) => `MADE UP KEY ${i}`);
+
 		const { res } = await post(
 			{
 				answer: "yes",
@@ -667,6 +734,7 @@ describe("POST /transactions/organize", () => {
 			},
 			"/transactions/organize/rule",
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
@@ -682,22 +750,26 @@ describe("POST /transactions/organize", () => {
 		const older = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-08-01', 900, 'SQ *LOCAL BAKERY 4432', 2, 'user') RETURNING id",
 		).first<{ id: number }>();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
 			true,
 		);
+
 		// Every other bakery charge in the category moves on, so the older hand-filed charge is the store's one charge there.
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 3 WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND category_id = 2 AND id != ?",
 		)
 			.bind(older?.id)
 			.run();
+
 		const jev = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 700, 'SQ *LOCAL BAKERY 4432', 3, 'jev') RETURNING id",
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.first<{ id: number }>();
+
 		const { res, html } = await yesFrom(save.html, undefined, true);
 		expect(res.status).toBe(200);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
@@ -738,13 +810,16 @@ describe("POST /transactions/organize", () => {
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.run();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
 			true,
 		);
+
 		const saved = await bakeryCharges();
 		expect(saved.length).toBeGreaterThan(1);
+
 		return { save, saved };
 	}
 
@@ -753,11 +828,13 @@ describe("POST /transactions/organize", () => {
 		await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
 			.bind(saved[0])
 			.run();
+
 		const jev = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 700, 'SQ *LOCAL BAKERY 4432', 3, 'jev') RETURNING id",
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.first<{ id: number }>();
+
 		const { res, html } = await yesFrom(save.html, undefined, true);
 		expect(res.status).toBe(200);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
@@ -795,15 +872,19 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 500, 'OTHER RAW', 2, 'user')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const other = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'OTHER RAW'",
 		).first<{ id: number }>();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
 			true,
 		);
+
 		const madeUp = Array.from({ length: 3000 }, (_, i) => 900000 + i);
+
 		const { res } = await post(
 			{
 				answer: "yes",
@@ -814,6 +895,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
 		expect(await ruleOf("OTHER RAW")).toBeNull();
@@ -830,22 +912,27 @@ describe("POST /transactions/organize", () => {
 			undefined,
 			true,
 		);
+
 		const today = todayIn(DEFAULT_TIME_ZONE);
+
 		const uncategorized = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'SQ *LOCAL BAKERY 4432') RETURNING id",
 		)
 			.bind(today)
 			.first<{ id: number }>();
+
 		const jev = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1300, 'SQ *LOCAL BAKERY 4432', 3, 'jev') RETURNING id",
 		)
 			.bind(today)
 			.first<{ id: number }>();
+
 		const user = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1400, 'SQ *LOCAL BAKERY 4432', 4, 'user') RETURNING id",
 		)
 			.bind(today)
 			.first<{ id: number }>();
+
 		const { res, html } = await post(
 			{
 				answer: "yes",
@@ -857,6 +944,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
@@ -865,12 +953,14 @@ describe("POST /transactions/organize", () => {
 			},
 		});
 		expect(html).not.toContain("rule-offer-title");
+
 		const charge = (id: number | undefined) =>
 			env.DB.prepare(
 				"SELECT category_id, category_source FROM transactions WHERE id = ?",
 			)
 				.bind(id)
 				.first();
+
 		expect(await charge(uncategorized?.id)).toEqual({
 			category_id: 2,
 			category_source: "merchant_rule",
@@ -890,6 +980,7 @@ describe("POST /transactions/organize", () => {
 			name: "Local Bakery",
 			group: "Local Bakery",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(
 			/role="alert"[^>]*>Pick a category from the list\.<\/p>/,
@@ -902,6 +993,7 @@ describe("POST /transactions/organize", () => {
 			name: "x".repeat(81),
 			group: "Local Bakery",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Local Bakery");
 		expect(html).toMatch(
@@ -915,6 +1007,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize",
 			true,
 		);
+
 		const { res, html } = await post(
 			{
 				answer: "no",
@@ -925,6 +1018,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toBeNull();
 		// The Save before it pushed the question's address, so the answer replaces it with the skips-only address,
@@ -946,11 +1040,13 @@ describe("POST /transactions/organize", () => {
 
 	it("Not now on the last store focuses the sentence that says every transaction has a category, and announces it (htmx)", async () => {
 		await leaveOnlyLocalBakery();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
 			true,
 		);
+
 		const { res, html } = await post(
 			{
 				answer: "no",
@@ -962,6 +1058,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			announce: "Every transaction has a category.",
@@ -974,11 +1071,13 @@ describe("POST /transactions/organize", () => {
 
 	it("Yes on the last store writes the rule, announces the toast then the sentence, and focuses the sentence (htmx)", async () => {
 		await leaveOnlyLocalBakery();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
 			true,
 		);
+
 		const { res, html } = await post(
 			{
 				answer: "yes",
@@ -990,6 +1089,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize/rule",
 			true,
 		);
+
 		const message = `Local Bakery is always ${await categoryName(2)} now.`;
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
@@ -1005,15 +1105,19 @@ describe("POST /transactions/organize", () => {
 		const others = (await organizeGroups(env.DB))
 			.map((group) => group.name)
 			.filter((name) => name !== "Local Bakery");
+
 		expect(others.length).toBeGreaterThan(0);
+
 		const skips = new URLSearchParams(
 			others.map((name): [string, string] => ["skip", name]),
 		).toString();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			`/transactions/organize?${skips}`,
 			true,
 		);
+
 		const { res, html } = await post(
 			{
 				answer: "no",
@@ -1025,6 +1129,7 @@ describe("POST /transactions/organize", () => {
 			`/transactions/organize/rule?${skips}`,
 			true,
 		);
+
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			announce: "You skipped the rest.",
 		});
@@ -1039,8 +1144,10 @@ describe("POST /transactions/organize", () => {
 			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
 		).run();
 		const { html } = await get();
+
 		const sentence =
 			html.match(/<p[^>]*>Every transaction has a category\.<\/p>/)?.[0] ?? "";
+
 		expect(sentence).toMatch(/^<p/);
 		expect(sentence).not.toContain("tabindex");
 		expect(sentence).not.toContain("autofocus");
@@ -1052,6 +1159,7 @@ describe("POST /transactions/organize", () => {
 			"/transactions/organize",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
 			toast: { type: "info" },
@@ -1060,16 +1168,19 @@ describe("POST /transactions/organize", () => {
 		expect(html).not.toContain("Stale name");
 		expect(html).not.toMatch(/value="2"[^>]*checked|checked[^>]*value="2"/);
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+
 		const plain = await post({
 			category: "2",
 			name: "",
 			group: "Gone merchant",
 		});
+
 		expect(plain.res.status).toBe(303);
 	});
 
 	it("handles 150 raw names in one shown merchant without exceeding D1 limits", async () => {
 		const statements = [];
+
 		for (let i = 0; i < 150; i++) {
 			const raw = `BULK MERCHANT*CODE${i}`;
 			statements.push(
@@ -1081,19 +1192,24 @@ describe("POST /transactions/organize", () => {
 				).bind(todayIn(DEFAULT_TIME_ZONE), raw),
 			);
 		}
+
 		await env.DB.batch(statements);
 		const page = await get();
 		expect(page.html).toMatch(/From BULK MERCHANT[^<]+ and 147 more/);
+
 		const { res } = await post(
 			{ category: "2", name: "", group: "Bulk merchant" },
 			"/transactions/organize",
 			true,
 		);
+
 		// The save files all 150 charges, then asks the question (no rule yet).
 		expect(res.status).toBe(200);
+
 		const count = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'BULK MERCHANT%' AND category_id = 2",
 		).first<{ n: number }>();
+
 		expect(count?.n).toBe(150);
 	});
 
@@ -1129,15 +1245,19 @@ describe("POST /transactions/organize", () => {
 	it("preserves skips through save and only counts skips that still exist", async () => {
 		const page = await get();
 		const first = page.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] ?? "";
+
 		const secondPage = await get(
 			`/transactions/organize?skip=${encodeURIComponent(first)}&skip=missing`,
 		);
+
 		const second = secondPage.html.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] ?? "";
 		expect(secondPage.html).toMatch(/2 of \d+/);
+
 		const { res: saved } = await post(
 			{ category: "2", name: "", group: second },
 			`/transactions/organize?skip=${encodeURIComponent(first)}`,
 		);
+
 		// The save redirects to the question, and the question's address keeps the skip.
 		expect(saved.status).toBe(303);
 		expect(
@@ -1145,6 +1265,7 @@ describe("POST /transactions/organize", () => {
 				"skip",
 			),
 		).toEqual([first]);
+
 		// Not now carries the skips on to the next store.
 		const { res: moved } = await post(
 			{
@@ -1155,6 +1276,7 @@ describe("POST /transactions/organize", () => {
 			},
 			`/transactions/organize/rule?skip=${encodeURIComponent(first)}`,
 		);
+
 		expect(
 			new URL(BASE + (moved.headers.get("Location") ?? "")).searchParams.getAll(
 				"skip",
@@ -1199,11 +1321,13 @@ describe("Organize's question is one question (#532)", () => {
 
 	it("an htmx Save asks about the store's charges in the category, the hand-filed one included, at an address naming the same store (#532)", async () => {
 		await kiosk();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Corner Kiosk" },
 			"/transactions/organize",
 			true,
 		);
+
 		expect(save.html).toContain(
 			`Always use ${await categoryName(2)} for Corner Kiosk?`,
 		);
@@ -1214,9 +1338,11 @@ describe("Organize's question is one question (#532)", () => {
 		expect(reload.html).toContain(
 			`Always use ${await categoryName(2)} for Corner Kiosk?`,
 		);
+
 		const charges = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name IN ('KIOSK ONE', 'KIOSK TWO') AND category_id = 2 AND category_source = 'user' ORDER BY id",
 		).all<{ id: number }>();
+
 		expect(charges.results).toHaveLength(2);
 		expect(
 			await storeChargeIds(env.DB, Number(questionFields(save.html).store), 2),
@@ -1225,22 +1351,26 @@ describe("Organize's question is one question (#532)", () => {
 
 	it("Yes on Save's question makes the rule on both keys and names the store in the toast (htmx, #532)", async () => {
 		await kiosk();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Corner Kiosk" },
 			undefined,
 			true,
 		);
+
 		const { res } = await yesFrom(save.html, undefined, true);
 		await expectKioskRuleMade(res);
 	});
 
 	it("Yes on the reloaded question makes the same rules and toast (htmx, #532)", async () => {
 		await kiosk();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Corner Kiosk" },
 			"/transactions/organize",
 			true,
 		);
+
 		const reload = await get(save.res.headers.get("HX-Push-Url") ?? "");
 		const { res } = await yesFrom(reload.html, undefined, true);
 		await expectKioskRuleMade(res);
@@ -1273,11 +1403,13 @@ describe("Organize's question is one question (#532)", () => {
 
 	it("an htmx Save of a store whose charges look mixed asks no question, and gives the save's toast alone (#532)", async () => {
 		await mixedBakeryCharge();
+
 		const { res, html } = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			"/transactions/organize",
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(html).not.toContain("rule-offer-title");
 		expect(res.headers.get("HX-Push-Url")).toBeNull();
@@ -1288,11 +1420,13 @@ describe("Organize's question is one question (#532)", () => {
 
 	it("a no-JavaScript Save of a store whose charges look mixed redirects to the ordinary page (#532)", async () => {
 		await mixedBakeryCharge();
+
 		const { res } = await post({
 			category: "2",
 			name: "",
 			group: "Local Bakery",
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
 	});
@@ -1303,17 +1437,22 @@ describe("Organize's question is one question (#532)", () => {
 			"/transactions/organize",
 			true,
 		);
+
 		const rules = () =>
 			env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM merchants WHERE default_category_id IS NOT NULL",
 			).first<{ n: number }>();
+
 		const before = await rules();
+
 		const bare = await post(
 			{ answer: "yes", merchant: "Local Bakery" },
 			"/transactions/organize/rule",
 		);
+
 		expect(bare.res.status).toBe(303);
 		expect(bare.res.headers.get("Location")).toBe("/transactions/organize");
+
 		for (const fields of [
 			{ store: "abc", category: "2" },
 			{ store: "999999", category: "2" },
@@ -1323,11 +1462,13 @@ describe("Organize's question is one question (#532)", () => {
 				"/transactions/organize/rule",
 				true,
 			);
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).not.toContain("rule-offer-title");
 			expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
 		}
+
 		expect(await rules()).toEqual(before);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 	});
@@ -1368,6 +1509,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			name: "The Bakery",
 			group: "Local Bakery",
 		});
+
 		const { html } = await followRedirect(save);
 		expect(html).toContain(
 			`Always use ${await categoryName(2)} for The Bakery?`,
@@ -1383,14 +1525,17 @@ describe("Organize's question with JavaScript off (#353)", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			"/transactions/organize?skip=Other%20store",
 		);
+
 		const { html } = await followRedirect(save);
 		expect(html).toContain(
 			'action="/transactions/organize/rule?skip=Other+store"',
 		);
+
 		const notNow = await post(
 			{
 				answer: "no",
@@ -1401,6 +1546,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			},
 			"/transactions/organize/rule?skip=Other+store",
 		);
+
 		expect(notNow.res.status).toBe(303);
 		const next = new URL(BASE + (notNow.res.headers.get("Location") ?? ""));
 		expect(next.pathname).toBe("/transactions/organize");
@@ -1417,6 +1563,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
 		const questionPath = save.res.headers.get("Location") ?? "";
 		const { html } = await get(questionPath);
+
 		const yes = await post(
 			{
 				answer: "yes",
@@ -1427,6 +1574,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			},
 			"/transactions/organize/rule",
 		);
+
 		expect(yes.res.status).toBe(303);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
 		const back = await get(questionPath);
@@ -1446,10 +1594,12 @@ describe("Organize's question with JavaScript off (#353)", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 500, 'OTHER RAW', 3, 'user')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
+
 		const otherStore = await env.DB.prepare(
 			"SELECT rowid AS id FROM merchants WHERE raw_name = 'OTHER RAW'",
 		).first<{ id: number }>();
-		const crafted: Record<string, string> = {
+
+		const crafted = {
 			"another category": `/transactions/organize?category=3&store=${store}`,
 			"a store that does not exist":
 				"/transactions/organize?category=2&store=999999",
@@ -1459,16 +1609,19 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			"no store": "/transactions/organize?category=2",
 			"an address from before #532, with saved ids":
 				"/transactions/organize?category=2&saved=1.2",
-		};
+		} satisfies Record<string, string>;
+
 		for (const [name, path] of Object.entries(crafted)) {
 			const { res, html } = await get(path);
 			expect(res.status, name).toBe(200);
 			expect(html, name).not.toContain("rule-offer-title");
 		}
+
 		// The same store and category asks, so the checks above fail for the reason they name.
 		const { html } = await get(
 			`/transactions/organize?category=2&store=${store}`,
 		);
+
 		expect(html).toContain("rule-offer-title");
 	});
 
@@ -1487,28 +1640,35 @@ describe("Organize's question with JavaScript off (#353)", () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name) VALUES ('STORE TWO RAW', 'Store two')",
 		).run();
+
 		const other = await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 500, 'STORE TWO RAW', 2, 'user') RETURNING id",
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.first<{ id: number }>();
+
 		expect(other?.id).toBeDefined();
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
 		const store = storeOf(save.res.headers.get("Location") ?? "");
+
 		const storeTwo = await env.DB.prepare(
 			"SELECT rowid AS id FROM merchants WHERE raw_name = 'STORE TWO RAW'",
 		).first<{ id: number }>();
+
 		const bakery = await get(
 			`/transactions/organize?category=2&store=${store}`,
 		);
+
 		expect(bakery.html).toContain("rule-offer-title");
 		expect(questionFields(bakery.html).store).toBe(store);
 		expect(await storeChargeIds(env.DB, Number(store), 2)).not.toContain(
 			other?.id,
 		);
+
 		const two = await get(
 			`/transactions/organize?category=2&store=${storeTwo?.id}`,
 		);
+
 		expect(two.html).toContain(
 			`Always use ${await categoryName(2)} for Store two?`,
 		);
@@ -1530,17 +1690,21 @@ describe("Organize's question address stays bounded (#532)", () => {
 
 	it("an htmx Save of 2,000 charges pushes an address under 200 characters with no bank text, and a reload asks the same question", async () => {
 		await bigStore();
+
 		const save = await post(
 			{ category: "2", name: "", group: "Store" },
 			"/transactions/organize",
 			true,
 		);
+
 		const pushed = save.res.headers.get("HX-Push-Url") ?? "";
 		expect(pushed.length).toBeLessThan(200);
 		expect(pushed).not.toContain("STORE*");
+
 		const filed = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'STORE*%' AND category_id = 2 AND category_source = 'user'",
 		).first<{ n: number }>();
+
 		expect(filed?.n).toBe(2000);
 
 		const reload = await get(pushed);
@@ -1608,8 +1772,10 @@ describe("the Organize by merchant link follows the Needs category filter", () =
 		const res = await exports.default.fetch(BASE + path, {
 			headers: { "HX-Request": "true" },
 		});
+
 		return res.text();
 	};
+
 	/** What sits inside the link's always-present wrapper. */
 	const wrapper = (html: string) =>
 		html.match(/<div id="organize-link">([\s\S]*?)<\/div>/)?.[1];

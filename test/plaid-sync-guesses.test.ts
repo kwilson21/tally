@@ -10,6 +10,7 @@ import {
 	merchantNames,
 	seedMerchant,
 } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // Names Workers AI suggested are saved under each bank text (spec §7). When Plaid later gives several bank
 // texts one merchant name in one sync, on any of its pages, sync starts that merchant's row from their rows: each
@@ -21,6 +22,7 @@ import {
 const KEY = btoa("01234567890123456789012345678901");
 const T1 = "TARGET 1234";
 const T2 = "TARGET #55";
+
 // Plaid's name for both, which is only each text tidied, so Plaid has nothing to suggest and the names
 // Workers AI made are what a person could still choose.
 const PLAID = "Target";
@@ -40,7 +42,10 @@ const transaction = (
 	personal_finance_category: { primary: "FOOD_AND_DRINK" },
 });
 
-const response = (body: unknown) =>
+/** A JSON value: what a Plaid or Jev reply body holds. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const response = (body: Json) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json" },
@@ -48,12 +53,14 @@ const response = (body: unknown) =>
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
-	return result?.id as number;
+
+	return present(result).id;
 }
 
 const ACCOUNT = {
@@ -66,18 +73,21 @@ const ACCOUNT = {
 };
 
 type Page = {
-	added?: unknown[];
+	added?: Json[];
 	hasMore?: boolean;
 };
 
 /** A sync over these pages, in order, on the one account. */
 async function syncPages(id: number, pages: Page[]) {
 	let served = 0;
+
 	const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 		if (String(url).endsWith("/accounts/get")) {
 			return response({ accounts: [ACCOUNT] });
 		}
+
 		const page = pages[served++] ?? {};
+
 		return response({
 			added: page.added ?? [],
 			modified: [],
@@ -86,11 +96,12 @@ async function syncPages(id: number, pages: Page[]) {
 			has_more: page.hasMore ?? false,
 		});
 	});
+
 	await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
 }
 
 /** A sync whose one page holds these transactions. */
-const sync = (id: number, added: unknown[]) => syncPages(id, [{ added }]);
+const sync = (id: number, added: Json[]) => syncPages(id, [{ added }]);
 
 /** A merchant's row and names as the sync left them, or null when it has no row. */
 const row = async (key: string) => {
@@ -99,6 +110,7 @@ const row = async (key: string) => {
 	)
 		.bind(key)
 		.first<{ display_name: string | null; suggestion_status: string }>();
+
 	return found && { ...found, names: await merchantNames(env.DB, key) };
 };
 
@@ -136,9 +148,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("keeps the other text's name, rule and Not a bill on the shared key when the empty answer comes first", async () => {
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Tea', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		await put(T1, { namesAsked: true });
 		await put(T2, {
 			displayName: "My tea",
@@ -161,9 +175,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("ends with a person's name from one bank text and a rule from the other on the shared key", async () => {
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Snacks', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		await put(T1, { displayName: "My coffee" });
 		await put(T2, { defaultCategoryId: category?.id });
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
@@ -258,9 +274,11 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 
 	it("copies the configured row of the second text when the first text's name call failed, so a failure leaves no row to copy", async () => {
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Coffee', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		// T1's name call failed. The failure is kept apart from merchants (#468), so T1 gets no row here.
 		await saveAskedNames(env.DB, [], [T1]);
 		await put(T2, {
@@ -323,9 +341,11 @@ const choices = (key: string) =>
 describe("a shared merchant name keeps each person's choice when its bank texts come on different pages of one sync", () => {
 	it("keeps the name, rule and Not a bill of a page-two text when page one's text holds only the empty answer", async () => {
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Hobbies', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		await put(T1, { namesAsked: true });
 		await put(T2, {
 			displayName: "My tea",
@@ -350,9 +370,11 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 	it("gives the key page one's suggestion made the name, rule and Not a bill of page two's text, as one page does", async () => {
 		expect(tidyName("TGT 0412")).not.toBe(PLAID);
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Books', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		await put(T2, {
 			displayName: "My tea",
 			defaultCategoryId: category?.id,
@@ -378,9 +400,11 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 	// gives the same row. Whatever the pages, the result is what one page would give.
 	it("gives the same row when both bank texts come on one page", async () => {
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Stationery', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		await put(T2, {
 			displayName: "My tea",
 			defaultCategoryId: category?.id,
@@ -435,9 +459,11 @@ describe("a shared merchant name keeps each person's choice when its bank texts 
 
 	it("never fills a row an earlier sync made, even when a later sync brings a text with a name, rule and Not a bill", async () => {
 		const id = await addItem();
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color) VALUES ('Gifts', 'tag', 'cat-blue') RETURNING id",
 		).first<{ id: number }>();
+
 		await put(T1, { namesAsked: true });
 		await syncPages(id, [{ added: [transaction("a", T1, PLAID)] }]);
 		expect(await choices(PLAID)).toEqual({

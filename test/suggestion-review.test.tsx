@@ -170,6 +170,7 @@ describe("the answer forms disable their submit buttons while a request runs (#4
 		(_label, html, count, guards) => {
 			const forms = postingForms(html);
 			expect(forms).toHaveLength(count);
+
 			for (const form of forms)
 				for (const guard of guards) expect(form).toContain(guard);
 		},
@@ -192,7 +193,9 @@ describe("MaybeQuestion is a quiet tag under one serif headline", () => {
 		const html = renderToString(
 			<MaybeQuestion>Maybe a transfer</MaybeQuestion>,
 		);
+
 		const open = tag(html);
+
 		for (const cls of [
 			"rounded-full",
 			"border-dashed",
@@ -206,6 +209,7 @@ describe("MaybeQuestion is a quiet tag under one serif headline", () => {
 		]) {
 			expect(open).toMatch(new RegExp(`\\b${cls}\\b`));
 		}
+
 		expect(open).not.toContain("font-serif");
 		expect(open).not.toContain("text-3xl");
 		expect(open).not.toContain("min-h-11");
@@ -216,6 +220,7 @@ describe("MaybeQuestion is a quiet tag under one serif headline", () => {
 		const html = renderToString(
 			<MaybeQuestion>Maybe Householdandgardensuppliesandmore</MaybeQuestion>,
 		);
+
 		expect(html).toContain(
 			'<span class="min-w-0 overflow-hidden text-ellipsis whitespace-normal break-normal leading-none">',
 		);

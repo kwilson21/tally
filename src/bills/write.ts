@@ -57,6 +57,7 @@ export function insertBillStatements(
 	day: string,
 ): [D1PreparedStatement, D1PreparedStatement] {
 	const at = day.slice(0, 7);
+
 	// The row goes to whichever active bill has the new name and no row yet. That is only the bill just added, because
 	// every bill has a row (from migration 0044's backfill, from insertBill, and from the demo reset). The same rule
 	// keeps a refused add from giving its namesake a row, since the namesake already has one.
@@ -102,6 +103,7 @@ export async function insertBill(
 	const day = today ?? (await householdToday(db));
 	// One batch, so the bill and its first row land together or not at all.
 	const [added] = await db.batch(insertBillStatements(db, f, day));
+
 	return (added?.meta.changes ?? 0) > 0;
 }
 
@@ -125,6 +127,7 @@ export async function updateBill(
 	month?: string,
 ): Promise<boolean> {
 	const at = month ?? (await householdMonth(db));
+
 	// The amount row and the update share one condition (OWN_OR_FREE) and run in one batch, the row first.
 	// Both see the bill as it was before the batch, so the row lands exactly when the update applies, even
 	// when another write lands in between. A refused save leaves no row, and so does an unchanged amount.
@@ -136,6 +139,7 @@ export async function updateBill(
 			 ON CONFLICT (bill_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
 		)
 		.bind(id, at, f.amountCents, id, f.amountCents, f.name, id, f.name);
+
 	const update = db
 		.prepare(
 			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,anchor_date=?,category_id=?,
@@ -157,9 +161,11 @@ export async function updateBill(
 			id,
 			f.name,
 		);
+
 	// The bill has its new name exactly when the update just applied (it set it, and a refused update
 	// leaves a name that differs), so the dismissals go only then.
 	const statements = [amountRow, update];
+
 	if (dropDismissals)
 		statements.push(
 			db
@@ -169,6 +175,7 @@ export async function updateBill(
 				.bind(id, id, f.name),
 		);
 	const results = await db.batch(statements);
+
 	return (results[1]?.meta.changes ?? 0) > 0;
 }
 
@@ -185,5 +192,6 @@ export async function activateBill(
 		.prepare(`UPDATE bills SET active=1,name=? WHERE id=? AND ${FREE}`)
 		.bind(name, id, id, name)
 		.run();
+
 	return meta.changes > 0;
 }

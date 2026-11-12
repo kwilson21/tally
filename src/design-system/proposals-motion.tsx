@@ -130,6 +130,7 @@ function SheetStage({ look }: { look: Look }) {
 			Costco
 		</h2>
 	);
+
 	return (
 		<>
 			<ul class="divide-y divide-rule px-4">
@@ -175,6 +176,7 @@ function ToastStage() {
  */
 function PageStage({ look }: { look: Look }) {
 	const more = look === "more";
+
 	return (
 		<>
 			<div
@@ -242,6 +244,7 @@ const WORDS: Record<Look, [string, string, string, string]> = {
 /** One option's picture: the same four moments, moving as that option would. */
 function Moments({ look }: { look: Look }) {
 	const [sw, sheet, toast, page] = WORDS[look];
+
 	return (
 		<div class="flex flex-col gap-3">
 			<Moment

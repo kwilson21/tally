@@ -6,10 +6,13 @@ const KEEP_ACRONYMS = ["AT&T", "H&M", "CVS", "ATM", "USPS", "UPS", "BP", "KFC"];
 
 // Card and processor prefixes a bank puts in front of the merchant, with or without a following space.
 const PREFIX = /^(SQ|TST|DD|SP|PAYPAL)\s?\*\s*/;
+
 // A terminal's own prefix, followed by its (varying) transaction code.
 const TERMINAL_PREFIX = /^(POS|CHECKCARD)\s+\d+\s*/;
+
 // A reference code joined on with * ("AMAZON.COM*RT4K2", "US*2K4").
 const STAR_CODE = /\*[A-Z0-9]*\d[A-Z0-9]*$/;
+
 // A trailing store number: the last space-separated token, if it has a # or three digits in a row
 // ("#552", "4432", "T-1432"), so a number that's part of the name stays ("PIER 39", "MOTEL 6").
 // The leading \s means it never strips the only token there is.
@@ -27,6 +30,7 @@ function applyAcronyms(text: string): string {
 		/(^|[^A-Za-z])([A-Za-z&]+)(?=$|[^A-Za-z])/g,
 		(match, before: string, word: string) => {
 			const acronym = keptAcronym(word);
+
 			return acronym ? before + acronym : match;
 		},
 	);
@@ -42,6 +46,7 @@ function applyAcronyms(text: string): string {
  */
 export function tidyName(raw: string): string {
 	const trimmed = raw.trim().replace(/\s+/g, " ");
+
 	if (/\p{Ll}/u.test(trimmed)) return trimmed;
 
 	let tidied = trimmed
@@ -49,12 +54,15 @@ export function tidyName(raw: string): string {
 		.replace(TERMINAL_PREFIX, "")
 		.replace(STAR_CODE, "")
 		.replace(TRAILING_CODE, "");
+
 	// Any * left only joins a processor to a merchant ("GOOGLE *YOUTUBE"): it reads as a space.
 	tidied = tidied.replace(/\*/g, " ").replace(/\s+/g, " ").trim();
+
 	// Nothing left to tidy (just a prefix, or just a number): the raw text, trimmed, is the best we have.
 	if (tidied === "") return trimmed;
 
 	const lower = tidied.toLowerCase();
 	const sentenced = lower.charAt(0).toUpperCase() + lower.slice(1);
+
 	return applyAcronyms(sentenced);
 }

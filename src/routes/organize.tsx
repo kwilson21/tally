@@ -37,8 +37,10 @@ import { OrganizeNewCategoryCard } from "../views/suggestion-card";
 import { TextInput } from "../views/text-input";
 import { CHANGED_SUGGESTION } from "./suggestions";
 
-type App = { Bindings: Env };
+type App = { Bindings: Env & { JEV_API_KEY?: string } };
+
 type Category = { id: number; name: string; icon: string; color: string };
+
 type Values = {
 	categoryId: number | null;
 	name: string;
@@ -108,52 +110,68 @@ async function renderOrganize(
 	const address = at ?? new URL(c.req.url);
 	const params = address.searchParams;
 	const requestedSkips = params.getAll("skip");
+
 	const [allGroups, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
 		c.env.DB.prepare(
 			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		).all<Category>(),
 	]);
+
 	const currentNames = new Set(allGroups.map((group) => group.name));
+
 	const skipped = [...new Set(requestedSkips)].filter((name) =>
 		currentNames.has(name),
 	);
+
 	const available = allGroups.filter((group) => !skipped.includes(group.name));
+
 	const group =
 		(values && allGroups.find((item) => item.name === values.groupName)) ||
 		available[0];
+
 	// The one waiting suggestion that holds a purchase from this merchant (decision 120), read only when its card is drawn.
 	const waiting =
 		!rule && group
 			? await newCategoryItem(c.env.DB, { merchantKeys: group.merchantKeys })
 			: undefined;
+
 	// The changed or refused words sit in the card when that suggestion's card is drawn, and under the heading when it isn't.
 	const inCard = !!waiting && cardError?.suggestionId === waiting.suggestionId;
 	const remaining = available.reduce((sum, item) => sum + item.count, 0);
+
 	const doneSentence =
 		allGroups.length > 0
 			? "You skipped the rest."
 			: "Every transaction has a category.";
+
 	const query = new URLSearchParams();
+
 	for (const name of skipped) query.append("skip", name);
 	const action = `/transactions/organize${query.size ? `?${query}` : ""}`;
 	const skipParams = new URLSearchParams(query);
+
 	if (group) skipParams.append("skip", group.name);
 	const skipHref = `/transactions/organize?${skipParams}`;
+
 	const sources = group
 		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
+
 	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
 	// question's own address also carries its category and store, which an answer must not repeat.
 	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
 	// The re-check's line, while a Create's run goes (decision 159).
 	const recheck = await runningRecheck(c.env.DB);
+
 	if (trigger) {
 		// The list ends on its empty state only when no store is left, so its sentence is announced after the answer's words.
 		const ends = focus && !rule && !group;
+
 		const announce = [trigger.announce, ends && doneSentence]
 			.filter(Boolean)
 			.join(" ");
+
 		if (trigger.toast || announce)
 			c.header(
 				"HX-Trigger",
@@ -325,6 +343,7 @@ function questionAddress(
 		["category", String(categoryId)],
 		["store", String(storeRow)],
 	]);
+
 	return `/transactions/organize?${params}`;
 }
 
@@ -337,11 +356,13 @@ function questionAddress(
  */
 organize.get("/transactions/organize", async (c) => {
 	const params = new URL(c.req.url).searchParams;
+
 	const offer = await storeOffer(
 		c.env.DB,
 		Number(params.get("store")),
 		Number(params.get("category")),
 	);
+
 	return offer
 		? renderOrganize(c, undefined, 200, true, offer)
 		: renderOrganize(c);
@@ -359,10 +380,12 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	const suggestionId = Number(form.get("suggestion"));
 	const url = new URL(c.req.url);
 	const next = `/transactions/organize${url.search}`;
+
 	const item =
 		Number.isInteger(suggestionId) && suggestionId > 0
 			? await newCategoryItem(c.env.DB, { id: suggestionId })
 			: undefined;
+
 	// The suggestion changed: a toast with JavaScript, or Organize drawn with the words without it.
 	const changed = () => {
 		if (c.req.header("HX-Request")) {
@@ -373,70 +396,80 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 					announce: CHANGED_SUGGESTION,
 				}),
 			);
+
 			return renderOrganize(c, undefined, 200, true);
 		}
+
 		return renderOrganize(c, undefined, 200, true, undefined, undefined, {
 			suggestionId,
 			message: CHANGED_SUGGESTION,
 		});
 	};
+
 	// A refused Create's reason, drawn on the page for either kind of request.
 	const refused = (message: string) =>
 		renderOrganize(c, undefined, 422, true, undefined, undefined, {
 			suggestionId,
 			message,
 		});
+
 	if (!item) return changed();
 	const ids = item.rows.map((row) => row.transactionId);
+
 	const shown = new Set(
 		form
 			.getAll("shown")
 			.map(Number)
 			.filter((n) => Number.isInteger(n) && n > 0),
 	);
+
 	if (shown.size !== ids.length || !ids.every((id) => shown.has(id)))
 		return changed();
+
 	const result = await createFromSuggestion(
 		c.env.DB,
 		suggestionId,
 		{ ticked: ids, shown: ids, notes: {}, whole: true },
 		actor(c),
 	);
+
 	// Organize ticks every purchase the card showed and files them whole, so "empty" means another tab changed one of them:
 	// the same answer as "gone".
 	if (!result.ok) {
 		if (result.reason === "gone" || result.reason === "empty") return changed();
+
 		return refused(result.error ?? "That category couldn't be made.");
 	}
-	await askAgainLeftOut(
-		c.env as Env & { JEV_API_KEY?: string },
-		result.leftOut,
-		(work) => c.executionCtx.waitUntil(work),
+
+	await askAgainLeftOut(c.env, result.leftOut, (work) =>
+		c.executionCtx.waitUntil(work),
 	);
 	// Only a new category starts the re-check (decision 157): an Add to or a Restore changes nothing the run would sort.
 	const created = !result.attached && !result.restored;
 	const [filedId] = result.filed;
+
 	const rechecking =
 		created && filedId !== undefined
-			? await startResortFor(
-					c.env as Env & { JEV_API_KEY?: string },
-					c.env.DB,
-					{
-						filedId,
-						excludeIds: [...result.leftOut, ...result.filed],
-					},
-				)
+			? await startResortFor(c.env, c.env.DB, {
+					filedId,
+					excludeIds: [...result.leftOut, ...result.filed],
+				})
 			: null;
+
 	const count = result.moved;
 	const transactions = `${count} ${count === 1 ? "transaction" : "transactions"}`;
+
 	const message = result.restored
 		? `Restored ${result.name} with ${transactions}`
 		: result.attached
 			? `Added ${transactions} to ${result.name}`
 			: `Created ${result.name} with ${transactions}`;
+
 	const left = leftOutSentence(result.leftOut.length);
 	const started = rechecking ? ` ${STARTED_ANNOUNCEMENT}` : "";
+
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
 	return renderOrganize(c, undefined, 200, true, undefined, {
 		toast: { message, type: "success" },
 		announce: `${message}.${left ? ` ${left}` : ""}${started}`,
@@ -450,6 +483,7 @@ organize.post("/transactions/organize", async (c) => {
 	const groupName = form.get("group")?.toString() ?? "";
 	const groups = await organizeGroups(c.env.DB);
 	const group = groups.find((item) => item.name === groupName);
+
 	const category =
 		Number.isInteger(categoryId) && categoryId > 0
 			? await c.env.DB.prepare(
@@ -458,8 +492,10 @@ organize.post("/transactions/organize", async (c) => {
 					.bind(categoryId)
 					.first<{ id: number; name: string }>()
 			: null;
+
 	const url = new URL(c.req.url);
 	const next = url.pathname + url.search;
+
 	// Another tab already finished this merchant: show the next one with a fresh form,
 	// so the stale choices can't carry over to it.
 	const alreadyCategorized = () => {
@@ -469,12 +505,15 @@ organize.post("/transactions/organize", async (c) => {
 			"HX-Trigger",
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
+
 		return renderOrganize(c, undefined, 200, true);
 	};
+
 	if (!group) return alreadyCategorized();
 	// "New category" (decision 101) is the choice when it's chosen: its name is checked first, and the
 	// category is made only once the rest passes, so a taken name saves nothing.
 	const choseNew = form.get("category") === "new";
+
 	const named = choseNew
 		? parseCategory(
 				nameForm(form.get("new_category_name")),
@@ -482,6 +521,7 @@ organize.post("/transactions/organize", async (c) => {
 				null,
 			)
 		: null;
+
 	const values: Values = {
 		categoryId: categoryId || null,
 		name,
@@ -489,18 +529,23 @@ organize.post("/transactions/organize", async (c) => {
 		newCategory: choseNew,
 		newCategoryName: String(form.get("new_category_name") ?? ""),
 	};
+
 	if (named && !named.ok) values.newCategoryError = named.errors.name;
 	else if (!choseNew && !category)
 		values.categoryError = "Pick a category from the list.";
+
 	if (name.length > DISPLAY_NAME_MAX)
 		values.nameError = `Name must be ${DISPLAY_NAME_MAX} characters or fewer.`;
+
 	if (values.categoryError || values.newCategoryError || values.nameError)
 		return renderOrganize(c, values, 422);
 
 	let chosen = category;
 	let madeId: number | null = null;
+
 	if (named?.ok) {
 		const made = await makeCategory(c.env.DB, named.value);
+
 		if (!made.ok)
 			return renderOrganize(
 				c,
@@ -510,9 +555,11 @@ organize.post("/transactions/organize", async (c) => {
 		chosen = { id: made.id, name: named.value.name };
 		madeId = made.id;
 	}
+
 	if (!chosen) return renderOrganize(c, values, 422);
 
 	const currentGroup = group;
+
 	const filed = await saveOrganizeGroup(
 		c.env.DB,
 		currentGroup.merchantKeys,
@@ -520,30 +567,38 @@ organize.post("/transactions/organize", async (c) => {
 		name && name !== currentGroup.name ? name : null,
 		actor(c),
 	);
+
 	if (filed.length === 0) {
 		// Another request categorized this group after it was read, so nothing was filed: a category made
 		// here goes too, and the answer is the one for a merchant that already has a category.
 		if (madeId !== null) await unmakeCategory(c.env.DB, madeId);
+
 		return alreadyCategorized();
 	}
+
 	const count = filed.length;
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
 	// The save makes no rule. Organize asks #209's question after it (#353), about the store's charges in the category
 	// (#532), rebuilt the way a reload rebuilds it: no question when that rebuild holds none, as when every merchant of
 	// the store has the rule already or a trip looks mixed (decision 113).
 	const store = await storeRowOf(c.env.DB, filed);
+
 	const offer =
 		store === null ? null : await storeOffer(c.env.DB, store, chosen.id);
+
 	// The question has an address of its own (#353), so a reload asks it again.
 	const asked = offer
 		? questionAddress(url.searchParams.getAll("skip"), chosen.id, offer.store)
 		: null;
+
 	if (!c.req.header("HX-Request")) return c.redirect(asked ?? next, 303);
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
+
 	if (asked) c.header("HX-Push-Url", asked);
+
 	return renderOrganize(c, undefined, 200, true, offer ?? undefined);
 });
 
@@ -555,11 +610,14 @@ organize.post("/transactions/organize", async (c) => {
 organize.post("/transactions/organize/rule", async (c) => {
 	const form = await c.req.formData();
 	const url = new URL(c.req.url);
+
 	// The skips only: an answer to the question must not carry its category or store back into the question.
 	const skips = new URLSearchParams(
 		url.searchParams.getAll("skip").map((name) => ["skip", name]),
 	);
+
 	const next = `/transactions/organize${skips.size ? `?${skips}` : ""}`;
+
 	const offer =
 		form.get("answer") === "yes"
 			? await storeOffer(
@@ -568,6 +626,7 @@ organize.post("/transactions/organize/rule", async (c) => {
 					Number(form.get("category")),
 				)
 			: null;
+
 	const written = offer
 		? await setOrganizeRule(
 				c.env.DB,
@@ -577,16 +636,20 @@ organize.post("/transactions/organize/rule", async (c) => {
 				actor(c),
 			)
 		: [];
+
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	// Named only when a rule was written: a store whose charges were filed elsewhere meanwhile makes none.
 	const trigger: Trigger = {};
+
 	if (offer && written.length > 0) {
 		const message = `${offer.merchant} is always ${offer.category} now.`;
 		trigger.toast = { message, type: "success" };
 		trigger.announce = message;
 	}
+
 	// The Save before it pushed the question's address, so the answer replaces it with the skips-only address, giving
 	// one history entry, not two.
 	c.header("HX-Replace-Url", next);
+
 	return renderOrganize(c, undefined, 200, true, undefined, trigger);
 });

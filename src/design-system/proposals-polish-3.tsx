@@ -57,6 +57,7 @@ const NOW = "2026-10-13";
 const ACCOUNT = "Credit card ••9012";
 const RENT: Cat = { name: "Rent", icon: "rent", color: "cat-slate" };
 const CHILDCARE: Cat = { name: "Childcare", icon: "kids", color: "cat-blue" };
+
 /** The demo's categories in their order: seven, so the two-column grid is four rows with New category last. */
 const CATS: Cat[] = [
 	GROCERIES,
@@ -72,10 +73,12 @@ const CATS: Cat[] = [
 const BAKERY = tx(70, NOW, "Local Bakery", 1200, undefined, {
 	rawName: "SQ *LOCAL BAKERY 4432",
 });
+
 /** Picked by Tally, 92% sure, as Groceries. */
 const TRADER = tx(71, NOW, "Trader Joe's", 6410, GROCERIES, {
 	rawName: "TRADER JOE'S #552",
 });
+
 const BLUE = tx(72, "2026-10-12", "Blue Bottle Coffee", 650, EATING_OUT);
 const PICKED = "Picked by Tally · 92% sure";
 
@@ -187,6 +190,7 @@ function DeskPanel({ children }: { children?: Child }) {
 /** The list's rows under their day headings, as Transactions draws them. */
 function DayRows({ rows }: { rows: ListRow[] }) {
 	const days = [...new Set(rows.map((row) => row.date))];
+
 	return (
 		<>
 			{days.map((date) => (

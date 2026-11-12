@@ -29,11 +29,13 @@ const TYPE_WORDS: Record<Show, string> = {
  */
 function matchNote(q: string, matched: SearchMatch): string {
 	const amount = searchAmount(q);
+
 	if (amount && (!amount.plain || matched.allByAmount)) {
 		return amount.exact
 			? ` (amount ${formatCents(amount.low)})`
 			: ` (amounts ${formatCents(amount.low)} to ${formatCents(amount.high)})`;
 	}
+
 	return matched.category ? " (category)" : "";
 }
 
@@ -48,13 +50,14 @@ export function resultCountParts(
 	today: string,
 	accountName: string | null = null,
 	matched: SearchMatch = NO_MATCH,
-): { before: string; figures: string; after: string } {
+) {
 	const paged = pages > 1;
 	const noun = `${TYPE_WORDS[f.show]}transaction${total === 1 ? "" : "s"}`;
 	const month = f.month === "all" ? "all months" : monthLabel(f.month, today);
 	// The category and the account come first, then the month: "in Groceries, Chase Card ••9921, October".
 	const named = [categoryName, accountName].filter(Boolean);
 	const where = `in ${[...named, month].join(", ")}`;
+
 	const rest = [
 		noun,
 		f.uncategorized && "needing a category",
@@ -63,8 +66,10 @@ export function resultCountParts(
 	]
 		.filter(Boolean)
 		.join(" ");
+
 	// The demo's raw view says so at the end, so switching views changes the text and is announced.
 	const tail = f.raw ? `${rest}, as the bank sends them` : rest;
+
 	return {
 		before: paged ? "Showing " : "",
 		figures: paged ? `${first}–${first + shown - 1} of ${total}` : `${total}`,
@@ -88,5 +93,6 @@ export function resultCount(
 		accountName,
 		matched,
 	);
+
 	return before + figures + after;
 }

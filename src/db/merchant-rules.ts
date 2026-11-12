@@ -44,6 +44,7 @@ export async function merchantRules(
 				}
 			>(),
 	]);
+
 	const rules = rows.results.map(
 		({ display_name, suggestedNames, suggestion_status, ...rule }) => ({
 			...rule,
@@ -57,6 +58,7 @@ export async function merchantRules(
 			}).name,
 		}),
 	);
+
 	const query =
 		(count?.n ?? 0) - Number(removing) > 20
 			? search
@@ -66,25 +68,30 @@ export async function merchantRules(
 					.normalize("NFD")
 					.replace(/\p{M}/gu, "")
 			: "";
+
 	const visible = rules.filter((rule) => {
 		const merchant = rule.merchant
 			.normalize("NFC")
 			.toLocaleLowerCase()
 			.normalize("NFD")
 			.replace(/\p{M}/gu, "");
+
 		const key = rule.merchantKey
 			.normalize("NFC")
 			.toLocaleLowerCase()
 			.normalize("NFD")
 			.replace(/\p{M}/gu, "");
+
 		return !query || merchant.includes(query) || key.includes(query);
 	});
+
 	visible.sort(
 		(a, b) =>
 			a.merchant.localeCompare(b.merchant) ||
 			a.merchantKey.localeCompare(b.merchantKey),
 	);
 	const keys = visible.map(({ merchantKey }) => merchantKey);
+
 	const counts = keys.length
 		? await db
 				.prepare(
@@ -98,9 +105,11 @@ export async function merchantRules(
 				.bind(JSON.stringify(keys))
 				.all<{ merchantKey: string; transactions: number }>()
 		: { results: [] };
+
 	const transactionCounts = new Map(
 		counts.results.map((row) => [row.merchantKey, row.transactions]),
 	);
+
 	return {
 		rules: visible.map((rule) => ({
 			...rule,
@@ -122,5 +131,6 @@ export async function removeMerchantRule(
 		)
 		.bind(merchantKey)
 		.first<{ merchant: string }>();
+
 	return result?.merchant ?? null;
 }

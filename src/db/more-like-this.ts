@@ -37,10 +37,13 @@ export function sameTextPeers<T extends SameTextRow>(
 	const group = groupBySameCleanedText([filed, ...others]).find((g) =>
 		g.rows.some((r) => r.id === filed.id),
 	);
+
 	if (!group) return [];
+
 	const peers = new Set(
 		group.rows.filter((r) => r.id !== filed.id).map((r) => r.id),
 	);
+
 	return others.filter((r) => peers.has(r.id));
 }
 
@@ -109,6 +112,7 @@ async function candidates(
 		)
 		.bind(JSON.stringify(extraIds))
 		.all<CandidateRow>();
+
 	return results.map((row) => ({
 		id: row.id,
 		rawName: row.rawName,
@@ -130,12 +134,16 @@ export async function moreLikeThis(
 	filedId: number,
 ): Promise<MoreLikeThis | null> {
 	const filed = await filedRow(db, filedId);
+
 	if (!filed || filed.archived === 1) return null;
+
 	const rows = sameTextPeers(
 		{ ...filed, mixed: filed.mixed === 1 },
 		await candidates(db, []),
 	);
+
 	if (rows.length === 0) return null;
+
 	return {
 		filedId,
 		categoryId: filed.categoryId,
@@ -163,23 +171,29 @@ export async function addMoreLikeThis(
 	input: { filedId: number; category: number; ticked: number[]; who: string },
 ): Promise<AddResult> {
 	const filed = await filedRow(db, input.filedId);
+
 	if (!filed) return { ok: false, reason: "gone" };
+
 	if (filed.archived === 1 || filed.categoryId !== input.category)
 		return { ok: false, reason: "changed" };
 	const ticked = [...new Set(input.ticked)];
+
 	const group = new Set(
 		sameTextPeers(
 			{ ...filed, mixed: filed.mixed === 1 },
 			await candidates(db, ticked),
 		).map((row) => row.id),
 	);
+
 	const ids = ticked.filter((id) => group.has(id));
+
 	// The filed purchase must still be in the category the card showed, and that category active. The check is a
 	// witness read in the same D1 batch as the write, and the write repeats it in its WHERE, so a recategorize or a
 	// delete after the read above moves nothing: the batch runs with no write between them.
 	const filedHolds = `EXISTS (SELECT 1 FROM transactions f JOIN categories fc ON fc.id = f.category_id
 		WHERE f.id = ? AND f.category_source = 'user' AND f.category_id = ? AND fc.archived = 0)`;
-	const [witness, write] = await db.batch([
+
+	const [witness, write] = await db.batch<{ holds: number }>([
 		db
 			.prepare(`SELECT ${filedHolds} AS holds`)
 			.bind(input.filedId, filed.categoryId),
@@ -199,9 +213,12 @@ export async function addMoreLikeThis(
 				JSON.stringify(ids),
 			),
 	]);
-	const holds = (witness?.results[0] as { holds?: number } | undefined)?.holds;
+
+	const holds = witness?.results[0]?.holds;
+
 	if (!holds) return { ok: false, reason: "changed" };
 	const moved = write?.meta.changes ?? 0;
+
 	return {
 		ok: true,
 		name: filed.categoryName,

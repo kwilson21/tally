@@ -37,6 +37,7 @@ describe("MonthEnd budget bars", () => {
 				]}
 			/>,
 		);
+
 		expect(html).toContain(
 			'aria-label="Spent against each budget: Dining -$0.30 of $0"',
 		);
@@ -53,19 +54,24 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(5)}
 			/>,
 		);
+
 		expect(html).not.toContain('<section tabindex="0"');
 		expect(html).not.toContain("swipe sideways for the rest");
 		expect(html).not.toContain("Show the rest of the categories");
+
 		const chart = html.match(
 			/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
 		)?.[0];
+
 		expect(chart).toContain(">budget</text>");
 		expect(chart).toContain('viewBox="0 0 350 142"');
 		expect(chart).toContain('width="42"');
 		expect([...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)]).toHaveLength(5);
+
 		const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map((m) =>
 			Number(m[1]),
 		);
+
 		expect(xs).toEqual([4, 65.5, 127, 188.5, 250]);
 		expect(298 - ((xs[xs.length - 1] ?? 0) + 42)).toBeGreaterThanOrEqual(4);
 		expect(chart).toContain('<text x="298" y="45"');
@@ -87,13 +93,16 @@ describe("MonthEnd budget bars", () => {
 					rows={rows(count)}
 				/>,
 			);
+
 			const chart =
 				html.match(
 					/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
 				)?.[0] ?? "";
+
 			const xs = [...chart.matchAll(/<rect x="([\d.]+)"/g)].map((m) =>
 				Number(m[1]),
 			);
+
 			expect(xs).toEqual(expected);
 			expect(xs.slice(1).every((x, i) => x - (xs[i] ?? x) <= 66)).toBe(true);
 		}
@@ -112,11 +121,14 @@ describe("MonthEnd budget bars", () => {
 					rows={rows(count)}
 				/>,
 			);
+
 			const wideCueHidden = count <= 10;
+
 			const chart =
 				html.match(
 					/<svg[^>]*aria-label="Spent against each budget:[\s\S]*?<\/svg>/,
 				)?.[0] ?? "";
+
 			if ([7, 12].includes(count)) expect(chart).toContain(">budget</text>");
 			expect(html).toMatch(
 				new RegExp(
@@ -144,6 +156,7 @@ describe("MonthEnd budget bars", () => {
 			expect(html).toContain(
 				`class="month-end-swipe-arrow month-end-swipe-arrow-left text-accent${wideCueHidden ? " lg:hidden" : ""}"`,
 			);
+
 			if (wideCueHidden) {
 				expect(html).toContain('class="mt-4 hidden lg:block"');
 				expect(html.match(/<section tabindex="0"/g)).toHaveLength(1);
@@ -154,24 +167,31 @@ describe("MonthEnd budget bars", () => {
 				expect(html).not.toContain("lg:hidden");
 				expect(html).not.toContain('class="mt-4 hidden lg:block"');
 			}
+
 			const luminance = (hex: string) => {
 				const rgb = hex
 					.match(/[\da-f]{2}/gi)
 					?.map((value) => Number.parseInt(value, 16) / 255);
+
 				if (rgb?.length !== 3) throw new Error(`Invalid color: ${hex}`);
+
 				const channels = rgb.map((value) =>
 					value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
 				);
+
 				return (
 					0.2126 * (channels[0] ?? 0) +
 					0.7152 * (channels[1] ?? 0) +
 					0.0722 * (channels[2] ?? 0)
 				);
 			};
+
 			const contrast = (a: string, b: string) => {
 				const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+
 				return ((values[0] ?? 0) + 0.05) / ((values[1] ?? 0) + 0.05);
 			};
+
 			if (count !== 12) return;
 			expect(contrast("#fbf8f2", "#0e0e0e")).toBeGreaterThanOrEqual(3);
 			expect(contrast("#ae5534", "#0e0e0e")).toBeGreaterThanOrEqual(3);
@@ -180,15 +200,19 @@ describe("MonthEnd budget bars", () => {
 			expect(chart).toContain('width="42"');
 			expect(chart).toContain('<line x1="31" x2="843" y1="40" y2="40"');
 			expect(chart).toContain('y="132"');
+
 			const xs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
 				(match) => Number(match[1]),
 			);
+
 			const labels = [
 				...(chart ?? "").matchAll(/<text x="([\d.]+)" y="132"/g),
 			].map((match) => Number(match[1]));
+
 			const overLabels = [
 				...(chart ?? "").matchAll(/<text x="([\d.]+)" y="16"/g),
 			].map((match) => Number(match[1]));
+
 			expect(xs).toHaveLength(12);
 			expect(labels).toHaveLength(12);
 			expect(overLabels).toHaveLength(12);
@@ -209,9 +233,11 @@ describe("MonthEnd budget bars", () => {
 			expect(html).toContain("max-w-full");
 			expect(chart).toContain('viewBox="0 0 843 142"');
 			expect(chart).toContain('width="843"');
+
 			const rectXs = [...(chart ?? "").matchAll(/<rect x="([\d.]+)"/g)].map(
 				(match) => Number(match[1]),
 			);
+
 			const lastBarEnd = Math.max(...rectXs) + 42;
 			expect(843 - lastBarEnd).toBe(44);
 			expect(html).toContain('id="twelve-chart-end"');
@@ -240,6 +266,7 @@ describe("MonthEnd budget bars", () => {
 					rows={rows(count)}
 				/>,
 			);
+
 			const chart = html.match(/<svg[^>]*>[\s\S]*?<\/svg>/)?.[0] ?? "";
 			expect(chart).toContain('stroke-dasharray="4 4"');
 			expect(chart).toContain(">budget</text>");
@@ -294,6 +321,7 @@ describe("MonthEnd budget bars", () => {
 					]}
 				/>,
 			);
+
 			expect(html).toContain(`>${expected}</p>`);
 			expect(html).toContain(`<title>${overage}</title>${overage}`);
 			expect(html).toContain(`aria-label="Over budget by ${overage.slice(1)}"`);
@@ -313,6 +341,7 @@ describe("MonthEnd budget bars", () => {
 				rows={[]}
 			/>,
 		);
+
 		expect(html).toContain(">−$57</p>");
 		expect(html).not.toContain(">$57</p>");
 		expect(html).not.toMatch(/>(?:Over|Under)<span class="sr-only"> budget/);
@@ -330,6 +359,7 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(1)}
 			/>,
 		);
+
 		expect(html).toMatch(/>Over<span class="sr-only"> budget<\/span>/);
 		expect(html).toContain(">$57</p>");
 		expect(html).toMatch(/text-6xl[^"]*text-over/);
@@ -346,6 +376,7 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(1)}
 			/>,
 		);
+
 		expect(html).toMatch(/>Under<span class="sr-only"> budget<\/span>/);
 		expect(html).toContain(">$57</p>");
 	});
@@ -361,8 +392,10 @@ describe("MonthEnd budget bars", () => {
 				rows={[]}
 			/>,
 		);
+
 		expect(nine).toContain(">−$999,999</p>");
 		expect(nine).toContain("max-sm:text-5xl");
+
 		const eight = renderToString(
 			<MonthEnd
 				needsCategoryCents={0}
@@ -373,6 +406,7 @@ describe("MonthEnd budget bars", () => {
 				rows={[]}
 			/>,
 		);
+
 		expect(eight).toContain(">−$99,999</p>");
 		expect(eight).not.toContain("max-sm:text-5xl");
 	});
@@ -388,6 +422,7 @@ describe("MonthEnd budget bars", () => {
 				rows={[]}
 			/>,
 		);
+
 		expect(html).toContain(">−$0.01</p>");
 		expect(html).not.toContain("-$0");
 	});
@@ -412,9 +447,12 @@ describe("MonthEnd budget bars", () => {
 				]}
 			/>,
 		);
+
 		const svg = html.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
+
 		const category =
 			svg.match(/<text[^>]*y="132"[^>]*>[\s\S]*?<\/text>/)?.[0] ?? "";
+
 		expect(category).not.toContain("textLength=");
 	});
 
@@ -439,10 +477,13 @@ describe("MonthEnd budget bars", () => {
 				/>
 			</>,
 		);
+
 		const ids = [...html.matchAll(/id="([^"]*-chart-end)"/g)].map((m) => m[1]);
+
 		const hrefs = [...html.matchAll(/href="#([^"]*-chart-end)"/g)].map(
 			(m) => m[1],
 		);
+
 		expect(new Set(ids).size).toBe(2);
 		expect(hrefs).toEqual(ids);
 	});
@@ -484,6 +525,7 @@ describe("MonthEnd budget bars", () => {
 				]}
 			/>,
 		);
+
 		const svg = html.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
 		expect(svg).toContain('textLength="62" lengthAdjust="spacingAndGlyphs"');
 		expect(svg).toContain("Supercalifragilisticexpialidocious");
@@ -502,6 +544,7 @@ describe("MonthEnd budget bars", () => {
 				]}
 			/>,
 		);
+
 		expect(html).toContain('class="text-right text-lg tabular-nums text-ok"');
 		expect(html).toContain(
 			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
@@ -520,9 +563,11 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(10)}
 			/>,
 		);
+
 		const svgs = [
 			...html.matchAll(/<svg viewBox="0 0 (\d+) 142"(?: width="(\d+)")?/g),
 		].map((match) => [match[1], match[2]]);
+
 		expect(svgs).toEqual([
 			["711", "711"],
 			["667", "667"],
@@ -559,15 +604,20 @@ describe("MonthEnd budget bars", () => {
 					rows={rows(count)}
 				/>,
 			);
+
 			const wide = html.slice(html.indexOf('class="mt-4 hidden lg:block"'));
 			const svg = wide.match(/<svg[\s\S]*?<\/svg>/)?.[0] ?? "";
+
 			const rectXs = [...svg.matchAll(/<rect x="([\d.]+)"/g)].map((match) =>
 				Number(match[1]),
 			);
+
 			const lastBarEnd = (rectXs[rectXs.length - 1] ?? 0) + 42;
+
 			const wordX = Number(
 				svg.match(/<text x="([\d.]+)" y="45"[^>]*>budget<\/text>/)?.[1],
 			);
+
 			expect(svg).toContain(`viewBox="0 0 ${width} 142"`);
 			expect(width).toBeLessThanOrEqual(667);
 			expect(
@@ -590,9 +640,12 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(10)}
 			/>,
 		);
+
 		const split = html.indexOf('class="mt-4 hidden lg:block"');
+
 		const capsOf = (part: string) =>
 			[...part.matchAll(/textLength="(\d+)"/g)].map((match) => match[1]);
+
 		// Ten labels and ten overages, each capped.
 		const phoneCaps = capsOf(html.slice(0, split));
 		expect(phoneCaps).toHaveLength(20);
@@ -613,9 +666,11 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(11)}
 			/>,
 		);
+
 		const svgs = [
 			...html.matchAll(/<svg viewBox="0 0 (\d+) 142"(?: width="(\d+)")?/g),
 		].map((match) => [match[1], match[2]]);
+
 		expect(svgs).toEqual([["777", "777"]]);
 	});
 
@@ -630,6 +685,7 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(5)}
 			/>,
 		);
+
 		const svgs = [...html.matchAll(/<svg viewBox="0 0 (\d+) 142"( width=)?/g)];
 		expect(svgs.map((match) => match[1])).toEqual(["350"]);
 		expect(svgs[0]?.[2]).toBeUndefined();
@@ -647,9 +703,11 @@ describe("MonthEnd budget bars", () => {
 				rows={[]}
 			/>,
 		);
+
 		const row = html.match(
 			/<div class="([^"]*)"><p class="whitespace-nowrap font-serif text-6xl[^"]*">\$1,000,000<\/p>/,
 		)?.[1];
+
 		expect(row).toBeDefined();
 		expect(row?.split(" ")).toContain("flex-wrap");
 		expect(row).not.toContain("nowrap");
@@ -686,8 +744,10 @@ describe("MonthEnd over-budget labels (decision 128)", () => {
 				]}
 			/>,
 		);
+
 		const label =
 			html.match(/<text\b[^>]*\bclass="([^"]*\bfill-over\b[^"]*)"/)?.[1] ?? "";
+
 		expect(html).toContain("+$15");
 		expect(label.split(" ")).toContain("tabular-nums");
 	});
@@ -698,6 +758,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 	// The Needs a category row is the list's last item.
 	const needsRow = (html: string) => {
 		const start = html.lastIndexOf("<li ");
+
 		return html.slice(start, html.indexOf("</li>", start) + "</li>".length);
 	};
 
@@ -710,6 +771,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 				needsCategory={{ spentCents: 5000, count: 1 }}
 			/>,
 		);
+
 		const row = needsRow(html);
 		expect(row).toContain('<span class="shrink-0 text-muted">');
 		expect(row).toContain(
@@ -732,6 +794,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 				needsCategory={{ spentCents: -1400, count: 1 }}
 			/>,
 		);
+
 		expect(html).toContain(
 			'<span class="text-right text-lg tabular-nums text-ok">+$14<span class="sr-only"> back: refunds outweigh spending</span></span>',
 		);
@@ -746,6 +809,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 				needsCategory={{ spentCents: 5000, count: 1 }}
 			/>,
 		);
+
 		expect(needsRow(html)).not.toContain("refunds outweigh");
 		expect(html).not.toContain("refunds outweigh");
 		expect(
@@ -765,6 +829,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 				needsCategory={{ spentCents: 5000, count: 2 }}
 			/>,
 		);
+
 		expect(html).toContain(
 			'<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>',
 		);
@@ -791,6 +856,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 				needsCategory={{ spentCents: 0, count: 2 }}
 			/>,
 		);
+
 		expect(html).toContain(
 			'<span class="text-right text-lg tabular-nums">$0</span>',
 		);

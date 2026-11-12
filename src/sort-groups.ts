@@ -76,14 +76,18 @@ export async function dailyJevCap(
 	env: { DEMO?: string },
 ): Promise<number> {
 	const usual = jevCallLimit(env);
+
 	if (env.DEMO !== "false") return usual;
+
 	// A set-up household has all four strokes drawn, so it has answered the three questions too.
 	if (questionsAnswered(await readFirstTally(db))) return usual;
+
 	const banks = await db
 		.prepare(
 			"SELECT COUNT(*) AS n FROM plaid_items WHERE disconnected_at IS NULL",
 		)
 		.first<{ n: number }>();
+
 	return Math.max(usual, FIRST_WEEK_CALLS_PER_BANK * (banks?.n ?? 0));
 }
 
@@ -207,18 +211,21 @@ export type SortPlan = ReadPlan & {
 	granted: number;
 };
 
+/** A failed ask. Its fields carry the status and request id, never the key or any transaction detail. */
+type FailedAsk = {
+	id: number;
+	outcome: "failed";
+	status: number | null;
+	requestId: string | null;
+	serviceWide: boolean;
+	/** The wait Jev asked for, when it sent a readable retry-after (decision 145). */
+	retryAfterMs?: number;
+};
+
 /** What one row's ask came to. An ask step never throws: any failure is `failed`. */
 export type AskResult =
 	| { id: number; outcome: "answered"; answer: JevAnswer }
-	| {
-			id: number;
-			outcome: "failed";
-			status: number | null;
-			requestId: string | null;
-			serviceWide: boolean;
-			/** The wait Jev asked for, when it sent a readable retry-after (decision 145). */
-			retryAfterMs?: number;
-	  }
+	| FailedAsk
 	| {
 			id: number;
 			outcome: "lost" | "date-changed" | "out-of-time";
@@ -273,12 +280,16 @@ function serviceWide(status: number | null): boolean {
  */
 function trailingFailures(results: AskResult[], before: number): number {
 	let n = 0;
+
 	for (let i = results.length - 1; i >= 0; i--) {
 		const r = results[i];
+
 		if (r?.outcome === "out-of-time") continue;
+
 		if (r?.outcome !== "failed" || r.serviceWide) return n;
 		n += 1;
 	}
+
 	return n + before;
 }
 
@@ -288,9 +299,13 @@ function trailingFailures(results: AskResult[], before: number): number {
  */
 function runStops(results: AskResult[], before: number): boolean {
 	const last = results.at(-1);
+
 	if (!last) return false;
+
 	if (last.outcome === "date-changed" || last.outcome === "lost") return true;
+
 	if (last.outcome === "failed" && last.serviceWide) return true;
+
 	return trailingFailures(results, before) >= MAX_FAILURES_IN_A_ROW;
 }
 
@@ -304,10 +319,13 @@ function askingStops(results: AskResult[], before: number): boolean {
 
 /** The first wait after a busy Jev, in ms (decision 145). Each wait after the next doubles it. */
 const FIRST_WAIT_MS = 30_000;
+
 /** Waits in a row before a run gives up: 30 s, 1 min, 2 min, 4 min, 8 min, 16 min (decision 145). */
 const MAX_WAITS_IN_A_ROW = 6;
+
 /** The longest wait Jev may ask for (its retry-after) and still be waited for (decision 145). */
 const MAX_RETRY_AFTER_MS = 30 * 60_000;
+
 /** The most one run waits in all, over its groups (decision 145). */
 const MAX_WAITED_MS = 60 * 60_000;
 
@@ -334,27 +352,36 @@ export function nextWait(groups: AskResult[][]): number | null {
 	// The waits the earlier groups already returned, by the same rule on each earlier prefix. The rule itself
 	// (waitAfter) takes those waits as a number, so this doesn't recurse.
 	let waited = 0;
+
 	for (let i = 1; i < groups.length; i++)
 		waited += waitAfter(groups.slice(0, i), waited) ?? 0;
+
 	return waitAfter(groups, waited);
 }
 
 /** The wait after the last of these groups, given the waits the run already returned for the groups before it. */
 function waitAfter(groups: AskResult[][], waitedBefore: number): number | null {
 	const last = groups.at(-1)?.at(-1);
+
 	if (!retryable(last)) return null;
 	// The trailing groups that ended on a busy Jev, counting back to the first of them that answered some rows (it counts).
 	let streak = 0;
+
 	for (let i = groups.length - 1; i >= 0; i--) {
 		const group = groups[i] ?? [];
+
 		if (!retryable(group.at(-1))) break;
 		streak += 1;
+
 		if (group.some((result) => result.outcome === "answered")) break;
 	}
+
 	// The last result is a retryable failure, so it may carry the wait Jev asked for.
 	const askedMs = last?.outcome === "failed" ? (last.retryAfterMs ?? 0) : 0;
+
 	if (streak > MAX_WAITS_IN_A_ROW || askedMs > MAX_RETRY_AFTER_MS) return null;
 	const wanted = Math.max(askedMs, FIRST_WAIT_MS * 2 ** (streak - 1));
+
 	return waitedBefore + wanted > MAX_WAITED_MS ? null : wanted;
 }
 
@@ -367,19 +394,25 @@ function reaskClusterMembers(
 	clusters: readonly number[][] | undefined,
 ): number[][] {
 	const clusterOf = new Map<number, number[]>();
+
 	for (const cluster of clusters ?? [])
 		for (const id of cluster) clusterOf.set(id, cluster);
 	const wanted = new Set(ids);
 	const placed = new Set<number>();
 	const out: number[][] = [];
+
 	for (const id of ids) {
 		if (placed.has(id)) continue;
+
 		const members = (clusterOf.get(id) ?? [id]).filter(
 			(member) => wanted.has(member) && !placed.has(member),
 		);
+
 		for (const member of members) placed.add(member);
+
 		if (members.length > 0) out.push(members);
 	}
+
 	return out;
 }
 
@@ -398,9 +431,12 @@ function stillInCluster(
 ): number[] {
 	const rows = [leaderId, ...followerIds].flatMap((id) => {
 		const row = current.get(id);
+
 		return row ? [row] : [];
 	});
+
 	const cluster = buildClusters(rows).find((c) => c[0] === leaderId) ?? [];
+
 	return followerIds.filter((id) => cluster.includes(id));
 }
 
@@ -419,6 +455,7 @@ async function learnedLinesFor(
 	rows: SortRow[],
 ): Promise<LearnedPair[]> {
 	const texts = new Set(rows.map((row) => cleanBankText(row.rawName)));
+
 	return (await loadLearnedLines(db))
 		.filter((line) => texts.has(line.cleanedText) && !line.vague)
 		.map(
@@ -459,22 +496,30 @@ async function readGroup(
 	{ kind: "busy" } | { kind: "none" } | { kind: "group"; plan: ReadPlan }
 > {
 	const db = env.DB;
+
 	if (!(await takeSortingTurn(db, options.turnId))) return { kind: "busy" };
+
 	const none = async () => {
 		await releaseSortingTurn(db, options.turnId);
+
 		return { kind: "none" as const };
 	};
+
 	// The marks a re-ask cleared in this read, put back by the group's save unless it answered the row (decision 160).
 	let cleared: ReaskMark[] = [];
+
 	try {
 		const switches = await readAiSwitches(db);
+
 		if (!asksJev(switches) || (options.bySync && !switches.sortOnArrival))
 			return await none();
+
 		const { results: categories } = await db
 			.prepare(
 				"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
 			)
 			.all<{ id: number; name: string }>();
+
 		const people = switches.details
 			? (
 					await db
@@ -482,13 +527,16 @@ async function readGroup(
 						.all<{ id: number; name: string }>()
 				).results
 			: [];
+
 		const timeZone = await householdTimeZone(db);
 		const day = todayIn(timeZone);
 		let rows: SortRow[];
 		let reask: ReaskPlan | undefined;
+
 		if (options.reask) {
 			// A re-ask reads its own run only, and only while the run is running (decision 160).
 			const run = await readRun(db);
+
 			if (!run || run.id !== options.reask.runId || run.status !== "running")
 				return await none();
 			// The still-waiting rows, in the run's order, under the turn: the clear and the read below both happen under it,
@@ -498,29 +546,38 @@ async function readGroup(
 			// a leader was decided or asked before, the next waiting follower leads the rest of its cluster and the cluster is
 			// still asked once. The followers of the picked leaders are cleared with them, under the same turn, never asked.
 			const exceptSet = new Set(options.exceptIds);
+
 			const members = reaskClusterMembers(
 				options.reask.ids.filter((id) => runIds.has(id)),
 				options.reask.clusters,
 			).map((cluster) => cluster.filter((id) => !exceptSet.has(id)));
+
 			const allMembers = members.flat();
+
 			const waiting = await reaskPicks(db, {
 				ids: allMembers,
 				except: new Set(),
 				limit: allMembers.length,
 			});
+
 			const waitingById = new Map(waiting.map((mark) => [mark.id, mark]));
 			const leaderMarks: ReaskMark[] = [];
 			const followerMarks: ReaskMark[] = [];
 			const followersOf = new Map<number, number[]>();
+
 			for (const cluster of members) {
 				if (leaderMarks.length >= options.limit) break;
 				const [leaderId, ...rest] = cluster.filter((id) => waitingById.has(id));
+
 				const leader =
 					leaderId === undefined ? undefined : waitingById.get(leaderId);
+
 				if (!leader) continue;
+
 				const followers = rest
 					.map((id) => waitingById.get(id))
 					.filter((mark): mark is ReaskMark => mark !== undefined);
+
 				leaderMarks.push(leader);
 				followerMarks.push(...followers);
 				followersOf.set(
@@ -528,9 +585,12 @@ async function readGroup(
 					followers.map((mark) => mark.id),
 				);
 			}
+
 			cleared = [...leaderMarks, ...followerMarks];
+
 			if (cleared.length > 0)
 				await db.batch([reaskClearStatement(db, cleared, options.turnId)]);
+
 			// One read for the leaders and their followers. Only the leaders' rows are asked, so only they are in `rows`.
 			const read = cleared.length
 				? await pendingForJev(db, cleared.length, {
@@ -541,11 +601,13 @@ async function readGroup(
 						ids: cleared.map((mark) => mark.id),
 					})
 				: [];
+
 			// pendingForJev's order is its own (newest first), so the rows are put in the run's order (decision 160).
 			const position = new Map(cleared.map((mark, i) => [mark.id, i]));
 			read.sort(
 				(a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0),
 			);
+
 			// The clusters are checked against the rows as they are now (decision 158): a follower changed since the clusters
 			// were built may no longer group with its leader. It is not filed; its mark goes back with the rest.
 			const current = new Map(
@@ -556,6 +618,7 @@ async function readGroup(
 					)
 				).map((row) => [row.id, row]),
 			);
+
 			const leaderIds = new Set(leaderMarks.map((mark) => mark.id));
 			rows = read.filter((row) => leaderIds.has(row.id));
 			const readIds = new Set(read.map((row) => row.id));
@@ -584,6 +647,7 @@ async function readGroup(
 				exceptIds: options.exceptIds,
 			});
 		}
+
 		if (rows.length === 0) {
 			// Nothing to ask: any mark this read cleared goes back before the turn is given up.
 			if (cleared.length > 0)
@@ -592,27 +656,30 @@ async function readGroup(
 						reaskRestoreStatement(db, mark, options.turnId),
 					),
 				);
+
 			return await none();
 		}
+
 		// Loaded once for the group, not per row: a line is context for the one text it is about, and a line that
 		// changes before the save still applies its answer (a line is not part of JevSeen).
 		const learned = switches.categories ? await learnedLinesFor(db, rows) : [];
-		return {
-			kind: "group",
-			plan: {
-				turnId: options.turnId,
-				day,
-				timeZone,
-				switches,
-				bySync: options.bySync,
-				askUntil: Date.now() + ASK_BUDGET_MS,
-				categories,
-				people,
-				rows,
-				learned,
-				...(reask ? { reask } : {}),
-			},
+
+		const plan: ReadPlan = {
+			turnId: options.turnId,
+			day,
+			timeZone,
+			switches,
+			bySync: options.bySync,
+			askUntil: Date.now() + ASK_BUDGET_MS,
+			categories,
+			people,
+			rows,
+			learned,
 		};
+
+		if (reask) plan.reask = reask;
+
+		return { kind: "group", plan };
 	} catch (error) {
 		// A cleared mark must not outlive the turn: put it back first. If that fails, the turn is kept, so a retried read
 		// takes it back and restores or clears again, and the turn runs out on its own otherwise (decision 160).
@@ -627,6 +694,7 @@ async function readGroup(
 				throw error;
 			}
 		}
+
 		await releaseSortingTurn(db, options.turnId);
 		throw error;
 	}
@@ -645,7 +713,9 @@ async function reserveCalls(
 	)
 		.bind(reservedKeyFor(plan.day, plan.turnId))
 		.first<{ value: string }>();
+
 	if (kept) return { granted: Number(kept.value) };
+
 	const granted = await reserveJevCalls(
 		env.DB,
 		plan.day,
@@ -653,6 +723,7 @@ async function reserveCalls(
 		plan.rows.length,
 		plan.turnId,
 	);
+
 	return { granted };
 }
 
@@ -671,17 +742,23 @@ async function askOne(
 	{ attempt }: { attempt: number },
 ): Promise<AskResult> {
 	const id = row.id;
+
 	try {
 		if (attempt > 1) return { id, outcome: "lost" };
+
 		if (todayIn(plan.timeZone) !== plan.day)
 			return { id, outcome: "date-changed" };
+
 		if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
+
 		// A re-ask asks for its category only, never details (decision 160).
 		const detailRequested =
 			plan.switches.details && !row.detailsAsked && !plan.reask;
+
 		const learned = plan.switches.categories
 			? learnedFor(plan.learned, cleanBankText(row.rawName))
 			: undefined;
+
 		const result = await askJev(
 			{ ...row, learnedCategory: learned },
 			plan.categories.map((c) => c.name),
@@ -692,27 +769,34 @@ async function askOne(
 				people: detailRequested ? plan.people : undefined,
 			},
 		);
+
 		if (!result.ok) {
 			// Status and request id only: never the key or anything about the transaction.
 			console.error(
 				`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
 			);
-			return {
+
+			const failure: FailedAsk = {
 				id,
 				outcome: "failed",
 				status: result.status,
 				requestId: result.requestId,
 				serviceWide: serviceWide(result.status),
-				...(result.retryAfterMs === undefined
-					? {}
-					: { retryAfterMs: result.retryAfterMs }),
 			};
+
+			if (result.retryAfterMs !== undefined) {
+				failure.retryAfterMs = result.retryAfterMs;
+			}
+
+			return failure;
 		}
+
 		return { id, outcome: "answered", answer: result.answer };
 	} catch (error) {
 		console.error(
 			`jev: ask failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
+
 		return {
 			id,
 			outcome: "failed",
@@ -754,20 +838,25 @@ export async function writeGroup(
 	const saveDay = todayIn(await householdTimeZone(db));
 	const byId = new Map(plan.rows.map((row) => [row.id, row]));
 	const reservedKey = reservedKeyFor(plan.day, turn);
+
 	// The turn is taken back first, while the group's record exists (decision 143): a save that already went through
 	// finds no record and takes nothing.
 	const statements: D1PreparedStatement[] = [
 		takeSortingTurnStatement(db, turn, reservedKey),
 	];
+
 	const applies: { index: number; categoryId: number | null }[] = [];
 	const details: Parameters<typeof saveJevDetailsStatement>[1] = [];
 	let asked = 0;
 
 	for (const result of results) {
 		const row = byId.get(result.id);
+
 		if (!row) continue;
+
 		if (result.outcome === "answered") {
 			asked += 1;
+
 			// A re-ask takes its category answer only, and never a flag, exclusion, income or details (decision 160).
 			// A re-ask row with no mark (never read with one) is not written at all (#831).
 			if (
@@ -778,10 +867,12 @@ export async function writeGroup(
 				const decision = decide(result.answer, plan.categories, JEV_THRESHOLD, {
 					categories: sw.categories,
 				});
+
 				applies.push({
 					index: statements.length,
 					categoryId: decision.categoryId,
 				});
+
 				const answer = saveJevResultStatements(db, row.id, decision, {
 					categoryOnly: row.categoryOnly,
 					// The save writes only to the row the run holds under this id: the identity its mark carries (#831).
@@ -808,7 +899,9 @@ export async function writeGroup(
 					turn,
 					seen: row.seen,
 				});
+
 				statements.push(answer.update);
+
 				if (answer.log) statements.push(answer.log);
 				// A confident answer for a real category applies to each follower of this leader as a category only (decision
 				// 158), unless Jev reads the trip as mixed: its followers may be other things. Each follower is saved on its own
@@ -817,6 +910,7 @@ export async function writeGroup(
 				// save is written (the follower's own save checks it, below). The mixed test is the app's (jevSaysMixedSql,
 				// mixed-trip.ts): Jev's mixed reading at or above the threshold, naming another category.
 				const leaderCategory = decision.categoryId;
+
 				const mixedTrip =
 					decision.mixedProbability !== null &&
 					decision.mixedProbability !== undefined &&
@@ -824,6 +918,7 @@ export async function writeGroup(
 					decision.alsoCategoryId !== null &&
 					decision.alsoCategoryId !== undefined &&
 					decision.alsoCategoryId !== leaderCategory;
+
 				if (
 					reask &&
 					leaderCategory !== null &&
@@ -833,11 +928,13 @@ export async function writeGroup(
 					for (const followerId of reask.followers[row.id] ?? []) {
 						const followerMark = markOf.get(followerId);
 						const followerSeen = reask.seen[followerId];
+
 						if (!followerMark || !followerSeen) continue;
 						applies.push({
 							index: statements.length,
 							categoryId: leaderCategory,
 						});
+
 						// A follower's category is logged like the leader's: the What AI did row counts it once, and only when
 						// the save files it (the log statement checks the row's source after the update).
 						const followerSave = saveJevResultStatements(
@@ -870,25 +967,32 @@ export async function writeGroup(
 								seen: followerSeen,
 							},
 						);
+
 						statements.push(followerSave.update);
+
 						if (followerSave.log) statements.push(followerSave.log);
 					}
 			}
+
 			if (sw.details && !row.detailsAsked && !reask) {
 				const kind = result.answer.kind;
+
 				const kindValue =
 					kind &&
 					kind.confidence >= JEV_THRESHOLD &&
 					kind.label !== "None of these"
 						? kind.label
 						: null;
+
 				const person = result.answer.forPerson;
+
 				const personValue =
 					person &&
 					person.confidence >= JEV_THRESHOLD &&
 					person.label.startsWith("person:")
 						? Number(person.label.slice("person:".length)) || null
 						: null;
+
 				// Jev's yes is kept only when it's likely (the same threshold as the other answers); a missing or unclear answer is a no (decision 103).
 				const worth = result.answer.noteWorthWriting;
 				details.push({
@@ -902,10 +1006,12 @@ export async function writeGroup(
 			}
 		} else if (result.outcome === "failed") {
 			asked += 1;
+
 			if (!result.serviceWide) {
 				if (reask) {
 					// A re-ask's failure is stamped only on the transaction the run holds under this id (#831 round 2).
 					const mark = markOf.get(row.id);
+
 					if (mark)
 						statements.push(
 							markReaskFailedStatement(
@@ -930,27 +1036,30 @@ export async function writeGroup(
 	// it stops the run only then.
 	const endedOutOfTime = results.at(-1)?.outcome === "out-of-time";
 	const askedNothingOutOfTime = asked === 0 && endedOutOfTime;
+
 	const shortGroup = reask
 		? plan.granted < reask.found
 		: plan.rows.length < GROUP_SIZE;
+
 	const stop =
 		!asksJev(now) ||
 		(plan.bySync && !now.sortOnArrival) ||
 		(!waitsOnBusy && shortGroup && !endedOutOfTime) ||
 		askedNothingOutOfTime ||
 		(!waitsOnBusy && runStops(results, failuresBefore));
+
 	if (reask) {
 		// The rows this group handled, for a re-sort's progress: each asked row once, except a busy one that the next group
 		// asks again (decision 145). Out-of-time and date-changed rows were not handled.
-		const handledLeaders = results
-			.filter(
-				(result) =>
-					(result.outcome === "answered" ||
-						result.outcome === "failed" ||
-						result.outcome === "lost") &&
-					!(waitsOnBusy && !stop && retryable(result)),
-			)
-			.map((result) => result.id);
+		const handledLeaders = results.flatMap((result) =>
+			(result.outcome === "answered" ||
+				result.outcome === "failed" ||
+				result.outcome === "lost") &&
+			!(waitsOnBusy && !stop && retryable(result))
+				? [result.id]
+				: [],
+		);
+
 		// Each handled leader counts with its followers (applied or restored, decision 158). A leader the cap or the budget
 		// left unhandled counts none of its followers, which are restored.
 		const handled =
@@ -959,6 +1068,7 @@ export async function writeGroup(
 				(sum, id) => sum + (reask.followers[id]?.length ?? 0),
 				0,
 			);
+
 		// Every row the re-ask cleared gets its mark back unless its answer was saved above: a row not reached, one the
 		// cap or the budget cut, one whose ask failed, and one whose answer no longer applied (decision 160). A row that
 		// was answered has its confidence written, so its restore changes nothing.
@@ -967,9 +1077,11 @@ export async function writeGroup(
 		for (const mark of reask.cleared) {
 			const seen = reask.seen[mark.id];
 			statements.push(reaskRestoreStatement(db, mark, turn, seen));
+
 			if (seen)
 				statements.push(reaskKeepStatement(db, reask.runId, mark, seen, turn));
 		}
+
 		statements.push(
 			bumpDoneStatement(db, {
 				runId: reask.runId,
@@ -978,10 +1090,12 @@ export async function writeGroup(
 			}),
 		);
 	}
+
 	const detailsStatement = saveJevDetailsStatement(db, details, {
 		stillOn: stillOnKeys({ details: true, sortOnArrival: plan.bySync }),
 		turnId: turn,
 	});
+
 	if (detailsStatement) statements.push(detailsStatement);
 	// What the group reserved and didn't ask goes back, then its record goes, and the turn is released last (decision 143).
 	statements.push(
@@ -996,6 +1110,7 @@ export async function writeGroup(
 	);
 
 	const saved = await db.batch(statements);
+
 	// The release is the batch's last statement. Changing no row means the turn wasn't this group's when the batch ran.
 	// Its record gone means the save already went through, so there is nothing to save. Its record still there means
 	// another group holds the turn: the step throws, so it is tried again.
@@ -1004,10 +1119,14 @@ export async function writeGroup(
 			.prepare("SELECT key FROM household_settings WHERE key = ?")
 			.bind(reservedKey)
 			.first();
+
 		if (record) throw new Error("sorting turn taken");
+
 		return { asked, applied: 0, stop: true };
 	}
+
 	let applied = 0;
+
 	for (const apply of applies)
 		if (
 			apply.categoryId !== null &&
@@ -1038,6 +1157,7 @@ export async function sortGroups(
 	// A re-ask asks only its own rows, and never by the sync switch (decision 160).
 	const onlyIds = options.reask ? options.reask.ids : options.onlyIds;
 	const bySync = options.reask ? false : (options.bySync ?? false);
+
 	if (!env.JEV_API_KEY || onlyIds?.length === 0) return done;
 	const apiKey = env.JEV_API_KEY;
 	const maxCalls = options.maxCalls ?? Number.POSITIVE_INFINITY;
@@ -1047,6 +1167,7 @@ export async function sortGroups(
 	// The failures in a row the groups so far ended with, from their cached answers, so a replayed run counts the same.
 	let streak = 0;
 	let held: string | undefined;
+
 	try {
 		// Merchant rules are the household's own, so they apply whatever the AI switches say.
 		if (!options.rulesApplied)
@@ -1054,10 +1175,13 @@ export async function sortGroups(
 				await applyMerchantRules(env.DB);
 				// After the merchant rules, so a merchant rule wins (decision 163).
 				await applyBankTextRules(env.DB);
+
 				return true;
 			});
+
 		for (let n = 1; done.asked < maxCalls; n++) {
 			const turnId = `${options.runId}:${n}`;
+
 			// A busy turn throws inside the read step, so Workflows retries the read until the turn is free.
 			const read = await runStep(
 				`group-${n}-read`,
@@ -1071,22 +1195,28 @@ export async function sortGroups(
 						turnId,
 						reask: options.reask,
 					});
+
 					if (result.kind === "busy" && options.waitForTurn)
 						throw new Error("sorting turn taken");
+
 					return result;
 				},
 			);
+
 			if (read.kind === "busy" || read.kind === "none") break;
 			const { plan: readPlan } = read;
 			held = turnId;
+
 			// A re-ask's picked rows that Jev's question didn't read are not asked again by a later group.
 			for (const id of readPlan.reask?.dropped ?? []) askedIds.add(id);
+
 			// A re-ask's followers are never asked on their own, so no later group picks one (decision 158).
 			for (const followerIds of Object.values(readPlan.reask?.followers ?? {}))
 				for (const id of followerIds) askedIds.add(id);
 			// The calls are reserved in a step of their own, so a read that runs again never reserves twice. A reserve
 			// that rejects grants nothing here; if its batch had committed, its record gives the calls back at the save.
 			let granted = 0;
+
 			try {
 				granted = (
 					await runStep(`group-${n}-reserve`, STEP_SETTINGS.reserve, () =>
@@ -1098,22 +1228,27 @@ export async function sortGroups(
 					`sorting: reserve step ${error instanceof Error ? error.name : "unknown"}`,
 				);
 			}
+
 			// With nothing granted there are no rows: the write gives the turn back, and as a short group it stops the run.
 			const plan: SortPlan = {
 				...readPlan,
 				granted,
 				rows: readPlan.rows.slice(0, granted),
 			};
+
 			const results: AskResult[] = [];
 			const before = streak;
 			let outOfTime = false;
+
 			for (const row of plan.rows) {
 				if (pastDeadline(options.time)) {
 					console.log("jev: stopped at the time budget");
 					outOfTime = true;
 					break;
 				}
+
 				let answer: AskResult;
+
 				try {
 					answer = await runStep(
 						`group-${n}-ask-${row.id}`,
@@ -1128,13 +1263,17 @@ export async function sortGroups(
 					);
 					answer = { id: row.id, outcome: "lost" };
 				}
+
 				results.push(answer);
+
 				if (askingStops(results, before)) break;
 			}
+
 			// A busy Jev's group waits before its next ask, and doesn't stop the run here (decision 145). The wait comes from
 			// the cached answers only, so a replayed run takes the same path.
 			const wait = options.sleep ? nextWait([...groups, results]) : null;
 			let written: Awaited<ReturnType<typeof writeGroup>>;
+
 			try {
 				written = await runStep(`group-${n}-write`, STEP_SETTINGS.write, () =>
 					writeGroup(env, plan, results, before, wait !== null),
@@ -1148,20 +1287,25 @@ export async function sortGroups(
 				);
 				break;
 			}
+
 			// A save has returned, so the turn is no longer this run's to release. Until then `held` stays set, so the
 			// in-process finally below releases the turn if a save throws.
 			held = undefined;
 			streak = trailingFailures(results, before);
 			done.asked += written.asked;
 			done.applied += written.applied;
+
 			// The busy row isn't asked off: the next group reads it again, under its own step names (decision 145).
 			const busyRow =
 				wait !== null && !written.stop ? results.at(-1)?.id : undefined;
+
 			for (const result of results)
 				if (result.outcome !== "out-of-time" && result.id !== busyRow)
 					askedIds.add(result.id);
 			groups.push(results);
+
 			if (written.stop || outOfTime) break;
+
 			if (wait !== null && options.sleep)
 				await options.sleep(`wait-${n}`, wait);
 		}
@@ -1170,5 +1314,6 @@ export async function sortGroups(
 		if (!options.waitForTurn && held !== undefined)
 			await releaseSortingTurn(env.DB, held);
 	}
+
 	return done;
 }

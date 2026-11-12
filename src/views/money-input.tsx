@@ -36,10 +36,14 @@ type Props = {
  */
 function centsOf(text: string, allowCredit: boolean): number | null {
 	const trimmed = text.trim();
+
 	if (trimmed === "") return 0;
+
 	if (trimmed.startsWith("-") && !allowCredit) return null;
+
 	try {
 		const cents = toCents(trimmed);
+
 		return cents === 0 ? 0 : cents;
 	} catch {
 		return null;
@@ -48,8 +52,10 @@ function centsOf(text: string, allowCredit: boolean): number | null {
 
 const round =
 	"flex size-12 shrink-0 items-center justify-center rounded-full border border-rule bg-paper text-xl font-semibold leading-none text-muted select-none hover:text-ink disabled:opacity-40";
+
 const cent =
 	"flex w-11 flex-1 items-center justify-center text-muted hover:bg-band hover:text-ink disabled:opacity-40";
+
 /** A chip under the field. Exported so a drawing of a chip the app doesn't have yet can't drift. */
 export const moneyChip =
 	"group inline-flex min-h-11 items-center gap-1 rounded-full bg-band px-3 text-sm font-medium text-muted hover:text-ink aria-pressed:text-ink";
@@ -94,12 +100,15 @@ export function MoneyInput({
 	const cents = centsOf(value, allowCredit);
 	const unreadable = cents === null;
 	const atZero = unreadable || (!allowCredit && cents === 0);
+
 	const describedBy =
 		[hint ? `${id}-hint` : null, error ? `${id}-error` : null]
 			.filter(Boolean)
 			.join(" ") || undefined;
+
 	const hasCents = cents !== null && cents % 100 !== 0;
 	const roundedCents = cents === null ? 0 : Math.ceil(cents / 100) * 100;
+
 	return (
 		<div data-money class="flex flex-col gap-2">
 			<label for={id} class="text-base text-ink">

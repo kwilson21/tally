@@ -34,6 +34,7 @@ export async function activeBankTextRules(
 			ORDER BY b.cleaned_text`,
 		)
 		.all<BankTextRule>();
+
 	return results;
 }
 
@@ -90,18 +91,24 @@ export async function bankTextRuleStatements(
 		.all<{ rawName: string }>();
 
 	const namesByText = new Map<string, string[]>();
+
 	for (const { rawName } of open) {
 		const cleanedText = cleanBankText(rawName);
+
 		if (!categoryFor.has(cleanedText)) continue;
 		const names = namesByText.get(cleanedText);
+
 		if (names) names.push(rawName);
 		else namesByText.set(cleanedText, [rawName]);
 	}
 
 	const statements: D1PreparedStatement[] = [];
+
 	for (const [cleanedText, names] of namesByText) {
 		const rule = categoryFor.get(cleanedText);
+
 		if (!rule) continue;
+
 		for (let i = 0; i < names.length; i += RAW_NAMES_PER_UPDATE) {
 			const chunk = names.slice(i, i + RAW_NAMES_PER_UPDATE);
 			statements.push(
@@ -126,6 +133,7 @@ export async function bankTextRuleStatements(
 			);
 		}
 	}
+
 	return statements;
 }
 
@@ -138,9 +146,11 @@ export async function applyBankTextRules(db: D1Database): Promise<void> {
 	const any = await db
 		.prepare("SELECT 1 AS one FROM bank_text_rules LIMIT 1")
 		.first<{ one: number }>();
+
 	if (!any) return;
 	const rules = await activeBankTextRules(db);
 	const statements = await bankTextRuleStatements(db, rules);
+
 	if (statements.length > 0) await db.batch(statements);
 }
 
@@ -161,14 +171,17 @@ export async function changeBankTextRule(
 	const others = (await activeBankTextRules(db)).filter(
 		(rule) => rule.cleanedText !== cleanedText,
 	);
+
 	const statements = await bankTextRuleStatements(db, [
 		...others,
 		{ cleanedText, categoryId },
 	]);
+
 	const [upsert] = await db.batch([
 		upsertBankTextRule(db, cleanedText, categoryId),
 		merchantRuleStatement(db),
 		...statements,
 	]);
+
 	return (upsert?.meta.changes ?? 0) > 0;
 }

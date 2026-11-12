@@ -18,6 +18,7 @@ import { loadTrends } from "../src/db/trends";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 import { rowCaption } from "../src/views/transaction-row";
+import { present } from "./helpers/present";
 
 // Spec §6.1 rule 4 and §8.5: a payment linked to a bill counts in Spent, whatever its exclusion, so the
 // bill counts once. It is decided where spending is read; linking and unlinking never write the
@@ -83,6 +84,7 @@ const rowOf = async (id: number) => {
 		db,
 		parseFilters(new URLSearchParams("month=all&q=LANDLORD"), MONTH),
 	);
+
 	return rows.find((row) => row.id === id);
 };
 
@@ -138,12 +140,10 @@ describe("a payment linked to a bill", () => {
 				categoryName: "Household",
 				billName: "Mortgage",
 			});
-			expect(rowCaption(row as NonNullable<typeof row>).caption).toBe(
+			expect(rowCaption(present(row)).caption).toBe(
 				"Household · paid Mortgage bill",
 			);
-			expect(rowCaption(row as NonNullable<typeof row>).kind).not.toBe(
-				"excluded",
-			);
+			expect(rowCaption(present(row)).kind).not.toBe("excluded");
 
 			await unlink().run();
 			expect(await readings()).toEqual(before);
@@ -155,9 +155,7 @@ describe("a payment linked to a bill", () => {
 			expect(await stored(9501)).toEqual([exclusion]);
 			const after = await rowOf(9501);
 			expect(after).toMatchObject({ excluded: true, paysBill: false });
-			expect(rowCaption(after as NonNullable<typeof after>).caption).toBe(
-				"Excluded",
-			);
+			expect(rowCaption(present(after)).caption).toBe("Excluded");
 		},
 	);
 
@@ -293,22 +291,26 @@ describe("a split whose bank transaction pays a bill", () => {
 
 describe("a payment linked to an earlier month's occurrence, then split", () => {
 	const AUGUST = "2026-08";
+
 	const spentIn = async (month: string) =>
 		summarizeMonth({
 			month,
 			...(await loadMonth(db, month)),
 			unpaidDueBillsCents: 0,
 		}).totalSpentCents;
+
 	const trendIn = async (month: string) =>
 		(await loadTrends(db, TODAY)).spend
 			.filter((row) => row.month === month)
 			.reduce((sum, row) => sum + row.cents, 0);
+
 	const months = async () => ({
 		august: await spentIn(AUGUST),
 		september: await spentIn(MONTH),
 		augustTrend: await trendIn(AUGUST),
 		septemberTrend: await trendIn(MONTH),
 	});
+
 	const partIds = async (parentId: number) =>
 		(
 			await db
@@ -351,15 +353,18 @@ describe("a payment linked to an earlier month's occurrence, then split", () => 
 				],
 				"test",
 			);
+
 			expect(split.saved).toBe(true);
 			// Split, it is still that payment whole: Spent and Trends read every month as before.
 			expect(await months()).toEqual(linked);
 			const parts = await partIds(9560);
 			expect(parts).toHaveLength(2);
+
 			const { rows } = await listTransactions(
 				db,
 				parseFilters(new URLSearchParams(`month=${AUGUST}&q=LANDLORD`), MONTH),
 			);
+
 			for (const id of parts)
 				expect(rows.find((row) => row.id === id)).toMatchObject({
 					countsInMonth: AUGUST,
@@ -396,10 +401,12 @@ describe("a payment linked to an earlier month's occurrence, then split", () => 
 			)
 			.bind(part)
 			.run();
+
 		const { rows } = await listTransactions(
 			db,
 			parseFilters(new URLSearchParams(`month=${AUGUST}&q=LANDLORD`), MONTH),
 		);
+
 		expect(rows.find((row) => row.id === 9573)).toMatchObject({
 			countsInMonth: AUGUST,
 		});
@@ -420,19 +427,26 @@ describe("the Show choice and a payment linked to a bill", () => {
 					MONTH,
 				),
 			);
+
 		const first = await query(1);
 		const rows = [...first.rows];
+
 		for (let page = 2; page <= first.pages; page++)
 			rows.push(...(await query(page)).rows);
+
 		return rows;
 	};
+
 	const ids = async (show: string) => (await shown(show)).map((r) => r.id);
+
 	const spendingListed = async () =>
 		(await shown("spending")).reduce((sum, r) => sum + r.amountCents, 0);
+
 	const breakdownTotal = async (month = MONTH) =>
 		excludedBreakdown(db, month).then(
 			(b) => b.transfer + b.reimbursement + b.byPerson,
 		);
+
 	const excludedCount = async (month = MONTH) =>
 		(
 			await listTransactions(
@@ -570,6 +584,7 @@ describe("the Show choice and a payment linked to a bill", () => {
 		expect(refunds).toEqual(expect.arrayContaining([9591, 9592]));
 		expect(refunds).not.toContain(9590);
 		const excluded = await ids("excluded");
+
 		for (const id of [9590, 9591, 9592]) expect(excluded).not.toContain(id);
 	});
 
@@ -612,6 +627,7 @@ describe("the Show choice and a payment linked to a bill", () => {
 				 SELECT 9701, id, '2026-09-03', -2000, 'SOME SHOP', 1, 'user', 9700 FROM accounts LIMIT 1`,
 			),
 		]);
+
 		for (const month of [AUGUST, MONTH])
 			expect(await excludedCount(month)).toBe(await breakdownTotal(month));
 		// A person excludes the refund and leaves its link as it is.
@@ -638,6 +654,7 @@ describe("the Show choice and a payment linked to a bill", () => {
 				)
 				.first(),
 		).toEqual({ excluded: 1, refundOfId: 9700 });
+
 		for (const month of [AUGUST, MONTH])
 			expect(await excludedCount(month)).toBe(await breakdownTotal(month));
 	});
@@ -659,14 +676,17 @@ describe("Jev and a payment that pays a bill", () => {
 			...flags,
 		},
 	});
+
 	const asked = async () =>
 		(await pendingForJev(db, 500)).find((t) => t.id === 9501);
+
 	const row = () =>
 		db
 			.prepare(
 				"SELECT excluded, excluded_source, flag_transfer, flag_reimbursement, flag_income, income_source, category_id, category_source FROM transactions WHERE id = 9501",
 			)
 			.first();
+
 	const stillLinked = async () =>
 		await db
 			.prepare(
@@ -736,6 +756,7 @@ describe("Jev and a payment that pays a bill", () => {
 
 	it("never writes to a payment that isn't linked and is excluded", async () => {
 		await addPayment("plaid").run();
+
 		for (const categoryOnly of [true, false])
 			expect(await saveJevResult(db, 9501, answer({}), { categoryOnly })).toBe(
 				false,
@@ -762,6 +783,7 @@ describe("Jev and a payment that pays a bill", () => {
 			)
 			.run();
 		const before = await spendFor();
+
 		const jev = async () =>
 			new Response(
 				JSON.stringify({
@@ -778,10 +800,12 @@ describe("Jev and a payment that pays a bill", () => {
 				}),
 				{ status: 200 },
 			);
+
 		const result = await categorizePending(
 			{ DB: db, JEV_API_KEY: "test-key" },
 			jev,
 		);
+
 		expect(result.asked).toBe(0);
 		expect(await row()).toMatchObject({
 			excluded: 1,

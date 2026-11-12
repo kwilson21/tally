@@ -130,6 +130,7 @@ export function merchantSuggestionState(row: {
 	names: string[];
 }): keyof typeof MERCHANT_SUGGESTION_ROWS {
 	if (row.status === "none") return row.namesAsked ? "asked" : "none";
+
 	if (
 		row.status === "pending" ||
 		row.status === "accepted" ||

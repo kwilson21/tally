@@ -23,6 +23,7 @@ describe("security headers", () => {
 
 const cspFor = async (path: string) => {
 	const response = await exports.default.fetch(`http://tally.test${path}`);
+
 	return response.headers.get("content-security-policy") ?? "";
 };
 
@@ -62,6 +63,7 @@ describe("Plaid Content Security Policy", () => {
 		for (const path of ["/", "/transactions", "/settings", "/accountsx"]) {
 			expect(await cspFor(path)).not.toContain("plaid.com");
 		}
+
 		Object.assign(env, { DEMO: "true" });
 		expect(await cspFor("/accounts")).not.toContain("plaid.com");
 	});
@@ -73,6 +75,7 @@ describe("Plaid Content Security Policy", () => {
 		expect(await cspFor("/accounts/1/disconnect")).toContain(
 			"style-src 'self' 'unsafe-inline'",
 		);
+
 		for (const path of ["/", "/transactions", "/settings", "/accountsx"]) {
 			expect(await cspFor(path)).not.toContain("unsafe-inline");
 		}
@@ -142,6 +145,7 @@ describe("decision and spec records for the Home Plaid allowances", () => {
 			spec
 				.split("\n")
 				.find((line) => line.startsWith("| Security headers |")) ?? "";
+
 		expect(row).toContain("decisions 63 and 124");
 		expect(row).toContain("Plaid Link's inline styles");
 		expect(row).not.toContain("decisions 63 and 123");

@@ -1,7 +1,9 @@
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
+import type { Json } from "../json";
 
-type Row = Record<string, unknown>;
+type Row = { [key: string]: Json };
+
 type Snapshot = {
 	transaction: Row;
 	parts: Row[];
@@ -23,19 +25,25 @@ export async function holdCashDelete(
 		(
 			await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
 		).results.map(({ name }) => name);
+
 	const [transactionColumns, paymentColumns] = await Promise.all([
 		columns("transactions"),
 		columns("bill_payments"),
 	]);
+
 	const jsonObject = (names: string[], alias = "") =>
 		`json_object(${names.map((name) => `'${name}', ${alias}${name}`).join(",")})`;
+
 	const paymentJson = `json_object(${[
 		...paymentColumns.map((name) => `'${name}', bp.${name}`),
 		"'bill_name', b.name",
 	].join(",")})`;
+
 	const arrayOf = (query: string) =>
 		`COALESCE((SELECT json_group_array(json(row)) FROM (${query})), '[]')`;
+
 	const token = crypto.randomUUID();
+
 	const result = await db.batch([
 		db
 			.prepare(`INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows,plan_rows)
@@ -52,6 +60,7 @@ export async function holdCashDelete(
 			)
 			.bind(id),
 	]);
+
 	return result[0]?.meta.changes === 1 ? token : null;
 }
 
@@ -63,6 +72,7 @@ export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
 		)
 		.bind(token)
 		.first<{ created_at: number }>();
+
 	return hold
 		? Math.min(10_000, Math.max(0, hold.created_at + 10_000 - Date.now()))
 		: 0;
@@ -83,11 +93,15 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			refund_rows: string;
 			plan_rows: string;
 		}>();
+
 	if (!hold) return null;
+
 	if (hold.restore_marker !== null)
 		return { alreadyRestored: true as const, name: hold.display_name };
 	const now = Date.now();
+
 	if (hold.created_at <= now - 10_000 || hold.created_at > now) return null;
+
 	const snapshot: Snapshot = {
 		transaction: JSON.parse(hold.transaction_row),
 		parts: JSON.parse(hold.split_rows),
@@ -95,8 +109,10 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		refunds: JSON.parse(hold.refund_rows),
 		plans: JSON.parse(hold.plan_rows),
 	};
+
 	const transaction = snapshot.transaction;
 	const columns = Object.keys(transaction);
+
 	const links: {
 		row_id: number;
 		partner_id: number;
@@ -104,6 +120,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		move_cents: number;
 		only_if_unlinked: boolean;
 	}[] = [];
+
 	const addLink = (row: Row, onlyIfUnlinked = false) => {
 		if (row.refund_of_id === null) return;
 		links.push({
@@ -114,10 +131,14 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			only_if_unlinked: onlyIfUnlinked,
 		});
 	};
+
 	addLink(transaction);
+
 	for (const row of snapshot.parts) addLink(row);
+
 	for (const row of snapshot.refunds) addLink(row, true);
 	const marker = crypto.randomUUID();
+
 	try {
 		// Predict the same fresh ids as the insert so payment conflicts never use snapshot ids.
 		const paymentCheck = await db
@@ -143,9 +164,11 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				JSON.stringify(snapshot.payments),
 			)
 			.all<{ name: string }>();
+
 		const lostLinks = paymentCheck.results.map(({ name }) => `${name} payment`);
 		// A person removed since the entry was deleted is gone: the entry comes back with no one, and no guess.
 		const personKept = `(${jsonColumn("for_person_id", "mapped.")} IS NULL OR ${jsonColumn("for_person_id", "mapped.")} IN (SELECT id FROM household_people))`;
+
 		const insertTransactions = `WITH source AS (
 				SELECT value, CAST(json_extract(value, '$.id') AS INTEGER) AS old_id FROM json_each(?)
 			), maximum AS (
@@ -161,22 +184,29 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			SELECT ${columns
 				.map((column) => {
 					if (column === "id") return "new_id";
+
 					if (column === "parent_id")
 						return "COALESCE((SELECT new_id FROM mapped parent WHERE parent.old_id=CAST(json_extract(mapped.value, '$.parent_id') AS INTEGER)), json_extract(mapped.value, '$.parent_id'))";
+
 					if (column === "for_person_id")
 						return `CASE WHEN ${personKept} THEN ${jsonColumn(column, "mapped.")} END`;
+
 					if (column === "for_person_guessed")
 						return `CASE WHEN ${personKept} THEN ${jsonColumn(column, "mapped.")} ELSE 0 END`;
+
 					return column === "refund_of_id"
 						? "NULL"
 						: jsonColumn(column, "mapped.");
 				})
 				.join(",")}
 			FROM mapped WHERE EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`;
+
 		const paymentColumns = Object.keys(snapshot.payments[0] ?? {}).filter(
 			(key) => key !== "bill_name" && key !== "id",
 		);
+
 		const targets = [transaction, ...snapshot.parts];
+
 		const writes = [
 			db
 				.prepare(
@@ -187,6 +217,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				.prepare(insertTransactions)
 				.bind(JSON.stringify(targets), token, marker),
 		];
+
 		if (snapshot.payments.length > 0)
 			writes.push(
 				db
@@ -250,6 +281,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					marker,
 				),
 		);
+
 		// A plan the entry or a part paid is paid again by the restored row, if canPayPlanSql accepts it for the plan's month
 		// as it is now, as restorePlanDelete does (splitOk). Its id is the plan's own, since the delete only unlinked it.
 		if (snapshot.plans.length > 0)
@@ -277,7 +309,9 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					),
 			);
 		const results = await db.batch(writes);
+
 		if (results[0]?.meta.changes !== 1) return null;
+
 		const restoredLinks = new Set(
 			(
 				await db
@@ -301,6 +335,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				.filter((row) => row.refund_of_id !== null)
 				.map((row) => `${row.id}:${row.refund_of_id}`),
 		);
+
 		const mappedId = (id: number) =>
 			targets.some((row) => Number(row.id) === id)
 				? Number(results[1]?.meta.last_row_id) -
@@ -311,6 +346,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 						.indexOf(id) +
 					1
 				: id;
+
 		for (const link of links)
 			if (
 				!restoredLinks.has(
@@ -318,6 +354,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				)
 			)
 				lostLinks.push(link.name);
+
 		// A plan the Undo didn't pay again (its month moved, or another payment took it) is named the way a refund link is.
 		// A plan deleted during the window has no row, so it is not named.
 		if (snapshot.plans.length > 0) {
@@ -327,12 +364,15 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				)
 				.bind(JSON.stringify(snapshot.plans.map(({ id }) => id)))
 				.all<{ id: number; name: string; transactionId: number | null }>();
+
 			for (const plan of plans.results) {
 				const paid = snapshot.plans.find(({ id }) => id === plan.id);
+
 				if (paid && plan.transactionId !== mappedId(paid.transaction_id))
 					lostLinks.push(plan.name);
 			}
 		}
+
 		return {
 			name: hold.display_name,
 			lostLinks,

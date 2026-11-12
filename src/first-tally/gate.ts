@@ -36,7 +36,9 @@ export function banksHistoryIn(banks: QuestionsFacts["banks"]): boolean {
  */
 export function questionsOpen(facts: QuestionsFacts): boolean {
 	if (facts.strokeOneDay === null) return false;
+
 	if (!banksHistoryIn(facts.banks)) return false;
+
 	return facts.waiting === 0;
 }
 
@@ -76,11 +78,14 @@ export async function readGateInputs(db: D1Database): Promise<{
 			"SELECT id, institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
 		)
 		.all<GateBank>();
+
 	const switches = await readAiSwitches(db);
+
 	const waiting = await countWaitingForJev(db, {
 		categories: switches.categories,
 		income: switches.income,
 	});
+
 	return { banks, waiting, sortOnArrival: switches.sortOnArrival };
 }
 
@@ -91,8 +96,10 @@ export async function readGateInputs(db: D1Database): Promise<{
  */
 export async function readQuestionsGate(db: D1Database): Promise<boolean> {
 	const record = await readFirstTally(db);
+
 	if (isSetUp(record)) return false;
 	const { banks, waiting } = await readGateInputs(db);
+
 	return questionsOpen({
 		strokeOneDay: record?.strokes.bank ?? null,
 		banks,

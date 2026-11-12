@@ -108,6 +108,7 @@ function KeysSheet({ phone = false }: { phone?: boolean }) {
 	const panel = phone
 		? "absolute inset-x-0 bottom-0 flex max-h-[754px] flex-col rounded-t-sheet bg-paper"
 		: "absolute inset-y-0 right-0 flex w-[28rem] flex-col rounded-l-sheet bg-paper";
+
 	return (
 		<>
 			<div class="absolute inset-0 bg-ink/30" />

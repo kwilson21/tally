@@ -29,14 +29,17 @@ const ACME_DEPOSITS = [ACME_FIRST, ACME_SECOND];
 const ZETA = { date: "2026-09-18", cents: 90000 };
 const ZETA_DEPOSITS = [ZETA];
 
+/** A JSON value, as the first_tally record stores it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
 /** The record as a setup that drew every stroke leaves it, with the answers given. */
-const drawn = (over: Record<string, unknown> = {}) => ({
+const drawn = (over: { [key: string]: Json } = {}) => ({
 	strokes: { bank: DAY, pay: DAY, bills: DAY, budgets: DAY },
 	budgets: {},
 	...over,
 });
 
-async function writeRecord(record: unknown) {
+async function writeRecord(record: Json) {
 	await db
 		.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -175,9 +178,11 @@ describe("readFinish", () => {
 
 	it("still gives the finish when a new deposit arrives unanswered after the budgets stroke", async () => {
 		await writeRecord(drawn({ bills: { kept: 2, cents: 3000 } }));
+
 		const account = await db
 			.prepare("SELECT id FROM accounts ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, flag_transfer) VALUES (?, 'finish-deposit', ?, -245000, 'NEW PAYER', NULL, NULL, 90, 1, 0)",

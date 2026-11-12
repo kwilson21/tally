@@ -17,6 +17,11 @@ import {
 	fileFeedbackIssue,
 	retryFeedback,
 } from "../src/routes/feedback";
+import { envWith, fakeFetch } from "./helpers/doubles";
+import { present } from "./helpers/present";
+
+/** A stored feedback row, as fileFeedbackIssue takes it. */
+type FiledRow = Parameters<typeof fileFeedbackIssue>[2];
 
 const BASE = "http://tally.test";
 
@@ -35,20 +40,22 @@ function productionApp(
 		await next();
 	});
 	app.route("/", feedback);
+
+	const bindings = envWith(env, {
+		DEMO: options.demo ? "true" : "false",
+		FEEDBACK_GITHUB_TOKEN: token,
+		FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
+		FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
+		APP_VERSION: options.appVersion,
+	});
+
 	return {
 		fetch(path: string, init?: RequestInit, waitUntil = vi.fn()) {
-			return app.fetch(
-				new Request(BASE + path, init),
-				{
-					...env,
-					DEMO: options.demo ? "true" : "false",
-					FEEDBACK_GITHUB_TOKEN: token,
-					FEEDBACK_DIAGNOSTICS_ENABLED: options.diagnostics ? "true" : "false",
-					FEEDBACK_REPLAY_LINKS_ENABLED: options.replayLinks ? "true" : "false",
-					APP_VERSION: options.appVersion,
-				} as unknown as Env,
-				{ waitUntil, passThroughOnException() {}, props: {} },
-			);
+			return app.fetch(new Request(BASE + path, init), bindings, {
+				waitUntil,
+				passThroughOnException() {},
+				props: {},
+			});
 		},
 	};
 }
@@ -120,6 +127,7 @@ describe("feedback diagnostic safeguards", () => {
 			},
 			"/accounts?private=1",
 		);
+
 		expect(context).toEqual({
 			route: "/accounts",
 			deviceCategory: "Mobile browser",
@@ -140,6 +148,7 @@ describe("feedback diagnostic safeguards", () => {
 			},
 			"/accounts",
 		);
+
 		expect(context).toEqual({
 			route: "/accounts",
 			deviceCategory: "Unknown",
@@ -198,6 +207,7 @@ describe("feedback form", () => {
 				"/feedback",
 				postFields({ type: "Bug", feeling: "Confused", message, from: "/" }),
 			);
+
 			expect(response.status).toBe(422);
 			const html = await response.text();
 			expect(html).toMatch(/role="alert"/);
@@ -211,8 +221,10 @@ describe("feedback form", () => {
 	it("wraps the review of the cleaned message, so a long paragraph can't widen the form", async () => {
 		const response = await productionApp().fetch("/feedback");
 		const html = await response.text();
+
 		const review =
 			html.match(/<div id="feedback-redaction-review"[^>]*>/)?.[0] ?? "";
+
 		// feedback-privacy.js puts the cleaned text in a <pre>, which doesn't wrap by itself.
 		expect(review).toContain("[&amp;_pre]:whitespace-pre-wrap");
 		expect(review).toContain("[&amp;_pre]:wrap-anywhere");
@@ -229,6 +241,7 @@ describe("feedback form", () => {
 				from: "/settings?open=3",
 			}),
 		);
+
 		expect(response.status).toBe(303);
 		expect(response.headers.get("location")).toContain("/settings?open=3");
 		expect(response.headers.get("location")).toContain("sent=feedback");
@@ -258,6 +271,7 @@ describe("feedback form", () => {
 				from: "/",
 			}),
 		);
+
 		expect(response.status).toBe(303);
 		expect(
 			await env.DB.prepare("SELECT app_version FROM feedback").first(),
@@ -279,10 +293,13 @@ describe("feedback form", () => {
 				client_context: JSON.stringify({ deviceCategory: "Mobile browser" }),
 			}),
 		);
+
 		expect(response.status).toBe(303);
+
 		const row = await env.DB.prepare(
 			"SELECT client_context, app_version FROM feedback",
 		).first<{ client_context: string | null; app_version: string | null }>();
+
 		expect(JSON.parse(row?.client_context ?? "null")).toEqual({
 			route: "/accounts",
 			deviceCategory: "Mobile browser",
@@ -301,6 +318,7 @@ describe("feedback form", () => {
 				from: "/",
 			}),
 		);
+
 		expect(response.status).toBe(303);
 		expect(
 			await env.DB.prepare("SELECT app_version FROM feedback").first(),
@@ -313,6 +331,7 @@ describe("feedback form", () => {
 			errorName: "TypeError",
 			secret: "BALANCE 987654",
 		};
+
 		const response = await productionApp(undefined, {
 			diagnostics: true,
 		}).fetch(
@@ -326,10 +345,13 @@ describe("feedback form", () => {
 				client_context: JSON.stringify(context),
 			}),
 		);
+
 		expect(response.status).toBe(303);
+
 		const row = await env.DB.prepare(
 			"SELECT client_context, replay_url FROM feedback",
 		).first<{ client_context: string | null; replay_url: string | null }>();
+
 		expect(JSON.parse(row?.client_context ?? "null")).toEqual({
 			route: "/accounts",
 			deviceCategory: "Mobile browser",
@@ -344,6 +366,7 @@ describe("feedback form", () => {
 			userAgent: "fake",
 			viewport: { width: 390, height: 844 },
 		});
+
 		await productionApp(undefined, {
 			diagnostics: false,
 			replayLinks: true,
@@ -360,9 +383,11 @@ describe("feedback form", () => {
 				posthog_session_id: "fake-session-id",
 			}),
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT client_context, replay_url FROM feedback",
 		).first();
+
 		expect(row).toEqual({ client_context: null, replay_url: null });
 	});
 
@@ -421,6 +446,7 @@ describe("feedback form", () => {
 		const response = await productionApp(undefined, { demo: true }).fetch(
 			"/feedback",
 		);
+
 		expect(response.headers.get("set-cookie")).toBeNull();
 	});
 
@@ -437,14 +463,18 @@ describe("feedback form", () => {
 				{ Cookie: "" },
 			),
 		);
+
 		expect(expired.status).toBe(400);
 		const html = await expired.text();
 		expect(html).toContain("Email me at [email removed]");
 		expect(html).not.toContain("person@example.com");
+
 		const token = expired.headers
 			.get("set-cookie")
 			?.match(/__Host-tally-feedback-limit=([^;]+)/)?.[1];
+
 		expect(token).toMatch(/^[0-9a-f-]{36}$/i);
+
 		const resent = await productionApp().fetch(
 			"/feedback",
 			postFields(
@@ -457,6 +487,7 @@ describe("feedback form", () => {
 				{ Cookie: `__Host-tally-feedback-limit=${token}` },
 			),
 		);
+
 		expect(resent.status).toBe(303);
 		expect(
 			await env.DB.prepare("SELECT message, page FROM feedback").first(),
@@ -475,6 +506,7 @@ describe("feedback form", () => {
 				confirm_review: "",
 			}),
 		);
+
 		expect(first.status).toBe(200);
 		const html = await first.text();
 		expect(html).toContain("I reviewed the cleaned message above.");
@@ -483,6 +515,7 @@ describe("feedback form", () => {
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
 		).toEqual({ count: 0 });
+
 		const edited = await productionApp().fetch(
 			"/feedback",
 			postFields({
@@ -494,6 +527,7 @@ describe("feedback form", () => {
 				confirm_review: "yes",
 			}),
 		);
+
 		expect(edited.status).toBe(200);
 		const changedHtml = await edited.text();
 		expect(changedHtml).toContain(
@@ -503,6 +537,7 @@ describe("feedback form", () => {
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
 		).toEqual({ count: 0 });
+
 		const skipped = await productionApp().fetch(
 			"/feedback",
 			postFields({
@@ -513,10 +548,12 @@ describe("feedback form", () => {
 				confirm_review: "",
 			}),
 		);
+
 		expect(skipped.status).toBe(200);
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) AS count FROM feedback").first(),
 		).toEqual({ count: 0 });
+
 		const confirmed = await productionApp().fetch(
 			"/feedback",
 			postFields({
@@ -527,6 +564,7 @@ describe("feedback form", () => {
 				confirm_review: "yes",
 			}),
 		);
+
 		expect(confirmed.status).toBe(303);
 	});
 
@@ -536,6 +574,7 @@ describe("feedback form", () => {
 				diagnostics: true,
 			}).fetch("/feedback")
 		).text();
+
 		expect(html).toContain("Attach technical details");
 		expect(html).toContain("excludes raw");
 		expect(html).toContain(
@@ -564,6 +603,7 @@ describe("feedback form", () => {
 				.bind("123e4567-e89b-12d3-a456-426614174000")
 				.run();
 		}
+
 		const response = await productionApp().fetch(
 			"/feedback",
 			postFields({
@@ -573,6 +613,7 @@ describe("feedback form", () => {
 				from: "/",
 			}),
 		);
+
 		expect(response.status).toBe(429);
 		expect(await response.text()).toMatch(/role="alert"/);
 	});
@@ -590,8 +631,10 @@ describe("feedback form", () => {
 				const reopened = await productionApp().fetch("/feedback", {
 					headers: { Cookie: cookie },
 				});
+
 				expect(reopened.headers.get("set-cookie")).toBeNull();
 			}
+
 			const response = await productionApp().fetch(
 				"/feedback",
 				postFields(
@@ -604,13 +647,16 @@ describe("feedback form", () => {
 					{ Cookie: cookie },
 				),
 			);
+
 			expect(response.status).toBe(303);
 		}
 
 		const reopened = await productionApp().fetch("/feedback", {
 			headers: { Cookie: cookie },
 		});
+
 		expect(reopened.headers.get("set-cookie")).toBeNull();
+
 		const eleventh = await productionApp().fetch(
 			"/feedback",
 			postFields(
@@ -618,6 +664,7 @@ describe("feedback form", () => {
 				{ Cookie: cookie },
 			),
 		);
+
 		expect(eleventh.status).toBe(429);
 	});
 
@@ -631,6 +678,7 @@ describe("feedback form", () => {
 				from: "https://evil.example/steal",
 			}),
 		);
+
 		expect(response.headers.get("location")).toBe("/?sent=feedback");
 	});
 
@@ -645,6 +693,7 @@ describe("feedback form", () => {
 				return_to: "/?adjust=1",
 			}),
 		);
+
 		expect(response.headers.get("location")).toBe("/?adjust=1&sent=feedback");
 	});
 });
@@ -655,17 +704,22 @@ it("files the expected GitHub issue without logging the token or message", async
 	)
 		.bind("This does not work at all")
 		.run();
-	const row = await env.DB.prepare("SELECT * FROM feedback").first();
+	const row = await env.DB.prepare("SELECT * FROM feedback").first<FiledRow>();
+
 	if (!row) throw new Error("feedback fixture was not inserted");
-	const fetchStub = vi.fn(
-		async () => new Response(JSON.stringify({ number: 136 }), { status: 201 }),
+
+	const fetchStub = fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number: 136 }), { status: 201 }),
+		),
 	);
+
 	const log = vi.spyOn(console, "info").mockImplementation(() => {});
 	await fileFeedbackIssue(env.DB, "secret-token", row, fetchStub);
-	const [url, init] = fetchStub.mock.calls[0] as unknown as [
-		string,
-		RequestInit,
-	];
+
+	const [url, init] = present(fetchStub.mock.calls[0]);
+
 	expect(url).toBe(
 		"https://api.github.com/repos/kwilson21/tally-feedback/issues",
 	);
@@ -710,14 +764,21 @@ it("adds only approved coarse technical fields and no replay link to the private
 			"https://us.i.posthog.com/replay/fake-session-123",
 		)
 		.run();
-	const row = await env.DB.prepare("SELECT * FROM feedback").first();
+	const row = await env.DB.prepare("SELECT * FROM feedback").first<FiledRow>();
+
 	if (!row) throw new Error("feedback fixture was not inserted");
-	const fetchStub = vi.fn(
-		async () => new Response(JSON.stringify({ number: 147 }), { status: 201 }),
+
+	const fetchStub = fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number: 147 }), { status: 201 }),
+		),
 	);
+
 	await fileFeedbackIssue(env.DB, "fixture-token", row, fetchStub);
-	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	const body = JSON.parse(String(init?.body)).body as string;
+	const [, init] = present(fetchStub.mock.calls[0]);
+	const sent: { body: string } = JSON.parse(String(init?.body));
+	const body = sent.body;
 	expect(body).toContain("Device category: Unknown");
 	expect(body).toContain("Recent error category: TypeError");
 	expect(body).not.toContain("replay");
@@ -732,9 +793,11 @@ it("retries unfiled feedback in the nightly job", async () => {
 	await env.DB.prepare(
 		"INSERT INTO feedback (created_at, actor, type, feeling, message, page, device) VALUES (datetime('now', '-11 minutes'), 'person', 'Question', 'Okay', 'Why?', '/', 'Desktop Chrome')",
 	).run();
+
 	const fetchStub = vi.fn(
 		async () => new Response(JSON.stringify({ number: 22 }), { status: 201 }),
 	);
+
 	await retryFeedback(
 		{ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "token" },
 		fetchStub,
@@ -750,6 +813,7 @@ describe("demo", () => {
 		const html = await (
 			await productionApp(undefined, { demo: true }).fetch("/feedback")
 		).text();
+
 		const at = (text: string) => html.indexOf(text);
 		expect(at("Feedback is off in the demo")).toBeGreaterThan(-1);
 		expect(at("Send feedback</h1>")).toBeGreaterThan(-1);
@@ -786,10 +850,12 @@ describe("demo", () => {
 		const get = await exports.default.fetch(`${BASE}/feedback?from=/settings`);
 		expect(await get.text()).toContain("Feedback is off in the demo");
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
+
 		const post = await exports.default.fetch(
 			`${BASE}/feedback`,
 			postFields({ type: "Bug", feeling: "Okay", message: "No", from: "/" }),
 		);
+
 		expect(post.status).toBe(404);
 		expect(fetchSpy).not.toHaveBeenCalled();
 		fetchSpy.mockRestore();
@@ -800,6 +866,7 @@ it("uses the Referer for the return page and leaves the top line's pill off feed
 	const response = await productionApp().fetch("/feedback", {
 		headers: { Referer: `${BASE}/transactions?uncategorized=1` },
 	});
+
 	const html = await response.text();
 	expect(html).toContain('name="from" value="/transactions"');
 	// The top line keeps its wordmark on this page, and no pill beside it (P123 A).
@@ -821,12 +888,14 @@ describe("a Referer that is not a URL", () => {
 				headers: { Referer: "not a url" },
 			})
 		).text();
+
 		expect(html).toContain('name="from" value="/"');
 	});
 });
 
 describe("the Feedback item on its own page", () => {
 	const SELF_HREF = "/feedback?return_to=%2Ftransactions%3Funcategorized%3D1";
+
 	const hiddenValue = (html: string, name: string) =>
 		html.match(
 			new RegExp(`<input type="hidden" name="${name}" value="([^"]*)"`),
@@ -838,6 +907,7 @@ describe("the Feedback item on its own page", () => {
 				headers: { Referer: `${BASE}/transactions?uncategorized=1` },
 			})
 		).text();
+
 		expect(html).toContain(`<a href="${SELF_HREF}" aria-current="page"`);
 	});
 
@@ -848,6 +918,7 @@ describe("the Feedback item on its own page", () => {
 					headers: { Referer: referer },
 				})
 			).text();
+
 			expect(html).toContain('name="from" value="/transactions"');
 			expect(hiddenValue(html, "return_to")).toBe(
 				"/transactions?uncategorized=1",
@@ -862,15 +933,19 @@ describe("the Feedback item on its own page", () => {
 				headers: { Referer: `${BASE}/transactions?uncategorized=1` },
 			})
 		).text();
+
 		const href = first.match(
 			/<a href="(\/feedback[^"]*)" aria-current="page"/,
 		)?.[1];
+
 		expect(href).toBe(SELF_HREF);
+
 		const again = await (
 			await productionApp().fetch(SELF_HREF, {
 				headers: { Referer: `${BASE}/feedback` },
 			})
 		).text();
+
 		const response = await productionApp().fetch(
 			"/feedback",
 			postFields({
@@ -881,6 +956,7 @@ describe("the Feedback item on its own page", () => {
 				return_to: hiddenValue(again, "return_to") ?? "",
 			}),
 		);
+
 		expect(response.status).toBe(303);
 		expect(response.headers.get("location")).toBe(
 			"/transactions?uncategorized=1&sent=feedback",
@@ -901,6 +977,7 @@ describe("the Feedback item on its own page", () => {
 				return_to: "/settings?open=3",
 			}),
 		);
+
 		expect(response.status).toBe(422);
 		expect(await response.text()).toContain(
 			'<a href="/feedback?return_to=%2Fsettings%3Fopen%3D3" aria-current="page"',
@@ -913,6 +990,7 @@ describe("the Feedback item on its own page", () => {
 				headers: { Referer: `${BASE}/feedback` },
 			})
 		).text();
+
 		expect(html).toContain('name="from" value="/"');
 		expect(hiddenValue(html, "return_to")).toBe("/");
 	});
@@ -923,11 +1001,14 @@ describe("the Feedback item on its own page", () => {
 				headers: { Referer: `${BASE}/transactions` },
 			})
 		).text();
+
 		expect(hiddenValue(fromOther, "from")).toBe("/transactions");
 		expect(hiddenValue(fromOther, "return_to")).toBe("/transactions");
+
 		const noReferer = await (
 			await productionApp().fetch("/feedback?return_to=%2Fsettings")
 		).text();
+
 		expect(hiddenValue(noReferer, "from")).toBe("/");
 		expect(hiddenValue(noReferer, "return_to")).toBe("/");
 	});
@@ -943,6 +1024,7 @@ it("normalizes browser newlines before enforcing the message limit", async () =>
 			from: "/",
 		}),
 	);
+
 	expect(response.status).toBe(303);
 });
 
@@ -953,8 +1035,17 @@ it("accepts a same-origin POST without an Origin header", async () => {
 		message: "hello",
 		from: "/",
 	});
-	delete (init.headers as Record<string, string>).Origin;
-	expect((await productionApp().fetch("/feedback", init)).status).toBe(303);
+
+	const { headers, ...rest } = init;
+	const { Origin: _origin, ...withoutOrigin } = headers;
+	expect(
+		(
+			await productionApp().fetch("/feedback", {
+				...rest,
+				headers: withoutOrigin,
+			})
+		).status,
+	).toBe(303);
 });
 
 it("rejects paths that normalize to a protocol-relative URL", async () => {
@@ -967,6 +1058,7 @@ it("rejects paths that normalize to a protocol-relative URL", async () => {
 			from: "/.//evil.com",
 		}),
 	);
+
 	expect(response.headers.get("location")).toBe("/?sent=feedback");
 });
 
@@ -984,6 +1076,7 @@ it("atomically limits concurrent submissions", async () => {
 			),
 		),
 	);
+
 	expect(responses.filter((r) => r.status === 303)).toHaveLength(10);
 	expect(responses.filter((r) => r.status === 429)).toHaveLength(1);
 });
@@ -1003,27 +1096,38 @@ describe("feedback filing safeguards", () => {
 		const message = `${"x".repeat(59)}😀\n second line`;
 		await insertOld(1);
 		await env.DB.prepare("UPDATE feedback SET message = ?").bind(message).run();
-		const row = await env.DB.prepare("SELECT * FROM feedback").first();
+
+		const row = await env.DB.prepare(
+			"SELECT * FROM feedback",
+		).first<FiledRow>();
+
 		if (!row) throw new Error("missing fixture");
-		const fetchStub = vi.fn(
-			async () => new Response(JSON.stringify({ number: 1 }), { status: 201 }),
+
+		const fetchStub = fakeFetch(
+			vi.fn(
+				async (_input: RequestInfo | URL, _init?: RequestInit) =>
+					new Response(JSON.stringify({ number: 1 }), { status: 201 }),
+			),
 		);
+
 		await Promise.all([
 			fileFeedbackIssue(env.DB, "token", row, fetchStub),
 			fileFeedbackIssue(env.DB, "token", row, fetchStub),
 		]);
 		expect(fetchStub).toHaveBeenCalledOnce();
-		const calls = fetchStub.mock.calls as unknown as [string, RequestInit][];
-		const body = JSON.parse(String(calls[0]?.[1].body));
+		const [, init] = present(fetchStub.mock.calls[0]);
+		const body = JSON.parse(String(init?.body));
 		expect(body.title).toBe(`Bug: ${"x".repeat(59)}😀`);
 		expect(body.body).toMatch(/```\n[^`]*\n```$/);
 	});
 
 	it("processes at most 20 eligible rows", async () => {
 		await insertOld(21);
+
 		const fetchStub = vi.fn(
 			async () => new Response(JSON.stringify({ number: 1 }), { status: 201 }),
 		);
+
 		await retryFeedback(
 			{ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "token" },
 			fetchStub,
@@ -1068,14 +1172,19 @@ async function insertFeedback(message = "Why?", extra = "") {
 }
 
 const filed = (number: number) =>
-	vi.fn(async () => new Response(JSON.stringify({ number }), { status: 201 }));
+	fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number }), { status: 201 }),
+		),
+	);
 
 it("keeps #123, @someone and backticks in feedback from becoming links or breaking out", async () => {
 	await insertFeedback("See #123 and @someone ``` done");
 	const fetchStub = filed(7);
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
-	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	const { body } = JSON.parse(String(init.body));
+	const [, init] = present(fetchStub.mock.calls[0]);
+	const { body } = JSON.parse(String(init?.body));
 	expect(body).toContain("````\nSee #123 and @someone ``` done\n````");
 });
 
@@ -1139,12 +1248,17 @@ it("strips legacy query strings before filing feedback", async () => {
 	)
 		.bind("/accounts?x=`@someone")
 		.run();
-	const fetchStub = vi.fn(
-		async () => new Response(JSON.stringify({ number: 3 }), { status: 201 }),
+
+	const fetchStub = fakeFetch(
+		vi.fn(
+			async (_input: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ number: 3 }), { status: 201 }),
+		),
 	);
+
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
-	const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
-	expect(JSON.parse(String(init.body)).body).toContain("Page: ` /accounts `");
+	const [, init] = present(fetchStub.mock.calls[0]);
+	expect(JSON.parse(String(init?.body)).body).toContain("Page: ` /accounts `");
 });
 
 it("files a report whose page has a huge number of backtick runs", async () => {
@@ -1153,9 +1267,11 @@ it("files a report whose page has a huge number of backtick runs", async () => {
 	)
 		.bind(`/accounts?x=${"`a".repeat(200_000)}`)
 		.run();
+
 	const fetchStub = vi.fn(
 		async () => new Response(JSON.stringify({ number: 4 }), { status: 201 }),
 	);
+
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
 	expect(fetchStub).toHaveBeenCalledOnce();
 });

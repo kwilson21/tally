@@ -239,6 +239,7 @@ describe("bill status", () => {
 				dueDay: 15,
 				anchorMonth: 1,
 			} as const;
+
 			// The hand-off boundary: Apr 15 is still overdue on Jul 7, and Jul 15 is due on Jul 8.
 			expect(billOccurrence(bill, "2026-07-07", false)).toMatchObject({
 				dueDate: "2026-04-15",
@@ -277,6 +278,7 @@ describe("billStatusLine", () => {
 		icon: "household",
 		color: "cat-brown",
 	};
+
 	const today = "2026-10-05";
 
 	it("keeps today lower case in the middle of a sentence", () => {
@@ -330,6 +332,7 @@ describe("BillRow cadence", () => {
 		icon: "kids",
 		color: "cat-ochre",
 	};
+
 	const rowText = (
 		frequency: "weekly" | "biweekly" | "quarterly" | "monthly",
 		dueDay: number,
@@ -396,6 +399,7 @@ describe("the schedule an inactive bill shows", () => {
 				today: "2026-10-05",
 			}),
 		);
+
 		expect(html).toContain("Monthly, on the 15th");
 		expect(html).not.toContain("Due ");
 	});

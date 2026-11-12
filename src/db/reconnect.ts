@@ -4,6 +4,7 @@ export async function readBankSignInEmails(db: D1Database): Promise<boolean> {
 			"SELECT key, value FROM household_settings WHERE key = 'bank_sign_in_emails'",
 		)
 		.first<{ value: string }>();
+
 	return row?.value !== "off";
 }
 

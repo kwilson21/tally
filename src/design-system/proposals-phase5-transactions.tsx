@@ -54,23 +54,28 @@ export const CARD = "Chase Card ••9921";
 // Sample data, in the demo's style: October, five days in.
 
 export type Cat = { name: string; icon: string; color: string };
+
 export const GROCERIES: Cat = {
 	name: "Groceries",
 	icon: "groceries",
 	color: "cat-blue",
 };
+
 export const EATING_OUT: Cat = {
 	name: "Eating Out",
 	icon: "eating-out",
 	color: "cat-plum",
 };
+
 export const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
 export const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
+
 export const HOUSEHOLD: Cat = {
 	name: "Household",
 	icon: "household",
 	color: "cat-brown",
 };
+
 export const FIVE = [GROCERIES, EATING_OUT, KIDS, GAS, HOUSEHOLD];
 export const FOUR = [GROCERIES, EATING_OUT, KIDS, HOUSEHOLD];
 export const THREE = [GROCERIES, EATING_OUT, HOUSEHOLD];
@@ -109,7 +114,9 @@ export const BLUE_BOTTLE = tx(
 	650,
 	EATING_OUT,
 );
+
 export const TRADER_JOES = tx(2, "2026-10-04", "Trader Joe's", 8217, GROCERIES);
+
 export const LUPITAS = tx(
 	3,
 	"2026-10-04",
@@ -117,15 +124,19 @@ export const LUPITAS = tx(
 	4290,
 	EATING_OUT,
 );
+
 export const COSTCO = tx(4, "2026-10-03", "Costco", 14260, GROCERIES);
 export const AMAZON = tx(5, "2026-10-02", "Amazon", 4217, HOUSEHOLD);
 export const SHELL = tx(6, "2026-10-02", "Shell", 4410, GAS);
+
 const PAYROLL = tx(7, "2026-10-01", "Acme Payroll", -245000, undefined, {
 	income: true,
 });
+
 const INTEREST = tx(8, "2026-10-01", "Savings interest", -418, undefined, {
 	income: true,
 });
+
 const FARMERS = tx(10, "2026-10-04", "Farmers market", 1850, GROCERIES);
 const CHEWY = tx(11, "2026-10-04", "Chewy", 6412);
 
@@ -154,11 +165,14 @@ type DaysProps = { rows: ListRow[]; select?: boolean; checked?: number[] };
 /** Rows grouped under their day, as the list does; in Select mode each row has its round tick. */
 export function Days({ rows, select, checked }: DaysProps) {
 	const days: [string, ListRow[]][] = [];
+
 	for (const row of rows) {
 		const last = days.at(-1);
+
 		if (last && last[0] === row.date) last[1].push(row);
 		else days.push([row.date, [row]]);
 	}
+
 	return (
 		<>
 			{days.map(([date, dayRows]) => (
@@ -280,6 +294,7 @@ type TxProps = {
 /** Transactions with its filters and count, as the app draws them today plus what's proposed. */
 function Transactions(props: TxProps) {
 	const { p, month = "October", account, show, type } = props;
+
 	return (
 		<>
 			<TxHeader />
@@ -494,6 +509,7 @@ export function Toggles({ p, always, dashed }: TogglesProps) {
 			Always for this merchant
 		</Chip>
 	);
+
 	return (
 		<div class="flex flex-wrap gap-2">
 			{dashed ? (
@@ -543,6 +559,7 @@ type PanelProps = {
 /** A panel for one transaction: its top, then chips, toggles, a line about them, and Save. */
 function Panel(props: PanelProps) {
 	const { p, cats = FIVE, selected = "Groceries" } = props;
+
 	return (
 		<PanelSheet>
 			<PanelTop
@@ -730,6 +747,7 @@ const accountLinks = (
 // P64 to P66: the type filter and search.
 
 const INCOME = "2 income transactions in October";
+
 const typeChips = (
 	<Transactions
 		p="p64-a"
@@ -738,6 +756,7 @@ const typeChips = (
 		rows={[PAYROLL, INTEREST]}
 	/>
 );
+
 const typeShow = (
 	<Transactions
 		p="p64-b"
@@ -755,6 +774,7 @@ const searchAmount = (
 		rows={[LUPITAS, AMAZON]}
 	/>
 );
+
 const searchHint = (
 	<Transactions
 		p="p65-b"
@@ -791,6 +811,7 @@ const monthLinks = (
 		</a>
 	</p>
 );
+
 const searchPair = (
 	<Transactions
 		p="p66-b"
@@ -1102,6 +1123,7 @@ const selectPage = (
 		bar={<SelectBar selected={3} link="Select all 25" />}
 	/>
 );
+
 /** A, next: the page is ticked, and the bar offers the whole month. */
 const selectAll = (
 	<SelectScreen
@@ -1110,6 +1132,7 @@ const selectAll = (
 		bar={<SelectBar selected={25} link="Select all 112 in September" />}
 	/>
 );
+
 const selectRow = (
 	<SelectScreen
 		rows={sept(300)}

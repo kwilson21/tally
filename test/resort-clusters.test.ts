@@ -35,6 +35,7 @@ describe("buildClusters: same cleaned text", () => {
 			row(2, "CHECKCARD 1002 CVS"),
 			row(3, "SHELL OIL 5566"),
 		];
+
 		const clusters = buildClusters(rows);
 		expect(clusters).toContainEqual([1, 2]);
 		expect(clusters).toContainEqual([3]);
@@ -45,6 +46,7 @@ describe("buildClusters: same cleaned text", () => {
 			row(1, "AMAZON MKTP US*KINDLE", { amountCents: -999 }),
 			row(2, "AMAZON.COM AUDIBLE", { amountCents: -999 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1], [2]]);
 	});
 
@@ -53,6 +55,7 @@ describe("buildClusters: same cleaned text", () => {
 			row(1, "WHOLE FOODS MKT"),
 			row(2, "WHOLE FOODS MKT", { mixed: true }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1], [2]]);
 	});
 
@@ -63,6 +66,7 @@ describe("buildClusters: same cleaned text", () => {
 			row(3, "APPLE.COM/BILL", { whatItWasNote: "Music" }),
 			row(4, "APPLE.COM/BILL", { whatItWasNote: null }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1, 2], [3], [4]]);
 	});
 });
@@ -73,6 +77,7 @@ describe("buildClusters: the amount rule", () => {
 			row(1, "STORE A", { amountCents: -1500 }),
 			row(2, "STORE A", { amountCents: -2900 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1, 2]]);
 	});
 
@@ -81,6 +86,7 @@ describe("buildClusters: the amount rule", () => {
 			row(1, "STORE A", { amountCents: -1500 }),
 			row(2, "STORE A", { amountCents: -3600 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1], [2]]);
 	});
 
@@ -89,6 +95,7 @@ describe("buildClusters: the amount rule", () => {
 			row(1, "STORE A", { amountCents: -400 }),
 			row(2, "STORE A", { amountCents: -1300 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1, 2]]);
 	});
 
@@ -99,6 +106,7 @@ describe("buildClusters: the amount rule", () => {
 			row(2, "STORE A", { amountCents: -2900 }),
 			row(3, "STORE A", { amountCents: -4000 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1, 2], [3]]);
 	});
 
@@ -107,6 +115,7 @@ describe("buildClusters: the amount rule", () => {
 			row(1, "STORE A", { amountCents: -1500 }),
 			row(2, "STORE A", { amountCents: 1500 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1], [2]]);
 	});
 
@@ -116,6 +125,7 @@ describe("buildClusters: the amount rule", () => {
 			row(2, "STORE A", { amountCents: -1200 }),
 			row(3, "STORE A", { amountCents: 1200 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1, 2], [3]]);
 	});
 
@@ -125,6 +135,7 @@ describe("buildClusters: the amount rule", () => {
 			row(8, "STORE A", { amountCents: -5000 }),
 			row(9, "STORE A", { amountCents: -110 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[7, 9], [8]]);
 	});
 });
@@ -136,6 +147,7 @@ describe("buildClusters: zero amounts", () => {
 			row(1, "STORE A", { amountCents: 0 }),
 			row(2, "STORE A", { amountCents: 0 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1, 2]]);
 	});
 
@@ -144,6 +156,7 @@ describe("buildClusters: zero amounts", () => {
 			row(1, "STORE A", { amountCents: 500 }),
 			row(2, "STORE A", { amountCents: 0 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1], [2]]);
 	});
 
@@ -152,6 +165,7 @@ describe("buildClusters: zero amounts", () => {
 			row(1, "STORE A", { amountCents: 0 }),
 			row(2, "STORE A", { amountCents: -999 }),
 		];
+
 		expect(buildClusters(rows)).toEqual([[1], [2]]);
 	});
 });
@@ -165,7 +179,9 @@ describe("buildClusters: the cap and coverage", () => {
 		const rows = Array.from({ length: 60 }, (_, i) =>
 			row(i + 1, "SAME STORE", { amountCents: -1500 }),
 		);
+
 		const clusters = buildClusters(rows);
+
 		for (const cluster of clusters)
 			expect(cluster.length).toBeLessThanOrEqual(25);
 		expect(clusters.map((c) => c.length)).toEqual([25, 25, 10]);
@@ -183,6 +199,7 @@ describe("buildClusters: the cap and coverage", () => {
 			row(7, "SHELL", { amountCents: 900 }),
 			row(8, "CHECKCARD 0001 CVS", { amountCents: -90000 }),
 		];
+
 		const clusters = buildClusters(rows);
 		const ids = flat(clusters).sort((a, b) => a - b);
 		expect(ids).toEqual(rows.map((r) => r.id).sort((a, b) => a - b));

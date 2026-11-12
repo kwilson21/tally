@@ -42,6 +42,7 @@ const TREND_SPEND_LEG = (
 		FROM transactions t
 		${COUNTED_JOINS}
 		WHERE ${where} AND ${COUNTED_SPENDING} AND ${COUNTED_MONTH} BETWEEN ?1 AND ?2`;
+
 export const TREND_SPEND_SQL = `SELECT month, categoryId, SUM(cents) AS cents FROM (
 		${TREND_SPEND_LEG("t.date >= ?3")}
 		UNION ALL
@@ -60,8 +61,10 @@ export async function loadTrends(
 ): Promise<TrendsInput> {
 	const days = sameDays(today);
 	const from = monthsBefore(days.month, TREND_MONTHS - 1);
+
 	// db.batch()'s return type is D1Result[], so the destructured elements are possibly undefined to
 	// noUncheckedIndexedAccess; the list below guarantees all five.
+	// SAFETY: the batch below lists exactly these five statements in this order, so its results are the five D1Results typed here.
 	const [categories, amounts, spend, same, first] = (await db.batch([
 		db.prepare(
 			"SELECT id, name, icon, color, archived FROM categories ORDER BY sort_order, name",
@@ -84,6 +87,7 @@ export async function loadTrends(
 		db.prepare("SELECT MIN(date) AS first FROM transactions"),
 	])) as [D1Result, D1Result, D1Result, D1Result, D1Result];
 
+	// SAFETY: each results array is what its statement above selects (its column aliases give the row shape), and MIN(date) returns one row.
 	return {
 		today,
 		firstDate:

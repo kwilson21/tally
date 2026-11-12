@@ -19,6 +19,7 @@ async function household(banks: number, strokes: readonly Stroke[]) {
 		db.prepare("DELETE FROM plaid_items"),
 		db.prepare("DELETE FROM household_settings WHERE key = 'first_tally'"),
 	]);
+
 	for (let i = 0; i < banks; i++) {
 		await db
 			.prepare(
@@ -27,6 +28,7 @@ async function household(banks: number, strokes: readonly Stroke[]) {
 			.bind(`cap-${i}`, new Uint8Array(1))
 			.run();
 	}
+
 	for (const stroke of strokes) await markStroke(db, stroke, "2026-10-13");
 }
 

@@ -55,6 +55,7 @@ export function isVague(
 	for (const v of vague) {
 		if (cleanedText === v || cleanedText.startsWith(`${v} `)) return true;
 	}
+
 	return false;
 }
 
@@ -77,18 +78,22 @@ export function groupBySameCleanedText(
 	for (const row of rows) {
 		if (row.mixed) continue;
 		const cleanedText = cleanBankText(row.rawName);
+
 		if (cleanedText === "") continue;
 
 		let note: string | null = null;
 		let key = cleanedText;
 		const vagueRow = isVague(cleanedText, vague);
+
 		if (vagueRow) {
 			note = normalizedNote(row.whatItWasNote);
+
 			if (note === "") continue;
 			key = `${cleanedText}\u0000${note}`;
 		}
 
 		const existing = groups.get(key);
+
 		if (existing) {
 			existing.rows.push(row);
 		} else {

@@ -16,6 +16,7 @@ const SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 function chunk(type: string, data: number[] = []): number[] {
 	const length = new DataView(new ArrayBuffer(4));
 	length.setUint32(0, data.length);
+
 	return [
 		...new Uint8Array(length.buffer),
 		...Array.from(type, (c) => c.charCodeAt(0)),
@@ -32,6 +33,7 @@ function header(width: number, height: number, colourType: number): number[] {
 	const size = new DataView(new ArrayBuffer(8));
 	size.setUint32(0, width);
 	size.setUint32(4, height);
+
 	return [...new Uint8Array(size.buffer), 8, colourType, 0, 0, 0];
 }
 
@@ -40,6 +42,7 @@ async function deflate(bytes: number[]): Promise<number[]> {
 	const stream = new Blob([new Uint8Array(bytes)])
 		.stream()
 		.pipeThrough(new CompressionStream("deflate"));
+
 	return Array.from(new Uint8Array(await new Response(stream).arrayBuffer()));
 }
 
@@ -135,6 +138,7 @@ describe("readPng", () => {
 			chunk("IDAT", await deflate([5, 1, 2, 3])),
 			chunk("IEND"),
 		);
+
 		await expect(readPng(bytes)).rejects.toThrow("Unknown PNG filter type.");
 	});
 
@@ -144,6 +148,7 @@ describe("readPng", () => {
 			chunk("IDAT", [1, 2, 3, 4, 5]),
 			chunk("IEND"),
 		);
+
 		await expect(readPng(bytes)).rejects.toThrow(
 			"The PNG's picture data is damaged.",
 		);
@@ -156,6 +161,7 @@ describe("readPng", () => {
 			chunk("IDAT", await deflate([0, 1, 2])),
 			chunk("IEND"),
 		);
+
 		await expect(readPng(bytes)).rejects.toThrow(
 			"The PNG's picture data is damaged.",
 		);

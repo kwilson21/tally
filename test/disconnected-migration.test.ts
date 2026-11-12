@@ -49,6 +49,7 @@ it("migration 0010 keeps every bank, account, link and status in a populated dat
 		.filter((line) => !line.startsWith("--"))
 		.join("\n")
 		.replaceAll(/\bplaid_items\b/g, "pre0010_plaid_items");
+
 	for (const statement of sql
 		.split(";")
 		.map((s) => s.trim())
@@ -60,6 +61,7 @@ it("migration 0010 keeps every bank, account, link and status in a populated dat
 			"SELECT id, institution_name, status, hex(access_token_encrypted) token, disconnected_at FROM pre0010_plaid_items ORDER BY id",
 		)
 		.all();
+
 	expect(items).toEqual([
 		{
 			id: 1,
@@ -76,20 +78,24 @@ it("migration 0010 keeps every bank, account, link and status in a populated dat
 			disconnected_at: null,
 		},
 	]);
+
 	const { results: accounts } = await db
 		.prepare(
 			"SELECT a.id, p.institution_name FROM pre0010_accounts a JOIN pre0010_plaid_items p ON p.id = a.plaid_item_id ORDER BY a.id",
 		)
 		.all();
+
 	expect(accounts).toEqual([
 		{ id: 10, institution_name: "Fine Bank" },
 		{ id: 11, institution_name: "Broken Bank" },
 	]);
+
 	const { results: fks } = await db
 		.prepare(
 			"SELECT \"table\" FROM pragma_foreign_key_list('pre0010_accounts')",
 		)
 		.all();
+
 	expect(fks).toEqual([{ table: "pre0010_plaid_items" }]);
 	expect((await db.prepare("PRAGMA foreign_key_check").all()).results).toEqual(
 		[],

@@ -27,6 +27,7 @@ export function finishPayLine({
 	deposits: PayDeposit[];
 }): string {
 	const cadence = cadenceOf(deposits.map((deposit) => deposit.date));
+
 	return `${name} · ${amountWords(deposits)}${cadence ? ` ${cadence}` : ""}`;
 }
 

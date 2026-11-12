@@ -3,12 +3,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { isSetUp, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const db = env.DB;
+
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 const setupMigration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0057_first_tally_setup"),
 );
+
 // The ALTER-free data migration: its one INSERT replays as written, which is safe to run again (ON CONFLICT).
 const SETUP = (setupMigration?.queries ?? []).find((query) =>
 	query.includes("INSERT INTO household_settings"),
@@ -27,6 +31,7 @@ describe("migration 0056 plaid_items.history_complete_at", () => {
 		const { results } = await db
 			.prepare("PRAGMA table_info(plaid_items)")
 			.all<{ name: string; notnull: number }>();
+
 		const column = results.find((row) => row.name === "history_complete_at");
 		expect(column).toBeDefined();
 		expect(column?.notnull).toBe(0);
@@ -47,13 +52,17 @@ describe("migration 0057 first_tally setup", () => {
 
 	it("counts a household with a budget as set up, with its five strokes as 0057 wrote them and no days (#582)", async () => {
 		if (!SETUP) throw new Error("Migration 0057 insert is missing");
-		const category = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const category = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await db
 			.prepare(
 				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, '2026-09', 50000)",
@@ -61,11 +70,13 @@ describe("migration 0057 first_tally setup", () => {
 			.bind(category)
 			.run();
 		await db.prepare(SETUP).run();
+
 		// 0057 is history: it still writes the count stroke, which migration 0061 takes out. Reading leaves
 		// out any stroke the record no longer has, so the stored text is checked for it and the read is not.
 		const raw = await db
 			.prepare("SELECT value FROM household_settings WHERE key = 'first_tally'")
 			.first<{ value: string }>();
+
 		expect(JSON.parse(raw?.value ?? "{}").strokes).toHaveProperty(
 			"count",
 			null,
@@ -80,13 +91,17 @@ describe("migration 0057 first_tally setup", () => {
 
 	it("leaves a first_tally record that already exists alone", async () => {
 		if (!SETUP) throw new Error("Migration 0057 insert is missing");
-		const category = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const category = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await db
 			.prepare(
 				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, '2026-09', 50000)",
@@ -115,9 +130,11 @@ const fourStrokes = env.TEST_MIGRATIONS.find((item) =>
 describe("migration 0061 first_tally four strokes", () => {
 	const replay = async () => {
 		if (!fourStrokes) throw new Error("Migration 0061 is missing");
+
 		for (const query of fourStrokes.queries) await db.prepare(query).run();
 	};
-	const writeRecord = (value: unknown) =>
+
+	const writeRecord = (value: Json) =>
 		db
 			.prepare(
 				"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
@@ -134,13 +151,17 @@ describe("migration 0061 first_tally four strokes", () => {
 
 	it("takes the count stroke, the night and its sync out of a set-up household, and keeps the rest", async () => {
 		if (!SETUP) throw new Error("Migration 0057 insert is missing");
-		const category = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const category = present(
+			(
+				await db
+					.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await db
 			.prepare(
 				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, '2026-09', 50000)",
@@ -217,6 +238,7 @@ describe("migration 0061 first_tally four strokes", () => {
 			},
 			reAsk: { bank: "Wells Fargo" },
 		};
+
 		await writeRecord(record);
 		await replay();
 		expect(await readFirstTally(db)).toEqual(record);

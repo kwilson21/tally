@@ -1,8 +1,12 @@
+import type { HtmlEscapedString } from "hono/utils/html";
 import { describe, expect, it } from "vitest";
 import type { SetupView } from "../src/first-tally/setup";
 import type { YourBank } from "../src/first-tally/your-banks";
 import { NotifyControl, type NotifyShown } from "../src/views/notify-control";
 import { SetupReading } from "../src/views/setup-reading";
+
+/** What a Hono JSX component returns: its markup, or a promise of it. */
+type Markup = HtmlEscapedString | Promise<HtmlEscapedString>;
 
 // The notify control (decision 149, N1): "Notify me on this device" under Home's first-week setup while the questions are not
 // yet open. Four states, each hidden until push.js shows one, so with no JavaScript, or in a browser without Web Push, nothing
@@ -11,9 +15,10 @@ import { SetupReading } from "../src/views/setup-reading";
 
 const VAPID =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
 const STATES: NotifyShown[] = ["off", "on", "iphone", "blocked"];
 
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+const html = (node: Markup) => String(node).replaceAll("&#39;", "'");
 
 const control = async (shown?: NotifyShown) =>
 	html(await NotifyControl({ vapidKey: VAPID, shown }));
@@ -23,6 +28,7 @@ const stateTag = (markup: string, state: string) => {
 	const match = new RegExp(
 		`<[a-z]+[^>]*data-notify-state="${state}"[^>]*>`,
 	).exec(markup);
+
 	return match?.[0] ?? null;
 };
 
@@ -42,6 +48,7 @@ const base: SetupView = {
 };
 
 const TODAY = "2026-10-22";
+
 const chase: YourBank = {
 	id: 3,
 	name: "Chase",
@@ -56,8 +63,10 @@ describe("the notify control's four states", () => {
 	it("hides every state by default, Off included, so nothing shows without JavaScript", async () => {
 		const markup = await control();
 		expect(markup).toContain('data-notify="true"');
+
 		for (const state of STATES) {
 			const tag = stateTag(markup, state);
+
 			if (state === "off") {
 				// The Off state is a wrapper div; it carries the hidden attribute as the other states do.
 				expect(markup).toMatch(
@@ -72,6 +81,7 @@ describe("the notify control's four states", () => {
 	it("un-hides exactly the state it is given", async () => {
 		for (const shown of STATES) {
 			const markup = await control(shown);
+
 			for (const state of STATES) {
 				const hidden =
 					state === "off"
@@ -79,6 +89,7 @@ describe("the notify control's four states", () => {
 								markup,
 							)
 						: /\shidden[\s>=]/.test(stateTag(markup, state) ?? "");
+
 				expect(hidden, `${shown} shown, ${state}`).toBe(state !== shown);
 			}
 		}
@@ -98,6 +109,7 @@ describe("the notify control's four states", () => {
 				idSuffix: "sorting",
 			}),
 		);
+
 		expect(markup).toContain('id="notify-help-sorting"');
 		expect(markup).toContain('aria-describedby="notify-help-sorting"');
 		expect(markup).not.toContain('id="notify-help"');
@@ -133,11 +145,13 @@ describe("the notify control's words and button", () => {
 
 	it("draws the iPhone hint as one sentence in one text node, with the ⋯ button in its Share step", async () => {
 		const markup = await control("iphone");
+
 		// The hint's element holds the sentence and nothing else: no element inside it, so a screen reader reads it in one piece
 		// and push.js can set the iPad sentence as one text node.
 		const hint = /<p[^>]*data-notify-state="iphone"[^>]*>([\s\S]*?)<\/p>/.exec(
 			markup,
 		);
+
 		expect(hint?.[1]).toBe(
 			"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.",
 		);
@@ -174,6 +188,7 @@ describe("the reading screen draws the control (decision 149)", () => {
 			{ vapidKey: VAPID },
 			{ banks: [chase], today: TODAY },
 		);
+
 		const next = markup.indexOf('id="setup-next"');
 		const control = markup.indexOf("data-notify=");
 		const banks = markup.indexOf('id="your-banks"');
@@ -197,11 +212,14 @@ describe("the reading screen draws the control (decision 149)", () => {
 			{ vapidKey: VAPID },
 			{ banks: [chase], today: TODAY },
 		);
+
 		const control = markup.indexOf("data-notify=");
+
 		const statusClose = markup.indexOf(
 			"</p>",
 			markup.indexOf('id="setup-status"'),
 		);
+
 		const nextClose = markup.indexOf("</p>", markup.indexOf('id="setup-next"'));
 		expect(control).toBeGreaterThan(statusClose);
 		expect(control).toBeGreaterThan(nextClose);

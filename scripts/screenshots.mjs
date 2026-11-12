@@ -16,17 +16,21 @@ import {
 import { PAGES, shotNames, VIEWPORTS } from "./pr-body.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://127.0.0.1:8787";
+
 // OUT holds the PR's shots. BEFORE_URL is the base branch's server, and its shots go to BEFORE_OUT.
 const OUT = process.env.OUT ?? "screenshots";
 const BEFORE_URL = process.env.BEFORE_URL;
 const BEFORE_OUT = process.env.BEFORE_OUT ?? "screenshots-before";
 
 await mkdir(OUT, { recursive: true });
+
 if (BEFORE_URL) await mkdir(BEFORE_OUT, { recursive: true });
+
 // CHROMIUM_PATH is a Chrome already on this machine. CI sets it to the runner's Google Chrome when that launches.
 const browser = await chromium.launch({
 	executablePath: process.env.CHROMIUM_PATH || undefined,
 });
+
 const errors = [];
 const today = () => new Date().toISOString().slice(0, 10);
 const started = today();
@@ -44,6 +48,7 @@ const FINGERPRINTED = new Set(["script", "font", "image"]);
 // instead, so the page still gets a fingerprint and a difference still shows.
 function hashAsset(response, url) {
 	const path = url.pathname + url.search;
+
 	return response.body().then(
 		async (body) => ({ path, sha256: await sha256Hex(body) }),
 		() => ({ path, sha256: `status:${response.status()}` }),
@@ -59,35 +64,43 @@ function hashAsset(response, url) {
 // rules come with it.
 function usedCss(clean) {
 	const out = [];
+
 	const groups = [
 		"CSSMediaRule",
 		"CSSSupportsRule",
 		"CSSLayerBlockRule",
 		"CSSContainerRule",
 	];
+
 	const isA = (rule, name) =>
 		typeof globalThis[name] !== "undefined" && rule instanceof globalThis[name];
+
 	const walk = (rules, conditions) => {
 		for (const rule of rules) {
 			if (isA(rule, "CSSStyleRule")) {
 				let used = true;
+
 				try {
 					used = document.querySelector(clean(rule.selectorText)) !== null;
 				} catch {
 					used = true;
 				}
+
 				if (used) out.push([...conditions, rule.cssText].join(" "));
 			} else if (groups.some((name) => isA(rule, name))) {
 				const condition = rule.cssText
 					.slice(0, rule.cssText.indexOf("{"))
 					.trim();
+
 				// The layer's prelude goes in before its rules, whether or not any of them match.
 				if (isA(rule, "CSSLayerBlockRule"))
 					out.push([...conditions, condition].join(" "));
 				walk(rule.cssRules, [...conditions, condition]);
 			} else if (isA(rule, "CSSImportRule")) {
 				out.push([...conditions, rule.cssText].join(" "));
+
 				if (rule.styleSheet === null) continue;
+
 				try {
 					walk(rule.styleSheet.cssRules, conditions);
 				} catch {
@@ -96,6 +109,7 @@ function usedCss(clean) {
 			} else out.push([...conditions, rule.cssText].join(" "));
 		}
 	};
+
 	for (const sheet of document.styleSheets) {
 		if (sheet.href !== null && new URL(sheet.href).origin !== location.origin)
 			continue;
@@ -105,14 +119,17 @@ function usedCss(clean) {
 				: `sheet:${new URL(sheet.href).pathname}`,
 		);
 		let rules;
+
 		try {
 			rules = sheet.cssRules;
 		} catch {
 			out.push(`sheet-unreadable:${sheet.href}`);
 			continue;
 		}
+
 		walk(rules, []);
 	}
+
 	return out;
 }
 
@@ -123,9 +140,11 @@ function usedCss(clean) {
 async function load(tab, url, { fingerprint = false } = {}) {
 	const { origin } = new URL(url);
 	const hashes = [];
+
 	if (fingerprint)
 		tab.on("response", (response) => {
 			const asset = new URL(response.url());
+
 			if (
 				asset.origin !== origin ||
 				!FINGERPRINTED.has(response.request().resourceType())
@@ -134,19 +153,25 @@ async function load(tab, url, { fingerprint = false } = {}) {
 			hashes.push(hashAsset(response, asset));
 		});
 	const response = await tab.goto(url, { waitUntil: "networkidle" });
+
 	if (!fingerprint || !response?.ok()) return { response };
 	await tab.evaluate(async () => {
 		await document.fonts.ready;
+
 		return true;
 	});
+
 	const css = await tab.evaluate(
 		`(${usedCss.toString()})(${cleanSelector.toString()})`,
 	);
+
 	const assets = (await Promise.allSettled(hashes)).flatMap((result) =>
 		result.status === "fulfilled" ? [result.value] : [],
 	);
+
 	const dom = await tab.evaluate(() => document.documentElement.outerHTML);
 	const parts = { dom, assets, css };
+
 	return { response, parts, fingerprint: await fingerprintOf(parts) };
 }
 
@@ -154,6 +179,7 @@ async function load(tab, url, { fingerprint = false } = {}) {
 function pageSize(tab) {
 	return tab.evaluate(() => {
 		const sides = [document.body, document.documentElement];
+
 		return {
 			width: Math.max(
 				...sides.flatMap((el) => [
@@ -179,6 +205,7 @@ async function sliceShots(tab, where) {
 	const size = await pageSize(tab);
 	const bands = sliceBands(size.height);
 	console.warn(`${where}: ${bands.length} slices, ${size.height}px tall.`);
+
 	return captureSlices({
 		label: where,
 		bands,
@@ -203,9 +230,12 @@ async function captureShots(tab, where) {
 		],
 		slices: () => sliceShots(tab, where),
 	});
+
 	let shots = await shoot();
+
 	for (let tries = 0; tries < 5; tries++) {
 		const again = await shoot();
+
 		if (
 			again.length === shots.length &&
 			again.every((shot, i) => shot.equals(shots[i]))
@@ -213,14 +243,17 @@ async function captureShots(tab, where) {
 			break;
 		shots = again;
 	}
+
 	return shots;
 }
 
 // Writes a page's shots into `dir` under the names shotNames gives them, and returns how many.
 async function save(dir, page, viewport, shots) {
 	const names = shotNames(page.name, viewport.name, shots.length);
+
 	for (const [i, shot] of shots.entries())
 		await writeFile(`${dir}/${names[i]}`, shot);
+
 	return shots.length;
 }
 
@@ -229,9 +262,11 @@ for (const viewport of VIEWPORTS) {
 		viewport: { width: viewport.width, height: viewport.height },
 		reducedMotion: "reduce",
 	};
+
 	const context = await browser.newContext(settings);
 	// The base branch's pages load in their own context, at the same size.
 	const beforeContext = BEFORE_URL ? await browser.newContext(settings) : null;
+
 	for (const page of PAGES) {
 		const where = `${page.path} (${viewport.name})`;
 		const tab = await context.newPage();
@@ -243,6 +278,7 @@ for (const viewport of VIEWPORTS) {
 		tab.on("pageerror", (error) => errors.push(`${where}: ${error.message}`));
 		const beforeTab = beforeContext ? await beforeContext.newPage() : null;
 		loaded++;
+
 		// Both servers at once, so the two loads are seconds apart (decision 152).
 		const [head, base] = beforeTab
 			? await Promise.all([
@@ -250,6 +286,7 @@ for (const viewport of VIEWPORTS) {
 					load(beforeTab, BEFORE_URL + page.path, { fingerprint: true }),
 				])
 			: [await load(tab, BASE + page.path), null];
+
 		if (!head.response?.ok()) {
 			errors.push(`${where}: HTTP ${head.response?.status()}`);
 			// An error page isn't the page: on the base branch this is a page the PR adds, so the
@@ -258,11 +295,13 @@ for (const viewport of VIEWPORTS) {
 			await beforeTab?.close();
 			continue;
 		}
+
 		if (!beforeTab) {
 			saved += await save(OUT, page, viewport, await captureShots(tab, where));
 			captured++;
 		} else {
 			const baseOk = base.response?.ok() ?? false;
+
 			if (
 				needsCapture({
 					head: { ok: true, fingerprint: head.fingerprint },
@@ -276,6 +315,7 @@ for (const viewport of VIEWPORTS) {
 					viewport,
 					await captureShots(tab, where),
 				);
+
 				if (baseOk)
 					savedBefore += await save(
 						BEFORE_OUT,
@@ -285,33 +325,44 @@ for (const viewport of VIEWPORTS) {
 					);
 				captured++;
 				const seconds = Math.round((Date.now() - captureStart) / 1000);
+
 				const why = baseOk
 					? `changed (${changedParts(head.parts, base.parts).join(", ")})`
 					: "new";
+
 				console.log(`${where}: ${why}, captured in ${seconds}s`);
 			}
 		}
+
 		await tab.close();
 		await beforeTab?.close();
 	}
+
 	await context.close();
 	await beforeContext?.close();
 }
 
 await browser.close();
+
 // Proof this run finished, with the UTC dates it ran on: the before-and-after only compares two
 // finished runs from the same day, since the demo data follows the date (scripts/changed-shots.mjs).
 const run = JSON.stringify({ started, finished: today() });
+
 await writeFile(`${OUT}/run.json`, run);
+
 if (BEFORE_URL) await writeFile(`${BEFORE_OUT}/run.json`, run);
+
 const seconds = Math.round((Date.now() - startedAt) / 1000);
+
 console.log(
 	`Loaded ${loaded} pages (each at each size), captured ${captured}, in ${seconds}s.`,
 );
+
 if (errors.length > 0) {
 	console.error(`Console errors:\n${errors.join("\n")}`);
 	process.exit(1);
 }
+
 console.log(
 	BEFORE_URL
 		? `Saved ${saved} screenshots to ${OUT}/ and ${savedBefore} to ${BEFORE_OUT}/`

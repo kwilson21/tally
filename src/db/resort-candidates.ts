@@ -79,19 +79,24 @@ export function orderCandidates<T extends { id: number; date: string }>(
 	const byId = new Map(rows.map((row) => [row.id, row]));
 	const seen = new Set<number>();
 	const queued: T[] = [];
+
 	for (const id of queueIds) {
 		const row = byId.get(id);
+
 		if (row && !seen.has(id)) {
 			seen.add(id);
 			queued.push(row);
 		}
 	}
+
 	const rest = rows
 		.filter((row) => !seen.has(row.id))
 		.sort((a, b) => {
 			if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+
 			return b.id - a.id;
 		});
+
 	return [...queued, ...rest];
 }
 
@@ -118,6 +123,7 @@ export async function resortCandidates(
 		.prepare("SELECT id FROM categories WHERE id = ? AND archived = 0")
 		.bind(newCategoryId)
 		.first<{ id: number }>();
+
 	if (!active) return [];
 
 	const { results } = await db
@@ -166,6 +172,7 @@ export async function resortCandidates(
 			jev_attempts: row.jevAttempts,
 		},
 	}));
+
 	return orderCandidates(rows, queueIds).slice(0, RESORT_CANDIDATE_MAX);
 }
 
@@ -186,6 +193,7 @@ export async function currentClusterRows(
 	})[]
 > {
 	if (ids.length === 0) return [];
+
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.amount_cents AS amountCents, t.raw_name AS rawName, ${merchantKeySql("t")} AS merchantKey,
@@ -202,5 +210,6 @@ export async function currentClusterRows(
 			mixed: number;
 			whatItWasNote: string | null;
 		}>();
+
 	return results.map((row) => ({ ...row, mixed: row.mixed === 1 }));
 }

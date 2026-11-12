@@ -36,6 +36,7 @@ type HistoryRow = {
  */
 function balanceRowsStatement(db: D1Database, today: string) {
 	const from = chartStart(today);
+
 	return db
 		.prepare(
 			`SELECT h.account_id, h.date, h.balance_cents, a.is_liability
@@ -60,23 +61,27 @@ function accountSources(
 	banks: Bank[],
 	appleCard: AppleCardAccount | null,
 ): AccountSource[] {
-	const sources: AccountSource[] = banks
-		.filter((bank) => !bank.disconnected)
-		.map(
-			(bank): AccountSource => ({
-				name: bank.name,
-				verb: "linked",
-				accountIds: bank.accounts
-					.filter((account) => account.connected !== false)
-					.map((account) => account.id),
-			}),
-		);
+	const sources: AccountSource[] = banks.flatMap((bank): AccountSource[] =>
+		bank.disconnected
+			? []
+			: [
+					{
+						name: bank.name,
+						verb: "linked",
+						accountIds: bank.accounts
+							.filter((account) => account.connected !== false)
+							.map((account) => account.id),
+					},
+				],
+	);
+
 	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
 		sources.push({
 			name: "Apple Card",
 			verb: "added",
 			accountIds: [appleCard.id],
 		});
+
 	return sources;
 }
 
@@ -103,13 +108,20 @@ export async function accountsWithHistory(
 		balanceRowsStatement(db, today),
 		appleCardStatement(db),
 	]);
+
+	// SAFETY: each statement of the batch above returns the rows its own SELECT names, so these are the typed row shapes.
 	const banks = banksFromRows((bankResult?.results ?? []) as BankRow[]);
+
+	// SAFETY: the Apple Card statement of the batch above returns AppleCardRow rows; [0] is its one row or undefined.
 	const appleCard = appleCardFromRow(
 		((cardResult?.results ?? []) as AppleCardRow[])[0],
 	);
+
 	const accountIds = countedAccounts(banks, appleCard)
 		.filter((account) => account.connected !== false)
 		.map((account) => account.id);
+
+	// SAFETY: the balance statement of the batch above returns HistoryRow rows.
 	const rows: BalanceRow[] = (
 		(balanceResult?.results ?? []) as HistoryRow[]
 	).map((r) => ({
@@ -118,7 +130,9 @@ export async function accountsWithHistory(
 		balanceCents: r.balance_cents,
 		isLiability: r.is_liability === 1,
 	}));
+
 	const points = netWorthSeries(rows, chartStart(today), accountIds);
+
 	return {
 		banks,
 		points,

@@ -194,11 +194,13 @@ describe("the bills page and Home see the same handled occurrences", () => {
 			)
 			.run();
 		await matchBillPayments(db, "2026-10-10");
+
 		const link = await db
 			.prepare(
 				"SELECT period FROM bill_payments WHERE bill_id=9701 AND status='linked'",
 			)
 			.first<{ period: string }>();
+
 		expect(link?.period).toBe("2026");
 	});
 });
@@ -231,6 +233,7 @@ describe("the bill's own page leaves out a due date before the day the bill was 
 	/** The bill's page as the household sees it at `now` (an ISO instant). */
 	async function billPageAt(id: number, now: string) {
 		vi.setSystemTime(new Date(now));
+
 		return (
 			await exports.default.fetch(`http://tally.test/bills/${id}`)
 		).text();
@@ -271,9 +274,11 @@ describe("the bill's own page leaves out a due date before the day the bill was 
 			)
 			.run();
 		vi.setSystemTime(new Date("2026-10-12T16:00:00Z"));
+
 		const picker = await exports.default.fetch(
 			"http://tally.test/bills/9706/occurrences/2026-10/link",
 		);
+
 		expect(picker.status).toBe(200);
 	});
 
@@ -284,9 +289,11 @@ describe("the bill's own page leaves out a due date before the day the bill was 
 			)
 			.run();
 		vi.setSystemTime(new Date("2026-10-12T16:00:00Z"));
+
 		const picker = await exports.default.fetch(
 			"http://tally.test/bills/9710/occurrences/2026/link",
 		);
+
 		expect(picker.status).toBe(200);
 		const html = await billPageAt(9710, "2026-10-12T16:00:00Z");
 		expect(paymentRow(html, "March")).toBe("");

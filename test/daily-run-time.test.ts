@@ -4,6 +4,7 @@ import { DAILY_RUN_UTC_HOUR, dailyRunTime } from "../src/first-tally/setup";
 // The daily run's time in the household's zone, as the reading screen says it (decision 150, spec §8.8): the next 09:00 UTC
 // run, in words such as "5 AM" or "2:30 PM".
 const at = (iso: string) => Date.parse(iso);
+
 /** The narrow no-break space (U+202F) that newer ICU puts before AM and PM. */
 const NARROW_NO_BREAK_SPACE = String.fromCharCode(0x202f);
 
@@ -65,6 +66,7 @@ describe("dailyRunTime", () => {
 
 	it("never uses the narrow no-break space before AM and PM, only a plain space", () => {
 		const zones = ["America/New_York", "Europe/London", "Asia/Kolkata", "UTC"];
+
 		for (const zone of zones) {
 			const words = dailyRunTime(zone, at("2026-10-25T12:00:00Z"));
 			expect(words).not.toContain(NARROW_NO_BREAK_SPACE);

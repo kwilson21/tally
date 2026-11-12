@@ -22,6 +22,7 @@ export async function readMonthSummary(
 	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
 	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
 	const unpaidPlansCents = current ? await plansSetAsideCents(db, month) : 0;
+
 	const summary = summarizeMonth({
 		month,
 		...data,
@@ -29,5 +30,6 @@ export async function readMonthSummary(
 		savingsGoalCents: data.savingsGoalCents,
 		unpaidPlansCents,
 	});
+
 	return { data, billData, activeBills, billTotals, summary };
 }

@@ -33,17 +33,20 @@ describe("the demo's planned expenses", () => {
 		const billData = await loadBillRows(env.DB, TODAY);
 		// The same bills total Home's Safe to spend subtracts (home.test.ts), so only the plans differ here.
 		const dueBills = billTotalsForRows(MONTH, billData.rows).setAsideCents;
+
 		const withoutPlans = summarizeMonth({
 			month: MONTH,
 			...data,
 			unpaidDueBillsCents: dueBills,
 		}).safeToSpendCents;
+
 		const withPlans = summarizeMonth({
 			month: MONTH,
 			...data,
 			unpaidDueBillsCents: dueBills,
 			unpaidPlansCents: 27000,
 		}).safeToSpendCents;
+
 		expect(withoutPlans - withPlans).toBe(27000);
 
 		const html = await (await exports.default.fetch(`${BASE}/`)).text();

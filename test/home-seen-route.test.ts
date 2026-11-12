@@ -18,19 +18,26 @@ const PERSON = "person@example.com";
 const RILEY = "riley@example.com";
 const ORIGIN = "http://localhost";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
-const family = { DB: env.DB, DEMO: "false" } as unknown as Env;
-const demo = { DB: env.DB, DEMO: "true" } as unknown as Env;
+
+/** The bindings a request is given: the database and the demo flag, and nothing else. */
+type Bindings = { DB: D1Database; DEMO: string };
+
+const family: Bindings = { DB: env.DB, DEMO: "false" };
+const demo: Bindings = { DB: env.DB, DEMO: "true" };
 
 const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 router.use("*", sameOrigin);
+
 router.use("*", async (c, next) => {
 	c.set("actor", PERSON);
 	await next();
 });
+
 router.route("/", home);
 
 /** The check-in as a form post. `step` is the step Home's page shows (Home's check-in only); none is the questions page's. */
-const checkIn = (bindings: Env = family, origin = ORIGIN, step?: string) =>
+const checkIn = (bindings: Bindings = family, origin = ORIGIN, step?: string) =>
 	router.request(
 		"/home/seen",
 		{
@@ -62,7 +69,10 @@ const setSeen = (email: string, when: string | null) =>
 		.bind(email, when)
 		.run();
 
-const writeRecord = (value: unknown) =>
+/** A JSON value, as the stored setup record holds it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const writeRecord = (value: Json) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 	)
@@ -76,7 +86,12 @@ const openingTag = (html: string, id: string) =>
 /** The HX-Trigger header's announce, or null when the answer carries none. */
 const announced = (res: Response) => {
 	const header = res.headers.get("HX-Trigger");
-	return header ? (JSON.parse(header) as { announce?: string }).announce : null;
+
+	if (!header) return null;
+
+	const parsed: { announce?: string } = JSON.parse(header);
+
+	return parsed.announce;
 };
 
 /** The text of the one element a redrawn page gives focus to (autofocus), as the page reads it; null when none has it. */
@@ -274,10 +289,12 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 	it("a poll with the list's own URL, sent after that check-in, announces nothing: the step was announced once (decision 146)", async () => {
 		await sorting();
 		const html = await (await checkIn(family, ORIGIN, "reading")).text();
+
 		const url =
 			/hx-get="([^"]+)"/
 				.exec(openingTag(html, "your-banks"))?.[1]
 				?.replaceAll("&amp;", "&") ?? "";
+
 		expect(url).toContain("/setup/banks?");
 		const poll = await setupRoute.request(url, {}, family);
 		expect(poll.status).toBe(200);

@@ -10,18 +10,21 @@ import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { seedMerchant } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
 const LAST = monthsBefore(THIS, 1);
 const GROCERIES = 1;
+
 /** The opening tag of the Add button whose count is its own tabular span (#676, decision 128). */
 const addButtonTag = (html: string) =>
 	html.match(/<button[^>]*>Add <span/)?.[0];
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -36,6 +39,7 @@ async function post(path: string, fields: Record<string, string>) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -50,6 +54,7 @@ async function postWithoutJs(path: string, fields: Record<string, string>) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -79,6 +84,7 @@ const filedAs = (id: number) =>
 function rowHtml(html: string, id: number) {
 	const start = html.indexOf(`data-transaction="${id}"`);
 	expect(start).toBeGreaterThan(-1);
+
 	return html.slice(start, html.indexOf("</li>", start));
 }
 
@@ -95,11 +101,11 @@ const saveFields = (extra: Record<string, string>) => ({
 
 beforeEach(async () => {
 	await resetDemo(env.DB, TODAY);
-	bakery = (
+	bakery = present(
 		await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
-		).first<{ id: number }>()
-	)?.id as number;
+		).first<{ id: number }>(),
+	).id;
 });
 
 describe("the New category chip in the edit panel", () => {
@@ -132,11 +138,12 @@ describe("the New category chip in the edit panel", () => {
 	});
 
 	it("a 51st active category gives the full message and saves nothing", async () => {
-		const active = (
+		const active = present(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
-			).first<{ n: number }>()
-		)?.n as number;
+			).first<{ n: number }>(),
+		).n;
+
 		for (let i = active; i < 50; i++)
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
@@ -167,13 +174,15 @@ describe("the New category chip in the edit panel", () => {
 		expect(res.status).toBe(200);
 		const made = await categoryNamed("Pet Care");
 		expect(made?.archived).toBe(0);
-		const last = (
+
+		const last = present(
 			await env.DB.prepare(
 				"SELECT MAX(sort_order) AS last FROM categories WHERE id <> ?",
 			)
 				.bind(made?.id)
-				.first<{ last: number }>()
-		)?.last as number;
+				.first<{ last: number }>(),
+		).last;
+
 		expect(made?.sortOrder).toBeGreaterThan(last);
 		expect(await filedAs(bakery)).toEqual({
 			categoryId: made?.id,
@@ -213,7 +222,7 @@ describe("a refused save makes no category", () => {
 		)
 			.bind(date, cents, rawName, refundOf, refundOf === null ? 0 : 1)
 			.first<{ id: number }>()
-			.then((row) => row?.id as number);
+			.then((row) => present(row).id);
 
 	it("a cash amount below its linked refunds saves nothing and makes no category", async () => {
 		const entry = await insertRow(
@@ -222,6 +231,7 @@ describe("a refused save makes no category", () => {
 			2000,
 			"Farmers market",
 		);
+
 		await insertRow(
 			"SELECT id FROM accounts WHERE type = 'cash'",
 			TODAY,
@@ -258,6 +268,7 @@ describe("a refused save makes no category", () => {
 	it("takes back only a made category nothing uses", async () => {
 		const unused = await makeCategory(env.DB, { name: "Unused" });
 		const used = await makeCategory(env.DB, { name: "Used" });
+
 		if (!unused.ok || !used.ok) throw new Error("the test categories");
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
@@ -279,6 +290,7 @@ describe("a refused save makes no category", () => {
 			10000,
 			"HOLIDAY SHOP",
 		);
+
 		await insertRow(
 			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
 			TODAY,
@@ -286,12 +298,14 @@ describe("a refused save makes no category", () => {
 			"HOLIDAY SHOP",
 			purchase,
 		);
+
 		const refund = await insertRow(
 			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
 			TODAY,
 			-2000,
 			"HOLIDAY SHOP",
 		);
+
 		const count = await categoryCount();
 
 		const { res } = await post(
@@ -318,6 +332,7 @@ describe("a refused save makes no category", () => {
 			10000,
 			"HOLIDAY SHOP",
 		);
+
 		await insertRow(
 			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
 			TODAY,
@@ -325,12 +340,14 @@ describe("a refused save makes no category", () => {
 			"HOLIDAY SHOP",
 			purchase,
 		);
+
 		const refund = await insertRow(
 			"SELECT id FROM accounts WHERE type <> 'cash' LIMIT 1",
 			TODAY,
 			-2000,
 			"HOLIDAY SHOP",
 		);
+
 		const count = await categoryCount();
 
 		const { res, html } = await post(
@@ -360,11 +377,13 @@ describe("a refused save makes no category", () => {
 			-1200,
 			"Corner shop",
 		);
+
 		// Nothing references the entry, so it can go. Its own save then finds no transaction and throws.
 		await env.DB.prepare(
 			`CREATE TRIGGER drop_entry_on_pet_care AFTER INSERT ON categories WHEN NEW.name = 'Pet Care'
 			BEGIN DELETE FROM transactions WHERE id = ${entry}; END`,
 		).run();
+
 		try {
 			const { res } = await post(
 				`/transactions/${entry}`,
@@ -396,8 +415,9 @@ describe("the likely transactions after a new category", () => {
 			)
 				.bind(date, cents)
 				.first<{ id: number }>();
-		first = (await insert(`${THIS}-01`, 1200))?.id as number;
-		second = (await insert(`${THIS}-02`, 900))?.id as number;
+
+		first = present(await insert(`${THIS}-01`, 1200)).id;
+		second = present(await insert(`${THIS}-02`, 900)).id;
 	});
 
 	it("are offered after Save, ticked, and Add files only the ticked ones into the new category", async () => {
@@ -405,6 +425,7 @@ describe("the likely transactions after a new category", () => {
 			`/transactions/${bakery}`,
 			saveFields({ category: "new", new_category_name: "Pet Care" }),
 		);
+
 		expect(saved.html).toContain("Pet Care is made.");
 		expect(saved.html).toContain("These might belong too:");
 		expect(saved.html).toMatch(
@@ -423,6 +444,7 @@ describe("the likely transactions after a new category", () => {
 		expect(saved.html).toContain('name="category_name" value="Pet Care"');
 
 		const made = await categoryNamed("Pet Care");
+
 		const { res, html } = await post(`/transactions/${bakery}/likely`, {
 			back: "/transactions",
 			category: String(made?.id),
@@ -447,11 +469,13 @@ describe("the likely transactions after a new category", () => {
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
 		).run();
 		const made = await categoryNamed("Pet Care");
+
 		const none = await post(`/transactions/${bakery}/likely/count`, {
 			back: "/transactions",
 			category: String(made?.id),
 			category_name: "Pet Care",
 		});
+
 		expect(none.html).toContain("Add to Pet Care");
 		expect(none.html).toMatch(/<button[^>]*disabled[^>]*>Add to Pet Care/);
 
@@ -461,6 +485,7 @@ describe("the likely transactions after a new category", () => {
 			category_name: "Pet Care",
 			ids: String(first),
 		});
+
 		expect(one.html).toContain(
 			'Add <span class="tabular-nums">1</span> to Pet Care</button>',
 		);
@@ -472,14 +497,16 @@ describe("the likely transactions after a new category", () => {
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
 		).run();
 		const made = await categoryNamed("Pet Care");
+
 		// Last month's charge ranks below every same-merchant row this month, so seven newer rows push it past the six.
-		const older = (
+		const older = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432') RETURNING id",
 			)
 				.bind(`${LAST}-20`)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		for (let day = 3; day <= 9; day++)
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1000, 'SQ *LOCAL BAKERY 4432')",
@@ -542,6 +569,7 @@ describe("the likely transactions after a new category", () => {
 		const described = saved.html.match(
 			new RegExp(`name="ids" value="${first}"[^>]*aria-describedby="([^"]+)"`),
 		)?.[1];
+
 		expect(described).toBeTruthy();
 		const reason = saved.html.indexOf(`id="${described}"`);
 		expect(reason).toBeGreaterThan(-1);
@@ -580,18 +608,19 @@ describe("the likely transactions after a new category", () => {
 	});
 
 	it("show a guess with the Maybe chip the list shows, not the plain Needs category tag", async () => {
-		const suggestion = (
+		const suggestion = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
-		const guess = (
+			).first<{ id: number }>(),
+		).id;
+
+		const guess = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_suggestion_id) VALUES (1, ?, 2000, 'SQ *CORNER PETS', ?) RETURNING id",
 			)
 				.bind(`${THIS}-03`, suggestion)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const saved = await post(
 			`/transactions/${bakery}`,
@@ -624,13 +653,14 @@ describe("the likely transactions after a new category", () => {
 		await env.DB.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
 			.bind(first)
 			.run();
-		const refund = (
+
+		const refund = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, refund_of_id, credit_reviewed) VALUES (1, ?, -500, 'SQ *LOCAL BAKERY 4432', ?, 1) RETURNING id",
 			)
 				.bind(`${THIS}-05`, first)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const saved = await post(
 			`/transactions/${bakery}`,
@@ -648,13 +678,14 @@ describe("the likely transactions after a new category", () => {
 	])(
 		"hide a guessed note while details are $details, as the list does",
 		async ({ details, shows }) => {
-			const guessed = (
+			const guessed = present(
 				await env.DB.prepare(
 					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, note, note_guessed, note_state) VALUES (1, ?, 1500, 'SQ *LOCAL BAKERY 4432', 'Birthday cake', 1, 'guessed') RETURNING id",
 				)
 					.bind(`${THIS}-04`)
-					.first<{ id: number }>()
-			)?.id as number;
+					.first<{ id: number }>(),
+			).id;
+
 			await env.DB.prepare(
 				"INSERT OR REPLACE INTO household_settings (key, value) VALUES ('ai_details', ?)",
 			)
@@ -667,6 +698,7 @@ describe("the likely transactions after a new category", () => {
 			);
 
 			const row = rowHtml(saved.html, guessed);
+
 			if (shows) {
 				expect(row).toContain("Birthday cake");
 				expect(row).toContain("decoration-dashed");
@@ -681,13 +713,13 @@ describe("the likely transactions after a new category", () => {
 
 	it("name the date and amount a cash entry was saved with in the reason, not the ones it had", async () => {
 		// A cash entry has no merchant name, so it is the same merchant as the bakery's bank rows by its raw name.
-		const entry = (
+		const entry = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES ((SELECT id FROM accounts WHERE type = 'cash'), ?, 2000, 'SQ *LOCAL BAKERY 4432') RETURNING id",
 			)
 				.bind(`${LAST}-15`)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const saved = await post(
 			`/transactions/${entry}`,
@@ -728,6 +760,7 @@ describe("the likely transactions after a new category", () => {
 			`/transactions/${bakery}`,
 			saveFields({ category: "new", new_category_name: "Pet Care" }),
 		);
+
 		const back = `/transactions?focus=${bakery}`;
 		expect(saved.html.match(/<a href="([^"]*)" aria-label="Close"/)?.[1]).toBe(
 			back,
@@ -770,6 +803,7 @@ describe("the likely transactions after a new category", () => {
 
 		const message =
 			"Nothing moved: those transactions changed since the panel opened.";
+
 		expect(res.status).toBe(200);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message, type: "info" },
@@ -822,6 +856,7 @@ describe("the likely transactions after a new category", () => {
 
 		const message =
 			"Nothing moved: those transactions changed since the panel opened.";
+
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message, type: "info" },
 			announce: message,
@@ -887,6 +922,7 @@ describe("a one-off name with a New category, on a row Jev categorized", () => {
 	 */
 	async function saveWithJev(id: number, fields: Record<string, string>) {
 		const queued: Promise<unknown>[] = [];
+
 		const response = await transactions.request(
 			`/transactions/${id}`,
 			{
@@ -906,7 +942,9 @@ describe("a one-off name with a New category, on a row Jev categorized", () => {
 				props: {},
 			},
 		);
+
 		await Promise.all(queued);
+
 		return response;
 	}
 

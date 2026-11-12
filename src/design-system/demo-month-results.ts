@@ -4,7 +4,7 @@
 // seed relative to today, so the month keys hold only for that day, and test/month-results.test.ts pins that date and
 // checks every value. The catalog and the proposal pictures that draw the strip read these. The current month (October)
 // is left out: the strip never reads it.
-export const DEMO_MONTH_RESULTS: Record<string, number | null> = {
+export const DEMO_MONTH_RESULTS = {
 	"2025-11": null,
 	"2025-12": null,
 	"2026-01": null,
@@ -16,4 +16,4 @@ export const DEMO_MONTH_RESULTS: Record<string, number | null> = {
 	"2026-07": 31500,
 	"2026-08": -13359,
 	"2026-09": -213447,
-};
+} satisfies Record<string, number | null>;

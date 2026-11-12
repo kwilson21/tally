@@ -49,6 +49,7 @@ describe("BillRow with a price change", () => {
 		const plain = String(
 			BillRow({ bill: NETFLIX, today: "2026-10-05", href: "/bills/1" }),
 		);
+
 		expect(plain).toContain("Was due Oct 2");
 		expect(plain).not.toContain("Price changed?");
 		expect(plain).not.toContain("py-2");
@@ -64,6 +65,7 @@ describe("BillRow with a price change", () => {
 				today: "2026-01-02",
 			}),
 		);
+
 		expect(html).toContain("Paid $17.99 on Dec 31, 2025");
 	});
 });
@@ -74,6 +76,7 @@ describe("BillRow amount (decision 128)", () => {
 		const row = String(
 			BillRow({ bill: NETFLIX, today: "2026-10-05", href: "/bills/1" }),
 		);
+
 		expect(row).toContain(
 			'<span class="shrink-0 text-lg tabular-nums">$15.49</span>',
 		);
@@ -96,6 +99,7 @@ describe("BillFindingRow amount (decision 128)", () => {
 				},
 			}),
 		);
+
 		expect(row).toContain(
 			'<span class="shrink-0 text-right tabular-nums">About $84.15</span>',
 		);
@@ -113,6 +117,7 @@ describe("BillOccurrenceRow with a price change", () => {
 		currentCents: 1549,
 		frequency: "monthly" as const,
 	};
+
 	const html = String(
 		BillOccurrenceRow({
 			billId: 1,
@@ -132,6 +137,7 @@ describe("BillOccurrenceRow with a price change", () => {
 		expect(html).toContain(
 			"Updating the bill links that payment and makes it $17.99 a month.",
 		);
+
 		const yearly = String(
 			BillOccurrenceRow({
 				billId: 1,
@@ -141,6 +147,7 @@ describe("BillOccurrenceRow with a price change", () => {
 				priceOffer: { ...offer, frequency: "yearly" },
 			}),
 		);
+
 		expect(yearly).toContain("$17.99 a year.");
 	});
 
@@ -181,6 +188,7 @@ describe("BillOccurrenceRow with a price change", () => {
 				status: "overdue",
 			}),
 		);
+
 		expect(plain).toContain("Link a payment");
 		expect(plain).toContain("No payment linked yet");
 		expect(plain).not.toContain("charged");

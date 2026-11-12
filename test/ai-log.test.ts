@@ -22,6 +22,7 @@ import {
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
+import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { pinClock } from "./pinned-clock";
 
@@ -33,6 +34,30 @@ const db = env.DB;
 const TODAY = "2026-10-11";
 const BASE = "http://tally.test";
 const OFF = { names: true, categories: true, income: true };
+
+/** One table of Download everything, by name: the export's type lists only its fixed keys, not its tables. */
+const exportedTable = (
+	data: Awaited<ReturnType<typeof tallyExport>>,
+	table: string,
+) => Object.entries(data).find(([name]) => name === table)?.[1];
+
+/** One ai_log row as Download everything writes it: the six columns EXPORT_COLUMNS lists for ai_log. */
+type AiLogExportRow = {
+	created_at: string;
+	household_day: string;
+	id: number;
+	kind: string;
+	merchant_raw_name: string | null;
+	transaction_id: number | null;
+};
+
+/** The value a query found, or a throw when it found no row, so the test fails at its own setup. */
+function present<T>(value: T | null | undefined): T {
+	if (value === null || value === undefined)
+		throw new Error("the test's setup found no row");
+
+	return value;
+}
 
 const reply = (categoryConfidence: number, incomeConfidence: number) =>
 	new Response(
@@ -54,10 +79,12 @@ const reply = (categoryConfidence: number, incomeConfidence: number) =>
 /** A fake Jev that answers every call the same way and counts the calls it got. */
 function fakeJev(answer: () => Response) {
 	const calls = { n: 0 };
+
 	return {
 		calls,
 		fetchImpl: async () => {
 			calls.n += 1;
+
 			return answer();
 		},
 	};
@@ -125,14 +152,16 @@ const logNames = async () =>
 
 /** A purchase with no category yet, for a name to be kept on. */
 const chargeAt = async (rawName: string) =>
-	(
-		await db
-			.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by) VALUES (1, ?, 650, ?, 'test') RETURNING id",
-			)
-			.bind(TODAY, rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+	present(
+		(
+			await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by) VALUES (1, ?, 650, ?, 'test') RETURNING id",
+				)
+				.bind(TODAY, rawName)
+				.first<{ id: number }>()
+		)?.id,
+	);
 
 /** The edit panel's values for a save that changes nothing but what a test names (as categorize-db's). */
 const personEdit = {
@@ -173,6 +202,7 @@ describe("the migration", () => {
 		const { results } = await db
 			.prepare("PRAGMA table_info(ai_log)")
 			.all<{ name: string }>();
+
 		expect(results.map((column) => column.name)).toEqual([
 			"id",
 			"kind",
@@ -195,14 +225,14 @@ describe("the migration", () => {
 describe("the tally's counts", () => {
 	it("counts a month from that month's own stored rows only", async () => {
 		const [a, b, c, d, e, f] = await someIds(6);
-		await logCategory(a as number, "2026-10-02");
-		await logCategory(b as number, "2026-10-09");
-		await logCategory(c as number, "2026-09-28");
-		await logIncome(d as number, "2026-10-03");
+		await logCategory(present(a), "2026-10-02");
+		await logCategory(present(b), "2026-10-09");
+		await logCategory(present(c), "2026-09-28");
+		await logIncome(present(d), "2026-10-03");
 		await logName("SQ *BLUE BOTTLE", "2026-09-15");
 		// Just outside both months: not counted in either.
-		await logCategory(e as number, "2026-08-31");
-		await logCategory(f as number, "2026-11-01");
+		await logCategory(present(e), "2026-08-31");
+		await logCategory(present(f), "2026-11-01");
 		expect(await readAiTally(db, TODAY)).toEqual({
 			month: "2026-10",
 			sorted: 2,
@@ -214,8 +244,8 @@ describe("the tally's counts", () => {
 
 	it("falls back to September from its first day, and not August's last", async () => {
 		const [a, b] = await someIds(2);
-		await logCategory(a as number, "2026-09-01");
-		await logCategory(b as number, "2026-08-31");
+		await logCategory(present(a), "2026-09-01");
+		await logCategory(present(b), "2026-08-31");
 		expect(await readAiTally(db, "2026-10-02")).toEqual({
 			month: "2026-09",
 			sorted: 1,
@@ -230,21 +260,20 @@ describe("the tally's counts", () => {
 			.prepare(`EXPLAIN QUERY PLAN ${AI_TALLY_SQL}`)
 			.bind("2026-09-01", "2026-11-01")
 			.all<{ detail: string }>();
+
 		const plan = results.map((row) => row.detail).join("\n");
 		expect(plan).toMatch(/USING (COVERING )?INDEX ai_log_household_day/);
 	});
 
 	it("builds the tally without calling Jev or Workers AI", async () => {
 		const [a] = await someIds(1);
-		await logCategory(a as number, TODAY);
+		await logCategory(present(a), TODAY);
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
 		// The tests' env has no AI binding (wrangler.jsonc), so the page gets a stub that records any ask.
-		const ai = { run: vi.fn(async () => ({ response: "Some Place" })) };
-		const page = await app.request(
-			`${BASE}/settings`,
-			{},
-			{ ...env, AI: ai as unknown as Ai },
-		);
+		const ai = fakeAi(vi.fn(async () => ({ response: "Some Place" })));
+
+		const page = await app.request(`${BASE}/settings`, {}, { ...env, AI: ai });
+
 		expect(page.status).toBe(200);
 		expect(await readAiTally(db, TODAY)).toMatchObject({ sorted: 1 });
 		expect(fetchSpy).not.toHaveBeenCalled();
@@ -269,8 +298,8 @@ describe("the tally's counts", () => {
 
 	it("early in a month with no AI work yet, shows last month's lines labelled with its name", async () => {
 		const [a, b] = await someIds(2);
-		await logCategory(a as number, "2026-09-20");
-		await logIncome(b as number, "2026-09-25");
+		await logCategory(present(a), "2026-09-20");
+		await logIncome(present(b), "2026-09-25");
 		const tally = await readAiTally(db, "2026-10-02");
 		expect(tally).toEqual({
 			month: "2026-09",
@@ -290,7 +319,8 @@ describe("the tally's counts", () => {
 			)
 			.bind(a, b, c, a, b, c, d)
 			.run();
-		for (const id of [a, b, c, d]) await logCategory(id as number, TODAY);
+
+		for (const id of [a, b, c, d]) await logCategory(present(id), TODAY);
 		expect(await readAiTally(db, TODAY)).toMatchObject({
 			sorted: 4,
 			changed: 2,
@@ -310,35 +340,44 @@ describe("the tally's counts", () => {
 	/** A transaction Jev sorted into `categoryId`, logged as Tally's pick; returns its id and amount. */
 	const sortedByJev = async (categoryId: number) => {
 		const [id] = await someIds(1);
-		const amount = (
-			await db
-				.prepare("SELECT amount_cents AS amount FROM transactions WHERE id = ?")
-				.bind(id)
-				.first<{ amount: number }>()
-		)?.amount as number;
+
+		const amount = present(
+			(
+				await db
+					.prepare(
+						"SELECT amount_cents AS amount FROM transactions WHERE id = ?",
+					)
+					.bind(id)
+					.first<{ amount: number }>()
+			)?.amount,
+		);
+
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'jev' WHERE id = ?",
 			)
 			.bind(categoryId, id)
 			.run();
-		await logCategory(id as number, TODAY);
-		return { id: id as number, amount };
+		await logCategory(present(id), TODAY);
+
+		return { id: present(id), amount };
 	};
 
 	it("counts a transaction Tally sorted and a person split, with a part in another category, as changed", async () => {
 		const [x, y] = await twoCategories();
-		const { id, amount } = await sortedByJev(x as number);
+		const { id, amount } = await sortedByJev(present(x));
 		const half = Math.trunc(amount / 2);
+
 		const split = await saveSplit(
 			db,
 			id,
 			[
-				{ categoryId: x as number, amountCents: half },
-				{ categoryId: y as number, amountCents: amount - half },
+				{ categoryId: present(x), amountCents: half },
+				{ categoryId: present(y), amountCents: amount - half },
 			],
 			"test",
 		);
+
 		expect(split.saved).toBe(true);
 		expect(await readAiTally(db, TODAY)).toMatchObject({
 			sorted: 1,
@@ -348,17 +387,19 @@ describe("the tally's counts", () => {
 
 	it("doesn't count a split whose parts all keep Tally's category", async () => {
 		const [x] = await twoCategories();
-		const { id, amount } = await sortedByJev(x as number);
+		const { id, amount } = await sortedByJev(present(x));
 		const half = Math.trunc(amount / 2);
+
 		const split = await saveSplit(
 			db,
 			id,
 			[
-				{ categoryId: x as number, amountCents: half },
-				{ categoryId: x as number, amountCents: amount - half },
+				{ categoryId: present(x), amountCents: half },
+				{ categoryId: present(x), amountCents: amount - half },
 			],
 			"test",
 		);
+
 		expect(split.saved).toBe(true);
 		expect(await readAiTally(db, TODAY)).toMatchObject({
 			sorted: 1,
@@ -368,14 +409,14 @@ describe("the tally's counts", () => {
 
 	it("stops counting it once the split is removed", async () => {
 		const [x, y] = await twoCategories();
-		const { id, amount } = await sortedByJev(x as number);
+		const { id, amount } = await sortedByJev(present(x));
 		const half = Math.trunc(amount / 2);
 		await saveSplit(
 			db,
 			id,
 			[
-				{ categoryId: x as number, amountCents: half },
-				{ categoryId: y as number, amountCents: amount - half },
+				{ categoryId: present(x), amountCents: half },
+				{ categoryId: present(y), amountCents: amount - half },
 			],
 			"test",
 		);
@@ -402,28 +443,33 @@ describe("the tally's counts", () => {
 			)
 			.bind(TODAY)
 			.run();
+
 		const [pending] = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id = 'pend-1'",
 			)
 			.all<{ id: number }>()
 			.then((r) => r.results);
+
 		const [posted] = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id = 'post-1'",
 			)
 			.all<{ id: number }>()
 			.then((r) => r.results);
-		await logCategory(pending?.id as number, TODAY);
+
+		await logCategory(present(pending?.id), TODAY);
+
 		const item = await db
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-1' WHERE id = ?")
 			.bind(item?.id)
 			.run();
 		await db.batch(
-			mergePendingIntoPosted(db, item?.id as number, "lock-1", "pend-1", {
+			mergePendingIntoPosted(db, present(item?.id), "lock-1", "pend-1", {
 				id: "post-1",
 				cents: 1200,
 				date: TODAY,
@@ -453,28 +499,37 @@ describe("the tally's counts", () => {
 				)
 				.bind(TODAY, plaidId, pending)
 				.run();
+
 		await insert("pend-2", 1);
 		await insert("post-2", 0);
+
 		const idOf = async (plaidId: string) =>
-			(
-				await db
-					.prepare("SELECT id FROM transactions WHERE plaid_transaction_id = ?")
-					.bind(plaidId)
-					.first<{ id: number }>()
-			)?.id as number;
+			present(
+				(
+					await db
+						.prepare(
+							"SELECT id FROM transactions WHERE plaid_transaction_id = ?",
+						)
+						.bind(plaidId)
+						.first<{ id: number }>()
+				)?.id,
+			);
+
 		const pendingId = await idOf("pend-2");
 		const postedId = await idOf("post-2");
 		await logCategory(pendingId, TODAY);
 		await logCategory(postedId, TODAY);
+
 		const item = await db
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-2' WHERE id = ?")
 			.bind(item?.id)
 			.run();
 		await db.batch(
-			mergePendingIntoPosted(db, item?.id as number, "lock-2", "pend-2", {
+			mergePendingIntoPosted(db, present(item?.id), "lock-2", "pend-2", {
 				id: "post-2",
 				cents: 1200,
 				date: TODAY,
@@ -522,26 +577,32 @@ describe("the tally's counts", () => {
 				)
 				.bind(TODAY, amount, plaidId, isPending)
 				.first<{ id: number }>();
+
 			if (set)
 				await db
 					.prepare(`UPDATE transactions SET ${set} WHERE id = ?`)
 					.bind(row?.id)
 					.run();
-			return row?.id as number;
+
+			return present(row?.id);
 		};
+
 		const pendingId = await storeRow("pend-m", 1, cents, pending);
 		const postedId = await storeRow("post-m", 0, postedCents, posted);
+
 		if (logged === "category") await logCategory(pendingId, TODAY);
 		else await logIncome(pendingId, TODAY);
+
 		const item = await db
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-m' WHERE id = ?")
 			.bind(item?.id)
 			.run();
 		await db.batch(
-			mergePendingIntoPosted(db, item?.id as number, "lock-m", "pend-m", {
+			mergePendingIntoPosted(db, present(item?.id), "lock-m", "pend-m", {
 				id: "post-m",
 				cents: postedCents,
 				date: TODAY,
@@ -550,6 +611,7 @@ describe("the tally's counts", () => {
 				plaidCategory: null,
 			}),
 		);
+
 		return { pendingId, postedId };
 	};
 
@@ -595,6 +657,7 @@ describe("the tally's counts", () => {
 			posted: "",
 			logged: "category",
 		});
+
 		expect(await logIds("category")).toEqual([postedId]);
 		expect(await readAiTally(db, TODAY)).toMatchObject({
 			sorted: 1,
@@ -637,6 +700,7 @@ describe("the tally's counts", () => {
 			cents: -1200,
 			logged: "income",
 		});
+
 		expect(await logIds("income")).toEqual([postedId]);
 	});
 });
@@ -651,7 +715,7 @@ describe("a deleted transaction's log row", () => {
 			)
 			.bind(accountId, TODAY, plaidId)
 			.first<{ id: number }>()
-			.then((row) => row?.id as number);
+			.then((row) => present(row?.id));
 
 	/** A purchase Jev sorts the way a run does: its category is set, then the run logs it. */
 	const sortedByJev = async (id: number) => {
@@ -668,6 +732,7 @@ describe("a deleted transaction's log row", () => {
 		const item = await db
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = 'lock-drop' WHERE id = ?")
 			.bind(item?.id)
@@ -701,21 +766,27 @@ describe("a deleted transaction's log row", () => {
 	});
 
 	it("forgets the ids of a disconnected bank's deleted transactions, so a later purchase is still logged", async () => {
-		const itemId = (
-			await db
-				.prepare(
-					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (X'00', 'Old Bank', 'demo') RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
-		const accountId = (
-			await db
-				.prepare(
-					"INSERT INTO accounts (plaid_item_id, name, type) VALUES (?, 'Old checking', 'depository') RETURNING id",
-				)
-				.bind(itemId)
-				.first<{ id: number }>()
-		)?.id as number;
+		const itemId = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (X'00', 'Old Bank', 'demo') RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
+		const accountId = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO accounts (plaid_item_id, name, type) VALUES (?, 'Old checking', 'depository') RETURNING id",
+					)
+					.bind(itemId)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		const goneId = await insertPurchase("old-1", accountId);
 		await logCategory(goneId, TODAY);
 		// The disconnect that also deletes the bank's history (accounts.tsx) deletes its transactions.
@@ -746,8 +817,8 @@ describe("a deleted transaction's log row", () => {
 			.prepare("DELETE FROM transactions WHERE id = ?")
 			.bind(droppedId)
 			.run();
-		const data = (await tallyExport(db)) as unknown as Record<string, unknown>;
-		expect(data.ai_log).toEqual([
+		const data = await tallyExport(db);
+		expect(exportedTable(data, "ai_log")).toEqual([
 			expect.objectContaining({ kind: "category", transaction_id: null }),
 		]);
 		expect(await readAiTally(db, TODAY)).toMatchObject({ sorted: 1 });
@@ -766,6 +837,7 @@ describe("the tally's lines", () => {
 			},
 			switches: { names: true, categories: false, income: true },
 		}).toString();
+
 		expect(html).toMatch(/<li[^>]*text-muted[^>]*>Transactions · Off<\/li>/);
 		expect(html).not.toContain("you changed");
 		expect(html).not.toContain("Sorted");
@@ -782,6 +854,7 @@ describe("the tally's lines", () => {
 			},
 			switches: { names: false, categories: true, income: false },
 		}).toString();
+
 		expect(html).toMatch(/<li[^>]*text-muted[^>]*>Paychecks · Off<\/li>/);
 		expect(html).toMatch(
 			/<li[^>]*text-muted[^>]*>Suggest store names · Off<\/li>/,
@@ -798,6 +871,7 @@ describe("the tally's lines", () => {
 			named: 12,
 			paychecks: 2,
 		});
+
 		expect(html).toContain("Sorted 84 transactions · you changed 5");
 		expect(html).toContain("Cleaned 12 merchant names");
 		expect(html).toContain("Found 2 paychecks");
@@ -808,11 +882,14 @@ describe("the tally's lines", () => {
 			section: "what-ai-did",
 			topic: "what Tally did",
 		}).toString();
+
 		expect(link).toContain('aria-label="Why? what Tally did"');
 		expect(link).toContain('href="/how-it-works#what-ai-did"');
+
 		const page = await (
 			await exports.default.fetch(`${BASE}/how-it-works`)
 		).text();
+
 		expect(page).toContain('id="what-ai-did"');
 	});
 
@@ -820,8 +897,10 @@ describe("the tally's lines", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/settings/ai`)
 		).text();
+
 		const group =
 			html.split('id="ai-suggestions"')[1]?.split("</section>")[0] ?? "";
+
 		expect(group).toContain("Why? what Tally did");
 		expect(group).toMatch(/Sorted \d+ transactions? · you changed \d+/);
 	});
@@ -830,6 +909,7 @@ describe("the tally's lines", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/settings/ai`)
 		).text();
+
 		expect(html.split('aria-label="Why? ').length - 1).toBe(1);
 	});
 });
@@ -847,15 +927,18 @@ describe("what the Jev run and the names write", () => {
 			.run();
 		// The answer carries no details questions, so the switch for them is off (as in the categorize tests).
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, details: false });
+
 		const before = {
 			category: await idsWhere("category_source = 'jev'"),
 			income: await idsWhere("income_source = 'jev'"),
 		};
+
 		await db
 			.prepare(
 				"CREATE TRIGGER ai_log_down BEFORE INSERT ON ai_log BEGIN SELECT RAISE(ABORT, 'log down'); END",
 			)
 			.run();
+
 		try {
 			// A failed save stops the run, as it does today.
 			await categorizePending(
@@ -865,6 +948,7 @@ describe("what the Jev run and the names write", () => {
 		} finally {
 			await db.prepare("DROP TRIGGER ai_log_down").run();
 		}
+
 		expect(
 			(
 				await db
@@ -880,13 +964,16 @@ describe("what the Jev run and the names write", () => {
 			{ DB: db, JEV_API_KEY: "test-key" },
 			fakeJev(() => reply(0.99, 0.99)).fetchImpl,
 		);
+
 		const after = {
 			category: await idsWhere("category_source = 'jev'"),
 			income: await idsWhere("income_source = 'jev'"),
 		};
+
 		const newCategory = after.category.filter(
 			(id) => !before.category.includes(id),
 		);
+
 		const newIncome = after.income.filter((id) => !before.income.includes(id));
 		expect(newCategory.length).toBeGreaterThan(0);
 		expect(newIncome.length).toBeGreaterThan(0);
@@ -902,22 +989,27 @@ describe("what the Jev run and the names write", () => {
 			)
 			.bind(TODAY)
 			.run();
+
 		const before = {
 			category: await idsWhere("category_source = 'jev'"),
 			income: await idsWhere("income_source = 'jev'"),
 		};
+
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		// The answer carries no details questions, so the switch for them is off (as in the categorize tests).
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, details: false });
 		const jev = fakeJev(() => reply(0.99, 0.99));
 		await categorizePending({ DB: db, JEV_API_KEY: "test-key" }, jev.fetchImpl);
+
 		const after = {
 			category: await idsWhere("category_source = 'jev'"),
 			income: await idsWhere("income_source = 'jev'"),
 		};
+
 		const newCategory = after.category.filter(
 			(id) => !before.category.includes(id),
 		);
+
 		const newIncome = after.income.filter((id) => !before.income.includes(id));
 		expect(newIncome.length).toBeGreaterThan(0);
 		expect(await logIds("category")).toEqual(newCategory);
@@ -928,11 +1020,13 @@ describe("what the Jev run and the names write", () => {
 		const again = await idsWhere("category_source = 'jev'");
 		const allNew = again.filter((id) => !before.category.includes(id));
 		expect(await logIds("category")).toEqual(allNew);
+
 		const dupes = await db
 			.prepare(
 				"SELECT COUNT(*) - COUNT(DISTINCT transaction_id) AS n FROM ai_log WHERE kind = 'category'",
 			)
 			.first<{ n: number }>();
+
 		expect(dupes?.n).toBe(0);
 	});
 
@@ -957,18 +1051,22 @@ describe("what the Jev run and the names write", () => {
 			kind: "name",
 			name: "Something else",
 		});
+
 		const none = await db
 			.prepare("SELECT COUNT(*) AS n FROM ai_log WHERE kind = 'name'")
 			.first<{ n: number }>();
+
 		expect(none?.n).toBe(0);
 
 		await settleSuggestion(db, "ACME*X", { kind: "name", name: "Acme Shop" });
 		await settleSuggestion(db, "ACME*X", { kind: "name", name: "Acme Shop" });
+
 		const names = await db
 			.prepare(
 				"SELECT merchant_raw_name AS name FROM ai_log WHERE kind = 'name'",
 			)
 			.all<{ name: string }>();
+
 		expect(names.results.map((row) => row.name)).toEqual(["ACME*X"]);
 		expect((await readAiTally(db, TODAY)).named).toBe(1);
 	});
@@ -1033,12 +1131,14 @@ describe("what the Jev run and the names write", () => {
 			)
 			.bind(TODAY, TODAY)
 			.run();
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
-		const groupId = category?.id as number;
+
+		const groupId = present(category?.id);
 		expect(
 			await saveOrganizeGroup(db, ["ORG*BANK"], groupId, "ORG*BANK", "test"),
 		).toHaveLength(1);
@@ -1063,12 +1163,14 @@ describe("what the Jev run and the names write", () => {
 		});
 		await chargeAt("ORG*FIRST");
 		await chargeAt("ORG*SECOND");
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
-		const groupId = category?.id as number;
+
+		const groupId = present(category?.id);
 		// A first save files ORG*FIRST with no name, so its suggestion stays pending.
 		expect(
 			await saveOrganizeGroup(db, ["ORG*FIRST"], groupId, null, "test"),
@@ -1117,28 +1219,33 @@ describe("what the Jev run and the names write", () => {
 			displayName: "Group Shop",
 		});
 		const keys = ["GRP*ONE", "GRP*TWO", "GRP*BANK", "GRP*DONE", "GRP*NEW"];
+
 		for (const key of keys) await chargeAt(key);
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		expect(
 			await saveOrganizeGroup(
 				db,
 				keys,
-				category?.id as number,
+				present(category?.id),
 				"Group Shop",
 				"test",
 			),
 		).toHaveLength(5);
 
 		const day = await householdToday(db);
+
 		const rows = await db
 			.prepare(
 				"SELECT merchant_raw_name AS name, household_day AS day FROM ai_log WHERE kind = 'name' ORDER BY merchant_raw_name",
 			)
 			.all<{ name: string; day: string }>();
+
 		expect(rows.results).toEqual([
 			{ name: "GRP*ONE", day },
 			{ name: "GRP*TWO", day },
@@ -1165,41 +1272,35 @@ describe("what the Jev run and the names write", () => {
 				)
 				.bind(TODAY),
 		]);
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
+
 		const keys = Array.from({ length: 600 }, (_, i) => `BIG SHOP ${i + 1}`);
-		let statements = 0;
-		const counted = new Proxy(db, {
-			get(target, property) {
-				const value = Reflect.get(target, property);
-				if (property === "prepare")
-					return (sql: string) => {
-						statements += 1;
-						return target.prepare(sql);
-					};
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
+		const prepare = vi.spyOn(db, "prepare");
+
 		expect(
 			await saveOrganizeGroup(
-				counted,
+				db,
 				keys,
-				category?.id as number,
+				present(category?.id),
 				"Big Shop",
 				"test",
 			),
 		).toHaveLength(600);
-		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
+		expect(prepare.mock.calls.length).toBeLessThan(D1_STATEMENT_LIMIT);
 		expect(await logNames()).toHaveLength(600);
+
 		const categorized = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'BIG SHOP %' AND category_id = ?",
 			)
 			.bind(category?.id)
 			.first<{ n: number }>();
+
 		expect(categorized?.n).toBe(600);
 	});
 
@@ -1225,13 +1326,16 @@ describe("what the Jev run and the names write", () => {
 				)
 				.bind(TODAY),
 		]);
+
 		const category = await db
 			.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
 			)
 			.first<{ id: number }>();
-		const categoryId = category?.id as number;
+
+		const categoryId = present(category?.id);
 		const keys = Array.from({ length: 600 }, (_, i) => `RULE SHOP ${i + 101}`);
+
 		const savedIds = await saveOrganizeGroup(
 			db,
 			keys,
@@ -1239,34 +1343,28 @@ describe("what the Jev run and the names write", () => {
 			null,
 			"test",
 		);
+
 		expect(savedIds).toHaveLength(600);
-		let statements = 0;
-		const counted = new Proxy(db, {
-			get(target, property) {
-				const value = Reflect.get(target, property);
-				if (property === "prepare")
-					return (sql: string) => {
-						statements += 1;
-						return target.prepare(sql);
-					};
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
+		const prepare = vi.spyOn(db, "prepare");
+
 		const ruled = await setOrganizeRule(
-			counted,
+			db,
 			categoryId,
 			JSON.stringify(savedIds),
 			"Rule shop",
 			"test",
 		);
+
 		expect(ruled).toHaveLength(600);
-		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
+		expect(prepare.mock.calls.length).toBeLessThan(D1_STATEMENT_LIMIT);
+
 		const rules = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM merchants WHERE raw_name LIKE 'RULE SHOP %' AND default_category_id = ?",
 			)
 			.bind(categoryId)
 			.first<{ n: number }>();
+
 		expect(rules?.n).toBe(600);
 	});
 });
@@ -1274,10 +1372,11 @@ describe("what the Jev run and the names write", () => {
 describe("the export and the demo", () => {
 	it("includes the log in Download everything, with no amounts", async () => {
 		const [a] = await someIds(1);
-		await logCategory(a as number, TODAY);
+		await logCategory(present(a), TODAY);
 		// Each table is spread in by name, so its type isn't in the export's own type.
-		const data = (await tallyExport(db)) as unknown as Record<string, unknown>;
-		const rows = data.ai_log as Record<string, unknown>[];
+		const data = await tallyExport(db);
+		// SAFETY: tallyExport selects ai_log's six exported columns, and the test has just logged one row into that table.
+		const rows = exportedTable(data, "ai_log") as AiLogExportRow[];
 		expect(rows).toHaveLength(1);
 		expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
 			"created_at",
@@ -1300,14 +1399,17 @@ describe("the export and the demo", () => {
 		expect((await logIds("income")).length).toBe(
 			seed.transactions.filter((t) => t.flagIncome).length,
 		);
+
 		const dated = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM ai_log l JOIN transactions t ON t.id = l.transaction_id WHERE l.household_day = t.date",
 			)
 			.first<{ n: number }>();
+
 		const total = await db
 			.prepare("SELECT COUNT(*) AS n FROM ai_log")
 			.first<{ n: number }>();
+
 		expect(dated?.n).toBe(total?.n);
 		expect((await readAiTally(db, TODAY)).sorted).toBeGreaterThan(0);
 	});

@@ -21,7 +21,19 @@ const BASE = "http://tally.test";
 
 async function request(path: string, init?: RequestInit) {
 	const res = await exports.default.fetch(BASE + path, init);
+
 	return { res, html: await res.text() };
+}
+
+/** A row of `SELECT *` or a column alias query: every value is a SQL string, number or null. */
+type SqlRow = Record<string, string | number | null>;
+
+/** The row a query returned; fails the test when the query returned none. */
+function requireRow<Row>(row: Row | null | undefined): Row {
+	if (row === null || row === undefined)
+		throw new Error("expected the query to return a row");
+
+	return row;
 }
 
 beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
@@ -63,6 +75,7 @@ describe("adding cash", () => {
 
 	it("refuses Add cash with no amount, saying so in role=alert, and saves nothing", async () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
+
 		const post = (body: string) =>
 			request("/transactions/cash", {
 				method: "POST",
@@ -73,6 +86,7 @@ describe("adding cash", () => {
 				},
 				body,
 			});
+
 		const missing = await post(
 			new URLSearchParams({
 				date: today,
@@ -80,6 +94,7 @@ describe("adding cash", () => {
 				category: "1",
 			}).toString(),
 		);
+
 		const blank = await post(
 			new URLSearchParams({
 				date: today,
@@ -88,12 +103,14 @@ describe("adding cash", () => {
 				category: "1",
 			}).toString(),
 		);
+
 		for (const { res, html } of [missing, blank]) {
 			expect(res.status).toBe(422);
 			expect(html).toMatch(
 				/<p id="cash-amount-error" role="alert"[^>]*>Enter an amount in dollars and cents\.<\/p>/,
 			);
 		}
+
 		expect(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name='No amount market'",
@@ -106,6 +123,7 @@ describe("adding cash", () => {
 			"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE type='cash')",
 		).run();
 		await env.DB.prepare("DELETE FROM accounts WHERE type='cash'").run();
+
 		const post = () =>
 			request("/transactions/cash", {
 				method: "POST",
@@ -122,15 +140,18 @@ describe("adding cash", () => {
 					note: "Peaches",
 				}),
 			});
+
 		const [{ res }] = await Promise.all([post(), post()]);
 		expect(res.status).toBe(200);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Added Farmers market", type: "success" },
 			announce: "Added $20.45 cash spending at Farmers market.",
 		});
+
 		const account = await env.DB.prepare(
 			"SELECT * FROM accounts WHERE type='cash'",
 		).all();
+
 		expect(account.results).toHaveLength(1);
 		expect(
 			(
@@ -144,9 +165,11 @@ describe("adding cash", () => {
 			plaid_item_id: null,
 			plaid_account_id: null,
 		});
+
 		const tx = await env.DB.prepare(
 			"SELECT amount_cents, plaid_transaction_id, category_source, flag_income, updated_by FROM transactions WHERE raw_name='Farmers market'",
 		).first();
+
 		expect(tx).toMatchObject({
 			amount_cents: 2045,
 			plaid_transaction_id: null,
@@ -166,6 +189,7 @@ describe("adding cash", () => {
 			},
 			body: "date=2026-02-31&amount=90071992547409.92&merchant=&category=999",
 		});
+
 		expect(res.status).toBe(422);
 		expect((html.match(/role="alert"/g) ?? []).length).toBeGreaterThanOrEqual(
 			3,
@@ -176,8 +200,10 @@ describe("adding cash", () => {
 
 	it("rejects cash dates more than ten years before today and accepts the boundary", async () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
+
 		const dateYearsBack = (years: number) =>
 			`${String(Number(today.slice(0, 4)) - years).padStart(4, "0")}${today.slice(4)}`;
+
 		for (const [date, accepted, message] of [
 			[dateYearsBack(10), true, ""],
 			[dateYearsBack(11), false, "Choose a date within the last 10 years."],
@@ -202,6 +228,7 @@ describe("adding cash", () => {
 					note: "",
 				}),
 			});
+
 			if (accepted) expect(res.status).toBe(200);
 			else {
 				expect(res.status).toBe(422);
@@ -220,6 +247,7 @@ describe("adding cash", () => {
 			},
 			body: "date=2026-01-02&amount=abc&merchant=&category=1",
 		});
+
 		expect(html).toContain("Enter an amount in dollars and cents.");
 		expect(html).not.toContain("Enter an amount greater than zero.");
 		expect(html).toContain("Enter where you spent it.");
@@ -240,6 +268,7 @@ describe("adding cash", () => {
 				category: "1",
 			}),
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Enter an amount greater than zero.");
 		expect(
@@ -262,12 +291,15 @@ describe("adding cash", () => {
 
 	it("returns to the filtered list after save, close, and cancel", async () => {
 		const back = "/transactions?category=1&amp;month=all";
+
 		const sheet = await request(
 			`/transactions/cash/new?back=${encodeURIComponent("/transactions?category=1&month=all")}`,
 		);
+
 		// Closing, or Cancel, returns focus to Add cash (#87).
 		expect(sheet.html).toContain(`href="${back}&amp;focus=add-cash"`);
 		expect(sheet.html).toContain(`name="back" value="${back}"`);
+
 		const { res } = await request("/transactions/cash", {
 			method: "POST",
 			redirect: "manual",
@@ -284,6 +316,7 @@ describe("adding cash", () => {
 				back: "/transactions?category=1&month=all",
 			}),
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe(
 			"/transactions?category=1&month=all",
@@ -295,6 +328,7 @@ describe("adding cash", () => {
 				).first<{ amount_cents: number }>()
 			)?.amount_cents,
 		).toBe(800);
+
 		const saved = await request("/transactions/cash", {
 			method: "POST",
 			headers: {
@@ -311,6 +345,7 @@ describe("adding cash", () => {
 				back: "/transactions?category=1&month=all",
 			}),
 		});
+
 		expect(saved.res.headers.get("HX-Push-Url")).toBe(
 			"/transactions?category=1&month=all",
 		);
@@ -337,11 +372,13 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Bill-linked cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9600,'Linked cash bill',1850,5,'monthly',1,'BILL-LINKED CASH')",
 		).run();
@@ -353,6 +390,7 @@ describe("cash lifecycle", () => {
 
 		return { id, today, month };
 	};
+
 	const saveCashEdit = (id: number, date: string, amount: string) =>
 		request(`/transactions/${id}`, {
 			method: "POST",
@@ -363,6 +401,7 @@ describe("cash lifecycle", () => {
 			},
 			body: new URLSearchParams({ date, amount, back: "/transactions" }),
 		});
+
 	const linkedPayment = (id: number) =>
 		env.DB.prepare(
 			"SELECT bill_id,period,transaction_id,status FROM bill_payments WHERE transaction_id=?",
@@ -424,14 +463,18 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
+
 		expect(created.res.status).toBe(200);
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Editable cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const monthSummary = async () => {
 			const data = await loadMonth(env.DB, "2026-10");
+
 			return summarizeMonth({
 				month: "2026-10",
 				categories: data.categories,
@@ -440,11 +483,13 @@ describe("cash lifecycle", () => {
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
 		};
+
 		const spentBefore = await monthSummary();
 		const panel = await request(`/transactions/${id}`);
 		expect(panel.html).toContain("Cash · you entered this");
 		expect(panel.html).toContain(`name="amount"`);
 		expect(panel.html).toContain(`name="date"`);
+
 		const saved = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -458,6 +503,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -484,13 +530,14 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		return (
+
+		return requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(merchant)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 	};
 
 	it("refuses an amount of zero in the edit panel and keeps the amount", async () => {
@@ -508,6 +555,7 @@ describe("cash lifecycle", () => {
 
 	it("saves a cash entry's category, note, date and amount from one Save", async () => {
 		const id = await createCash("One save cash", "18.50");
+
 		const saved = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -523,6 +571,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -547,6 +596,7 @@ describe("cash lifecycle", () => {
 		)
 			.bind(today, id, id)
 			.run();
+
 		const refused = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -561,6 +611,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(refused.res.status).toBe(422);
 		expect(refused.html).toContain(
 			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
@@ -576,15 +627,19 @@ describe("cash lifecycle", () => {
 
 	it("treats a cash entry deleted while it is being saved as an error, not a refund refusal", async () => {
 		const id = await createCash("Vanishing cash", "18.50");
+
+		// SAFETY: saveEdit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
 				await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
 					.bind(id)
 					.run();
+
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
+
 		await expect(
 			saveEdit(
 				db,
@@ -620,14 +675,17 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Future guard' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
 		tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 		const future = tomorrow.toISOString().slice(0, 10);
+
 		const rejected = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -641,21 +699,26 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(rejected.res.status).toBe(422);
 		expect(rejected.html).toContain("Choose today or an earlier date.");
+
 		const bankRow = await env.DB.prepare(
 			"SELECT t.id, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id LIMIT 1",
 		).first<{ id: number; bank: string }>();
-		const bankId = bankRow?.id as number;
+
+		const bankId = requireRow(bankRow).id;
 		const bankPanel = await request(`/transactions/${bankId}`);
 		expect(bankPanel.html).toContain(
 			`From ${bankRow?.bank}. Its date and amount stay as the bank sent them. If something&#39;s off, you can split it, exclude it, or count it in another month.`,
 		);
+
 		const bank = await env.DB.prepare(
 			"SELECT date,amount_cents FROM transactions WHERE id=?",
 		)
 			.bind(bankId)
 			.first();
+
 		await request(`/transactions/${bankId}`, {
 			method: "POST",
 			headers: {
@@ -693,11 +756,13 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Split edit' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await saveSplit(
 			env.DB,
 			id,
@@ -707,6 +772,7 @@ describe("cash lifecycle", () => {
 			],
 			"demo",
 		);
+
 		const rejected = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -720,6 +786,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(rejected.res.status).toBe(422);
 		expect(rejected.html).toContain(
 			"The parts add up to $18.50. Change them to match $20.00.",
@@ -736,6 +803,7 @@ describe("cash lifecycle", () => {
 		const tomorrow = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
 		tomorrow.setUTCDate(tomorrow.getUTCDate() - 1);
 		const moved = tomorrow.toISOString().slice(0, 10);
+
 		const saved = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -749,6 +817,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			(
@@ -763,6 +832,7 @@ describe("cash lifecycle", () => {
 
 	describe("linking a split cash entry in the same save as its amount", () => {
 		type LinkRow = { amountCents: number; refundOfId: number | null };
+
 		const linkState = async (id: number) => ({
 			parent: await env.DB.prepare(
 				"SELECT amount_cents AS amountCents, refund_of_id AS refundOfId FROM transactions WHERE id = ?",
@@ -777,6 +847,7 @@ describe("cash lifecycle", () => {
 					.all<LinkRow>()
 			).results,
 		});
+
 		/** A $90.00 cash entry split into $60.00 and $30.00, and a $100.00 cash purchase to link it to. */
 		const splitAndPurchase = async () => {
 			const id = await createCash("Link split cash", "90.00");
@@ -789,8 +860,10 @@ describe("cash lifecycle", () => {
 				],
 				"demo",
 			);
+
 			return { id, purchase: await createCash("Link purchase cash", "100.00") };
 		};
+
 		/** The panel's save that links the entry to the purchase and sets its amount to `cashAmountCents`. */
 		const linkAndSetAmount = (
 			id: number,
@@ -860,11 +933,13 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Split part cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await saveSplit(
 			env.DB,
 			id,
@@ -874,19 +949,22 @@ describe("cash lifecycle", () => {
 			],
 			"demo",
 		);
-		const part = (
+
+		const part = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id=? ORDER BY id LIMIT 1",
 			)
 				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		const panel = await request(`/transactions/${part}`);
 		expect(panel.res.status).toBe(200);
 		expect(panel.html).not.toContain(`name="amount"`);
 		expect(panel.html).not.toContain(`name="date"`);
 		expect(panel.html).not.toContain("Cash · you entered this");
 		expect(panel.html).toContain("$9.00");
+
 		const saved = await request(`/transactions/${part}`, {
 			method: "POST",
 			headers: {
@@ -896,6 +974,7 @@ describe("cash lifecycle", () => {
 			},
 			body: new URLSearchParams({ category: "2", back: "/transactions" }),
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
@@ -924,18 +1003,23 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Ten year cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const today = todayIn(DEFAULT_TIME_ZONE);
+
 		const tenYearsBefore = (days: number) => {
 			const day = new Date(`${today}T00:00:00Z`);
 			day.setUTCFullYear(day.getUTCFullYear() - 10);
 			day.setUTCDate(day.getUTCDate() + days);
+
 			return day.toISOString().slice(0, 10);
 		};
+
 		const tooOld = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -949,8 +1033,10 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(tooOld.res.status).toBe(422);
 		expect(tooOld.html).toContain("Choose a date within the last 10 years.");
+
 		const boundary = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -964,6 +1050,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(boundary.res.status).toBe(200);
 		expect(
 			await env.DB.prepare("SELECT date FROM transactions WHERE id=?")
@@ -991,13 +1078,16 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Month move cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const loadSpent = async () => {
 			const data = await loadMonth(env.DB, today.slice(0, 7));
+
 			return summarizeMonth({
 				month: today.slice(0, 7),
 				categories: data.categories,
@@ -1006,6 +1096,7 @@ describe("cash lifecycle", () => {
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
 		};
+
 		const before = await loadSpent();
 		await request(`/transactions/${id}`, {
 			method: "POST",
@@ -1038,16 +1129,19 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Refund guard cash' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,?, -1500, 'Cash refund', ?, 1 FROM transactions WHERE id=?",
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE), id, id)
 			.run();
+
 		const tooSmall = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -1061,6 +1155,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(tooSmall.res.status).toBe(422);
 		expect(tooSmall.html).toContain(
 			"Linked refunds add up to $15.00, so the amount can&#39;t be less than that.",
@@ -1068,6 +1163,7 @@ describe("cash lifecycle", () => {
 		const yesterday = new Date(`${todayIn(DEFAULT_TIME_ZONE)}T00:00:00Z`);
 		yesterday.setUTCDate(yesterday.getUTCDate() - 1);
 		const date = yesterday.toISOString().slice(0, 10);
+
 		const moved = await request(`/transactions/${id}`, {
 			method: "POST",
 			headers: {
@@ -1081,6 +1177,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(moved.res.status).toBe(200);
 		expect(
 			(
@@ -1093,6 +1190,7 @@ describe("cash lifecycle", () => {
 
 	it("uses the cash-delete toast wording for a split entry and Undo restores its parent and parts", async () => {
 		const name = "Split market";
+
 		const created = await request("/transactions/cash", {
 			method: "POST",
 			headers: {
@@ -1107,12 +1205,15 @@ describe("cash lifecycle", () => {
 				category: "1",
 			}),
 		});
+
 		expect(created.res.status).toBe(200);
+
 		const entry = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 		)
 			.bind(name)
 			.first<{ id: number }>();
+
 		if (!entry) throw new Error("created cash entry missing");
 
 		const split = await request(`/transactions/${entry.id}/split`, {
@@ -1123,19 +1224,22 @@ describe("cash lifecycle", () => {
 			},
 			body: "part_category=1&part_category=2&part_amount=7.25&part_amount=12.75&back=%2Ftransactions",
 		});
+
 		expect(split.res.status).toBe(200);
+
 		const before = {
 			parent: await env.DB.prepare("SELECT * FROM transactions WHERE id=?")
 				.bind(entry.id)
-				.first(),
+				.first<SqlRow>(),
 			parts: (
 				await env.DB.prepare(
 					"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
 				)
 					.bind(entry.id)
-					.all()
+					.all<SqlRow>()
 			).results,
 		};
+
 		expect(before.parts).toHaveLength(2);
 
 		const deleted = await request(`/transactions/${entry.id}/delete`, {
@@ -1147,6 +1251,7 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=%2Ftransactions&confirm=1",
 		});
+
 		const feedback = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}");
 		expect(deleted.res.status).toBe(200);
 		expect(feedback.toast.message).toBe("Deleted Split market, $20.00.");
@@ -1167,31 +1272,31 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(restored.res.status).toBe(200);
+
 		const restoredParent = await env.DB.prepare(
 			"SELECT * FROM transactions WHERE raw_name=? AND is_split=1 ORDER BY id DESC LIMIT 1",
 		)
 			.bind(name)
-			.first<Record<string, unknown>>();
+			.first<SqlRow>();
+
 		const restoredParts = (
 			await env.DB.prepare(
 				"SELECT * FROM transactions WHERE parent_id=? ORDER BY id",
 			)
 				.bind(restoredParent?.id)
-				.all<Record<string, unknown>>()
+				.all<SqlRow>()
 		).results;
-		const withoutIds = ({
-			id: _id,
-			parent_id: _parentId,
-			...row
-		}: Record<string, unknown>) => row;
+
+		const withoutIds = ({ id: _id, parent_id: _parentId, ...row }: SqlRow) =>
+			row;
+
 		expect(restoredParent).not.toBeNull();
-		expect(withoutIds(restoredParent as Record<string, unknown>)).toEqual(
-			withoutIds(before.parent as Record<string, unknown>),
+		expect(withoutIds(requireRow(restoredParent))).toEqual(
+			withoutIds(requireRow(before.parent)),
 		);
-		expect(restoredParts.map(withoutIds)).toEqual(
-			(before.parts as Record<string, unknown>[]).map(withoutIds),
-		);
+		expect(restoredParts.map(withoutIds)).toEqual(before.parts.map(withoutIds));
 	});
 
 	it("is left out of Accounts and net worth", async () => {
@@ -1220,6 +1325,7 @@ describe("cash lifecycle", () => {
 		const cash = await env.DB.prepare(
 			"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		expect(cash).not.toBeNull();
 		await request(`/transactions/${cash?.id}`, {
 			method: "POST",
@@ -1266,17 +1372,20 @@ describe("cash lifecycle", () => {
 				},
 				body: new URLSearchParams(fields),
 			});
+
 		await cashPost({
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "12.00",
 			merchant: "Rule cash shop",
 			category: "1",
 		});
-		const id = (
+
+		const id = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Rule cash shop' ORDER BY id DESC LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const key = (
 			await env.DB.prepare(
 				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
@@ -1284,18 +1393,21 @@ describe("cash lifecycle", () => {
 				.bind(id)
 				.first<{ key: string }>()
 		)?.key;
+
 		const categoryName = async (categoryId: number) =>
 			(
 				await env.DB.prepare("SELECT name FROM categories WHERE id = ?")
 					.bind(categoryId)
 					.first<{ name: string }>()
 			)?.name;
+
 		const setRule = (categoryId: number) =>
 			env.DB.prepare(
 				"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
 			)
 				.bind(key, categoryId)
 				.run();
+
 		const askAboutDelete = () =>
 			request(`/transactions/${id}/delete`, {
 				method: "POST",
@@ -1310,9 +1422,11 @@ describe("cash lifecycle", () => {
 		// The store's rule is for the entry's own category (1): the tick opens ticked and says what the rule is.
 		await setRule(1);
 		const matching = await askAboutDelete();
+
 		const matchingSheet = matching.html.slice(
 			matching.html.indexOf('role="dialog"'),
 		);
+
 		expect(matching.res.status).toBe(200);
 		expect(matchingSheet).toContain("Delete Rule cash shop, $12.00?");
 		expect(matchingSheet).toMatch(/name="always" value="1" checked/);
@@ -1339,9 +1453,11 @@ describe("cash lifecycle", () => {
 			"UPDATE categories SET archived = 1 WHERE id = 1",
 		).run();
 		const archived = await askAboutDelete();
+
 		const archivedSheet = archived.html.slice(
 			archived.html.indexOf('role="dialog"'),
 		);
+
 		expect(archivedSheet).toMatch(/name="always" value="1" checked/);
 		expect(archivedSheet).toContain(
 			`Rule cash shop is always ${await categoryName(1)}. Untick it and save to remove the rule.`,
@@ -1352,6 +1468,7 @@ describe("cash lifecycle", () => {
 		const cash = await env.DB.prepare(
 			"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		await request(`/transactions/${cash?.id}/split`, {
 			method: "POST",
 			headers: {
@@ -1360,11 +1477,13 @@ describe("cash lifecycle", () => {
 			},
 			body: "part_category=1&part_category=2&part_amount=10&part_amount=10&back=%2Ftransactions",
 		});
+
 		const part = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id=? LIMIT 1",
 		)
 			.bind(cash?.id)
 			.first<{ id: number }>();
+
 		expect((await request(`/transactions/${part?.id}`)).html).not.toContain(
 			"Delete cash transaction",
 		);
@@ -1380,31 +1499,38 @@ describe("cash lifecycle", () => {
 				})
 			).res.status,
 		).toBe(404);
+
 		const bill = await env.DB.prepare(
 			"SELECT id FROM bills WHERE id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
 		).first<{
 			id: number;
 		}>();
+
 		await env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2026-10', ?, 'user', 'linked')",
 		)
 			.bind(bill?.id, cash?.id)
 			.run();
+
 		const refund = await env.DB.prepare(`INSERT INTO transactions
 			(account_id,date,amount_cents,raw_name,refund_of_id,flag_income,updated_by)
 			SELECT id, '2026-10-06', -500, 'Cash refund', ?, 0, 'demo'
 			FROM accounts WHERE type!='cash' LIMIT 1`)
 			.bind(cash?.id)
 			.run();
+
 		const refundId = Number(refund.meta.last_row_id);
 		const sheet = await request(`/transactions/${cash?.id}`);
 		expect(sheet.html).toContain("Delete cash transaction");
+
 		const bank = await env.DB.prepare(
 			"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type!='cash' LIMIT 1",
 		).first<{ id: number }>();
+
 		expect((await request(`/transactions/${bank?.id}`)).html).not.toContain(
 			"Delete cash transaction",
 		);
+
 		const confirm = await request(`/transactions/${cash?.id}/delete`, {
 			method: "POST",
 			headers: {
@@ -1414,11 +1540,14 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=/transactions",
 		});
+
 		expect(confirm.html).not.toContain("This can&#39;t be undone.");
 		expect(confirm.html).toContain(">Keep it</a>");
+
 		const safeBeforeDelete = (await request("/")).html
 			.match(/Safe to spend<\/p>\s*<p[^>]*>(.*?)<\/p>/s)?.[1]
 			?.trim();
+
 		const deleted = await request(`/transactions/${cash?.id}/delete`, {
 			method: "POST",
 			headers: {
@@ -1428,6 +1557,7 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=/transactions&confirm=1",
 		});
+
 		const feedback = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}");
 		expect(deleted.res.status).toBe(200);
 		expect(feedback.toast).toMatchObject({
@@ -1452,6 +1582,7 @@ describe("cash lifecycle", () => {
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(0);
+
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -1464,10 +1595,12 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(restored.res.status).toBe(200);
 		expect(
 			JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}").announce,
 		).toBe("Farmers market is back.");
+
 		const restoredCash = await env.DB.prepare(
 			"SELECT id, raw_name, amount_cents, date FROM transactions WHERE raw_name='Farmers market' AND is_split=1 ORDER BY id DESC LIMIT 1",
 		).first<{
@@ -1476,6 +1609,7 @@ describe("cash lifecycle", () => {
 			amount_cents: number;
 			date: string;
 		}>();
+
 		expect(restoredCash).toMatchObject({
 			raw_name: "Farmers market",
 			amount_cents: 2000,
@@ -1510,6 +1644,7 @@ describe("cash lifecycle", () => {
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(1);
+
 		const reused = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -1522,6 +1657,7 @@ describe("cash lifecycle", () => {
 				back: "/transactions",
 			}),
 		});
+
 		expect(
 			JSON.parse(reused.res.headers.get("HX-Trigger") ?? "{}").toast.message,
 		).toBe("That cash entry is already back.");
@@ -1540,6 +1676,7 @@ describe("cash lifecycle", () => {
 				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>()
 		)?.id;
+
 		const deleted = await request(`/transactions/${id}/delete`, {
 			method: "POST",
 			headers: {
@@ -1549,13 +1686,17 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=%2Ftransactions&confirm=1",
 		});
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+
+		const token: string = JSON.parse(
+			deleted.res.headers.get("HX-Trigger") ?? "{}",
+		).toast.undo;
+
 		await env.DB.prepare(
 			"UPDATE cash_delete_holds SET created_at=? WHERE token=?",
 		)
 			.bind(Date.now() - 10_001, token)
 			.run();
+
 		for (const value of [token, crypto.randomUUID()]) {
 			const refused = await request("/transactions/undo-cash-delete", {
 				method: "POST",
@@ -1566,6 +1707,7 @@ describe("cash lifecycle", () => {
 				},
 				body: new URLSearchParams({ token: value, back: "/transactions" }),
 			});
+
 			expect(
 				JSON.parse(refused.res.headers.get("HX-Trigger") ?? "{}").toast.type,
 			).toBe("error");
@@ -1591,14 +1733,17 @@ describe("cash lifecycle", () => {
 				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>()
 		)?.id;
+
 		const bill = await env.DB.prepare(
 			"SELECT id, name FROM bills WHERE id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
 		).first<{ id: number; name: string }>();
+
 		await env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2026-10', ?, 'user', 'linked')",
 		)
 			.bind(bill?.id, id)
 			.run();
+
 		const deleted = await request(`/transactions/${id}/delete`, {
 			method: "POST",
 			headers: {
@@ -1608,18 +1753,23 @@ describe("cash lifecycle", () => {
 			},
 			body: "back=%2Ftransactions&confirm=1",
 		});
-		const token = JSON.parse(deleted.res.headers.get("HX-Trigger") ?? "{}")
-			.toast.undo as string;
+
+		const token: string = JSON.parse(
+			deleted.res.headers.get("HX-Trigger") ?? "{}",
+		).toast.undo;
+
 		const otherTransaction = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE id!=? LIMIT 1",
 		)
 			.bind(id)
 			.first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?, '2026-10', ?, 'user', 'linked')",
 		)
 			.bind(bill?.id, otherTransaction?.id)
 			.run();
+
 		const restored = await request("/transactions/undo-cash-delete", {
 			method: "POST",
 			headers: {
@@ -1629,8 +1779,10 @@ describe("cash lifecycle", () => {
 			},
 			body: new URLSearchParams({ token, back: "/transactions" }),
 		});
+
 		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.message;
+
 		// A month takes more than one payment (decision 101), so the entry's payment comes back beside the other one.
 		expect(message).toBe("Restored Farmers market.");
 		expect(
@@ -1660,22 +1812,27 @@ describe("cash lifecycle", () => {
 
 	describe("asking before a cash entry is deleted (decision 84, Q57 B)", () => {
 		const form = { "content-type": "application/x-www-form-urlencoded" };
+
 		const ask = (id: number, back = "/transactions") =>
 			request(`/transactions/${id}/delete`, {
 				method: "POST",
 				headers: { Origin: BASE, "HX-Request": "true", ...form },
 				body: new URLSearchParams({ back }),
 			});
+
 		const farmersMarket = async () =>
-			(
+			requireRow(
 				await env.DB.prepare(
 					"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Farmers market'",
-				).first<{ id: number }>()
-			)?.id as number;
+				).first<{ id: number }>(),
+			).id;
+
 		const dialog = (html: string) =>
 			html.slice(html.indexOf('role="dialog"'), html.lastIndexOf("</section>"));
+
 		const deleteForm = (html: string, id: number) => {
 			const from = html.indexOf(`action="/transactions/${id}/delete"`);
+
 			return html.slice(from, html.indexOf("</form>", from));
 		};
 
@@ -1745,8 +1902,10 @@ describe("cash lifecycle", () => {
 		it("announces the swap by moving focus to the question, not the title", async () => {
 			const id = await farmersMarket();
 			const { html } = await ask(id);
+
 			const question =
 				html.match(/<p[^>]*>Delete Farmers market, \$20\.00\?/)?.[0] ?? "";
+
 			expect(question).toContain("autofocus");
 			expect(question).toContain('tabindex="-1"');
 			// Focusing it scrolls Delete and Keep it into view with it on a phone.
@@ -1760,9 +1919,11 @@ describe("cash lifecycle", () => {
 
 		it("Keep it brings the normal sheet back, with Cancel and Save and the title focused", async () => {
 			const id = await farmersMarket();
+
 			const { html } = await request(`/transactions/${id}`, {
 				headers: { "HX-Request": "true" },
 			});
+
 			expect(html).toContain('id="edit-save"');
 			expect(html).toContain(">Save</span>");
 			expect(html).toContain(">Cancel</a>");
@@ -1789,11 +1950,14 @@ describe("cash lifecycle", () => {
 		// The last day of October, when every Groceries row of the demo is in (the demo's spending is paced, #322).
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-31T15:00:00Z"));
+
 		try {
 			await resetDemo(env.DB, "2026-10-31");
+
 			const cash = await env.DB.prepare(
 				"SELECT amount_cents FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND category_id=1 LIMIT 1",
 			).first<{ amount_cents: number }>();
+
 			expect(cash?.amount_cents).toBe(2000);
 			const month = await loadMonth(env.DB, "2026-10");
 			expect(month.transactions).toContainEqual(
@@ -1812,14 +1976,17 @@ describe("cash lifecycle", () => {
 	it("is never touched by a Plaid sync", async () => {
 		const key = btoa("01234567890123456789012345678901");
 		const encrypted = await encryptToken("token", key);
+
 		const item = await env.DB.prepare(
 			"INSERT INTO plaid_items(access_token_encrypted,institution_name,linked_by,plaid_item_id) VALUES(?,'Sync bank','demo','sync-bank') RETURNING id",
 		)
 			.bind(encrypted)
 			.first<{ id: number }>();
+
 		const cashBefore = await env.DB.prepare(
 			"SELECT * FROM transactions WHERE account_id=(SELECT id FROM accounts WHERE type='cash')",
 		).all();
+
 		const fetchImpl = vi.fn(
 			async (url: RequestInfo | URL) =>
 				new Response(
@@ -1837,9 +2004,10 @@ describe("cash lifecycle", () => {
 					{ headers: { "content-type": "application/json" } },
 				),
 		);
+
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: key },
-			item?.id as number,
+			requireRow(item).id,
 			fetchImpl,
 		);
 		expect(
@@ -1854,6 +2022,7 @@ describe("cash lifecycle", () => {
 
 describe("adding cash twice by retrying (a lost reply, a failed render)", () => {
 	const KEY = "6f1c2a52-8c0e-4b5f-9d3a-0a1b2c3d4e5f";
+
 	const post = (fields: Record<string, string>) =>
 		request("/transactions/cash", {
 			method: "POST",
@@ -1871,6 +2040,7 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 				...fields,
 			}),
 		});
+
 	const recorded = async () =>
 		(
 			await env.DB.prepare(
@@ -1881,10 +2051,13 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 	it("carries a one-time key in the form, new every time the form is drawn", async () => {
 		const keyOf = (html: string) =>
 			html.match(/<input type="hidden" name="entry_key" value="([^"]+)"/)?.[1];
+
 		const first = keyOf((await request("/transactions/cash/new")).html);
 		const second = keyOf((await request("/transactions/cash/new")).html);
+
 		const uuid =
 			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 		expect(first).toMatch(uuid);
 		expect(second).toMatch(uuid);
 		expect(second).not.toBe(first);
@@ -1895,8 +2068,10 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 		const again = await post({ entry_key: KEY });
 		expect(first.res.status).toBe(200);
 		expect(again.res.status).toBe(200);
+
 		const toast = (res: Response) =>
 			JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
 		expect(toast(again.res)).toEqual(toast(first.res));
 		expect(toast(again.res).toast.message).toBe("Added Retried market");
 		expect(await recorded()).toBe(1);
@@ -1923,8 +2098,10 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 			note: "Peaches",
 			amount: "20.45",
 		});
+
 		const saved = (await ofKey()).results;
 		expect(saved).toHaveLength(1);
+
 		// The reply was lost; the person changes the still-open form and taps Add again.
 		const again = await post({
 			entry_key: KEY,
@@ -1934,6 +2111,7 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 			date: "2026-10-02",
 			note: "",
 		});
+
 		expect(again.res.status).toBe(200);
 		expect((await ofKey()).results).toEqual(saved);
 		expect(saved[0]).toMatchObject({
@@ -1942,8 +2120,10 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 			category_id: 1,
 			note: "Peaches",
 		});
+
 		const triggers = (res: Response) =>
 			JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
 		// The second reply is the first's: the stored row's words, not the form's.
 		expect(triggers(again.res)).toEqual({
 			toast: { message: "Added Retried market", type: "success" },
@@ -1962,22 +2142,26 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 	it("leaves a split entry untouched by a repeat: the parent and its parts keep their amounts", async () => {
 		await post({ entry_key: KEY, amount: "20.00" });
 		const parent = (await ofKey()).results[0];
+
 		const split = await saveSplit(
 			env.DB,
-			parent?.id as number,
+			requireRow(parent).id,
 			[
 				{ categoryId: 1, amountCents: 1200 },
 				{ categoryId: 2, amountCents: 800 },
 			],
 			"test",
 		);
+
 		expect(split.saved).toBe(true);
+
 		const parts = () =>
 			env.DB.prepare(
 				"SELECT amount_cents, category_id FROM transactions WHERE parent_id = ? ORDER BY amount_cents",
 			)
 				.bind(parent?.id)
 				.all();
+
 		const before = await parts();
 		expect(before.results).toHaveLength(2);
 		const again = await post({ entry_key: KEY, amount: "99.00" });
@@ -2001,6 +2185,7 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 			post({ entry_key: KEY }),
 			post({ entry_key: KEY }),
 		]);
+
 		expect([a.res.status, b.res.status]).toEqual([200, 200]);
 		expect(await recorded()).toBe(1);
 	});
@@ -2036,9 +2221,11 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 	it("draws a fresh key when it sends the form back with an error", async () => {
 		const { res, html } = await post({ entry_key: KEY, merchant: "" });
 		expect(res.status).toBe(422);
+
 		const key = html.match(
 			/<input type="hidden" name="entry_key" value="([^"]+)"/,
 		)?.[1];
+
 		expect(key).toBeTruthy();
 		expect(key).not.toBe(KEY);
 		expect(await recorded()).toBe(0);
@@ -2105,25 +2292,32 @@ describe("the cash form's Category group", () => {
 
 describe("changing a split cash entry's parts (Change the parts)", () => {
 	const today = () => todayIn(DEFAULT_TIME_ZONE);
-	const post = (path: string, fields: [string, string][], htmx = true) =>
-		request(path, {
+
+	const post = (path: string, fields: [string, string][], htmx = true) => {
+		const headers = new Headers({
+			Origin: BASE,
+			"content-type": "application/x-www-form-urlencoded",
+		});
+
+		if (htmx) headers.set("HX-Request", "true");
+
+		return request(path, {
 			method: "POST",
 			redirect: "manual",
-			headers: {
-				Origin: BASE,
-				...(htmx ? { "HX-Request": "true" } : {}),
-				"content-type": "application/x-www-form-urlencoded",
-			},
+			headers,
 			body: new URLSearchParams(fields),
 		});
+	};
+
 	const idByName = async (merchant: string) =>
-		(
+		requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(merchant)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 	const partsOf = async (id: number) =>
 		(
 			await env.DB.prepare(
@@ -2132,6 +2326,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				.bind(id)
 				.all<{ id: number; categoryId: number; amountCents: number }>()
 		).results;
+
 	const stateOf = async (id: number) => ({
 		parent: await env.DB.prepare(
 			"SELECT amount_cents AS amountCents, is_split AS isSplit FROM transactions WHERE id=?",
@@ -2143,9 +2338,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"SELECT refund_of_id AS refundOfId, amount_cents AS amountCents FROM transactions WHERE raw_name='Part refund'",
 		).first(),
 	});
+
 	const spentThisMonth = async () => {
 		const month = today().slice(0, 7);
 		const data = await loadMonth(env.DB, month);
+
 		return summarizeMonth({
 			month,
 			categories: data.categories,
@@ -2154,6 +2351,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			unpaidDueBillsCents: 0,
 		}).totalSpentCents;
 	};
+
 	/**
 	 * A $90.00 cash entry split into Groceries $60.00 (part A) and Household $30.00 (part B), with a
 	 * $20.00 refund linked to B.
@@ -2189,9 +2387,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		)
 			.bind(b?.id, id)
 			.run();
-		return { id, a: a?.id as number, b: b?.id as number };
+
+		return { id, a: requireRow(a).id, b: requireRow(b).id };
 	};
+
 	const BILL = 9950;
+
 	/** How many of the bill's payments this month are the person's own Not this one on the transaction. */
 	const dismissalsOn = async (transactionId: number) =>
 		(
@@ -2201,6 +2402,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				.bind(BILL, today().slice(0, 7), transactionId)
 				.first<{ n: number }>()
 		)?.n;
+
 	/** A monthly $30.00 bill paid by the cash entries of `merchant`, due on today's day of the month. */
 	const insertCashBill = (bill: number, merchant: string) =>
 		env.DB.prepare(
@@ -2208,6 +2410,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		)
 			.bind(bill, Number(today().slice(8, 10)), merchant)
 			.run();
+
 	/** A person's own Not this one on a transaction, for the bill's payment this month. */
 	const notThisOne = (bill: number, transactionId: number) =>
 		env.DB.prepare(
@@ -2215,6 +2418,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		)
 			.bind(bill, today().slice(0, 7), transactionId)
 			.run();
+
 	/** Saves (or adds a part to) the correction sheet: a posted total of $100.00 over the saved $90.00. */
 	const correction = (
 		id: number,
@@ -2230,12 +2434,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["total", total],
 			["amount_was", amountWas],
 			...extra,
-			...parts.flatMap(([partId, category, amount]) => [
-				["part_id", partId] as [string, string],
-				["part_category", category] as [string, string],
-				["part_amount", amount] as [string, string],
+			...parts.flatMap(([partId, category, amount]): [string, string][] => [
+				["part_id", partId],
+				["part_category", category],
+				["part_amount", amount],
 			]),
 		]);
+
 	/** The saved parts, A and B, each at its own amount. */
 	const savedParts = (a: number, b: number): [string, string, string][] => [
 		[String(a), "1", "60.00"],
@@ -2245,11 +2450,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("offers Change the parts when an amount breaks the parts, and saves nothing", async () => {
 		const { id } = await splitCash("Parts refusal");
 		const before = await stateOf(id);
+
 		const { res, html } = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "100.00"],
 			["back", "/transactions"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
@@ -2264,6 +2471,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("offers Change the parts when the parts change between the check and the save, and saves nothing more", async () => {
 		const { id, a, b } = await splitCash("Parts change in save");
 		const realBatch = env.DB.batch.bind(env.DB);
+
 		// Another save moves part B to $40.00 after the check, in the save's own batch.
 		const spy = vi
 			.spyOn(env.DB, "batch")
@@ -2273,9 +2481,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				)
 					.bind(b)
 					.run();
+
 				return realBatch(statements);
 			});
+
 		let batches = 0;
+
 		const answer = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "90.00"],
@@ -2284,6 +2495,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			batches = spy.mock.calls.length;
 			spy.mockRestore();
 		});
+
 		expect(batches).toBe(1);
 		expect(answer.res.status).toBe(422);
 		expect(answer.html).toContain(
@@ -2308,11 +2520,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("offers no Change the parts for another amount error, or on a split entry that isn't refused", async () => {
 		const { id } = await splitCash("No parts link");
+
 		const zero = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "0"],
 			["back", "/transactions"],
 		]);
+
 		expect(zero.res.status).toBe(422);
 		expect(zero.html).toContain("Enter an amount greater than zero.");
 		expect(zero.html).not.toContain("Change the parts");
@@ -2326,10 +2540,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(id)
 			.run();
+
 		const { res } = await correction(id, [
 			[String(a), "5", "70.00"],
 			[String(b), "1", "30.00"],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -2354,6 +2570,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(id)
 			.run();
+
 		const panel = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "100.00"],
@@ -2361,10 +2578,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["income_was", "1"],
 			["back", "/transactions"],
 		]);
+
 		expect(panel.res.status).toBe(422);
 		expect(panel.html).toMatch(
 			/<button(?=[^>]*name="change_parts")(?=[^>]*value="1")[^>]*>Change the parts<\/button>/,
 		);
+
 		const sheet = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "100.00"],
@@ -2373,12 +2592,15 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["change_parts", "1"],
 			["back", "/transactions"],
 		]);
+
 		expect(sheet.res.status).toBe(200);
 		expect(sheet.html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+
 		const saved = await correction(id, [
 			[String(a), "5", "70.00"],
 			[String(b), "1", "30.00"],
 		]);
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -2399,6 +2621,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.bind(id)
 			.run();
 		const before = await partsOf(id);
+
 		const { res, html } = await post(`/transactions/${id}/split`, [
 			["back", "/transactions"],
 			["part_category", "1"],
@@ -2406,6 +2629,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["part_amount", "60.00"],
 			["part_amount", "30.00"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Income can&#39;t be split.");
 		expect(await partsOf(id)).toEqual(before);
@@ -2416,30 +2640,38 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(id)
 			.run();
+
 		const corrected = await request(
 			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
 		);
+
 		expect(corrected.res.status).toBe(200);
 		expect(corrected.html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
 		expect(shownTotal(corrected.html)).toBe(
 			formatCents(10000, { signed: true }),
 		);
+
 		const fresh = await request(
 			`/transactions/${id}/split?back=%2Ftransactions`,
 		);
+
 		expect(fresh.res.status).toBe(404);
 	});
 
 	it("opens the split with the new total, the saved parts and the mismatch and live lines", async () => {
 		const { id, a, b } = await splitCash("Sheet");
+
 		const { res, html } = await request(
 			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
 		);
+
 		expect(res.status).toBe(200);
+
 		// The amount under the title is the new total, not the saved $90.00.
 		const shown = html.match(
 			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold tabular-nums">([^<]*)<\/p>/,
 		)?.[1];
+
 		expect(shown).toBe(formatCents(10000, { signed: true }));
 		expect(shown).not.toBe(formatCents(9000, { signed: true }));
 		expect(html).toMatch(/<option value="1" selected[^>]*>Groceries<\/option>/);
@@ -2464,19 +2696,23 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("says what is left against the new total as the parts change", async () => {
 		const { id } = await splitCash("Live line");
+
 		const left = await post(`/transactions/${id}/split/line`, [
 			["total", "10000"],
 			["part_amount", "60.00"],
 			["part_amount", "30.00"],
 		]);
+
 		expect(left.html).toContain(
 			'<span class="tabular-nums">$10.00</span> left to assign',
 		);
+
 		const full = await post(`/transactions/${id}/split/line`, [
 			["total", "10000"],
 			["part_amount", "60.00"],
 			["part_amount", "40.00"],
 		]);
+
 		expect(full.html).toContain(
 			'Adds up to <span class="tabular-nums">$100.00</span>',
 		);
@@ -2521,11 +2757,14 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.first()),
 		displayName: (await getTransaction(env.DB, id))?.displayName,
 	});
+
 	const shiftDay = (date: string, days: number) => {
 		const shifted = new Date(`${date}T00:00:00Z`);
 		shifted.setUTCDate(shifted.getUTCDate() + days);
+
 		return shifted.toISOString().slice(0, 10);
 	};
+
 	const unescapeAttribute = (value: string) =>
 		value
 			.replaceAll("&quot;", '"')
@@ -2533,6 +2772,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.replaceAll("&lt;", "<")
 			.replaceAll("&gt;", ">")
 			.replaceAll("&amp;", "&");
+
 	/** The hidden fields in markup, as name and value, with the entities an attribute escapes undone. */
 	const hiddenFields = (html: string): [string, string][] =>
 		[
@@ -2541,17 +2781,21 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			name,
 			unescapeAttribute(value),
 		]);
+
 	const pendingIn = (html: string) =>
 		hiddenFields(html)
 			.filter(([name]) => name === "pending_edit")
 			.map(([, value]) => value);
+
 	/** The hidden fields the edit panel of entry `id` draws, as its form posts them. */
 	const panelFields = async (id: number) => {
 		const { html } = await request(`/transactions/${id}?back=%2Ftransactions`);
 		const start = html.indexOf(`action="/transactions/${id}"`);
 		const end = html.indexOf(`action="/transactions/${id}/delete"`, start);
+
 		return hiddenFields(html.slice(start, end));
 	};
+
 	const shownTotal = (html: string) =>
 		html.match(
 			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold tabular-nums">([^<]*)<\/p>/,
@@ -2561,6 +2805,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Panel changes");
 		const before = await parentOf(id);
 		const earlier = shiftDay(today(), -2);
+
 		const edits: [string, string][] = [
 			["date", earlier],
 			["amount", "100.00"],
@@ -2571,9 +2816,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["excluded", "1"],
 			["kind", "one_off"],
 		];
+
 		const drawn = (await panelFields(id)).filter(
 			([name]) => !edits.some(([edit]) => edit === name),
 		);
+
 		const fields = [...drawn, ...edits];
 		const pending = new URLSearchParams(fields).toString();
 
@@ -2581,6 +2828,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			...fields,
 			["change_parts", "1"],
 		]);
+
 		expect(sheet.res.status).toBe(200);
 		expect(shownTotal(sheet.html)).toBe(formatCents(10000, { signed: true }));
 		expect(hiddenFields(sheet.html)).toEqual(
@@ -2600,6 +2848,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				["pending_edit", pending],
 			],
 		});
+
 		expect(added.res.status).toBe(200);
 		expect(added.html).toContain(
 			`name="pending_edit" value="${pending.replaceAll("&", "&amp;")}"`,
@@ -2612,6 +2861,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const saved = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
+
 		expect(saved.res.status).toBe(200);
 		const trigger = JSON.parse(saved.res.headers.get("HX-Trigger") ?? "{}");
 		expect(trigger.toast).toEqual({
@@ -2649,6 +2899,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("saves a pending edit's date and exclusion on a part the correction adds, as on the saved parts", async () => {
 		const { id, a, b } = await splitCash("Panel and new part");
 		const earlier = shiftDay(today(), -2);
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", earlier],
@@ -2668,6 +2919,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ extra: [["pending_edit", pending]] },
 		);
+
 		expect(saved.res.status).toBe(200);
 		expect(await parentOf(id)).toMatchObject({
 			amountCents: 10000,
@@ -2692,6 +2944,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("Change the parts with an amount that already matches the parts saves the panel as usual", async () => {
 		const { id } = await splitCash("Matching amount");
+
 		const { res, html } = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "90.00"],
@@ -2700,6 +2953,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["back", "/transactions"],
 			["change_parts", "1"],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(html).not.toContain('id="split-title"');
 		expect(
@@ -2714,6 +2968,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("a refused correction keeps the pending edit", async () => {
 		const { id, a, b } = await splitCash("Refused correction");
 		const before = await parentOf(id);
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", today()],
@@ -2732,6 +2987,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ extra: [["pending_edit", pending]] },
 		);
+
 		expect(short.res.status).toBe(422);
 		expect(pendingIn(short.html)).toEqual([pending]);
 		expect(await parentOf(id)).toEqual(before);
@@ -2745,6 +3001,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ extra: [["pending_edit", pending]] },
 		);
+
 		expect(refund.res.status).toBe(422);
 		expect(refund.html).toContain(
 			"Linked refunds add up to $20.00, so part 2 can&#39;t be less than that.",
@@ -2760,6 +3017,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("a pending edit the panel refuses saves nothing, and reopens the panel with its error and the posted values", async () => {
 		const { id, a, b } = await splitCash("Refused panel");
 		const tomorrow = shiftDay(today(), 1);
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", tomorrow],
@@ -2773,6 +3031,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { res, html } = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
+
 		// The panel refused the future date before anything was saved: the amount and the parts stay as they were.
 		expect(
 			await env.DB.prepare(
@@ -2799,6 +3058,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("saves the pending edit and the corrected parts in one batch, so a failure in the panel's half saves neither", async () => {
 		const { id, a, b } = await splitCash("One batch");
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", today()],
@@ -2808,6 +3068,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["note", "Farmers market\nand bakery"],
 			["excluded", "1"],
 		]).toString();
+
 		const before = await parentOf(id);
 		const partsBefore = await partsOf(id);
 		// Every panel save writes a merchants row (saveEdit), and the correction's statements never do, so this
@@ -2815,14 +3076,17 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		await env.DB.prepare(
 			"CREATE TRIGGER fail_panel_merchant BEFORE INSERT ON merchants BEGIN SELECT RAISE(ABORT, 'forced panel failure'); END",
 		).run();
+
 		try {
 			const { res } = await correction(id, savedParts(a, b), {
 				extra: [["pending_edit", pending]],
 			});
+
 			expect(res.status).toBe(500);
 		} finally {
 			await env.DB.prepare("DROP TRIGGER fail_panel_merchant").run();
 		}
+
 		expect(await parentOf(id)).toEqual(before);
 		expect(await partsOf(id)).toEqual(partsBefore);
 	});
@@ -2847,6 +3111,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.bind(a, id)
 			.run();
 		const before = await stateOf(id);
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", today()],
@@ -2858,6 +3123,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { res, html } = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $65.00, so part 1 can&#39;t be less than that.",
@@ -2877,6 +3143,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Rule split', 1)",
 		).run();
 		const tomorrow = shiftDay(today(), 1);
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", tomorrow],
@@ -2890,11 +3157,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { res, html } = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
+
 		const groceries = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 1").first<{
 				name: string;
 			}>()
 		)?.name;
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Choose today or an earlier date.");
 		expect(html).toMatch(/name="always" value="1" checked/);
@@ -2916,11 +3185,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 2",
 		).run();
+
 		const archivedName = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
 				name: string;
 			}>()
 		)?.name;
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", shiftDay(today(), 1)],
@@ -2934,6 +3205,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { res, html } = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Choose today or an earlier date.");
 		expect(html).toMatch(/name="always" value="1" checked/);
@@ -2945,6 +3217,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("redirects a plain browser save back to the list", async () => {
 		const { id, a, b } = await splitCash("Plain save");
+
 		const { res } = await post(
 			`/transactions/${id}/split`,
 			[
@@ -2960,6 +3233,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/transactions");
 	});
@@ -2967,10 +3241,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("still refuses parts that don't add up to the new total, and saves nothing", async () => {
 		const { id, a, b } = await splitCash("Still refused");
 		const before = await stateOf(id);
+
 		const { res, html } = await correction(id, [
 			[String(a), "1", "60.00"],
 			[String(b), "5", "30.00"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"The parts must add up exactly to the transaction amount.",
@@ -2986,10 +3262,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.bind(b)
 			.run();
 		const before = await stateOf(id);
+
 		const { res, html } = await correction(id, [
 			[String(a), "1", "80.00"],
 			[String(b), "5", "20.00"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $25.00, so part 2 can&#39;t be less than that.",
@@ -2999,6 +3277,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("adds a part and keeps the total, the saved parts and their refund, then saves a third part", async () => {
 		const { id, a, b } = await splitCash("Add part");
+
 		const added = await correction(
 			id,
 			[
@@ -3007,6 +3286,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ extra: [["add", "1"]] },
 		);
+
 		expect(added.res.status).toBe(200);
 		expect(added.html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
 		expect(added.html).toMatch(/<input[^>]*name="amount_was"[^>]*value="9000"/);
@@ -3021,11 +3301,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"The parts add up to $90.00. Change them to match $100.00.",
 		);
 		expect((added.html.match(/name="part_id"/g) ?? []).length).toBe(3);
+
 		const saved = await correction(id, [
 			[String(a), "1", "60.00"],
 			[String(b), "5", "30.00"],
 			["", "2", "10.00"],
 		]);
+
 		expect(saved.res.status).toBe(200);
 		const parts = await partsOf(id);
 		expect(parts).toEqual([
@@ -3065,18 +3347,22 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			}),
 		});
 		const plain = await idByName("Plain cash");
-		const bank = (
+
+		const bank = requireRow(
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t JOIN accounts ac ON ac.id = t.account_id WHERE ac.type <> 'cash' AND t.parent_id IS NULL AND t.is_split = 0 AND t.flag_income = 0 ORDER BY t.id LIMIT 1",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const before = await stateOf(id);
+
 		for (const target of [bank, a, plain]) {
 			expect(
 				(await request(`/transactions/${target}/split?total=10000`)).res.status,
 			).toBe(404);
 			expect((await correction(target, savedParts(a, b))).res.status).toBe(404);
 		}
+
 		for (const total of ["0", "-10000", "10000.5", "abc", ""]) {
 			expect(
 				(await request(`/transactions/${id}/split?total=${total}`)).res.status,
@@ -3085,6 +3371,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				(await correction(id, savedParts(a, b), { total })).res.status,
 			).toBe(404);
 		}
+
 		expect(
 			(await correction(id, savedParts(a, b), { amountWas: "abc" })).res.status,
 		).toBe(404);
@@ -3094,10 +3381,12 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("is not found when a posted part id isn't a whole number, in the save or in Add a part, and saves nothing", async () => {
 		const { id, a } = await splitCash("Bad part id");
 		const before = await stateOf(id);
+
 		const tampered: [string, string, string][] = [
 			[String(a), "1", "60.00"],
 			["abc", "5", "40.00"],
 		];
+
 		expect((await correction(id, tampered)).res.status).toBe(404);
 		expect(
 			(await correction(id, tampered, { extra: [["add", "1"]] })).res.status,
@@ -3108,13 +3397,15 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("saves nothing when the posted parts or the amount are out of date, and the save is an error", async () => {
 		const { id, a, b } = await splitCash("Out of date");
 		const before = await stateOf(id);
-		const foreign = (
+
+		const foreign = requireRow(
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.id <> ? ORDER BY t.id LIMIT 1",
 			)
 				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		const cases: { name: string; run: () => Promise<{ res: Response }> }[] = [
 			{
 				name: "a saved part is missing",
@@ -3146,6 +3437,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				run: () => correction(id, savedParts(a, b), { amountWas: "8000" }),
 			},
 		];
+
 		for (const testCase of cases) {
 			const { res } = await testCase.run();
 			expect(res.status, testCase.name).toBe(500);
@@ -3155,6 +3447,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("refuses a correction when a part was added at the same moment, and writes nothing from it", async () => {
 		const { id, a, b } = await splitCash("Racing part");
+
+		// SAFETY: correctCashSplit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -3171,9 +3465,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				)
 					.bind(id)
 					.run();
+
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
+
 		await expect(
 			correctCashSplit(
 				db,
@@ -3238,6 +3534,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("refuses a correction with two new parts when another part is added at the same moment, and writes nothing", async () => {
 		const { id, a, b } = await splitCash("Racing two new parts");
+
+		// SAFETY: correctCashSplit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -3249,9 +3547,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				)
 					.bind(id)
 					.run();
+
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
+
 		await expect(
 			correctCashSplit(
 				db,
@@ -3285,6 +3585,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("refuses a same-total correction with two new parts when another part is added at the same moment, and writes nothing", async () => {
 		const { id, a, b } = await splitCash("Racing same total");
+
+		// SAFETY: correctCashSplit calls only `prepare` and `batch` on the database it is given, and both are env.DB's own methods here.
 		const db = {
 			prepare: env.DB.prepare.bind(env.DB),
 			batch: async (statements: D1PreparedStatement[]) => {
@@ -3301,9 +3603,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				)
 					.bind(id)
 					.run();
+
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
+
 		await expect(
 			correctCashSplit(
 				db,
@@ -3342,6 +3646,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		)
 			.bind(today(), categoryId)
 			.run();
+
 	/** The category select of part `index` (0-based) in the sheet's HTML. */
 	const selectOf = (html: string, index: number) =>
 		html.match(
@@ -3351,9 +3656,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("keeps a saved part's archived category in its own select, and in no other row's", async () => {
 		const { id, b } = await splitCash("Archived sheet");
 		await archive(5);
+
 		const { res, html } = await request(
 			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
 		);
+
 		expect(res.status).toBe(200);
 		expect(selectOf(html, 0)).not.toMatch(/<option value="5"/);
 		expect(selectOf(html, 1)).toMatch(
@@ -3379,17 +3686,21 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Archived refused");
 		await archive(5);
 		const before = await stateOf(id);
+
 		const onSaved = await correction(id, [
 			[String(a), "5", "60.00"],
 			[String(b), "5", "40.00"],
 		]);
+
 		expect(onSaved.res.status).toBe(422);
 		expect(onSaved.html).toContain("Pick a category for part 1.");
+
 		const onNew = await correction(id, [
 			[String(a), "1", "60.00"],
 			[String(b), "5", "30.00"],
 			["", "5", "10.00"],
 		]);
+
 		expect(onNew.res.status).toBe(422);
 		expect(onNew.html).toContain("Pick a category for part 3.");
 		expect(await stateOf(id)).toEqual(before);
@@ -3398,19 +3709,23 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("keeps B's archived option when the sheet is drawn again with Add a part or with an error", async () => {
 		const { id, a, b } = await splitCash("Redrawn archived");
 		await archive(5);
+
 		const added = await correction(id, savedParts(a, b), {
 			extra: [["add", "1"]],
 		});
+
 		expect(added.res.status).toBe(200);
 		expect(selectOf(added.html, 1)).toMatch(
 			/<option value="5" selected[^>]*>Household<\/option>/,
 		);
 		expect(selectOf(added.html, 2)).not.toMatch(/<option value="5"/);
+
 		const failed = await correction(id, [
 			[String(a), "1", "60.00"],
 			[String(b), "5", "30.00"],
 			["", "", "10.00"],
 		]);
+
 		expect(failed.res.status).toBe(422);
 		expect(selectOf(failed.html, 1)).toMatch(
 			/<option value="5" selected[^>]*>Household<\/option>/,
@@ -3429,6 +3744,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Entry refund sheet");
 		await linkEntryRefund(id);
 		const before = await stateOf(id);
+
 		const { res, html } = await correction(
 			id,
 			[
@@ -3437,6 +3753,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ total: "8000", amountWas: "9000" },
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
@@ -3448,11 +3765,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id } = await splitCash("Entry refund panel");
 		await linkEntryRefund(id);
 		const before = await stateOf(id);
+
 		const { res, html } = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "80.00"],
 			["back", "/transactions"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
@@ -3465,6 +3784,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Pending refund sheet");
 		await linkEntryRefund(id);
 		const before = await stateOf(id);
+
 		const pending = new URLSearchParams([
 			["back", "/transactions"],
 			["date", today()],
@@ -3472,9 +3792,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["merchant", "Corner Market"],
 			["note", "Refund sheet note"],
 		]).toString();
+
 		const { res, html } = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
@@ -3493,6 +3815,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Family refunds sheet");
 		await linkEntryRefund(id, 6500);
 		const before = await stateOf(id);
+
 		const { res, html } = await correction(
 			id,
 			[
@@ -3501,6 +3824,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ total: "8000", amountWas: "9000" },
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $85.00, so the amount can&#39;t be less than that.",
@@ -3512,11 +3836,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id } = await splitCash("Family refunds panel");
 		await linkEntryRefund(id, 6500);
 		const before = await stateOf(id);
+
 		const { res, html } = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "80.00"],
 			["back", "/transactions"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"Linked refunds add up to $85.00, so the amount can&#39;t be less than that.",
@@ -3550,6 +3876,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	it("saves a correction whose total covers the refunds linked to the entry and its parts together, and keeps each refund's link", async () => {
 		const { id, a, b } = await splitCash("Family refunds saved");
 		await linkEntryRefund(id, 6500);
+
 		const { res } = await correction(
 			id,
 			[
@@ -3558,6 +3885,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			],
 			{ total: "8500", amountWas: "9000" },
 		);
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -3570,9 +3898,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			{ id: a, categoryId: 1, amountCents: 5500 },
 			{ id: b, categoryId: 5, amountCents: 3000 },
 		]);
+
 		const links = await env.DB.prepare(
 			"SELECT raw_name AS name, refund_of_id AS refundOfId FROM transactions WHERE raw_name IN ('Entry refund', 'Part refund') ORDER BY raw_name",
 		).all<{ name: string; refundOfId: number }>();
+
 		expect(links.results).toEqual([
 			{ name: "Entry refund", refundOfId: id },
 			{ name: "Part refund", refundOfId: b },
@@ -3619,8 +3949,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 					totalCents: 10000,
 					amountWasCents: 9000,
 					parts: [
-						{ id: a?.id as number, categoryId: 1, amountCents: 6000 },
-						{ id: b?.id as number, categoryId: 5, amountCents: 3000 },
+						{ id: requireRow(a).id, categoryId: 1, amountCents: 6000 },
+						{ id: requireRow(b).id, categoryId: 5, amountCents: 3000 },
 						{ id: null, categoryId: 5, amountCents: 1000 },
 					],
 				},
@@ -3664,8 +3994,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"demo",
 		);
 		const [partA, partB] = await partsOf(id);
-		const a = partA?.id as number;
-		const b = partB?.id as number;
+		const a = requireRow(partA).id;
+		const b = requireRow(partB).id;
 		expect([await dismissalsOn(a), await dismissalsOn(b)]).toEqual([1, 1]);
 
 		await expect(
@@ -3684,13 +4014,15 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				"demo",
 			),
 		).resolves.toEqual({ saved: true });
-		const added = (
+
+		const added = requireRow(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)",
 			)
 				.bind(id, a, b)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		expect([
 			await dismissalsOn(added),
 			await dismissalsOn(a),
@@ -3714,12 +4046,14 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		await insertCashBill(BILL, "Refused new part");
 		// The purchase gets its own Not this one after the split, so neither part has one yet.
 		await notThisOne(BILL, id);
+
 		const rowCount = async () =>
 			(
 				await env.DB.prepare("SELECT COUNT(*) AS n FROM bill_payments").first<{
 					n: number;
 				}>()
 			)?.n;
+
 		const before = await rowCount();
 
 		// Part B keeps the $20.00 refund linked to it, so $15.00 can't hold it and the whole batch is refused.
@@ -3772,11 +4106,13 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 
 	it("draws a refused split cash entry's Change the parts between its Amount and Date, after its category (#688)", async () => {
 		const { id } = await splitCash("Panel parts");
+
 		const { html } = await post(`/transactions/${id}`, [
 			["date", today()],
 			["amount", "100.00"],
 			["back", "/transactions"],
 		]);
+
 		const at = (needle: string) => html.indexOf(needle);
 		expect(at('id="edit-category"')).toBeGreaterThan(-1);
 		expect(at('id="edit-category"')).toBeLessThan(at('id="cash-edit-amount"'));
@@ -3799,17 +4135,19 @@ describe("a bank transaction split into parts", () => {
 		const bank = await env.DB.prepare(
 			"SELECT t.id, t.amount_cents AS amountCents, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id WHERE t.parent_id IS NULL AND t.is_split = 0 AND a.type <> 'cash' AND ABS(t.amount_cents) >= 2 ORDER BY t.id LIMIT 1",
 		).first<{ id: number; amountCents: number; bank: string }>();
-		const amount = bank?.amountCents as number;
+
+		const amount = requireRow(bank).amountCents;
 		const half = Math.trunc(amount / 2);
 		await saveSplit(
 			env.DB,
-			bank?.id as number,
+			requireRow(bank).id,
 			[
 				{ amountCents: half, categoryId: 1 },
 				{ amountCents: amount - half, categoryId: 5 },
 			],
 			"demo",
 		);
+
 		const [part] = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
@@ -3817,6 +4155,7 @@ describe("a bank transaction split into parts", () => {
 				.bind(bank?.id)
 				.all<{ id: number }>()
 		).results;
+
 		const parentPanel = await request(`/transactions/${bank?.id}`);
 		expect(parentPanel.html).toContain(
 			`From ${bank?.bank}. Its date and amount stay as the bank sent them.`,

@@ -34,6 +34,7 @@ describe("form posts from other sites (Hono csrf)", () => {
 		const res = await exports.default.fetch("http://tally.test/transactions", {
 			headers: { Origin: "https://evil.example" },
 		});
+
 		expect(res.status).toBe(200);
 	});
 });

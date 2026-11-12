@@ -73,6 +73,7 @@ function RowKeys({ row }: { row: Row }) {
  */
 export function Ledger({ level = 3 }: { level?: 2 | 3 }) {
 	const Heading = level === 2 ? "h2" : "h3";
+
 	return (
 		<div class="flex flex-col gap-3">
 			{LEDGER.map((section) => (
@@ -115,9 +116,11 @@ export function KeysDetails({
 			<Icon name="chevron-right" class="size-5" />
 		</span>
 	);
+
 	const layout = row
 		? "grid min-h-16 grid-cols-[1.5rem_1fr_auto] items-center gap-x-4 py-3"
 		: "flex min-h-11 items-center gap-2";
+
 	return (
 		<details class="group" open={open}>
 			<summary
@@ -159,6 +162,7 @@ export function KeysSheetBody({ titleId }: { titleId: string }) {
  */
 export function KeysSheet({ closeHref }: { closeHref: string }) {
 	const titleId = "keys-title";
+
 	const closeAttrs = {
 		"hx-get": closeHref,
 		"hx-target": "#keys",
@@ -166,6 +170,7 @@ export function KeysSheet({ closeHref }: { closeHref: string }) {
 		"hx-swap": "outerHTML",
 		"hx-push-url": "true",
 	};
+
 	return (
 		<BottomSheet
 			labelledBy={titleId}

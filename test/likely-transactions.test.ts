@@ -4,11 +4,11 @@ import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import {
 	addLikely,
 	LIKELY_LIMIT,
-	type LikelyRow,
 	likelyTransactions,
 } from "../src/db/likely-transactions";
 import { resetDemo } from "../src/demo/reset";
 import { rowCaption, TransactionRow } from "../src/views/transaction-row";
+import { isMethod, present } from "./helpers/present";
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
@@ -37,7 +37,8 @@ async function tx(
 			options.suggestionId ?? null,
 		)
 		.first<{ id: number }>();
-	return row?.id as number;
+
+	return present(row).id;
 }
 
 async function filed(id: number) {
@@ -95,18 +96,16 @@ beforeEach(async () => {
 	await env.DB.prepare(
 		"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
 	).run();
-	pet = (
+	pet = present(
 		await env.DB.prepare(
 			"SELECT id FROM categories WHERE name = 'Pet Care'",
-		).first<{
-			id: number;
-		}>()
-	)?.id as number;
-	suggested = (
+		).first<{ id: number }>(),
+	).id;
+	suggested = present(
 		await env.DB.prepare(
 			"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-		).first<{ id: number }>()
-	)?.id as number;
+		).first<{ id: number }>(),
+	).id;
 	// The transaction the category was made from: already filed in Pet Care.
 	saved = await tx(
 		`${THIS}-12`,
@@ -125,21 +124,25 @@ describe("likelyTransactions", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		const sameLast = await tx(
 			`${LAST}-14`,
 			4800,
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await tx(
 			`${TWO_BACK}-20`,
 			3000,
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		const guessNew = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: suggested,
 		});
+
 		const guessLast = await tx(
 			`${LAST}-29`,
 			2399,
@@ -149,6 +152,7 @@ describe("likelyTransactions", () => {
 				suggestionId: suggested,
 			},
 		);
+
 		await tx(`${TWO_BACK}-08`, 999, "OLD GUESS", "Old", {
 			suggestionId: suggested,
 		});
@@ -170,6 +174,7 @@ describe("likelyTransactions", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.prepare("UPDATE transactions SET own_name = ? WHERE id = ?")
 			.bind("Grandma's birthday cake", named)
 			.run();
@@ -197,6 +202,7 @@ describe("likelyTransactions", () => {
 				"Banfield Pet Hospital",
 			),
 		];
+
 		for (let day = 3; day <= 9; day++)
 			await tx(`${THIS}-0${day}`, 300 - day, `CHEWY ${day}`, `Chewy ${day}`, {
 				suggestionId: suggested,
@@ -216,6 +222,7 @@ describe("likelyTransactions", () => {
 		await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: suggested,
 		});
+
 		const sameMerchant = await tx(
 			`${THIS}-03`,
 			7650,
@@ -249,12 +256,14 @@ describe("likelyTransactions", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		const typed = await tx(
 			`${THIS}-04`,
 			4800,
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET note = 'Dinner', note_guessed = 1, note_state = 'guessed' WHERE id = ?",
@@ -289,13 +298,13 @@ describe("likelyTransactions", () => {
 	});
 
 	it("carries the date a bank change unlinked a refund, as the list does", async () => {
-		const unlinked = (
+		const unlinked = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, credit_reviewed, refund_unlinked_purchase_date) VALUES (1, ?, -700, 'BANFIELD PET HOSPITAL', 'Banfield Pet Hospital', 1, ?) RETURNING id",
 			)
 				.bind(`${THIS}-06`, `${THIS}-01`)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
 
 		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
 
@@ -312,11 +321,13 @@ describe("likelyTransactions", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
-		const bill = (
+
+		const bill = present(
 			await env.DB.prepare(
 				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Vet plan', 9000, 1, 'monthly', 'BANFIELD PLAN') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await env.DB.prepare(
 			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'auto', 'linked')",
 		)
@@ -339,6 +350,7 @@ describe("likelyTransactions", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
 			.bind(payment)
 			.run();
@@ -349,16 +361,16 @@ describe("likelyTransactions", () => {
 			.run();
 
 		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
-		const row = rows.find((found) => found.id === payment);
+		const row = present(rows.find((found) => found.id === payment));
 
 		expect(row).toMatchObject({
 			paysPlan: true,
 			planName: "Car registration",
 		});
-		const caption = rowCaption(row as LikelyRow);
+		const caption = rowCaption(row);
 		expect(caption.kind).not.toBe("excluded");
 		expect(caption.caption).toContain("paid Car registration");
-		const html = await TransactionRow({ row: row as LikelyRow }).toString();
+		const html = await TransactionRow({ row }).toString();
 		expect(html).toContain("paid Car registration");
 		expect(html).not.toContain("Excluded");
 	});
@@ -372,9 +384,11 @@ describe("addLikely", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		const guessNew = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: suggested,
 		});
+
 		const guessLast = await tx(
 			`${LAST}-29`,
 			2399,
@@ -384,7 +398,9 @@ describe("addLikely", () => {
 				suggestionId: suggested,
 			},
 		);
+
 		const unrelated = await tx(`${THIS}-07`, 1200, "TARGET", "Target");
+
 		const tooOld = await tx(`${TWO_BACK}-08`, 999, "OLD GUESS", "Old", {
 			suggestionId: suggested,
 		});
@@ -423,12 +439,14 @@ describe("addLikely", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		const unticked = await tx(
 			`${THIS}-04`,
 			4800,
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.prepare(
 			'UPDATE transactions SET split_removed_from_cents = 18742, split_removed_bills = \'[{"name":"Water","period":"2026-09"}]\' WHERE id IN (?, ?)',
 		)
@@ -460,38 +478,41 @@ describe("addLikely", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.prepare(
 			"UPDATE transactions SET split_removed_from_cents = 18742, split_removed_bills = ? WHERE id = ?",
 		)
 			.bind('[{"billId":9860,"name":"Costco membership","period":"2026"}]', row)
 			.run();
 
-		const likely = (
-			await likelyTransactions(env.DB, saved, "Pet Care", TODAY)
-		).find((found) => found.id === row);
+		const likely = present(
+			(await likelyTransactions(env.DB, saved, "Pet Care", TODAY)).find(
+				(found) => found.id === row,
+			),
+		);
 
 		expect(likely?.splitRemovedFromCents).toBe(18742);
 		expect(likely?.splitRemovedBills).toBe(
 			'[{"billId":9860,"name":"Costco membership","period":"2026"}]',
 		);
-		expect(
-			await TransactionRow({ row: likely as LikelyRow }).toString(),
-		).toContain(
+		expect(await TransactionRow({ row: likely }).toString()).toContain(
 			"The bank changed this from $187.42, so its split was removed. The Costco membership bill for 2026 is no longer paid.",
 		);
 	});
 
 	it("offers and files a guess whose suggestion differs from the new category only in accented capitals", async () => {
-		const ecole = (
+		const ecole = present(
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 98) RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
-		const accented = (
+			).first<{ id: number }>(),
+		).id;
+
+		const accented = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('école', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: accented,
 		});
@@ -520,16 +541,18 @@ describe("addLikely", () => {
 
 	it("matches a guess whose accented name is in another Unicode form than the category's", async () => {
 		// The category is composed (É as one character); the suggestion is decomposed (E and a combining accent).
-		const ecole = (
+		const ecole = present(
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('École', 'tag', 'cat-plum', 98) RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
-		const decomposed = (
+			).first<{ id: number }>(),
+		).id;
+
+		const decomposed = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('École', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: decomposed,
 		});
@@ -555,6 +578,7 @@ describe("addLikely", () => {
 		const older = await tx(`${LAST}-28`, 2399, "PETSMART 0412", "Petsmart", {
 			suggestionId: suggested,
 		});
+
 		for (let day = 1; day <= LIKELY_LIMIT + 1; day++)
 			await tx(
 				`${THIS}-0${day}`,
@@ -598,9 +622,11 @@ describe("addLikely", () => {
 				"BANFIELD PET HOSPITAL",
 				"Banfield Pet Hospital",
 			);
+
 			const guessNew = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 				suggestionId: suggested,
 			});
+
 			const changed = victim === "same" ? sameNew : guessNew;
 			const control = victim === "same" ? guessNew : sameNew;
 
@@ -630,6 +656,7 @@ describe("addLikely", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
 			.bind(pet)
 			.run();
@@ -655,9 +682,11 @@ describe("addLikely", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		const guessNew = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
 			suggestionId: suggested,
 		});
+
 		await env.DB.prepare(
 			"UPDATE categories SET name = 'Vet Visits', name_key = 'vet visits' WHERE id = ?",
 		)
@@ -687,6 +716,7 @@ describe("addLikely", () => {
 			"BANFIELD PET HOSPITAL",
 			"Banfield Pet Hospital",
 		);
+
 		await env.DB.prepare(
 			"UPDATE categories SET name = 'PET CARE', name_key = 'pet care' WHERE id = ?",
 		)
@@ -719,6 +749,7 @@ function editedAfterRead(change: string, id: number): D1Database {
 			get(target, property) {
 				if (property === "bind")
 					return (...values: unknown[]) => afterRead(target.bind(...values));
+
 				if (property === "all")
 					return async () => {
 						const result = await target.all();
@@ -727,25 +758,32 @@ function editedAfterRead(change: string, id: number): D1Database {
 						)
 							.bind(id)
 							.run();
+
 						return result;
 					};
-				const value = Reflect.get(target, property);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				const value: unknown = Object(target)[property];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
+
 	return new Proxy(env.DB, {
 		get(target, property) {
 			if (property === "prepare")
 				return (sql: string) => {
 					const statement = target.prepare(sql);
+
 					return sql.includes(
 						"FROM category_suggestions WHERE status = 'pending'",
 					)
 						? afterRead(statement)
 						: statement;
 				};
-			const value = Reflect.get(target, property);
-			return typeof value === "function" ? value.bind(target) : value;
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }

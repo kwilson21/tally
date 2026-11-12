@@ -35,6 +35,7 @@ async function addCard(fields: {
 			fields.removedAt ?? null,
 		)
 		.run();
+
 	return env.DB.prepare(
 		"SELECT id FROM accounts WHERE subtype = 'apple_card'",
 	).first<{ id: number }>();
@@ -70,16 +71,20 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 
 	it("counts the card in the headline and the chart from its counted day, and it adds to the banks", async () => {
 		const without = await accountsWithHistory(env.DB, TODAY);
+
 		const card = await addCard({
 			balanceCents: 124018,
 			balanceOn: TODAY,
 			countedFrom: "2026-10-01",
 		});
+
 		await addCardBalances(card?.id ?? 0, DAYS_OCT, 124018);
+
 		const { banks, points, appleCard, added } = await accountsWithHistory(
 			env.DB,
 			TODAY,
 		);
+
 		expect(appleCard).toMatchObject({
 			balanceCents: 124018,
 			balanceOn: TODAY,
@@ -106,11 +111,13 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 
 	it("reads the card's balances only from its counted day on, so an older balance never carries into the line", async () => {
 		const without = await accountsWithHistory(env.DB, TODAY);
+
 		const card = await addCard({
 			balanceCents: 124018,
 			balanceOn: TODAY,
 			countedFrom: "2026-10-01",
 		});
+
 		// A balance from before the card counted (a removal's gap, say) must not reach the line.
 		await addCardBalances(card?.id ?? 0, ["2026-09-01"], 999999);
 		await addCardBalances(card?.id ?? 0, DAYS_OCT, 124018);
@@ -123,12 +130,14 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 
 	it("leaves a removed card out of the headline, the chart and the counted accounts, and keeps its rows", async () => {
 		const before = await accountsWithHistory(env.DB, TODAY);
+
 		const card = await addCard({
 			balanceCents: 124018,
 			balanceOn: null,
 			countedFrom: "2026-10-01",
 			removedAt: "2026-10-03 10:00:00",
 		});
+
 		await addCardBalances(card?.id ?? 0, DAYS_OCT, 124018);
 		const after = await accountsWithHistory(env.DB, TODAY);
 		expect(after.appleCard?.removedAt).toBe("2026-10-03 10:00:00");
@@ -156,6 +165,7 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 			balanceOn: TODAY,
 			countedFrom: TODAY,
 		});
+
 		await addCardBalances(card?.id ?? 0, [TODAY], -1200);
 		const { banks, appleCard } = await accountsWithHistory(env.DB, TODAY);
 		expect(
@@ -166,11 +176,13 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 
 	it("reads the card's last transaction as the day it's through, and no card as no account", async () => {
 		expect(await appleCardAccount(env.DB)).toBeNull();
+
 		const card = await addCard({
 			balanceCents: 124018,
 			balanceOn: TODAY,
 			countedFrom: TODAY,
 		});
+
 		expect((await appleCardAccount(env.DB))?.through).toBeNull();
 		await env.DB.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name)
@@ -194,11 +206,13 @@ describe("Transactions' Account choice with Apple Card (#766)", () => {
 		const choices = await accountChoices(env.DB);
 		const labels = choices.map((choice) => choice.label);
 		const card = labels.indexOf("Apple Card");
+
 		const lastBank = Math.max(
 			...labels.map((label, i) =>
 				label !== "Apple Card" && label !== "Cash" ? i : -1,
 			),
 		);
+
 		expect(card).toBe(lastBank + 1);
 		expect(labels.at(-1)).toBe("Cash");
 	});

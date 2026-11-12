@@ -15,6 +15,8 @@ import {
 } from "../src/sort-instance";
 import type { SortParams } from "../src/sort-start";
 import { fakeSteps } from "./fake-sort-steps";
+import { fakeAi } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 // What one sorting instance does (sort-instance.ts), run through its fake step runner: the sorting groups, then the
 // night's steps for the 09:00 run's instance (decision 139).
@@ -22,6 +24,9 @@ import { fakeSteps } from "./fake-sort-steps";
 const db = env.DB;
 const TODAY = "2026-09-22";
 const NIGHT = "2026-10-13";
+
+/** The chat request a Workers AI binding receives: the messages, and the user's words are in one of them. */
+type ChatInput = { messages: { role: string; content: string }[] };
 
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
@@ -50,18 +55,18 @@ const jevAnswer = () =>
 
 /** A fake Workers AI: a category question gets `Subscriptions`, a bank text a place name. `order` hears each kind. */
 const aiThatHears = (order: string[] = []) =>
-	({
-		run: vi.fn(async (_model: string, input: unknown) => {
-			const user = (
-				input as { messages: { role: string; content: string }[] }
-			).messages.find((m) => m.role === "user")?.content;
+	fakeAi(
+		vi.fn(async (_model: string, input: ChatInput) => {
+			const user = input.messages.find((m) => m.role === "user")?.content;
+
 			const kind = user?.startsWith("Places:") ? "categories" : "names";
 			order.push(kind);
+
 			return {
 				response: kind === "categories" ? "Subscriptions" : "Some Place Name",
 			};
 		}),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+	);
 
 /** Clears what the night would ask about, then adds one unsorted, unnamed charge per name (each from a store of its own). */
 async function onlyCharges(names: string[]) {
@@ -73,6 +78,7 @@ async function onlyCharges(names: string[]) {
 		db.prepare("DELETE FROM merchant_name_failures"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);
+
 	if (names.length === 0) return;
 	await db.batch(
 		names.map((raw) =>
@@ -111,11 +117,13 @@ async function runInstance(
 		fails: options.fails,
 		replayAfter: options.replayAfter,
 	});
+
 	await runSortInstance(instanceEnv, steps.runStep, params, {
 		runId: crypto.randomUUID(),
 		fetchImpl: options.fetchImpl,
 		now: options.now,
 	});
+
 	return steps;
 }
 
@@ -150,11 +158,13 @@ describe("the night's instance, in production", () => {
 
 	it("in the demo, makes the names and suggestions steps, with no wait mark to clear", async () => {
 		await onlyCharges(["SHOP A"]);
+
 		const steps = await runInstance(
 			{ DB: db, JEV_API_KEY: "jev", DEMO: "true", AI: aiThatHears() },
 			night,
 			{ fetchImpl: vi.fn(async () => jevAnswer()) },
 		);
+
 		expect(steps.names().slice(-2)).toEqual([
 			"night-names",
 			"night-suggestions",
@@ -165,11 +175,13 @@ describe("the night's instance, in production", () => {
 	it("a daytime instance has no night step and asks Workers AI nothing", async () => {
 		await onlyCharges(["SHOP A"]);
 		const ai = aiThatHears();
+
 		const steps = await runInstance(
 			{ DB: db, JEV_API_KEY: "jev", DEMO: "false", AI: ai },
 			{ bySync: false, rulesApplied: false },
 			{ fetchImpl: vi.fn(async () => jevAnswer()) },
 		);
+
 		expect(steps.names().filter((name) => name.startsWith("night-"))).toEqual(
 			[],
 		);
@@ -178,12 +190,15 @@ describe("the night's instance, in production", () => {
 
 	it("gives the names and suggestions no retries and a 15-minute timeout, and the wait mark step retries with a 10-second delay", async () => {
 		await onlyCharges(["SHOP A"]);
+
 		const steps = await runInstance(
 			{ DB: db, DEMO: "false", AI: aiThatHears() },
 			night,
 		);
+
 		const config = (name: string) =>
 			steps.steps.find((step) => step.name === name)?.config;
+
 		expect(config("night-names")).toEqual({
 			retries: { limit: 0, delay: 0 },
 			timeout: "15 minutes",
@@ -206,11 +221,13 @@ describe("a failing step never stops the next", () => {
 	it("a names step that fails logs its name, and the suggestions still run", async () => {
 		await onlyCharges(["SHOP A"]);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const steps = await runInstance(
 			{ DB: db, DEMO: "false", AI: aiThatHears() },
 			night,
 			{ fails: ["night-names"] },
 		);
+
 		expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
 			"workers-ai: names step failed Error",
 		]);
@@ -222,11 +239,13 @@ describe("a failing step never stops the next", () => {
 	it("a suggestions step that fails logs its name and the instance still resolves", async () => {
 		await onlyCharges(["SHOP A"]);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const steps = await runInstance(
 			{ DB: db, DEMO: "false", AI: aiThatHears() },
 			night,
 			{ fails: ["night-suggestions"] },
 		);
+
 		expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
 			"workers-ai: category suggestions step failed Error",
 		]);
@@ -236,11 +255,13 @@ describe("a failing step never stops the next", () => {
 	it("a sort that stops still lets both night steps run, logging only its name", async () => {
 		await onlyCharges(["SHOP A"]);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const steps = await runInstance(
 			{ DB: db, JEV_API_KEY: "jev", DEMO: "false", AI: aiThatHears() },
 			night,
 			{ fails: ["group-1-read"], fetchImpl: vi.fn(async () => jevAnswer()) },
 		);
+
 		expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
 			"sorting: stopped Error",
 		]);
@@ -252,6 +273,7 @@ describe("a failing step never stops the next", () => {
 	it("a save that fails every try logs its name only, and the night's steps still run", async () => {
 		await onlyCharges(["SHOP A"]);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const steps = await runInstance(
 			{ DB: db, JEV_API_KEY: "jev", DEMO: "false", AI: aiThatHears() },
 			night,
@@ -260,6 +282,7 @@ describe("a failing step never stops the next", () => {
 				fetchImpl: vi.fn(async () => jevAnswer()),
 			},
 		);
+
 		expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
 			"sorting: save step Error",
 		]);
@@ -307,11 +330,13 @@ describe("no Jev key", () => {
 	it("the night's wait-mark step, names and suggestions still run, with no sort, no Jev call and no rules step", async () => {
 		await onlyCharges(["SHOP A"]);
 		const fetchImpl = vi.fn(async () => jevAnswer());
+
 		const steps = await runInstance(
 			{ DB: db, DEMO: "false", AI: aiThatHears() },
 			night,
 			{ fetchImpl },
 		);
+
 		expect(steps.names()).toEqual([
 			"night-run-wait",
 			"night-names",
@@ -328,20 +353,21 @@ describe("each step's budget counts from its own start", () => {
 		// Each Workers AI request takes five minutes: names start at 0, 5 and 10, and a fourth would start at 15.
 		let t = 0;
 		const order: string[] = [];
-		const ai = {
-			run: vi.fn(async (_model: string, input: unknown) => {
-				const user = (
-					input as { messages: { role: string; content: string }[] }
-				).messages.find((m) => m.role === "user")?.content;
+
+		const ai = fakeAi(
+			vi.fn(async (_model: string, input: ChatInput) => {
+				const user = input.messages.find((m) => m.role === "user")?.content;
+
 				order.push(user?.startsWith("Places:") ? "categories" : "names");
 				t += 5 * 60_000;
+
 				return {
 					response: user?.startsWith("Places:")
 						? "Subscriptions"
 						: "Some Place Name",
 				};
 			}),
-		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		);
 
 		await runInstance({ DB: db, DEMO: "false", AI: ai }, night, {
 			now: () => t,
@@ -377,18 +403,23 @@ describe("one instance asks Jev at most INSTANCE_MAX_CALLS (decision 146)", () =
 describe("runSortInstance passes its sleep to the sorting groups (decision 145)", () => {
 	it("a 429 waits through the sleep it was given, then the rows are sorted", async () => {
 		await onlyCharges(["SHOP A", "SHOP B"]);
+
 		const ids = (
 			await db
 				.prepare("SELECT id FROM transactions ORDER BY id")
 				.all<{ id: number }>()
 		).results.map((row) => row.id);
+
 		let call = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			call += 1;
+
 			return call === 1
 				? new Response("{}", { status: 429, headers: { "retry-after": "5" } })
 				: jevAnswer();
 		});
+
 		const sleep = vi.fn(async (_name: string, _ms: number) => {});
 		const steps = fakeSteps();
 		await runSortInstance(
@@ -412,18 +443,24 @@ describe("the night's run clears the daily run's wait mark once nothing waits (d
 			)
 			.bind(TODAY)
 			.run();
+
 	/** The mark, written while a charge waits, as the switch's turn-on writes it. */
 	const marked = async () => {
 		// Setup not done (no budgets stroke): the mark is written only while setup is not done (decision 148).
 		for (const stroke of ["bank", "pay", "bills"] as const) {
 			await markStroke(db, stroke, "2026-10-12");
 		}
+
 		await waitingCharge();
+
 		// Both switches are on, so the SQL is never null.
-		const waitingSql = waitingForJevSql({
-			categories: true,
-			income: true,
-		}) as string;
+		const waitingSql = present(
+			waitingForJevSql({
+				categories: true,
+				income: true,
+			}),
+		);
+
 		await waitsForRunStatement(db, waitingSql).run();
 	};
 
@@ -448,11 +485,13 @@ describe("the night's run clears the daily run's wait mark once nothing waits (d
 		await marked();
 		await onlyCharges([]);
 		await waitingCharge();
+
 		// No Jev key: the sort asks nothing, so the charge still waits when the night's steps have run.
 		const steps = await runInstance(
 			{ DB: db, DEMO: "false", AI: aiThatHears() },
 			night,
 		);
+
 		expect(steps.names()).toContain("night-names");
 		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
 	});

@@ -38,6 +38,14 @@ import {
 	merchantNames,
 	seedMerchant,
 } from "./helpers/merchants";
+import { present } from "./helpers/present";
+
+/** True when `key` names a merchant suggestion state that has a stored row to seed. */
+function isMerchantState(
+	key: string,
+): key is keyof typeof MERCHANT_SUGGESTION_ROWS {
+	return key in MERCHANT_SUGGESTION_ROWS;
+}
 
 // The two suggestion machines are the one place their rules are written. These tests keep the database's own
 // checks and every store function in step with them: the allowed values, then each state met with each event.
@@ -81,13 +89,14 @@ describe("the suggestion machines against the schema", () => {
 
 describe("every state met with every event", () => {
 	it("category suggestion: only a waiting suggestion moves, and finished ones refuse everything", () => {
-		const moves: Record<string, Record<string, string | null>> = {
+		const moves = {
 			born: { NAME: "pending", NAMELESS: "none" },
 			pending: { ACCEPT: "created", DISMISS: "dismissed", EMPTY: "none" },
 			created: { ACCEPT: null, DISMISS: null, EMPTY: null },
 			dismissed: { ACCEPT: null, DISMISS: null, EMPTY: null },
 			none: { ACCEPT: null, DISMISS: null, EMPTY: null },
-		};
+		} satisfies Record<string, Record<string, string | null>>;
+
 		// A stored suggestion is never born again, and an unsaved one cannot be decided.
 		for (const state of CATEGORY_SUGGESTION_STATUSES)
 			for (const event of ["NAME", "NAMELESS"])
@@ -95,11 +104,13 @@ describe("every state met with every event", () => {
 					next(categorySuggestionMachine, state, event),
 					`${state} ${event}`,
 				).toBeNull();
+
 		for (const event of ["ACCEPT", "DISMISS", "EMPTY"])
 			expect(
 				next(categorySuggestionMachine, "born", event),
 				`born ${event}`,
 			).toBeNull();
+
 		for (const [state, events] of Object.entries(moves))
 			for (const [event, target] of Object.entries(events))
 				expect(
@@ -118,7 +129,8 @@ describe("every state met with every event", () => {
 			REJECT: null,
 			WITHDRAW: null,
 		};
-		const moves: Record<string, Record<string, string | null>> = {
+
+		const moves = {
 			none: {
 				...none,
 				BANK_NAME: "pending",
@@ -136,9 +148,11 @@ describe("every state met with every event", () => {
 			accepted: none,
 			rejected: none,
 		};
+
 		expect(Object.keys(moves).sort()).toEqual(
 			Object.keys(merchantSuggestionMachine.states).sort(),
 		);
+
 		for (const [state, events] of Object.entries(moves))
 			for (const [event, target] of Object.entries(events))
 				expect(
@@ -162,10 +176,13 @@ describe("the category suggestion store follows its machine", () => {
 			)
 			.bind(status)
 			.first<{ id: number }>();
-		return row?.id as number;
+
+		return present(row).id;
 	}
+
 	const eligible = async () => {
 		const ids: number[] = [];
+
 		for (let i = 0; i < 3; i++) {
 			const row = await db
 				.prepare(
@@ -174,8 +191,10 @@ describe("the category suggestion store follows its machine", () => {
 					 VALUES (1, '2026-09-20', 1500, 'NETFLIX.COM', 'ENTERTAINMENT', 0.93, 1, 0, 0, 0, 0) RETURNING id`,
 				)
 				.first<{ id: number }>();
-			ids.push(row?.id as number);
+
+			ids.push(present(row).id);
 		}
+
 		return ids;
 	};
 
@@ -214,24 +233,26 @@ describe("the category suggestion store follows its machine", () => {
 	it("a new group is stored as waiting when it has a usable name and as nothing when it has none, as the machine says", async () => {
 		const named = await saveSuggestion(db, "Streaming", await eligible());
 		const nameless = await saveSuggestion(db, null, await eligible());
-		expect(await statusOf(named as number)).toBe(
+		expect(await statusOf(present(named))).toBe(
 			next(categorySuggestionMachine, CATEGORY_SUGGESTION_UNSAVED, "NAME"),
 		);
-		expect(await statusOf(nameless as number)).toBe(
+		expect(await statusOf(present(nameless))).toBe(
 			next(categorySuggestionMachine, CATEGORY_SUGGESTION_UNSAVED, "NAMELESS"),
 		);
 	});
 
 	it("accepting a waiting suggestion creates the category and moves it where the machine says", async () => {
 		const purchases = await eligible();
-		const id = (await saveSuggestion(db, "Zed Streaming", purchases)) as number;
+		const id = present(await saveSuggestion(db, "Zed Streaming", purchases));
 		expect(await statusOf(id)).toBe("pending");
+
 		const result = await createFromSuggestion(
 			db,
 			id,
 			{ ticked: purchases, shown: purchases, notes: {} },
 			"person",
 		);
+
 		expect(result).toMatchObject({ ok: true });
 		expect(await statusOf(id)).toBe(
 			next(categorySuggestionMachine, "pending", "ACCEPT"),
@@ -259,18 +280,20 @@ describe("the category suggestion store follows its machine", () => {
 });
 
 describe("the merchant suggestion store follows its machine", () => {
-	const states = Object.keys(
-		merchantSuggestionMachine.states,
-	) as (keyof typeof MERCHANT_SUGGESTION_ROWS)[];
+	const states = Object.keys(merchantSuggestionMachine.states).map((key) => {
+		if (!isMerchantState(key))
+			throw new Error(`no stored row for state ${key}`);
+
+		return key;
+	});
 
 	beforeEach(async () => {
 		await resetDemo(db, "2026-09-22");
 	});
 
 	async function seed(state: keyof typeof MERCHANT_SUGGESTION_ROWS) {
-		const row = MERCHANT_SUGGESTION_ROWS[state] as NonNullable<
-			(typeof MERCHANT_SUGGESTION_ROWS)[typeof state]
-		>;
+		const row = present(MERCHANT_SUGGESTION_ROWS[state]);
+
 		await seedMerchant(db, {
 			key: "ZED CAFE",
 			status: row.status,
@@ -278,16 +301,20 @@ describe("the merchant suggestion store follows its machine", () => {
 			namesAsked: row.namesAsked,
 		});
 	}
+
 	/** The machine's state for the stored row, so every check reads one answer. */
 	const stateNow = async () => {
-		const row = await db
-			.prepare(
-				"SELECT suggestion_status AS status, names_asked AS namesAsked FROM merchants WHERE raw_name = 'ZED CAFE'",
-			)
-			.first<{ status: string; namesAsked: number }>();
+		const row = present(
+			await db
+				.prepare(
+					"SELECT suggestion_status AS status, names_asked AS namesAsked FROM merchants WHERE raw_name = 'ZED CAFE'",
+				)
+				.first<{ status: string; namesAsked: number }>(),
+		);
+
 		return merchantSuggestionState({
-			status: (row as NonNullable<typeof row>).status,
-			namesAsked: (row as NonNullable<typeof row>).namesAsked === 1,
+			status: row.status,
+			namesAsked: row.namesAsked === 1,
 			names: await merchantNames(db, "ZED CAFE"),
 		});
 	};

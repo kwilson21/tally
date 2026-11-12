@@ -23,6 +23,7 @@ const base: Props = {
 	closeHref: "/?focus=1",
 	closeAttrs: { "hx-get": "/?focus=1", "hx-push-url": "/" },
 };
+
 const render = (props: Partial<Props> = {}) =>
 	String(BudgetSheet({ ...base, ...props }));
 
@@ -66,6 +67,7 @@ describe("BudgetSheet", () => {
 			ok: false,
 			error: "Enter a dollar amount, like 250 or 250.50.",
 		});
+
 		if (refused.ok) throw new Error("expected a refusal");
 		const html = render({ value: "six hundred", error: refused.error });
 		expect(html).toMatch(

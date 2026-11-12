@@ -60,11 +60,13 @@ describe("never_suggest_rules table", () => {
 			kind: "income",
 			decidedOn: "2026-10-03",
 		});
+
 		const again = await addNeverSuggest(db, {
 			merchantKey: "VENMO",
 			kind: "income",
 			decidedOn: "2026-10-04",
 		});
+
 		expect(first).toBe(true);
 		expect(again).toBe(false);
 		const rules = await neverSuggestRules(db);
@@ -177,8 +179,10 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 				fields.suggestionId ?? null,
 			)
 			.first<{ id: number }>();
+
 		return row?.id ?? 0;
 	};
+
 	const listed = async (id: number) =>
 		(
 			await listTransactions(
@@ -187,13 +191,16 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 				[id],
 			)
 		).rows[0];
+
 	const rowHtml = async (id: number) => {
 		const html = await (
 			await exports.default.fetch(
 				"http://tally.test/transactions?show=all&month=all&q=VENMO+123",
 			)
 		).text();
+
 		const row = html.slice(html.indexOf(`data-transaction="${id}"`));
+
 		return row.slice(0, row.indexOf("</li>"));
 	};
 
@@ -204,6 +211,7 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 			amount: -2500,
 			incomeConfidence: 0.6,
 		});
+
 		expect((await rowHtml(id)).includes("Maybe income")).toBe(true);
 		await addNeverSuggest(db, {
 			merchantKey: "Venmo",
@@ -213,9 +221,11 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 		expect((await listed(id))?.incomeConfidence).toBeNull();
 		expect((await getTransaction(db, id))?.incomeConfidence).toBeNull();
 		expect(await rowHtml(id)).not.toContain("Maybe income");
+
 		const panel = await (
 			await exports.default.fetch(`http://tally.test/transactions/${id}`)
 		).text();
+
 		expect(panel).not.toContain("Maybe income");
 		const [rule] = await neverSuggestRules(db);
 		await removeNeverSuggest(db, lineKey(rule));
@@ -230,19 +240,23 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		const suggestionId = suggestion?.id ?? 0;
+
 		const chewy = await insertTx({
 			raw: "CHEWY.COM",
 			merchant: "Chewy",
 			amount: 4500,
 			suggestionId,
 		});
+
 		const petco = await insertTx({
 			raw: "PETCO 22",
 			merchant: "Petco",
 			amount: 2399,
 			suggestionId,
 		});
+
 		await addNeverSuggest(db, {
 			merchantKey: "Chewy",
 			kind: "new_category",
@@ -334,6 +348,7 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 				"SELECT id, merchant_key AS merchantKey, kind FROM never_suggest_rules WHERE merchant_key='VENMO 123' AND kind='income'",
 			)
 			.first<{ id: number; merchantKey: string; kind: string }>();
+
 		const removed = await removeNeverSuggest(db, lineKey(bank));
 		expect(removed?.rule.kind).toBe("income");
 		expect(removed?.removedCount).toBe(2);
@@ -344,6 +359,7 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 		const name = (await neverSuggestRules(db)).find(
 			(rule) => rule.merchantKey === "Venmo" && rule.kind === "income",
 		);
+
 		await removeNeverSuggest(db, lineKey(name));
 		expect(await lines()).toEqual(["CHEWY:income", "Venmo:transfer"]);
 	});
@@ -361,6 +377,7 @@ describe("new-category grouping", () => {
 				.bind(`plaid-${crypto.randomUUID()}`, raw)
 				.run();
 		}
+
 		expect(await noneFitTransactions(db)).toHaveLength(3);
 		await addNeverSuggest(db, {
 			merchantKey: "CHEWY.COM",
@@ -393,6 +410,7 @@ describe("new-category grouping", () => {
 				date: "2025-11-01",
 			}),
 		];
+
 		const named = await insertCharge({
 			raw: "VENMO 123",
 			merchant: "Venmo",
@@ -400,6 +418,7 @@ describe("new-category grouping", () => {
 			plaidCategory: "SHOPPING",
 			noneFit: true,
 		});
+
 		// Chewy has three charges too, so its group still reaches the three a group needs once Venmo's are left out.
 		const chewy = [
 			await insertCharge({
@@ -426,6 +445,7 @@ describe("new-category grouping", () => {
 				date: "2025-11-01",
 			}),
 		];
+
 		expect(
 			(await noneFitTransactions(db)).map((item) => item.id).sort(),
 		).toEqual([...charges, named, ...chewy].sort());
@@ -482,6 +502,7 @@ const insertCharge = async ({
 			suggestionId,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 };
 
@@ -505,9 +526,11 @@ describe("a Never suggest line on a store covers the bank text's charges with no
 		).results
 			.map((row) => `${row.merchantKey}:${row.kind}`)
 			.sort();
+
 	/** The store names Settings lists. */
 	const listed = async () =>
 		(await neverSuggestRules(db)).map((rule) => rule.merchantKey);
+
 	const yesOnVenmo = () =>
 		addNeverSuggest(db, {
 			merchantKey: "Venmo",
@@ -605,12 +628,14 @@ describe("every reader of a Never suggest line honors the bank text's match (#45
 			amount: 2500,
 			transferConfidence: 0.5,
 		});
+
 		const older = await insertCharge({
 			raw: "VENMO 123",
 			amount: 2500,
 			transferConfidence: 0.5,
 			date: "2025-12-01",
 		});
+
 		expect(await askedCharges("transfer")).toEqual([named, older]);
 		await addNeverSuggest(db, {
 			merchantKey: "Venmo",
@@ -626,11 +651,13 @@ describe("every reader of a Never suggest line honors the bank text's match (#45
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		const older = await insertCharge({
 			raw: "VENMO 123",
 			amount: 4500,
 			suggestionId: suggestion?.id ?? 0,
 		});
+
 		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
 		expect((await getTransaction(db, older))?.maybeCategoryName).toBe(
 			"new:Pet Care",
@@ -654,6 +681,7 @@ describe("the review's Yes and No writes skip a charge the match hides (#459)", 
 			kind: "income",
 			decidedOn: "2026-10-03",
 		});
+
 		const declineIncome = (id: number) =>
 			db
 				.prepare(
@@ -661,6 +689,7 @@ describe("the review's Yes and No writes skip a charge the match hides (#459)", 
 				)
 				.bind(id)
 				.run();
+
 		const yesIncome = (id: number) =>
 			db
 				.prepare(
@@ -668,6 +697,7 @@ describe("the review's Yes and No writes skip a charge the match hides (#459)", 
 				)
 				.bind(id)
 				.run();
+
 		expect((await declineIncome(older)).meta.changes).toBe(0);
 		expect((await yesIncome(older)).meta.changes).toBe(0);
 		// The same statement changes a charge the line does not cover, so the zeros above come from the match.
@@ -681,22 +711,26 @@ describe("the review's Yes and No writes skip a charge the match hides (#459)", 
 			amount: 2500,
 			transferConfidence: 0.5,
 		});
+
 		const older = await insertCharge({
 			raw: "VENMO 123",
 			amount: 2500,
 			transferConfidence: 0.5,
 			date: "2025-12-01",
 		});
+
 		const visible = await insertCharge({
 			raw: "CHEWY 9",
 			amount: 2500,
 			transferConfidence: 0.5,
 		});
+
 		await addNeverSuggest(db, {
 			merchantKey: "Venmo",
 			kind: "transfer",
 			decidedOn: "2026-10-03",
 		});
+
 		const leaveOut = (id: number) =>
 			db
 				.prepare(
@@ -704,6 +738,7 @@ describe("the review's Yes and No writes skip a charge the match hides (#459)", 
 				)
 				.bind(id)
 				.run();
+
 		expect((await leaveOut(older)).meta.changes).toBe(0);
 		expect((await leaveOut(visible)).meta.changes).toBe(1);
 	});
@@ -716,6 +751,7 @@ describe("the Never suggest match is indexed by raw name (#459)", () => {
 				`EXPLAIN QUERY PLAN SELECT t.id FROM transactions t WHERE ${neverSuggestedSql("t", "income")}`,
 			)
 			.all<{ detail: string }>();
+
 		const plan = results.map((row) => row.detail).join("\n");
 		expect(plan).toContain("transactions_raw_name");
 		expect(plan).not.toContain("SCAN u");

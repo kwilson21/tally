@@ -20,22 +20,27 @@ export const PUSH_SERVICE_HOSTS = [
  */
 export const PUSH_SERVICE_EXACT_HOSTS = ["jmt17.google.com"] as const;
 
+const EXACT_HOSTS: readonly string[] = PUSH_SERVICE_EXACT_HOSTS;
+
 /**
  * True when the endpoint is an https URL whose host is one of PUSH_SERVICE_HOSTS or a subdomain of one, or one of
  * PUSH_SERVICE_EXACT_HOSTS, with no port but the default. The host is compared lower-cased. A URL that doesn't parse is false.
  */
 export function isPushServiceEndpoint(endpoint: string): boolean {
 	let url: URL;
+
 	try {
 		url = new URL(endpoint);
 	} catch {
 		return false;
 	}
+
 	// A URL's port is "" for the default port (443 for https), so a port written out as 443 is the default too.
 	if (url.protocol !== "https:" || url.port !== "") return false;
 	const host = url.hostname.toLowerCase();
-	if ((PUSH_SERVICE_EXACT_HOSTS as readonly string[]).includes(host))
-		return true;
+
+	if (EXACT_HOSTS.includes(host)) return true;
+
 	return PUSH_SERVICE_HOSTS.some(
 		(service) => host === service || host.endsWith(`.${service}`),
 	);

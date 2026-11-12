@@ -15,12 +15,15 @@
 // aria-keyshortcuts; this script only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
+
 // The row a person opens, marked on transaction, Home's savings goal and category rows, Bills' bill and planned
 // expense rows, and a bill page's month rows. Only a link can take focus, so a details row (Settings' category rows)
 // is passed over.
 const ROW = "a[data-row]";
+
 // A region that scrolls sideways (month-end's chart) keeps the arrows for itself.
 const SIDEWAYS = "[data-sideways]";
+
 // The list that takes the search when a page has no search of its own.
 const SEARCH_PAGE = "/transactions?focus=search";
 
@@ -31,6 +34,7 @@ export function keysHref({ pathname, search }) {
 	const path = /[\\\t\n\r]/.test(pathname)
 		? "/"
 		: pathname.replace(/^\/+/, "/");
+
 	return `${path}${search ? `${search}&` : "?"}keys`;
 }
 
@@ -61,6 +65,7 @@ export function controlFor(doc, key) {
 	const named = [...doc.querySelectorAll("[aria-keyshortcuts]")].filter(
 		(node) => node.getAttribute("aria-keyshortcuts") === key && usable(node),
 	);
+
 	return named.at(-1) ?? null;
 }
 
@@ -91,6 +96,7 @@ export function keyboard(doc, win) {
 
 	// A page loaded with the keys sheet already open (a reload) keeps its fragment on close, as a sheet opened with ? does.
 	const loaded = openSheet(doc);
+
 	if (loaded && doc.getElementById("keys")?.contains(loaded)) {
 		keptHash = win.location.hash;
 		armed = true;
@@ -120,9 +126,12 @@ export function keyboard(doc, win) {
 	/** Focuses the page's heading: the first h1 in #main, or else #main, as toast.js's focusHeading does. */
 	function focusHeading() {
 		const main = doc.getElementById("main");
+
 		if (!main) return;
+
 		const heading =
 			[...doc.querySelectorAll("h1")].find((h1) => main.contains(h1)) ?? main;
+
 		if (!heading.hasAttribute("tabindex"))
 			heading.setAttribute("tabindex", "-1");
 		heading.focus();
@@ -131,9 +140,11 @@ export function keyboard(doc, win) {
 	/** Moves focus to the row j or k goes to: from the row focus is on, one down or up, stopping at the ends. */
 	function moveRow(key, active) {
 		const rows = rowsOf(doc);
+
 		if (rows.length === 0) return;
 		const at = rows.findIndex((row) => row === active || row.contains(active));
 		let next;
+
 		if (at === -1) next = key === "j" ? 0 : rows.length - 1;
 		else
 			next = Math.min(
@@ -147,25 +158,34 @@ export function keyboard(doc, win) {
 	return {
 		keydown(event) {
 			if (event.defaultPrevented || event.isComposing) return;
+
 			if (event.ctrlKey || event.altKey || event.metaKey) return;
+
 			// Shift is part of ? and of / (on layouts such as German, where / needs it); a shifted letter or arrow does nothing.
 			if (event.shiftKey && event.key !== "?" && event.key !== "/") return;
 			const active = doc.activeElement ?? doc.body;
+
 			if (active.closest(FIELD) || openSheet(doc)) return;
 			// Caps Lock makes a letter's key a capital; a letter is read the same either way.
 			const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+
 			switch (key) {
 				case "/": {
 					const search = controlFor(doc, "/");
 					event.preventDefault();
+
 					if (search) search.focus();
 					else win.location.assign(SEARCH_PAGE);
+
 					return;
 				}
+
 				case "?": {
 					event.preventDefault();
+
 					if (loading) return;
 					returnTo = active === doc.body ? null : active;
+
 					// Focus on an Undo toast is blurred so the sheet can take focus (sheet.js moves it only from nothing).
 					if (doc.getElementById("toasts")?.contains(active)) active.blur();
 					keptHash = win.location.hash;
@@ -179,16 +199,20 @@ export function keyboard(doc, win) {
 						swap: "outerHTML",
 						push: url + keptHash,
 					});
+
 					return;
 				}
+
 				case "j":
 				case "k":
 					moveRow(key, active);
+
 					return;
 				case "e":
 					if (!active.hasAttribute("data-row")) return;
 					event.preventDefault();
 					active.click();
+
 					return;
 				default: {
 					// ← and → (Home's month links) and u (the Undo toast) are the page's own controls, named by their key.
@@ -198,6 +222,7 @@ export function keyboard(doc, win) {
 					)
 						return;
 					const control = controlFor(doc, key);
+
 					if (!control) return;
 					event.preventDefault();
 					control.click();
@@ -208,6 +233,7 @@ export function keyboard(doc, win) {
 			// A settle of #keys, or of a region that holds it (a history restore swaps the body, which holds #keys), is the
 			// keys sheet's swap. Another request's settle (Sync now, a row's sheet) leaves the return alone.
 			const region = doc.getElementById("keys");
+
 			if (!region || !event?.target?.contains?.(region)) {
 				// An Undo's push drops ?keys from the address (its swap draws #page, which does not hold #keys), and so can any
 				// other push. While the keys sheet is open, the address gets ?keys back in place, as keepFragment puts the fragment back.
@@ -220,24 +246,30 @@ export function keyboard(doc, win) {
 						"",
 						keysHref(win.location) + (win.location.hash || keptHash),
 					);
+
 				return;
 			}
+
 			// A settle of #keys itself is the keys request's own swap, so its wait is over; a body swap that redraws #keys is not.
 			if (event.target === region) loading = false;
 			const sheet = openSheet(doc);
+
 			if (sheet) {
 				// Only the keys sheet's own open arms the return; a different sheet's settle changes nothing.
 				if (region.contains(sheet)) {
 					armed = true;
 					keepFragment(keptHash);
 				}
+
 				return;
 			}
+
 			// A settle with no sheet open ends the keys' return: it was the close (a failed request is ended(), below).
 			const back = armed ? returnTo : null;
 			const fragment = armed ? keptHash : "";
 			forget();
 			keepFragment(fragment);
+
 			// When the opener is gone (a Back redrew the page, or an Undo left its toast), focus goes to the page's heading,
 			// but only from nothing, as ended() gives it back.
 			if (back?.isConnected) back.focus();
@@ -247,18 +279,22 @@ export function keyboard(doc, win) {
 		/** A keys request that ends with no swap forgets the return, and refocuses its opener if focus is on nothing. */
 		ended(event) {
 			const ctx = event.detail?.ctx;
+
 			if (ctx?.target?.id !== "keys") return;
 			// Every keys request ends here, cancelled, dropped or failed, so a ? after this one sends a new request.
 			loading = false;
 			pending = null;
+
 			// A swap's settle ends the return, so a finish that comes first leaves it for that settle.
 			if (ctx.status === "swapped" && ctx.swap !== "none") return;
 			const sheet = openSheet(doc);
+
 			// A failed close leaves the sheet up, so its return stays for the retried Escape or Cancel.
 			if (sheet && doc.getElementById("keys")?.contains(sheet)) return;
 			// A sheet that opened meanwhile takes the focus with it, so the old opener gets none back.
 			const back = sheet ? null : returnTo;
 			forget();
+
 			// Focus moves back only from nothing (an Undo that ? blurred), so a person who moved it keeps it.
 			if (
 				back?.isConnected &&
@@ -277,20 +313,26 @@ export function keyboard(doc, win) {
 		 */
 		responded(event) {
 			const target = event.detail?.ctx?.target;
+
 			if (target?.id !== "keys") return;
 			const sheet = openSheet(doc);
 			const otherSheet = !!sheet && !target.contains(sheet);
 			const from = event.detail?.ctx?.request?.headers?.["HX-Current-URL"];
+
 			const moved =
 				!!from && pathAndQuery(new URL(from)) !== pathAndQuery(win.location);
+
 			const redrawn = !target.isConnected;
+
 			if (!otherSheet && !moved && !redrawn) return;
 			event.preventDefault();
+
 			if (otherSheet) forget();
 		},
 		/** A keys request's ctx as htmx's before-request gives it, so a history restore can abort the request while it loads. */
 		requested(event) {
 			const ctx = event.detail?.ctx;
+
 			if (ctx?.target?.id === "keys") pending = ctx;
 		},
 		/**

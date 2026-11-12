@@ -68,7 +68,9 @@ export function PlannedRow({
 			</span>
 		</>
 	);
+
 	const look = "flex min-h-16 items-center gap-4";
+
 	return (
 		<li>
 			{href ? (
@@ -131,6 +133,7 @@ export function PlanBand({
 }) {
 	const move = `/plans/${planId}/move`;
 	const drop = `/plans/${planId}/drop`;
+
 	return (
 		<section class="mt-3 bg-band px-4 py-3" aria-labelledby="plan-band-title">
 			<p class="text-lg" id="plan-band-title">
@@ -212,17 +215,21 @@ export function PlanSheet({
 	const title = plan ? plan.name : "Plan an expense";
 	const action = plan ? `/plans/${plan.id}` : "/plans";
 	const amountCents = plan?.amountCents;
+
 	// Closing the sheet, by the backdrop or Cancel, returns focus to what opened it (#87).
 	const closeHref = !plan
 		? "/bills?focus=plan-expense"
 		: opener
 			? `/plans/${plan.id}?focus=edit-plan`
 			: `/bills?focus=plan-${plan.id}`;
+
 	// The sheet's own links carry the opener too, so the delete question closes to the same place.
 	const via = opener ? "?opener=plan" : "";
+
 	const openerField = opener && (
 		<input type="hidden" name="opener" value="plan" />
 	);
+
 	return (
 		<BottomSheet
 			labelledBy="plan-sheet-title"
@@ -411,6 +418,7 @@ export function PlanPaymentPicker({
 	focusHeading?: boolean;
 }) {
 	const action = `/plans/${planId}/link`;
+
 	return (
 		<section
 			class="mt-6 border-t border-rule pt-4"

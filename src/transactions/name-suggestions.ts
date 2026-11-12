@@ -14,26 +14,34 @@ export function parseSuggestedNames(
 	stored: string | null | undefined,
 ): string[] {
 	let rows: unknown;
+
 	try {
 		rows = JSON.parse(stored ?? "[]");
 	} catch {
 		return [];
 	}
+
 	if (!Array.isArray(rows)) return [];
 	const named: [number, string][] = [];
+
 	for (const row of rows) {
-		if (
-			Array.isArray(row) &&
-			typeof row[0] === "number" &&
-			typeof row[1] === "string"
-		)
-			named.push([row[0], row[1].trim()]);
+		if (isNamedRow(row)) named.push([row[0], row[1].trim()]);
 	}
+
 	return named
 		.filter(([, name]) => name !== "")
 		.sort((a, b) => a[0] - b[0])
 		.map(([, name]) => name)
 		.slice(0, MAX_SUGGESTED_NAMES);
+}
+
+// True for one stored `[position, name]` pair: an array whose first item is a number and second a string.
+function isNamedRow(row: unknown): row is [number, string] {
+	return (
+		Array.isArray(row) &&
+		typeof row[0] === "number" &&
+		typeof row[1] === "string"
+	);
 }
 
 /**
@@ -42,8 +50,11 @@ export function parseSuggestedNames(
  */
 export function normaliseNames(names: readonly string[]): string[] {
 	return names
-		.map((name) => name.trim())
-		.filter((name) => name !== "")
+		.flatMap((name) => {
+			const trimmed = name.trim();
+
+			return trimmed !== "" ? [trimmed] : [];
+		})
 		.slice(0, MAX_SUGGESTED_NAMES);
 }
 
@@ -86,6 +97,7 @@ export function usableSuggestedNames({
 }: Stored): string[] {
 	if (status !== MERCHANT_SUGGESTION_WAITING) return [];
 	const names = parseSuggestedNames(stored);
+
 	return namesOn ? names : names.filter((name) => isBankName(name, key));
 }
 
@@ -125,6 +137,12 @@ const repeatsShown = (name: string, key: string, tidied: string) =>
  * and, when it is the bank's, `fromBank` (no sparkles icon, P87 B), else the tidied bank text
  * (decision 46).
  */
+export type ShownName = {
+	name: string;
+	suggested: boolean;
+	fromBank: boolean;
+};
+
 export function shownName({
 	chosen,
 	ownName,
@@ -135,17 +153,16 @@ export function shownName({
 	/** A name given to this one transaction (decision 101), which wins over the merchant's. */
 	ownName?: string | null;
 	rawName: string;
-}): {
-	name: string;
-	suggested: boolean;
-	fromBank: boolean;
-} {
+}): ShownName {
 	if (ownName) return { name: ownName, suggested: false, fromBank: false };
+
 	if (chosen) return { name: chosen, suggested: false, fromBank: false };
 	const tidied = tidyName(rawName);
+
 	const first = usableSuggestedNames(merchant).find(
 		(name) => !repeatsShown(name, merchant.key, tidied),
 	);
+
 	return first
 		? {
 				name: first,
@@ -158,6 +175,7 @@ export function shownName({
 /** The names the edit panel and the review offer: the usable ones that differ from the tidied bank text. */
 export function offeredNames(merchant: Stored, rawName: string): string[] {
 	const tidied = tidyName(rawName);
+
 	return usableSuggestedNames(merchant).filter(
 		(name) => !repeatsShown(name, merchant.key, tidied),
 	);

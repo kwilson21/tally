@@ -21,11 +21,15 @@ export type VapidKeys = { publicKey: string; signingKey: CryptoKey };
  */
 export async function vapidKeys(env: PushEnv): Promise<VapidKeys | null> {
 	if (env.DEMO === "true") return null;
+
 	if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return null;
 	const publicBytes = fromBase64Url(env.VAPID_PUBLIC_KEY);
 	const scalar = fromBase64Url(env.VAPID_PRIVATE_KEY);
+
 	if (publicBytes?.length !== 65 || publicBytes[0] !== 0x04) return null;
+
 	if (scalar?.length !== 32) return null;
+
 	try {
 		const signingKey = await crypto.subtle.importKey(
 			"jwk",
@@ -40,6 +44,7 @@ export async function vapidKeys(env: PushEnv): Promise<VapidKeys | null> {
 			false,
 			["sign"],
 		);
+
 		return { publicKey: toBase64Url(publicBytes), signingKey };
 	} catch {
 		return null;
