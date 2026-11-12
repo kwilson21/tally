@@ -18,7 +18,7 @@ import { tidyName } from "../transactions/tidy-name";
 import { LIST, LIST_VERSION } from "./category-saves";
 import { Database, runWith } from "./database";
 import { isUniqueViolation } from "./errors";
-import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { ChangedSinceRead, decideAndSave, guardedSave } from "./guarded-save";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
@@ -532,18 +532,10 @@ export const decideCreate = <E>(
 			),
 			decide: (facts) => createRule.decide(request, facts),
 			save: (write) =>
-				Effect.tryPromise({
-					try: () => db.batch(createStatements(db, write, request.shown)),
-					catch: (cause) => cause,
-				}).pipe(
-					Effect.catch(
-						(cause): Effect.Effect<never, ChangedSinceRead | NameTaken> =>
-							cause instanceof Error && CREATE_GUARD_RAISED.test(cause.message)
-								? Effect.fail(new ChangedSinceRead())
-								: isUniqueViolation(cause)
-									? Effect.fail(new NameTaken())
-									: Effect.die(cause),
-					),
+				guardedSave(
+					() => db.batch(createStatements(db, write, request.shown)),
+					(error) => CREATE_GUARD_RAISED.test(error.message),
+					() => new NameTaken(),
 				),
 			gaveUp: "A suggestion kept changing while its Yes was being saved.",
 		});

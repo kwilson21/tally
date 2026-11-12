@@ -20,8 +20,7 @@ import {
 import type { Refusal } from "../rules/terms";
 import { LIST, LIST_VERSION } from "./category-saves";
 import { Database, runWith } from "./database";
-import { isUniqueViolation } from "./errors";
-import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { decideAndSave, guardedSave } from "./guarded-save";
 import { incomeGuessSql, PERSON_INCOME_SET_SQL } from "./income";
 import { neverSuggestedSql } from "./never-suggest";
 import type { NewCategoryTarget } from "./new-category-answer";
@@ -207,18 +206,12 @@ export function neverSuggestChangedSinceRead(error: Error): boolean {
 	return NEVER_SUGGEST_GUARD_RAISED.test(error.message);
 }
 
-/** Runs a save's batch, and reads a guard's error as ChangedSinceRead; any other failure is a defect. */
+/** Runs a save's batch. Either guard's failure becomes ChangedSinceRead; any other failure is a defect. */
 const saveBatch = (db: D1Database, statements: D1PreparedStatement[]) =>
-	Effect.tryPromise({
-		try: () => db.batch(statements),
-		catch: (cause) => cause,
-	}).pipe(
-		Effect.catch((cause) =>
-			cause instanceof Error &&
-			(maybeChangedSinceRead(cause) || neverSuggestChangedSinceRead(cause))
-				? Effect.fail(new ChangedSinceRead())
-				: Effect.die(cause),
-		),
+	guardedSave(
+		() => db.batch(statements),
+		(error) =>
+			maybeChangedSinceRead(error) || neverSuggestChangedSinceRead(error),
 	);
 
 const GAVE_UP = "A suggestion kept changing while its answer was being saved.";
@@ -463,18 +456,10 @@ export const decideFile = <E extends Refusal>(
 			facts: Effect.promise(() => fileFacts(db, request.transactionId)),
 			decide: (facts) => fileRule.decide(request, facts),
 			save: (write) =>
-				Effect.tryPromise({
-					try: () => db.batch(fileStatements(db, write)),
-					catch: (cause) => cause,
-				}).pipe(
-					Effect.catch(
-						(cause): Effect.Effect<never, ChangedSinceRead | NameTaken> =>
-							cause instanceof Error && maybeChangedSinceRead(cause)
-								? Effect.fail(new ChangedSinceRead())
-								: isUniqueViolation(cause)
-									? Effect.fail(new NameTaken())
-									: Effect.die(cause),
-					),
+				guardedSave(
+					() => db.batch(fileStatements(db, write)),
+					maybeChangedSinceRead,
+					() => new NameTaken(),
 				),
 			gaveUp: GAVE_UP,
 		});

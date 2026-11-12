@@ -15,7 +15,7 @@ import {
 import { groupBySameCleanedText, type SameTextRow } from "../same-text-matches";
 import { COUNTED_JOINS } from "./counted-month";
 import { Database, runWith } from "./database";
-import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { decideAndSave, guardedSave } from "./guarded-save";
 import { merchantKeySql } from "./merchant-key";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { cardLabel, JOIN_MERCHANT, LABEL_SQL } from "./suggestions-queue";
@@ -284,15 +284,9 @@ export const decideMore = <E>(
 			facts: Effect.promise(() => moreFacts(db, request.filedId, posted)),
 			decide: (facts) => moreRule.decide(request, facts),
 			save: (write) =>
-				Effect.tryPromise({
-					try: () => db.batch(moreStatements(db, write, posted)),
-					catch: (cause) => cause,
-				}).pipe(
-					Effect.catch((cause) =>
-						cause instanceof Error && GUARD_RAISED.test(cause.message)
-							? Effect.fail(new ChangedSinceRead())
-							: Effect.die(cause),
-					),
+				guardedSave(
+					() => db.batch(moreStatements(db, write, posted)),
+					(error) => GUARD_RAISED.test(error.message),
 				),
 			gaveUp: "The purchases kept changing while they were being added.",
 		});
