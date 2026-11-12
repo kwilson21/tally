@@ -6,6 +6,7 @@ import {
 	loadBillSuggestions,
 	threeMonthsBack,
 } from "../src/bills/find";
+import { MAX_OCCURRENCE_CENTS } from "../src/bills/totals";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { present } from "./helpers/present";
@@ -28,6 +29,22 @@ describe("finding bills", () => {
 				charge("2026-09-01", 1000),
 			]),
 		).toMatchObject([{ amountCents: 1000, dueDay: 1, chargeCount: 3 }]);
+	});
+
+	it("never offers a charge past what the set-aside can add up, so no bill is saved with one", () => {
+		// Setup's Keep saves a found bill as it is, and setAsideFor refuses an occurrence past MAX_OCCURRENCE_CENTS.
+		expect(
+			findBillSuggestions([
+				charge("2026-08-01", MAX_OCCURRENCE_CENTS + 1),
+				charge("2026-09-01", MAX_OCCURRENCE_CENTS + 1),
+			]),
+		).toEqual([]);
+		expect(
+			findBillSuggestions([
+				charge("2026-08-01", MAX_OCCURRENCE_CENTS),
+				charge("2026-09-01", MAX_OCCURRENCE_CENTS),
+			]),
+		).toMatchObject([{ amountCents: MAX_OCCURRENCE_CENTS }]);
 	});
 
 	it("requires two eligible charges 25–35 days apart and within 10%", () => {
