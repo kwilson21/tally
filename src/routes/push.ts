@@ -10,12 +10,17 @@
 // restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
 // 409, so opening Home on a shared device does not hand it to whoever is looking, and the page shows that device as Off.
 
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { Hono } from "hono";
 import { actor } from "../actor";
+import { runWith } from "../db/database";
+import { decideDevice } from "../db/push-saves";
 import { fromBase64Url } from "../push/base64url";
-import { MAX_DEVICES_PER_PERSON } from "../push/devices";
 import { isPushServiceEndpoint } from "../push/endpoint";
 import { vapidKeys } from "../push/keys";
+import { subscribeDevice } from "../rules/push";
 
 type App = { Bindings: Env; Variables: { actor: string } };
 
@@ -33,79 +38,49 @@ const AUTH_LENGTH = 22;
 
 const P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 
-/** One field of a parsed form: text, a file, several of either, or absent. */
-type FormFields = Record<string, string | File | (string | File)[] | undefined>;
+/**
+ * A subscription form at the edge (decision 206): the three fields as text of exactly the lengths push.js sends, checked
+ * before anything is decoded, so an oversized value costs nothing more than the check. A file, a list or a missing field
+ * is not text and fails.
+ */
+const SubscriptionFields = Schema.Struct({
+	endpoint: Schema.String.check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_ENDPOINT_LENGTH),
+	),
+	p256dh: Schema.String.check(
+		Schema.isMinLength(P256DH_LENGTH),
+		Schema.isMaxLength(P256DH_LENGTH),
+	),
+	auth: Schema.String.check(
+		Schema.isMinLength(AUTH_LENGTH),
+		Schema.isMaxLength(AUTH_LENGTH),
+	),
+});
 
-/** True for a field the browser sent as text (a file, a list or a missing field is not). */
-function isText(value: FormFields[string]): value is string {
-	return typeof value === "string";
-}
+/** Whether the three fields are a real subscription: a browser's push service, a key on the curve, a 16-byte secret. */
+async function isSubscription(fields: {
+	endpoint: string;
+	p256dh: string;
+	auth: string;
+}) {
+	if (!isPushServiceEndpoint(fields.endpoint)) return false;
+	const point = fromBase64Url(fields.p256dh);
 
-/** A form field as text, or null when it is missing or a file. */
-const fieldOf = (form: FormFields, name: string) => {
-	const value = form[name];
-
-	return isText(value) ? value : null;
-};
-
-/** The three subscription fields as the browser sent them, or null when any one is not a valid subscription. */
-async function subscriptionOf(form: FormFields) {
-	// Every length is checked before any field is decoded, so an oversized value costs nothing more than the check.
-	const endpoint = fieldOf(form, "endpoint");
-	const p256dh = fieldOf(form, "p256dh");
-	const auth = fieldOf(form, "auth");
-
-	if (!endpoint || endpoint.length > MAX_ENDPOINT_LENGTH) return null;
-
-	if (!p256dh || p256dh.length !== P256DH_LENGTH) return null;
-
-	if (!auth || auth.length !== AUTH_LENGTH) return null;
-
-	if (!isPushServiceEndpoint(endpoint)) return null;
-	const point = fromBase64Url(p256dh);
-
-	if (point?.length !== 65 || point[0] !== 0x04) return null;
+	if (point?.length !== 65 || point[0] !== 0x04) return false;
 
 	try {
 		// RFC 8291 §7: the key must be on the curve, which an import checks.
 		await crypto.subtle.importKey("raw", point, P256, false, []);
 	} catch {
-		return null;
+		return false;
 	}
 
-	const secret = fromBase64Url(auth);
-
-	if (secret?.length !== 16) return null;
-
-	return { endpoint, p256dh, auth };
+	return fromBase64Url(fields.auth)?.length === 16;
 }
 
-// The membership guard is part of the write itself: a row is stored only while the person is a member, so a removal that lands
-// after the check above still stores nothing (the write changes no row). ?1 is the person, ?2 to ?4 the device's fields.
-const INSERT_SQL = `INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth)
-	SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM household_members WHERE email = ?1 AND removed_at IS NULL)`;
-
-/**
- * A tap: the device is stored for the person who tapped, and moves to them from whoever had it. A tap also stamps created_at, so
- * the device the person just turned on is the newest, and the cap (TRIM_SQL) never drops it. 0 changes: not a member.
- */
-const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth, created_at = datetime('now')`;
-
-/** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row is never changed (decision 149). */
-const RESTORE_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO NOTHING`;
-
-/**
- * The cap (decision 149, spec §10): drops the person's devices past the newest MAX_DEVICES_PER_PERSON, by created_at then id (?1 is
- * the person). It runs after the write in the same batch, and only when that write changed a row: changes() is the count of the
- * write the batch ran just before, so a restore that stores nothing, or a removed person's tap, trims nothing.
- */
-const TRIM_SQL = `DELETE FROM push_subscriptions
-	WHERE member_email = ?1 AND changes() > 0 AND id NOT IN (
-		SELECT id FROM push_subscriptions WHERE member_email = ?1 ORDER BY created_at DESC, id DESC LIMIT ${MAX_DEVICES_PER_PERSON})`;
-
-/** The one person a device is stored for, if any. */
-const OWNER_SQL =
-	"SELECT member_email FROM push_subscriptions WHERE endpoint = ?";
+/** What the rule's answer becomes: stored (or already there), not a member, or someone else's device. */
+type Answered = 204 | 404 | 409;
 
 push.post("/push/subscribe", async (c) => {
 	// Web Push off (the demo reads nothing; no keys) and no member signed in are answered before the body is read or parsed.
@@ -118,7 +93,8 @@ push.post("/push/subscribe", async (c) => {
 		return c.body(null, 404);
 	}
 
-	// The early answer for someone who isn't a member. The write below checks membership again, and it is the one that stores.
+	// The early answer for someone who isn't a member. The rule checks membership again on what it reads, and the save's guard
+	// holds it to that, so a removal that lands after this check still stores nothing.
 	const current = await c.env.DB.prepare(
 		"SELECT 1 AS present FROM household_members WHERE email = ? AND removed_at IS NULL",
 	)
@@ -137,39 +113,33 @@ push.post("/push/subscribe", async (c) => {
 	)
 		return c.body(null, 413);
 	const form = await c.req.parseBody();
-	const subscription = await subscriptionOf(form);
+	const fields = Schema.decodeUnknownResult(SubscriptionFields)(form);
 
-	if (!subscription) return c.body(null, 422);
+	// The fields are decoded and checked only once their lengths have passed.
+	if (!Result.isSuccess(fields) || !(await isSubscription(fields.success)))
+		return c.body(null, 422);
+	// "1" on a page load's quiet re-post.
+	const restore = form.restore === "1";
 
-	const row = [
-		member,
-		subscription.endpoint,
-		subscription.p256dh,
-		subscription.auth,
-	];
+	// A device already stored for this person is left as it is. A person removed since the early check gets the answer of
+	// someone who was never a member on a tap. On a page load's re-post every refusal answers 409, the one answer push.js
+	// shows as Off: nothing was stored, whether the device is someone else's or the person was just removed.
+	const status = await runWith(
+		c.env.DB,
+		decideDevice(subscribeDevice, {
+			member,
+			...fields.success,
+			restore,
+			// The time of the request, as SQLite writes it in UTC (decision 195: the rule and the save read no clock).
+			now: new Date().toISOString().slice(0, 19).replace("T", " "),
+		}).pipe(
+			Effect.map((): Answered => 204),
+			Effect.catchTags({
+				NotAMember: () => Effect.succeed<Answered>(restore ? 409 : 404),
+				DeviceIsSomeoneElses: () => Effect.succeed<Answered>(409),
+			}),
+		),
+	);
 
-	// The write and the cap are one batch, so the cap holds atomically: a failed trim leaves the write undone too.
-	if (form.restore !== "1") {
-		const [tapped] = await c.env.DB.batch([
-			c.env.DB.prepare(TAP_SQL).bind(...row),
-			c.env.DB.prepare(TRIM_SQL).bind(member),
-		]);
-
-		return c.body(null, tapped?.meta.changes ? 204 : 404);
-	}
-
-	// A page load's quiet re-post: a missing row is stored for this person. An existing row must already be theirs, and is then
-	// left as it is; one that belongs to someone else is not moved here, so the answer is 409 and the page shows the device as Off.
-	const [restored] = await c.env.DB.batch([
-		c.env.DB.prepare(RESTORE_SQL).bind(...row),
-		c.env.DB.prepare(TRIM_SQL).bind(member),
-	]);
-
-	if (restored?.meta.changes) return c.body(null, 204);
-
-	const owner = await c.env.DB.prepare(OWNER_SQL)
-		.bind(subscription.endpoint)
-		.first<{ member_email: string }>();
-
-	return c.body(null, owner?.member_email === member ? 204 : 409);
+	return c.body(null, status);
 });

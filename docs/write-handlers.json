@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 61,
+	"legacyBaseline": 60,
 	"handlers": [
 		{
 			"method": "POST",
@@ -300,7 +300,9 @@
 			"path": "/push/subscribe",
 			"file": "push.ts",
 			"area": "push",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/push.ts",
+			"stories": "test/push-stories.test.ts"
 		},
 		{
 			"method": "POST",
