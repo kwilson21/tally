@@ -11,9 +11,9 @@ import type {
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 
-/** How many messages a sender (?1) has stored in the hour before a time (?2), as SQL. */
-const SENT_THIS_HOUR =
-	"(SELECT COUNT(*) FROM feedback WHERE actor = ?1 AND created_at > datetime(?2, '-1 hour'))";
+/** How many messages a sender has stored in the hour before a time, as SQL over those two parameters. */
+const sentThisHour = (sender: string, now: string) =>
+	`(SELECT COUNT(*) FROM feedback WHERE actor = ${sender} AND created_at > datetime(${now}, '-1 hour'))`;
 
 /** What the feedback rule reads: the sender's messages in the hour before `now`. A form with no sender has none. */
 export async function feedbackFacts(
@@ -24,7 +24,7 @@ export async function feedbackFacts(
 	if (sender === null) return { sentThisHour: 0 };
 
 	const row = await db
-		.prepare(`SELECT ${SENT_THIS_HOUR} AS sentThisHour`)
+		.prepare(`SELECT ${sentThisHour("?1", "?2")} AS sentThisHour`)
 		.bind(sender, now)
 		.first<FeedbackFacts>();
 
@@ -35,27 +35,33 @@ export async function feedbackFacts(
  * The statement that stores a message. Its guard: the message is NULL unless the sender still has fewer stored this hour
  * than the rule's limit, and the column is NOT NULL, so a miss fails the statement with an error feedbackChangedSinceRead
  * knows. SQLite's RAISE works only inside a trigger, so the NOT NULL failure is how a plain statement raises.
+ *
+ * The technical context's column is named only when there is context to store, so with diagnostics off the statement
+ * never mentions it (verification/feedback-integration.test.ts holds that). The first six values keep the places that
+ * suite reads them at: the sender, the kind, the feeling, the cleaned message, the page and the device.
  */
 export function feedbackSaveStatement(
 	db: D1Database,
 	save: FeedbackWrite,
 ): D1PreparedStatement {
+	const withContext = save.clientContext !== null;
+
 	return db
 		.prepare(
-			`INSERT INTO feedback (actor, created_at, type, feeling, message, page, device, client_context, app_version)
-			SELECT ?1, datetime(?2), ?3, ?4, CASE WHEN ${SENT_THIS_HOUR} < ?10 THEN ?5 END, ?6, ?7, ?8, ?9`,
+			`INSERT INTO feedback (actor, type, feeling, message, page, device, created_at, app_version${withContext ? ", client_context" : ""})
+			SELECT ?1, ?2, ?3, CASE WHEN ${sentThisHour("?1", "?7")} < ?9 THEN ?4 END, ?5, ?6, datetime(?7), ?8${withContext ? ", ?10" : ""}`,
 		)
 		.bind(
 			save.sender,
-			save.now,
 			save.type,
 			save.feeling,
 			save.message,
 			save.page,
 			save.device,
-			save.clientContext,
+			save.now,
 			save.appVersion,
 			save.sentThisHourBelow,
+			...(withContext ? [save.clientContext] : []),
 		);
 }
 
