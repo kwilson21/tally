@@ -1,3 +1,5 @@
+import { and, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { householdToday } from "../dates";
 import { NOTE_MAX } from "../limits";
@@ -10,9 +12,11 @@ import {
 } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { categoryNames } from "./categories";
+import { isUniqueViolation } from "./errors";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
+import { categorySuggestions } from "./schema";
 import type { ListRow } from "./transactions";
 
 export type NoneFitTransaction = {
@@ -61,6 +65,26 @@ export async function noneFitTransactions(
 
 const placeholders = () => `SELECT value FROM json_each(?)`;
 
+/** The condition for a suggestion still waiting; every query about a pending one reads it from here. */
+const pendingSuggestion = eq(categorySuggestions.status, "pending");
+
+/**
+ * The pending suggestion with this name, matched as SQLite's NOCASE does (ASCII case only, the rule of the partial unique
+ * index on lower(name)). Drizzle has no collation helper, so the NOCASE stays in the sql template.
+ */
+function pendingSuggestionIdByName(db: D1Database, name: string) {
+	return drizzle(db)
+		.select({ id: categorySuggestions.id })
+		.from(categorySuggestions)
+		.where(
+			and(
+				sql`${categorySuggestions.name} = ${name} COLLATE NOCASE`,
+				pendingSuggestion,
+			),
+		)
+		.get();
+}
+
 export async function saveSuggestion(
 	db: D1Database,
 	name: string | null,
@@ -78,12 +102,7 @@ export async function saveSuggestion(
 			: "";
 
 	if (safeName) {
-		const existing = await db
-			.prepare(
-				"SELECT id FROM category_suggestions WHERE name = ? COLLATE NOCASE AND status = 'pending'",
-			)
-			.bind(safeName)
-			.first<{ id: number }>();
+		const existing = await pendingSuggestionIdByName(db, safeName);
 
 		if (existing) {
 			await db
@@ -132,26 +151,12 @@ export async function saveSuggestion(
 
 		if (id) return id;
 
-		return (
-			(
-				await db
-					.prepare(
-						"SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status='pending'",
-					)
-					.bind(safeName)
-					.first<{ id: number }>()
-			)?.id ?? null
-		);
+		return (await pendingSuggestionIdByName(db, safeName))?.id ?? null;
 	} catch (error) {
 		// A concurrent nightly run may win the partial unique index; attach this group to that row.
-		if (!safeName || !/UNIQUE/i.test(String(error))) throw error;
+		if (!safeName || !isUniqueViolation(error)) throw error;
 
-		const existing = await db
-			.prepare(
-				"SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status='pending'",
-			)
-			.bind(safeName)
-			.first<{ id: number }>();
+		const existing = await pendingSuggestionIdByName(db, safeName);
 
 		if (!existing) throw error;
 		await db
@@ -371,12 +376,11 @@ export async function createFromSuggestion(
 	},
 	actor: string,
 ): Promise<CreateResult> {
-	const s = await db
-		.prepare(
-			"SELECT name FROM category_suggestions WHERE id = ? AND status = 'pending'",
-		)
-		.bind(id)
-		.first<{ name: string }>();
+	const s = await drizzle(db)
+		.select({ name: categorySuggestions.name })
+		.from(categorySuggestions)
+		.where(and(eq(categorySuggestions.id, id), pendingSuggestion))
+		.get();
 
 	if (!s) return { ok: false, reason: "gone" };
 	const name = tidyName(s.name);
@@ -562,7 +566,7 @@ export async function createFromSuggestion(
 				.bind(id, token),
 		]);
 	} catch (error) {
-		if (error instanceof Error && /UNIQUE/i.test(error.message))
+		if (isUniqueViolation(error))
 			return { ok: false, reason: "invalid", error: "That name is taken." };
 		throw error;
 	}
@@ -584,10 +588,11 @@ export async function createFromSuggestion(
 		return { ok: false, reason: "empty", error: NOTHING_TICKED };
 
 	if ((flipResult?.meta.changes ?? 0) === 0) {
-		const stillPending = await db
-			.prepare("SELECT status FROM category_suggestions WHERE id=?")
-			.bind(id)
-			.first<{ status: string }>();
+		const stillPending = await drizzle(db)
+			.select({ status: categorySuggestions.status })
+			.from(categorySuggestions)
+			.where(eq(categorySuggestions.id, id))
+			.get();
 
 		if (stillPending?.status !== "pending")
 			return { ok: false, reason: "gone" };
@@ -648,12 +653,13 @@ export async function dismissSuggestion(
 	db: D1Database,
 	id: number,
 ): Promise<{ name: string } | null> {
-	const result = await db
-		.prepare(
-			"UPDATE category_suggestions SET status = 'dismissed', decided_at = datetime('now') WHERE id = ? AND status = 'pending' RETURNING name",
-		)
-		.bind(id)
-		.first<{ name: string }>();
+	// A compare-and-set: only a pending row changes, so a second dismiss finds nothing and returns null.
+	const result = await drizzle(db)
+		.update(categorySuggestions)
+		.set({ status: "dismissed", decidedAt: sql`datetime('now')` })
+		.where(and(eq(categorySuggestions.id, id), pendingSuggestion))
+		.returning({ name: categorySuggestions.name })
+		.get();
 
 	return result ?? null;
 }

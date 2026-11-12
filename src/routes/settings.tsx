@@ -26,6 +26,7 @@ import {
 	type PendingSuggestion,
 	pendingSuggestionPage,
 } from "../db/category-suggestions";
+import { isUniqueViolation } from "../db/errors";
 import { waitsForRunStatement } from "../db/first-tally";
 import {
 	displayName,
@@ -1351,8 +1352,7 @@ function retry(
 }
 
 /** The database refused a name that differs only in capitals: someone saved it a moment earlier. */
-const nameTaken = (cause: unknown) =>
-	cause instanceof Error && /UNIQUE/.test(cause.message);
+export const nameTaken = (cause: unknown) => isUniqueViolation(cause);
 
 /**
  * The category was archived, restored or never existed: another screen got there first. The
