@@ -1,4 +1,6 @@
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
@@ -9,9 +11,8 @@ import { type AiTallyCounts, readAiTally } from "../db/ai-log";
 import {
 	type AiSwitches,
 	readAiSwitches,
-	saveAiSwitches,
+	switchNamed,
 } from "../db/ai-switches";
-import { changeBankTextRule } from "../db/bank-text-rules";
 import { categoryNames, settingsCategories } from "../db/categories";
 import {
 	addCategoryStatements,
@@ -30,31 +31,47 @@ import {
 } from "../db/category-suggestions";
 import { type Database, runWith } from "../db/database";
 import { isUniqueViolation } from "../db/errors";
-import { waitsForRunStatement } from "../db/first-tally";
 import {
 	displayName,
 	FORGET_UNDO_MIN_MS,
-	forgetText,
 	learnedCategoryChoices,
 	loadLearnedLines,
-	undoForget,
-	undoRemainingMs,
 } from "../db/learned-lines";
-import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
+import { merchantRules } from "../db/merchant-rules";
 import {
+	type NeverSuggestRule,
 	neverSuggestRuleLine,
 	neverSuggestRules,
-	removeNeverSuggest,
 } from "../db/never-suggest";
-import {
-	readBankSignInEmails,
-	removeHouseholdMember,
-	saveBankSignInEmails,
-} from "../db/reconnect";
+import { readBankSignInEmails } from "../db/reconnect";
 import { runningRecheck, startResortFor } from "../db/resort-start";
+import {
+	addPersonStatements,
+	addressFacts,
+	aiSwitchesFacts,
+	aiSwitchesStatements,
+	alwaysRuleFacts,
+	bankSignInEmailsStatements,
+	changeLineFacts,
+	changeLineStatements,
+	decideSetting,
+	forgetStatements,
+	forgetUndoLeftMs,
+	neverSuggestLineFacts,
+	noFacts,
+	personFacts,
+	personNameTaken,
+	removeAddressStatements,
+	removeAlwaysRuleStatements,
+	removeNeverSuggestStatements,
+	removePersonStatements,
+	renamePersonStatements,
+	textVersion,
+	timeZoneStatements,
+	undoForgetFacts,
+	undoForgetStatements,
+} from "../db/settings-saves";
 import { suggestionQueue } from "../db/suggestions-queue";
-import { saveTimeZone } from "../db/time-zone";
-import { waitingForJevSql } from "../db/transactions";
 import { readAtEdge } from "../edge";
 import { hxTrigger } from "../htmx";
 import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
@@ -68,7 +85,23 @@ import {
 	renameCategory,
 	restoreCategory,
 } from "../rules/categories";
+import {
+	addPerson,
+	type ChangeLineWrite,
+	changeLine,
+	forgetLine,
+	removeAlwaysRule,
+	removeNeverSuggestLine,
+	removePerson,
+	removeSignInAddress,
+	renamePerson,
+	saveAiSwitches as saveAiSwitchesRule,
+	saveBankSignInEmails as saveBankSignInEmailsRule,
+	saveTimeZone as saveTimeZoneRule,
+	undoForget,
+} from "../rules/settings";
 import { dismissNewCategory } from "../rules/suggestions";
+import type { Refusal } from "../rules/terms";
 import {
 	type CategoryErrors,
 	CategoryId,
@@ -915,7 +948,19 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 	const switches = await readAiSwitches(c.env.DB);
 	const before = await merchantRules(c.env.DB, switches.names, search, true);
 	const focusRules = before;
-	const removed = await removeMerchantRule(c.env.DB, merchantKey);
+
+	const removed = await runWith(
+		c.env.DB,
+		decideSetting(
+			removeAlwaysRule,
+			{ merchantKey },
+			(db) => alwaysRuleFacts(db, merchantKey),
+			removeAlwaysRuleStatements,
+		).pipe(
+			Effect.map(({ decided }) => Option.getOrNull(decided)?.merchant ?? null),
+		),
+	);
+
 	const view = { rulesSearch: search };
 
 	if (!removed) {
@@ -951,6 +996,9 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 // Remove takes one "Never suggest" line away and says so; the suggestion may come back as a fresh guess.
 // The store's linked lines go with it (decision 101). Focus goes to the line that took the clicked line's place,
 // counting only the lines left above it, or to the heading when none is left.
+/** The Remove rule for a line as Settings draws it. */
+const removeNeverSuggest = removeNeverSuggestLine<NeverSuggestRule>();
+
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	const id = Number(form.get("id")?.toString() ?? "");
@@ -959,10 +1007,22 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 	const search = String(form.get("rules_search") ?? "");
 	const lines = await neverSuggestRules(c.env.DB);
 
-	const removed =
-		Number.isInteger(id) && id > 0
-			? await removeNeverSuggest(c.env.DB, { id, merchantKey, kind })
-			: null;
+	// A number that is no line's finds no line, so the rule has nothing to do, as for a line already gone.
+	const removed = await runWith(
+		c.env.DB,
+		decideSetting(
+			removeNeverSuggest,
+			{ id },
+			(db) => neverSuggestLineFacts(db, { id, merchantKey, kind }),
+			removeNeverSuggestStatements,
+		).pipe(
+			Effect.map(({ decided }) => {
+				const write = Option.getOrNull(decided);
+
+				return write && { rule: write.line };
+			}),
+		),
+	);
 
 	if (!removed) {
 		// A line that is already gone: a plain form goes back to the rules, as a Remove that worked does.
@@ -1030,11 +1090,32 @@ settings.post("/settings/learned/forget", async (c) => {
 
 	const name = line ? `${line.name} → ${line.categoryName}` : displayName(text);
 	const message = `Forgot ${name}. Tally goes back to guessing.`;
-	const id = line ? await forgetText(c.env.DB, text) : 0;
+	// The time of the Forget is taken here and handed to the rule (decision 195): the Undo's ten seconds count from it.
+	const forgottenAt = Date.now();
+
+	const id = await runWith(
+		c.env.DB,
+		decideSetting(
+			forgetLine,
+			{ text, now: forgottenAt },
+			async (db) => ({
+				learned: line !== undefined,
+				version: await textVersion(db, text),
+			}),
+			forgetStatements,
+		).pipe(
+			// The Forget's own statement answers with its row's number, which the Undo names.
+			// SAFETY: that statement, the second of the batch, ends in RETURNING id, so its first row has an id.
+			Effect.map(
+				({ saved }) =>
+					(saved?.[1]?.results[0] as { id: number } | undefined)?.id ?? 0,
+			),
+		),
+	);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
-	// The Undo's time is what the server has left from the Forget's stored time, so the button never outlives the window.
-	const left = id > 0 ? await undoRemainingMs(c.env.DB, id) : 0;
+	// The Undo's time is what is left of the ten seconds since the Forget's stored time, so the button never outlives the window.
+	const left = id > 0 ? forgetUndoLeftMs(forgottenAt, Date.now()) : 0;
 
 	const toast =
 		left >= FORGET_UNDO_MIN_MS
@@ -1058,25 +1139,29 @@ settings.post("/settings/learned/undo", async (c) => {
 	const token = String(form.get("token") ?? "");
 	const id = Number(token);
 
-	const outcome =
-		Number.isInteger(id) && id > 0 ? await undoForget(c.env.DB, id) : "gone";
+	// A token that is no Forget's number finds no row, so the rule refuses it as it refuses one already undone.
+	const refusal = await runWith(
+		c.env.DB,
+		decideSetting(
+			undoForget,
+			{ id: Number.isInteger(id) && id > 0 ? id : 0, now: Date.now() },
+			(db) => undoForgetFacts(db, Number.isInteger(id) && id > 0 ? id : 0),
+			undoForgetStatements,
+		).pipe(
+			Effect.as(null),
+			Effect.catch((refused) => Effect.succeed(refused)),
+		),
+	);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
 
-	const toast =
-		outcome === "undone"
-			? {
-					message: "Forget undone. Tally has that line back.",
-					type: "success",
-					undoDone: token,
-				}
-			: outcome === "expired"
-				? {
-						message: "Undo expired. The line stays forgotten.",
-						type: "error",
-						undoDone: token,
-					}
-				: { message: "Nothing to undo.", type: "error", undoDone: token };
+	const toast = refusal
+		? { message: refusal.say, type: "error", undoDone: token }
+		: {
+				message: "Forget undone. Tally has that line back.",
+				type: "success",
+				undoDone: token,
+			};
 
 	c.header("HX-Trigger", hxTrigger({ toast, announce: toast.message }));
 
@@ -1106,38 +1191,32 @@ settings.post("/settings/learned/change", async (c) => {
 		return renderPage(c, "learned", { learnedError: message, status: 400 });
 	};
 
-	if (!line) return refuse("Choose a line to change.");
+	const chosen =
+		Number.isInteger(categoryId) && categoryId > 0 ? categoryId : 0;
 
-	if (line.vague)
-		return refuse(
-			`${line.name} covers more than one kind of purchase, so a rule can't be made for it.`,
-		);
-
-	const category =
-		Number.isInteger(categoryId) && categoryId > 0
-			? await c.env.DB.prepare(
-					"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
-				)
-					.bind(categoryId)
-					.first<{ id: number; name: string }>()
-			: null;
-
-	if (!category) {
-		const message = "Choose a category.";
-
-		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
-
-		return renderPage(c, "learned", {
-			learnedChange: { cleanedText: text, error: message },
-			status: 400,
-		});
-	}
-
-	// The rule and its immediate apply are one batch (review of #838): a failure leaves no rule, and says so.
-	let written: boolean;
+	// The rule decides; the rule and its immediate apply are one batch (review of #838), so a failure leaves no rule,
+	// and says so.
+	let answer: { saved: ChangeLineWrite } | { refused: Refusal };
 
 	try {
-		written = await changeBankTextRule(c.env.DB, text, category.id);
+		answer = await runWith(
+			c.env.DB,
+			decideSetting(
+				changeLine,
+				{ text, categoryId: chosen },
+				(db) =>
+					changeLineFacts(
+						db,
+						text,
+						chosen,
+						line ? { name: line.name, vague: line.vague } : null,
+					),
+				changeLineStatements,
+			).pipe(
+				Effect.map(({ decided }) => ({ saved: Option.getOrThrow(decided) })),
+				Effect.catch((refused) => Effect.succeed({ refused })),
+			),
+		);
 	} catch {
 		const message =
 			"Tally couldn't save that rule, so nothing changed. Try again.";
@@ -1147,17 +1226,29 @@ settings.post("/settings/learned/change", async (c) => {
 		return renderPage(c, "learned", { learnedError: message, status: 503 });
 	}
 
-	// The category was archived after it was checked: no rule was written, so the change is refused (round 2 of #838).
-	if (!written) {
-		const message = "That category was just archived, so nothing changed.";
+	if ("refused" in answer) {
+		const { refused } = answer;
 
-		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+		// A category that is unknown or archived is refused beside its own line.
+		if (Predicate.isTagged(refused, "NoCategoryChosen")) {
+			if (htmx) c.header("HX-Trigger", hxTrigger({ announce: refused.say }));
 
-		return renderPage(c, "learned", { learnedError: message, status: 409 });
+			return renderPage(c, "learned", {
+				learnedChange: { cleanedText: text, error: refused.say },
+				status: 400,
+			});
+		}
+
+		// The page names the line that is too vague for a rule.
+		return refuse(
+			Predicate.isTagged(refused, "LineTooVague") && line
+				? `${line.name} covers more than one kind of purchase, so a rule can't be made for it.`
+				: refused.say,
+		);
 	}
 
 	if (!htmx) return c.redirect("/settings/learned", 303);
-	const message = `${line.name} now goes to ${category.name} every time.`;
+	const message = `${answer.saved.lineName} now goes to ${answer.saved.categoryName} every time.`;
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
@@ -1464,34 +1555,18 @@ settings.post("/settings/ai", async (c) => {
 	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
 	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
 
-	// A flip that replaced an earlier one in the browser can still reach the server after that one was aborted, so
-	// the switch just flipped is always written, even when its value matches what the page drew.
-	// SAFETY: the keys are AI_FEATURES' own keys that next holds, so the record holds exactly the switches a Partial<AiSwitches> names.
-	const changed = Object.fromEntries(
-		AI_FEATURES.flatMap((f) =>
-			f.key in next &&
-			(next[f.key] !== drawn.includes(f.key) || f.key === posted)
-				? [[f.key, next[f.key]]]
-				: [],
-		),
-	) as Partial<AiSwitches>;
-
-	// Decision 150: the rows the switch left wait for the daily run, so setup keeps the run's words once it's back on. The
-	// wait mark goes in the save's own batch, and its guards decide whether it writes.
-	const switchesAfter = { ...before, ...changed };
-
-	const waiting =
-		!before.sortOnArrival && changed.sortOnArrival === true
-			? waitingForJevSql({
-					categories: switchesAfter.categories,
-					income: switchesAfter.income,
-				})
-			: null;
-
-	await saveAiSwitches(
+	await runWith(
 		c.env.DB,
-		changed,
-		waiting === null ? [] : [waitsForRunStatement(c.env.DB, waiting)],
+		decideSetting(
+			saveAiSwitchesRule,
+			{
+				posted: next,
+				drawnOn: drawn.flatMap((name) => switchNamed(name) ?? []),
+				flipped: posted,
+			},
+			aiSwitchesFacts,
+			aiSwitchesStatements,
+		),
 	);
 	const now = await readAiSwitches(c.env.DB);
 
@@ -1535,7 +1610,15 @@ settings.post("/settings/bank-sign-in-emails", async (c) => {
 	if (form.has("remove"))
 		return removeBankSignInEmail(c, String(form.get("remove") ?? ""));
 	const on = form.get("enabled") === "on";
-	await saveBankSignInEmails(c.env.DB, on);
+	await runWith(
+		c.env.DB,
+		decideSetting(
+			saveBankSignInEmailsRule,
+			{ on },
+			noFacts,
+			bankSignInEmailsStatements,
+		),
+	);
 
 	return done(
 		c,
@@ -1555,14 +1638,20 @@ async function removeBankSignInEmail(c: Context<App>, posted: string) {
 	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
 		return bankSignInEmailError(c, "Choose an address to remove.", 400);
 
-	const member = await c.env.DB.prepare(
-		"SELECT 1 FROM household_members WHERE email = ?",
-	)
-		.bind(email)
-		.first();
+	const refused = await runWith(
+		c.env.DB,
+		decideSetting(
+			removeSignInAddress,
+			{ email, now: Date.now() },
+			(db) => addressFacts(db, email),
+			removeAddressStatements,
+		).pipe(
+			Effect.as(null),
+			Effect.catchTag("AddressNotFound", (refusal) => Effect.succeed(refusal)),
+		),
+	);
 
-	if (!member) return bankSignInEmailError(c, "Address not found.", 404);
-	await removeHouseholdMember(c.env.DB, email);
+	if (refused) return bankSignInEmailError(c, refused.say, 404);
 
 	// The list is in address order: the address that takes the removed row's place is the next one, else the one before it.
 	const remaining = (await reconnectRecipients(c.env.DB)).results.map(
@@ -1631,22 +1720,26 @@ settings.post("/settings/people", async (c) => {
 	if (action === "remove") {
 		if (!Number.isInteger(id) || id <= 1) return c.text("Not found", 404);
 
-		const person = await c.env.DB.prepare(
-			"SELECT name FROM household_people WHERE id = ?",
-		)
-			.bind(id)
-			.first<{ name: string }>();
+		const removed = await runWith(
+			c.env.DB,
+			decideSetting(
+				removePerson,
+				{ id, who: actor(c) },
+				(db) => personFacts(db, id),
+				removePersonStatements,
+			).pipe(
+				// The statement that clears the person's purchases is the batch's second, after the guard.
+				Effect.map(({ decided, saved }) => ({
+					name: Option.getOrThrow(decided).name,
+					count: saved?.[1]?.meta.changes ?? 0,
+				})),
+				Effect.catchTag("PersonGone", () => Effect.succeed(null)),
+			),
+		);
 
-		if (!person) return c.notFound();
-
-		const [cleared] = await c.env.DB.batch([
-			c.env.DB.prepare(
-				"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0, updated_by = ?, updated_at = datetime('now') WHERE for_person_id = ?",
-			).bind(actor(c), id),
-			c.env.DB.prepare("DELETE FROM household_people WHERE id = ?").bind(id),
-		]);
-
-		const count = cleared?.meta.changes ?? 0;
+		if (!removed) return c.notFound();
+		const person = { name: removed.name };
+		const { count } = removed;
 
 		return done(
 			c,
@@ -1667,26 +1760,32 @@ settings.post("/settings/people", async (c) => {
 		});
 
 	if (action === "add") {
-		let added: number;
+		const result = await runWith(
+			c.env.DB,
+			decideSetting(
+				addPerson,
+				{ name },
+				noFacts,
+				addPersonStatements,
+				personNameTaken,
+			).pipe(
+				Effect.map(({ saved }) => ({
+					id: Number(saved?.[0]?.meta.last_row_id),
+				})),
+				Effect.catchTag("PersonNameTaken", (refusal) =>
+					Effect.succeed({ refused: refusal.say }),
+				),
+			),
+		);
 
-		try {
-			const result = await c.env.DB.prepare(
-				"INSERT INTO household_people (name) VALUES (?)",
-			)
-				.bind(name)
-				.run();
-
-			added = result.meta.last_row_id;
-		} catch (error) {
-			if (nameTaken(error))
-				return renderPage(c, "people", {
-					peopleAddOpen: true,
-					peopleError: "That name is already in your household.",
-					peopleValue: nameValue,
-					status: 422,
-				});
-			throw error;
-		}
+		if ("refused" in result)
+			return renderPage(c, "people", {
+				peopleAddOpen: true,
+				peopleError: result.refused,
+				peopleValue: nameValue,
+				status: 422,
+			});
+		const added = result.id;
 
 		return done(c, `Added ${name}`, `Added ${name} to your household.`, {
 			page: "people",
@@ -1697,25 +1796,31 @@ settings.post("/settings/people", async (c) => {
 	}
 
 	if (action === "rename" && Number.isInteger(id) && id > 1) {
-		try {
-			const result = await c.env.DB.prepare(
-				"UPDATE household_people SET name = ? WHERE id = ?",
-			)
-				.bind(name, id)
-				.run();
+		const refused = await runWith(
+			c.env.DB,
+			decideSetting(
+				renamePerson,
+				{ id, name },
+				(db) => personFacts(db, id),
+				renamePersonStatements,
+				personNameTaken,
+			).pipe(
+				Effect.as(null),
+				Effect.catch((refusal) => Effect.succeed(refusal)),
+			),
+		);
 
-			if (!result.meta.changes) return c.notFound();
-		} catch (error) {
-			if (nameTaken(error))
-				return renderPage(c, "people", {
-					peopleOpen: id,
-					peopleErrorPersonId: id,
-					peopleError: "That name is already in your household.",
-					peopleValue: nameValue,
-					status: 422,
-				});
-			throw error;
-		}
+		if (refused && Predicate.isTagged(refused, "PersonGone"))
+			return c.notFound();
+
+		if (refused)
+			return renderPage(c, "people", {
+				peopleOpen: id,
+				peopleErrorPersonId: id,
+				peopleError: refused.say,
+				peopleValue: nameValue,
+				status: 422,
+			});
 
 		return done(c, `Renamed to ${name}`, `Renamed this person to ${name}.`, {
 			page: "people",
@@ -1735,7 +1840,15 @@ settings.post("/settings/time-zone", async (c) => {
 
 	if (!parsed.ok)
 		return renderPage(c, "household", { zoneError: parsed.error, status: 422 });
-	await saveTimeZone(c.env.DB, parsed.zone);
+	await runWith(
+		c.env.DB,
+		decideSetting(
+			saveTimeZoneRule,
+			{ zone: parsed.zone },
+			noFacts,
+			timeZoneStatements,
+		),
+	);
 
 	// The month follows the zone, but the Household page draws only the time zone and the bank sign-in emails, so the
 	// answer carries nothing else. Categories draws the new month when it is next opened.

@@ -101,17 +101,31 @@ export async function saveAiSwitches(
 	switches: Partial<AiSwitches>,
 	alongside: D1PreparedStatement[] = [],
 ): Promise<void> {
-	const given = SWITCH_NAMES.filter((name) => switches[name] !== undefined);
+	const statements = aiSwitchStatements(db, switches);
 
-	if (given.length === 0) return;
-	await db.batch([
-		...given.map((name) =>
-			db
-				.prepare(
-					"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-				)
-				.bind(KEYS[name], switches[name] ? "on" : "off"),
-		),
-		...alongside,
-	]);
+	if (statements.length === 0) return;
+	await db.batch([...statements, ...alongside]);
 }
+
+/** One statement for each switch given, which stores it as "on" or "off". */
+export const aiSwitchStatements = (
+	db: D1Database,
+	switches: Partial<AiSwitches>,
+) =>
+	SWITCH_NAMES.filter((name) => switches[name] !== undefined).map((name) =>
+		db
+			.prepare(
+				"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+			)
+			.bind(KEYS[name], switches[name] ? "on" : "off"),
+	);
+
+/** The stored switches as one text, as SQL: each one's row, in key order. Two reads agree only while no switch changed. */
+export const AI_SWITCHES_VERSION = `(SELECT COALESCE(group_concat(key || '=' || value, '|'), '') FROM (SELECT key, value
+	FROM household_settings WHERE key IN (${Object.values(KEYS)
+		.map((key) => `'${key}'`)
+		.join(", ")}) ORDER BY key))`;
+
+/** The name of a switch from what a form posts, or undefined. */
+export const switchNamed = (text: string): keyof AiSwitches | undefined =>
+	SWITCH_NAMES.find((name) => name === text);

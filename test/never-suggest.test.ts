@@ -6,8 +6,8 @@ import {
 	neverSuggestedSql,
 	neverSuggestRuleLine,
 	neverSuggestRules,
-	removeNeverSuggest,
 } from "../src/db/never-suggest";
+import { removeNeverSuggest } from "../src/db/settings-saves";
 import {
 	incomeAskedSql,
 	suggestionQueue,
