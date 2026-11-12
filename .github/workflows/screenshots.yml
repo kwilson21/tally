@@ -55,11 +55,18 @@ jobs:
           git worktree add --detach ../base "$BASE_SHA"
           (
             cd ../base
-            # A base from before the switch to pnpm (decision 204) has only npm's lockfile.
-            if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else npm ci; fi
-            pnpm run build
-            pnpm run db:migrate:local
-            pnpm exec wrangler dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
+            # A base from before the switch to pnpm (decision 204) has only npm's lockfile, so npm installs and runs it:
+            # pnpm would install it afresh without a lockfile and pick newer versions than the base was built with.
+            if [ -f pnpm-lock.yaml ]; then
+              pnpm install --frozen-lockfile
+              run="pnpm run" exec="pnpm exec"
+            else
+              npm ci
+              run="npm run" exec="npx"
+            fi
+            $run build
+            $run db:migrate:local
+            $exec wrangler dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
             for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 2; done
             curl -fsS http://127.0.0.1:8788/cdn-cgi/handler/scheduled
           )
