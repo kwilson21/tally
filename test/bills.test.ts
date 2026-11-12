@@ -3249,6 +3249,44 @@ describe("Bill guards", () => {
 			expect(html).toContain('value="150000.00"');
 		});
 
+		it("refuses an amount past $100,000,000 in words, ticked or not, and saves nothing", async () => {
+			// The set-aside refuses an occurrence above $100,000,000 (MAX_OCCURRENCE_CENTS), so one must never be
+			// saved: it would break Home and Bills on every later visit.
+			const before = await billCount();
+
+			for (const confirm_amount of ["", "10000000001"]) {
+				const res = await post(
+					"/bills",
+					fields({ name: "Castle", amount: "100000000.01", confirm_amount }),
+				);
+
+				const html = await res.text();
+				expect(res.headers.get("HX-Trigger")).toBeNull();
+				expect(html).toMatch(
+					/<p id="bill-amount-error" role="alert"[^>]*>Enter an amount of \$100,000,000 or less\.<\/p>/,
+				);
+				expect(html).not.toContain("is a lot for a bill");
+			}
+
+			expect(await billCount()).toBe(before);
+		});
+
+		it("saves a ticked amount of exactly $100,000,000, and Bills still draws", async () => {
+			const res = await post(
+				"/bills",
+				fields({
+					name: "Castle",
+					amount: "100000000.00",
+					confirm_amount: "10000000000",
+				}),
+			);
+
+			expect(res.headers.get("HX-Trigger")).toContain("Bill added");
+			expect(
+				(await exports.default.fetch("http://tally.test/bills")).status,
+			).toBe(200);
+		});
+
 		it("does not ask at exactly $100,000.00, and asks one cent over", async () => {
 			const exact = await post(
 				"/bills",

@@ -39,7 +39,7 @@ import {
 	manualLinkWindowDays,
 	partPaidSentence,
 } from "../bills/status";
-import { billTotalsForRows } from "../bills/totals";
+import { billTotalsForRows, MAX_OCCURRENCE_CENTS } from "../bills/totals";
 import { linkPaymentSql, occurrenceUnpaidSql } from "../bills/unpaid";
 import {
 	activateBill,
@@ -904,6 +904,10 @@ async function save(c: Context<App>, id?: number) {
 	} catch {
 		errors.amount = "Enter an amount greater than $0.";
 	}
+
+	// The set-aside refuses an occurrence past this (docs/verification.md, "Numbers"), so a bill never holds one.
+	if (!errors.amount && cents > MAX_OCCURRENCE_CENTS)
+		errors.amount = `Enter an amount of ${formatCents(MAX_OCCURRENCE_CENTS, { wholeDollars: true })} or less.`;
 
 	const anchorDate = values.anchor_date;
 	const validAnchorDate = validDateString(anchorDate);
