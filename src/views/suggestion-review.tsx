@@ -56,6 +56,26 @@ function Guess({
 	);
 }
 
+/**
+ * What a card's form held when it was posted, shown again with its error. Something else's keys (#965) hold its own
+ * typed name and the category it was posted with, so a refused answer redraws them and no other answer's row opens.
+ */
+export type CardValues = {
+	picked?: string | null;
+	own?: string;
+	ticked?: number[];
+	notes?: Record<number, string>;
+	/** The new category name typed in the dashed row (decision 156). */
+	newName?: string;
+	/** Why the typed name was refused, shown on its own field (aria-invalid, described by the message). */
+	newNameError?: string;
+	/** Something else's "Or make a new category" name, as typed. */
+	elseName?: string;
+	elseNameError?: string;
+	/** Something else's chosen category, as posted, so the select keeps it when the answer is refused. */
+	elseCategory?: string;
+};
+
 /** The hidden fields that name a rule's stores: sent back by the question's Yes (decision 101). */
 function StoreFields({ stores }: { stores: { merchantKey: string }[] }) {
 	return (
@@ -240,15 +260,7 @@ export function SuggestionCard({
 	/** Active categories, for Something else on a category guess. */
 	categories: { id: number; name: string }[];
 	/** What the form held when it was posted (the Name row, the ticks, or a typed new category name), shown again with its error. */
-	values?: {
-		picked?: string | null;
-		own?: string;
-		ticked?: number[];
-		notes?: Record<number, string>;
-		newName?: string;
-		/** Why the typed name was refused, shown on its own field (aria-invalid, described by the message). */
-		newNameError?: string;
-	};
+	values?: CardValues;
 	error?: string;
 	focus?: boolean;
 	/** A category guess: the name Tally suggests for a new category, drawn as the dashed row when it is known. */
@@ -258,6 +270,17 @@ export function SuggestionCard({
 	/** The prefix for this card's field ids, so two cards on one page (the catalog) don't share a label. */
 	fieldId?: string;
 }) {
+	// Which dashed row a category guess shows is decided here and in the lazy answer, by the one function (#965).
+	const row: SuggestedRow =
+		item.kind === "category"
+			? suggestedRow({
+					guess: item.category,
+					suggested: suggestedName,
+					categories,
+					typed: values?.newName,
+				})
+			: { kind: "none" };
+
 	return (
 		<div class="flex flex-col gap-5">
 			{item.kind === "name" ? (
@@ -301,28 +324,38 @@ export function SuggestionCard({
 					<MaybeQuestion>Maybe {item.category}</MaybeQuestion>
 					<Guess sure={item.sure} section="categorization" />
 					<YesForm action={action} item={item} yes={`Yes, ${item.category}`} />
-					{/* A typed name stays on screen, open, when its answer is refused; else Tally's name, once it has one, unless it is the guess itself (decision 166). */}
-					{values?.newName !== undefined ||
-					(suggestedName !== undefined &&
-						!isTheGuess(suggestedName, item.category)) ? (
+					{row.kind === "new" && (
 						<NewCategoryRow
 							action={action}
 							itemId={item.id}
 							fieldId={fieldId}
-							name={values?.newName ?? suggestedName ?? ""}
-							categories={categories}
+							name={row.name}
 							open={values?.newName !== undefined}
 							error={values?.newNameError}
 						/>
-					) : suggestUrl && suggestedName === undefined ? (
+					)}
+					{row.kind === "existing" && (
+						<ExistingCategoryRow
+							action={action}
+							itemId={item.id}
+							category={row.category}
+						/>
+					)}
+					{/* Until Tally has asked, its name comes in place from the loader; a refused Something else keeps its field, so no loader runs. */}
+					{row.kind === "none" &&
+					suggestUrl &&
+					suggestedName === undefined &&
+					values?.elseName === undefined ? (
 						<NewCategoryLoader url={suggestUrl} fieldId={fieldId} />
 					) : null}
 					<SomethingElse
 						action={action}
 						item={item}
 						categories={categories}
+						values={values}
 						error={error}
 						fieldId={fieldId}
+						withNewName={row.kind !== "new" || values?.elseName !== undefined}
 					/>
 				</>
 			)}
@@ -500,19 +533,52 @@ function YesForm({
 export const isTheGuess = (name: string, guess: string | null) =>
 	guess !== null && sameName(name, guess);
 
+/** The dashed row a category guess's card shows (#965): nothing yet or none, the one tap, or the editable new name. */
+export type SuggestedRow =
+	| { kind: "none" }
+	| { kind: "existing"; category: { id: number; name: string } }
+	| { kind: "new"; name: string };
+
 /**
- * The dashed row for Tally's suggested new category (decision 156): "New category: {name}", labelled "Tally's
- * suggestion". It is the second of a category guess's three answers, after Yes and before Something else. It opens
- * in place with no script, the name pre-filled and editable, and nothing is made until "Create and next".
- * When the name is one of the family's active categories (decision 165) the row reads "Existing category: {name}" with
- * the family's own spelling, and its button reads "Save and next": the purchase is filed in that category, none is made.
+ * Which row a category guess shows, decided in one place (#965). A typed new name always draws the editable new row,
+ * whatever the categories say. Otherwise a name that is the guess itself, or no name, draws none; one of the family's
+ * active categories is the one tap; any other name is the new row. Pure: `categories` is what the family has now.
+ */
+export function suggestedRow({
+	guess,
+	suggested,
+	categories,
+	typed,
+}: {
+	guess: string | null;
+	/** Tally's suggested name; undefined while it is not known yet (the lazy answer then draws nothing when Tally has none). */
+	suggested: string | undefined;
+	categories: { id: number; name: string; archived?: boolean }[];
+	typed?: string;
+}): SuggestedRow {
+	if (typed !== undefined) return { kind: "new", name: typed };
+
+	if (suggested === undefined || isTheGuess(suggested, guess))
+		return { kind: "none" };
+
+	const category = activeNamed(suggested, categories);
+
+	return category
+		? { kind: "existing", category }
+		: { kind: "new", name: suggested };
+}
+
+/**
+ * The dashed row for Tally's suggested new category (decision 156, #965): "New category: {name}", labelled "Tally's
+ * suggestion". It is the second of a category guess's answers, after Yes and before Something else. It opens in place
+ * with no script, the name pre-filled and editable, and nothing is made until "Create and next". It only ever says new:
+ * a name the family already has is the one tap instead (ExistingCategoryRow).
  */
 export function NewCategoryRow({
 	action,
 	itemId,
 	fieldId,
 	name,
-	categories = [],
 	open = false,
 	error,
 }: {
@@ -524,15 +590,11 @@ export function NewCategoryRow({
 	fieldId: string;
 	/** The name Tally suggested, or the one a person typed when the answer was refused. */
 	name: string;
-	/** The family's active categories: a name that is one of them is an existing category (decision 165). */
-	categories?: { id: number; name: string; archived?: boolean }[];
 	/** Open, as a refused answer leaves it, so the typed name is on screen. */
 	open?: boolean;
 	/** Why the typed name was refused: the field is marked invalid and names this message. */
 	error?: string;
 }) {
-	const existing = activeNamed(name, categories);
-
 	return (
 		<details
 			class="group rounded-control border border-dashed border-ink px-4"
@@ -544,8 +606,7 @@ export function NewCategoryRow({
 						<Icon name="sparkles" class="size-4 shrink-0" />
 						{/* The visible label is gone (owner, decision 166): screen readers still hear whose suggestion it is. */}
 						<span class="sr-only">Tally's suggestion: </span>
-						{existing ? "Existing category" : "New category"}:{" "}
-						{existing?.name ?? name}
+						New category: {name}
 					</span>
 				</span>
 				<Icon
@@ -558,7 +619,8 @@ export function NewCategoryRow({
 				<TextInput
 					id={`new-category-name-${fieldId}`}
 					name="new_name"
-					label="Category name"
+					label="New category name"
+					hint="Added to your categories and used for this transaction."
 					value={name}
 					error={error}
 					maxlength={CATEGORY_NAME_MAX}
@@ -566,10 +628,46 @@ export function NewCategoryRow({
 					surface="paper"
 				/>
 				<Button type="submit" name="answer" value="create" class="w-full">
-					{existing ? "Save and next" : "Create and next"}
+					Create and next
 				</Button>
 			</form>
 		</details>
+	);
+}
+
+/**
+ * The one tap (decision 165, #965): Tally's suggested name is one of the family's active categories, so the row files
+ * the purchase in that category by its id, with no name field and no new category. Its button is the row itself, the
+ * same dashed look at 44px, with the family's own spelling in its words.
+ */
+export function ExistingCategoryRow({
+	action,
+	itemId,
+	category,
+}: {
+	/** The screen's address, with its skips: the answer posts there. */
+	action: string;
+	/** The queue item's id, sent back with the answer. */
+	itemId: string;
+	/** The active category the purchase is filed in. */
+	category: { id: number; name: string };
+}) {
+	return (
+		<form {...answerForm(action)}>
+			<input type="hidden" name="id" value={itemId} />
+			<input type="hidden" name="category" value={String(category.id)} />
+			<button
+				type="submit"
+				name="answer"
+				value="create"
+				class="flex min-h-11 w-full items-center gap-1.5 rounded-control border border-dashed border-ink px-4 text-left text-lg wrap-anywhere outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+			>
+				<Icon name="sparkles" class="size-4 shrink-0" />
+				{/* The visible label is gone (owner, decision 166): screen readers still hear whose suggestion it is. */}
+				<span class="sr-only">Tally's suggestion: </span>
+				Put it in {category.name}
+			</button>
+		</form>
 	);
 }
 
@@ -597,8 +695,9 @@ export function NewCategoryLoader({
 }
 
 /**
- * Something else: a disclosure that opens in place with no script. It answers this one item only and
- * never makes a rule (decision 101). A category guess's choice is one select (decision 156).
+ * Something else: a disclosure that opens in place with no script. It answers this one item only and never makes a rule
+ * (decision 101). On a category guess it chooses one category (decision 156) and, when the card shows no new row, also
+ * makes one from a second field (#965). Its wrapper is drawn either way, so the lazy answer can empty the field out of band.
  */
 function SomethingElse({
 	action,
@@ -607,20 +706,23 @@ function SomethingElse({
 	values,
 	error,
 	fieldId = item.id,
+	withNewName = false,
 }: {
 	action: string;
 	item: SuggestionItem;
 	categories: { id: number; name: string }[];
-	/** What the Name row held when it was posted, shown again with its error. */
-	values?: { picked?: string | null; own?: string };
+	/** What the form held when it was posted, shown again with its error. */
+	values?: CardValues;
 	/** The refusal to show: open with it, so its chips or names are on screen. */
 	error?: string;
 	fieldId?: string;
+	/** A category guess draws its "Or make a new category" field (#965) when the card has no new-category row. */
+	withNewName?: boolean;
 }) {
 	return (
 		<details
 			class="group rounded-control border border-rule px-4"
-			open={Boolean(error)}
+			open={Boolean(error) || values?.elseName !== undefined}
 		>
 			<summary class="flex min-h-11 cursor-pointer items-center justify-between text-lg">
 				Something else
@@ -632,25 +734,47 @@ function SomethingElse({
 			<form {...answerForm(action)} class="flex flex-col gap-4 pb-4 pt-2">
 				<input type="hidden" name="id" value={item.id} />
 				{item.kind === "category" && (
-					<div class="flex flex-col gap-2">
-						<label
-							for={`category-choice-${fieldId}`}
-							class="text-base text-ink"
-						>
-							Choose a category
-						</label>
-						<SelectField
-							id={`category-choice-${fieldId}`}
-							name="category"
-							variant="control"
-							class="w-full"
-						>
-							<option value="" />
-							{categories.map((category) => (
-								<option value={String(category.id)}>{category.name}</option>
-							))}
-						</SelectField>
-					</div>
+					<>
+						<div class="flex flex-col gap-2">
+							<label
+								for={`category-choice-${fieldId}`}
+								class="text-base text-ink"
+							>
+								Choose a category
+							</label>
+							<SelectField
+								id={`category-choice-${fieldId}`}
+								name="category"
+								variant="control"
+								class="w-full"
+							>
+								<option value="" />
+								{categories.map((category) => (
+									<option
+										value={String(category.id)}
+										selected={String(category.id) === values?.elseCategory}
+									>
+										{category.name}
+									</option>
+								))}
+							</SelectField>
+						</div>
+						{/* Always drawn, so the lazy answer can empty it out of band when the row is the new one (#965). */}
+						<div id={`else-new-${fieldId}`}>
+							{withNewName && (
+								<TextInput
+									id={`else-new-name-${fieldId}`}
+									name="new_name"
+									label="Or make a new category"
+									value={values?.elseName}
+									error={values?.elseNameError}
+									maxlength={CATEGORY_NAME_MAX}
+									autocomplete="off"
+									surface="paper"
+								/>
+							)}
+						</div>
+					</>
 				)}
 				{item.kind === "name" && (
 					<NameChoices

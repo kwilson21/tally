@@ -26,6 +26,7 @@ import {
 import {
 	FULL_NEW_CATEGORY,
 	fileInNewCategory,
+	type NewCategoryTarget,
 	newCategoryTarget,
 	pendingCategoryNames,
 	suggestedCategoryName,
@@ -42,7 +43,6 @@ import {
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
-import { activeNamed } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -50,11 +50,13 @@ import { OWN_VALUE, pickValue, STORE_VALUE } from "../views/name-choices";
 import { RecheckLine, type RecheckRun } from "../views/recheck-line";
 import {
 	AskFirst,
-	isTheGuess,
+	type CardValues,
+	ExistingCategoryRow,
 	joinStores,
 	MoreLikeThisCard,
 	NewCategoryRow,
 	SuggestionCard,
+	suggestedRow,
 } from "../views/suggestion-review";
 
 type App = { Bindings: Env & { JEV_API_KEY?: string; AI?: Ai } };
@@ -78,18 +80,27 @@ type Ask = {
 	check?: string;
 };
 
-/** What the form held when it was posted, shown again with its error. */
-type Values = {
-	id: string;
-	picked?: string | null;
-	own?: string;
-	ticked?: number[];
-	notes?: Record<number, string>;
-	/** The new category name a person typed in a category guess's row (decision 156). */
-	newName?: string;
-	/** Why the typed name was refused, shown on its own field (decision 156). */
-	newNameError?: string;
-};
+/** What the form held when it was posted, shown again with its error (the card's values, and the item's id). */
+type Values = CardValues & { id: string };
+
+/** The words when a one tap's category is gone or archived since the card was drawn (#965). */
+const CATEGORY_GONE = "That category is gone. Choose another.";
+
+/** The active category with this id, read from a posted field, or null. Number("") is 0, so the empty text is checked first. */
+async function activeCategoryById(
+	db: D1Database,
+	raw: string,
+): Promise<{ id: number; name: string } | null> {
+	const text = raw.trim();
+	const chosen = Number(text);
+
+	if (text === "" || !Number.isInteger(chosen)) return null;
+
+	return db
+		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
+		.bind(chosen)
+		.first<{ id: number; name: string }>();
+}
 
 export const suggestions = new Hono<App>();
 
@@ -558,31 +569,53 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
 	const ai = c.env.AI;
 	const name = await suggestedCategoryName(db, ai, item);
-
-	// The name is asked and kept as it was (decision 161); a name that is the guess itself draws nothing (decision 166),
-	// the same empty answer as no name.
-	if (!name || isTheGuess(name, item.category)) return c.body(null);
-	// The row says "Existing category" for one of the family's active categories (decision 165), so it is named so.
 	const categories = (await categoryNames(db)).filter((c) => !c.archived);
-	const existing = activeNamed(name, categories);
+	// The name is asked and kept as it was (decision 161); the one function decides the row (#965): a name that is the
+	// guess itself, or none, draws nothing (decision 166), the same empty answer as no name.
+	const row = suggestedRow({
+		guess: item.category,
+		suggested: name ?? undefined,
+		categories,
+	});
+
+	if (row.kind === "none") return c.body(null);
+	const action = reviewAddress(skipped, again);
+
 	// Announce only, never a toast: a passive suggestion appearing is not an answer or a change (CLAUDE.md names toast + announce for those).
+	if (row.kind === "existing") {
+		c.header(
+			"HX-Trigger",
+			hxTrigger({
+				announce: `Tally suggests an existing category: ${row.category.name}`,
+			}),
+		);
+
+		return c.html(
+			<ExistingCategoryRow
+				action={action}
+				itemId={item.id}
+				category={row.category}
+			/>,
+		);
+	}
+
 	c.header(
 		"HX-Trigger",
-		hxTrigger({
-			announce: existing
-				? `Tally suggests an existing category: ${existing.name}`
-				: `Tally suggests a new category: ${name}`,
-		}),
+		hxTrigger({ announce: `Tally suggests a new category: ${row.name}` }),
 	);
 
+	// The new row empties Something else's new-name field out of band, so the card offers one new-category place (#965).
+	// htmx swaps an out-of-band element by its id, and the wrapper is on the card from the first draw.
 	return c.html(
-		<NewCategoryRow
-			action={reviewAddress(skipped, again)}
-			itemId={item.id}
-			fieldId={item.id}
-			name={name}
-			categories={categories}
-		/>,
+		<>
+			<NewCategoryRow
+				action={action}
+				itemId={item.id}
+				fieldId={item.id}
+				name={row.name}
+			/>
+			<div id={`else-new-${item.id}`} hx-swap-oob="outerHTML" />
+		</>,
 	);
 });
 
@@ -916,30 +949,13 @@ suggestions.post(PATH, async (c) => {
 				return done(`Set ${item.label} to ${item.category}.`, after);
 			}
 
-			// The suggested new category, opened in place (decision 156): the typed name is checked as the category form
-			// checks it, a name the family already has files the purchase in that one, and the create and the filing are
-			// one batch. Nothing is made without this answer.
-			if (answer === "create") {
-				const typed = String(form.get("new_name") ?? "");
-				const target = newCategoryTarget(typed, await categoryNames(db));
-
-				if (!target.ok) {
-					// The limit is the card's message; a refused name is named by its own field (aria-invalid).
-					const limit = target.error === FULL_NEW_CATEGORY;
-
-					return renderScreen(c, {
-						reviewUrl,
-						values: {
-							id,
-							newName: typed,
-							newNameError: limit ? undefined : target.error,
-						},
-						error: limit ? target.error : undefined,
-						status: 422,
-						focus: true,
-					});
-				}
-
+			// The category answers each do one thing (#965). A create with a category is the one tap; a create with a name is the
+			// dashed new row. Both file through filedAs, so the create, the filing and the re-check are one path.
+			// The purchase is filed in an active category the family has, or in a new one made from the typed name.
+			const filedAs = async (
+				target: Exclude<NewCategoryTarget, { ok: false }>,
+				refuse: (nameError?: string) => Values,
+			) => {
 				const result = await fileInNewCategory(db, {
 					transactionId: item.transactionId,
 					target,
@@ -952,7 +968,7 @@ suggestions.post(PATH, async (c) => {
 
 					return renderScreen(c, {
 						reviewUrl,
-						values: { id, newName: typed },
+						values: refuse(),
 						error: FULL_NEW_CATEGORY,
 						status: 422,
 						focus: true,
@@ -981,24 +997,104 @@ suggestions.post(PATH, async (c) => {
 					rechecking ? STARTED_ANNOUNCEMENT : "",
 					item.transactionId,
 				);
+			};
+
+			// A typed name, checked as the category form checks it (decision 156): a name the family already has files the
+			// purchase in that one, and a refused name redraws the card with `refuse`'s values and its error on the field.
+			const typedName = async (
+				typed: string,
+				refuse: (nameError?: string) => Values,
+			) => {
+				const target = newCategoryTarget(typed, await categoryNames(db));
+
+				if (target.ok) return filedAs(target, () => refuse());
+
+				// The limit is the card's message; a refused name is named by its own field (aria-invalid).
+				const limit = target.error === FULL_NEW_CATEGORY;
+
+				return renderScreen(c, {
+					reviewUrl,
+					values: refuse(limit ? undefined : target.error),
+					error: limit ? target.error : undefined,
+					status: 422,
+					focus: true,
+				});
+			};
+
+			// The dashed row (decision 156, #965): the one tap posts the category's id; the new row posts only a name.
+			if (answer === "create") {
+				if (form.has("category")) {
+					const category = await activeCategoryById(
+						db,
+						form.get("category")?.toString() ?? "",
+					);
+
+					if (!category)
+						return renderScreen(c, {
+							reviewUrl,
+							values: { id },
+							error: CATEGORY_GONE,
+							status: 422,
+							focus: true,
+						});
+
+					return filedAs(
+						{
+							ok: true,
+							kind: "existing",
+							id: category.id,
+							name: category.name,
+						},
+						() => ({ id }),
+					);
+				}
+
+				const typed = String(form.get("new_name") ?? "");
+
+				return typedName(typed, (nameError) => ({
+					id,
+					newName: typed,
+					newNameError: nameError,
+				}));
 			}
 
+			// Something else (#965): one category, or one new name, never both. A name with no category is made the same way
+			// as the new row's; a blank name beside a chosen category counts as no name.
 			if (answer === "else") {
-				const chosen = Number(form.get("category")?.toString() ?? "");
+				const category = form.get("category")?.toString() ?? "";
+				const typed = form.get("new_name")?.toString() ?? "";
+				const hasCategory = category.trim() !== "";
+				const hasName = typed.trim() !== "";
 
-				const category = Number.isInteger(chosen)
-					? await db
-							.prepare(
-								"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
-							)
-							.bind(chosen)
-							.first<{ id: number; name: string }>()
-					: null;
-
-				if (!category)
+				if (!hasCategory && !hasName)
 					return renderScreen(c, {
 						values: { id },
-						error: "Pick a category.",
+						error: "Choose a category, or type a name for a new one.",
+						status: 422,
+						focus: true,
+					});
+
+				if (hasCategory && hasName)
+					return renderScreen(c, {
+						values: { id, elseName: typed, elseCategory: category },
+						error: "Choose a category or type a new name, not both.",
+						status: 422,
+						focus: true,
+					});
+
+				if (hasName)
+					return typedName(typed, (nameError) => ({
+						id,
+						elseName: typed,
+						elseNameError: nameError,
+					}));
+
+				const chosen = await activeCategoryById(db, category);
+
+				if (!chosen)
+					return renderScreen(c, {
+						values: { id },
+						error: CATEGORY_GONE,
 						status: 422,
 						focus: true,
 					});
@@ -1012,7 +1108,7 @@ suggestions.post(PATH, async (c) => {
 							FROM transactions WHERE id = ? AND ${categoryAskedSql("transactions")}
 								AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
 						)
-						.bind(category.id, today, item.transactionId, category.id),
+						.bind(chosen.id, today, item.transactionId, chosen.id),
 					db
 						.prepare(
 							`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
@@ -1020,13 +1116,13 @@ suggestions.post(PATH, async (c) => {
 						WHERE id = ? AND ${categoryAskedSql("transactions")}
 							AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
 						)
-						.bind(category.id, who, item.transactionId, category.id),
+						.bind(chosen.id, who, item.transactionId, chosen.id),
 				]);
 
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 
-				return done(`Set ${item.label} to ${category.name}.`, after);
+				return done(`Set ${item.label} to ${chosen.name}.`, after);
 			}
 
 			break;

@@ -925,7 +925,9 @@ describe("categories", () => {
 		);
 
 		expect(res.status).toBe(422);
-		expect(textOf(html)).toContain("Pick a category.");
+		expect(textOf(html)).toContain(
+			"Choose a category, or type a name for a new one.",
+		);
 		// The error points at the chips, so Something else is open with them in it.
 		expect(html).toMatch(/<details[^>]*\bopen/);
 	});
@@ -3533,7 +3535,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		}
 	});
 
-	it("a lazy name that is an active category reads Existing category, Save and next, and is announced as one (decision 165)", async () => {
+	it("a lazy name that is an active category draws the one tap, Put it in, and is announced as one (decision 165, #965)", async () => {
 		const { id, ids } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
 		const holder: Env & { AI?: Ai } = env;
@@ -3547,10 +3549,15 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 				`/settings/suggestions/new-category?id=${id}`,
 			);
 
-			expect(textOf(html)).toContain("Existing category: Groceries");
+			expect(textOf(html)).toContain("Put it in Groceries");
 			expect(textOf(html)).not.toContain("New category");
-			expect(html).toMatch(/>\s*Save and next\s*</);
+			expect(html).toContain(
+				`<input type="hidden" name="category" value="${await categoryId("Groceries")}"`,
+			);
+			expect(html).not.toMatch(/value="create"[^>]*>\s*Save and next/);
 			expect(html).not.toContain("Create and next");
+			// The one tap sends nothing out of band: Something else keeps its new-name field.
+			expect(html).not.toContain("hx-swap-oob");
 			expect(trigger(res).announce).toBe(
 				"Tally suggests an existing category: Groceries",
 			);
@@ -3580,6 +3587,10 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 			expect(textOf(html)).toContain("New category: Books & audio");
 			expect(html).toMatch(/>\s*Create and next\s*</);
+			// The row empties Something else's new-name field out of band, so the two never offer a new category at once.
+			expect(html).toContain(
+				`<div id="else-new-${id}" hx-swap-oob="outerHTML"></div>`,
+			);
 			expect(trigger(res).announce).toBe(
 				"Tally suggests a new category: Books & audio",
 			);
@@ -3630,7 +3641,9 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		);
 
 		expect(html).toContain('aria-invalid="true"');
-		expect(html).toContain(`aria-describedby="new-category-name-${id}-error"`);
+		expect(html).toMatch(
+			new RegExp(`aria-describedby="[^"]*new-category-name-${id}-error"`),
+		);
 		expect(html).toContain(`id="new-category-name-${id}-error"`);
 	});
 
@@ -3833,7 +3846,7 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 	}
 
 	it("the full page draws no row for a pending name that is the guess, in any case, and still draws Yes", async () => {
-		const { address } = await eatingOutCard();
+		const { address, ids } = await eatingOutCard();
 
 		const suggestion = await db
 			.prepare(
@@ -3852,7 +3865,9 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 		expect(page.html).toContain("Maybe Eating Out");
 		expect(page.html).toContain("Yes, Eating Out");
 		expect(textOf(page.html)).not.toContain("Tally's suggestion");
-		expect(page.html).not.toContain('name="new_name"');
+		// The guess draws no row, so Something else keeps its field for a new category (#965).
+		expect(page.html).toContain(`id="else-new-name-category-${ids.category}"`);
+		expect(page.html).toContain(`<div id="else-new-category-${ids.category}">`);
 		expect(page.html).not.toContain("Existing category");
 		expect(page.html).not.toContain("New category");
 	});
@@ -3923,5 +3938,356 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 				ids.category,
 			),
 		).toEqual({ category_id: await categoryId("Eating Out") });
+	});
+});
+
+// #965: each answer on a category guess's card does one thing. The one tap files in the family's category it names;
+// Something else chooses one or makes one (never both); the lazy row carries its out-of-band part only for a new name.
+describe("a category guess's answers each do one thing (#965)", () => {
+	const countOf = async (sql: string) =>
+		present((await db.prepare(sql).first<{ n: number }>())?.n);
+
+	async function categoryCard() {
+		const ids = await oneOfEach();
+		const address = `/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`;
+
+		return { ids, address, id: `category-${ids.category}` };
+	}
+
+	const filedIn = async (transactionId: number) =>
+		row("SELECT category_id FROM transactions WHERE id = ?", transactionId);
+
+	/** A post with its headers, for the one-tap answer that reads the page's skips from HX-Current-URL. */
+	async function postFrom(
+		fields: Record<string, string>,
+		headers: Record<string, string> = {},
+	) {
+		const body = new URLSearchParams(fields).toString();
+		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
+			method: "POST",
+			redirect: "manual",
+			headers: new Headers({
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+				"HX-Request": "true",
+				...headers,
+			}),
+			body,
+		});
+
+		return { res, html: await res.text() };
+	}
+
+	it("the one tap files the purchase in the category it names, by id, with no category made", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		const before = await countOf("SELECT COUNT(*) AS n FROM categories");
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", category: String(groceries) },
+			true,
+		);
+
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast?.message).toBe(
+			"Added Lupita's Taqueria to Groceries.",
+		);
+		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(before);
+		expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+	});
+
+	it("a one tap with a typed name beside it ignores the name and files in the chosen category", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+
+		await post(
+			"/settings/suggestions",
+			{ id, answer: "create", category: String(groceries), new_name: "Brunch" },
+			true,
+		);
+
+		expect(
+			await countOf(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Brunch'",
+			),
+		).toBe(0);
+		expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+	});
+
+	it("a one tap on a category archived since the card was drawn is refused in words, and Something else stays open", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(groceries)
+			.run();
+
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", category: String(groceries) },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain("That category is gone. Choose another.");
+		expect(html).toMatch(/<details[^>]*border-rule[^>]*\bopen\b/);
+		expect(await filedIn(ids.category)).toEqual({ category_id: null });
+	});
+
+	it("a one tap for a purchase already answered gets the stale words, and files nothing more", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		await post(
+			"/settings/suggestions",
+			{ id, answer: "create", category: String(groceries) },
+			true,
+		);
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", category: String(groceries) },
+			true,
+		);
+
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+	});
+
+	it("a one tap's refusal keeps the skips of the page it was answered on, read from HX-Current-URL", async () => {
+		const { ids, id, address } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(groceries)
+			.run();
+
+		const { res, html } = await postFrom(
+			{ id, answer: "create", category: String(groceries) },
+			{ "HX-Current-URL": `${BASE}${address}` },
+		);
+
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			`action="/settings/suggestions?skip=income-${ids.income}&amp;skip=transfer-${ids.transfer}"`,
+		);
+	});
+
+	it("a plain post of a one tap with no HX-Current-URL still answers, from the request's own address", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
+			method: "POST",
+			redirect: "manual",
+			headers: new Headers({
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+			}),
+			body: new URLSearchParams({
+				id,
+				answer: "create",
+				category: String(groceries),
+			}).toString(),
+		});
+
+		expect(res.status).toBe(303);
+		expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+	});
+
+	it("Something else with both a category and a name saves nothing, keeps the name and the chosen category, and makes none", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		const before = await countOf("SELECT COUNT(*) AS n FROM categories");
+
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: String(groceries), new_name: "Brunch" },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain(
+			"Choose a category or type a new name, not both.",
+		);
+		expect(html).toContain('value="Brunch"');
+		expect(html).toMatch(
+			new RegExp(`<option value="${groceries}"[^>]*\\bselected\\b`),
+		);
+		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(before);
+		expect(await filedIn(ids.category)).toEqual({ category_id: null });
+	});
+
+	it("Something else with neither a category nor a name asks for one of the two", async () => {
+		const { id } = await categoryCard();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: "", new_name: "   " },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain(
+			"Choose a category, or type a name for a new one.",
+		);
+	});
+
+	it("Something else with only a new name makes the category and files the purchase, as a typed create does", async () => {
+		const { ids, id } = await categoryCard();
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: "", new_name: "Brunch" },
+			true,
+		);
+
+		expect(trigger(res).toast?.message).toBe(
+			"Made Brunch and set Lupita's Taqueria to it.",
+		);
+		const made = await row("SELECT id FROM categories WHERE name = 'Brunch'");
+		expect(made).not.toBeNull();
+		expect(await filedIn(ids.category)).toEqual({ category_id: made?.id });
+	});
+
+	it("Something else with only a name the family has files there, and says Added", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: "", new_name: "  groceries " },
+			true,
+		);
+
+		expect(trigger(res).toast?.message).toBe(
+			"Added Lupita's Taqueria to Groceries.",
+		);
+		expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+	});
+
+	it("a whitespace-only name beside a chosen category counts as no name, and the category is set", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: String(groceries), new_name: "   " },
+			true,
+		);
+
+		expect(trigger(res).toast?.message).toBe(
+			"Set Lupita's Taqueria to Groceries.",
+		);
+		expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+	});
+
+	it("a category that is not a number, with no name, is refused as gone", async () => {
+		const { id } = await categoryCard();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: "abc", new_name: "" },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain("That category is gone. Choose another.");
+	});
+
+	it("an archived category, with no name, is refused as gone", async () => {
+		const { id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(groceries)
+			.run();
+
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", category: String(groceries), new_name: "" },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain("That category is gone. Choose another.");
+	});
+
+	it("a refused typed name under Something else redraws it open, its error on the field, with no loader", async () => {
+		const { ids, id } = await categoryCard();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", new_name: "x".repeat(41) },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(html).toMatch(/<details[^>]*border-rule[^>]*\bopen\b/);
+		expect(html).toContain('aria-invalid="true"');
+		expect(html).toContain(`id="else-new-name-${id}-error"`);
+		expect(html).toContain("x".repeat(41));
+		expect(html).not.toContain('hx-trigger="load"');
+		expect(await filedIn(ids.category)).toEqual({ category_id: null });
+	});
+
+	it("a name that an archived category already has is refused on its field, and says to restore it", async () => {
+		const { id } = await categoryCard();
+		await db
+			.prepare(
+				"INSERT INTO categories (name, name_key, icon, color, sort_order, archived) VALUES ('Brunch', 'brunch', 'tag', 'cat-blue', 99, 1)",
+			)
+			.run();
+
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", new_name: "Brunch" },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain(
+			"An archived category has that name. Restore it instead.",
+		);
+	});
+
+	it("at 50 active categories a name under Something else is refused in words, and the field stays open", async () => {
+		const { ids, id } = await categoryCard();
+		const active = await countOf(
+			"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+		);
+
+		for (let i = active; i < 50; i++)
+			await db
+				.prepare(
+					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?)",
+				)
+				.bind(`Extra ${i}`, `extra ${i}`, 100 + i)
+				.run();
+
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else", new_name: "Books & audio" },
+			true,
+		);
+
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain("Add it to an existing category instead.");
+		expect(html).toMatch(/<details[^>]*border-rule[^>]*\bopen\b/);
+		expect(await filedIn(ids.category)).toEqual({ category_id: null });
+	});
+
+	it("the lazy new row carries the out-of-band empty wrapper; the screen keeps one new-category place", async () => {
+		const { id } = await categoryCard();
+		await saveAiSwitches(db, { categories: true });
+		const holder: Env & { AI?: Ai } = env;
+		const before = holder.AI;
+		holder.AI = fakeAi(vi.fn(async () => "Pet Care"));
+
+		try {
+			const { html } = await get(`/settings/suggestions/new-category?id=${id}`);
+			expect(textOf(html)).toContain("New category: Pet Care");
+			expect(html).toContain(
+				`<div id="else-new-${id}" hx-swap-oob="outerHTML"></div>`,
+			);
+		} finally {
+			holder.AI = before;
+		}
 	});
 });

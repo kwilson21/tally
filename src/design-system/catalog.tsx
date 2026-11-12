@@ -4581,13 +4581,14 @@ function SuggestionsReview() {
 				components={[
 					"SuggestionCard",
 					"NewCategoryRow",
+					"ExistingCategoryRow",
 					"NewCategoryLoader",
 					"SelectField",
 					"TextInput",
 					"Button",
 					"Icon",
 				]}
-				sentence="A category guess with its three answers in order: Yes, the dashed row (New category, with the name Tally suggests; the row has no visible label, and a screen reader hears “Tally's suggestion” before it) and Something else, whose categories are one select with a label. The row opens in place with the name editable and Create and next; nothing is made until then. When the name is one of the family's categories the row reads Existing category and its button reads Save and next, which files the purchase in it and makes nothing. With no name there is no row, and a name that is the guess's own category draws no row either, since Yes already files it (decision 166). At the 50-category limit the create is refused in words and Something else stays open."
+				sentence="A category guess with its three answers in order, and each one does one thing. Yes files the guess. The dashed row says what Tally suggests: when the name is one of the family's categories it is one tap, “Put it in” that category, with no name field; when it is a new name the row opens in place with the name editable, its field labelled “New category name”, and Create and next makes it. Something else chooses one of the family's categories, and when the card has no new row (an existing category, the guess itself, or no name) it also has “Or make a new category”, so a card has one place to make a category. A name typed in both, or a category and a name, saves nothing and asks for one. At the 50-category limit the create is refused in words and Something else stays open."
 			>
 				<div hx-ignore class="grid gap-8 md:grid-cols-2">
 					<div class="max-w-md">
@@ -4615,7 +4616,7 @@ function SuggestionsReview() {
 							/>
 						</div>
 					</State>
-					<State label="An existing category: the row reads Existing category, and Save and next files the purchase in it">
+					<State label="An existing category: one tap, Put it in Groceries, files the purchase in it; Something else chooses another or makes one">
 						<div class="max-w-md">
 							<SuggestionCard
 								action="/settings/suggestions"
@@ -4624,7 +4625,7 @@ function SuggestionsReview() {
 								skipHref="/settings/suggestions?skip=category-9"
 								categories={audibleCategories}
 								suggestedName="Groceries"
-								values={{ newName: "Groceries" }}
+								values={{ elseName: "" }}
 								fieldId="maybe-answers-existing"
 							/>
 						</div>
@@ -4644,7 +4645,7 @@ function SuggestionsReview() {
 							/>
 						</div>
 					</State>
-					<State label="No name for this store: no dashed row">
+					<State label="No name for this store: no dashed row, and Something else opens with its field for a new category">
 						<div class="max-w-md">
 							<SuggestionCard
 								action="/settings/suggestions"
@@ -4652,6 +4653,7 @@ function SuggestionsReview() {
 								today={REVIEW_TODAY}
 								skipHref="/settings/suggestions?skip=category-9"
 								categories={audibleCategories}
+								values={{ elseName: "" }}
 								fieldId="maybe-answers-none"
 							/>
 						</div>
