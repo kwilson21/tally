@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 36,
+	"legacyBaseline": 32,
 	"handlers": [
 		{
 			"method": "POST",
@@ -456,28 +456,40 @@
 			"path": "/setup/bills",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides which found charges are kept. Each bill is still its own batch, in a loop, so a Keep that fails part-way keeps and counts the bills before it (a tested behaviour); decision 209's one batch is the owner's call."
 		},
 		{
 			"method": "POST",
 			"path": "/setup/budgets",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides the answer from the question as the page reads it. The deposits, bills and budgets an answer writes have no cap, so the save's SQL writes them and re-checks each row as it does (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/setup/pay",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides the answer from the question as the page reads it. The deposits, bills and budgets an answer writes have no cap, so the save's SQL writes them and re-checks each row as it does (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/setup/savings",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides the answer from the question as the page reads it. The deposits, bills and budgets an answer writes have no cap, so the save's SQL writes them and re-checks each row as it does (decision 209)."
 		},
 		{
 			"method": "POST",
