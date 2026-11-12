@@ -131,20 +131,86 @@ export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 	}));
 }
 
-/** What you have minus what you owe, in cents. */
-export function netWorthCents(
-	accounts: (Pick<Account, "balanceCents" | "isLiability"> &
-		Partial<Pick<Account, "connected">>)[],
-): number {
-	return accounts.reduce(
-		(sum, a) =>
-			sum +
-			(a.connected === false
-				? 0
-				: a.isLiability
-					? -a.balanceCents
-					: a.balanceCents),
-		0,
+/** What net worth reads of an account. */
+export type NetWorthAccount = {
+	balanceCents: number;
+	isLiability: boolean;
+	connected?: boolean;
+};
+
+/**
+ * What netWorthCents can add exactly (docs/verification.md, "Numbers"): no balance above $100,000,000 and at most 10,000
+ * accounts, so the sum stays within 1e14 cents, far under the 2^53 a double holds exactly.
+ */
+export const MAX_BALANCE_CENTS = 10_000_000_000;
+export const MAX_NET_WORTH_ACCOUNTS = 10_000;
+
+/** Refuses accounts past the limits above. The message names no amount: balances are never logged. */
+//@ skip
+function assertNetWorthWithinLimits(accounts: NetWorthAccount[]): void {
+	if (
+		accounts.length > MAX_NET_WORTH_ACCOUNTS ||
+		!accounts.every(
+			(a) =>
+				Number.isSafeInteger(a.balanceCents) &&
+				Math.abs(a.balanceCents) <= MAX_BALANCE_CENTS,
+		)
+	)
+		throw new RangeError(
+			"These accounts hold more money or more rows than Tally can add up exactly.",
+		);
+}
+
+/** What you have minus what you owe, in cents. It refuses accounts past the limits above with a RangeError. */
+//@ skip
+export function netWorthCents(accounts: NetWorthAccount[]): number {
+	assertNetWorthWithinLimits(accounts);
+	return netWorthWithinLimits(accounts);
+}
+
+// Checked by LemmaScript and Dafny (decision 188). The rule, in plain words: net worth is exactly the sum of the
+// connected accounts' balances, with each liability's balance subtracted instead of added; an account marked not
+// connected counts for nothing.
+function netWorthWithinLimits(accounts: NetWorthAccount[]): number {
+	//@ verify
+	//@ requires accounts.length <= MAX_NET_WORTH_ACCOUNTS
+	//@ requires forall(i: nat, i < accounts.length ==> -MAX_BALANCE_CENTS <= accounts[i].balanceCents && accounts[i].balanceCents <= MAX_BALANCE_CENTS)
+	//@ ensures \result === netWorthTo(accounts, accounts.length)
+	//@ ensures -MAX_BALANCE_CENTS * accounts.length <= \result && \result <= MAX_BALANCE_CENTS * accounts.length
+	//@ type i nat
+	let sum = 0;
+	let i = 0;
+	while (i < accounts.length) {
+		//@ invariant 0 <= i && i <= accounts.length
+		//@ invariant sum === netWorthTo(accounts, i)
+		//@ invariant -MAX_BALANCE_CENTS * i <= sum && sum <= MAX_BALANCE_CENTS * i
+		//@ decreases accounts.length - i
+		const a = accounts[i] as NetWorthAccount;
+		if (a.connected !== false)
+			sum = a.isLiability ? sum - a.balanceCents : sum + a.balanceCents;
+		i = i + 1;
+	}
+	return sum;
+}
+
+/**
+ * What netWorthWithinLimits' contract compares against: the first n accounts' net worth, written as the simplest
+ * recursion so it reads as the rule. Exported only so the type checker sees it used.
+ */
+export function netWorthTo(accounts: NetWorthAccount[], n: number): number {
+	//@ verify
+	//@ type n nat
+	//@ requires n <= accounts.length
+	//@ decreases n
+	if (n === 0) return 0;
+	const a = accounts[n - 1] as NetWorthAccount;
+	return (
+		netWorthTo(accounts, n - 1) +
+		(a.connected === false
+			? 0
+			: a.isLiability
+				? -a.balanceCents
+				: a.balanceCents)
 	);
 }
 
