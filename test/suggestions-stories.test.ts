@@ -3,12 +3,14 @@ import {
 	acceptCategoryGuess,
 	addMoreLikeThis,
 	answerMoneyMaybe,
+	answerNameSuggestion,
 	chooseCategory,
 	dismissNewCategory,
 	type FileFacts,
 	fileInCategory,
 	type MaybeFacts,
 	type MoreFacts,
+	type NameFacts,
 	neverSuggestStores,
 } from "../src/rules/suggestions";
 import { answerOf, refuse, write } from "./helpers/rule-answers";
@@ -420,5 +422,89 @@ describe("Add the purchases that look like the one just filed", () => {
 		],
 	])("refuses when %s", (_story, facts, answer) => {
 		expect(ask(facts)).toEqual(answer);
+	});
+});
+
+describe("Answer a suggested name for a merchant", () => {
+	const KEY = "BLUE BOTTLE COF";
+
+	const WAITING: NameFacts = {
+		suggestion: {
+			status: "pending",
+			namesAsked: false,
+			names: ["Blue Bottle Coffee", "Blue Bottle"],
+		},
+		named: false,
+		version: VERSION,
+	};
+
+	const ask = (
+		choice: { kind: "name"; name: string } | { kind: "keep" },
+		facts: NameFacts = WAITING,
+	) =>
+		answerOf(
+			answerNameSuggestion.decide(
+				{ merchantKey: KEY, choice, today: TODAY },
+				facts,
+			),
+		);
+
+	const settles = (
+		status: string,
+		displayName: string | null,
+		logKeptGuess: boolean,
+	) =>
+		write({
+			merchantKey: KEY,
+			status,
+			displayName,
+			logKeptGuess,
+			today: TODAY,
+			expectedVersion: VERSION,
+		});
+
+	it.each([
+		[
+			"accepts a name Tally offered, and logs the kept guess",
+			{ kind: "name", name: "Blue Bottle" },
+			settles("accepted", "Blue Bottle", true),
+		],
+		[
+			"turns the suggestion down for a name of the person's own",
+			{ kind: "name", name: "Coffee place" },
+			settles("rejected", "Coffee place", true),
+		],
+		[
+			"turns the suggestion down and sets no name for Keep the bank's",
+			{ kind: "keep" },
+			settles("rejected", null, false),
+		],
+	] as const)("%s", (_story, choice, answer) => {
+		expect(ask(choice)).toEqual(answer);
+	});
+
+	it.each<[string, NameFacts]>([
+		[
+			"the suggestion was already accepted",
+			{
+				...WAITING,
+				suggestion: {
+					status: "accepted",
+					namesAsked: false,
+					names: ["Blue Bottle"],
+				},
+			},
+		],
+		[
+			"Tally has no suggestion for the merchant",
+			{
+				...WAITING,
+				suggestion: { status: "none", namesAsked: true, names: [] },
+			},
+		],
+		["there is no such merchant", { ...WAITING, suggestion: null }],
+		["a person already chose a name", { ...WAITING, named: true }],
+	])("refuses when %s", (_story, facts) => {
+		expect(ask({ kind: "keep" }, facts)).toEqual(ANSWERED);
 	});
 });

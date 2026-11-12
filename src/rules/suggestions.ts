@@ -5,8 +5,13 @@
 // fact, so the page and the rule cannot disagree. The saves' guards are in src/db/suggestion-saves.ts (decision 190).
 import * as Data from "effect/Data";
 import { categorySuggestionMachine } from "../machines/category-suggestion";
+import {
+	merchantSuggestionMachine,
+	merchantSuggestionState,
+} from "../machines/merchant-suggestion";
 import { next } from "../machines/next";
 import { COLORS, nameKey, sameName } from "../settings/category-form";
+import { nameSource } from "../transactions/name-suggestions";
 import {
 	active,
 	type CategoryFacts,
@@ -463,4 +468,95 @@ export const addMoreLikeThis = rule({
 	}),
 	writesText:
 		"Files each ticked purchase that still waits in the category as the person's own choice, and leaves the ones someone decided meanwhile.",
+});
+
+// A suggested name for a merchant, answered. Its states and moves are the merchant suggestion machine's (decision 206,
+// style 1): the rule asks the machine whether the answer is allowed, and saves the state the machine names.
+
+/** What a person chose: a name, or "Keep the bank's". */
+export type NameAnswer = { kind: "name"; name: string } | { kind: "keep" };
+
+export type NameRequest = {
+	merchantKey: string;
+	choice: NameAnswer;
+	/** The household's date (YYYY-MM-DD) a kept guess is logged on. */
+	today: string;
+};
+
+export type NameFacts = {
+	/** The merchant's stored suggestion: its status, whether Tally asked for names, and the names offered. Null when there is no such merchant. */
+	suggestion: { status: string; namesAsked: boolean; names: string[] } | null;
+	/** Whether a person has already chosen a name for the merchant. */
+	named: boolean;
+	/** Stands for everything above as it was read. A save lands only while the stored rows still have this version. */
+	version: string;
+};
+
+/** What the rule saves: the state the machine moved to, the name when one was chosen, and whether a kept guess is logged. */
+export type NameWrite = {
+	merchantKey: string;
+	status: string;
+	/** The chosen name. Null for "Keep the bank's", which leaves the merchant without one. */
+	displayName: string | null;
+	/** True when the name kept is Tally's guess and not the bank's own, which the AI log counts once (spec §8.6). */
+	logKeptGuess: boolean;
+	today: string;
+	expectedVersion: string;
+};
+
+export const answerNameSuggestion = rule({
+	name: "Answer a suggested name for a merchant",
+	given: (request: NameRequest, facts: NameFacts) => {
+		const { choice } = request;
+		const offered = facts.suggestion?.names ?? [];
+
+		// Picking one of the offered names accepts the suggestion; a name of the person's own, or the bank's, turns it down.
+		const event =
+			choice.kind === "name" && offered.includes(choice.name)
+				? "ACCEPT"
+				: "REJECT";
+
+		return {
+			...request,
+			named: facts.named,
+			to:
+				facts.suggestion === null
+					? null
+					: next(
+							merchantSuggestionMachine,
+							merchantSuggestionState(facts.suggestion),
+							event,
+						),
+			version: facts.version,
+		};
+	},
+	refusals: [
+		unless(
+			term<{ to: string | null }>(
+				"the suggestion is waiting, so the machine allows the answer",
+				(g) => g.to !== null,
+			),
+			() => new AlreadyAnswered(),
+		),
+		unless(
+			term<{ named: boolean }>(
+				"no person has chosen a name for the merchant",
+				(g) => !g.named,
+			),
+			() => new AlreadyAnswered(),
+		),
+	],
+	writes: (g): NameWrite => ({
+		merchantKey: g.merchantKey,
+		// SAFETY: the first refusal answered a null `to`, so it is a state here.
+		status: g.to as string,
+		displayName: g.choice.kind === "name" ? g.choice.name : null,
+		logKeptGuess:
+			g.choice.kind === "name" &&
+			nameSource([g.choice.name], g.merchantKey) === "tally",
+		today: g.today,
+		expectedVersion: g.version,
+	}),
+	writesText:
+		"Settles the suggestion as accepted or turned down, sets the merchant's name when one was chosen, and logs a kept guess once.",
 });
