@@ -3,8 +3,19 @@
 // ticked. Nothing moves until the person taps Add. The card is recomputed from the filed purchase's id on every
 // draw, so the URL carries only that id, never bank text. No Jev call, no AI call, nothing in the background.
 
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import {
+	addMoreLikeThis as addMore,
+	type MoreFacts,
+	type MoreRequest,
+	type MoreWrite,
+} from "../rules/suggestions";
 import { groupBySameCleanedText, type SameTextRow } from "../same-text-matches";
 import { COUNTED_JOINS } from "./counted-month";
+import { Database, runWith } from "./database";
+import { decideAndSave, guardedSave } from "./guarded-save";
 import { merchantKeySql } from "./merchant-key";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { cardLabel, JOIN_MERCHANT, LABEL_SQL } from "./suggestions-queue";
@@ -159,70 +170,160 @@ export type AddResult =
 	/** The card is stale: the purchase moved to another category, or its category was archived. Nothing moved. */
 	| { ok: false; reason: "changed" };
 
+/** The filed purchase ?1's category, when a person filed it. */
+const FILED = `FROM transactions f JOIN categories fc ON fc.id = f.category_id WHERE f.id = ?1 AND f.category_source = 'user'`;
+
+/** Each posted id (?2, a JSON list) with whether that purchase still waits for a category and is not a mixed trip, as SQL. */
+const TICKED_NOW = `SELECT v.value AS id, (v.value IN (SELECT t.id FROM transactions t ${COUNTED_JOINS}
+	WHERE ${WAITING} AND NOT ${jevSaysMixedSql("t")})) AS waiting FROM json_each(?2) v`;
+
+/** Everything the Add rule reads as one text, as SQL: the filed purchase's category and each posted purchase's state. */
+const MORE_VERSION = `(COALESCE((SELECT f.category_id || ':' || fc.archived ${FILED}), 'none') || '/'
+	|| COALESCE((SELECT group_concat(id || ':' || waiting, '|') FROM (${TICKED_NOW})), ''))`;
+
 /**
- * Add: files the ticked purchases that are in the filed purchase's group into its category, as one D1 statement. A
- * ticked id that isn't in the group is ignored (the ids are checked against the group, never trusted). The write has
- * the waiting check too, so a purchase someone decided meanwhile is left alone and counted as skipped. The SET list
- * is fileInNewCategory's; no answer record is written. `category` is the category the card showed: when the filed
- * purchase is in another one now, or its category is archived, the card is stale and nothing moves.
+ * What the Add rule reads, with its version. The filed purchase's category, the posted purchases' states and the
+ * version come from one batch. Which posted purchases look like the filed one is worked out from their bank text, as
+ * the card works it out (sameTextPeers): an id that is not in the group is left out, never trusted.
  */
-export async function addMoreLikeThis(
+export async function moreFacts(
 	db: D1Database,
-	input: { filedId: number; category: number; ticked: number[]; who: string },
-): Promise<AddResult> {
-	const filed = await filedRow(db, input.filedId);
+	filedId: number,
+	posted: number[],
+): Promise<MoreFacts> {
+	const ids = JSON.stringify([...new Set(posted)].sort((a, b) => a - b));
 
-	if (!filed) return { ok: false, reason: "gone" };
-
-	if (filed.archived === 1 || filed.categoryId !== input.category)
-		return { ok: false, reason: "changed" };
-	const ticked = [...new Set(input.ticked)];
-
-	const group = new Set(
-		sameTextPeers(
-			{ ...filed, mixed: filed.mixed === 1 },
-			await candidates(db, ticked),
-		).map((row) => row.id),
-	);
-
-	const ids = ticked.filter((id) => group.has(id));
-
-	// The filed purchase must still be in the category the card showed, and that category active. The check is a
-	// witness read in the same D1 batch as the write, and the write repeats it in its WHERE, so a recategorize or a
-	// delete after the read above moves nothing: the batch runs with no write between them.
-	const filedHolds = `EXISTS (SELECT 1 FROM transactions f JOIN categories fc ON fc.id = f.category_id
-		WHERE f.id = ? AND f.category_source = 'user' AND f.category_id = ? AND fc.archived = 0)`;
-
-	const [witness, write] = await db.batch<{ holds: number }>([
-		db
-			.prepare(`SELECT ${filedHolds} AS holds`)
-			.bind(input.filedId, filed.categoryId),
+	// SAFETY: the batch below lists exactly three statements, so its results are the three D1Results typed here.
+	const [filedNow, tickedNow, version] = (await db.batch([
 		db
 			.prepare(
-				`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-					split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now')
-				WHERE ${filedHolds}
-					AND id IN (SELECT value FROM json_each(?))
-					AND id IN (SELECT t.id FROM transactions t ${COUNTED_JOINS} WHERE ${WAITING} AND NOT ${jevSaysMixedSql("t")})`,
+				`SELECT f.category_id AS categoryId, fc.name AS categoryName, fc.archived AS archived ${FILED}`,
 			)
-			.bind(
-				filed.categoryId,
-				input.who,
-				input.filedId,
-				filed.categoryId,
-				JSON.stringify(ids),
-			),
-	]);
+			.bind(filedId),
+		db.prepare(TICKED_NOW).bind(filedId, ids),
+		db.prepare(`SELECT ${MORE_VERSION} AS version`).bind(filedId, ids),
+	])) as [
+		D1Result<{ categoryId: number; categoryName: string; archived: number }>,
+		D1Result<{ id: number; waiting: number }>,
+		D1Result<{ version: string }>,
+	];
 
-	const holds = witness?.results[0]?.holds;
+	const filed = await filedRow(db, filedId);
 
-	if (!holds) return { ok: false, reason: "changed" };
-	const moved = write?.meta.changes ?? 0;
+	const group = filed
+		? new Set(
+				sameTextPeers(
+					{ ...filed, mixed: filed.mixed === 1 },
+					await candidates(db, posted),
+				).map((row) => row.id),
+			)
+		: new Set<number>();
+
+	const category = filedNow.results[0];
 
 	return {
-		ok: true,
-		name: filed.categoryName,
-		moved,
-		skipped: ids.length - moved,
+		filed: category ? { ...category, archived: category.archived === 1 } : null,
+		ticked: tickedNow.results
+			.filter((row) => group.has(row.id))
+			.map((row) => ({ id: row.id, waiting: row.waiting === 1 })),
+		version: version.results[0]?.version ?? "",
 	};
 }
+
+/**
+ * The Add's save, one batch. First the guard: it records nothing while the filed purchase and the posted purchases are
+ * still as the rule read them, and tries to record an answer with no guess when they are not, which fails the batch
+ * (maybe_answers.confidence is NOT NULL; SQLite's RAISE works only inside a trigger). Then the purchases the rule
+ * named are filed; their ids go in as one JSON value. No answer record is written.
+ */
+export const moreStatements = (
+	db: D1Database,
+	save: MoreWrite,
+	posted: number[],
+) => [
+	db
+		.prepare(
+			`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+			SELECT 'category', NULL, 'yes', '2000-01-01' WHERE ${MORE_VERSION} IS NOT ?3`,
+		)
+		.bind(
+			save.filedId,
+			JSON.stringify([...new Set(posted)].sort((a, b) => a - b)),
+			save.expectedVersion,
+		),
+	db
+		.prepare(
+			`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+				split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now')
+			WHERE id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(save.categoryId, save.who, JSON.stringify(save.move)),
+];
+
+/** The text of the guard's failure, as D1 passes SQLite's message on. */
+const GUARD_RAISED = /NOT NULL constraint failed: maybe_answers\.confidence/;
+
+/**
+ * Reads the Add's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the
+ * guard raises (decideAndSave). Answers with the category's name, how many purchases moved and how many were left.
+ */
+export const decideMore = <E>(
+	moreRule: {
+		decide: (
+			request: MoreRequest,
+			facts: MoreFacts,
+		) => Effect.Effect<Option.Option<MoreWrite>, E>;
+	},
+	request: MoreRequest,
+	posted: number[],
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const { decided } = yield* decideAndSave({
+			facts: Effect.promise(() => moreFacts(db, request.filedId, posted)),
+			decide: (facts) => moreRule.decide(request, facts),
+			save: (write) =>
+				guardedSave(
+					() => db.batch(moreStatements(db, write, posted)),
+					(error) => GUARD_RAISED.test(error.message),
+				),
+			gaveUp: "The purchases kept changing while they were being added.",
+		});
+
+		const write = Option.getOrUndefined(decided);
+
+		return {
+			name: write?.name ?? "",
+			moved: write?.move.length ?? 0,
+			skipped: write?.skipped ?? 0,
+		};
+	});
+
+/**
+ * Add, as the rule decides it (decision 157): files the ticked purchases that are in the filed purchase's group into
+ * its category. `category` is the category the card showed: when the filed purchase is in another one now, or its
+ * category is archived, the card is stale and nothing moves.
+ */
+export const addMoreLikeThis = (
+	db: D1Database,
+	input: { filedId: number; category: number; ticked: number[]; who: string },
+): Promise<AddResult> =>
+	runWith(
+		db,
+		decideMore(
+			addMore,
+			{ filedId: input.filedId, categoryId: input.category, who: input.who },
+			input.ticked,
+		).pipe(
+			Effect.match({
+				onSuccess: (added): AddResult => ({ ok: true, ...added }),
+				onFailure: (refusal): AddResult => ({
+					ok: false,
+					reason: Predicate.isTagged(refusal, "CardChanged")
+						? "changed"
+						: "gone",
+				}),
+			}),
+		),
+	);

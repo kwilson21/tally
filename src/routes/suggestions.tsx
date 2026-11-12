@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { addressOf } from "../address";
@@ -8,7 +9,7 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
-import { incomeGuessSql, PERSON_INCOME_SET_SQL } from "../db/income";
+import { type Database, runWith } from "../db/database";
 import {
 	type NameChoice,
 	type NameReview,
@@ -25,24 +26,36 @@ import {
 } from "../db/never-suggest";
 import {
 	FULL_NEW_CATEGORY,
-	fileInNewCategory,
-	type NewCategoryTarget,
-	newCategoryTarget,
 	pendingCategoryNames,
 	suggestedCategoryName,
 } from "../db/new-category-answer";
 import { runningRecheck, startResortFor } from "../db/resort-start";
 import {
-	categoryAskedSql,
-	incomeAskedSql,
+	decideCategoryMaybe,
+	decideFile,
+	decideMoneyMaybe,
+	decideNeverSuggest,
+} from "../db/suggestion-saves";
+import {
 	neverSuggestAskedSql,
 	type SuggestionItem,
 	suggestionQueue,
-	transferAskedSql,
 } from "../db/suggestions-queue";
+import { readAtEdge } from "../edge";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
+import {
+	type AlreadyAnswered,
+	acceptCategoryGuess,
+	answerMoneyMaybe,
+	chooseCategory,
+	type FileRequest,
+	fileInCategory,
+	type NeverSuggestRequest,
+	neverSuggestStores,
+} from "../rules/suggestions";
+import { CategoryId, CategoryName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -85,22 +98,6 @@ type Values = CardValues & { id: string };
 
 /** The words when a one tap's category is gone or archived since the card was drawn (#965). */
 const CATEGORY_GONE = "That category is gone. Choose another.";
-
-/** The active category with this id, read from a posted field, or null. Number("") is 0, so the empty text is checked first. */
-async function activeCategoryById(
-	db: D1Database,
-	raw: string,
-): Promise<{ id: number; name: string } | null> {
-	const text = raw.trim();
-	const chosen = Number(text);
-
-	if (text === "" || !Number.isInteger(chosen)) return null;
-
-	return db
-		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
-		.bind(chosen)
-		.first<{ id: number; name: string }>();
-}
 
 export const suggestions = new Hono<App>();
 
@@ -224,35 +221,22 @@ async function storeLabels(
 }
 
 /**
- * Yes on a question (decision 101): writes one "Never suggest" line for each store the question asked about, and only
- * while it is still that question, so a No that changed under it writes nothing (#440). Returns the stores' labels, or
- * null when no line was written. Settings' categories asks the same question after its No (decision 120).
+ * Yes on a question (decision 101): the rule keeps one "Never suggest" line for each store the question still asks
+ * about, so a No that changed under it writes nothing (#440). Returns the stores' labels, or null when the rule
+ * refuses because the question is no longer asked. Settings' categories asks the same question after its No (decision 120).
  */
 export async function writeNeverSuggest(
 	db: D1Database,
-	input: {
-		kind: NeverSuggestKind;
-		/** The item's number: the suggestion's, for a new category. */
-		id: number;
-		stores: string[];
-		today: string;
-	},
+	request: NeverSuggestRequest,
 ): Promise<string | null> {
-	const { results } = await db
-		.prepare(
-			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
-			SELECT q.key, ?2, ?3 FROM (${neverSuggestAskedSql(input.kind)}) q
-			WHERE q.key IN (SELECT value FROM json_each(?4)) RETURNING merchant_key`,
-		)
-		.bind(input.id, input.kind, input.today, JSON.stringify(input.stores))
-		.all<{ merchant_key: string }>();
+	const kept = await runWith(
+		db,
+		decideNeverSuggest(neverSuggestStores, request).pipe(
+			Effect.catchTag("AlreadyAnswered", () => Effect.succeed(null)),
+		),
+	);
 
-	const written = new Set(results.map((row) => row.merchant_key));
-	const known = input.stores.filter((store) => written.has(store));
-
-	if (known.length === 0) return null;
-
-	return joinStores([...(await storeLabels(db, known)).values()]);
+	return kept && joinStores([...(await storeLabels(db, kept)).values()]);
 }
 
 /** The toast's and announcement's words once a question's Yes has written its lines (decision 101). */
@@ -720,7 +704,7 @@ suggestions.post(PATH, async (c) => {
 
 		const labels = await writeNeverSuggest(db, {
 			kind: knownKind,
-			id: Number(found[2]),
+			itemId: Number(found[2]),
 			stores,
 			today,
 		});
@@ -812,176 +796,122 @@ suggestions.post(PATH, async (c) => {
 
 	if (!item) return stale();
 
+	/** Runs an answer's rule and save. False when the rule refuses because the question was already answered. */
+	const answered = <A,>(program: Effect.Effect<A, AlreadyAnswered, Database>) =>
+		runWith(
+			db,
+			program.pipe(
+				Effect.as(true),
+				Effect.catchTag("AlreadyAnswered", () => Effect.succeed(false)),
+			),
+		);
+
 	switch (item.kind) {
-		case "income": {
-			if (answer === "yes") {
-				// The answer record and the write go in one batch: the record reads the guess before the write (decision 155).
-				const [, result] = await db.batch([
-					db
-						.prepare(
-							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'income', ${incomeGuessSql("transactions")}, 'yes', ?
-							FROM transactions WHERE id = ? AND ${incomeAskedSql("transactions")}`,
-						)
-						.bind(today, item.transactionId),
-					db
-						.prepare(
-							`UPDATE transactions SET ${PERSON_INCOME_SET_SQL}
-						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
-						)
-						.bind(1, who, item.transactionId),
-				]);
-
-				if ((result?.meta.changes ?? 0) === 0) return stale();
-				const after = await suggestionQueue(db);
-
-				return done(`Counted ${item.label} as income.`, after);
-			}
-
-			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
-			if (answer === "no") {
-				const [, result] = await db.batch([
-					db
-						.prepare(
-							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'income', ${incomeGuessSql("transactions")}, 'no', ?
-							FROM transactions WHERE id = ? AND ${incomeAskedSql("transactions")}`,
-						)
-						.bind(today, item.transactionId),
-					db
-						.prepare(
-							`UPDATE transactions SET income_maybe_declined = 1
-						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
-						)
-						.bind(item.transactionId),
-				]);
-
-				if ((result?.meta.changes ?? 0) === 0) return stale();
-
-				return askScreen(c, {
-					kind: "income",
-					id: item.id,
-					stores: [{ merchantKey: item.merchantKey, label: item.merchant }],
-					check: "Not counted as income",
-				});
-			}
-
-			break;
-		}
-
+		case "income":
 		case "transfer": {
-			if (answer === "yes") {
-				const [, result] = await db.batch([
-					db
-						.prepare(
-							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'transfer', transactions.transfer_confidence, 'yes', ?
-							FROM transactions WHERE id = ? AND ${transferAskedSql("transactions")}`,
-						)
-						.bind(today, item.transactionId),
-					db
-						.prepare(
-							`UPDATE transactions SET excluded = 1, excluded_source = 'user', transfer_confidence = NULL,
-							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND ${transferAskedSql("transactions")}`,
-						)
-						.bind(who, item.transactionId),
-				]);
-
-				if ((result?.meta.changes ?? 0) === 0) return stale();
-				const after = await suggestionQueue(db);
-
-				return done(`Left ${item.label} out of the budget.`, after);
-			}
+			if (answer !== "yes" && answer !== "no") break;
+			const income = item.kind === "income";
 
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
-			if (answer === "no") {
-				const [, result] = await db.batch([
-					db
-						.prepare(
-							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'transfer', transactions.transfer_confidence, 'no', ?
-							FROM transactions WHERE id = ? AND ${transferAskedSql("transactions")}`,
-						)
-						.bind(today, item.transactionId),
-					db
-						.prepare(
-							`UPDATE transactions SET transfer_maybe_declined = 1
-						WHERE id = ? AND ${transferAskedSql("transactions")}`,
-						)
-						.bind(item.transactionId),
-				]);
+			const saved = await answered(
+				decideMoneyMaybe(answerMoneyMaybe, {
+					kind: item.kind,
+					answer,
+					transactionId: item.transactionId,
+					today,
+					who,
+				}),
+			);
 
-				if ((result?.meta.changes ?? 0) === 0) return stale();
+			if (!saved) return stale();
 
+			if (answer === "no")
 				return askScreen(c, {
-					kind: "transfer",
+					kind: item.kind,
 					id: item.id,
 					stores: [{ merchantKey: item.merchantKey, label: item.merchant }],
-					check: "Kept in the budget",
+					check: income ? "Not counted as income" : "Kept in the budget",
 				});
-			}
 
-			break;
+			return done(
+				income
+					? `Counted ${item.label} as income.`
+					: `Left ${item.label} out of the budget.`,
+				await suggestionQueue(db),
+			);
 		}
 
 		case "category": {
 			if (answer === "yes") {
-				const [, result] = await db.batch([
-					db
-						.prepare(
-							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'category', transactions.category_confidence, 'yes', ?
-							FROM transactions WHERE id = ? AND jev_category_id = ? AND ${categoryAskedSql("transactions")}`,
-						)
-						.bind(today, item.transactionId, item.categoryId),
-					db
-						.prepare(
-							`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
-							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND jev_category_id = ? AND ${categoryAskedSql("transactions")}`,
-						)
-						.bind(who, item.transactionId, item.categoryId),
-				]);
+				const saved =
+					item.categoryId !== null &&
+					(await answered(
+						decideCategoryMaybe(acceptCategoryGuess, {
+							transactionId: item.transactionId,
+							categoryId: item.categoryId,
+							today,
+							who,
+						}),
+					));
 
-				if ((result?.meta.changes ?? 0) === 0) return stale();
-				const after = await suggestionQueue(db);
+				if (!saved) return stale();
 
-				return done(`Set ${item.label} to ${item.category}.`, after);
+				return done(
+					`Set ${item.label} to ${item.category}.`,
+					await suggestionQueue(db),
+				);
 			}
 
 			// The category answers each do one thing (#965). A create with a category is the one tap; a create with a name is the
-			// dashed new row. Both file through filedAs, so the create, the filing and the re-check are one path.
-			// The purchase is filed in an active category the family has, or in a new one made from the typed name.
+			// dashed new row. Both go through the one rule (fileInCategory), so the create, the filing and the re-check are one
+			// path. `refuse` gives the card's values back, with a refused name's sentence on its own field (aria-invalid).
 			const filedAs = async (
-				target: Exclude<NewCategoryTarget, { ok: false }>,
+				target: FileRequest["target"],
 				refuse: (nameError?: string) => Values,
 				typedByPerson: boolean,
 			) => {
-				const result = await fileInNewCategory(db, {
-					transactionId: item.transactionId,
-					target,
-					today,
-					who,
-					typedByPerson,
-				});
-
-				if (!result.ok) {
-					if (result.reason === "gone") return stale();
-
-					return renderScreen(c, {
+				const again = (values: Values, error?: string) =>
+					renderScreen(c, {
 						reviewUrl,
-						values: refuse(),
-						error: FULL_NEW_CATEGORY,
+						values,
+						error,
 						status: 422,
 						focus: true,
 					});
-				}
+
+				const result = await runWith(
+					db,
+					decideFile(fileInCategory, {
+						transactionId: item.transactionId,
+						target,
+						today,
+						who,
+						typedByPerson,
+					}).pipe(
+						Effect.map((filed) => ({ filed })),
+						Effect.catchTags({
+							AlreadyAnswered: () => Effect.succeed({ refused: stale }),
+							CategoryGone: (gone) =>
+								Effect.succeed({ refused: () => again(refuse(), gone.say) }),
+							// The limit is the card's message, with the offer to add to a category the family has.
+							ListFull: () =>
+								Effect.succeed({
+									refused: () => again(refuse(), FULL_NEW_CATEGORY),
+								}),
+						}),
+						Effect.catch((name) =>
+							Effect.succeed({ refused: () => again(refuse(name.say)) }),
+						),
+					),
+				);
+
+				if ("refused" in result) return result.refused();
+				const { name, created } = result.filed;
 
 				// Only a new category starts the re-check (decision 157): an Add to changes nothing the run would sort.
 				// The card's same-text peers (the "N more look like this" offer) are read before the run starts and kept out of
 				// it, so the card still offers them to the person (#842 round 2).
-				const rechecking = result.created
+				const rechecking = created
 					? await startResortFor(c.env, db, {
 							filedId: item.transactionId,
 							excludeIds: (
@@ -990,50 +920,44 @@ suggestions.post(PATH, async (c) => {
 						})
 					: null;
 
-				const after = await suggestionQueue(db);
-
 				return done(
-					result.created
-						? `Made ${result.name} and set ${item.label} to it.`
-						: `Added ${item.label} to ${result.name}.`,
-					after,
+					created
+						? `Made ${name} and set ${item.label} to it.`
+						: `Added ${item.label} to ${name}.`,
+					await suggestionQueue(db),
 					rechecking ? STARTED_ANNOUNCEMENT : "",
 					item.transactionId,
 				);
 			};
 
-			// A typed name, checked as the category form checks it (decision 156): a name the family already has files the
-			// purchase in that one, and a refused name redraws the card with `refuse`'s values and its error on the field.
-			const typedName = async (
+			// A typed name, read at the edge as the category form reads it (decision 156); a name the family already has
+			// files the purchase in that one.
+			const typedName = (
 				typed: string,
 				refuse: (nameError?: string) => Values,
 				typedByPerson: boolean,
 			) => {
-				const target = newCategoryTarget(typed, await categoryNames(db));
+				const name = readAtEdge(CategoryName, typed);
 
-				if (target.ok) return filedAs(target, () => refuse(), typedByPerson);
-
-				// The limit is the card's message; a refused name is named by its own field (aria-invalid).
-				const limit = target.error === FULL_NEW_CATEGORY;
-
-				return renderScreen(c, {
-					reviewUrl,
-					values: refuse(limit ? undefined : target.error),
-					error: limit ? target.error : undefined,
-					status: 422,
-					focus: true,
-				});
+				return name.ok
+					? filedAs({ name: name.value }, refuse, typedByPerson)
+					: renderScreen(c, {
+							reviewUrl,
+							values: refuse(name.say),
+							status: 422,
+							focus: true,
+						});
 			};
 
 			// The dashed row (decision 156, #965): the one tap posts the category's id; the new row posts only a name.
 			if (answer === "create") {
 				if (form.has("category")) {
-					const category = await activeCategoryById(
-						db,
-						form.get("category")?.toString() ?? "",
+					const tapped = readAtEdge(
+						CategoryId,
+						(form.get("category")?.toString() ?? "").trim(),
 					);
 
-					if (!category)
+					if (!tapped.ok)
 						return renderScreen(c, {
 							reviewUrl,
 							values: { id },
@@ -1042,16 +966,7 @@ suggestions.post(PATH, async (c) => {
 							focus: true,
 						});
 
-					return filedAs(
-						{
-							ok: true,
-							kind: "existing",
-							id: category.id,
-							name: category.name,
-						},
-						() => ({ id }),
-						false,
-					);
+					return filedAs({ categoryId: tapped.value }, () => ({ id }), false);
 				}
 
 				const typed = String(form.get("new_name") ?? "");
@@ -1094,40 +1009,39 @@ suggestions.post(PATH, async (c) => {
 						true,
 					);
 
-				const chosen = await activeCategoryById(db, category);
-
-				if (!chosen)
-					return renderScreen(c, {
+				const gone = () =>
+					renderScreen(c, {
 						values: { id },
 						error: CATEGORY_GONE,
 						status: 422,
 						focus: true,
 					});
 
-				const [, result] = await db.batch([
-					db
-						.prepare(
-							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'category', transactions.category_confidence,
-								CASE WHEN transactions.jev_category_id = ? THEN 'yes' ELSE 'something_else' END, ?
-							FROM transactions WHERE id = ? AND ${categoryAskedSql("transactions")}
-								AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
-						)
-						.bind(chosen.id, today, item.transactionId, chosen.id),
-					db
-						.prepare(
-							`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
-							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND ${categoryAskedSql("transactions")}
-							AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
-						)
-						.bind(chosen.id, who, item.transactionId, chosen.id),
-				]);
+				const chosenId = readAtEdge(CategoryId, category.trim());
 
-				if ((result?.meta.changes ?? 0) === 0) return stale();
-				const after = await suggestionQueue(db);
+				if (!chosenId.ok) return gone();
 
-				return done(`Set ${item.label} to ${chosen.name}.`, after);
+				const name = await runWith(
+					db,
+					decideCategoryMaybe(chooseCategory, {
+						transactionId: item.transactionId,
+						categoryId: chosenId.value,
+						today,
+						who,
+					}).pipe(
+						Effect.map(({ facts }) => facts.chosen?.name ?? ""),
+						Effect.catchTags({
+							CategoryGone: () => Effect.succeed(null),
+							AlreadyAnswered: () => Effect.succeed(undefined),
+						}),
+					),
+				);
+
+				if (name === null) return gone();
+
+				if (name === undefined) return stale();
+
+				return done(`Set ${item.label} to ${name}.`, await suggestionQueue(db));
 			}
 
 			break;

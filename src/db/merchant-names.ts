@@ -4,7 +4,15 @@
 
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import { householdToday } from "../dates";
+import {
+	answerNameSuggestion,
+	type NameFacts,
+	type NameRequest,
+	type NameWrite,
+} from "../rules/suggestions";
 import {
 	type NameSource,
 	nameSource,
@@ -14,6 +22,8 @@ import {
 import { tidyName } from "../transactions/tidy-name";
 import { KEPT_NAME_LOG_SQL } from "./ai-log";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
+import { Database, runWith } from "./database";
+import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 import { merchantKeySql, merchantNamesJsonSql } from "./merchant-key";
 import { merchants } from "./schema";
 
@@ -355,49 +365,131 @@ export type NameChoice =
 	/** "Keep the bank's": the tidied bank text stays, and the merchant isn't suggested names again. */
 	| { kind: "keep" };
 
+/** The names offered for the merchant ?1, in the order they are stored, as one text. Each is in hex, so no name can look like the marks between them. */
+const OFFERED_NAMES = `COALESCE((SELECT group_concat(hex(name), '|') FROM (SELECT name FROM merchant_suggested_names
+	WHERE merchant_key = ?1 ORDER BY position)), '')`;
+
+/** Everything the name rule reads as one text, as SQL: the merchant's status, whether a person named it, and the offered names. */
+const NAME_VERSION = `(COALESCE((SELECT suggestion_status || ':' || names_asked || ':' || (display_name IS NOT NULL)
+	FROM merchants WHERE raw_name = ?1), 'none') || '/' || ${OFFERED_NAMES})`;
+
+/** What the name rule reads about a merchant, with its version, in one batch. */
+export async function nameFacts(
+	db: D1Database,
+	key: string,
+): Promise<NameFacts> {
+	// SAFETY: the batch below lists exactly three statements, so its results are the three D1Results typed here. A batch
+	// is one transaction, so the version is of the very rows read beside it.
+	const [merchant, names, version] = (await db.batch([
+		db
+			.prepare(
+				"SELECT suggestion_status AS status, names_asked AS namesAsked, display_name IS NOT NULL AS named FROM merchants WHERE raw_name = ?1",
+			)
+			.bind(key),
+		db
+			.prepare(
+				"SELECT name FROM merchant_suggested_names WHERE merchant_key = ?1 ORDER BY position",
+			)
+			.bind(key),
+		db.prepare(`SELECT ${NAME_VERSION} AS version`).bind(key),
+	])) as [
+		D1Result<{ status: string; namesAsked: number; named: number }>,
+		D1Result<{ name: string }>,
+		D1Result<{ version: string }>,
+	];
+
+	const row = merchant.results[0];
+
+	return {
+		suggestion: row
+			? {
+					status: row.status,
+					namesAsked: row.namesAsked === 1,
+					names: names.results.map((n) => n.name),
+				}
+			: null,
+		named: row?.named === 1,
+		version: version.results[0]?.version ?? "",
+	};
+}
+
 /**
- * Settles one merchant's pending suggestion with a person's choice: the name they picked or typed
- * becomes `display_name` (`accepted` when it is one of the suggestions, otherwise `rejected`), or
- * keeping the bank's name leaves `display_name` empty and turns the suggestion down. Nothing happens
- * unless the suggestion is still waiting and the merchant still has no chosen name, so a stale form
- * can't overwrite a name chosen elsewhere. Returns whether anything was settled.
+ * The name answer's save, one batch. A guessed name a person keeps is logged first, while the suggestion is still
+ * pending (spec §8.6); the log statement checks that itself. The update is the guard as well (decision 190): it lands only while the merchant and its offered
+ * names are still as the rule read them.
  */
-export async function settleSuggestion(
+export const nameStatements = (db: D1Database, save: NameWrite) => [
+	...(save.logKeptGuess
+		? [
+				db
+					.prepare(KEPT_NAME_LOG_SQL)
+					.bind(save.today, save.merchantKey, save.displayName),
+			]
+		: []),
+	db
+		.prepare(
+			`UPDATE merchants SET display_name = COALESCE(?2, display_name), suggestion_status = ?3
+			WHERE raw_name = ?1 AND ${NAME_VERSION} IS ?4`,
+		)
+		.bind(
+			save.merchantKey,
+			save.displayName,
+			save.status,
+			save.expectedVersion,
+		),
+];
+
+/**
+ * Reads the merchant's suggestion, asks the rule and saves what it decides in one batch. When the update finds the rows
+ * changed since the read, the rule is asked again on the fresh rows (decideAndSave).
+ */
+export const decideName = <E>(
+	nameRule: {
+		decide: (
+			request: NameRequest,
+			facts: NameFacts,
+		) => Effect.Effect<Option.Option<NameWrite>, E>;
+	},
+	request: NameRequest,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		return yield* decideAndSave({
+			facts: Effect.promise(() => nameFacts(db, request.merchantKey)),
+			decide: (facts) => nameRule.decide(request, facts),
+			save: (write) =>
+				Effect.promise(() => db.batch(nameStatements(db, write))).pipe(
+					Effect.filterOrFail(
+						(results) => (results.at(-1)?.meta.changes ?? 0) > 0,
+						() => new ChangedSinceRead(),
+					),
+				),
+			gaveUp:
+				"A merchant's name kept changing while an answer was being saved.",
+		});
+	});
+
+/**
+ * Settles one merchant's pending suggestion with a person's choice, as the rule decides it: true when it was settled,
+ * false when the rule refuses because the suggestion is no longer waiting or the merchant already has a chosen name.
+ */
+export const settleSuggestion = async (
 	db: D1Database,
 	key: string,
 	choice: NameChoice,
-): Promise<boolean> {
-	const update =
-		choice.kind === "keep"
-			? db
-					.prepare(
-						"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = ? AND suggestion_status = 'pending' AND display_name IS NULL",
-					)
-					.bind(key)
-			: db
-					.prepare(
-						`UPDATE merchants SET display_name = ?1,
-							suggestion_status = CASE WHEN EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = merchants.raw_name AND n.name = ?1) THEN 'accepted' ELSE 'rejected' END
-						 WHERE raw_name = ?2 AND suggestion_status = 'pending' AND display_name IS NULL`,
-					)
-					.bind(choice.name, key);
-
-	// A guessed name a person keeps is logged first, while the suggestion is still pending (spec §8.6).
-	if (choice.kind === "keep" || nameSource([choice.name], key) !== "tally") {
-		const result = await update.run();
-
-		return result.meta.changes > 0;
-	}
-
-	const [, result] = await db.batch([
-		db
-			.prepare(KEPT_NAME_LOG_SQL)
-			.bind(await householdToday(db), key, choice.name),
-		update,
-	]);
-
-	return (result?.meta.changes ?? 0) > 0;
-}
+): Promise<boolean> =>
+	runWith(
+		db,
+		decideName(answerNameSuggestion, {
+			merchantKey: key,
+			choice,
+			today: await householdToday(db),
+		}).pipe(
+			Effect.as(true),
+			Effect.catchTag("AlreadyAnswered", () => Effect.succeed(false)),
+		),
+	);
 
 /**
  * The display names the merchants table has for these raw merchant keys, one query: a key whose row has no display name

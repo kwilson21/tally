@@ -4,6 +4,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import { isUniqueViolation } from "./errors";
 
 /** The save found the facts changed since the rule read them. Never shown to a person: the rule is asked again. */
 export class ChangedSinceRead extends Data.TaggedError("ChangedSinceRead") {}
@@ -34,4 +35,25 @@ export const decideAndSave = <F, W, E, S, E2, R1, R2>(steps: {
 		Effect.catchTag("ChangedSinceRead", () =>
 			Effect.die(new Error(steps.gaveUp)),
 		),
+	);
+
+/**
+ * Runs a save and says what its failure was: the guard's own error (`isGuard`) becomes ChangedSinceRead, a name the
+ * unique indexes refuse becomes the refusal `whenNameTaken` makes (for a save that stores a name), and anything else is
+ * a defect, so the request fails as it would have.
+ */
+export const guardedSave = <A, E = never>(
+	run: () => Promise<A>,
+	isGuard: (error: Error) => boolean,
+	whenNameTaken?: () => E,
+) =>
+	Effect.tryPromise({ try: run, catch: (cause) => cause }).pipe(
+		Effect.catch((cause): Effect.Effect<never, ChangedSinceRead | E> => {
+			if (cause instanceof Error && isGuard(cause))
+				return Effect.fail(new ChangedSinceRead());
+
+			return whenNameTaken && isUniqueViolation(cause)
+				? Effect.fail(whenNameTaken())
+				: Effect.die(cause);
+		}),
 	);

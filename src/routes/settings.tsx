@@ -24,7 +24,7 @@ import {
 } from "../db/category-saves";
 import {
 	createFromSuggestion,
-	dismissSuggestion,
+	decideDismiss,
 	type PendingSuggestion,
 	pendingSuggestionPage,
 } from "../db/category-suggestions";
@@ -68,6 +68,7 @@ import {
 	renameCategory,
 	restoreCategory,
 } from "../rules/categories";
+import { dismissNewCategory } from "../rules/suggestions";
 import {
 	type CategoryErrors,
 	CategoryId,
@@ -1282,7 +1283,7 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 
 	const labels = await writeNeverSuggest(c.env.DB, {
 		kind: "new_category",
-		id,
+		itemId: id,
 		stores,
 		today: await householdToday(c.env.DB),
 	});
@@ -1300,8 +1301,14 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 
 	// The question's own answer, posted from the question drawn in the card's place (decision 101).
 	if (form.get("answer")) return answerQuestion(c, id, form);
+
 	// The No retires the suggestion, and the question asks in the card's place (decisions 101, 120).
-	const result = await dismissSuggestion(db, id);
+	const result = await runWith(
+		db,
+		decideDismiss(dismissNewCategory, { suggestionId: id }).pipe(
+			Effect.catchTag("SuggestionChanged", () => Effect.succeed(null)),
+		),
+	);
 
 	if (!result)
 		return renderPage(c, "categories", {

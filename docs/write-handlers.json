@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 59,
+	"legacyBaseline": 56,
 	"handlers": [
 		{
 			"method": "POST",
@@ -456,21 +456,29 @@
 			"path": "/settings/suggestions",
 			"file": "suggestions.tsx",
 			"area": "suggestions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/suggestions.ts",
+			"stories": "test/suggestions-stories.test.ts",
+			"reason": "The Yes on a suggested new category releases the suggestion's other purchases with two SQL statements keyed by the suggestion, because their number has no cap (decision 209). The rule decides everything else."
 		},
 		{
 			"method": "POST",
 			"path": "/settings/suggestions/:id{[0-9]+}/create",
 			"file": "settings.tsx",
 			"area": "suggestions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/suggestions.ts",
+			"stories": "test/suggestions-stories.test.ts",
+			"reason": "The Yes on a suggested new category releases the suggestion's other purchases with two SQL statements keyed by the suggestion, because their number has no cap (decision 209). The rule decides everything else."
 		},
 		{
 			"method": "POST",
 			"path": "/settings/suggestions/:id{[0-9]+}/dismiss",
 			"file": "settings.tsx",
 			"area": "suggestions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/suggestions.ts",
+			"stories": "test/suggestions-stories.test.ts"
 		},
 		{
 			"method": "POST",
