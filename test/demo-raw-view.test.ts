@@ -5,20 +5,23 @@ import { listTransactions, PAGE_SIZE } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { type Filters, SHOWS } from "../src/transactions/filters";
+import { envWith } from "./helpers/doubles";
 
 // The demo's "See it without AI" (spec §8.6, decisions 68, 73, 79; P44 A): two links under the
 // Transactions title switch the list between what Tally made of it and the bank's raw data (?raw=1).
 // Only the list changes. The family app shows no links and ignores ?raw=1.
 
-const family = { ...env, DEMO: "false" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
 
 async function demo(path: string) {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
+
 	return { res, html: await res.text() };
 }
 
 async function familyApp(path: string) {
 	const res = await transactions.request(path, {}, family);
+
 	return { res, html: await res.text() };
 }
 
@@ -99,19 +102,25 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const seed = await env.DB.prepare(
 			"SELECT id, amount_cents FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431' AND amount_cents = 18742",
 		).first<{ id: number; amount_cents: number }>();
+
 		expect(seed).toBeDefined();
+
 		const parts = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ?",
 		)
 			.bind(seed?.id)
 			.all<{ id: number }>();
+
 		const realTotal = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL",
 		).first<{ n: number }>();
+
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 		const raw = await demo(
 			`/transactions?raw=1&month=${month}&q=COSTCO+WHSE+%230431`,
 		);
+
 		const rows = rowsOf(raw.html);
 		const seedRows = rows.filter((row) => row.id === seed?.id);
 		expect(seedRows).toHaveLength(1);
@@ -120,9 +129,11 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(
 			parts.results.every((part) => !rows.some((row) => row.id === part.id)),
 		).toBe(true);
+
 		const normalMonth = await demo(
 			`/transactions?month=${month}&show=spending&q=COSTCO+WHSE+%230431`,
 		);
+
 		const normalRows = rowsOf(normalMonth.html);
 		expect(normalRows.some((row) => row.id === seed?.id)).toBe(false);
 		expect(
@@ -130,9 +141,11 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 				normalRows.some((row) => row.id === part.id),
 			),
 		).toBe(true);
+
 		const normalCostco = await demo(
 			`/transactions?month=${month}&show=spending&q=COSTCO+WHSE`,
 		);
+
 		expect(countOf(normalCostco.html)).toContain(
 			"2 spending transactions matching",
 		);
@@ -144,25 +157,31 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const parent = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id IS NULL AND is_split = 1 AND raw_name = 'COSTCO WHSE #0431' AND amount_cents = 18742",
 		).first<{ id: number }>();
+
 		expect(parent).toBeDefined();
+
 		const parts = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ?",
 		)
 			.bind(parent?.id)
 			.all<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = NULL WHERE id = ? OR parent_id = ?",
 		)
 			.bind(parent?.id, parent?.id)
 			.run();
+
 		const emptyParent = await env.DB.prepare(
 			"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
 		)
 			.bind(parent?.id)
 			.first<{ categoryId: number | null }>();
+
 		expect(emptyParent?.categoryId).toBeNull();
 		expect(parts.results).toHaveLength(2);
 		const query = `&month=${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}&q=COSTCO+WHSE+%230431`;
+
 		const assertRawParent = async (filter: string) => {
 			const { html } = await demo(`/transactions?raw=1${filter}${query}`);
 			const rows = rowsOf(html);
@@ -170,6 +189,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			expect(textOf(rows[0]?.html ?? "")).toContain("$187.42");
 			expect(countOf(html)).toMatch(/(?:^|\D)1 (?:spending )?transaction/);
 		};
+
 		const assertNormalParts = async (filter: string) => {
 			const { html } = await demo(`/transactions?${filter}${query}`);
 			const rows = rowsOf(html);
@@ -203,6 +223,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = ? WHERE id = ? OR parent_id = ?",
 		)
@@ -213,6 +234,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			const { html } = await demo(
 				`/transactions?category=${category?.id}${query}`,
 			);
+
 			const rows = rowsOf(html);
 			expect(rows.some((row) => row.id === parent?.id)).toBe(false);
 			expect(
@@ -233,7 +255,9 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			date: string;
 			amountCents: number;
 		}>();
+
 		expect(parent).toBeDefined();
+
 		if (!parent) throw new Error("Demo seed split Costco purchase is missing");
 
 		const parts = await env.DB.prepare(
@@ -241,12 +265,15 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		)
 			.bind(parent.id)
 			.all<{ id: number }>();
+
 		const otherAccount = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE id != ? ORDER BY id LIMIT 1",
 		)
 			.bind(parent.accountId)
 			.first<{ id: number }>();
+
 		expect(otherAccount).toBeDefined();
+
 		if (!otherAccount) throw new Error("Demo seed needs a second account");
 
 		const twinId = 99001;
@@ -279,18 +306,23 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 				),
 			),
 		);
+
 		expect(combinations).toHaveLength(120);
 
 		for (const filters of combinations) {
 			const firstPage = await listTransactions(env.DB, filters);
 			const pages = [firstPage];
+
 			for (let page = 2; page <= firstPage.pages; page += 1) {
 				pages.push(await listTransactions(env.DB, { ...filters, page }));
 			}
+
 			const rows = pages.flatMap((result) => result.rows);
+
 			const parentPageCount = pages.filter((result) =>
 				result.rows.some((row) => row.id === parent.id),
 			).length;
+
 			const twinPageCount = pages.filter((result) =>
 				result.rows.some((row) => row.id === twinId),
 			).length;
@@ -332,12 +364,14 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const { html } = await demo("/transactions?raw=1");
 		const rows = rowsOf(html);
 		expect(rows.length).toBeGreaterThan(10);
+
 		for (const row of rows) {
 			const raw = await env.DB.prepare(
 				"SELECT raw_name FROM transactions WHERE id = ?",
 			)
 				.bind(row.id)
 				.first<{ raw_name: string }>();
+
 			const words = textOf(row.html);
 			expect(words, `row ${row.id}`).toContain(raw?.raw_name);
 			// Every row says Needs category, the paycheck too.
@@ -352,7 +386,9 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const transfer = rowsOf(
 			(await demo("/transactions?raw=1&month=all&q=ONLINE+TRANSFER")).html,
 		);
+
 		expect(transfer.length).toBeGreaterThan(0);
+
 		for (const row of transfer) {
 			const words = textOf(row.html);
 			expect(words).toContain("ONLINE TRANSFER TO SAV ...5678");
@@ -360,10 +396,13 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			expect(words).not.toContain("Transfer to Savings");
 			expect(words).not.toContain("Excluded");
 		}
+
 		const pay = rowsOf(
 			(await demo("/transactions?raw=1&month=all&q=ACME+CORP+PAYROLL")).html,
 		);
+
 		expect(pay.length).toBeGreaterThan(0);
+
 		for (const row of pay) {
 			const words = textOf(row.html);
 			expect(words).toContain("ACME CORP PAYROLL");
@@ -377,6 +416,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const { html } = await demo(
 			"/transactions?raw=1&month=all&show=excluded&q=ONLINE+TRANSFER",
 		);
+
 		const rows = rowsOf(html);
 		expect(rows.length).toBeGreaterThan(0);
 		expect(textOf(rows[0]?.html ?? "")).toContain(
@@ -403,6 +443,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const out = textOf(raw.find((r) => r.id === 9002)?.html ?? "");
 		expect(pay).toContain("PLAID PAYROLL 0412");
 		expect(out).toContain("PLAID XFER OUT 7731");
+
 		for (const words of [pay, out]) {
 			expect(words).toContain("Needs category");
 			expect(words).not.toContain("Income");
@@ -413,14 +454,17 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 	it("Needs category shows and counts every bank row, including Plaid-marked rows", async () => {
 		await addPlaidMarked();
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
 		const rawTotal = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL AND substr(date,1,7) = ?",
 		)
 			.bind(month)
 			.first<{ n: number }>();
+
 		const { html } = await demo(
 			`/transactions?raw=1&uncategorized=1&month=${month}`,
 		);
+
 		const rows = rowsOf(html);
 		expect(countOf(html)).toContain(`of ${rawTotal?.n} transactions`);
 		expect(html.match(/id="needs-count">(\d+)</)?.[1]).toBe(
@@ -439,6 +483,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const row = rowsOf(
 			(await demo("/transactions?raw=1&month=all&q=TRADER+JOE")).html,
 		)[0];
+
 		const words = textOf(row?.html ?? "");
 		expect(words).toContain("TRADER JOE'S #552");
 		expect(words).not.toContain("Groceries");
@@ -449,7 +494,9 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const row = await env.DB.prepare(
 			"SELECT id, raw_name AS rawName FROM transactions WHERE parent_id IS NULL AND raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).first<{ id: number; rawName: string }>();
+
 		expect(row).toBeDefined();
+
 		if (!row) throw new Error("Demo bakery transaction is missing");
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'onlyprivateword' WHERE id = ?",
@@ -473,6 +520,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(
 			(await demo("/transactions?raw=1&month=all&q=SQ+%2ALOCAL+BAKERY")).html,
 		).toContain(`data-transaction="${row.id}"`);
+
 		for (const query of ["onlyprivateword", "Only Cleannameword"])
 			expect(
 				(await demo(`/transactions?month=all&q=${encodeURIComponent(query)}`))
@@ -482,19 +530,24 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 
 	it("without ?raw=1 the list is as today", async () => {
 		await addPlaidMarked();
+
 		const transfer = rowsOf(
 			(await demo("/transactions?month=all&q=ONLINE+TRANSFER")).html,
 		);
+
 		expect(transfer.length).toBeGreaterThan(0);
+
 		for (const row of transfer) {
 			const words = textOf(row.html);
 			expect(words).toContain("Transfer to Savings");
 			expect(words).toContain("Excluded");
 			expect(words).not.toContain("ONLINE TRANSFER TO SAV");
 		}
+
 		const joes = rowsOf(
 			(await demo("/transactions?month=all&q=TRADER+JOE")).html,
 		);
+
 		expect(textOf(joes[0]?.html ?? "")).toContain("Groceries");
 		const { html } = await demo("/transactions");
 		expect(countOf(html)).not.toContain("as the bank sends them");
@@ -521,16 +574,20 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const made = rowsOf(
 			(await demo("/transactions?month=all&q=COSTCO+WHSE")).html,
 		);
+
 		const raw = rowsOf(
 			(await demo("/transactions?raw=1&month=all&q=COSTCO+WHSE")).html,
 		);
+
 		// Each split's parts are replaced by their bank transaction in the raw view.
 		const splits = await env.DB.prepare(
 			"SELECT id, parent_id AS parentId FROM transactions WHERE parent_id IS NOT NULL",
 		).all<{ id: number; parentId: number }>();
+
 		const parentByPart = new Map(
 			splits.results.map((part) => [part.id, part.parentId]),
 		);
+
 		expect(parentByPart.size).toBeGreaterThan(0);
 		expect(made.some((row) => parentByPart.has(row.id))).toBe(true);
 		expect(new Set(raw.map((row) => row.id))).toEqual(
@@ -550,9 +607,11 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		);
 		expect(html).toMatch(/hx-get="\/transactions\?[^"]*raw=1[^"]*"/);
 		const pageTwo = await demo("/transactions?raw=1&month=all&page=2");
+
 		const rawTotal = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NULL",
 		).first<{ n: number }>();
+
 		expect(countOf(pageTwo.html)).toContain(
 			`of ${rawTotal?.n} transactions in all months`,
 		);
@@ -562,9 +621,11 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(rowsOf(html)[0]?.html).toMatch(
 			/href="\/transactions\/\d+\?[^"]*raw=1"/,
 		);
+
 		const requestedSelection = await demo(
 			"/transactions?raw=1&month=all&select=1",
 		);
+
 		expect(requestedSelection.html).not.toContain('id="selection-form"');
 		expect(requestedSelection.html).not.toContain('name="ids"');
 		expect(requestedSelection.html).not.toContain("Tap rows to select them.");
@@ -601,6 +662,7 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		const { html } = await demo("/transactions/5?raw=1");
 		const rows = rowsOf(html);
 		expect(rows.length).toBeGreaterThan(10);
+
 		for (const row of rows)
 			expect(textOf(row.html), `row ${row.id}`).toContain("Needs category");
 		expect(html).toMatch(
@@ -614,10 +676,13 @@ describe("the two links under the title", () => {
 		const { html } = await demo("/transactions");
 		const nav = viewNav(html);
 		expect(nav).toBeDefined();
+
 		const links = [...(nav ?? "").matchAll(/<a [^>]*>[\s\S]*?<\/a>/g)].map(
 			(m) => m[0],
 		);
+
 		expect(links.map(textOf)).toEqual(["With Tally", "Without Tally"]);
+
 		for (const link of links) expect(link).toContain("min-h-11");
 		// The dot between them is for the eye only.
 		expect(nav).toMatch(/<span[^>]*aria-hidden="true"[^>]*>\s*·\s*<\/span>/);
@@ -661,14 +726,17 @@ describe("the two links under the title", () => {
 			viewNav(
 				(await demo("/transactions?month=all&q=ONLINE&page=2&select=1")).html,
 			) ?? "";
+
 		expect(linkIn(nav, "Without Tally")).toContain(
 			'href="/transactions?q=ONLINE&amp;month=all&amp;raw=1"',
 		);
+
 		const back =
 			viewNav(
 				(await demo("/transactions?raw=1&month=all&q=ONLINE&show=excluded"))
 					.html,
 			) ?? "";
+
 		expect(linkIn(back, "With Tally")).toContain(
 			'href="/transactions?q=ONLINE&amp;month=all&amp;show=excluded"',
 		);
@@ -708,9 +776,11 @@ describe("the family app", () => {
 
 	it("ignores ?raw=1: the same page, with Tally's names, categories and marks", async () => {
 		const plain = await familyApp("/transactions?month=all&q=ONLINE+TRANSFER");
+
 		const raw = await familyApp(
 			"/transactions?month=all&q=ONLINE+TRANSFER&raw=1",
 		);
+
 		expect(raw.html).toBe(plain.html);
 		expect(raw.html).not.toContain("raw=1");
 		const row = rowsOf(raw.html)[0];

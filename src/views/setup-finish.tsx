@@ -42,6 +42,7 @@ export function SetupFinish({
 	focus: boolean;
 }) {
 	const amount = safeToSpendText(safeCents);
+
 	const listed = [
 		...(rows.pay.length > 0 ? [{ label: "Pay", values: rows.pay }] : []),
 		...(rows.bills !== null ? [{ label: "Bills", values: [rows.bills] }] : []),
@@ -52,6 +53,7 @@ export function SetupFinish({
 			? [{ label: "Savings", values: [rows.savings] }]
 			: []),
 	];
+
 	return (
 		<SetupScreen
 			foot={

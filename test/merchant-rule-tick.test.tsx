@@ -7,6 +7,7 @@ describe("MerchantRuleTick (#353)", () => {
 		const html = await (
 			<MerchantRuleTick merchant="Local Bakery" checked={false} />
 		).toString();
+
 		expect(html).toMatch(
 			/<label[^>]*class="[^"]*\bmin-h-11\b[^"]*"[^>]*>[\s\S]*<\/label>/,
 		);
@@ -21,6 +22,7 @@ describe("MerchantRuleTick (#353)", () => {
 		const html = await (
 			<MerchantRuleTick merchant="Local Bakery" checked={false} />
 		).toString();
+
 		expect(html).toContain(
 			'aria-labelledby="merchant-rule-title" aria-describedby="merchant-rule-hint"',
 		);
@@ -36,6 +38,7 @@ describe("MerchantRuleTick (#353)", () => {
 		const html = await (
 			<MerchantRuleTick merchant="Local Bakery" checked={false} />
 		).toString();
+
 		expect(html).not.toMatch(/name="always" value="1" checked/);
 		expect(html).toContain("Use this category for Local Bakery from now on");
 		expect(html).toContain("Leave it unticked to change just this one.");
@@ -49,6 +52,7 @@ describe("MerchantRuleTick (#353)", () => {
 				ruleCategory="Groceries"
 			/>
 		).toString();
+
 		expect(html).toMatch(/name="always" value="1" checked/);
 		expect(html).toContain(
 			"Local Bakery is always Groceries. Untick it and save to remove the rule.",
@@ -60,6 +64,7 @@ describe("MerchantRuleTick (#353)", () => {
 		const html = await (
 			<MerchantRuleTick merchant="Local Bakery" checked />
 		).toString();
+
 		expect(html).toMatch(/name="always" value="1" checked/);
 		expect(html).toContain("Leave it unticked to change just this one.");
 	});
@@ -72,6 +77,7 @@ describe("MerchantRuleTick (#353)", () => {
 				ruleCategory="Groceries"
 			/>
 		).toString();
+
 		expect(html).not.toMatch(/name="always" value="1" checked/);
 		expect(html).toContain(
 			"Local Bakery is always Groceries. Untick it and save to remove the rule.",
@@ -83,6 +89,7 @@ describe("MerchantRuleTick (#353)", () => {
 		const html = await (
 			<MerchantRuleTick merchant="Local Bakery" checked={false} />
 		).toString();
+
 		expect(html).toMatch(/<label class="group\/rule /);
 		expect(html).toContain(
 			'<span class="hidden group-has-[:checked]/rule:flex">',

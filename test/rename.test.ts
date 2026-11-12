@@ -11,6 +11,7 @@ import {
 } from "../src/transactions/rename";
 
 type GuessArgs = Parameters<typeof oneOffGuessesAgain>[0];
+
 /** A row Jev can be asked about: included, not a split, not income, not a refund that follows its purchase. */
 const askable: JevRow = {
 	included: true,
@@ -18,6 +19,7 @@ const askable: JevRow = {
 	income: false,
 	followsPurchase: false,
 };
+
 const guess = (args: Omit<GuessArgs, "row">, row: JevRow = askable) =>
 	oneOffGuessesAgain({ ...args, row });
 
@@ -28,6 +30,7 @@ describe("a one-off name makes Tally guess the category again", () => {
 		displayName: "Dog bed",
 		jevCategories: true,
 	};
+
 	it("when the category is Tally's or empty, and the name is one-off", () => {
 		expect(
 			guess({
@@ -258,6 +261,7 @@ describe("a row Jev can be asked about (decision 101)", () => {
 		displayName: "Dog bed",
 		jevCategories: true,
 	};
+
 	const jev = { categoryId: 4, categorySource: "jev" };
 
 	it("is included, not a split, not income, and not a refund that follows its purchase", () => {
@@ -272,6 +276,7 @@ describe("a row Jev can be asked about (decision 101)", () => {
 		expect(guess({ edit: named, current: jev, postedCategory: null })).toBe(
 			true,
 		);
+
 		for (const row of [
 			{ ...askable, included: false },
 			{ ...askable, isSplit: true },

@@ -12,9 +12,11 @@ import { Icon } from "./icons";
 export type NotifyShown = "off" | "on" | "iphone" | "blocked";
 
 const ON = "Notifications are on for this device.";
+
 // The hint is one sentence in one text node. On an iPad, push.js sets the same sentence with every "iPhone" said as "iPad".
 const IPHONE_HINT =
 	"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.";
+
 const BLOCKED =
 	"Notifications are blocked for Tally in this device's settings.";
 
@@ -34,6 +36,7 @@ export function NotifyControl({
 }) {
 	const hidden = (state: NotifyShown) => shown !== state;
 	const helpId = idSuffix ? `notify-help-${idSuffix}` : "notify-help";
+
 	return (
 		<div data-notify data-vapid-key={vapidKey}>
 			<div class="mt-4" data-notify-state="off" hidden={hidden("off")}>

@@ -28,6 +28,7 @@ export type BankState = "in" | "paused" | "being-read" | "reading";
 
 export function bankState(bank: YourBank, today: string): BankState {
 	if (bank.historyCompleteAt !== null) return "in";
+
 	const flag = bankFlag(
 		{
 			id: bank.id,
@@ -37,7 +38,9 @@ export function bankState(bank: YourBank, today: string): BankState {
 		},
 		today,
 	);
+
 	if (flag !== null) return "paused";
+
 	return bank.fresh ? "being-read" : "reading";
 }
 
@@ -56,5 +59,6 @@ export async function readYourBanks(db: D1Database): Promise<YourBank[]> {
 			ORDER BY p.id`,
 		)
 		.all<Omit<YourBank, "fresh"> & { fresh: number }>();
+
 	return results.map((row) => ({ ...row, fresh: row.fresh === 1 }));
 }

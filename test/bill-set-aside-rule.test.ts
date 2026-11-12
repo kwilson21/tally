@@ -11,6 +11,7 @@ import {
 // occurrence of an active bill that is due this month, each counted once, the first one given winning a tie.
 
 const MONTH = "2026-10";
+
 const occ = (
 	billId: number,
 	dueDate: string,
@@ -18,6 +19,7 @@ const occ = (
 	amountCents: number,
 	paidCents = 0,
 ) => ({ billId, dueDate, status, amountCents, paidCents });
+
 const active = new Set([1, 2, 3]);
 
 describe("setAsideFor", () => {
@@ -135,6 +137,7 @@ describe("setAsideFor's limits", () => {
 
 	it("refuses an amount or a paid amount it cannot add exactly, without naming it", () => {
 		const past = MAX_OCCURRENCE_CENTS + 1;
+
 		for (const bad of [
 			occ(1, "2026-10-05", "due", past),
 			occ(1, "2026-10-05", "due", -past),
@@ -146,12 +149,15 @@ describe("setAsideFor's limits", () => {
 			occ(9, "2026-11-05", "paid", past),
 		]) {
 			let thrown: unknown;
+
 			try {
 				setAsideFor([bad], active, MONTH);
 			} catch (error) {
 				thrown = error;
 			}
+
 			expect(thrown).toBeInstanceOf(RangeError);
+			// SAFETY: the line above has just checked that thrown is a RangeError.
 			expect((thrown as Error).message).not.toMatch(/\d/);
 		}
 	});

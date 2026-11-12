@@ -27,6 +27,8 @@ const OTHER = "B";
 const RESERVED = "sorting_turn_test_reservation";
 
 type State = keyof typeof sortingTurnMachine.states;
+
+// SAFETY: the keys of the machine's states object are exactly its State names, so each key is a State.
 const STATES = Object.keys(sortingTurnMachine.states) as State[];
 const EVENTS = ["TAKE", "RETAKE", "RELEASE", "HOLDS", "EXPIRE"] as const;
 
@@ -37,6 +39,7 @@ function rowFor(
 	now = Date.now(),
 ): SortingTurn | null {
 	if (state === "free") return null;
+
 	return {
 		id: holder,
 		until: state === "held" ? now + SORTING_TURN_MS : now - 1000,
@@ -47,6 +50,7 @@ async function seed(turn: SortingTurn | null) {
 	await db
 		.prepare("DELETE FROM household_settings WHERE key = 'sorting_turn'")
 		.run();
+
 	if (turn)
 		await db
 			.prepare(
@@ -55,6 +59,7 @@ async function seed(turn: SortingTurn | null) {
 			.bind(JSON.stringify(turn.until === null ? { id: turn.id } : turn))
 			.run();
 }
+
 const stateNow = async () =>
 	sortingTurnState(await readSortingTurn(db), Date.now());
 
@@ -90,7 +95,9 @@ describe("the sorting turn machine", () => {
 				EXPIRE: null,
 			},
 		};
+
 		expect(Object.keys(grid).sort()).toEqual([...STATES].sort());
+
 		for (const state of STATES)
 			for (const event of EVENTS)
 				expect(
@@ -111,6 +118,7 @@ describe("the sorting turn statements follow the machine", () => {
 			await seed(rowFor(state, OTHER));
 			expect(await stateNow(), state).toBe(state);
 		}
+
 		expect(sortingTurnState({ id: OTHER, until: null }, Date.now())).toBe(
 			"expired",
 		);
@@ -127,6 +135,7 @@ describe("the sorting turn statements follow the machine", () => {
 				target ? ME : OTHER,
 			);
 		}
+
 		await seed({ id: OTHER, until: null });
 		expect(await takeSortingTurn(db, ME)).toBe(true);
 	});
@@ -169,10 +178,12 @@ describe("the sorting turn statements follow the machine", () => {
 		for (const state of STATES) {
 			const row = rowFor(state, ME);
 			await seed(row);
+
 			const checked = await db
 				.prepare(`SELECT ${turnHeldSql()} AS held`)
 				.bind(ME)
 				.first<{ held: number }>();
+
 			const target = next(sortingTurnMachine, state, "HOLDS");
 			expect(checked?.held === 1, `${state}: guard`).toBe(target !== null);
 			expect(await stateNow(), `${state} after HOLDS`).toBe(target ?? state);
@@ -183,10 +194,12 @@ describe("the sorting turn statements follow the machine", () => {
 	it("a save's guard fails for another group's turn, live or run out", async () => {
 		for (const state of ["held", "expired"] as const) {
 			await seed(rowFor(state, OTHER));
+
 			const checked = await db
 				.prepare(`SELECT ${turnHeldSql()} AS held`)
 				.bind(ME)
 				.first<{ held: number }>();
+
 			expect(checked?.held, state).toBe(0);
 		}
 	});
@@ -204,6 +217,7 @@ describe("the sorting turn statements follow the machine", () => {
 						.prepare("DELETE FROM household_settings WHERE key = ?")
 						.bind(RESERVED)
 						.run();
+
 					if (withRecord)
 						await db
 							.prepare(
@@ -214,8 +228,10 @@ describe("the sorting turn statements follow the machine", () => {
 					const started = Date.now();
 					await takeSortingTurnStatement(db, ME, RESERVED).run();
 					const after = await readSortingTurn(db);
+
 					const allowed =
 						withRecord && next(sortingTurnMachine, state, event) !== null;
+
 					if (allowed) {
 						// Taken: the turn is ours, with a fresh full turn, whoever had it before.
 						expect(after?.id, `${state}, ${event}: holder`).toBe(ME);
@@ -230,6 +246,7 @@ describe("the sorting turn statements follow the machine", () => {
 							`${state}, ${event}, record ${withRecord}: row`,
 						).toEqual(before);
 					}
+
 					expect(
 						await stateNow(),
 						`${state}, ${event}, record ${withRecord}`,
@@ -280,6 +297,7 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 			.bind(value)
 			.run();
 	}
+
 	const rawNow = async () =>
 		(
 			await db
@@ -313,6 +331,7 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 			)
 			.bind(RESERVED)
 			.run();
+
 		for (const bad of DAMAGED) {
 			await seedRaw(bad);
 			await takeSortingTurnStatement(db, ME, RESERVED).run();
@@ -325,16 +344,20 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 			await seedRaw(bad);
 			await releaseSortingTurn(db, ME);
 			expect(await rawNow(), `${bad}: release`).toBe(bad);
+
 			const checked = await db
 				.prepare(`SELECT ${turnHeldSql()} AS held`)
 				.bind(ME)
 				.first<{ held: number }>();
+
 			expect(checked?.held, `${bad}: guard`).toBe(0);
+
 			// Nor does it pass for the id a damaged row still names: a damaged row is nobody's turn.
 			const named = await db
 				.prepare(`SELECT ${turnHeldSql()} AS held`)
 				.bind(OTHER)
 				.first<{ held: number }>();
+
 			expect(named?.held, `${bad}: guard for ${OTHER}`).toBe(0);
 			expect(next(sortingTurnMachine, "free", "RELEASE")).toBeNull();
 			expect(next(sortingTurnMachine, "free", "HOLDS")).toBeNull();
@@ -361,6 +384,7 @@ describe("a valid but odd row reads the same everywhere", () => {
 			.bind(value)
 			.run();
 	}
+
 	const held = async (id: string) =>
 		(
 			await db

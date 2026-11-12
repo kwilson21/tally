@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { namesToReview, settleSuggestion } from "../src/db/merchant-names";
 import { resetDemo } from "../src/demo/reset";
-import { clearMerchants, seedMerchant } from "./helpers/merchants";
+import {
+	clearMerchants,
+	type MerchantSeed,
+	seedMerchant,
+} from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // Suggested merchant names (P29 A, decision 64, #33): which names wait for a person (namesToReview) and
 // how a choice settles one (settleSuggestion). The one review screen that asks them is tested in
@@ -16,30 +21,37 @@ const LUPITA = "SQ *LUPITAS TAQ 2210";
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
+
 async function post(
 	path: string,
 	fields: Record<string, string>,
 	htmx = false,
 ) {
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: htmx ? { ...headers, "HX-Request": "true" } : headers,
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
+
 const trigger = (res: Response) =>
+	// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast and announce keys below when a route sends them.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;
 	};
+
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
@@ -57,14 +69,20 @@ async function charges(rawName: string, count: number, merchantName?: string) {
 			.bind(`plaid-${crypto.randomUUID()}`, rawName, merchantName ?? null)
 			.run();
 }
+
 /** A suggestion waiting for a person; no names is an empty answer (asked, nothing usable), which is status none. */
-const suggest = (key: string, names: string[], status = "pending") =>
+const suggest = (
+	key: string,
+	names: string[],
+	status: NonNullable<MerchantSeed["status"]> = "pending",
+) =>
 	seedMerchant(db, {
 		key,
-		status: names.length === 0 ? "none" : (status as "pending"),
+		status: names.length === 0 ? "none" : status,
 		names,
 		namesAsked: names.length === 0,
 	});
+
 const merchant = (key: string) =>
 	db
 		.prepare(
@@ -84,13 +102,14 @@ beforeEach(async () => {
 });
 
 /** The number Skip uses for a merchant, never its bank text. */
-const rowId = async (key: string) =>
-	(
-		await db
-			.prepare("SELECT rowid AS id FROM merchants WHERE raw_name = ?")
-			.bind(key)
-			.first<{ id: number }>()
-	)?.id as number;
+const rowId = async (key: string) => {
+	const row = await db
+		.prepare("SELECT rowid AS id FROM merchants WHERE raw_name = ?")
+		.bind(key)
+		.first<{ id: number }>();
+
+	return present(row).id;
+};
 
 async function twoMerchants() {
 	await charges(BLUE, 3);
@@ -111,6 +130,7 @@ async function ownNames(rawName: string, count: number) {
 		)
 		.bind(rawName, count)
 		.all<{ id: number }>();
+
 	for (const { id } of results)
 		await db
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
@@ -150,6 +170,7 @@ describe("namesToReview", () => {
 		await ownNames(BLUE, 2);
 		const [blue] = await namesToReview(db);
 		expect(blue).toMatchObject({ key: BLUE, count: 3, owned: 2 });
+
 		// A split part's own name is not counted: its purchase is the top-level row.
 		const purchase = await db
 			.prepare(
@@ -157,6 +178,7 @@ describe("namesToReview", () => {
 			)
 			.bind(BLUE)
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
 			.bind(purchase?.id)
@@ -295,11 +317,13 @@ describe("the names switch and the Band on the contents page (#606)", () => {
 
 	it("announces that the Band took its suggestions away when the switch is saved off, and draws no Band on the AI page", async () => {
 		await twoMerchants();
+
 		const { res, html } = await post(
 			"/settings/ai",
 			{ categories: "on", income: "on" },
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(html).toContain('id="ai-suggestions"');
 		expect(html).not.toContain('href="/settings/suggestions"');
@@ -309,21 +333,25 @@ describe("the names switch and the Band on the contents page (#606)", () => {
 	it("announces the count when the switch is saved on again", async () => {
 		await twoMerchants();
 		await saveAiSwitches(db, { names: false });
+
 		const { res } = await post(
 			"/settings/ai",
 			{ names: "on", categories: "on", income: "on" },
 			true,
 		);
+
 		expect(trigger(res).announce).toContain("2 suggestions to check.");
 	});
 
 	it("says nothing about the Band when a save doesn't change it", async () => {
 		await twoMerchants();
+
 		const { res } = await post(
 			"/settings/ai",
 			{ names: "on", categories: "on" },
 			true,
 		);
+
 		expect(trigger(res).announce).not.toMatch(/merchant name/);
 	});
 
@@ -407,8 +435,10 @@ describe("Settings", () => {
 
 	it("has a Suggest store names switch in the AI suggestions group, on to start", async () => {
 		const { html } = await get("/settings/ai");
+
 		const group =
 			html.split('id="ai-suggestions"')[1]?.split("</section>")[0] ?? "";
+
 		const first = group.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";
 		expect(first).toContain('name="names"');
 		expect(first).toMatch(/\schecked/);

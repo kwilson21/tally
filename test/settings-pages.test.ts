@@ -7,40 +7,56 @@ import { settingsPlaces } from "../src/views/settings-pages";
 // Settings is a contents page (decision 120): each section is its own page with Settings as its back link.
 
 const BASE = "http://tally.test";
+
 const SRC = import.meta.glob(["../src/**/*.{ts,tsx}"], {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
+function formHeaders(htmx: boolean) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
+	return headers;
+}
+
 async function post(path: string, fields: Record<string, string>, htmx = true) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers: formHeaders(htmx),
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
+
 const trigger = (res: Response) =>
+	// SAFETY: HX-Trigger is the JSON the app's own routes write, with the toast and announce keys this type names.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string };
 		announce?: string;
 	};
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, "").replaceAll("&#39;", "'");
+
 /** The one h1 of a page, as text. */
 const h1Of = (html: string) => {
 	const headings = [...html.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/g)];
+
 	return headings.length === 1
 		? textOf(headings[0]?.[1] ?? "")
 		: `${headings.length} h1s`;
@@ -63,6 +79,7 @@ describe("settingsPlaces: the folios are never shortened", () => {
 			sorted: 0,
 			month: "2026-10",
 		});
+
 		expect(categories?.folio?.text).toBe("50 categories · $50,000,000 a month");
 	});
 });
@@ -72,9 +89,11 @@ describe("GET /settings: the contents page", () => {
 	it("sets the household folio's words in normal figures", async () => {
 		const { html } = await get("/settings");
 		const row = html.split('href="/settings/household"')[1]?.split("</a>")[0];
+
 		const folio = row?.match(
 			/<span class="([^"]*)">Eastern · sign-in emails on<\/span>/,
 		);
+
 		expect(folio).toBeDefined();
 		expect(folio?.[1]).not.toContain("tabular-nums");
 	});
@@ -83,6 +102,7 @@ describe("GET /settings: the contents page", () => {
 		const { res, html } = await get("/settings");
 		expect(res.status).toBe(200);
 		expect(h1Of(html)).toBe("Settings");
+
 		for (const [path, count] of [
 			["/settings/categories", "7 categories · $4,350 a month"],
 			["/settings/rules", "merchants"],
@@ -94,6 +114,7 @@ describe("GET /settings: the contents page", () => {
 			expect(html).toContain(`href="${path}"`);
 			expect(textOf(html)).toContain(count);
 		}
+
 		// No section's rows are drawn here any more.
 		expect(html).not.toContain('id="categories"');
 		expect(html).not.toContain("Add category");
@@ -109,16 +130,19 @@ describe("GET each Settings page", () => {
 		["/settings/ai", "AI suggestions", "Suggest store names"],
 		["/settings/data", "Your data", "Download transactions (CSV)"],
 	] as const;
+
 	for (const [path, title, marker] of pages) {
 		it(`${path} has one h1 named ${title}, Settings as its first link, and its own content`, async () => {
 			const { res, html } = await get(path);
 			expect(res.status).toBe(200);
 			expect(h1Of(html)).toBe(title);
 			expect(textOf(html)).toContain(marker);
+
 			// The back link is SubpageHead's own link (its classes are unique to it), drawn before the h1.
 			const back = html.indexOf(
 				'<a href="/settings" class="flex min-h-11 items-center gap-1 text-lg text-ink no-underline"',
 			);
+
 			expect(back).toBeGreaterThan(-1);
 			expect(back).toBeLessThan(html.indexOf("<h1"));
 			expect(textOf(html.slice(back, html.indexOf("</a>", back)))).toContain(
@@ -131,14 +155,18 @@ describe("GET each Settings page", () => {
 describe("Switches save when flipped", () => {
 	it("the AI switches post on their own change and keep Save only inside noscript", async () => {
 		const { html } = await get("/settings/ai");
+
 		const switches = [...html.matchAll(/<input[^>]*role="switch"[^>]*>/g)].map(
 			(m) => m[0],
 		);
+
 		expect(switches).toHaveLength(5);
+
 		for (const raw of switches) {
 			expect(raw).toContain('hx-post="/settings/ai"');
 			expect(raw).toContain('hx-trigger="change"');
 		}
+
 		// The form itself posts nothing, so one change never sends two requests.
 		expect(html).not.toMatch(/<form[^>]*hx-trigger=/);
 		expect(html).toMatch(/<noscript>[\s\S]*?Save[\s\S]*?<\/noscript>/);
@@ -168,6 +196,7 @@ describe("Switches save when flipped", () => {
 		// No hx-trigger on the form: htmx's default trigger for a form is its submit, and a Remove is that submit.
 		expect(form).not.toContain("hx-trigger");
 		expect(form).toContain("data-switches-revert");
+
 		for (const tag of [switchTag, form]) {
 			expect(tag).toContain('hx-target="#household-emails"');
 			expect(tag).toContain('hx-select="#household-emails-body"');
@@ -197,6 +226,7 @@ describe("Switches save when flipped", () => {
 			{ enabled: "on" },
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/household");
 	});
@@ -209,6 +239,7 @@ describe("Plain forms go back to their page", () => {
 			{ action: "add", name: "Grandma" },
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/people");
 	});

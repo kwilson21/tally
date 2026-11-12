@@ -40,6 +40,7 @@ import { enabled } from "./plaid";
 // setup screen's refresh and check-in draw and move it in place (redrawSetup), so nothing reloads the page.
 
 type App = { Bindings: Env };
+
 export const setupRoute = new Hono<App>();
 
 /** "3,5" as the ids of the banks a page already shows as in: positive whole numbers, anything else ignored. */
@@ -65,6 +66,7 @@ const READING_STEPS = ["reading", "sorting", "slow", "run"] as const;
 export async function readHomeSetup(db: D1Database) {
 	const today = await householdToday(db);
 	const banks = await readYourBanks(db);
+
 	const flagged = flaggedBanks(
 		banks.map((bank) => ({
 			id: bank.id,
@@ -74,7 +76,9 @@ export async function readHomeSetup(db: D1Database) {
 		})),
 		today,
 	);
+
 	const setup = await readSetup(db, { today, flagged });
+
 	return { today, banks, flagged, setup };
 }
 
@@ -93,6 +97,7 @@ function welcomeLink(env: Env) {
 		/>
 	) : undefined;
 }
+
 function anotherBankLink(env: Env) {
 	return enabled(env) ? (
 		<LinkBank
@@ -119,40 +124,51 @@ export async function redrawSetup(
 	said = "",
 ) {
 	const { today, banks, flagged, setup } = read;
+
 	if (setup?.phase === "ready") {
 		const model = await settleAndLoad(c.env.DB, today);
 		const heading = questionHeading(model);
+
 		const message = [said, "Your questions are ready.", heading ?? ""]
 			.filter(Boolean)
 			.join(" ");
+
 		c.header("HX-Retarget", "#setup-screen");
 		c.header("HX-Reswap", "outerHTML");
 		c.header(
 			"HX-Trigger",
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
+
 		return c.html(drawQuestionScreen(model, { focus: true }));
 	}
+
 	if (!setup) {
 		c.header("HX-Redirect", "/setup");
+
 		return c.body(null, 204);
 	}
+
 	c.header("HX-Retarget", "#setup-screen");
 	c.header("HX-Reswap", "outerHTML");
+
 	if (setup.phase === "before") {
 		const message = [said, WELCOME_HEADING].filter(Boolean).join(" ");
 		c.header(
 			"HX-Trigger",
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
+
 		return c.html(<SetupWelcome linkBank={welcomeLink(c.env)} focusHeading />);
 	}
+
 	const message = [said, readingStatus(setup)].filter(Boolean).join(" ");
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "info" }, announce: message }),
 	);
 	const pushKeys = await vapidKeys(c.env);
+
 	return c.html(
 		<SetupReading
 			view={setup}
@@ -176,21 +192,27 @@ setupRoute.get("/setup", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const flagged = flaggedBanks(await bankSyncs(c.env.DB), today);
 	const view = await readSetup(c.env.DB, { today, flagged });
+
 	if (!view) {
 		// Setup is done (readSetup is null only once the budgets stroke is drawn, which never goes back), so the finish is
 		// read from the record. The redirect is a guard for a record that has no budgets stroke after all.
 		const finish = await readFinish(c.env.DB, today);
+
 		return finish ? c.html(finishPage(finish, false)) : c.redirect("/", 303);
 	}
+
 	if (view.phase === "ready") {
 		const oneAtATime = c.req.query("budgets") === "one";
 		const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
+
 		return c.html(questionsPage(model, oneAtATime));
 	}
+
 	const pushKeys = await vapidKeys(c.env);
 	const plaidButton = enabled(c.env) && loadsPlaid(c);
 	const plaid = plaidScripts(plaidButton);
 	const modules = pushKeys ? [...plaid.modules, "/js/push.js"] : plaid.modules;
+
 	if (view.phase === "before")
 		return c.html(
 			<Layout
@@ -206,6 +228,7 @@ setupRoute.get("/setup", async (c) => {
 		);
 	const banks = await readYourBanks(c.env.DB);
 	const pushNotify = pushKeys ? { vapidKey: pushKeys.publicKey } : undefined;
+
 	return c.html(
 		<Layout
 			setup
@@ -238,6 +261,7 @@ export function ReadingSwaps({
 	bankLine: boolean;
 }) {
 	const step = readingStep(view);
+
 	return (
 		<>
 			<p id="setup-status" hx-swap-oob="innerHTML">
@@ -271,24 +295,30 @@ setupRoute.get("/setup/banks", async (c) => {
 	const read = await readHomeSetup(c.env.DB);
 	const { today, banks, flagged, setup } = read;
 	const shown = idsIn(c.req.query("in"));
+
 	const arrived = banks
 		.filter((bank) => bankState(bank, today) === "in" && !shown.has(bank.id))
 		.map(inSentence);
+
 	const said = arrived.join(" ");
+
 	if (setup?.phase !== "reading") return redrawSetup(c, read, said);
 	// A step change is announced once, with its status: the poll names the step the page shows (decision 146). A count that ticks
 	// on within the step is never announced alone.
 	const shownStep = READING_STEPS.find((step) => step === c.req.query("step"));
 	const stepNow = readingStep(setup);
 	const stepChanged = shownStep !== undefined && shownStep !== stepNow;
+
 	const message = [said, stepChanged ? readingStatus(setup) : ""]
 		.filter(Boolean)
 		.join(" ");
+
 	if (message)
 		c.header(
 			"HX-Trigger",
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
+
 	return c.html(
 		<>
 			<YourBanks

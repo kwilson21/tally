@@ -134,6 +134,7 @@ export const cardLabel = (row: {
  */
 export const askedSql = (kind: MaybeKind, confidence: string) => {
 	const { above, below } = askedBounds(kind);
+
 	return `CAST((${confidence}) * ${BASIS_POINTS} AS INTEGER) BETWEEN ${above + 1} AND ${below - 1}`;
 };
 
@@ -179,6 +180,7 @@ async function incomeSuggestions(
 			WHERE ${incomeAskedSql("t")}`,
 		)
 		.all<Candidate & { incomeConfidence: number }>();
+
 	return results.map((row) => ({
 		order: row.id,
 		item: {
@@ -241,6 +243,7 @@ async function transferSuggestions(
 			WHERE ${transferAskedSql("t")}`,
 		)
 		.all<Candidate & { transferConfidence: number }>();
+
 	return results.map((row) => ({
 		order: row.id,
 		item: {
@@ -295,6 +298,7 @@ async function categorySuggestions(
 				category: string;
 			}
 		>();
+
 	return results.map((row) => ({
 		order: row.id,
 		item: {
@@ -330,12 +334,15 @@ async function newCategorySuggestions(
 		only ? 1 : Number.MAX_SAFE_INTEGER,
 		only,
 	);
+
 	if (suggestions.length === 0) return [];
 	// The same check Settings makes for its "Add to" or "Restore" button: a category with the name, as sameName reads it.
 	const categories = await categoryNames(db);
+
 	const ids = suggestions.flatMap((suggestion) =>
 		suggestion.rows.map((row) => row.id),
 	);
+
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, m.display_name AS displayName, ${ownNameSql("t")} AS ownName
@@ -349,12 +356,16 @@ async function newCategorySuggestions(
 			displayName: string | null;
 			ownName: string | null;
 		}>();
+
 	const byId = new Map(results.map((row) => [row.id, row]));
 	const items: { item: NewCategorySuggestion; order: number }[] = [];
+
 	for (const suggestion of suggestions) {
 		const rows = suggestion.rows.flatMap((row) => {
 			const found = byId.get(row.id);
+
 			if (!found) return [];
+
 			return [
 				{
 					transactionId: row.id,
@@ -366,7 +377,9 @@ async function newCategorySuggestions(
 				},
 			];
 		});
+
 		if (rows.length === 0) continue;
+
 		// Each store once, in the order its first purchase came in, so the question reads the same every time.
 		const stores = [
 			...new Map(
@@ -378,6 +391,7 @@ async function newCategorySuggestions(
 					]),
 			).values(),
 		];
+
 		const name = tidyName(suggestion.name);
 		const found = categories.find((c) => sameName(c.name, name));
 		items.push({
@@ -398,6 +412,7 @@ async function newCategorySuggestions(
 			},
 		});
 	}
+
 	return items;
 }
 
@@ -410,8 +425,10 @@ async function nameSuggestions(
 	switches: AiSwitches,
 ): Promise<{ item: NameSuggestion; order: number }[]> {
 	const reviews = await namesToReview(db, switches);
+
 	if (reviews.length === 0) return [];
 	const keys = reviews.map((review) => review.key);
+
 	const { results } = await db
 		.prepare(
 			`SELECT ${merchantKeySql("t")} AS merchantKey, MAX(t.date) AS latest, SUM(t.amount_cents) AS totalCents
@@ -421,7 +438,9 @@ async function nameSuggestions(
 		)
 		.bind(JSON.stringify(keys))
 		.all<{ merchantKey: string; latest: string; totalCents: number }>();
+
 	const totals = new Map(results.map((row) => [row.merchantKey, row]));
+
 	return reviews.map((review) => ({
 		order: review.id,
 		item: {
@@ -455,6 +474,7 @@ export async function suggestionQueue(
 	switches?: AiSwitches,
 ): Promise<SuggestionItem[]> {
 	const s = switches ?? (await readAiSwitches(db));
+
 	const [income, transfer, category, newCategory, names] = await Promise.all([
 		s.income ? incomeSuggestions(db) : [],
 		s.categories ? transferSuggestions(db) : [],
@@ -462,6 +482,7 @@ export async function suggestionQueue(
 		s.categories ? newCategorySuggestions(db) : [],
 		nameSuggestions(db, s),
 	]);
+
 	const byKind: Record<SuggestionKind, SuggestionItem[]> = {
 		income: newestFirst(income),
 		transfer: newestFirst(transfer),
@@ -469,6 +490,7 @@ export async function suggestionQueue(
 		new_category: newestFirst(newCategory),
 		name: newestFirst(names),
 	};
+
 	return ORDER.flatMap((kind) => byKind[kind]);
 }
 

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
 	categoryCallLimit,
 	suggestNewCategories,
@@ -13,6 +13,8 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { tidyName } from "../src/transactions/tidy-name";
+import { fakeAi as bindingOf } from "./helpers/doubles";
+import { isMethod, present } from "./helpers/present";
 
 // The nightly step for new category suggestions (spec §7, §8.6, #51). Code finds the transactions Jev
 // was sure no category fit and groups them by theme; only a group of three or more asks Workers AI for a
@@ -22,15 +24,23 @@ import { tidyName } from "../src/transactions/tidy-name";
 const db = env.DB;
 
 type Ask = { merchants: string[]; avoid: string[]; sent: string };
+
+/** The JSON body a Workers AI call sends: its chat messages. */
+type AiInput = { messages: { role: string; content: string }[] };
+
+type FakeRun = (model: string, input: AiInput) => Promise<{ response: string }>;
+
 /** The merchants and categories Workers AI was told in one call, read from the prompt it was given. */
-const readAsk = (input: unknown): Ask => {
-	const messages = (input as { messages: { role: string; content: string }[] })
-		.messages;
+const readAsk = (input: AiInput): Ask => {
+	const { messages } = input;
+
 	const user = messages.find((m) => m.role === "user")?.content ?? "";
+
 	const line = (label: string) =>
 		(user.match(new RegExp(`${label}: (.*)`))?.[1] ?? "")
 			.split("; ")
 			.filter(Boolean);
+
 	return {
 		merchants: line("Places"),
 		avoid: line("Categories to avoid"),
@@ -40,14 +50,17 @@ const readAsk = (input: unknown): Ask => {
 
 /** A fake Workers AI answering each call from `answer`, which sees what it was told. */
 const fakeAi = (
-	answer: (ask: Ask) => unknown = () => ({ response: "Subscriptions" }),
+	answer: (
+		ask: Ask,
+	) => { response: string } | Promise<{ response: string }> = () => ({
+		response: "Subscriptions",
+	}),
 ) =>
-	({
-		run: vi.fn(async (_model: string, input: unknown) =>
-			answer(readAsk(input)),
-		),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
-const asks = (ai: { run: ReturnType<typeof vi.fn> }) =>
+	bindingOf(
+		vi.fn<FakeRun>(async (_model, input) => await answer(readAsk(input))),
+	);
+
+const asks = (ai: { run: Mock<FakeRun> }) =>
 	ai.run.mock.calls.map(([, input]) => readAsk(input));
 
 type Over = {
@@ -60,9 +73,12 @@ type Over = {
 	pending?: 0 | 1;
 	date?: string;
 };
+
 let seq = 0;
+
 async function add(over: Over = {}) {
 	seq += 1;
+
 	const o = {
 		rawName: `STREAM ${seq}`,
 		plaidCategory: "ENTERTAINMENT",
@@ -74,6 +90,7 @@ async function add(over: Over = {}) {
 		pending: 0,
 		...over,
 	};
+
 	const result = await db
 		.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category, category_confidence, jev_none_fit, note, pending)
@@ -90,14 +107,18 @@ async function add(over: Over = {}) {
 			o.pending,
 		)
 		.run();
+
 	return Number(result.meta.last_row_id);
 }
+
 const addMany = async (n: number, over: Over = {}) => {
 	const made: number[] = [];
+
 	for (let i = 0; i < n; i++)
 		made.push(
 			await add({ ...over, rawName: over.rawName ?? `STREAM ${seq + 1}` }),
 		);
+
 	return made;
 };
 
@@ -107,6 +128,7 @@ const suggestions = async () =>
 			.prepare("SELECT id, name, status FROM category_suggestions ORDER BY id")
 			.all<{ id: number; name: string; status: string }>()
 	).results;
+
 const categoryCount = async () =>
 	(
 		await db
@@ -131,16 +153,19 @@ beforeEach(async () => {
 describe("suggestNewCategories", () => {
 	it("rechecks names after Workers AI answers before saving a pending suggestion", async () => {
 		await addMany(3);
-		const ai = {
-			run: vi.fn(async () => {
+
+		const ai = bindingOf(
+			vi.fn(async () => {
 				await db
 					.prepare(
 						"INSERT INTO categories(name,icon,color,sort_order) VALUES('Home Supplies','tag','cat-blue',99)",
 					)
 					.run();
+
 				return { response: "Home Supplies" };
 			}),
-		} as unknown as Ai;
+		);
+
 		await suggestNewCategories({ DB: db, AI: ai });
 		expect(
 			(await suggestions()).some(
@@ -153,6 +178,7 @@ describe("suggestNewCategories", () => {
 	it("finds a qualifying older group behind 600 newer one-off merchants", async () => {
 		for (let i = 0; i < 600; i++)
 			await add({ rawName: `ONE OFF ${i}`, plaidCategory: `SINGLE ${i}` });
+
 		const older = [
 			await add({
 				rawName: "OLDER SHOP",
@@ -170,6 +196,7 @@ describe("suggestNewCategories", () => {
 				date: "2025-01-03",
 			}),
 		];
+
 		const ai = fakeAi(() => ({ response: "Older Shop" }));
 		await suggestNewCategories({ DB: db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(1);
@@ -185,17 +212,22 @@ describe("suggestNewCategories", () => {
 	it("caps loaded purchases at 500 even when a selected theme has more rows", async () => {
 		await addMany(501);
 		let statements = 0;
+
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
 				if (property === "prepare")
 					return (sql: string) => {
 						statements++;
+
 						return target.prepare(sql);
 					};
-				return typeof value === "function" ? value.bind(target) : value;
+
+				const value: unknown = Object(target)[property];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
+
 		const rows = await noneFitTransactions(counted);
 		expect(rows.length).toBeLessThanOrEqual(500);
 		expect(statements).toBe(2);
@@ -206,10 +238,12 @@ describe("suggestNewCategories", () => {
 			null,
 			await addMany(3, { rawName: "OLDER NONE", plaidCategory: "OLD" }),
 		);
+
 		const group = await addMany(3, {
 			rawName: "SHOP",
 			plaidCategory: "NEW GROUP",
 		});
+
 		const ai = fakeAi(async () => {
 			await db.batch([
 				db
@@ -223,15 +257,19 @@ describe("suggestNewCategories", () => {
 					)
 					.bind(oldNone, group[1]),
 			]);
+
 			return { response: "1" };
 		});
+
 		await suggestNewCategories({ DB: db, AI: ai });
+
 		const links = await db
 			.prepare(
 				"SELECT category_suggestion_id FROM transactions WHERE id IN (SELECT value FROM json_each(?))",
 			)
 			.bind(JSON.stringify(group.slice(1)))
 			.all<{ category_suggestion_id: number | null }>();
+
 		expect(links.results.every((r) => r.category_suggestion_id === null)).toBe(
 			true,
 		);
@@ -257,11 +295,13 @@ describe("suggestNewCategories", () => {
 		expect(shown?.rows.map((r) => r.id).sort()).toEqual([...made].sort());
 		// Nothing is created automatically, and nothing is moved: a person decides (spec §7).
 		expect(await categoryCount()).toBe(had);
+
 		const moved = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE category_id IS NOT NULL",
 			)
 			.first<{ n: number }>();
+
 		expect(moved?.n).toBe(0);
 	});
 
@@ -290,6 +330,7 @@ describe("suggestNewCategories", () => {
 				"Household",
 			]),
 		);
+
 		for (const leaked of [
 			"Secret",
 			"17.99",
@@ -349,9 +390,11 @@ describe("suggestNewCategories", () => {
 	it("keeps themes apart and asks once for each group, the biggest first", async () => {
 		await addMany(3, { plaidCategory: "TRANSPORTATION", rawName: "RIDE" });
 		await addMany(4, { plaidCategory: "ENTERTAINMENT", rawName: "STREAM" });
+
 		const ai = fakeAi((ask) => ({
 			response: ask.merchants.includes("Ride") ? "Rides" : "Subscriptions",
 		}));
+
 		expect(await suggestNewCategories({ DB: db, AI: ai })).toEqual({
 			asked: 2,
 			suggested: 2,
@@ -403,7 +446,7 @@ describe("suggestNewCategories", () => {
 		const first = fakeAi(() => ({ response: "Pet Care" }));
 		await suggestNewCategories({ DB: db, AI: first });
 		const [made] = await pendingSuggestions(db);
-		await dismissSuggestion(db, made?.id as number);
+		await dismissSuggestion(db, present(made).id);
 
 		// Three more of another theme: the model says the dismissed name again, and Tally drops it.
 		await addMany(3, {
@@ -423,7 +466,7 @@ describe("suggestNewCategories", () => {
 			AI: fakeAi(() => ({ response: "Streaming" })),
 		});
 		const [made] = await pendingSuggestions(db);
-		await dismissSuggestion(db, made?.id as number);
+		await dismissSuggestion(db, present(made).id);
 
 		const again = fakeAi(() => ({ response: "Media" }));
 		await suggestNewCategories({ DB: db, AI: again });
@@ -454,6 +497,7 @@ describe("suggestNewCategories", () => {
 
 	it("asks about at most five groups a night, the biggest first, and the rest wait for the next", async () => {
 		expect(categoryCallLimit).toBe(5);
+
 		const shops = [
 			"ALPHA",
 			"BRAVO",
@@ -463,13 +507,16 @@ describe("suggestNewCategories", () => {
 			"FOXTROT",
 			"GOLF",
 		];
+
 		for (const [g, shop] of shops.entries())
 			await addMany(3 + (g % 2), {
 				plaidCategory: `THEME_${g}`,
 				rawName: shop,
 			});
+
 		const named = (prefix: string) =>
 			fakeAi((ask) => ({ response: `${prefix} ${ask.merchants[0]}` }));
+
 		const first = named("Mine");
 		expect(await suggestNewCategories({ DB: db, AI: first })).toMatchObject({
 			asked: 5,
@@ -529,6 +576,7 @@ describe("suggestNewCategories", () => {
 		const ai = fakeAi(() => ({ response: "Something" }));
 		ai.run.mockImplementationOnce(async () => {
 			await saveAiSwitches(db, { categories: false });
+
 			return { response: "Late Name" };
 		});
 		expect(await suggestNewCategories({ DB: db, AI: ai })).toMatchObject({
@@ -542,17 +590,21 @@ describe("suggestNewCategories", () => {
 	it("leaves a group to be asked tomorrow when the call fails, and stops after three failures in a row", async () => {
 		for (const theme of ["A", "B", "C", "D"])
 			await addMany(3, { plaidCategory: theme, rawName: `SHOP ${theme}` });
+
 		const failing = fakeAi(() => {
 			throw new Error("capacity");
 		});
+
 		expect(await suggestNewCategories({ DB: db, AI: failing })).toEqual({
 			asked: 3,
 			suggested: 0,
 		});
 		expect(await suggestions()).toEqual([]);
+
 		const working = fakeAi((ask) => ({
 			response: `Name ${ask.merchants[0]}`.replace(/[\d]/g, ""),
 		}));
+
 		expect(await suggestNewCategories({ DB: db, AI: working })).toMatchObject({
 			asked: 4,
 		});
@@ -562,10 +614,13 @@ describe("suggestNewCategories", () => {
 		for (const theme of ["A", "B", "C", "D"])
 			await addMany(3, { plaidCategory: theme, rawName: `SHOP ${theme}` });
 		let now = 0;
+
 		const ai = fakeAi((ask) => {
 			now += 1_000;
+
 			return { response: `Name ${ask.merchants[0]}` };
 		});
+
 		expect(
 			await suggestNewCategories({ DB: db, AI: ai }, categoryCallLimit, {
 				deadline: 1_500,
@@ -603,10 +658,13 @@ describe("suggestNewCategories", () => {
 			DB: db,
 			AI: fakeAi(() => ({ response: "Subscriptions" })),
 		});
+
 		const lines = [...logged.mock.calls, ...failed.mock.calls]
 			.flat()
 			.join("\n");
+
 		expect(lines).toContain("workers-ai");
+
 		for (const leaked of [
 			"Netflix",
 			"NETFLIX",
@@ -634,16 +692,20 @@ describe("the category-suggestion card's rows", () => {
 			.bind("DOG BED", shouted)
 			.run();
 		const [shown] = await pendingSuggestions(db);
+
 		const display = (id: number | undefined) =>
 			shown?.rows.find((r) => r.id === id)?.displayName;
+
 		expect(display(named)).toBe("Dog bed");
 		expect(display(shouted)).toBe("DOG BED");
+
 		const plainRaw = (
 			await db
 				.prepare("SELECT raw_name AS rawName FROM transactions WHERE id = ?")
 				.bind(plain)
 				.first<{ rawName: string }>()
 		)?.rawName;
+
 		expect(display(plain)).toBe(tidyName(plainRaw ?? ""));
 	});
 });

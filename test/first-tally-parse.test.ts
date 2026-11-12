@@ -73,6 +73,7 @@ describe("parseFirstTally", () => {
 				budgets: {},
 			}),
 		);
+
 		expect(record.strokes).toEqual({ bank: "2026-09-22", bills: null });
 	});
 
@@ -91,6 +92,7 @@ describe("parseFirstTally", () => {
 				},
 			}),
 		);
+
 		expect(record.budgets).toEqual({
 			a: { kind: "suggested", cents: 100 },
 			e: { kind: "skipped", cents: null },
@@ -112,6 +114,7 @@ describe("parseFirstTally", () => {
 				savings: "later",
 			}),
 		);
+
 		expect(record).toEqual({
 			strokes: { bank: "2026-09-22" },
 			budgets: {},
@@ -142,6 +145,7 @@ describe("parseFirstTally", () => {
 				},
 			}),
 		);
+
 		expect(record.pay).toEqual({
 			ok: { yes: { "1": { date: "2026-09-01", cents: 100 } }, at: 1 },
 		});
@@ -177,9 +181,11 @@ describe("the record the writers make is read back whole", () => {
 			no: { "12": { date: "2026-09-02", cents: 900 } },
 		}).run();
 		await payAnswerStatement(db, "OTHER", { no: {} }).run();
+
 		const raw = await db
 			.prepare("SELECT value FROM household_settings WHERE key = 'first_tally'")
 			.first<{ value: string }>();
+
 		expect(await readFirstTally(db)).toEqual(JSON.parse(raw?.value ?? "null"));
 		expect((await readFirstTally(db))?.pay?.ACME).toEqual({
 			yes: { "11": { date: "2026-09-01", cents: 250000 } },
@@ -193,6 +199,7 @@ describe("a merchant named like an object's own plumbing", () => {
 	it("keeps a pay answer filed under __proto__", () => {
 		const text =
 			'{"strokes":{},"budgets":{},"pay":{"__proto__":{"yes":{"1":{"date":"2026-09-01","cents":100}},"at":0}}}';
+
 		const record = parseFirstTally(text);
 		expect(Object.keys(record.pay ?? {})).toEqual(["__proto__"]);
 		expect(Object.entries(record.pay ?? {})).toHaveLength(1);

@@ -16,8 +16,10 @@ import { TransactionRow } from "../src/views/transaction-row";
 // and only a group of several asks Workers AI for a name. A single Venmo payment never does.
 
 let n = 0;
+
 const row = (theme: string, merchant: string, key = merchant): NoneFit => {
 	n += 1;
+
 	return { id: n, theme, merchant, merchantKey: key };
 };
 
@@ -27,6 +29,7 @@ describe("groupNoneFit", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET date = '2026-08-08' WHERE category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet Care')",
 		).run();
+
 		const result = await listTransactions(env.DB, {
 			month: "all",
 			category: null,
@@ -37,7 +40,9 @@ describe("groupNoneFit", () => {
 			q: "Chewy",
 			page: 1,
 		});
+
 		const row = result.rows.find((item) => item.maybeCategoryNew);
+
 		if (!row) throw new Error("Pet Care demo row is missing");
 		expect(renderToString(TransactionRow({ row }))).toContain(
 			"Maybe new: Pet Care",
@@ -45,11 +50,13 @@ describe("groupNoneFit", () => {
 	});
 	it("asks about a theme only once three transactions share it", () => {
 		expect(MIN_GROUP).toBe(3);
+
 		const groups = groupNoneFit([
 			row("ENTERTAINMENT", "Netflix"),
 			row("ENTERTAINMENT", "Hulu"),
 			row("ENTERTAINMENT", "Spotify"),
 		]);
+
 		expect(groups).toHaveLength(1);
 		expect(groups[0]?.theme).toBe("ENTERTAINMENT");
 		expect(groups[0]?.ids).toHaveLength(3);
@@ -71,6 +78,7 @@ describe("groupNoneFit", () => {
 			row("ENTERTAINMENT", "Netflix", "NETFLIX"),
 			row("ENTERTAINMENT", "Netflix", "NETFLIX"),
 		]);
+
 		expect(groups).toHaveLength(1);
 		expect(groups[0]?.merchants).toEqual(["Netflix"]);
 	});
@@ -84,6 +92,7 @@ describe("groupNoneFit", () => {
 			row("ENTERTAINMENT", "Spotify"),
 			row("TRANSPORTATION", "Metro"),
 		]);
+
 		expect(groups.map((g) => [g.theme, g.ids.length])).toEqual([
 			["ENTERTAINMENT", 3],
 			["TRANSPORTATION", 3],
@@ -96,6 +105,7 @@ describe("groupNoneFit", () => {
 			...["d", "e", "f", "g"].map((m) => row("MOON", m)),
 			...["h", "i", "j"].map((m) => row("APPLE", m)),
 		];
+
 		expect(groupNoneFit(rows).map((g) => g.theme)).toEqual([
 			"MOON",
 			"APPLE",
@@ -110,6 +120,7 @@ describe("groupNoneFit", () => {
 			row("T", "z"),
 			row("T", "w"),
 		].reverse();
+
 		const [group] = groupNoneFit(rows);
 		expect(group?.ids).toEqual([...(group?.ids ?? [])].sort((a, b) => a - b));
 	});
@@ -121,6 +132,7 @@ describe("groupNoneFit", () => {
 			row("T", "Netflix", "N"),
 			row("T", "Disney Plus", "D"),
 		]);
+
 		expect(group?.merchants).toEqual(["Netflix", "Disney Plus", "Hulu"]);
 	});
 
@@ -130,14 +142,17 @@ describe("groupNoneFit", () => {
 			row("T", "Dog bed", "AMAZON"),
 			row("T", "Cat tree", "AMAZON"),
 		]);
+
 		expect(group?.merchants).toEqual(["Amazon", "Cat tree", "Dog bed"]);
 	});
 
 	it("tells Workers AI about no more than ten merchants, so a long backfill can't make a long prompt", () => {
 		expect(MAX_MERCHANTS_SENT).toBe(10);
+
 		const rows = Array.from({ length: 25 }, (_, i) =>
 			row("T", `Shop ${String(i).padStart(2, "0")}`),
 		);
+
 		const [group] = groupNoneFit(rows);
 		expect(group?.merchants).toHaveLength(MAX_MERCHANTS_SENT);
 		// Every transaction is still behind the suggestion, not only the ones named.
@@ -148,6 +163,7 @@ describe("groupNoneFit", () => {
 		expect(groupNoneFit([])).toEqual([]);
 	});
 });
+
 describe("shared Maybe parts", () => {
 	it("renders Maybe income as the shared dashed row tag", async () => {
 		const { MaybeIncome } = await import("../src/views/maybe-category");
@@ -174,7 +190,9 @@ describe("shared Maybe parts", () => {
 		const { SuggestedCategoryChip } = await import(
 			"../src/views/maybe-category"
 		);
+
 		const { renderToString } = await import("hono/jsx/dom/server");
+
 		const html = renderToString(
 			SuggestedCategoryChip({
 				name: "Eating Out",
@@ -183,6 +201,7 @@ describe("shared Maybe parts", () => {
 				transactionId: 1,
 			}),
 		);
+
 		expect(html).toContain("Suggested");
 		expect(html).toContain("Tally&#39;s guess · 64% sure");
 		expect(html).toContain("border-dashed");
@@ -194,17 +213,21 @@ describe("shared Maybe parts", () => {
 			{},
 			{ ...env, DEMO: "true" },
 		);
+
 		const html = await res.text();
 		expect(res.status).toBe(200);
 		expect(html).toContain(
 			'data-ds-components="MaybeCategory MaybeIncome SuggestedCategoryChip Chip WhyLink"',
 		);
+
 		const confidenceIds = [
 			...html.matchAll(/<span class="sr-only" id="([^"]+)">Tally&#39;s guess/g),
 		].map((match) => match[1]);
+
 		// Two as before, and the category grid's Tally's guess cell (P120 B, #498), each with its own id.
 		expect(confidenceIds).toHaveLength(3);
 		expect(new Set(confidenceIds).size).toBe(3);
+
 		for (const id of confidenceIds) {
 			expect(html).toContain(`aria-describedby="${id}"`);
 		}

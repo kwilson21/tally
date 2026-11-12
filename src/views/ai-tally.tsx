@@ -26,12 +26,15 @@ export function AiTally({
 	const sorted = switches.categories
 		? `Sorted ${count(tally.sorted, "transaction", "transactions")} · you changed ${tally.changed}`
 		: "Transactions · Off";
+
 	const named = switches.names
 		? `Cleaned ${count(tally.named, "merchant name", "merchant names")}`
 		: "Suggest store names · Off";
+
 	const paychecks = switches.income
 		? `Found ${count(tally.paychecks, "paycheck", "paychecks")}`
 		: "Paychecks · Off";
+
 	return (
 		<div class="mt-5">
 			<h3 class="text-sm text-muted">In {monthName(tally.month)}</h3>

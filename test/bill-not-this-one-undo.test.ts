@@ -22,18 +22,24 @@ const post = (path: string, body: Record<string, string> = {}) =>
 		},
 		body: new URLSearchParams(body),
 	});
+
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
 const unlink = () => post(`/bills/${BILL}/occurrences/${PERIOD}/unlink`);
+
 const linkPayment = (transaction: number) =>
 	post(`/bills/${BILL}/link`, {
 		transaction_id: String(transaction),
 		period: PERIOD,
 		opened_period: PERIOD,
 	});
+
 const undo = (token: string) =>
 	post(`/bills/${BILL}/undo-unlink`, { token, back: `/bills/${BILL}` });
+
 const token = (res: Response) => String(trigger(res).toast.undo);
+
 /** The row a Not this one's Undo token was saved on, by its undo_token column (0 once that row is gone). */
 const dismissalIdOf = async (undoToken: string) =>
 	(
@@ -41,12 +47,14 @@ const dismissalIdOf = async (undoToken: string) =>
 			.bind(undoToken)
 			.first<{ id: number }>()
 	)?.id ?? 0;
+
 const linkedTo = () =>
 	env.DB.prepare(
 		"SELECT transaction_id AS transactionId FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
 	)
 		.bind(BILL, PERIOD)
 		.first<{ transactionId: number }>();
+
 const dismissedOn = async (...transactions: number[]) =>
 	(
 		await env.DB.prepare(
@@ -55,6 +63,7 @@ const dismissedOn = async (...transactions: number[]) =>
 			.bind(BILL, PERIOD)
 			.all<{ transactionId: number }>()
 	).results.map(({ transactionId }) => transactionId);
+
 const pay = (transaction: number) =>
 	env.DB.prepare(
 		"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'auto','linked')",
@@ -97,11 +106,13 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		expect(toast.undo).toMatch(
 			/^9401\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
 		);
+
 		const dismissal = await env.DB.prepare(
 			"SELECT undo_token AS undoToken FROM bill_payments WHERE bill_id=? AND period=? AND status='dismissed'",
 		)
 			.bind(BILL, PERIOD)
 			.first<{ undoToken: string }>();
+
 		expect(dismissal?.undoToken).toBe(toast.undo);
 		expect(toast.undoExpiresInMs).toBeGreaterThan(8000);
 		expect(toast.undoExpiresInMs).toBeLessThanOrEqual(10000);
@@ -136,6 +147,7 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/${BILL}`)
 		).text();
+
 		expect(html).toContain('id="page"');
 		expect(html).toContain("Paid");
 	});
@@ -261,11 +273,13 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 
 	it("lists the turned-away payment last under 'You said not this one', and linking it links it and lifts the Not this one", async () => {
 		await unlink();
+
 		const html = await (
 			await exports.default.fetch(
 				`${BASE}/bills/${BILL}/occurrences/${PERIOD}/link`,
 			)
 		).text();
+
 		const label = html.indexOf("You said not this one");
 		const other = html.indexOf('value="9402"');
 		const turnedAway = html.indexOf('value="9401"');
@@ -321,11 +335,13 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		expect(await linkedTo()).toEqual({ transactionId: 9411 });
 		expect(await dismissedOn(9410, 9411, 9412)).toEqual([]);
 		expect(await dismissedOn(9420)).toEqual([9420]);
+
 		const lastMonthRows = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=? AND period=? AND transaction_id=9411 AND status='dismissed'",
 		)
 			.bind(BILL, lastMonth)
 			.first<{ n: number }>();
+
 		expect(lastMonthRows?.n).toBe(1);
 	});
 
@@ -359,6 +375,7 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/${BILL}`)
 		).text();
+
 		expect(html.indexOf('id="page"')).toBeLessThan(html.indexOf('id="sheet"'));
 		expect(html.indexOf('id="sheet"')).toBeLessThan(html.indexOf("</main>"));
 		expect(html.slice(html.indexOf("</main>"))).not.toContain('id="sheet"');
@@ -376,12 +393,14 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/${BILL}`)
 		).text();
+
 		const form =
 			html.match(
 				new RegExp(
 					`<form[^>]*action="/bills/${BILL}/occurrences/${PERIOD}/unlink"[^>]*>`,
 				),
 			)?.[0] ?? "";
+
 		expect(form).toContain('hx-target="#page"');
 		expect(form).toContain('hx-select="#page"');
 		expect(form).toContain('hx-swap="outerHTML"');

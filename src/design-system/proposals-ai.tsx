@@ -34,6 +34,7 @@ const CATS = {
 	dateNight: { name: "Date Night", icon: "date-night", color: "cat-plum" },
 	health: { name: "Health", icon: "health", color: "cat-slate" },
 } as const;
+
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 /** A small terracotta "Why?" (P33 A), 44px tall, with its own name for screen readers. */
@@ -83,6 +84,7 @@ const SOME_OFF = [true, true, true, false];
 
 export const OFF_MEANS =
 	"Off means your rules and choices only. Nothing already decided changes.";
+
 const ALL_OFF = "Tally sorts by your rules and choices only.";
 
 /**
@@ -177,6 +179,7 @@ export function SwitchRow({
 	needs?: string;
 }) {
 	const greyed = needs !== undefined;
+
 	return (
 		<li>
 			<label class="group flex min-h-11 cursor-pointer items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent">
@@ -639,6 +642,7 @@ function pet(id: number, name: string, cents: number): ListRow {
 		categoryColor: null,
 	};
 }
+
 const PET_ROWS = [
 	pet(1, "Chewy", 6412),
 	pet(2, "Banfield Pet Hospital", 18900),
@@ -730,18 +734,18 @@ const tallyOnTrends = (
 		</p>
 		<p class="mt-5 text-sm text-muted">Every category, May to October</p>
 		<ul class="divide-y divide-rule border-y border-rule">
-			{[
-				[CATS.groceries, "$860 in September"],
-				[CATS.eatingOut, "$365 in September"],
-				[CATS.kids, "$255 in September"],
-			].map(([c, line]) => (
+			{(
+				[
+					[CATS.groceries, "$860 in September"],
+					[CATS.eatingOut, "$365 in September"],
+					[CATS.kids, "$255 in September"],
+				] satisfies [Cat, string][]
+			).map(([c, line]) => (
 				<li class="flex h-16 items-center gap-4">
-					<CategoryIcon icon={(c as Cat).icon} color={(c as Cat).color} />
+					<CategoryIcon icon={c.icon} color={c.color} />
 					<span class="min-w-0 flex-1">
-						<span class="block truncate text-lg leading-6">
-							{(c as Cat).name}
-						</span>
-						<span class="block leading-6 text-muted">{line as string}</span>
+						<span class="block truncate text-lg leading-6">{c.name}</span>
+						<span class="block leading-6 text-muted">{line}</span>
 					</span>
 				</li>
 			))}
@@ -775,6 +779,7 @@ function Strokes({ n }: { n: number }) {
 /** A count drawn as tally marks: a full TallyMark for every five, then the strokes left over. */
 function Marks({ n }: { n: number }) {
 	const rest = n % 5;
+
 	return (
 		<span class="mt-1 flex flex-wrap items-center gap-1 text-ink">
 			{Array.from({ length: Math.floor(n / 5) }, () => (
@@ -794,15 +799,17 @@ const tallyMarksPage = (
 		<Title>What Tally did</Title>
 		<p class="mt-2 text-muted">In October. Each mark is five.</p>
 		<ul class="mt-3 divide-y divide-rule border-y border-rule">
-			{[
-				["Sorted 84 transactions", 84],
-				["Cleaned 12 merchant names", 12],
-				["Found 2 paychecks", 2],
-				["You changed 5 of Tally's choices", 5],
-			].map(([label, n]) => (
+			{(
+				[
+					["Sorted 84 transactions", 84],
+					["Cleaned 12 merchant names", 12],
+					["Found 2 paychecks", 2],
+					["You changed 5 of Tally's choices", 5],
+				] satisfies [string, number][]
+			).map(([label, n]) => (
 				<li class="py-3">
-					<p class="text-lg">{label as string}</p>
-					<Marks n={n as number} />
+					<p class="text-lg">{label}</p>
+					<Marks n={n} />
 				</li>
 			))}
 		</ul>
@@ -923,6 +930,7 @@ const WITHOUT_LINE =
 function ViewLinks({ current }: { current: "made" | "bank" }) {
 	const link = "inline-flex min-h-11 items-center";
 	const here = `${link} font-semibold text-ink no-underline`;
+
 	return (
 		<nav aria-label="View" class="flex flex-wrap items-center gap-x-2">
 			<a

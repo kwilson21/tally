@@ -48,6 +48,7 @@ describe("splitKeepable", () => {
 			rawName: "BIG",
 			amountCents: BIG_BILL_CENTS + 1,
 		});
+
 		const exact = found({ rawName: "EXACT", amountCents: BIG_BILL_CENTS });
 		const split = splitKeepable([over, exact], []);
 		expect(split.waiting).toEqual([over]);
@@ -108,6 +109,7 @@ describe("billsMutedLine", () => {
 			found({ rawName: "C", displayName: "Rent", amountCents: 190000 }),
 			found({ rawName: "D", displayName: "Gym", amountCents: 4500 }),
 		];
+
 		expect(billsMutedLine(charges)).toBe(
 			"Your bank shows 4 charges that come back every month, about $1,972 in all: Netflix $15.49, Spotify $11.99, Rent $1,900 and 1 more.",
 		);
@@ -124,6 +126,7 @@ describe("billsLedgerLine", () => {
 
 describe("keepShown", () => {
 	const netflix = found({ rawName: "NETFLIX", displayName: "Netflix" });
+
 	const spotify = found({
 		rawName: "SPOTIFY",
 		displayName: "Spotify",
@@ -165,6 +168,7 @@ describe("keepShown", () => {
 			'{"rawName":"NETFLIX","amountCents":"1549","dueDay":5}',
 			'{"rawName":"NETFLIX","amountCents":1549.5,"dueDay":5}',
 		];
+
 		expect(keepShown([netflix], garbage)).toEqual([]);
 	});
 

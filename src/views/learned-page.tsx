@@ -57,8 +57,10 @@ export function LearnedPage({
 				<ul class="mt-4 flex flex-col gap-2">
 					{lines.map((line, index) => {
 						const title = `${line.name} → ${line.categoryName}`;
+
 						const changing =
 							change?.cleanedText === line.cleanedText ? change : undefined;
+
 						return (
 							<li class="flex min-h-16 items-center gap-4 rounded-control border border-rule bg-paper px-4 py-2">
 								<CategoryIcon icon={line.icon} color={line.color} />

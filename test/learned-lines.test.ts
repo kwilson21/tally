@@ -18,12 +18,14 @@ const ENTERTAINMENT = {
 	icon: "entertainment",
 	color: "cat-blue",
 };
+
 const BOOKS = {
 	categoryId: 40,
 	categoryName: "Books & audio",
 	icon: "books",
 	color: "cat-plum",
 };
+
 const GROCERIES = {
 	categoryId: 1,
 	categoryName: "Groceries",
@@ -47,6 +49,7 @@ describe("learnedLines: grouping by cleaned bank text", () => {
 			answer(1, "AUDIBLE*TE3E10I7 WA 07/26", BOOKS, "2026-07-26"),
 			answer(2, "AUDIBLE*ZZ99X1 WA 08/04", BOOKS, "2026-08-04"),
 		]);
+
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toMatchObject({
 			cleanedText: "audible",
@@ -62,6 +65,7 @@ describe("learnedLines: grouping by cleaned bank text", () => {
 			answer(1, "AMAZON MKTPLACE PMTS", GROCERIES),
 			answer(2, "AMAZON.COM*RT4K2", ENTERTAINMENT),
 		]);
+
 		expect(lines.map((line) => line.cleanedText)).toEqual([
 			"amazon mktplace pmts",
 			"amazon.com",
@@ -93,6 +97,7 @@ describe("learnedLines: the category and the count", () => {
 			answer(2, "NETFLIX.COM", GROCERIES, "2026-10-02"),
 			answer(1, "NETFLIX.COM", ENTERTAINMENT, "2026-10-01"),
 		];
+
 		const [line] = learnedLines(rows);
 		expect(line?.categoryName).toBe("Groceries");
 		expect(line?.answers).toBe(3);
@@ -107,6 +112,7 @@ describe("learnedLines: the category and the count", () => {
 			answer(2, "NETFLIX.COM", BOOKS, "2026-10-02"),
 			answer(1, "NETFLIX.COM", GROCERIES, "2026-10-01"),
 		];
+
 		const [line] = learnedLines(rows);
 		expect(line?.categoryName).toBe("Entertainment");
 		expect(line?.answers).toBe(2);
@@ -122,6 +128,7 @@ describe("learnedLines: the category and the count", () => {
 			answer(1, "NETFLIX.COM", GROCERIES, "2026-10-05"),
 			answer(2, "NETFLIX.COM", ENTERTAINMENT, "2026-10-05"),
 		];
+
 		expect(learnedLines(rows)[0]?.categoryName).toBe("Entertainment");
 	});
 });
@@ -139,6 +146,7 @@ describe("learnedLines: Forget", () => {
 				"2026-10-09 08:00:00",
 			),
 		];
+
 		expect(
 			learnedLines(rows, [
 				{ cleanedText: "netflix.com", forgottenAt: forgotAt },
@@ -164,9 +172,11 @@ describe("learnedLines: Forget", () => {
 				"2026-10-08 08:00:00",
 			),
 		];
+
 		const [line] = learnedLines(rows, [
 			{ cleanedText: "netflix.com", forgottenAt: forgotAt },
 		]);
+
 		expect(line?.categoryName).toBe("Books & audio");
 		expect(line?.answers).toBe(1);
 	});
@@ -176,9 +186,11 @@ describe("learnedLines: Forget", () => {
 			answer(1, "NETFLIX.COM", ENTERTAINMENT),
 			answer(2, "AUDIBLE WA", BOOKS),
 		];
+
 		const lines = learnedLines(rows, [
 			{ cleanedText: "netflix.com", forgottenAt: forgotAt },
 		]);
+
 		expect(lines.map((line) => line.cleanedText)).toEqual(["audible"]);
 	});
 });
@@ -188,6 +200,7 @@ describe("learnedLines: a known-vague text", () => {
 		const [line] = learnedLines([
 			answer(1, "APPLE.COM/BILL 09/30", ENTERTAINMENT),
 		]);
+
 		expect(line).toMatchObject({ cleanedText: "apple.com/bill", vague: true });
 	});
 
@@ -195,6 +208,7 @@ describe("learnedLines: a known-vague text", () => {
 		const [line] = learnedLines([
 			answer(1, "APPLE.COM/BILLING INC", ENTERTAINMENT),
 		]);
+
 		expect(line?.vague).toBe(false);
 	});
 });
@@ -217,6 +231,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -251,6 +266,7 @@ async function tx(fields: {
 			fields.parentId ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -305,6 +321,7 @@ describe("loadLearnedLines: which rows are evidence", () => {
 			source: null,
 			isSplit: 1,
 		});
+
 		await tx({
 			raw: "COSTCO WHSE 0231",
 			category: "Groceries",

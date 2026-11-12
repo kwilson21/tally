@@ -10,11 +10,9 @@ import { BASIS_POINTS, confidenceBasisPoints } from "./confidence";
  * and below `below`, both excluded, so the threshold itself is sure. The review queue's SQL is built from these
  * same bounds (src/db/suggestions-queue.ts), so the queue and the answer writes can't disagree with this.
  */
-export function unsureBounds(threshold = JEV_THRESHOLD): {
-	above: number;
-	below: number;
-} {
+export function unsureBounds(threshold = JEV_THRESHOLD) {
 	const below = confidenceBasisPoints(threshold);
+
 	return { above: BASIS_POINTS - below, below };
 }
 
@@ -33,8 +31,9 @@ export type MaybeKind = "category" | "income" | "transfer";
  * Category and transfer: from MAYBE_FLOOR up to the threshold, so the threshold itself is sure. The review queue's SQL
  * is built from these bounds too (askedSql in src/db/suggestions-queue.ts), so the queue, the rows and the answer writes can't disagree.
  */
-export function askedBounds(kind: MaybeKind): { above: number; below: number } {
+export function askedBounds(kind: MaybeKind) {
 	if (kind === "income") return unsureBounds();
+
 	return {
 		above: confidenceBasisPoints(MAYBE_FLOOR) - 1,
 		below: confidenceBasisPoints(JEV_THRESHOLD),
@@ -45,6 +44,7 @@ export function askedBounds(kind: MaybeKind): { above: number; below: number } {
 export function isUnsure(confidence: number, kind: MaybeKind): boolean {
 	const basis = confidenceBasisPoints(confidence);
 	const { above, below } = askedBounds(kind);
+
 	return basis < below && basis > above;
 }
 

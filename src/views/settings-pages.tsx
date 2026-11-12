@@ -63,11 +63,14 @@ export type ContentsCounts = {
 /** The one-line folio each Settings row shows at its right, its words and its count (P134 A, #606). */
 export function settingsPlaces(counts: ContentsCounts): Place[] {
 	const { categories, merchants, people } = counts;
+
 	const budget =
 		categories.budgetCents === null
 			? ""
 			: ` · ${formatCents(categories.budgetCents, { wholeDollars: categories.budgetCents % 100 === 0 })} a month`;
+
 	const ai = `${counts.aiOff === 0 ? "All on" : `${counts.aiOff} off`} · ${counts.sorted} sorted in ${monthName(counts.month)}`;
+
 	return [
 		{
 			name: "Categories",

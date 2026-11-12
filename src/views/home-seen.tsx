@@ -39,8 +39,10 @@ export function HomeSeenCheckIn({
 		// A Plaid Link window pauses the check-in too, so its answer can't redraw Home mid-link; a quiet ping with no step stands
 		// in for each skipped tick, so the person still counts as there (plaid-link.js, decisions 146 and 149).
 		"data-waits-for-link": true,
-		...(step ? { "hx-vals": JSON.stringify({ step }) } : {}),
+		// An undefined attribute is left out of the markup, so no step renders no hx-vals.
+		"hx-vals": step ? JSON.stringify({ step }) : undefined,
 	};
+
 	return (
 		<div
 			id={HOME_SEEN_ID}

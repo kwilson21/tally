@@ -106,11 +106,26 @@ import { TextInput } from "../views/text-input";
 import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
+
 export const bills = new Hono<App>();
 
 type Category = { id: number; name: string; icon: string; color: string };
+
 /** An amount over $100,000.00 that the form asks about with a "Yes, $X is right" chip (P45 A). */
 type BigAmount = { cents: number; confirmed: boolean };
+
+/** The frequency names a bill can take. */
+const FREQUENCY_NAMES: readonly string[] = [
+	"monthly",
+	"yearly",
+	"weekly",
+	"biweekly",
+	"quarterly",
+];
+
+const isFrequency = (name: string): name is Values["frequency"] =>
+	FREQUENCY_NAMES.includes(name);
+
 type Values = {
 	name: string;
 	amount: string;
@@ -151,8 +166,10 @@ export async function page(
 	// A payment at another price is offered on the row it would pay: an active bill whose shown
 	// occurrence is unpaid, due or overdue (P36 B, spec §8.5). Worked out here each time; nothing is stored.
 	const offers = await loadPriceOffers(c.env.DB, loaded);
+
 	const rows = loaded.map((b) => {
 		const offer = offers.get(b.id);
+
 		return offer
 			? {
 					...b,
@@ -160,6 +177,7 @@ export async function page(
 				}
 			: b;
 	});
+
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
 	const totals = billTotalsForRows(today.slice(0, 7), active);
@@ -169,17 +187,21 @@ export async function page(
 	const plans = await loadPlans(c.env.DB);
 	const unpaidPlans = plans.filter((plan) => plan.transactionId === null);
 	const earlierPlans = unpaidPlans.filter((plan) => plan.month < month);
+
 	const plansPaidThisMonth = plans.filter(
 		(plan) => plan.paidDate && plan.paidDate.slice(0, 7) === month,
 	);
+
 	const plannedThisMonthCents = unpaidPlans
 		.filter((plan) => plan.month === month)
 		.reduce((sum, plan) => sum + plan.amountCents, 0);
+
 	// Paid this month's total adds the plans paid this month to the bills paid this month (decision 122).
 	const plansPaidCents = plansPaidThisMonth.reduce(
 		(sum, plan) => sum + plan.amountCents,
 		0,
 	);
+
 	// The line under a heading names the occurrences its total counts that no row lists, by bill (decision 122).
 	const unlistedLine = (status: BillStatus) =>
 		includesLine(
@@ -187,15 +209,19 @@ export async function page(
 				const dueDates = totals.unlisted[status]
 					.filter((occurrence) => occurrence.billId === bill.id)
 					.map((occurrence) => occurrence.dueDate);
+
 				return dueDates.length
 					? [{ name: bill.name, frequency: bill.frequency, dueDates }]
 					: [];
 			}),
 		);
+
 	const statusGroup = (status: BillStatus, extraRows: Child[] = []) => {
 		const group = active.filter((b) => b.status === status);
 		const includes = unlistedLine(status);
+
 		if (!group.length && !extraRows.length && !includes) return null;
+
 		return (
 			<section class="mt-4">
 				<BillStatusHeading
@@ -217,6 +243,7 @@ export async function page(
 			</section>
 		);
 	};
+
 	return c.html(
 		<Layout
 			title="Bills · Tally"
@@ -356,6 +383,7 @@ export async function page(
  */
 async function earlierPrice(db: D1Database, billId: number, today: string) {
 	const history = (await amountRowsByBill(db, billId)).get(billId) ?? [];
+
 	return earlierAmount(history, today.slice(0, 7));
 }
 
@@ -366,6 +394,7 @@ async function categories(c: Context<App>) {
 		).all<Category>()
 	).results;
 }
+
 async function dbBill(c: Context<App>, id: number) {
 	return c.env.DB.prepare(
 		`SELECT b.*,c.icon,c.color FROM bills b LEFT JOIN categories c ON c.id=b.category_id WHERE b.id=?`,
@@ -373,6 +402,7 @@ async function dbBill(c: Context<App>, id: number) {
 		.bind(id)
 		.first<DbBill>();
 }
+
 async function activeBills(c: Context<App>) {
 	return (
 		await c.env.DB.prepare(
@@ -380,6 +410,7 @@ async function activeBills(c: Context<App>) {
 		).all<{ id: number; name: string; active: number }>()
 	).results;
 }
+
 /** The sheet again, with the Name error for a name another active bill has (`values.name` is the name). */
 async function nameTaken(
 	c: Context<App>,
@@ -392,11 +423,14 @@ async function nameTaken(
 ) {
 	const name = sheet.values.name;
 	const taken = duplicateBillName(await activeBills(c), name, sheet.bill?.id);
+
 	// Whoever held the name may have let go of it already; the person is still told it was taken.
 	return page(c, { ...sheet, errors: { name: alreadyCalled(taken ?? name) } });
 }
+
 const alreadyCalled = (name: string) =>
 	`You already have a bill called ${name}.`;
+
 function valuesOf(b?: DbBill): Values {
 	return {
 		name: b?.name ?? "",
@@ -412,6 +446,7 @@ function valuesOf(b?: DbBill): Values {
 
 function quarterlyMonths(anchorMonth: string) {
 	const first = Math.min(12, Math.max(1, Number(anchorMonth) || 1)) - 1;
+
 	return [0, 3, 6, 9].map((offset) =>
 		new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
 			new Date(Date.UTC(2026, (first + offset) % 12, 1)),
@@ -441,6 +476,7 @@ function BillSheet({
 	finding?: string;
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
+
 	// Closing the sheet, by the backdrop or Cancel, returns focus to what opened it (#87): this bill's Edit bill
 	// button, the Possible bills row a new bill was added from, or Add a bill.
 	const closeHref = bill
@@ -448,11 +484,13 @@ function BillSheet({
 		: finding
 			? `/bills/find?focus=${encodeURIComponent(finding)}`
 			: "/bills?focus=add-bill";
+
 	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
 	// to get it back (P45 A's duplicate name has no other way out).
 	const activeAction = bill
 		? `${action}/${bill.active ? "deactivate" : `reactivate${errors.name ? "?rename=1" : ""}`}`
 		: "";
+
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
@@ -706,8 +744,10 @@ function BillSheet({
 }
 
 bills.get("/bills", (c) => page(c));
+
 bills.get("/bills/new", (c) => {
 	const q = c.req.query();
+
 	const values = q.name
 		? {
 				name: q.name,
@@ -720,18 +760,23 @@ bills.get("/bills/new", (c) => {
 				merchant_raw_name: q.merchant_raw_name ?? "",
 			}
 		: undefined;
+
 	return page(c, { values, finding: q.finding || undefined });
 });
+
 bills.get("/bills/find", async (c) => {
 	const suggestions = await loadBillSuggestions(
 		c.env.DB,
 		await householdToday(c.env.DB),
 	);
+
 	// The Add sheet closes back to its finding (?focus=, #87), unless that finding has gone.
 	const focus = c.req.query("focus");
+
 	const focusRawName = suggestions.some((s) => s.rawName === focus)
 		? focus
 		: undefined;
+
 	return c.html(
 		<Layout
 			title="Possible bills · Tally"
@@ -756,6 +801,7 @@ bills.get("/bills/find", async (c) => {
 		</Layout>,
 	);
 });
+
 function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
 	return suggestions.length ? (
 		<ul
@@ -782,40 +828,51 @@ function billFindingList(suggestions: BillSuggestion[], focusRawName?: string) {
 		</div>
 	);
 }
+
 bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	// Hono has already decoded the name once.
 	const merchant = c.req.param("merchant");
 	const today = await householdToday(c.env.DB);
 	const before = await loadBillSuggestions(c.env.DB, today);
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
+
 	if (dismissedIndex < 0) return c.notFound();
+
 	const result = await c.env.DB.prepare(
 		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
 		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
 	)
 		.bind(merchant)
 		.run();
+
 	if (!result.meta.changes) return c.notFound();
+
 	const headers = {
 		"HX-Trigger": hxTrigger({
 			toast: { message: "Marked as not a bill", type: "success" },
 			announce: "Suggestion removed",
 		}),
 	};
+
 	if (c.req.header("HX-Request")) {
 		const remaining = await loadBillSuggestions(c.env.DB, today);
 		const focus = remaining[dismissedIndex] ?? remaining[0];
+
 		return c.html(
 			billFindingList(remaining, focus?.rawName ?? ""),
 			200,
 			headers,
 		);
 	}
+
 	return c.redirect("/bills/find", 303);
 });
+
 bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));
+
 bills.get("/bills/:id/edit", async (c) => {
 	const bill = await dbBill(c, Number(c.req.param("id")));
+
 	return bill ? page(c, { bill }) : c.notFound();
 });
 
@@ -824,37 +881,42 @@ async function save(c: Context<App>, id?: number) {
 	const raw = (name: string) => String(form[name] ?? "").trim();
 	// The possible bill a new bill was added from: a redrawn sheet keeps it, so its close still goes there (#87).
 	const finding = raw("finding") || undefined;
+	const frequency = raw("frequency");
+
 	const values: Values = {
 		name: raw("name"),
 		amount: raw("amount"),
 		due_day: raw(raw("frequency") === "weekly" ? "weekly_day" : "due_day"),
-		frequency: (
-			["monthly", "yearly", "weekly", "biweekly", "quarterly"] as const
-		).includes(raw("frequency") as Values["frequency"])
-			? (raw("frequency") as Values["frequency"])
-			: "monthly",
+		frequency: isFrequency(frequency) ? frequency : "monthly",
 		anchor_month: raw("anchor_month"),
 		anchor_date: raw("anchor_date"),
 		category_id: raw("category_id"),
 		merchant_raw_name: raw("merchant_raw_name"),
 	};
+
 	const errors: Record<string, string> = {};
 	let cents = 0;
+
 	try {
 		cents = toCents(values.amount);
+
 		if (cents <= 0) throw new Error();
 	} catch {
 		errors.amount = "Enter an amount greater than $0.";
 	}
+
 	// The set-aside refuses an occurrence past this (docs/verification.md, "Numbers"), so a bill never holds one.
 	if (!errors.amount && cents > MAX_OCCURRENCE_CENTS)
 		errors.amount = `Enter an amount of ${formatCents(MAX_OCCURRENCE_CENTS, { wholeDollars: true })} or less.`;
+
 	const anchorDate = values.anchor_date;
 	const validAnchorDate = validDateString(anchorDate);
+
 	const due =
 		values.frequency === "biweekly" && validAnchorDate
 			? ((new Date(`${anchorDate}T00:00:00Z`).getUTCDay() + 6) % 7) + 1
 			: Number(values.due_day);
+
 	// A biweekly bill has no due day field: its weekday comes from its date, so only that date is checked.
 	if (
 		values.frequency !== "biweekly" &&
@@ -866,11 +928,15 @@ async function save(c: Context<App>, id?: number) {
 			values.frequency === "weekly"
 				? "Choose a day of the week."
 				: "Enter a day from 1 to 31.";
+
 	if (values.frequency === "biweekly" && !validAnchorDate)
 		errors.anchor_date = "Choose a date.";
+
 	if (!values.name) errors.name = "Enter a name.";
+
 	if (!values.merchant_raw_name)
 		errors.merchant_raw_name = "Enter the bank's text.";
+
 	if (!values.category_id) errors.category_id = "Choose a category.";
 	else {
 		const category = await c.env.DB.prepare(
@@ -878,32 +944,42 @@ async function save(c: Context<App>, id?: number) {
 		)
 			.bind(Number(values.category_id))
 			.first();
+
 		if (!category) errors.category_id = "Choose an existing category.";
 	}
+
 	const anchor = Number(values.anchor_month);
+
 	if (
 		(values.frequency === "yearly" || values.frequency === "quarterly") &&
 		(!Number.isInteger(anchor) || anchor < 1 || anchor > 12)
 	)
 		errors.anchor_month = "Choose a month.";
 	const bill = id ? await dbBill(c, id) : undefined;
+
 	if (id && !bill) return c.notFound();
+
 	// Only a new name is checked: a bill that already shares its name can still be edited.
 	if (!errors.name && !(bill && sameBillName(bill.name, values.name))) {
 		const duplicate = duplicateBillName(await activeBills(c), values.name, id);
+
 		if (duplicate) errors.name = alreadyCalled(duplicate);
 	}
+
 	// P45 A: a very large amount, added or edited, is saved only once its own "Yes, $X is right" chip
 	// is ticked.
 	let bigAmount: BigAmount | undefined;
+
 	if (!errors.amount && cents > BIG_BILL_CENTS) {
 		bigAmount = {
 			cents,
 			confirmed: !needsBigAmountConfirm(cents, raw("confirm_amount")),
 		};
+
 		if (!bigAmount.confirmed)
 			errors.amount = `${formatCents(cents)} is a lot for a bill.`;
 	}
+
 	// Linked payments are budget history, so a bill that has them keeps its schedule. A weekly bill's
 	// due day is its weekday, which names its occurrences, so moving it is a change of schedule too.
 	const periodKeysChanged =
@@ -916,13 +992,16 @@ async function save(c: Context<App>, id?: number) {
 			bill.anchor_date !==
 				(values.frequency === "biweekly" ? anchorDate : null) ||
 			(values.frequency === "weekly" && bill.due_day !== due));
+
 	const protectedScheduleChanged = periodKeysChanged;
+
 	if (protectedScheduleChanged) {
 		const linked = await c.env.DB.prepare(
 			"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
 		)
 			.bind(id)
 			.first();
+
 		if (linked) {
 			// The message goes under the field that changed, so it is visible on the form.
 			const field =
@@ -933,12 +1012,14 @@ async function save(c: Context<App>, id?: number) {
 						: values.frequency === "biweekly"
 							? "anchor_date"
 							: "anchor_month";
+
 			errors[field] =
 				bill.frequency === values.frequency
 					? "This bill has payments linked. To change when it's due, deactivate it and add a new bill."
 					: "This bill has payments linked. To change how often it's due, deactivate it and add a new bill.";
 		}
 	}
+
 	if (Object.keys(errors).length)
 		return page(c, {
 			bill: bill ?? undefined,
@@ -947,6 +1028,7 @@ async function save(c: Context<App>, id?: number) {
 			bigAmount,
 			finding,
 		});
+
 	// Typed bank text saves its transaction's merchant key, so the bill's payments match it (spec §6.1). Only a
 	// text the bill already has keeps the bill's old bank-text flag, so an unchanged legacy bill keeps matching
 	// by bank text (write.ts).
@@ -954,6 +1036,7 @@ async function save(c: Context<App>, id?: number) {
 		bill?.merchant_raw_name === values.merchant_raw_name
 			? values.merchant_raw_name
 			: await merchantKeyOfBankText(c.env.DB, values.merchant_raw_name);
+
 	const fields: BillFields = {
 		name: values.name,
 		amountCents: cents,
@@ -968,13 +1051,16 @@ async function save(c: Context<App>, id?: number) {
 		merchantRawName,
 		typedMerchantText: values.merchant_raw_name,
 	};
+
 	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
 	// The household's date is read once, here, and its month is what a changed amount applies from.
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
+
 	const written = id
 		? await updateBill(c.env.DB, id, fields, periodKeysChanged, month)
 		: await insertBill(c.env.DB, fields, today);
+
 	// Another save took the name since the check above, and the write refused it.
 	if (!written)
 		return nameTaken(c, {
@@ -985,6 +1071,7 @@ async function save(c: Context<App>, id?: number) {
 		});
 	await matchBillPayments(c.env.DB, today);
 	const message = id ? "Bill saved" : "Bill added";
+
 	// A saved edit returns to its bill's page, with focus on Edit bill, as the sheet's Cancel does (#87).
 	if (c.req.header("HX-Request")) {
 		const res = id
@@ -1000,6 +1087,7 @@ async function save(c: Context<App>, id?: number) {
 					true,
 				)
 			: await page(c, undefined, today);
+
 		res.headers.set(
 			"HX-Trigger",
 			hxTrigger({
@@ -1008,12 +1096,17 @@ async function save(c: Context<App>, id?: number) {
 			}),
 		);
 		res.headers.set("HX-Push-Url", id ? `/bills/${id}` : "/bills");
+
 		return res;
 	}
+
 	return c.redirect(id ? `/bills/${id}?focus=edit-bill` : "/bills", 303);
 }
+
 bills.post("/bills", (c) => save(c));
+
 bills.post("/bills/:id", (c) => save(c, Number(c.req.param("id"))));
+
 /** What a person gets after a bill is switched on or off: Bills again, with the toast. */
 async function activeChanged(c: Context<App>, message: string) {
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
@@ -1026,35 +1119,46 @@ async function activeChanged(c: Context<App>, message: string) {
 		}),
 	);
 	res.headers.set("HX-Push-Url", "/bills");
+
 	return res;
 }
+
 bills.post("/bills/:id/deactivate", async (c) => {
 	const { meta } = await c.env.DB.prepare(
 		"UPDATE bills SET active=0 WHERE id=?",
 	)
 		.bind(Number(c.req.param("id")))
 		.run();
+
 	if (!meta.changes) return c.notFound();
+
 	return activeChanged(c, "Bill deactivated");
 });
+
 bills.post("/bills/:id/reactivate", async (c) => {
 	const id = Number(c.req.param("id"));
 	const bill = await dbBill(c, id);
+
 	if (!bill) return c.notFound();
+
 	// After a refusal the sheet's Reactivate sends ?rename=1: the Name field is then the way out, so
 	// what it holds is the name the bill comes back under. Otherwise the bill keeps its own name.
 	const name =
 		c.req.query("rename") === "1"
 			? String((await c.req.parseBody()).name ?? "").trim()
 			: bill.name;
+
 	const values = { ...valuesOf(bill), name };
+
 	if (!name)
 		return page(c, { bill, values, errors: { name: "Enter a name." } });
+
 	// A bill that would repeat an active bill's name comes back as the same Name error as adding.
 	if (!bill.active && !(await activateBill(c.env.DB, id, name)))
 		return nameTaken(c, { bill, values });
 	// A payment that arrived while the bill was off links now, as a save does (spec §6.1).
 	await matchBillPayments(c.env.DB);
+
 	return activeChanged(c, "Bill reactivated");
 });
 
@@ -1068,14 +1172,14 @@ type LinkedPayment = {
 	display_name: string | null;
 	excluded?: number;
 };
+
 const monthName = (period: string, today: string) =>
 	new Intl.DateTimeFormat("en-US", {
 		month: "long",
-		...(period.slice(0, 4) === today.slice(0, 4)
-			? {}
-			: { year: "numeric" as const }),
+		year: period.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${period}-01T00:00:00Z`));
+
 const shortDate = (date: string) =>
 	new Intl.DateTimeFormat("en-US", {
 		month: "short",
@@ -1089,6 +1193,7 @@ function nextTwoWeeksAfter(anchor: string, today: string): string {
 		0,
 		Math.floor((dayNumber(today) - dayNumber(anchor)) / 14) + 1,
 	);
+
 	return dateOfDayNumber(dayNumber(anchor) + 14 * steps);
 }
 
@@ -1099,21 +1204,27 @@ const occurrenceLabel = (date: string) =>
 		day: "numeric",
 		timeZone: "UTC",
 	}).format(new Date(`${date}T00:00:00Z`));
+
 const addMonths = (period: string, amount: number) => {
 	const date = new Date(`${period}-01T00:00:00Z`);
 	date.setUTCMonth(date.getUTCMonth() + amount);
+
 	return date.toISOString().slice(0, 7);
 };
+
 const occurrenceDate = (bill: DbBill, period: string) => {
 	if (bill.frequency === "weekly" || bill.frequency === "biweekly")
 		return period;
+
 	if (bill.frequency === "quarterly") {
 		const quarter = Number(period.slice(-1));
 		const firstQuarter = Math.floor(((bill.anchor_month ?? 1) - 1) / 3) + 1;
+
 		const month =
 			(((bill.anchor_month ?? 1) - 1 + ((quarter - firstQuarter + 4) % 4) * 3) %
 				12) +
 			1;
+
 		return billOccurrenceForMonth(
 			{
 				frequency: bill.frequency,
@@ -1124,10 +1235,12 @@ const occurrenceDate = (bill: DbBill, period: string) => {
 			month,
 		).dueDate;
 	}
+
 	const month =
 		bill.frequency === "monthly"
 			? period
 			: `${period}-${String(bill.anchor_month).padStart(2, "0")}`;
+
 	return billOccurrenceForMonth(
 		{
 			frequency: bill.frequency,
@@ -1139,8 +1252,10 @@ const occurrenceDate = (bill: DbBill, period: string) => {
 		Number(month.slice(5, 7)),
 	).dueDate;
 };
+
 const occurrenceMonth = (bill: DbBill, period: string) =>
 	occurrenceDate(bill, period).slice(0, 7);
+
 /**
  * A period in words, as the picker's month choices and the link messages name it: the month a monthly or yearly
  * bill's period is for, else the occurrence's due date (#205, decision 101).
@@ -1149,14 +1264,16 @@ const periodLabel = (bill: DbBill, period: string, today: string) =>
 	["monthly", "yearly"].includes(bill.frequency)
 		? monthName(billPeriodMonth(countedBill(bill), period), today)
 		: occurrenceLabel(occurrenceDate(bill, period));
+
 /** The shape of each frequency's payment keys (bill_payments.period), so a key of another shape never sets a start. */
-const periodKeyShape: Record<DbBill["frequency"], RegExp> = {
+const periodKeyPattern: Record<DbBill["frequency"], RegExp> = {
 	monthly: /^\d{4}-\d{2}$/,
 	yearly: /^\d{4}$/,
 	weekly: /^\d{4}-\d{2}-\d{2}$/,
 	biweekly: /^\d{4}-\d{2}-\d{2}$/,
 	quarterly: /^\d{4}-Q[1-4]$/,
 };
+
 /** The periods a bill's page lists and accepts: back to its earliest linked payment (or six months), ahead two months (a year for yearly bills). */
 async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 	const linked = await db
@@ -1165,17 +1282,23 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 		)
 		.bind(bill.id)
 		.all<{ period: string }>();
+
 	let start = addMonths(today.slice(0, 7), -6);
+
 	for (const { period } of linked.results) {
-		if (!periodKeyShape[bill.frequency].test(period)) continue;
+		if (!periodKeyPattern[bill.frequency].test(period)) continue;
 		const month = occurrenceMonth(bill, period);
+
 		if (month < start) start = month;
 	}
+
 	const end = addMonths(
 		today.slice(0, 7),
 		bill.frequency === "yearly" ? 12 : 2,
 	);
+
 	const result = new Set<string>();
+
 	for (let month = start; month <= end; month = addMonths(month, 1)) {
 		for (const occurrence of billOccurrencesForMonth(
 			{
@@ -1189,6 +1312,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 		))
 			result.add(occurrence.period);
 	}
+
 	// The picker and the link routes keep every period, handled ones included (decision 99); only the Payments list leaves them out.
 	result.add(
 		billOccurrence(
@@ -1202,6 +1326,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 			new Set(),
 		).period,
 	);
+
 	return [...result].sort((a, b) =>
 		occurrenceDate(bill, b).localeCompare(occurrenceDate(bill, a)),
 	);
@@ -1228,6 +1353,7 @@ async function foundCharges(
 	if (!months.length) return new Map<string, FoundCharge>();
 	const window = manualLinkWindowDays(bill.frequency);
 	const dues = months.map((month) => month.due).sort();
+
 	const charges = (
 		await db
 			.prepare(
@@ -1242,7 +1368,9 @@ async function foundCharges(
 			)
 			.all<{ transaction_id: number; date: string; amount_cents: number }>()
 	).results;
+
 	if (!charges.length) return new Map<string, FoundCharge>();
+
 	const turnedAway = new Set(
 		(
 			await db
@@ -1253,16 +1381,20 @@ async function foundCharges(
 				.all<{ period: string; transaction_id: number }>()
 		).results.map((row) => `${row.period}|${row.transaction_id}`),
 	);
+
 	// Each month's closest so far: by amount to the month's own amount, then by days from its due date.
 	const closest = new Map<
 		string,
 		FoundCharge & { amountGap: number; dayGap: number }
 	>();
+
 	for (const charge of charges) {
 		const day = dayNumber(charge.date);
 		let nearest: { month: (typeof months)[number]; dayGap: number } | undefined;
+
 		for (const month of months) {
 			const dayGap = Math.abs(day - dayNumber(month.due));
+
 			if (
 				dayGap <= window &&
 				!turnedAway.has(`${month.period}|${charge.transaction_id}`) &&
@@ -1270,7 +1402,9 @@ async function foundCharges(
 			)
 				nearest = { month, dayGap };
 		}
+
 		if (!nearest) continue;
+
 		const candidate = {
 			transactionId: charge.transaction_id,
 			date: charge.date,
@@ -1278,7 +1412,9 @@ async function foundCharges(
 			amountGap: Math.abs(charge.amount_cents - nearest.month.cents),
 			dayGap: nearest.dayGap,
 		};
+
 		const kept = closest.get(nearest.month.period);
+
 		if (
 			!kept ||
 			candidate.amountGap < kept.amountGap ||
@@ -1286,6 +1422,7 @@ async function foundCharges(
 		)
 			closest.set(nearest.month.period, candidate);
 	}
+
 	return closest;
 }
 
@@ -1303,11 +1440,14 @@ async function billPage(
 	focusEditBill = false,
 ) {
 	const bill = await dbBill(c, id);
+
 	if (!bill) return c.notFound();
 	const today = given ?? (await householdToday(c.env.DB));
 	const periods = await billPeriods(c.env.DB, bill, today);
+
 	if (requestedPeriod && !periods.includes(requestedPeriod))
 		return c.notFound();
+
 	const payments = (
 		await c.env.DB.prepare(
 			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked' AND bp.period IN (SELECT value FROM json_each(?)) ORDER BY t.date,bp.id`,
@@ -1315,13 +1455,16 @@ async function billPage(
 			.bind(id, JSON.stringify(periods))
 			.all<LinkedPayment>()
 	).results;
+
 	// A month can hold several payments (decision 101), so each period lists all of its own, in date order.
 	const byPeriod = new Map<string, LinkedPayment[]>();
+
 	for (const payment of payments)
 		byPeriod.set(payment.period, [
 			...(byPeriod.get(payment.period) ?? []),
 			payment,
 		]);
+
 	// An unpaid occurrence due before the day the bill was added is already handled, so it has no row (decision 99).
 	// The picker still lists every period, so a payment can be linked to one by hand.
 	const listedPeriods = periods.filter(
@@ -1332,37 +1475,48 @@ async function billPage(
 				byPeriod.has(period),
 			),
 	);
+
 	// Each occurrence is judged at its own month's amount (decision 101), so the page, the picker and the
 	// price offer all read the same figure for one occurrence.
 	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
+
 	const amountOn = (dueDate: string) =>
 		amountForMonth(history, dueDate.slice(0, 7), bill.amount_cents);
+
 	const paidByPeriod = paidByPeriodOf(payments);
 	const paidOf = (period: string) => paidByPeriod.get(period) ?? 0;
 	// Paid once its payments reach 90% of its amount (decision 101); a part-paid period isn't in this set.
 	const paidPeriods = paidPeriodsOf(bill, history, paidByPeriod);
+
 	// A Paid month takes no more payments (decision 101): its picker is never built, and the page says it is paid
 	// (#205). The opened period is then always one of the picker's months, so the picker needs no check of its own.
 	const paidPicker =
 		requestedPeriod && paidPeriods.has(requestedPeriod)
 			? requestedPeriod
 			: undefined;
+
 	const pickerPeriod = paidPicker ? undefined : requestedPeriod;
+
 	const refusal = paidPicker
 		? `${periodLabel(bill, paidPicker, today)}'s bill is already paid.`
 		: undefined;
+
 	const shownError = error ?? refusal;
+
 	const pickerAmount = pickerPeriod
 		? amountOn(occurrenceDate(bill, pickerPeriod))
 		: bill.amount_cents;
+
 	// The picker sorts by closeness to what's still unpaid in the month (decision 79), not to its whole amount.
 	const pickerLeftCents = pickerPeriod
 		? Math.max(0, pickerAmount - paidOf(pickerPeriod))
 		: pickerAmount;
+
 	let candidates: (LinkedPayment & {
 		sameMerchant: number;
 		turnedAway: number;
 	})[] = [];
+
 	if (pickerPeriod) {
 		const due = occurrenceDate(bill, pickerPeriod);
 		// A payment the person turned away for this month stays listed, last, under "You said not this one" (#340).
@@ -1382,6 +1536,7 @@ async function billPage(
 				.all<LinkedPayment & { sameMerchant: number; turnedAway: number }>()
 		).results;
 	}
+
 	const current = billOccurrence(
 		{
 			frequency: bill.frequency,
@@ -1394,13 +1549,17 @@ async function billPage(
 		paidPeriods,
 		new Set(byPeriod.keys()),
 	);
+
 	// A payment at another price, offered on the occurrence the Bills row shows (P36 B, spec §8.5).
 	const currentCents = amountOn(current.dueDate);
+
 	const offer = await findPriceOffer(
 		c.env.DB,
 		offerBill(bill, current, currentCents, byPeriod.has(current.period)),
 	);
+
 	const change = latestPriceChange(history);
+
 	const picker = pickerPeriod ? (
 		<BillPaymentPicker
 			billId={id}
@@ -1429,20 +1588,24 @@ async function billPage(
 				}))}
 		/>
 	) : null;
+
 	if (picker && rerender) {
 		// The picker arrives whole, so a live line inside it isn't reliably spoken; the count goes to the announcer instead.
 		c.header(
 			"HX-Trigger",
 			hxTrigger({ announce: paymentCountSentence(candidates.length) }),
 		);
+
 		return c.html(picker);
 	}
+
 	if (paidPicker && rerender) {
 		// A month chip asked for a Paid month: its reply is the whole page, which replaces the body (as transactions.tsx's
 		// swapWholePage does), since the chip's own target, the picker, is gone.
 		c.header("HX-Retarget", "body");
 		c.header("HX-Reswap", "outerHTML");
 	}
+
 	const cadence =
 		bill.frequency === "weekly"
 			? `every ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bill.due_day - 1]}`
@@ -1451,32 +1614,43 @@ async function billPage(
 				: bill.frequency === "quarterly"
 					? "every 3 months"
 					: `${bill.frequency === "monthly" ? "a month" : "a year"}, due the ${ordinal(bill.due_day)}`;
+
 	// A month's status, as the ledger reads it (P131 A). A month with no payment and no charge found is "not-paid".
 	const statusOf = (period: string): BillStatus | "not-paid" => {
 		if (paidPeriods.has(period)) return "paid";
+
 		if (period === current.period) return current.status;
 		const due = occurrenceDate(bill, period);
+
 		if (due >= today) return "upcoming";
+
 		// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
 		// only one from an earlier month reads No payment, part paid or not.
 		const missedThisMonth =
 			["weekly", "biweekly"].includes(bill.frequency) &&
 			due.slice(0, 7) === today.slice(0, 7);
+
 		return missedThisMonth ? "overdue" : "not-paid";
 	};
+
 	const unpaid = listedPeriods
 		.filter((period) => !byPeriod.has(period) && statusOf(period) !== "paid")
 		.map((period) => {
 			const due = occurrenceDate(bill, period);
+
 			return { period, due, cents: amountOn(due) };
 		});
+
 	const found = await foundCharges(c.env.DB, bill, unpaid);
+
 	const labelOf = (period: string) =>
 		["monthly", "yearly"].includes(bill.frequency)
 			? monthName(billPeriodMonth(countedBill(bill), period), today)
 			: occurrenceLabel(occurrenceDate(bill, period));
+
 	const linkTo = (period: string, transactionId?: number) =>
 		`/bills/${id}/occurrences/${period}/link${transactionId ? `?transaction_id=${transactionId}` : ""}#payment-picker`;
+
 	// The words a month's row carries in muted type: today's page's own status words, with the amount after the date.
 	const wordOf = {
 		paid: "Paid",
@@ -1484,6 +1658,7 @@ async function billPage(
 		upcoming: "Upcoming",
 		overdue: "Overdue",
 	} as const;
+
 	const statusWords = (
 		status: BillStatus | "not-paid",
 		due: string,
@@ -1492,6 +1667,7 @@ async function billPage(
 		status === "not-paid"
 			? "No payment"
 			: `${wordOf[status]} ${shortDate(due)} · ${amount}`;
+
 	const units = {
 		monthly: "months",
 		yearly: "years",
@@ -1499,15 +1675,18 @@ async function billPage(
 		weekly: "weeks",
 		biweekly: "two-week periods",
 	} as const;
+
 	const rowFor = (period: string) => {
 		const status = statusOf(period);
 		const due = occurrenceDate(bill, period);
 		const amount = formatCents(amountOn(due));
 		const month = labelOf(period);
 		const payments = byPeriod.get(period) ?? [];
+
 		if (payments.length) {
 			const partPaid = status !== "paid" && paidOf(period) > 0;
 			const partWords = partPaidSentence(paidOf(period), amountOn(due));
+
 			return (
 				<LedgerDisclosure
 					month={month}
@@ -1547,6 +1726,7 @@ async function billPage(
 				</LedgerDisclosure>
 			);
 		}
+
 		if (offer && period === current.period)
 			return (
 				<LedgerPriceRow month={month} words={statusWords(status, due, amount)}>
@@ -1570,6 +1750,7 @@ async function billPage(
 				</LedgerPriceRow>
 			);
 		const charge = found.get(period);
+
 		if (charge)
 			return (
 				<LedgerMonth
@@ -1579,6 +1760,7 @@ async function billPage(
 					action={<span class="text-accent">Link it</span>}
 				/>
 			);
+
 		return (
 			<LedgerMonth
 				href={linkTo(period)}
@@ -1588,13 +1770,16 @@ async function billPage(
 			/>
 		);
 	};
+
 	// Consecutive months with no payment and no charge found fold into one row, newest first (P131 A); a single
 	// month keeps its own row.
 	const rows: Child[] = [];
 	let run: string[] = [];
+
 	const closeRun = () => {
 		const newest = run[0];
 		const oldest = run[run.length - 1];
+
 		if (newest !== undefined && oldest !== undefined && run.length === 1)
 			rows.push(
 				<LedgerMonth
@@ -1623,6 +1808,7 @@ async function billPage(
 			);
 		run = [];
 	};
+
 	for (const period of listedPeriods) {
 		if (
 			statusOf(period) === "not-paid" &&
@@ -1635,7 +1821,9 @@ async function billPage(
 			rows.push(rowFor(period));
 		}
 	}
+
 	closeRun();
+
 	return c.html(
 		<Layout
 			title={`${bill.name} · Tally`}
@@ -1719,11 +1907,13 @@ bills.get("/bills/:id/occurrences/:period/link", (c) =>
 		Boolean(c.req.header("HX-Request")),
 	),
 );
+
 bills.get("/bills/:id/month-explanation", async (c) => {
 	const id = Number(c.req.param("id"));
 	const period = c.req.query("period") ?? "";
 	const transactionId = Number(c.req.query("transaction_id"));
 	const bill = await dbBill(c, id);
+
 	if (
 		!bill ||
 		!(
@@ -1731,6 +1921,7 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 		).includes(period)
 	)
 		return c.notFound();
+
 	if (!Number.isInteger(transactionId))
 		return c.html(
 			<p class="text-sm text-muted">
@@ -1738,12 +1929,15 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 				month it was paid.
 			</p>,
 		);
+
 	const payment = await c.env.DB.prepare(
 		"SELECT date FROM transactions WHERE id=?",
 	)
 		.bind(transactionId)
 		.first<{ date: string }>();
+
 	if (!payment) return c.notFound();
+
 	return c.html(
 		<BillMonthExplanation
 			bill={countedBill(bill)}
@@ -1752,8 +1946,10 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 		/>,
 	);
 });
+
 /** Whether an occurrence is still unpaid, as 1 or 0 (`?1` the bill, `?2` the period), in the same terms as linkPaymentSql. */
 const unpaidSelect = `SELECT ${occurrenceUnpaidSql("?1", "?2")} AS unpaid`;
+
 bills.post("/bills/:id/link", async (c) => {
 	const id = Number(c.req.param("id"));
 	const form = await c.req.parseBody();
@@ -1761,8 +1957,10 @@ bills.post("/bills/:id/link", async (c) => {
 	const period = String(form.period ?? "");
 	const opened = String(form.opened_period ?? period);
 	const bill = await dbBill(c, id);
+
 	if (!bill) return c.notFound();
 	const today = await householdToday(c.env.DB);
+
 	if (
 		!(Number.isInteger(transaction) && transaction > 0) ||
 		!(await billPeriods(c.env.DB, bill, today)).includes(period)
@@ -1778,10 +1976,12 @@ bills.post("/bills/:id/link", async (c) => {
 	const due = occurrenceDate(bill, period);
 	const manualWindow = manualLinkWindowDays(bill.frequency);
 	const label = periodLabel(bill, period, today);
+
 	// A Paid month takes no more payments (decision 101): the picker lists none for it, so a request that names one is refused.
 	const unpaid = await c.env.DB.prepare(unpaidSelect)
 		.bind(id, period)
 		.first<{ unpaid: number }>();
+
 	if (unpaid?.unpaid === 0)
 		return billPage(
 			c,
@@ -1791,6 +1991,7 @@ bills.post("/bills/:id/link", async (c) => {
 			undefined,
 			today,
 		);
+
 	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053). The payment's group is the
 	// transaction, its split parent and its parts (paysPlanGroupSql): the picker never lists one, and a request that
 	// names one anyway is refused here, rather than by the trigger's error.
@@ -1799,6 +2000,7 @@ bills.post("/bills/:id/link", async (c) => {
 	)
 		.bind(transaction)
 		.first();
+
 	if (plannedAlready)
 		return billPage(
 			c,
@@ -1808,6 +2010,7 @@ bills.post("/bills/:id/link", async (c) => {
 			undefined,
 			today,
 		);
+
 	// Only money out pays a bill: a positive amount is money out, in Plaid's sign (#324). A credit fails here
 	// and in the INSERT below, with the same message as a payment outside the window.
 	const eligible = await c.env.DB.prepare(
@@ -1815,6 +2018,7 @@ bills.post("/bills/:id/link", async (c) => {
 	)
 		.bind(transaction, due, manualWindow)
 		.first();
+
 	if (!eligible) {
 		return billPage(
 			c,
@@ -1825,6 +2029,7 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	}
+
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
 	// The INSERT refuses a Paid month itself (decision 101), so two open pickers can't both link past 90%. The Not this
@@ -1832,20 +2037,24 @@ bills.post("/bills/:id/link", async (c) => {
 	// is in. It runs only when this link was made, since the DELETE needs the linked row this payment just got. The last
 	// statement reads the month as the INSERT left it, which says why a link made nothing.
 	// A plan's link that landed after the check above is refused by the INSERT's trigger (migration 0053): the same field error.
-	const batch = await c.env.DB.batch<{ unpaid: number }>([
-		c.env.DB.prepare(linkPaymentSql).bind(
-			id,
-			period,
-			transaction,
-			due,
-			manualWindow,
-		),
-		c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
-		c.env.DB.prepare(unpaidSelect).bind(id, period),
-	]).catch((error: unknown) => {
-		if (String(error).includes("already pays a planned expense")) return null;
-		throw error;
-	});
+	let batch: D1Result<{ unpaid: number }>[] | null = null;
+
+	try {
+		batch = await c.env.DB.batch<{ unpaid: number }>([
+			c.env.DB.prepare(linkPaymentSql).bind(
+				id,
+				period,
+				transaction,
+				due,
+				manualWindow,
+			),
+			c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
+			c.env.DB.prepare(unpaidSelect).bind(id, period),
+		]);
+	} catch (error) {
+		if (!String(error).includes("already pays a planned expense")) throw error;
+	}
+
 	if (!batch)
 		return billPage(
 			c,
@@ -1856,6 +2065,7 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	const [insert, , state] = batch;
+
 	if (!insert?.meta.changes)
 		return billPage(
 			c,
@@ -1867,16 +2077,20 @@ bills.post("/bills/:id/link", async (c) => {
 			undefined,
 			today,
 		);
+
 	return feedbackRedirect(c, id, "Payment linked", today);
 });
+
 bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	const id = Number(c.req.param("id"));
 	const period = c.req.param("period");
 	// A month can hold several payments (decision 101), so the one a Not this one names is unlinked, and only it. One
 	// that names none (a page from before this change) unlinks the month's only payment, and is refused when there are more.
 	const form = await c.req.parseBody();
+
 	const named =
 		form.transaction_id === undefined ? undefined : Number(form.transaction_id);
+
 	const paid = (
 		await c.env.DB.prepare(
 			"SELECT transaction_id FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
@@ -1884,12 +2098,14 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 			.bind(id, period)
 			.all<{ transaction_id: number }>()
 	).results;
+
 	const linked =
 		named === undefined
 			? paid.length === 1
 				? paid[0]
 				: undefined
 			: paid.find((row) => row.transaction_id === named);
+
 	if (!linked) return c.notFound();
 	// The token is random and saved on this Not this one, so its Undo works once (#340). It keeps the payment's id,
 	// so a Not this one that later moves to another payment is refused, as before.
@@ -1903,6 +2119,7 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		).bind(id, period, linked.transaction_id, undoToken),
 	]);
 	const undo = await unlinkUndo(c.env.DB, undoToken);
+
 	return feedbackRedirect(
 		c,
 		id,
@@ -1916,6 +2133,7 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		},
 	);
 });
+
 /**
  * The Undo for a Not this one (#340): its token, and the rest of its ten seconds, counted by the database's clock as
  * its created_at was. The row is found by its undo_token, which is random, so a later Not this one never matches it.
@@ -1927,8 +2145,10 @@ async function unlinkUndo(db: D1Database, token: string) {
 		)
 		.bind(token)
 		.first<{ ms: number }>();
+
 	return { token, ms: row?.ms ?? 0 };
 }
+
 /**
  * Undo for a Not this one (#340): relinks the payment to its month and lifts the dismissal. The token works once and
  * only within ten seconds of the dismissal, by the database's clock (see unlinkUndo for its parts).
@@ -1939,6 +2159,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	const token = String(form.token ?? "");
 	// The token's payment, when it has the right shape: its transaction id, a dot and the random UUID saved on the Not this one.
 	const [, transactionId] = /^(\d+)\.([0-9a-f-]{36})$/i.exec(token) ?? [];
+
 	// The Not this one the token names, if it is still there, and whether its ten seconds are still running.
 	const held = transactionId
 		? await c.env.DB.prepare(
@@ -1947,6 +2168,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 				.bind(token, Number(transactionId), id)
 				.first<{ transactionId: number; period: string; fresh: number }>()
 		: null;
+
 	// The link comes back as the matcher's ('auto'): the dismissal doesn't remember how the payment was linked, and most
 	// links are the matcher's. Only a hand link's "by hand" label is lost (the export keeps the column). The guard checks
 	// the token again, since the read above and this batch don't run atomically. A plan that took the payment meanwhile
@@ -1968,7 +2190,9 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 				])
 			)[0]?.meta.changes === 1
 		: false;
+
 	if (!c.req.header("HX-Request")) return c.redirect(`/bills/${id}`, 303);
+
 	const response = await billPage(
 		c,
 		id,
@@ -1979,12 +2203,14 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 		false,
 		restored ? held?.transactionId : undefined,
 	);
+
 	// The Undo may come from an open Edit sheet, whose /edit address the bar still shows: the bill's own address replaces it.
 	response.headers.set("HX-Push-Url", `/bills/${id}`);
 	// Each outcome claims only what is true of the payment: the link is back, or it stays unlinked. A month can hold
 	// other payments now (decision 101), so a restored payment never waits on them. Every answer ends this Undo's
 	// toast, so undoDone names its token on each one (#340, #397).
-	let toast: { message: string; type: "success" | "error"; undoDone?: string };
+	let toast: UndoToast;
+
 	if (restored)
 		toast = {
 			message: "Payment linked again",
@@ -2009,8 +2235,24 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 		"HX-Trigger",
 		hxTrigger({ toast, announce: toast.message }),
 	);
+
 	return response;
 });
+
+/** An Undo toast's keys beyond its words: the Undo token, its time left and where to send it. */
+type UndoToast = {
+	message: string;
+	type: "success" | "error";
+	undoDone?: string;
+};
+
+/** The toast keys a feedback redirect adds to its message: an Undo's, or none. */
+type ExtraToast = {
+	undo?: string;
+	undoExpiresInMs?: number;
+	undoAction?: string;
+};
+
 async function feedbackRedirect(
 	c: Context<App>,
 	id: number,
@@ -2018,7 +2260,7 @@ async function feedbackRedirect(
 	today?: string,
 	announce = message,
 	// Extra toast keys, such as an Undo's (see toast.js).
-	toast: Record<string, unknown> = {},
+	toast: ExtraToast = {},
 ) {
 	if (c.req.header("HX-Request")) {
 		const response = await billPage(
@@ -2029,6 +2271,7 @@ async function feedbackRedirect(
 			undefined,
 			today,
 		);
+
 		response.headers.set(
 			"HX-Trigger",
 			hxTrigger({
@@ -2036,8 +2279,10 @@ async function feedbackRedirect(
 				announce,
 			}),
 		);
+
 		return response;
 	}
+
 	return c.redirect(`/bills/${id}`, 303);
 }
 
@@ -2064,6 +2309,7 @@ function offerBill(
 		linked,
 	};
 }
+
 async function currentOffer(
 	c: Context<App>,
 	bill: DbBill,
@@ -2079,9 +2325,12 @@ async function currentOffer(
 			.bind(bill.id)
 			.all<{ period: string; amount_cents: number }>()
 	).results;
+
 	const paidByPeriod = paidByPeriodOf(linked);
+
 	const history =
 		(await amountRowsByBill(c.env.DB, bill.id)).get(bill.id) ?? [];
+
 	const current = billOccurrence(
 		{
 			frequency: bill.frequency,
@@ -2094,15 +2343,18 @@ async function currentOffer(
 		paidPeriodsOf(bill, history, paidByPeriod),
 		new Set(paidByPeriod.keys()),
 	);
+
 	const billCents = amountForMonth(
 		history,
 		current.dueDate.slice(0, 7),
 		bill.amount_cents,
 	);
+
 	const offer = await findPriceOffer(
 		c.env.DB,
 		offerBill(bill, current, billCents, paidByPeriod.has(current.period)),
 	);
+
 	return (
 		offer && {
 			period: current.period,
@@ -2119,17 +2371,25 @@ async function currentOffer(
 // for the prices it showed, in whole cents: the occurrence's amount, the charge, and the bill's current
 // amount. Once any of them has changed, a page that has gone stale saves nothing and the person is told,
 // so no one is made to accept a price they didn't see.
-const wholeCents = (value: unknown) =>
-	typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+/** One form field as the browser sent it: text, a file, several of either, or absent. */
+type FormValue = string | File | (string | File)[] | undefined;
+
+const isText = (value: FormValue): value is string => typeof value === "string";
+
+const wholeCents = (value: FormValue) =>
+	isText(value) && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+
 async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	const id = Number(c.req.param("id"));
 	const period = c.req.param("period");
 	const form = await c.req.parseBody();
 	const transaction = Number(form.transaction_id);
 	const bill = await dbBill(c, id);
+
 	if (!bill) return c.notFound();
 	const today = await householdToday(c.env.DB);
 	const offer = await currentOffer(c, bill, today);
+
 	const gone = () =>
 		billPage(
 			c,
@@ -2139,12 +2399,15 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 			undefined,
 			today,
 		);
+
 	if (!offer || offer.period !== period || offer.transactionId !== transaction)
 		return gone();
+
 	if (verb === "accept") {
 		// The prices the page showed: the occurrence's amount, the charge (decision 101) and the bill's current amount.
 		const seenBill = wholeCents(form.bill_cents);
 		const seenCurrent = wholeCents(form.current_cents);
+
 		if (
 			seenBill !== offer.billCents ||
 			wholeCents(form.charge_cents) !== offer.amountCents ||
@@ -2163,6 +2426,7 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 			return gone();
 	} else {
 		await dismissPriceOffer(c.env.DB, id, period, transaction);
+
 		return feedbackRedirect(
 			c,
 			id,
@@ -2171,10 +2435,12 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 			`Price change dismissed. The bill stays ${formatCents(bill.amount_cents)}.`,
 		);
 	}
+
 	// The new price applies from this month on, so an unpaid payment at it in this month or a later one may
 	// now match; earlier months keep the price they had (decision 101).
 	await matchBillPayments(c.env.DB, today);
 	const updated = `Bill updated to ${formatCents(offer.amountCents)}`;
+
 	return feedbackRedirect(
 		c,
 		id,
@@ -2183,9 +2449,11 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 		`${updated} and the payment linked`,
 	);
 }
+
 bills.post("/bills/:id/occurrences/:period/price/accept", (c) =>
 	answerPrice(c, "accept"),
 );
+
 bills.post("/bills/:id/occurrences/:period/price/dismiss", (c) =>
 	answerPrice(c, "dismiss"),
 );

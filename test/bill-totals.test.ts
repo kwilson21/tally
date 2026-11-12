@@ -34,6 +34,7 @@ describe("bill totals", () => {
 				],
 			},
 		]);
+
 		expect(totals.monthlyCents).toBe(12000);
 		expect(totals.groups.overdueCents).toBe(10000);
 		expect(totals.soonCents).toBe(10000);
@@ -73,6 +74,7 @@ describe("bill totals", () => {
 			],
 			thisMonthOccurrences: [],
 		});
+
 		// Home lists it as "Was due Sep 28" and Bills puts it in Overdue, so Home's sentence says so too.
 		expect(totals.overdueCount).toBe(1);
 		expect(totals.setAsideCents).toBe(0);
@@ -108,6 +110,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.stillToPayCents).toBe(5000);
 	});
 
@@ -154,6 +157,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.stillToPayCents).toBe(96000);
 	});
 
@@ -193,6 +197,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
 		// Two of its occurrences are overdue, but it is one bill.
@@ -202,6 +207,7 @@ describe("bill totals", () => {
 	it("counts every October occurrence in Upcoming and still to pay, and September's overdue one in Overdue (decision 122)", () => {
 		const upcomingBill = { ...bill(5000), id: 2 };
 		const bills = [bill(10000), upcomingBill];
+
 		const septemberDisplayed = {
 			billId: 10000,
 			dueDate: "2026-09-28",
@@ -209,6 +215,7 @@ describe("bill totals", () => {
 			amountCents: 10000,
 			paidCents: 0,
 		};
+
 		const octoberDisplayed = {
 			billId: 2,
 			dueDate: "2026-10-20",
@@ -216,6 +223,7 @@ describe("bill totals", () => {
 			amountCents: 5000,
 			paidCents: 0,
 		};
+
 		const octoberOccurrence = {
 			billId: 10000,
 			dueDate: "2026-10-28",
@@ -223,14 +231,17 @@ describe("bill totals", () => {
 			amountCents: 10000,
 			paidCents: 0,
 		};
+
 		const displayedOccurrences = [septemberDisplayed, octoberDisplayed];
 		const octoberOccurrences = [octoberOccurrence, octoberDisplayed];
+
 		const withOverdueBill = calculateBillTotals({
 			month: "2026-10",
 			bills,
 			displayedOccurrences,
 			thisMonthOccurrences: octoberOccurrences,
 		});
+
 		expect(withOverdueBill.groups.overdueCents).toBe(10000);
 		// October 28 is not a row, but it is due this month, so Upcoming counts it with October 20's $50 (decision 122).
 		expect(withOverdueBill.groups.upcomingCents).toBe(15000);
@@ -243,6 +254,7 @@ describe("bill totals", () => {
 			displayedOccurrences: [octoberDisplayed],
 			thisMonthOccurrences: [octoberDisplayed],
 		});
+
 		expect(withoutOverdueBill.groups.overdueCents).toBe(0);
 		expect(withoutOverdueBill.groups.upcomingCents).toBe(5000);
 		expect(withoutOverdueBill.stillToPayCents).toBe(5000);
@@ -287,6 +299,7 @@ describe("bill totals", () => {
 					},
 				],
 			});
+
 			expect(totals.stillToPayCents).toBe(stillToPayCents);
 			expect(totals.groups.overdueCents).toBe(overdueCents);
 			expect(
@@ -304,6 +317,7 @@ describe("bill totals", () => {
 			status: "paid" | "due" | "upcoming",
 			paidCents = 0,
 		) => ({ billId: 24000, dueDate, status, amountCents: 24000, paidCents });
+
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(24000, "weekly")],
@@ -316,6 +330,7 @@ describe("bill totals", () => {
 				friday("2026-10-30", "upcoming"),
 			],
 		});
+
 		expect(totals.groups.dueCents).toBe(24000);
 		expect(totals.groups.upcomingCents).toBe(48000);
 		expect(totals.stillToPayCents).toBe(72000);
@@ -354,6 +369,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.groups.overdueCents).toBe(48000);
 		expect(totals.groups.overdueCents + totals.groups.dueCents).toBe(
 			totals.soonCents,
@@ -393,6 +409,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.groups.upcomingCents).toBe(18800);
 	});
 
@@ -419,6 +436,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.monthlyCents).toBe(0);
 		expect(totals.stillToPayCents).toBe(0);
 	});
@@ -446,6 +464,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(24000);
 	});
@@ -480,6 +499,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
 	});
@@ -514,6 +534,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
 	});
@@ -533,6 +554,7 @@ describe("bill totals", () => {
 			],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.groups.overdueCents).toBe(24000);
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(24000);
@@ -553,6 +575,7 @@ describe("bill totals", () => {
 			],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(24000);
 	});
@@ -580,6 +603,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(10000);
 	});
@@ -607,6 +631,7 @@ describe("bill totals", () => {
 				},
 			],
 		});
+
 		expect(totals.monthlyCents).toBe(120000);
 		expect(totals.stillToPayCents).toBe(60000);
 		expect(totals.groups.overdueCents).toBe(60000);
@@ -620,6 +645,7 @@ describe("bill totals", () => {
 			amountCents: 24000,
 			paidCents: status === "paid" ? 24000 : 0,
 		});
+
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(299), bill(1399), bill(24000, "weekly")],
@@ -648,6 +674,7 @@ describe("bill totals", () => {
 				friday("2026-10-30", "upcoming"),
 			],
 		});
+
 		// Paid this month is the two paid rows ($16.98) and Daycare's two paid Fridays, listed or not ($480).
 		expect(totals.groups.paidCents).toBe(49698);
 		expect(totals.groups.dueCents).toBe(24000);
@@ -669,6 +696,7 @@ describe("bill totals", () => {
 			],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.groups.paidCents).toBe(120000);
 	});
 });
@@ -699,6 +727,7 @@ describe("Safe to spend's set-aside is this month's bills only (decision 123)", 
 				},
 			],
 		});
+
 		expect(totals.setAsideCents).toBe(60000);
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(120000);
@@ -719,6 +748,7 @@ describe("Safe to spend's set-aside is this month's bills only (decision 123)", 
 			],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.setAsideCents).toBe(0);
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(120000);
@@ -754,6 +784,7 @@ describe("Safe to spend's set-aside is this month's bills only (decision 123)", 
 				},
 			],
 		});
+
 		expect(totals.setAsideCents).toBe(24000);
 		expect(totals.soonCents).toBe(48000);
 	});
@@ -773,6 +804,7 @@ describe("Safe to spend's set-aside is this month's bills only (decision 123)", 
 			],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.setAsideCents).toBe(0);
 	});
 
@@ -799,6 +831,7 @@ describe("Safe to spend's set-aside is this month's bills only (decision 123)", 
 				},
 			],
 		});
+
 		expect(totals.setAsideCents).toBe(120000);
 	});
 
@@ -817,6 +850,7 @@ describe("Safe to spend's set-aside is this month's bills only (decision 123)", 
 			],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.setAsideCents).toBe(120000);
 	});
 });

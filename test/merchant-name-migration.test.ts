@@ -8,6 +8,7 @@ const db = env.DB;
 // migration files, so no column is missed), filled with rows. Every table and index name the migration
 // touches gets this prefix.
 const P = "pre0017_";
+
 const scratch = (sql: string) =>
 	sql.replaceAll(/\b(transactions|bill_payments|bills)(_\w+)?\b/g, `${P}$1$2`);
 
@@ -21,10 +22,12 @@ const withoutComments = (query: string) =>
 
 const REBUILT_BY_0017 =
 	/^(CREATE TABLE (transactions|bill_payments|bills)\b|ALTER TABLE (transactions|bills)\b|CREATE (UNIQUE )?INDEX \w+ ON (transactions|bill_payments)\b)/;
+
 const upTo0016 = env.TEST_MIGRATIONS.filter((m) => m.name < "0017")
 	.flatMap((m) => m.queries)
 	.map(withoutComments)
 	.filter((query) => REBUILT_BY_0017.test(query));
+
 const migration0017 = env.TEST_MIGRATIONS.find((m) =>
 	m.name.startsWith("0017_merchant_name_pending"),
 );
@@ -45,9 +48,16 @@ async function dropScratch() {
 	]);
 }
 
-type Row = Record<string, unknown>;
-const rows = async (sql: string) =>
-	((await db.prepare(sql).all<Row>()).results ?? []) as Row[];
+/** A column value a row holds: text, a whole number, or null. */
+type Cell = string | number | null;
+
+type Row = Record<string, Cell>;
+
+/** An index as the schema check reads it: its columns are a list. */
+type IndexInfo = Record<string, Cell | Cell[]>;
+
+const rows = async (sql: string): Promise<Row[]> =>
+	(await db.prepare(sql).all<Row>()).results ?? [];
 
 /** Every column filled with something other than its default, so a dropped or reordered column shows. */
 async function seedBeforeMigration() {
@@ -65,6 +75,7 @@ async function seedBeforeMigration() {
 			`INSERT INTO ${BILLS} (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9001, 'Pre0017 Internet', 8000, 5, 'monthly', 'COMCAST'), (9002, 'Pre0017 Water', 3000, 12, 'monthly', 'CITY WATER')`,
 		),
 	]);
+
 	const tx = (row: Record<string, string | number | null>) => {
 		const values = {
 			account_id: 9001,
@@ -74,13 +85,16 @@ async function seedBeforeMigration() {
 			updated_at: "2026-09-01 00:00:00",
 			...row,
 		};
+
 		const names = Object.keys(values);
+
 		return db
 			.prepare(
 				`INSERT INTO ${TX} (${names.join(", ")}) VALUES (${names.map(() => "?").join(", ")})`,
 			)
 			.bind(...Object.values(values));
 	};
+
 	await db.batch([
 		// A transaction with every column filled in.
 		tx({
@@ -241,21 +255,27 @@ const columns = async (table: string) =>
 	await rows(
 		`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info('${table}') ORDER BY cid`,
 	);
+
 const foreignKeys = async (table: string) =>
 	await rows(
 		`SELECT "from", "table", "to", on_update, on_delete FROM pragma_foreign_key_list('${table}') ORDER BY "from"`,
 	);
+
 const indexes = async (table: string) => {
 	const list = await rows(
 		`SELECT name, "unique", origin, partial FROM pragma_index_list('${table}') ORDER BY name`,
 	);
-	const out: Row[] = [];
+
+	const out: IndexInfo[] = [];
+
 	for (const index of list) {
 		const cols = await rows(
 			`SELECT name FROM pragma_index_info('${index.name}') ORDER BY seqno`,
 		);
-		out.push({ ...index, columns: cols.map((c) => c.name) });
+
+		out.push({ ...index, columns: cols.map((c) => String(c.name)) });
 	}
+
 	return out;
 };
 
@@ -350,6 +370,7 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 				`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '${P}%' ORDER BY name`,
 			)
 		).map((r) => r.name);
+
 		expect(names).toEqual([BP, BILLS, TX]);
 	});
 
@@ -432,11 +453,12 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 
 		await runMigration();
 
-		const strip = (list: Row[]) =>
+		const strip = (list: IndexInfo[]) =>
 			list.map(({ name, ...rest }) => ({
 				...rest,
 				name: String(name).replace(/^sqlite_autoindex_.*$/, "sqlite_autoindex"),
 			}));
+
 		expect(strip(await indexes(TX))).toEqual(strip(indexesBefore));
 		expect(strip(await indexes(BP))).toEqual(strip(billIndexesBefore));
 		expect(await foreignKeys(TX)).toEqual(foreignKeysBefore);
@@ -524,15 +546,18 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 			["updated at null", "updated_at", null],
 			["jev pick that doesn't exist", "jev_category_id", 424242],
 		];
-		const outcome = async (table: string, column: string, value: unknown) => {
-			const row: Record<string, unknown> = {
+
+		const outcome = async (table: string, column: string, value: Cell) => {
+			const row = {
 				account_id: 9001,
 				date: "2026-09-30",
 				amount_cents: 100,
 				raw_name: "PROBE",
 				[column]: value,
 			};
+
 			const names = Object.keys(row);
+
 			try {
 				await db
 					.prepare(
@@ -541,13 +566,16 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 					.bind(...Object.values(row))
 					.run();
 				await db.prepare(`DELETE FROM ${table} WHERE id = 9999`).run();
+
 				return "accepted";
 			} catch {
 				return "rejected";
 			}
 		};
+
 		const run = async (table: string) => {
 			const out: Record<string, string> = {};
+
 			for (const [label, column, value] of probes)
 				out[label] = await outcome(table, column, value);
 			out["excluded source plaid"] = await outcome(
@@ -555,6 +583,7 @@ describe("migration 0017: merchant_name, pending and the 'plaid' exclusion sourc
 				"excluded_source",
 				"plaid",
 			);
+
 			return out;
 		};
 
@@ -584,6 +613,7 @@ describe("the real bills table, after every migration", () => {
 				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (9401, 'Zz Real Bill', 100, 1, 'monthly', 'Zz Real Merchant')",
 			),
 		]);
+
 		try {
 			expect(
 				await rows("SELECT merchant_raw_text FROM bills WHERE id = 9401"),
@@ -606,6 +636,7 @@ describe("the real transactions table, after every migration", () => {
 				"INSERT INTO accounts (id, name, type) VALUES (9001, 'Real check', 'depository')",
 			),
 		]);
+
 		try {
 			await db
 				.prepare(

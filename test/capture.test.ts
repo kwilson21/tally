@@ -11,6 +11,7 @@ import {
 function harness() {
 	const logs: string[] = [];
 	const waits: number[] = [];
+
 	return {
 		logs,
 		waits,
@@ -32,19 +33,24 @@ describe("captureWithRetries", () => {
 		const run = harness();
 		let calls = 0;
 		let fallbacks = 0;
+
 		const result = await captureWithRetries({
 			label: "/design-system/proposals (phone)",
 			capture: async () => {
 				calls += 1;
+
 				if (calls === 1) throw FAILURE;
+
 				return "full page";
 			},
 			fallback: async () => {
 				fallbacks += 1;
+
 				return "slices";
 			},
 			...run.options,
 		});
+
 		expect(result).toBe("full page");
 		expect(calls).toBe(2);
 		expect(fallbacks).toBe(0);
@@ -58,6 +64,7 @@ describe("captureWithRetries", () => {
 		const run = harness();
 		let calls = 0;
 		let fallbacks = 0;
+
 		const result = await captureWithRetries({
 			label: "/design-system/proposals (desktop)",
 			capture: async () => {
@@ -66,10 +73,12 @@ describe("captureWithRetries", () => {
 			},
 			fallback: async () => {
 				fallbacks += 1;
+
 				return "slices";
 			},
 			...run.options,
 		});
+
 		expect(result).toBe("slices");
 		expect(calls).toBe(3);
 		expect(fallbacks).toBe(1);
@@ -108,19 +117,23 @@ describe("captureSlices", () => {
 		const run = harness();
 		const taken: number[] = [];
 		let failed = false;
+
 		const shots = await captureSlices({
 			label: "/design-system/proposals (phone)",
 			bands,
 			capture: async (band) => {
 				taken.push(band.y);
+
 				if (band.y === 16000 && !failed) {
 					failed = true;
 					throw FAILURE;
 				}
+
 				return `slice at ${band.y}`;
 			},
 			...run.options,
 		});
+
 		expect(shots).toEqual(["slice at 0", "slice at 16000", "slice at 32000"]);
 		expect(taken).toHaveLength(4);
 		expect(run.waits).toEqual([1000]);
@@ -139,7 +152,9 @@ describe("captureSlices", () => {
 				bands,
 				capture: async (band) => {
 					taken.push(band.y);
+
 					if (band.y === 16000) throw FAILURE;
+
 					return `slice at ${band.y}`;
 				},
 				...run.options,
@@ -155,6 +170,7 @@ describe("pageShooter", () => {
 		const run = harness();
 		let wholeCalls = 0;
 		let sliceCalls = 0;
+
 		const shoot = pageShooter({
 			label: "/design-system/proposals (phone)",
 			whole: async () => {
@@ -163,10 +179,12 @@ describe("pageShooter", () => {
 			},
 			slices: async () => {
 				sliceCalls += 1;
+
 				return ["a", "b"];
 			},
 			...run.options,
 		});
+
 		expect(await shoot()).toEqual(["a", "b"]);
 		expect(wholeCalls).toBe(3);
 		const logsAfterFirst = run.logs.length;
@@ -179,15 +197,18 @@ describe("pageShooter", () => {
 	it("never slices a page whose whole-page capture works", async () => {
 		const run = harness();
 		let sliceCalls = 0;
+
 		const shoot = pageShooter({
 			label: "/settings (desktop)",
 			whole: async () => ["whole"],
 			slices: async () => {
 				sliceCalls += 1;
+
 				return ["a", "b"];
 			},
 			...run.options,
 		});
+
 		expect(await shoot()).toEqual(["whole"]);
 		expect(sliceCalls).toBe(0);
 	});
@@ -196,19 +217,23 @@ describe("pageShooter", () => {
 		const run = harness();
 		let wholeCalls = 0;
 		let sliceCalls = 0;
+
 		const shoot = pageShooter({
 			label: "/design-system/proposals (desktop)",
 			height: 270694,
 			whole: async () => {
 				wholeCalls += 1;
+
 				return ["whole"];
 			},
 			slices: async () => {
 				sliceCalls += 1;
+
 				return ["a", "b"];
 			},
 			...run.options,
 		});
+
 		expect(await shoot()).toEqual(["a", "b"]);
 		expect(await shoot()).toEqual(["a", "b"]);
 		expect(wholeCalls).toBe(0);
@@ -220,35 +245,43 @@ describe("pageShooter", () => {
 		const run = harness();
 		let wholeCalls = 0;
 		let sliceCalls = 0;
+
 		const shootWhole = pageShooter({
 			label: "/settings (desktop)",
 			height: SLICE_HEIGHT,
 			whole: async () => {
 				wholeCalls += 1;
+
 				return ["whole"];
 			},
 			slices: async () => {
 				sliceCalls += 1;
+
 				return ["a", "b"];
 			},
 			...run.options,
 		});
+
 		expect(await shootWhole()).toEqual(["whole"]);
 		expect(wholeCalls).toBe(1);
 		expect(sliceCalls).toBe(0);
+
 		const shootSliced = pageShooter({
 			label: "/settings (desktop)",
 			height: SLICE_HEIGHT + 1,
 			whole: async () => {
 				wholeCalls += 1;
+
 				return ["whole"];
 			},
 			slices: async () => {
 				sliceCalls += 1;
+
 				return ["a", "b"];
 			},
 			...run.options,
 		});
+
 		expect(await shootSliced()).toEqual(["a", "b"]);
 		expect(wholeCalls).toBe(1);
 		expect(sliceCalls).toBe(1);

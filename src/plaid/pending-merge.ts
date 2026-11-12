@@ -68,9 +68,12 @@ function hasAnswerSql(personChoice: string, jevAnswer: string) {
 
 const PENDING =
 	"(SELECT id FROM transactions WHERE plaid_transaction_id = ?1 AND pending = 1)";
+
 const POSTED = "(SELECT id FROM transactions WHERE plaid_transaction_id = ?2)";
+
 /** The posted row's payment group (decision 82): the row, its split parent and its parts, as the triggers read it. */
 const POSTED_GROUP = `(SELECT g.id FROM transactions g WHERE g.id IN (${POSTED}, (SELECT parent_id FROM transactions WHERE id = ${POSTED})) OR g.parent_id = ${POSTED})`;
+
 const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 	SELECT 1 FROM plaid_items WHERE id = ?4 AND sync_lock_id = ?5 AND disconnected_at IS NULL)`;
 
@@ -79,8 +82,10 @@ const PENDING_NOTE_WINS = pendingNoteWinsSql(
 	"p.note_state",
 	"transactions.note_state",
 );
+
 /** The note state the merge picks: the later of the two (laterNoteState), a tie keeping the posted row's. */
 const PICKED_NOTE_STATE = `(CASE WHEN ${PENDING_NOTE_WINS} THEN p.note_state ELSE transactions.note_state END)`;
+
 /**
  * Every compatibility flag of the merged row, written from the picked state (FLAG_RULES in the note machine). "keep" is
  * the two rows' own answers and stamps, the way the merge has always combined them.
@@ -111,8 +116,10 @@ const POSTED_PAYS_ONCE_MOVED = `(${paysBillOrPlanSql("transactions")} OR EXISTS 
 // inherited is never its own choice.
 const OWN_EXCLUSION = `transactions.excluded_source = 'user'
 	AND (transactions.excluded IS NOT pe.excluded OR pe.excluded_source IS NOT 'user')`;
+
 const OWN_INCOME =
 	"transactions.income_source = 'user' AND pe.income_source IS NOT 'user'";
+
 const OWN_REVIEW = `transactions.credit_reviewed_by = 'user'
 	AND (transactions.credit_reviewed IS NOT pe.credit_reviewed OR pe.credit_reviewed_by IS NOT 'user')`;
 
@@ -125,7 +132,9 @@ const OWN_REVIEW = `transactions.credit_reviewed_by = 'user'
 const takesDetailSql = (value: string, guessed: string, cleared: string) =>
 	`(transactions.${cleared} = 0 AND (transactions.${value} IS NULL
 		OR (transactions.${guessed} = 1 AND (p.${cleared} = 1 OR (p.${value} IS NOT NULL AND p.${guessed} = 0)))))`;
+
 const KIND_TAKEN = takesDetailSql("kind", "kind_guessed", "kind_cleared");
+
 const PERSON_TAKEN = takesDetailSql(
 	"for_person_id",
 	"for_person_guessed",
@@ -137,9 +146,11 @@ const PERSON_TAKEN = takesDetailSql(
 /** Mirrors the first category statement: a person's pick on the pending row moves onto the posted row. */
 const LOG_PERSON_PICK = `p.category_source = 'user' AND p.category_id IS NOT NULL
 	AND COALESCE(t.category_source, '') != 'user'`;
+
 /** Mirrors JEV_CATEGORY_ARM (the Jev answer statement): Jev's category moves onto a posted row with no category, at the same amount, never a split. */
 const LOG_JEV_PICK = `p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL AND t.is_split = 0`;
+
 /** Mirrors the split statement that takes the pre-split category when the amount changed. */
 const LOG_SPLIT_CATEGORY = `p.is_split = 1 AND p.amount_cents != ?3
 	AND t.is_split = 0 AND t.split_removed_from_cents IS NULL AND COALESCE(t.category_source, '') != 'user'`;
@@ -178,6 +189,7 @@ const POSTED_GROUP_PAYS = `(EXISTS (SELECT 1 FROM bill_payments other WHERE othe
  * unset confidence and that the purchase isn't split.
  */
 const JEV_CATEGORY_ARM = `p.category_confidence IS NOT NULL AND transactions.category_id IS NULL AND transactions.category_source IS NULL`;
+
 /**
  * Jev's mixed-trip arm of the same statement (#233, #546): its pick, none-fit or mixed reading onto a posted row with a
  * category of its own and no Jev answer. It moves no category.
@@ -450,6 +462,7 @@ export function mergePendingIntoPosted(
 		posted.merchantName,
 		posted.plaidCategory,
 	];
+
 	// D1 wants exactly as many values as the statement's highest numbered parameter.
 	return STATEMENTS.map((sql) =>
 		db.prepare(sql).bind(...values.slice(0, highestParameter(sql))),

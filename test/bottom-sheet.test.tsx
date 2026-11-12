@@ -78,9 +78,11 @@ describe("BottomSheet with a footer", () => {
 	it("puts the footer after the scrolling element, outside it, under a rule with the bottom safe area", () => {
 		const scroller = html.indexOf('id="body-text"');
 		const scrollerEnd = html.indexOf("</div>", scroller);
+
 		const footerStart = html.indexOf(
 			'<div class="shrink-0 border-t border-rule',
 		);
+
 		expect(footerStart).toBeGreaterThan(scrollerEnd);
 		expect(footerStart).toBeGreaterThan(0);
 		const footer = html.slice(footerStart);
@@ -113,6 +115,7 @@ describe("BottomSheet with a footer", () => {
 				Body
 			</BottomSheet>,
 		);
+
 		expect(still).not.toMatch(/\bsheet-panel\b|\bfade-in\b/);
 	});
 });

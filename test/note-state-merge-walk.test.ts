@@ -8,6 +8,7 @@ import {
 	type NoteState,
 } from "../src/machines/note-state";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-10-01";
@@ -17,6 +18,7 @@ let item = 0;
 
 /** A held answer that every state can be seen with: Jev said yes, the question was asked, and the try is stamped. */
 const HELD = { detailsAsked: 1, worth: 1, tried: STAMP, failed: null };
+
 const TEXT: Partial<Record<NoteState, string>> = {
 	guessed: "Note",
 	written: "Note",
@@ -60,6 +62,7 @@ async function merge(key: string, pending: NoteState, posted: NoteState) {
 			plaidCategory: null,
 		}),
 	);
+
 	return db
 		.prepare(
 			`SELECT note, note_state AS state, note_guessed AS guessed, note_dismissed AS dismissed,
@@ -81,10 +84,12 @@ async function merge(key: string, pending: NoteState, posted: NoteState) {
 describe("the merge's note state, pair by pair", () => {
 	beforeAll(async () => {
 		await resetDemo(db, TODAY);
+
 		const row = await db
 			.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
-		item = row?.id as number;
+
+		item = present(row?.id);
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = ? WHERE id = ?")
 			.bind(LOCK, item)

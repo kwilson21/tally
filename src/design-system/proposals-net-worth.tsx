@@ -23,10 +23,12 @@ function days(from: string, to: string): string[] {
 	const out: string[] = [];
 	const day = new Date(`${from}T00:00:00Z`);
 	const end = new Date(`${to}T00:00:00Z`);
+
 	while (day <= end) {
 		out.push(day.toISOString().slice(0, 10));
 		day.setUTCDate(day.getUTCDate() + 1);
 	}
+
 	return out;
 }
 
@@ -37,6 +39,7 @@ function days(from: string, to: string): string[] {
 function series(step: number): NetWorthPoint[] {
 	const all = days("2026-05-01", TODAY);
 	const before = all.filter((d) => d < ADDED);
+
 	return all.map((date, i) => {
 		const n = Math.min(i, before.length - 1);
 		// A payday on the 1st and the 15th lifts it, and the days' spending takes some back: a small sawtooth on a steady rise.
@@ -45,6 +48,7 @@ function series(step: number): NetWorthPoint[] {
 		const sincePayday = day < 15 ? day - 1 : day - 15;
 		const wobble = 15_000 - sincePayday * 1_000;
 		const after = date >= ADDED ? step + (i - before.length) * 1_000 : 0;
+
 		return { date, cents: trend + wobble + after };
 	});
 }
@@ -68,7 +72,9 @@ function view(
  */
 function withSentence(points: NetWorthPoint[], sentence: string): NetWorthView {
 	const drawn = view(points);
+
 	if (drawn.kind !== "line") return drawn;
+
 	return {
 		...drawn,
 		sentence,
@@ -82,6 +88,7 @@ function withSentence(points: NetWorthPoint[], sentence: string): NetWorthView {
 const CARD_ADDED: AccountAdded[] = [
 	{ name: "Apple Card", verb: "added", date: ADDED },
 ];
+
 const BANK_LINKED: AccountAdded[] = [
 	{ name: "Wells Fargo", verb: "linked", date: ADDED },
 ];
@@ -91,6 +98,7 @@ const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 /** A round cap on a zero-length stroke: a dot that stays round however the chart's box stretches. */
 function Cap({ at, width, tone }: { at: string; width: number; tone: string }) {
 	const [x, y] = at.split(",");
+
 	return (
 		<path
 			d={`M${x} ${y}h0.01`}
@@ -108,9 +116,11 @@ function Cap({ at, width, tone }: { at: string; width: number; tone: string }) {
  */
 function MarkedTop({ points }: { points: NetWorthPoint[] }) {
 	const drawn = view(points);
+
 	if (drawn.kind !== "line") return null;
 	const index = points.findIndex((p) => p.date === ADDED);
 	const ring = drawn.points.split(" ")[index] ?? "0,0";
+
 	return (
 		<>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Accounts</h1>

@@ -48,6 +48,7 @@ export function TimeZoneRow({
 			{label}
 		</option>
 	);
+
 	return (
 		<details
 			id={`${id}-disclosure`}

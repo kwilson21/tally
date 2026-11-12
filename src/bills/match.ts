@@ -42,6 +42,7 @@ async function candidatesBetween(
 		)
 		.bind(...merchantTextArgs(bill), start, finish)
 		.all<MatchCandidate>();
+
 	return results;
 }
 
@@ -58,6 +59,7 @@ export function pickBillPayment(
 	windowDays = BILL_DATE_WINDOW_DAYS,
 ): MatchCandidate | undefined {
 	const due = dayNumber(dueDate);
+
 	return candidates
 		.filter(
 			(candidate) => Math.abs(dayNumber(candidate.date) - due) <= windowDays,
@@ -102,10 +104,13 @@ export async function matchBillPayments(
 	given?: string,
 ): Promise<number> {
 	const today = given ?? (await householdToday(db));
+
 	const first = await db
 		.prepare("SELECT MIN(date) AS date FROM transactions")
 		.first<{ date: string | null }>();
+
 	if (!first?.date) return 0;
+
 	const bills = (
 		await db
 			.prepare(
@@ -113,9 +118,11 @@ export async function matchBillPayments(
 			)
 			.all<Bill>()
 	).results;
+
 	const endDay = dayNumber(today) + 7;
 	// Each occurrence is matched at its own month's amount (decision 101, src/bills/amount.ts).
 	const amountRows = await amountRowsByBill(db);
+
 	type Pair = {
 		bill: Bill;
 		period: string;
@@ -123,16 +130,20 @@ export async function matchBillPayments(
 		dateDistance: number;
 		amountDistance: number;
 	};
+
 	const pairs: Pair[] = [];
 	const firstDay = dayNumber(first.date);
+
 	const linkedRows = (
 		await db
 			.prepare("SELECT bill_id,period FROM bill_payments WHERE status='linked'")
 			.all<{ bill_id: number; period: string }>()
 	).results;
+
 	const linked = new Set(
 		linkedRows.map((row) => `${row.bill_id}:${row.period}`),
 	);
+
 	const dismissedRows = (
 		await db
 			.prepare(
@@ -140,51 +151,67 @@ export async function matchBillPayments(
 			)
 			.all<{ bill_id: number; period: string; transaction_id: number }>()
 	).results;
+
 	const dismissed = new Set(
 		dismissedRows.map(
 			(row) => `${row.bill_id}:${row.period}:${row.transaction_id}`,
 		),
 	);
+
 	const reserved = new Set<number>();
+
 	for (const bill of bills) {
 		if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
 			const step = bill.frequency === "weekly" ? 7 : 14;
+
 			const anchorDay =
 				bill.frequency === "weekly"
 					? firstDay -
 						((new Date(`${first.date}T00:00:00Z`).getUTCDay() + 6) % 7) +
 						(bill.due_day - 1)
 					: dayNumber(bill.anchor_date ?? today);
+
 			const window = billDateWindowDays(bill.frequency);
+
 			// The first occurrence whose window reaches the first transaction, not only one falling on or
 			// after it, so a payment the day after a due date still links to that due date.
 			const firstOccurrence =
 				anchorDay + Math.ceil((firstDay - window - anchorDay) / step) * step;
+
 			let occurrenceDay = firstOccurrence;
+
 			const occurrenceDates: { due: string; period: string; day: number }[] =
 				[];
+
 			while (occurrenceDay <= endDay + window) {
 				const due = dateOfDayNumber(occurrenceDay);
 				const period = due;
+
 				if (!linked.has(`${bill.id}:${period}`)) {
 					occurrenceDates.push({ due, period, day: occurrenceDay });
 				}
+
 				occurrenceDay += step;
 			}
+
 			if (occurrenceDates.length) {
 				const firstOccurrenceDate = occurrenceDates[0];
 				const lastOccurrenceDate = occurrenceDates.at(-1);
+
 				if (!firstOccurrenceDate || !lastOccurrenceDate) continue;
 				const startDate = dateOfDayNumber(firstOccurrenceDate.day - window);
 				const finishDate = dateOfDayNumber(lastOccurrenceDate.day + window);
+
 				const candidates = await candidatesBetween(
 					db,
 					bill,
 					startDate,
 					finishDate,
 				);
+
 				for (const { due, period, day } of occurrenceDates) {
 					const cents = occurrenceCents(bill, due, amountRows);
+
 					for (const candidate of candidates) {
 						if (
 							!pickBillPayment([candidate], due, cents, window) ||
@@ -201,62 +228,80 @@ export async function matchBillPayments(
 					}
 				}
 			}
+
 			continue;
 		}
+
 		const firstMonth = new Date(`${first.date.slice(0, 7)}-01T00:00:00Z`);
 		firstMonth.setUTCMonth(firstMonth.getUTCMonth() - 1);
 		let year = firstMonth.getUTCFullYear();
 		let month = firstMonth.getUTCMonth() + 1;
 		// The occurrences still waiting on a payment, earliest first, read in one statement below.
 		const occurrences: { due: string; period: string }[] = [];
+
 		while (year < Number(today.slice(0, 4)) + 2) {
 			if (bill.frequency === "yearly" && month !== bill.anchor_month) {
 				month += 1;
+
 				if (month === 13) {
 					month = 1;
 					year += 1;
 				}
+
 				continue;
 			}
+
 			if (
 				bill.frequency === "quarterly" &&
 				(month - (bill.anchor_month ?? 1) + 12) % 3 !== 0
 			) {
 				month += 1;
+
 				if (month === 13) {
 					month = 1;
 					year += 1;
 				}
+
 				continue;
 			}
+
 			const schedule = {
 				frequency: bill.frequency,
 				dueDay: bill.due_day,
 				anchorMonth: bill.anchor_month,
 			};
+
 			const { dueDate: due, period } = billOccurrenceForMonth(
 				schedule,
 				year,
 				month,
 			);
+
 			if (dayNumber(due) > endDay) break;
+
 			if (linked.has(`${bill.id}:${period}`)) {
 				month += bill.frequency === "yearly" ? 12 : 1;
+
 				while (month > 12) {
 					month -= 12;
 					year += 1;
 				}
+
 				continue;
 			}
+
 			occurrences.push({ due, period });
 			month += bill.frequency === "yearly" ? 12 : 1;
+
 			while (month > 12) {
 				month -= 12;
 				year += 1;
 			}
 		}
+
 		const firstDue = occurrences[0];
 		const lastDue = occurrences.at(-1);
+
 		if (firstDue && lastDue) {
 			// One statement for the whole bill, however many months of history it spans; each occurrence then
 			// takes only the candidates inside its own date window.
@@ -266,8 +311,10 @@ export async function matchBillPayments(
 				shiftDay(firstDue.due, -BILL_DATE_WINDOW_DAYS),
 				shiftDay(lastDue.due, BILL_DATE_WINDOW_DAYS),
 			);
+
 			for (const { due, period } of occurrences) {
 				const cents = occurrenceCents(bill, due, amountRows);
+
 				for (const candidate of candidates) {
 					if (
 						!pickBillPayment([candidate], due, cents) ||
@@ -285,6 +332,7 @@ export async function matchBillPayments(
 			}
 		}
 	}
+
 	pairs.sort(
 		(a, b) =>
 			a.dateDistance - b.dateDistance ||
@@ -297,7 +345,9 @@ export async function matchBillPayments(
 	// matcher leaves it, and only their hand link takes it. Income is never a bill payment (the candidate
 	// query leaves `flag_income` ones out, as the hand-link picker does).
 	const assignments = assignPairs(pairs, reserved);
+
 	if (!assignments.length) return 0;
+
 	const result = await db
 		.prepare(
 			// An occurrence with a payment already linked (a part payment, too) takes no more from the matcher. The unique
@@ -317,6 +367,7 @@ export async function matchBillPayments(
 			),
 		)
 		.run();
+
 	return result.meta.changes ?? 0;
 }
 
@@ -338,18 +389,22 @@ export function assignPairs<P extends Pair>(
 ): P[] {
 	const key = (p: P) => `${p.bill.id}:${p.period}`;
 	const options = new Map<string, P[]>();
+
 	for (const pair of pairs) {
 		if (reserved.has(pair.candidate.id)) continue;
 		const list = options.get(key(pair)) ?? [];
 		list.push(pair);
 		options.set(key(pair), list);
 	}
+
 	const byPayment = new Map<number, P>();
 	const byOccurrence = new Map<string, P>();
+
 	const take = (pair: P) => {
 		byPayment.set(pair.candidate.id, pair);
 		byOccurrence.set(key(pair), pair);
 	};
+
 	for (const pair of pairs)
 		if (
 			!reserved.has(pair.candidate.id) &&
@@ -357,20 +412,27 @@ export function assignPairs<P extends Pair>(
 			!byOccurrence.has(key(pair))
 		)
 			take(pair);
+
 	const augment = (occurrence: string, seen: Set<number>): boolean => {
 		for (const pair of options.get(occurrence) ?? []) {
 			const id = pair.candidate.id;
+
 			if (seen.has(id)) continue;
 			seen.add(id);
 			const holder = byPayment.get(id);
+
 			if (!holder || augment(key(holder), seen)) {
 				take(pair);
+
 				return true;
 			}
 		}
+
 		return false;
 	};
+
 	for (const occurrence of options.keys())
 		if (!byOccurrence.has(occurrence)) augment(occurrence, new Set());
+
 	return [...byOccurrence.values()];
 }

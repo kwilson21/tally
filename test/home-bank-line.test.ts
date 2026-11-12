@@ -4,24 +4,28 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { bankSyncs } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { envWith } from "./helpers/doubles";
 
 // Home's picked bank alert (decision 82, P96): a connected bank that needs attention or hasn't synced
 // for 3 days gets an as-of tag and a soft alert line with Fix before the forecast.
 // Only Date is faked: the Workers runtime and D1 keep their real timers. Noon Eastern on Oct 7.
 const NOW = "2026-10-07T16:00:00Z";
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 
 async function page(bindings: Env = family) {
 	const res = await home.request("/", {}, bindings);
+
 	return { res, html: await res.text() };
 }
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, " ").replaceAll("&#39;", "'");
 
 const FIRST = "First Harbor Bank";
 const SECOND = "Northline Card Services";
+
 const setBank = (
 	name: string,
 	{ status, syncedAt }: { status?: string; syncedAt?: string | null },
@@ -74,10 +78,12 @@ describe("bankSyncs", () => {
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES (X'00', 'Old Bank', 'person', datetime('now'))",
 		).run();
 		const syncs = await bankSyncs(env.DB);
+
 		// Each bank carries its plaid_items id, which its flag is matched by (readSetup).
 		const ids = await env.DB.prepare(
 			"SELECT id FROM plaid_items ORDER BY id",
 		).all<{ id: number }>();
+
 		expect(syncs.map((bank) => bank.id)).toEqual(
 			ids.results.map((row) => row.id),
 		);

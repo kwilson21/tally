@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 // Decision 120 (P135 A): one suggestion card wherever Tally asks, with one set of answers. Settings' No retires the
 // suggestion and asks decision 101's question in place; Organize's card creates the category and files its purchases.
@@ -13,20 +14,25 @@ const THIS = TODAY.slice(0, 7);
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
 async function post(path: string, fields: [string, string][], hx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (hx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(hx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -43,25 +49,25 @@ beforeEach(async () => {
 		),
 		env.DB.prepare("DELETE FROM category_suggestions"),
 	]);
-	suggestion = (
+	suggestion = present(
 		await env.DB.prepare(
 			"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-		).first<{ id: number }>()
-	)?.id as number;
-	chewy = (
+		).first<{ id: number }>(),
+	).id;
+	chewy = present(
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 6412, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
 		)
 			.bind(`${THIS}-05`, suggestion)
-			.first<{ id: number }>()
-	)?.id as number;
-	petsmart = (
+			.first<{ id: number }>(),
+	).id;
+	petsmart = present(
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 2399, 'PETSMART 0412', 'Petsmart', 1, ?) RETURNING id",
 		)
 			.bind(`${THIS}-02`, suggestion)
-			.first<{ id: number }>()
-	)?.id as number;
+			.first<{ id: number }>(),
+	).id;
 });
 
 const count = async (sql: string) =>
@@ -71,6 +77,7 @@ const count = async (sql: string) =>
 function cardMarkup(html: string, sentence: string): string {
 	const start = html.indexOf(sentence);
 	expect(start).toBeGreaterThan(-1);
+
 	return html.slice(start, html.indexOf("</form>", start));
 }
 
@@ -94,6 +101,7 @@ describe("Settings: one card, and No asks in its place", () => {
 			`/settings/suggestions/${suggestion}/dismiss`,
 			[],
 		);
+
 		expect(
 			await count(
 				`SELECT COUNT(*) AS n FROM category_suggestions WHERE id = ${suggestion} AND status = 'dismissed'`,
@@ -109,16 +117,20 @@ describe("Settings: one card, and No asks in its place", () => {
 
 	it("Yes writes one Never suggest line for each store the question asked about, and says so", async () => {
 		const no = await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+
 		const stores = [...no.html.matchAll(/name="store" value="([^"]+)"/g)].map(
-			(match) => match[1] as string,
+			(match) => present(match[1]),
 		);
+
 		expect(stores.length).toBe(2);
+
 		const yes = await post(`/settings/suggestions/${suggestion}/dismiss`, [
 			["answer", "ask_yes"],
 			["id", `new-${suggestion}`],
 			["kind", "new_category"],
 			...stores.map((store): [string, string] => ["store", store]),
 		]);
+
 		expect(
 			await count(
 				"SELECT COUNT(*) AS n FROM never_suggest_rules WHERE kind = 'new_category'",
@@ -131,15 +143,18 @@ describe("Settings: one card, and No asks in its place", () => {
 
 	it("Not now writes no line and returns to Settings' categories", async () => {
 		const no = await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+
 		const stores = [...no.html.matchAll(/name="store" value="([^"]+)"/g)].map(
-			(match) => match[1] as string,
+			(match) => present(match[1]),
 		);
+
 		const notNow = await post(`/settings/suggestions/${suggestion}/dismiss`, [
 			["answer", "ask_not_now"],
 			["id", `new-${suggestion}`],
 			["kind", "new_category"],
 			...stores.map((store): [string, string] => ["store", store]),
 		]);
+
 		expect(notNow.res.status).toBe(200);
 		expect(
 			await count(
@@ -156,6 +171,7 @@ describe("Settings: one card, and No asks in its place", () => {
 			["kind", "new_category"],
 			["store", "CHEWY.COM"],
 		]);
+
 		expect(stale.res.status).toBe(404);
 		expect(
 			await count(
@@ -169,6 +185,7 @@ describe("Settings: one card, and No asks in its place", () => {
 function formMarkup(html: string, sentence: string): string {
 	const at = html.indexOf(sentence);
 	expect(at).toBeGreaterThan(-1);
+
 	return html.slice(html.lastIndexOf("<form", at), html.indexOf("</form>", at));
 }
 
@@ -177,11 +194,11 @@ describe("Settings: the question is drawn where the No's card was", () => {
 
 	beforeEach(async () => {
 		// Pet Care has two purchases and Tutoring has one, so Pet Care is listed first.
-		tutoring = (
+		tutoring = present(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Tutoring', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 4500, 'TUTOR HUB 77', 'Tutor Hub', 1, ?)",
 		)
@@ -203,6 +220,7 @@ describe("Settings: the question is drawn where the No's card was", () => {
 		const { html } = await post(`/settings/suggestions/${suggestion}/dismiss`, [
 			["place", "0"],
 		]);
+
 		const question = html.indexOf("Don&#39;t suggest Pet Care again for");
 		expect(question).toBeGreaterThan(-1);
 		expect(question).toBeLessThan(html.indexOf("A new category: Tutoring"));
@@ -212,6 +230,7 @@ describe("Settings: the question is drawn where the No's card was", () => {
 		const { html } = await post(`/settings/suggestions/${tutoring}/dismiss`, [
 			["place", "1"],
 		]);
+
 		const question = html.indexOf("Don&#39;t suggest Tutoring again for");
 		expect(question).toBeGreaterThan(html.indexOf("A new category: Pet Care"));
 	});
@@ -222,9 +241,11 @@ describe("Settings: the question is drawn where the No's card was", () => {
 		expect(
 			none.html.indexOf("Don&#39;t suggest Pet Care again for"),
 		).toBeGreaterThan(none.html.indexOf("A new category: Tutoring"));
+
 		const past = await post(`/settings/suggestions/${tutoring}/dismiss`, [
 			["place", "99"],
 		]);
+
 		expect(past.res.status).toBe(200);
 		expect(
 			past.html.indexOf("Don&#39;t suggest Tutoring again for"),
@@ -234,22 +255,25 @@ describe("Settings: the question is drawn where the No's card was", () => {
 	it("with more than ten waiting, the question still comes before a card that moved up into the list", async () => {
 		// Ten are listed, so Extra 9 waits behind the limit until Pet Care is answered and moves up.
 		for (let i = 1; i <= 9; i++) {
-			const id = (
+			const id = present(
 				await env.DB.prepare(
 					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
 				)
 					.bind(`Extra ${i}`)
-					.first<{ id: number }>()
-			)?.id as number;
+					.first<{ id: number }>(),
+			).id;
+
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, ?, ?, 1, ?)",
 			)
 				.bind(`${THIS}-09`, `EXTRA ${i}`, `Extra ${i}`, id)
 				.run();
 		}
+
 		const { html } = await post(`/settings/suggestions/${suggestion}/dismiss`, [
 			["place", "0"],
 		]);
+
 		const question = html.indexOf("Don&#39;t suggest Pet Care again for");
 		expect(question).toBeLessThan(html.indexOf("A new category: Tutoring"));
 		expect(question).toBeLessThan(html.indexOf("A new category: Extra 9"));
@@ -278,6 +302,7 @@ describe("the suggested name is tidied the same on every surface", () => {
 			`/settings/suggestions/${suggestion}/dismiss`,
 			[],
 		);
+
 		expect(html).toContain("Don&#39;t suggest Pet care again for");
 		expect(html).not.toContain("PET CARE");
 	});
@@ -288,10 +313,12 @@ describe("the suggested name is tidied the same on every surface", () => {
 		)
 			.bind(suggestion)
 			.run();
+
 		const { res, html } = await post(
 			`/settings/suggestions/${suggestion}/dismiss`,
 			[],
 		);
+
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Tally won't suggest Pet care again.",
 		);
@@ -312,10 +339,12 @@ describe("the suggested name is tidied the same on every surface", () => {
 describe("the card follows its own rule, not the Suggestions queue's switch", () => {
 	it("No still asks with Guess categories off, since Settings' card is drawn whatever that switch says", async () => {
 		await saveAiSwitches(env.DB, { categories: false });
+
 		const { html } = await post(
 			`/settings/suggestions/${suggestion}/dismiss`,
 			[],
 		);
+
 		expect(html).toContain("Don&#39;t suggest Pet Care again for");
 		await saveAiSwitches(env.DB, { categories: true });
 	});
@@ -326,10 +355,12 @@ describe("the card follows its own rule, not the Suggestions queue's switch", ()
 		)
 			.bind(suggestion)
 			.run();
+
 		const { res, html } = await post(
 			`/settings/suggestions/${suggestion}/dismiss`,
 			[],
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Tally won't suggest Pet Care again.",
@@ -360,11 +391,13 @@ describe("Suggestions page: the card's unticked note is kept", () => {
 			["ticked", String(chewy)],
 			[`note_${petsmart}`, "Pet food"],
 		]);
+
 		const row = await env.DB.prepare(
 			"SELECT note, category_id FROM transactions WHERE id = ?",
 		)
 			.bind(petsmart)
 			.first<{ note: string | null; category_id: number | null }>();
+
 		expect(row?.note).toBe("Pet food");
 		expect(row?.category_id).toBeNull();
 	});
@@ -437,8 +470,10 @@ describe("Organize: the card above the chips", () => {
 
 	it("shows the sentence as the card's one headline, and no Skip in the card", async () => {
 		const { html } = await get("/transactions/organize");
+
 		const sentence =
 			"Tally suggested a new category for this and 1 more: Pet Care";
+
 		expect(html).toContain(`<h2 class="text-lg">${sentence}</h2>`);
 		expect(cardMarkup(html, sentence)).not.toContain("Skip");
 	});
@@ -452,6 +487,7 @@ describe("Organize: the card above the chips", () => {
 				.bind(`${THIS}-${day}`)
 				.run();
 		}
+
 		const { html } = await get("/transactions/organize");
 		expect(html).toContain('name="group" value="Costco"');
 		expect(html).not.toContain("Tally suggested a new category");
@@ -466,10 +502,13 @@ describe("Organize: the card above the chips", () => {
 
 	it("queues the card's Create and Organize's Save on one request queue, so a second submit is dropped", async () => {
 		const { html } = await get("/transactions/organize");
+
 		const forms = [
 			...html.matchAll(/<form\b[^>]*hx-post="[^"]+"[^>]*>[\s\S]*?<\/form>/g),
 		].map((match) => match[0]);
+
 		expect(forms).toHaveLength(2);
+
 		for (const form of forms) {
 			expect(form).toContain('hx-sync="#organize-page:drop"');
 			expect(form).toContain('hx-disable="#organize-page button[type=submit]"');
@@ -479,13 +518,14 @@ describe("Organize: the card above the chips", () => {
 	it("draws the card for Chewy, the first on screen, with many other waiting suggestions behind it", async () => {
 		// Each other suggestion is one charge from a merchant whose name sorts after Chewy and Petsmart, so Chewy stays first.
 		for (let i = 1; i <= 50; i++) {
-			const id = (
+			const id = present(
 				await env.DB.prepare(
 					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
 				)
 					.bind(`Zed ${i}`)
-					.first<{ id: number }>()
-			)?.id as number;
+					.first<{ id: number }>(),
+			).id;
+
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, ?, ?, 1, ?)",
 			)
@@ -497,6 +537,7 @@ describe("Organize: the card above the chips", () => {
 				)
 				.run();
 		}
+
 		const { html } = await get("/transactions/organize");
 		expect(html).toContain('name="group" value="Chewy"');
 		expect(html).toContain(
@@ -519,6 +560,7 @@ describe("Organize: the card above the chips", () => {
 			["shown", String(chewy)],
 			["shown", String(petsmart)],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Created Pet Care with 2 transactions",
@@ -538,11 +580,13 @@ describe("Organize: the card above the chips", () => {
 
 	it("an answer for a suggestion already answered says it changed, as Settings says", async () => {
 		await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+
 		const { res } = await post("/transactions/organize/suggestion", [
 			["suggestion", String(suggestion)],
 			["shown", String(chewy)],
 			["shown", String(petsmart)],
 		]);
+
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"That suggestion was changed somewhere else. Here's the current list.",
 		);
@@ -552,11 +596,13 @@ describe("Organize: the card above the chips", () => {
 		await env.DB.prepare(
 			`CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}; END`,
 		).run();
+
 		const { res, html } = await post("/transactions/organize/suggestion", [
 			["suggestion", String(suggestion)],
 			["shown", String(chewy)],
 			["shown", String(petsmart)],
 		]);
+
 		await env.DB.prepare("DROP TRIGGER file_during_create").run();
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
@@ -591,6 +637,7 @@ describe("Organize: the card above the chips", () => {
 			],
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
 	});
@@ -604,6 +651,7 @@ const fields = (...shown: number[]): [string, string][] => [
 
 const CHANGED =
 	"That suggestion was changed somewhere else. Here's the current list.";
+
 /** The changed words under Organize's heading, as they are drawn without a card for the suggestion (decision 120). */
 const CHANGED_LINE = `<p role="alert" class="mt-3 text-sm text-over">${CHANGED.replace("'", "&#39;")}</p>`;
 
@@ -627,17 +675,20 @@ describe("Organize: Create files only the purchases the card showed", () => {
 
 	it("files nothing, and draws the card with every purchase, when one was added after the card was drawn", async () => {
 		await get("/transactions/organize");
-		const third = (
+
+		const third = present(
 			await env.DB.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 500, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
 			)
 				.bind(`${THIS}-06`, suggestion)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy, petsmart),
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(CHANGED);
 		expect(
@@ -651,6 +702,7 @@ describe("Organize: Create files only the purchases the card showed", () => {
 			),
 		).toBe(3);
 		const card = cardMarkup(html, "Tally suggested a new category");
+
 		for (const id of [chewy, petsmart, third])
 			expect(card).toContain(`name="shown" value="${id}"`);
 	});
@@ -662,10 +714,12 @@ describe("Organize: Create files only the purchases the card showed", () => {
 		)
 			.bind(petsmart)
 			.run();
+
 		const { res } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy, petsmart),
 		);
+
 		expect(res.headers.get("HX-Trigger")).toContain(CHANGED);
 		expect(
 			await count(
@@ -700,6 +754,7 @@ describe("Organize: Create files only the purchases the card showed", () => {
 			fields(chewy),
 			false,
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();
 		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
@@ -725,11 +780,13 @@ describe("Organize without JavaScript: a changed answer says so on the page", ()
 		await env.DB.prepare(
 			`CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}; END`,
 		).run();
+
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy, petsmart),
 			false,
 		).finally(() => env.DB.prepare("DROP TRIGGER file_during_create").run());
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();
 		// chewy is still attached, so its card is drawn and the words sit in it, once, not under Organize's heading.
@@ -756,11 +813,13 @@ describe("Organize without JavaScript: a changed answer says so on the page", ()
 
 	it("says it changed when Create comes for a suggestion already answered, and draws no card", async () => {
 		await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy, petsmart),
 			false,
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();
 		expect(html).toContain(CHANGED_LINE);
@@ -769,11 +828,13 @@ describe("Organize without JavaScript: a changed answer says so on the page", ()
 
 	it("says it changed under the heading when no card is drawn for the purchases it showed", async () => {
 		await costcoFirst();
+
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy),
 			false,
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();
 		expect(html).toContain('name="group" value="Costco"');
@@ -795,6 +856,7 @@ describe("Organize without JavaScript: a changed answer says so on the page", ()
 			],
 			false,
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();
 		expect(html).toContain(CHANGED_LINE);
@@ -810,6 +872,7 @@ describe("Organize: a refused Create shows its reason in the card", () => {
 			(await count(
 				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
 			)) ?? 0;
+
 		for (let i = active; i < 50; i++)
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
@@ -828,6 +891,7 @@ describe("Organize: a refused Create shows its reason in the card", () => {
 			],
 			false,
 		);
+
 		expect(res.status).toBe(422);
 		expect(res.headers.get("Location")).toBeNull();
 		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
@@ -847,11 +911,13 @@ describe("Organize: a refused Create shows its reason in the card", () => {
 
 	it("without JavaScript, shows the reason under Organize's heading when no card is drawn for it", async () => {
 		await costcoFirst();
+
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy, petsmart),
 			false,
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			`<p role="alert" class="mt-3 text-sm text-over">${FULL}</p>`,
@@ -865,6 +931,7 @@ describe("Organize: a refused Create shows its reason in the card", () => {
 			["shown", String(chewy)],
 			["shown", String(petsmart)],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(res.headers.get("HX-Trigger")).toBeNull();
 		expect(cardMarkup(html, "Tally suggested a new category")).toContain(

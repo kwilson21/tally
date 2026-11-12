@@ -70,17 +70,16 @@ const ask: BudgetAsk = {
 /** A not-done budgets step: asked (one category to answer), or nothing asked for the given reason. */
 const budgetsAsked = (
 	over: Partial<Extract<BudgetsStep, { done: false }>> = {},
-) =>
-	({
-		done: false,
-		month: "2026-10",
-		asks: [ask],
-		keepAllOpen: false,
-		needs: null,
-		firstDate: "2026-08-01",
-		nothingAsked: null,
-		...over,
-	}) as BudgetsStep;
+): BudgetsStep => ({
+	done: false,
+	month: "2026-10",
+	asks: [ask],
+	keepAllOpen: false,
+	needs: null,
+	firstDate: "2026-08-01",
+	nothingAsked: null,
+	...over,
+});
 
 /** The budgets step with nothing to ask: no category left, and the reason the step says (null when it was answered). */
 const budgetsNothing = (nothingAsked: NothingAsked | null) =>
@@ -101,16 +100,20 @@ const modelOf = (over: Partial<FirstPageModel> = {}): FirstPageModel => ({
 });
 
 const PAY_ANSWERED = { payAnswered: true };
+
 const BILLS_KEPT = {
 	ledger: [{ id: "bills", text: "Bills · 1 kept, about $15 a month" }],
 };
+
 const BILL: BillSuggestion = {
 	rawName: "NETFLIX",
+	bankText: "NETFLIX.COM",
 	displayName: "Netflix",
 	amountCents: 1549,
 	dueDay: 5,
 	categoryId: 1,
-} as BillSuggestion;
+	chargeCount: 3,
+};
 
 const stepsOf = (notes: SkippedNote[]) => notes.map((note) => note.step);
 
@@ -134,6 +137,7 @@ describe("skippedNotes", () => {
 		const notes = skippedNotes(
 			modelOf({ budgets: budgetsAsked(), waiting: [BILL, BILL] }),
 		);
+
 		expect(notes).toEqual([skippedPay(), skippedBills(2)]);
 	});
 
@@ -202,16 +206,18 @@ describe("skippedNotes", () => {
 				notes: ["Your pay", "Your bills", "Your budgets"],
 			},
 		];
+
 		it.each(cases)(
 			"pay asked $pay, bills asked $bills, budgets asked $budgets: $notes",
 			({ pay, bills, budgets, notes }) => {
 				const model = modelOf({
-					...(pay ? PAY_ANSWERED : {}),
-					...(bills ? BILLS_KEPT : {}),
+					payAnswered: pay,
+					ledger: bills ? BILLS_KEPT.ledger : [],
 					budgets: budgetsNothing(budgets ? null : "every-category-budgeted"),
 					budgetsAnswered: budgets,
 					waiting: [],
 				});
+
 				expect(stepsOf(skippedNotes(model))).toEqual(notes);
 			},
 		);
@@ -220,6 +226,7 @@ describe("skippedNotes", () => {
 			const notes = skippedNotes(
 				modelOf({ budgets: budgetsNothing("no-categories") }),
 			);
+
 			expect(notes.at(-1)).toEqual(skippedBudgets("no-categories"));
 		});
 
@@ -231,6 +238,7 @@ describe("skippedNotes", () => {
 					waiting: [BILL, BILL, BILL],
 				}),
 			);
+
 			expect(notes).toEqual([
 				skippedBills(3),
 				skippedBudgets("every-category-budgeted"),

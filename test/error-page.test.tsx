@@ -18,6 +18,7 @@ describe("ErrorPage", () => {
 			const html = render(
 				kind === "404" ? { kind } : { kind, retryHref: "/bills" },
 			);
+
 			expect(html.match(/<h1/g)).toHaveLength(1);
 			expect(html).toMatch(
 				new RegExp(

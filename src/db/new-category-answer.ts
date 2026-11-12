@@ -42,16 +42,20 @@ export function newCategoryTarget(
 ): NewCategoryTarget {
 	const name = normalizeName(typed);
 	const active = activeNamed(name, categories);
+
 	if (active)
 		return { ok: true, kind: "existing", id: active.id, name: active.name };
 	const parsed = parseCategory(nameForm(name), categories, null);
+
 	if (!parsed.ok) {
 		const error = parsed.errors.name ?? "";
+
 		return {
 			ok: false,
 			error: error === fullMessage("add") ? FULL_NEW_CATEGORY : error,
 		};
 	}
+
 	return {
 		ok: true,
 		kind: "create",
@@ -69,7 +73,9 @@ export async function pendingCategoryNames(
 	merchantKeys: string[],
 ): Promise<Map<string, string>> {
 	const names = new Map<string, string>();
+
 	if (merchantKeys.length === 0) return names;
+
 	const { results } = await db
 		.prepare(
 			`SELECT ${merchantKeySql("t")} AS key, cs.name AS name FROM category_suggestions cs
@@ -80,8 +86,10 @@ export async function pendingCategoryNames(
 		)
 		.bind(JSON.stringify(merchantKeys))
 		.all<{ key: string; name: string }>();
+
 	for (const row of results)
 		if (!names.has(row.key)) names.set(row.key, row.name);
+
 	return names;
 }
 
@@ -108,12 +116,16 @@ export async function suggestedCategoryName(
 		)
 		.bind(item.transactionId, item.transactionId)
 		.first<{ raw: string | null }>();
+
 	if (!allowed) return null;
 	const bankText = cleanBankText(allowed.raw ?? "");
+
 	const pending = (await pendingCategoryNames(db, [item.merchantKey])).get(
 		item.merchantKey,
 	);
+
 	if (pending) return pending;
+
 	if (!ai || !(await readAiSwitches(db)).categories) return null;
 	// Asked once for each transaction and set of active categories (decisions 161 and 165): a kept answer is read and
 	// never asked again while the categories are the ones it was asked against. A category made, renamed, archived or
@@ -121,6 +133,7 @@ export async function suggestedCategoryName(
 	const active = (await categoryNames(db)).filter((c) => !c.archived);
 	const key = await categoriesKey(active);
 	const kept = await keptRow(db, item.transactionId);
+
 	if (kept && kept.key === key) return kept.name;
 	// Claim first: one statement inserts the row, or takes over a kept row whose key is no longer the current one, so
 	// only the winner asks Workers AI. A request that loses the claim reads what is stored: no name while the winner is
@@ -128,6 +141,7 @@ export async function suggestedCategoryName(
 	// purchase that was deleted meanwhile (and whose id a new purchase reused) is dropped rather than written over that
 	// purchase's row.
 	const token = crypto.randomUUID();
+
 	const claim = await db
 		.prepare(
 			`INSERT INTO maybe_names (transaction_id, name, claim, categories_key)
@@ -137,8 +151,10 @@ export async function suggestedCategoryName(
 		)
 		.bind(token, key, item.transactionId)
 		.run();
+
 	if ((claim.meta.changes ?? 0) === 0)
 		return (await keptRow(db, item.transactionId))?.name ?? null;
+
 	// The store's name and the purchase's cleaned bank text (decision 164), and the family's active categories as choices
 	// (decision 165). A person's own name, note or kind for this purchase is typed text and never leaves the app; no
 	// amount, date or account either.
@@ -150,22 +166,28 @@ export async function suggestedCategoryName(
 		// Lowest id first: when two labels collide, the first category by id is the one a reply names.
 		[...active].sort((a, b) => a.id - b.id).map((c) => c.name),
 	);
+
 	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
+
 	const done = await db
 		.prepare(
 			"UPDATE maybe_names SET name = ?, categories_key = ? WHERE transaction_id = ? AND claim = ?",
 		)
 		.bind(name, key, item.transactionId, token)
 		.run();
+
 	// Nothing changed when the row was replaced meanwhile: the answer is for a purchase that is gone, so it is dropped.
 	if ((done.meta.changes ?? 0) === 0) return null;
+
 	// The categories may have changed while the call was in flight (decision 165): the answer was asked against `key`, so
 	// it is not offered now. The row keeps `key`, so the next draw sees a stale key and asks once more; no second call here.
 	const current = await categoriesKey(
 		(await categoryNames(db)).filter((c) => !c.archived),
 	);
+
 	if (current !== key) return null;
+
 	return name;
 }
 
@@ -180,10 +202,12 @@ export async function categoriesKey(
 		.map((c) => `${c.id}:${c.name}`)
 		.sort()
 		.join("\n");
+
 	const digest = await crypto.subtle.digest(
 		"SHA-256",
 		new TextEncoder().encode(list),
 	);
+
 	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("")
@@ -238,14 +262,18 @@ export async function fileInNewCategory(
 	// drawn (a cached row can outlive the rule). Every guard and the waiting check below use this, so a refused create
 	// files nothing and reads as an answer that changed somewhere else, never as the limit.
 	const asked = `${categoryAskedSql("transactions")} AND NOT ${neverSuggestedSql("transactions", "new_category")}`;
+
 	// The category this batch files in: by id for an existing one, else by the name the way createFromSuggestion does.
 	const pick =
 		target.kind === "existing"
 			? "(SELECT id FROM categories WHERE id = ? AND archived = 0)"
 			: "(SELECT id FROM categories WHERE (name_key = ? OR name = ? COLLATE NOCASE) AND archived = 0 ORDER BY id LIMIT 1)";
+
 	const pickBinds: (string | number)[] =
 		target.kind === "existing" ? [target.id] : [key, target.name];
+
 	const statements: D1PreparedStatement[] = [];
+
 	if (target.kind === "create")
 		statements.push(
 			db
@@ -280,6 +308,7 @@ export async function fileInNewCategory(
 	);
 	const results = await db.batch(statements);
 	const filed = results[results.length - 1]?.meta.changes ?? 0;
+
 	if (filed === 0) {
 		// A refusal is "gone" unless the purchase still waits for this answer: a stale answer must never read as the
 		// limit, even when the list is full too. Only a waiting purchase on a create can be refused for the limit.
@@ -287,16 +316,21 @@ export async function fileInNewCategory(
 			.prepare(`SELECT 1 AS ok FROM transactions WHERE id = ? AND ${asked}`)
 			.bind(transactionId)
 			.first();
+
 		if (waiting && target.kind === "create") {
 			const active = await db
 				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
 				.first<{ n: number }>();
+
 			if ((active?.n ?? 0) >= MAX_ACTIVE) return { ok: false, reason: "limit" };
 		}
+
 		return { ok: false, reason: "gone" };
 	}
+
 	const created =
 		target.kind === "create" && (results[0]?.meta.changes ?? 0) === 1;
+
 	// The stored category's own name, as it was saved (a create that lost a race keeps the other person's casing).
 	const stored = await db
 		.prepare(
@@ -304,5 +338,6 @@ export async function fileInNewCategory(
 		)
 		.bind(transactionId)
 		.first<{ name: string }>();
+
 	return { ok: true, name: stored?.name ?? target.name, created };
 }

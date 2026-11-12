@@ -32,6 +32,7 @@ export function Notebook({
 }) {
 	const strokeClass = (line: number) =>
 		lineClass?.(line) ?? (ink ? "stroke-ink" : "stroke-muted");
+
 	return (
 		<svg
 			class={`${size} shrink-0`}

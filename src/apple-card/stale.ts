@@ -16,8 +16,10 @@ export function appleCardNotice(
 	today: string,
 ): { words: string; since: string } | null {
 	if (!card || card.removedAt !== null || card.uploadedOn === null) return null;
+
 	// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
 	if (card.uploadedOn > daysBefore(today, APPLE_STALE_AFTER_DAYS)) return null;
+
 	return {
 		words: `Apple Card hasn't been updated since ${shortDay(card.uploadedOn, today)}`,
 		since: card.uploadedOn,

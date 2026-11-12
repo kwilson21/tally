@@ -38,6 +38,7 @@ export function unticksFrom(
 	const drawnSet = new Set(drawn);
 	const kept = hidden.filter((id) => !drawnSet.has(id));
 	const unticked = (drawn ?? []).filter((id) => !ticked.has(id));
+
 	return [...new Set([...kept, ...unticked])].filter((id) => !ticked.has(id));
 }
 
@@ -53,6 +54,7 @@ export function ticksFrom(
 ): number[] {
 	if (!all || pageIds === undefined) return checked;
 	const onPage = new Set(pageIds);
+
 	return checked.filter((id) => !onPage.has(id));
 }
 
@@ -66,6 +68,7 @@ export function settle(
 	matched: ReadonlySet<number>,
 ): Selection {
 	const everyTick = [...selection.ticks, ...selection.held];
+
 	if (!selection.all)
 		return {
 			ticks: unique(everyTick),
@@ -75,6 +78,7 @@ export function settle(
 		};
 	const off = new Set(selection.unticked);
 	const keep = (id: number) => !off.has(id);
+
 	return {
 		ticks: unique(everyTick.filter((id) => !matched.has(id) && keep(id))),
 		held: unique(everyTick.filter((id) => matched.has(id) && keep(id))),
@@ -98,6 +102,7 @@ export function setIds(
 ): number[] {
 	if (!selection.all) return [];
 	const off = new Set(selection.unticked);
+
 	return matched.filter((id) => !off.has(id));
 }
 

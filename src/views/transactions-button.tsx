@@ -9,6 +9,7 @@ export function TransactionsButton({
 	count: number;
 }) {
 	if (count <= 0) return null;
+
 	return (
 		<a
 			href={href}

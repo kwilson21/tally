@@ -52,6 +52,7 @@ type LabelInput = {
 /** An account's name as the lists name it: "Chase Card ••9921", or just the name when the bank gives no digits. The Cash account reads "Cash". */
 function baseLabel(account: LabelInput): string {
 	if (account.type === "cash") return "Cash";
+
 	return account.mask ? `${account.name} ••${account.mask}` : account.name;
 }
 
@@ -62,35 +63,50 @@ function baseLabel(account: LabelInput): string {
  * ("... (2)"). Only accounts that share a label are changed, one step at a time.
  */
 export function uniqueAccountLabels(accounts: LabelInput[]): string[] {
-	const bases = accounts.map(baseLabel);
+	let rows = accounts.map((account) => {
+		const base = baseLabel(account);
+
+		return { account, base, label: base };
+	});
+
 	// What each account's label becomes at each step; an account with no bank has nothing to add.
 	const steps: ((a: LabelInput, base: string) => string)[] = [
 		(a, base) => (a.bank ? `${base} (${a.bank})` : base),
 		(a, base) =>
 			a.bank ? `${base} (${a.bank}, ${a.subtype ?? a.type})` : base,
 	];
-	let labels = bases;
+
 	for (const step of steps) {
-		const current = labels;
-		labels = current.map((label, i) =>
-			current.some((other, j) => j !== i && other === label)
-				? step(accounts[i] as LabelInput, bases[i] as string)
-				: label,
-		);
+		const current = rows.map((row) => row.label);
+
+		rows = rows.map((row, i) => ({
+			...row,
+			label: current.some((other, j) => j !== i && other === row.label)
+				? step(row.account, row.base)
+				: row.label,
+		}));
 	}
+
+	const labels = rows.map((row) => row.label);
+
 	// Still alike: number every one after the first, skipping a number another account already wears.
 	const used = new Set(labels);
 	const seen = new Set<string>();
+
 	return labels.map((label) => {
 		if (!seen.has(label)) {
 			seen.add(label);
+
 			return label;
 		}
+
 		let n = 2;
+
 		while (used.has(`${label} (${n})`)) n++;
 		const numbered = `${label} (${n})`;
 		used.add(numbered);
 		seen.add(numbered);
+
 		return numbered;
 	});
 }
@@ -123,28 +139,104 @@ export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 			bank: string | null;
 			disconnected_at: string | null;
 		}>();
+
 	const labels = uniqueAccountLabels(results);
+
 	return results.map((a, i) => ({
 		id: a.id,
+		// SAFETY: uniqueAccountLabels returns one label per account, in order, so labels[i] is set for each row a.
 		label: labels[i] as string,
 		disconnected: a.disconnected_at !== null,
 	}));
 }
 
-/** What you have minus what you owe, in cents. */
-export function netWorthCents(
-	accounts: (Pick<Account, "balanceCents" | "isLiability"> &
-		Partial<Pick<Account, "connected">>)[],
-): number {
-	return accounts.reduce(
-		(sum, a) =>
-			sum +
-			(a.connected === false
-				? 0
-				: a.isLiability
-					? -a.balanceCents
-					: a.balanceCents),
-		0,
+/** What net worth reads of an account. */
+export type NetWorthAccount = {
+	balanceCents: number;
+	isLiability: boolean;
+	connected?: boolean;
+};
+
+/**
+ * What netWorthCents can add exactly (docs/verification.md, "Numbers"): no balance above $100,000,000 and at most 10,000
+ * accounts, so the sum stays within 1e14 cents, far under the 2^53 a double holds exactly.
+ */
+export const MAX_BALANCE_CENTS = 10_000_000_000;
+export const MAX_NET_WORTH_ACCOUNTS = 10_000;
+
+/** Refuses accounts past the limits above. The message names no amount: balances are never logged. */
+//@ skip
+function assertNetWorthWithinLimits(accounts: NetWorthAccount[]): void {
+	if (
+		accounts.length > MAX_NET_WORTH_ACCOUNTS ||
+		!accounts.every(
+			(a) =>
+				Number.isSafeInteger(a.balanceCents) &&
+				Math.abs(a.balanceCents) <= MAX_BALANCE_CENTS,
+		)
+	)
+		throw new RangeError(
+			"These accounts hold more money or more rows than Tally can add up exactly.",
+		);
+}
+
+/** What you have minus what you owe, in cents. It refuses accounts past the limits above with a RangeError. */
+//@ skip
+export function netWorthCents(accounts: NetWorthAccount[]): number {
+	assertNetWorthWithinLimits(accounts);
+
+	return netWorthWithinLimits(accounts);
+}
+
+// Checked by LemmaScript and Dafny (decision 188). The rule, in plain words: net worth is exactly the sum of the
+// connected accounts' balances, with each liability's balance subtracted instead of added; an account marked not
+// connected counts for nothing.
+function netWorthWithinLimits(accounts: NetWorthAccount[]): number {
+	//@ verify
+	//@ requires accounts.length <= MAX_NET_WORTH_ACCOUNTS
+	//@ requires forall(i: nat, i < accounts.length ==> -MAX_BALANCE_CENTS <= accounts[i].balanceCents && accounts[i].balanceCents <= MAX_BALANCE_CENTS)
+	//@ ensures \result === netWorthTo(accounts, accounts.length)
+	//@ ensures -MAX_BALANCE_CENTS * accounts.length <= \result && \result <= MAX_BALANCE_CENTS * accounts.length
+	//@ type i nat
+	let sum = 0;
+	let i = 0;
+
+	while (i < accounts.length) {
+		//@ invariant 0 <= i && i <= accounts.length
+		//@ invariant sum === netWorthTo(accounts, i)
+		//@ invariant -MAX_BALANCE_CENTS * i <= sum && sum <= MAX_BALANCE_CENTS * i
+		//@ decreases accounts.length - i
+		// SAFETY: the loop runs only while i < accounts.length, so accounts[i] is an account.
+		const a = accounts[i] as NetWorthAccount;
+
+		if (a.connected !== false)
+			sum = a.isLiability ? sum - a.balanceCents : sum + a.balanceCents;
+		i = i + 1;
+	}
+
+	return sum;
+}
+
+/**
+ * What netWorthWithinLimits' contract compares against: the first n accounts' net worth, written as the simplest
+ * recursion so it reads as the rule. Exported only so the type checker sees it used.
+ */
+export function netWorthTo(accounts: NetWorthAccount[], n: number): number {
+	//@ verify
+	//@ type n nat
+	//@ requires n <= accounts.length
+	//@ decreases n
+	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= accounts.length, so accounts[n - 1] is an account.
+	const a = accounts[n - 1] as NetWorthAccount;
+
+	return (
+		netWorthTo(accounts, n - 1) +
+		(a.connected === false
+			? 0
+			: a.isLiability
+				? -a.balanceCents
+				: a.balanceCents)
 	);
 }
 
@@ -164,6 +256,7 @@ export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
 			last_synced_at: string | null;
 			disconnected_at: string | null;
 		}>();
+
 	return results.map((row) => ({
 		id: row.id,
 		name: row.institution_name,
@@ -179,6 +272,7 @@ export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
  */
 export async function accountsByBank(db: D1Database): Promise<Bank[]> {
 	const { results } = await banksStatement(db).all<BankRow>();
+
 	return banksFromRows(results);
 }
 
@@ -199,30 +293,41 @@ export function banksStatement(db: D1Database): D1PreparedStatement {
 /** The banks `banksStatement` read, with their accounts. */
 export function banksFromRows(results: BankRow[]): Bank[] {
 	const banks: Bank[] = [];
+
 	for (const row of results) {
 		let bank = banks.at(-1);
+
 		if (bank?.id !== row.bank_id) {
-			bank = {
+			const created: Bank = {
 				id: row.bank_id,
 				name: row.bank_name,
 				needsAttention: row.status === "needs_attention",
 				lastSyncedAt: row.last_synced_at,
-				...(row.disconnected_at !== null ? { disconnected: true } : {}),
 				accounts: [],
 			};
-			banks.push(bank);
+
+			if (row.disconnected_at !== null) created.disconnected = true;
+
+			banks.push(created);
+			bank = created;
 		}
+
 		if (row.id === null) continue;
-		bank.accounts.push({
+
+		const account: Account = {
 			id: row.id,
 			name: row.name ?? "",
 			mask: row.mask,
 			type: row.type ?? "",
 			balanceCents: row.balance_cents ?? 0,
 			isLiability: row.is_liability === 1,
-			...(row.disconnected_at !== null ? { connected: false } : {}),
-		});
+		};
+
+		if (row.disconnected_at !== null) account.connected = false;
+
+		bank.accounts.push(account);
 	}
+
 	return banks;
 }
 
@@ -271,6 +376,7 @@ export function appleCardFromRow(
 	row: AppleCardRow | null | undefined,
 ): AppleCardAccount | null {
 	if (!row) return null;
+
 	return {
 		id: row.id,
 		balanceCents: row.balance_cents,
@@ -302,6 +408,7 @@ export async function appleCardUpload(
 			"SELECT uploaded_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
 		)
 		.first<{ uploaded_on: string | null; removed_at: string | null }>();
+
 	return row
 		? { uploadedOn: row.uploaded_on, removedAt: row.removed_at }
 		: null;
@@ -316,6 +423,7 @@ export function countedAccounts(
 	appleCard: AppleCardAccount | null,
 ): Account[] {
 	const accounts = banks.flatMap((bank) => bank.accounts);
+
 	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
 		accounts.push({
 			id: appleCard.id,
@@ -325,5 +433,6 @@ export function countedAccounts(
 			balanceCents: appleCard.balanceCents,
 			isLiability: true,
 		});
+
 	return accounts;
 }

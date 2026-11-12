@@ -17,6 +17,7 @@ const WEEKDAYS = [
 	"Saturday",
 	"Sunday",
 ];
+
 const MONTHS = [
 	"January",
 	"February",
@@ -31,7 +32,9 @@ const MONTHS = [
 	"November",
 	"December",
 ];
+
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+
 const FREQUENCIES: [DueFrequency, string][] = [
 	["weekly", "every week"],
 	["biweekly", "every two weeks"],

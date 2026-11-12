@@ -78,6 +78,7 @@ describe("where a name came from (P87 B)", () => {
 
 describe("usableSuggestedNames", () => {
 	const KEY = "SQ *BLUE BOTTLE COF 0412";
+
 	const base = {
 		stored: storedNames(["Blue Bottle Coffee", "Blue Bottle"]),
 		status: "pending",
@@ -119,6 +120,7 @@ describe("usableSuggestedNames", () => {
 
 describe("shownName", () => {
 	const raw = "SQ *BLUE BOTTLE COF 0412";
+
 	const input = {
 		chosen: null,
 		stored: storedNames(["Blue Bottle Coffee", "Blue Bottle"]),
@@ -150,6 +152,7 @@ describe("shownName", () => {
 			suggested: false,
 			fromBank: false,
 		};
+
 		expect(shownName({ ...input, stored: null })).toEqual(tidied);
 		expect(shownName({ ...input, status: "rejected" })).toEqual(tidied);
 		expect(shownName({ ...input, status: "accepted" })).toEqual(tidied);
@@ -162,6 +165,7 @@ describe("shownName", () => {
 			key: "Blue Bottle Coffee",
 			stored: storedNames(["Blue Bottle Coffee"]),
 		};
+
 		expect(shownName(bank)).toEqual({
 			name: "Blue Bottle Coffee",
 			suggested: true,
@@ -200,6 +204,7 @@ describe("shownName", () => {
 			key: raw,
 			namesOn: true,
 		};
+
 		expect(offeredNames(guess, raw)).toEqual([]);
 		expect(shownName({ ...input, ...guess })).toEqual({
 			name: "Blue bottle cof",
@@ -215,6 +220,7 @@ describe("shownName", () => {
 			key: "Blue Bottle Cof",
 			namesOn: true,
 		};
+
 		expect(offeredNames(bank, raw)).toEqual(["Blue Bottle Cof"]);
 		expect(shownName({ ...input, ...bank })).toEqual({
 			name: "Blue Bottle Cof",
@@ -241,6 +247,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 				key: raw,
 				namesOn: true,
 			};
+
 			expect(offeredNames(merchant, raw)).toEqual([]);
 			expect(shownName({ ...merchant, chosen: null, rawName: raw })).toEqual({
 				name: tidied,
@@ -257,6 +264,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 			key: "TRADER JOE'S #552",
 			namesOn: true,
 		};
+
 		expect(offeredNames(merchant, "TRADER JOE'S #552")).toEqual([
 			"Trader Joe's Market",
 		]);
@@ -269,6 +277,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 			key: "MOTEL 6",
 			namesOn: true,
 		};
+
 		expect(offeredNames(merchant, "MOTEL 6")).toEqual(["Motel 8"]);
 		expect(
 			shownName({ ...merchant, chosen: null, rawName: "MOTEL 6" }),
@@ -286,6 +295,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 			key: "ATT",
 			namesOn: true,
 		};
+
 		expect(offeredNames(bank, "AT&T")).toEqual(["ATT"]);
 		expect(shownName({ ...bank, chosen: null, rawName: "AT&T" })).toEqual({
 			name: "ATT",

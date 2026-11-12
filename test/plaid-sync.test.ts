@@ -24,6 +24,37 @@ import { syncItem, TRANSIENT_ITEM_ERROR_CODES } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { merchantNames } from "./helpers/merchants";
 
+// undefined is allowed as a field value: JSON.stringify leaves such a field out, as a test below relies on.
+type Json =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| Json[]
+	| { [key: string]: Json };
+
+/** The row a query returned; an error when it returned none. */
+function defined<Value>(value: Value | null | undefined): Value {
+	if (value === null || value === undefined)
+		throw new Error("the query returned no row");
+
+	return value;
+}
+
+function isDbMember(
+	target: D1Database,
+	property: PropertyKey,
+): property is keyof D1Database {
+	return property in target;
+}
+
+function isMethod<Member>(
+	value: Member,
+): value is Extract<Member, (...args: never[]) => object> {
+	return typeof value === "function";
+}
+
 const KEY = btoa("01234567890123456789012345678901");
 
 const account = (current: number | null = 12.34) => ({
@@ -35,7 +66,7 @@ const account = (current: number | null = 12.34) => ({
 	balances: { current },
 });
 
-const page = (overrides: Record<string, unknown> = {}) => ({
+const page = (overrides: Record<string, Json> = {}) => ({
 	added: [],
 	modified: [],
 	removed: [],
@@ -44,7 +75,7 @@ const page = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const transaction = (overrides: Record<string, unknown> = {}) => ({
+const transaction = (overrides: Record<string, Json> = {}) => ({
 	transaction_id: "transaction-1",
 	account_id: "account-1",
 	date: "2026-09-27",
@@ -58,26 +89,29 @@ const transaction = (overrides: Record<string, unknown> = {}) => ({
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
-	return result?.id as number;
+
+	return defined(result).id;
 }
 
-const response = (body: unknown, status = 200) =>
+const response = (body: Json, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
 	});
 
 const plaidFetch = (
-	sync: (body: Record<string, unknown>) => Response | Promise<Response>,
+	sync: (body: Record<string, Json>) => Response | Promise<Response>,
 	accounts = [account()],
 ) =>
 	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get")) return response({ accounts });
+
 		return sync(JSON.parse(String(init?.body)));
 	});
 
@@ -114,6 +148,7 @@ async function categoryLog() {
 	const { results } = await env.DB.prepare(
 		"SELECT transaction_id FROM ai_log WHERE kind = 'category' ORDER BY id",
 	).all<{ transaction_id: number | null }>();
+
 	return results;
 }
 
@@ -172,22 +207,27 @@ describe("syncItem", () => {
 					response(page({ added: [transaction({ amount: 12.34 })] })),
 				),
 			);
+
 			const tx = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id='transaction-1'",
 			).first<{ id: number }>();
+
 			const suggestion = await env.DB.prepare(
 				"INSERT INTO category_suggestions(name,status) VALUES(?,'pending') RETURNING id",
 			)
 				.bind(`Pet Care ${kind}`)
 				.first<{ id: number }>();
+
 			await env.DB.prepare(
 				"UPDATE transactions SET category_confidence=.95,jev_none_fit=1,category_suggestion_id=?,jev_mixed=.9,jev_also_category_id=(SELECT id FROM categories ORDER BY id LIMIT 1) WHERE id=?",
 			)
 				.bind(suggestion?.id, tx?.id)
 				.run();
+
 			const corrected = transaction({
 				amount: kind === "added" ? 13.34 : 13.34,
 			});
+
 			await syncItem(
 				opts,
 				item,
@@ -219,6 +259,7 @@ describe("syncItem", () => {
 
 	it("gets and upserts accounts separately, stores raw names, and saves transactions", async () => {
 		const id = await addItem();
+
 		const fetchImpl = plaidFetch(() =>
 			response(
 				page({
@@ -243,9 +284,11 @@ describe("syncItem", () => {
 				"SELECT plaid_item_id, balance_cents, is_liability FROM accounts",
 			).first(),
 		).toEqual({ plaid_item_id: id, balance_cents: 1234, is_liability: 0 });
+
 		const { results } = await env.DB.prepare(
 			"SELECT amount_cents, raw_name, plaid_category FROM transactions ORDER BY id",
 		).all();
+
 		expect(results).toEqual([
 			{
 				amount_cents: 1234,
@@ -267,10 +310,12 @@ describe("syncItem", () => {
 
 	it("stores Plaid's detailed category beside its primary one, when a transaction is added and when the bank modifies it", async () => {
 		const id = await addItem();
+
 		const stored = () =>
 			env.DB.prepare(
 				"SELECT plaid_category, plaid_detailed_category FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 			).first();
+
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
@@ -324,9 +369,11 @@ describe("syncItem", () => {
 			id,
 			plaidFetch(() => response(page({ added: [transaction()] }))),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id AS accountId, date, raw_name AS rawName FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; accountId: number; date: string; rawName: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET is_split = 1, category_id = 2 WHERE id = ?",
@@ -379,9 +426,11 @@ describe("syncItem", () => {
 			id,
 			plaidFetch(() => response(page({ added: [transaction()] }))),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id AS accountId, date, raw_name AS rawName FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; accountId: number; date: string; rawName: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?").bind(
 				parent?.id,
@@ -478,9 +527,11 @@ describe("syncItem", () => {
 				response(page({ added: [transaction({ merchant_name: null })] })),
 			),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id AS accountId, date, raw_name AS rawName FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; accountId: number; date: string; rawName: string }>();
+
 		await env.DB.batch([
 			env.DB.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?").bind(
 				parent?.id,
@@ -498,12 +549,14 @@ describe("syncItem", () => {
 				parent?.id,
 			),
 		]);
+
 		const merchantNames = async () =>
 			(
 				await env.DB.prepare(
 					"SELECT merchant_name FROM transactions ORDER BY id",
 				).all()
 			).results.map((r) => r.merchant_name);
+
 		expect(await merchantNames()).toEqual([null, null, null]);
 
 		await syncItem(
@@ -603,13 +656,20 @@ describe("syncItem", () => {
 					),
 				),
 			);
-			const [first, second] = (
+
+			const categoryIds = (
 				await env.DB.prepare(
 					"SELECT id FROM categories ORDER BY id LIMIT 2",
 				).all<{
 					id: number;
 				}>()
-			).results.map((r) => r.id) as [number, number];
+			).results.map((r) => r.id);
+
+			const [first, second] = [
+				defined(categoryIds[0]),
+				defined(categoryIds[1]),
+			];
+
 			await env.DB.batch([
 				env.DB.prepare(
 					"UPDATE transactions SET category_id = ?, category_source = 'merchant_rule' WHERE plaid_transaction_id IN ('by-rule', 'same')",
@@ -668,6 +728,7 @@ describe("syncItem", () => {
 						}>()
 					).results.map((r) => [r.id, [r.category_id, r.category_source]]),
 				);
+
 			// The old rule's category is cleared, and the sync's own rules step gives the new merchant's.
 			expect(await state()).toEqual({
 				"by-rule": [second, "merchant_rule"],
@@ -701,11 +762,15 @@ describe("syncItem", () => {
 				),
 			),
 		);
-		const [rule, mine] = (
+
+		const categoryIds = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 			).all<{ id: number }>()
-		).results.map((r) => r.id) as [number, number];
+		).results.map((r) => r.id);
+
+		const [rule, mine] = [defined(categoryIds[0]), defined(categoryIds[1])];
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE plaid_transaction_id = 'by-user'",
@@ -815,12 +880,14 @@ describe("syncItem", () => {
 		]);
 		expect(await merchantNames(env.DB, "Comcast")).toEqual(["Comcast"]);
 		expect(await merchantNames(env.DB, "COMCAST CABLE")).toEqual(["Comcast"]);
+
 		const charge = await env.DB.prepare(
 			"SELECT id, category_source FROM transactions",
 		).first<{ id: number; category_source: string | null }>();
+
 		expect(charge?.category_source).toBe("merchant_rule");
 		expect(
-			(await getTransaction(env.DB, charge?.id as number))?.displayName,
+			(await getTransaction(env.DB, defined(charge).id))?.displayName,
 		).toBe("Comcast Cable");
 		// The bill saved under the bank text still pays from the charge.
 		expect(
@@ -850,6 +917,7 @@ describe("syncItem", () => {
 					),
 				),
 			);
+
 		const lines = async () =>
 			(
 				await env.DB.prepare(
@@ -894,9 +962,11 @@ describe("syncItem", () => {
 				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO 123', 'income', '2026-10-03')",
 			).run();
 			await syncVenmo(id, "venmo-1", -25);
+
 			const named = await env.DB.prepare(
 				"SELECT id, merchant_key AS merchantKey, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
 			).first<{ id: number; merchantKey: string; kind: string }>();
+
 			await removeNeverSuggest(env.DB, {
 				id: named?.id ?? 0,
 				merchantKey: named?.merchantKey ?? "",
@@ -907,9 +977,11 @@ describe("syncItem", () => {
 				"UPDATE transactions SET income_confidence = 0.5 WHERE plaid_transaction_id = 'venmo-2'",
 			).run();
 			expect(await lines()).toEqual([]);
+
 			const asked = (await suggestionQueue(env.DB, AI_SWITCHES_ALL_ON)).filter(
 				(item) => item.kind === "income",
 			);
+
 			expect(asked).toHaveLength(1);
 			expect(asked[0]).toMatchObject({ merchantKey: "Venmo" });
 		});
@@ -947,9 +1019,11 @@ describe("syncItem", () => {
 			await env.DB.prepare(
 				"UPDATE transactions SET income_confidence = 0.5 WHERE plaid_transaction_id = 'venmo-1'",
 			).run();
+
 			const asked = (await suggestionQueue(env.DB, AI_SWITCHES_ALL_ON)).filter(
 				(item) => item.kind === "income",
 			);
+
 			expect(asked).toEqual([]);
 		});
 	});
@@ -1002,12 +1076,14 @@ describe("syncItem", () => {
 				),
 			),
 		);
+
 		const name = async () =>
 			(
 				await env.DB.prepare(
 					"SELECT display_name FROM merchants WHERE raw_name = 'Merchant'",
 				).first()
 			)?.display_name;
+
 		expect(await name()).toBe("First");
 
 		// Another bank text with the same name finds the row there and leaves it be, and a later edit to
@@ -1166,13 +1242,16 @@ describe("syncItem", () => {
 
 	it("adds and logs nothing when the same page is synced twice", async () => {
 		const id = await addItem();
+
 		const fetchImpl = plaidFetch(() =>
 			response(page({ added: [transaction()] })),
 		);
+
 		expect(
 			await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
 		).toMatchObject({ added: 1 });
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
 		try {
 			expect(
 				await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
@@ -1181,6 +1260,7 @@ describe("syncItem", () => {
 		} finally {
 			log.mockRestore();
 		}
+
 		expect(
 			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
 		).toEqual({ n: 1 });
@@ -1192,8 +1272,10 @@ describe("syncItem", () => {
 			.bind(id)
 			.run();
 		const sentCursor: boolean[] = [];
+
 		const fetchImpl = plaidFetch((body) => {
 			sentCursor.push("cursor" in body);
+
 			return response(page());
 		});
 
@@ -1212,9 +1294,11 @@ describe("syncItem", () => {
 		const cursors: unknown[] = [];
 		let syncCalls = 0;
 		let chosenCategory: number | undefined;
+
 		const fetchImpl = plaidFetch(async (body) => {
 			cursors.push(body.cursor);
 			syncCalls += 1;
+
 			if (syncCalls === 1)
 				return response(
 					page({
@@ -1223,16 +1307,19 @@ describe("syncItem", () => {
 						has_more: true,
 					}),
 				);
+
 			if (syncCalls === 2) {
 				const category = await env.DB.prepare(
 					"SELECT id FROM categories LIMIT 1",
 				).first<{ id: number }>();
+
 				chosenCategory = category?.id;
 				await env.DB.prepare(
 					"UPDATE transactions SET category_id = ?, category_source = 'user', note = 'keep', excluded = 1 WHERE plaid_transaction_id = 'transaction-1'",
 				)
 					.bind(chosenCategory)
 					.run();
+
 				return response(
 					{
 						error_type: "TRANSACTIONS_ERROR",
@@ -1242,6 +1329,7 @@ describe("syncItem", () => {
 					400,
 				);
 			}
+
 			if (syncCalls === 3)
 				return response(
 					page({
@@ -1298,9 +1386,18 @@ describe("syncItem", () => {
 				),
 			),
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT date, amount_cents, raw_name, category_id, note, excluded FROM transactions",
-		).first<Record<string, unknown>>();
+		).first<{
+			date: string;
+			amount_cents: number;
+			raw_name: string;
+			category_id: number | null;
+			note: string | null;
+			excluded: number;
+		}>();
+
 		expect(row).toMatchObject({
 			date: "2026-09-28",
 			amount_cents: -500,
@@ -1395,15 +1492,18 @@ describe("syncItem", () => {
 				response(page({ added: [transaction({ amount: -3000 })] })),
 			),
 		);
+
 		const tx = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
-		await saveJevResult(env.DB, tx?.id as number, {
+
+		await saveJevResult(env.DB, defined(tx).id, {
 			categoryId: null,
 			suggestedCategoryId: null,
 			confidence: 0.95,
 			flags: { transfer: false, reimbursement: false, income: true },
 		});
+
 		for (const amount of [-3000, -3000]) {
 			await syncItem(
 				opts,
@@ -1425,6 +1525,7 @@ describe("syncItem", () => {
 				jev_category_id: null,
 			});
 		}
+
 		for (const amount of [-3100, -3200]) {
 			await syncItem(
 				opts,
@@ -1461,9 +1562,11 @@ describe("syncItem", () => {
 				response(page({ added: [transaction({ amount: -30 })] })),
 			),
 		);
+
 		const tx = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
+
 		for (const path of ["added", "modified"] as const) {
 			await env.DB.prepare(
 				"UPDATE transactions SET income_confidence = 0.5, transfer_confidence = 0.6 WHERE id = ?",
@@ -1500,6 +1603,7 @@ describe("syncItem", () => {
 			),
 		);
 		const today = await householdToday(env.DB);
+
 		for (const [path, amount] of [
 			["added", 31],
 			["modified", 32],
@@ -1539,6 +1643,7 @@ describe("syncItem", () => {
 			),
 		);
 		const today = await householdToday(env.DB);
+
 		for (const path of ["added", "modified"] as const) {
 			await sortedByJev(today);
 			await syncItem(
@@ -1570,6 +1675,7 @@ describe("syncItem", () => {
 			),
 		);
 		const today = await householdToday(env.DB);
+
 		for (const [path, amount] of [
 			["added", 31],
 			["modified", 32],
@@ -1632,10 +1738,12 @@ describe("syncItem", () => {
 				response(page({ added: [transaction({ amount: -12 })] })),
 			),
 		);
+
 		const tx = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
-		await saveJevResult(env.DB, tx?.id as number, {
+
+		await saveJevResult(env.DB, defined(tx).id, {
 			categoryId: 1,
 			suggestedCategoryId: 1,
 			confidence: 0.95,
@@ -1643,7 +1751,7 @@ describe("syncItem", () => {
 		});
 		await saveEdit(
 			env.DB,
-			tx?.id as number,
+			defined(tx).id,
 			{
 				categoryId: null,
 				alwaysForMerchant: false,
@@ -1702,12 +1810,15 @@ describe("syncItem", () => {
 				),
 			),
 		);
+
 		const tx = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number }>();
+
 		const purchase = await env.DB.prepare(
 			"SELECT id, date FROM transactions WHERE plaid_transaction_id = 'purchase'",
 		).first<{ id: number; date: string }>();
+
 		if (!purchase) throw new Error("Expected the purchase");
 		await env.DB.prepare(
 			"UPDATE transactions SET refund_of_id = ?, category_source = 'jev', category_confidence = 0.95, credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
@@ -1715,10 +1826,12 @@ describe("syncItem", () => {
 			.bind(purchase.id, tx?.id)
 			.run();
 		const monthBefore = await loadMonth(env.DB, purchase.date.slice(0, 7));
+
 		const budgetTotalBefore = monthBefore.transactions.reduce(
 			(sum, row) => sum + row.amountCents,
 			0,
 		);
+
 		expect(
 			monthBefore.transactions.some(
 				(row) => row.amountCents === -1200 && row.linked,
@@ -1756,6 +1869,7 @@ describe("syncItem", () => {
 
 	describe("a bank correction that leaves a purchase over-refunded (spec §8.5)", () => {
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+
 		type Refund = { id: string; amount: number; date: string };
 
 		/** A $`purchase` purchase and refunds of the given dollars, all linked to it by a person. */
@@ -1794,6 +1908,7 @@ describe("syncItem", () => {
 			)
 				.bind(...refunds.map((r) => r.id))
 				.run();
+
 			return item;
 		}
 
@@ -1804,13 +1919,14 @@ describe("syncItem", () => {
 				WHERE r.refund_of_id = (SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase')
 				ORDER BY r.id`,
 			).all<{ id: string }>();
+
 			return results.map((r) => r.id);
 		}
 
 		const correct = (
 			item: number,
 			path: "added" | "modified",
-			t: Record<string, unknown>,
+			t: Record<string, Json>,
 		) =>
 			syncItem(
 				opts,
@@ -1831,6 +1947,7 @@ describe("syncItem", () => {
 				const item = await linked(50, [
 					{ id: "refund", amount: 30, date: "2026-09-10" },
 				]);
+
 				await correct(item, path, refundTx("refund", 60, "2026-09-10"));
 				expect(await stillLinked()).toEqual([]);
 				// Only the link is gone: the refund keeps the bank's new amount and its review.
@@ -1853,6 +1970,7 @@ describe("syncItem", () => {
 				const item = await linked(50, [
 					{ id: "refund", amount: 30, date: "2026-09-10" },
 				]);
+
 				await correct(item, path, refundTx("refund", 40, "2026-09-10"));
 				expect(await stillLinked()).toEqual(["refund"]);
 				// Up to the purchase's amount exactly is still a refund of it.
@@ -1869,6 +1987,7 @@ describe("syncItem", () => {
 				const item = await linked(50, [
 					{ id: "refund", amount: 30, date: "2026-09-10" },
 				]);
+
 				await correct(item, path, {
 					transaction_id: "purchase",
 					amount: 20,
@@ -1885,6 +2004,7 @@ describe("syncItem", () => {
 				{ id: "second", amount: 20, date: "2026-09-12" },
 				{ id: "third", amount: 5, date: "2026-09-14" },
 			]);
+
 			// $50 down to $30: the newest ($5, then $20) go; $20 stays.
 			await correct(item, "modified", {
 				transaction_id: "purchase",
@@ -1900,6 +2020,7 @@ describe("syncItem", () => {
 				{ id: "a", amount: 20, date: "2026-09-10" },
 				{ id: "b", amount: 20, date: "2026-09-10" },
 			]);
+
 			await correct(item, "modified", {
 				transaction_id: "purchase",
 				amount: 30,
@@ -1913,6 +2034,7 @@ describe("syncItem", () => {
 			const item = await linked(50, [
 				{ id: "refund", amount: 30, date: "2026-09-10" },
 			]);
+
 			// Another purchase that was over-refunded before this rule: nothing in this sync touches it.
 			await syncItem(
 				opts,
@@ -1955,6 +2077,7 @@ describe("syncItem", () => {
 				{ id: "income", amount: 30, date: "2026-09-08" },
 				{ id: "refund", amount: 20, date: "2026-09-10" },
 			]);
+
 			await env.DB.prepare(
 				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE plaid_transaction_id = 'income'",
 			).run();
@@ -1971,9 +2094,13 @@ describe("syncItem", () => {
 				const item = await linked(50, [
 					{ id: "refund", amount: 40, date: "2026-09-10" },
 				]);
-				const refund = (await env.DB.prepare(
-					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
-				).first<{ id: number }>()) as { id: number };
+
+				const refund = defined(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first<{ id: number }>(),
+				);
+
 				await saveSplit(
 					env.DB,
 					refund.id,
@@ -1989,6 +2116,7 @@ describe("syncItem", () => {
 					name: "REFUND SHOP",
 					date: "2026-09-01",
 				});
+
 				return { item, refundId: refund.id };
 			}
 
@@ -1999,27 +2127,32 @@ describe("syncItem", () => {
 					WHERE refund_of_id = (SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase')
 						AND is_split = 0 AND amount_cents < 0 AND flag_income = 0`,
 				).first<{ cents: number }>();
+
 				return row?.cents;
 			}
 
 			it("loses the parts that no longer fit, one part at a time", async () => {
 				const { refundId } = await trimmedSplit();
+
 				const { results } = await env.DB.prepare(
 					"SELECT refund_of_id IS NOT NULL AS linked FROM transactions WHERE parent_id = ? ORDER BY id",
 				)
 					.bind(refundId)
 					.all<{ linked: number }>();
+
 				expect(results.map((part) => part.linked)).toEqual([1, 0]);
 				expect(await refundedCents()).toBe(2000);
 			});
 
 			it("is not over-refunded when the split is removed", async () => {
 				const { refundId } = await trimmedSplit();
+
 				const { unlinked } = await removeSplit(
 					env.DB,
 					refundId,
 					"person@example.com",
 				);
+
 				// The whole $40 refund no longer fits the $30 purchase: it is unlinked, and the person is told.
 				expect(unlinked).toEqual(["2026-09-10"]);
 				expect(await refundedCents()).toBe(0);
@@ -2034,6 +2167,7 @@ describe("syncItem", () => {
 
 			it("is not over-refunded when it is split again", async () => {
 				const { refundId } = await trimmedSplit();
+
 				const result = await saveSplit(
 					env.DB,
 					refundId,
@@ -2043,6 +2177,7 @@ describe("syncItem", () => {
 					],
 					"person@example.com",
 				);
+
 				expect(result).toEqual({
 					saved: true,
 					unlinked: ["2026-09-10"],
@@ -2056,9 +2191,13 @@ describe("syncItem", () => {
 				const item = await linked(50, [
 					{ id: "refund", amount: 40, date: "2026-09-10" },
 				]);
-				const refund = (await env.DB.prepare(
-					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
-				).first<{ id: number }>()) as { id: number };
+
+				const refund = defined(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first<{ id: number }>(),
+				);
+
 				await saveSplit(
 					env.DB,
 					refund.id,
@@ -2085,9 +2224,13 @@ describe("syncItem", () => {
 				const item = await linked(50, [
 					{ id: "refund", amount: 40, date: "2026-09-10" },
 				]);
-				const refund = (await env.DB.prepare(
-					"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
-				).first<{ id: number }>()) as { id: number };
+
+				const refund = defined(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
+					).first<{ id: number }>(),
+				);
+
 				await saveSplit(
 					env.DB,
 					refund.id,
@@ -2134,9 +2277,11 @@ describe("syncItem", () => {
 			env.DB.prepare("DELETE FROM budget_amounts"),
 			env.DB.prepare("DELETE FROM categories"),
 		]);
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Synthetic', 'groceries', 'cat-blue', 1) RETURNING id",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO budget_amounts VALUES (?, '2026-09', 100000)",
 		)
@@ -2169,12 +2314,14 @@ describe("syncItem", () => {
 				),
 			),
 		);
+
 		const monthSummary = async () =>
 			summarizeMonth({
 				month: "2026-09",
 				...(await loadMonth(env.DB, "2026-09")),
 				unpaidDueBillsCents: 0,
 			});
+
 		const unclassified = await monthSummary();
 		expect(unclassified.totalSpentCents).toBe(20000);
 		expect(unclassified.safeToSpendCents).toBe(80000);
@@ -2185,19 +2332,22 @@ describe("syncItem", () => {
 		).toEqual({ credit_reviewed: 0, flag_income: 0 });
 
 		vi.spyOn(console, "error").mockImplementation(() => {});
+
 		const failedJev = await categorizePending(
 			{ DB: env.DB, JEV_API_KEY: "synthetic-key" },
 			async () => response({}, 429),
 		);
+
 		expect(failedJev.asked).toBe(1);
 		expect((await monthSummary()).safeToSpendCents).toBe(80000);
 
 		const refund = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE plaid_transaction_id = 'refund'",
 		).first<{ id: number }>();
+
 		await saveEdit(
 			env.DB,
-			refund?.id as number,
+			defined(refund).id,
 			{
 				categoryId: null,
 				alwaysForMerchant: false,
@@ -2223,9 +2373,11 @@ describe("syncItem", () => {
 				item,
 				plaidFetch(() => response(page({ added: [transaction()] }))),
 			);
+
 			const parent = await env.DB.prepare(
 				"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 			).first<{ id: number; account_id: number }>();
+
 			await env.DB.batch([
 				env.DB.prepare(
 					"UPDATE transactions SET is_split = 1 WHERE id = ?",
@@ -2266,12 +2418,15 @@ describe("syncItem", () => {
 			item,
 			plaidFetch(() => response(page({ added: [transaction()] }))),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id, date FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; account_id: number; date: string }>();
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET is_split = 1, category_id = ?, category_source = 'jev' WHERE id = ?",
@@ -2280,11 +2435,13 @@ describe("syncItem", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, parent_id) VALUES (?, '2026-09-27', 500, 'RAW SHOP', ?, ?)",
 			).bind(parent?.account_id, category?.id, parent?.id),
 		]);
+
 		const part = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ?",
 		)
 			.bind(parent?.id)
 			.first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, refund_of_id) VALUES (?, '2026-10-02', -500, 'REFUND SHOP', ?)",
 		)
@@ -2321,7 +2478,8 @@ describe("syncItem", () => {
 
 	it("moves split children with a date correction and removes them for an amount correction", async () => {
 		const item = await addItem();
-		const sync = (overrides: Record<string, unknown>) =>
+
+		const sync = (overrides: Record<string, Json>) =>
 			syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				item,
@@ -2329,17 +2487,21 @@ describe("syncItem", () => {
 					response(page({ modified: [transaction(overrides)] })),
 				),
 			);
+
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			item,
 			plaidFetch(() => response(page({ added: [transaction()] }))),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; account_id: number }>();
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET is_split = 1, category_id = ? WHERE id = ?",
@@ -2379,7 +2541,8 @@ describe("syncItem", () => {
 
 	it("a second bank change keeps the category a restored purchase went back to, and its note", async () => {
 		const item = await addItem();
-		const sync = (overrides: Record<string, unknown>) =>
+
+		const sync = (overrides: Record<string, Json>) =>
 			syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				item,
@@ -2387,17 +2550,21 @@ describe("syncItem", () => {
 					response(page({ modified: [transaction(overrides)] })),
 				),
 			);
+
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			item,
 			plaidFetch(() => response(page({ added: [transaction()] }))),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; account_id: number }>();
+
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET is_split = 1, category_id = ?, category_source = 'jev' WHERE id = ?",
@@ -2424,7 +2591,7 @@ describe("syncItem", () => {
 	});
 
 	describe("a merchant rule's category when the bank changes a purchase", () => {
-		const syncPage = (item: number, body: Record<string, unknown>) =>
+		const syncPage = (item: number, body: Record<string, Json>) =>
 			syncItem(
 				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 				item,
@@ -2434,14 +2601,17 @@ describe("syncItem", () => {
 		/** A stored purchase the bank sent, with its id and the id of a category to give it. */
 		async function storedPurchase(item: number) {
 			await syncPage(item, { added: [transaction()] });
+
 			const category = await env.DB.prepare(
 				"SELECT id FROM categories LIMIT 1",
 			).first<{ id: number }>();
+
 			const parent = await env.DB.prepare(
 				"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 			).first<{ id: number; account_id: number }>();
+
 			return {
-				parent: parent?.id as number,
+				parent: defined(parent).id,
 				account: parent?.account_id,
 				category: category?.id,
 			};
@@ -2596,21 +2766,27 @@ describe("syncItem", () => {
 	it("skips a concurrent run and releases the lock after success", async () => {
 		const id = await addItem();
 		let releaseAccounts!: () => void;
+
 		const waiting = new Promise<void>((resolve) => {
 			releaseAccounts = resolve;
 		});
+
 		const firstFetch = vi.fn(async (url: RequestInfo | URL) => {
 			if (String(url).endsWith("/accounts/get")) {
 				await waiting;
+
 				return response({ accounts: [account()] });
 			}
+
 			return response(page());
 		});
+
 		const first = syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
 			firstFetch,
 		);
+
 		await vi.waitFor(async () => {
 			expect((await itemState(id))?.sync_locked_until).not.toBeNull();
 		});
@@ -2645,20 +2821,25 @@ describe("syncItem", () => {
 		const id = await addItem();
 		let releaseA!: () => void;
 		let releaseB!: () => void;
+
 		const waitA = new Promise<void>((resolve) => {
 			releaseA = resolve;
 		});
+
 		const waitB = new Promise<void>((resolve) => {
 			releaseB = resolve;
 		});
+
 		const runA = syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
 			plaidFetch(async () => {
 				await waitA;
+
 				return response(page());
 			}),
 		);
+
 		await vi.waitFor(async () => {
 			expect((await itemState(id))?.sync_lock_id).not.toBeNull();
 		});
@@ -2668,14 +2849,17 @@ describe("syncItem", () => {
 		)
 			.bind(id)
 			.run();
+
 		const runB = syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
 			id,
 			plaidFetch(async () => {
 				await waitB;
+
 				return response(page());
 			}),
 		);
+
 		await vi.waitFor(async () => {
 			expect((await itemState(id))?.sync_lock_id).not.toBe(lockA);
 		});
@@ -2696,6 +2880,7 @@ describe("syncItem", () => {
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		let calls = 0;
+
 		try {
 			await expect(
 				syncItem(
@@ -2703,6 +2888,7 @@ describe("syncItem", () => {
 					id,
 					plaidFetch(() => {
 						calls += 1;
+
 						if (calls === 1) {
 							return response(
 								page({
@@ -2714,6 +2900,7 @@ describe("syncItem", () => {
 								}),
 							);
 						}
+
 						return response(
 							{
 								error_type: "ITEM_ERROR",
@@ -2726,6 +2913,7 @@ describe("syncItem", () => {
 				),
 			).rejects.toThrow("Plaid request failed");
 			const output = [...log.mock.calls, ...error.mock.calls].flat().join(" ");
+
 			for (const secret of ["secret-access-token", "SECRET NAME", "9876.54"]) {
 				expect(output).not.toContain(secret);
 			}
@@ -2737,6 +2925,7 @@ describe("syncItem", () => {
 
 	it("keeps page one and its cursor after page two fails, then resumes without duplicates", async () => {
 		const id = await addItem();
+
 		const run = () =>
 			plaidFetch((body) =>
 				body.cursor === undefined
@@ -2762,6 +2951,7 @@ describe("syncItem", () => {
 								}),
 							),
 			);
+
 		let failing = true;
 		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 		await expect(
@@ -2782,9 +2972,11 @@ describe("syncItem", () => {
 		expect(JSON.parse(String(resumed.mock.calls[1]?.[1]?.body)).cursor).toBe(
 			"cursor-1",
 		);
+
 		const { results } = await env.DB.prepare(
 			"SELECT plaid_transaction_id FROM transactions ORDER BY id",
 		).all();
+
 		expect(results.map((row) => row.plaid_transaction_id)).toEqual([
 			"transaction-1",
 			"transaction-2",
@@ -2799,9 +2991,11 @@ describe("syncItem", () => {
 			id,
 			plaidFetch(() => response(page({ added: [transaction()] }))),
 		);
+
 		const parent = await env.DB.prepare(
 			"SELECT id, account_id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 		).first<{ id: number; account_id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (?, '2026-09-27', 600, 'RAW SHOP', ?), (?, '2026-09-27', 634, 'RAW SHOP', ?)",
 		)
@@ -2830,12 +3024,14 @@ describe("syncItem", () => {
 
 	it("writes nothing once another run has taken its expired lock", async () => {
 		const id = await addItem();
+
 		const fetchImpl = plaidFetch(async () => {
 			await env.DB.prepare(
 				"UPDATE plaid_items SET sync_lock_id = 'newer-run', sync_locked_until = datetime('now', '+5 minutes'), sync_cursor = 'newer-cursor' WHERE id = ?",
 			)
 				.bind(id)
 				.run();
+
 			return response(page({ added: [transaction()] }));
 		});
 
@@ -2899,27 +3095,36 @@ describe("syncItem", () => {
 		// The database the sync sees, where `before` runs just ahead of the first statement whose SQL starts with `prefix`.
 		function racingDb(prefix: string, before: string, id: number): D1Database {
 			let fired = false;
+
 			return new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop !== "prepare") {
-						const value = Reflect.get(target, prop);
-						return typeof value === "function" ? value.bind(target) : value;
+						if (!isDbMember(target, prop)) return undefined;
+
+						const value = target[prop];
+
+						return isMethod(value) ? value.bind(target) : value;
 					}
+
 					return (sql: string) => {
 						const statement = target.prepare(sql);
+
 						if (fired || !sql.startsWith(prefix)) return statement;
+
 						return {
 							bind: (...values: unknown[]) => {
 								const bound = statement.bind(...values);
+
 								return {
 									run: async () => {
 										fired = true;
 										await target.prepare(before).bind(id).run();
+
 										return bound.run();
 									},
 								};
 							},
-						} as unknown as D1PreparedStatement;
+						};
 					};
 				},
 			});
@@ -2934,6 +3139,7 @@ describe("syncItem", () => {
 			const id = await addItem();
 			const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 			const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+
 			const db = racingDb(
 				"UPDATE plaid_items SET connection_revision",
 				"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
@@ -2947,12 +3153,14 @@ describe("syncItem", () => {
 			expect(errors).toHaveBeenCalledWith(
 				`plaid sync could not record its completion for item ${id}`,
 			);
+
 			// Nothing about the token or the transaction is logged.
 			for (const call of [...errors.mock.calls, ...logs.mock.calls]) {
 				const line = call.map(String).join(" ");
 				expect(line).not.toContain("secret-access-token");
 				expect(line).not.toContain("RAW SHOP");
 			}
+
 			expect(
 				await env.DB.prepare(
 					"SELECT status, attention_login, attention_held, connection_revision, sync_lock_id FROM plaid_items WHERE id = ?",
@@ -2972,6 +3180,7 @@ describe("syncItem", () => {
 
 		it("a completion whose retry succeeds after a login error lands ends ok through the real sync path", async () => {
 			const id = await addItem();
+
 			const db = racingDb(
 				"UPDATE plaid_items SET connection_revision",
 				"UPDATE plaid_items SET status = 'needs_attention', attention_login = 1, attention_held = 0 WHERE id = ?",
@@ -3010,6 +3219,7 @@ describe("syncItem", () => {
 					)
 						.bind(id)
 						.run();
+
 					return response(
 						{ error_type: "ITEM_ERROR", error_code: "ITEM_LOGIN_REQUIRED" },
 						400,
@@ -3031,25 +3241,30 @@ describe("syncItem", () => {
 		)
 			.bind(id)
 			.run();
+
 		const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 			if (String(url).endsWith("/accounts/get")) {
 				return response({ accounts: [account()] });
 			}
+
 			if (String(url).endsWith("/item/get")) {
 				await env.DB.prepare(
 					"UPDATE plaid_items SET status = 'ok' WHERE id = ?",
 				)
 					.bind(id)
 					.run();
+
 				return response({
 					item: { error: { error_code: "ITEM_LOGIN_REQUIRED" } },
 				});
 			}
+
 			return response(
 				{ error_type: "ITEM_ERROR", error_code: "ITEM_LOGIN_REQUIRED" },
 				400,
 			);
 		});
+
 		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		await expect(
@@ -3072,10 +3287,13 @@ describe("syncItem", () => {
 		"rethrows a login error and leaves the right status when %s",
 		async (_case, itemResponse, expectedStatus) => {
 			const id = await addItem();
+
 			const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 				if (String(url).endsWith("/accounts/get"))
 					return response({ accounts: [account()] });
+
 				if (String(url).endsWith("/item/get")) return itemResponse;
+
 				return response(
 					{
 						error_type: "ITEM_ERROR",
@@ -3085,6 +3303,7 @@ describe("syncItem", () => {
 					400,
 				);
 			});
+
 			const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 			await expect(
 				syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl),
@@ -3104,6 +3323,7 @@ describe("syncItem", () => {
 			"PRODUCT_NOT_READY",
 			"TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
 		]);
+
 		for (const [type, code, expectedStatus] of [
 			["ITEM_ERROR", "ITEM_LOGIN_REQUIRED", "needs_attention"],
 			["ITEM_ERROR", "PASSWORD_RESET_REQUIRED", "needs_attention"],
@@ -3136,6 +3356,7 @@ describe("syncItem", () => {
 	describe("transfers and card payments (spec §8.5, decision 67)", () => {
 		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
 		const TRANSFERS = ["TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS"] as const;
+
 		const inCategory = (primary: string | null, overrides = {}) =>
 			transaction({
 				personal_finance_category: primary === null ? null : { primary },
@@ -3160,11 +3381,11 @@ describe("syncItem", () => {
 			).first();
 
 		const rowId = async () =>
-			(
+			defined(
 				await env.DB.prepare(
 					"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
-				).first<{ id: number }>()
-			)?.id as number;
+				).first<{ id: number }>(),
+			).id;
 
 		/** What the edit panel saves when a person only flips the exclude toggle. */
 		const person = async (excluded: boolean) =>
@@ -3228,11 +3449,13 @@ describe("syncItem", () => {
 				}),
 			);
 			const month = await loadMonth(env.DB, "2026-09");
+
 			const summary = summarizeMonth({
 				month: "2026-09",
 				...month,
 				unpaidDueBillsCents: 0,
 			});
+
 			expect(summary.totalSpentCents).toBe(1200);
 		});
 
@@ -3292,6 +3515,7 @@ describe("syncItem", () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("FOOD_AND_DRINK"));
 				await person(true);
+
 				for (const category of ["TRANSFER_IN", "FOOD_AND_DRINK", null]) {
 					await syncAs(id, kind, inCategory(category));
 					expect(await exclusion()).toEqual({
@@ -3343,6 +3567,7 @@ describe("syncItem", () => {
 					await setups[source](id);
 					const before = await exclusion();
 					expect(before).toMatchObject({ excluded: 1 });
+
 					for (const kind of ["modified", "added"] as const) {
 						await syncAs(id, kind, inCategory("FOOD_AND_DRINK"));
 						expect(await exclusion()).toEqual(before);
@@ -3370,23 +3595,27 @@ describe("syncItem", () => {
 			await env.DB.prepare(
 				"INSERT OR IGNORE INTO categories (name, icon, color, sort_order) VALUES ('Split A', 'groceries', 'cat-blue', 91), ('Split B', 'groceries', 'cat-blue', 92)",
 			).run();
+
 			const { results: categories } = await env.DB.prepare(
 				"SELECT id FROM categories WHERE name IN ('Split A', 'Split B') ORDER BY name",
 			).all<{ id: number }>();
+
 			await saveSplit(
 				env.DB,
 				await rowId(),
 				[
-					{ amountCents: 600, categoryId: categories[0]?.id as number },
-					{ amountCents: 634, categoryId: categories[1]?.id as number },
+					{ amountCents: 600, categoryId: defined(categories[0]).id },
+					{ amountCents: 634, categoryId: defined(categories[1]).id },
 				],
 				"synthetic-person",
 			);
+
 			const { results } = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 				.bind(await rowId())
 				.all<{ id: number }>();
+
 			return results.map((part) => part.id);
 		};
 
@@ -3467,7 +3696,7 @@ describe("syncItem", () => {
 				// The edit panel's toggle on one part includes the purchase and every part.
 				await saveEdit(
 					env.DB,
-					first as number,
+					defined(first),
 					{
 						categoryId: null,
 						alwaysForMerchant: false,
@@ -3479,11 +3708,13 @@ describe("syncItem", () => {
 					},
 					"synthetic-person",
 				);
+
 				for (const kind of ["added", "modified"] as const) {
 					await syncAs(id, kind, inCategory("TRANSFER_OUT"));
 					expect(await exclusion()).toEqual(included);
 					expect(await parts()).toEqual([included, included]);
 				}
+
 				expect(await spent()).toBe(1234);
 			});
 		});
@@ -3503,12 +3734,15 @@ describe("syncItem", () => {
 					).bind(transactionId),
 				]);
 			};
+
 			const unlink = () =>
 				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id = 9001").run();
+
 			const payment = () =>
 				env.DB.prepare(
 					"SELECT status FROM bill_payments WHERE bill_id = 9001",
 				).first();
+
 			const parts = async () =>
 				(
 					await env.DB.prepare(
@@ -3517,6 +3751,7 @@ describe("syncItem", () => {
 						.bind(await rowId())
 						.all()
 				).results;
+
 			const spent = async () =>
 				summarizeMonth({
 					month: "2026-09",
@@ -3610,7 +3845,7 @@ describe("syncItem", () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("GENERAL_SERVICES"));
 				const [linked] = await split();
-				await link(linked as number);
+				await link(defined(linked));
 				await syncAs(id, "modified", inCategory("LOAN_PAYMENTS"));
 				const plaid = { excluded: 1, excluded_source: "plaid" };
 				expect(await exclusion()).toEqual(plaid);
@@ -3647,6 +3882,7 @@ describe("syncItem", () => {
 					},
 					"synthetic-person",
 				);
+
 			const decisions = () =>
 				env.DB.prepare(
 					"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
@@ -3666,6 +3902,7 @@ describe("syncItem", () => {
 					);
 					await decide(choice);
 					expect(await decisions()).toMatchObject(expected);
+
 					for (const kind of ["modified", "added"] as const) {
 						await syncAs(id, kind, inCategory("TRANSFER_IN", { amount: -50 }));
 						expect(await exclusion()).toEqual({
@@ -3673,6 +3910,7 @@ describe("syncItem", () => {
 							excluded_source: null,
 						});
 					}
+
 					expect(await decisions()).toMatchObject(expected);
 				},
 			);
@@ -3753,18 +3991,21 @@ describe("syncItem", () => {
 			it("counts a split transfer credit's parts when a person reviews the split as a refund", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+
 				const { results: categories } = await env.DB.prepare(
 					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 				).all<{ id: number }>();
+
 				await saveSplit(
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
+
 				const parts = async () =>
 					(
 						await env.DB.prepare(
@@ -3773,6 +4014,7 @@ describe("syncItem", () => {
 							.bind(await rowId())
 							.all()
 					).results;
+
 				// The parts follow their parent: excluded by Plaid and not yet reviewed.
 				expect(await parts()).toEqual([
 					{
@@ -3809,23 +4051,27 @@ describe("syncItem", () => {
 			it("reviews a split part a person once marked income and then turned income off", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+
 				const { results: categories } = await env.DB.prepare(
 					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 				).all<{ id: number }>();
+
 				await saveSplit(
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
+
 				const { results } = await env.DB.prepare(
 					"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
 				)
 					.bind(await rowId())
 					.all<{ id: number }>();
+
 				// Marked income, then income turned off: still unreviewed, with a person's income choice.
 				await env.DB.prepare(
 					"UPDATE transactions SET flag_income = 0, income_source = 'user' WHERE id = ?",
@@ -3833,11 +4079,13 @@ describe("syncItem", () => {
 					.bind(results[0]?.id)
 					.run();
 				await decide("refund", true);
+
 				const first = await env.DB.prepare(
 					"SELECT excluded, excluded_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
 				)
 					.bind(results[0]?.id)
 					.first();
+
 				expect(first).toEqual({
 					excluded: 0,
 					excluded_source: null,
@@ -3849,68 +4097,80 @@ describe("syncItem", () => {
 			it("leaves a split part a person marked income as income when they review the split", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+
 				const { results: categories } = await env.DB.prepare(
 					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 				).all<{ id: number }>();
+
 				await saveSplit(
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
+
 				const { results } = await env.DB.prepare(
 					"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
 				)
 					.bind(await rowId())
 					.all<{ id: number }>();
+
 				await env.DB.prepare(
 					"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
 				)
 					.bind(results[0]?.id)
 					.run();
 				await decide("refund", true);
+
 				const first = await env.DB.prepare(
 					"SELECT flag_income, credit_reviewed FROM transactions WHERE id = ?",
 				)
 					.bind(results[0]?.id)
 					.first();
+
 				expect(first).toEqual({ flag_income: 1, credit_reviewed: 0 });
 			});
 
 			it("leaves a split part's own exclusion alone when a person reviews the split", async () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+
 				const { results: categories } = await env.DB.prepare(
 					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 				).all<{ id: number }>();
+
 				await saveSplit(
 					env.DB,
 					await rowId(),
 					[
-						{ amountCents: -2000, categoryId: categories[0]?.id as number },
-						{ amountCents: -3000, categoryId: categories[1]?.id as number },
+						{ amountCents: -2000, categoryId: defined(categories[0]).id },
+						{ amountCents: -3000, categoryId: defined(categories[1]).id },
 					],
 					"synthetic-person",
 				);
+
 				const { results } = await env.DB.prepare(
 					"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
 				)
 					.bind(await rowId())
 					.all<{ id: number }>();
+
 				await env.DB.prepare(
 					"UPDATE transactions SET excluded_source = 'user' WHERE id = ?",
 				)
 					.bind(results[0]?.id)
 					.run();
 				await decide("refund", true);
+
 				const first = await env.DB.prepare(
 					"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
 				)
 					.bind(results[0]?.id)
 					.first();
+
 				expect(first).toEqual({ excluded: 1, excluded_source: "user" });
 			});
 
@@ -4013,15 +4273,18 @@ describe("syncItem", () => {
 		it("never lets Jev clear a Plaid exclusion or take it over", async () => {
 			const id = await addItem();
 			await syncAs(id, "added", inCategory("TRANSFER_OUT"));
+
 			const category = await env.DB.prepare(
 				"SELECT id FROM categories LIMIT 1",
 			).first<{ id: number }>();
+
 			const written = await saveJevResult(env.DB, await rowId(), {
-				categoryId: category?.id as number,
-				suggestedCategoryId: category?.id as number,
+				categoryId: defined(category).id,
+				suggestedCategoryId: defined(category).id,
 				confidence: 0.95,
 				flags: { transfer: false, reimbursement: false, income: true },
 			});
+
 			expect(written).toBe(false);
 			expect(
 				await env.DB.prepare(
@@ -4045,10 +4308,12 @@ describe("syncItem", () => {
 			const id = await addItem();
 			await syncAs(id, "added", inCategory("LOAN_PAYMENTS"));
 			const fetchImpl = vi.fn(async () => response({}, 500));
+
 			const result = await categorizePending(
 				{ DB: env.DB, JEV_API_KEY: "synthetic-key" },
 				fetchImpl,
 			);
+
 			expect(result).toEqual({ asked: 0, applied: 0 });
 			expect(fetchImpl).not.toHaveBeenCalled();
 			expect(await exclusion()).toEqual({
@@ -4061,7 +4326,8 @@ describe("syncItem", () => {
 
 describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", () => {
 	const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
-	const payroll = (overrides: Record<string, unknown> = {}) =>
+
+	const payroll = (overrides: Record<string, Json> = {}) =>
 		transaction({
 			transaction_id: "payroll",
 			amount: -3000,
@@ -4069,9 +4335,11 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			personal_finance_category: { primary: "INCOME" },
 			...overrides,
 		});
+
 	const notIncomeByPlaid = {
 		personal_finance_category: { primary: "GENERAL_MERCHANDISE" },
 	};
+
 	const send = (
 		id: number,
 		path: "added" | "modified",
@@ -4082,16 +4350,19 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			id,
 			plaidFetch(() => response(page({ [path]: transactions }))),
 		);
+
 	const income = () =>
 		env.DB.prepare(
 			"SELECT flag_income, income_source, plaid_category FROM transactions WHERE plaid_transaction_id = 'payroll'",
 		).first();
+
 	const payrollId = async () =>
-		(
+		defined(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id = 'payroll'",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 	const jevAnswer = (income: boolean) => ({
 		categoryId: null,
 		suggestedCategoryId: null,
@@ -4116,9 +4387,11 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			env.DB.prepare("DELETE FROM budget_amounts"),
 			env.DB.prepare("DELETE FROM categories"),
 		]);
+
 		const category = await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Synthetic', 'groceries', 'cat-blue', 1) RETURNING id",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"INSERT INTO budget_amounts VALUES (?, '2026-09', 100000)",
 		)
@@ -4142,11 +4415,13 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 			income_source: null,
 			plaid_category: "INCOME",
 		});
+
 		const month = summarizeMonth({
 			month: "2026-09",
 			...(await loadMonth(env.DB, "2026-09")),
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(month.incomeCents).toBe(300000);
 		// Only the purchase is spent: the paycheck is income, and the unreviewed refund is held.
 		expect(month.totalSpentCents).toBe(20000);
@@ -4325,6 +4600,7 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 		async ({ answer, incomeSwitch }) => {
 			const id = await addItem();
 			await send(id, "added", payroll());
+
 			const written = await saveJevResult(
 				env.DB,
 				await payrollId(),
@@ -4350,9 +4626,11 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 		"does not flag an outgoing payment Plaid labels INCOME, so it stays in Spent, on a %s sync",
 		async (path) => {
 			const id = await addItem();
+
 			if (path === "modified") {
 				await send(id, "added", payroll({ amount: 500, ...notIncomeByPlaid }));
 			}
+
 			await send(id, path, payroll({ amount: 500 }));
 
 			expect(await income()).toEqual({
@@ -4360,11 +4638,13 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 				income_source: null,
 				plaid_category: "INCOME",
 			});
+
 			const month = summarizeMonth({
 				month: "2026-09",
 				...(await loadMonth(env.DB, "2026-09")),
 				unpaidDueBillsCents: 0,
 			});
+
 			expect(month.incomeCents).toBe(0);
 			expect(month.totalSpentCents).toBe(50000);
 		},
@@ -4424,12 +4704,14 @@ describe("Plaid's INCOME category at sync (spec §8.5, decisions 67 and 70)", ()
 
 describe("balance snapshots at sync (spec §5, §8.3, decision 64)", () => {
 	const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+
 	const sync = (id: number, accounts = [account()]) =>
 		syncItem(
 			opts,
 			id,
 			plaidFetch(() => response(page()), accounts),
 		);
+
 	const snapshots = async () =>
 		(
 			await env.DB.prepare(
@@ -4438,6 +4720,7 @@ describe("balance snapshots at sync (spec §5, §8.3, decision 64)", () => {
 				 ORDER BY h.date, a.plaid_account_id`,
 			).all()
 		).results;
+
 	const setZone = (value: string) =>
 		env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('time_zone', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -4529,6 +4812,7 @@ describe("balance snapshots at sync (spec §5, §8.3, decision 64)", () => {
 					)
 						.bind(id)
 						.run();
+
 					return response(page());
 				}),
 			),
@@ -4553,18 +4837,20 @@ describe("syncItem reports which rows it changed", () => {
 	});
 
 	const rowId = async (plaidId: string) =>
-		(
+		defined(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE plaid_transaction_id = ?",
 			)
 				.bind(plaidId)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 	const idsOf = (synced: Awaited<ReturnType<typeof syncItem>>) =>
 		"changedIds" in synced ? [...synced.changedIds].sort((a, b) => a - b) : [];
 
 	it("lists the ids of the rows it added", async () => {
 		const id = await addItem();
+
 		const synced = await syncItem(
 			opts,
 			id,
@@ -4579,6 +4865,7 @@ describe("syncItem reports which rows it changed", () => {
 				),
 			),
 		);
+
 		expect(idsOf(synced)).toEqual([await rowId("a"), await rowId("b")]);
 	});
 
@@ -4598,6 +4885,7 @@ describe("syncItem reports which rows it changed", () => {
 				),
 			),
 		);
+
 		const synced = await syncItem(
 			opts,
 			id,
@@ -4611,6 +4899,7 @@ describe("syncItem reports which rows it changed", () => {
 				),
 			),
 		);
+
 		expect(idsOf(synced)).toEqual(
 			[await rowId("a"), await rowId("c")].sort((x, y) => x - y),
 		);
@@ -4633,6 +4922,7 @@ describe("syncItem reports which rows it changed", () => {
 			),
 		);
 		const pendingRow = await rowId("pending-1");
+
 		const synced = await syncItem(
 			opts,
 			id,
@@ -4652,17 +4942,20 @@ describe("syncItem reports which rows it changed", () => {
 				),
 			),
 		);
+
 		expect(idsOf(synced)).toEqual([pendingRow]);
 	});
 
 	it("lists the rows of every page of one sync", async () => {
 		const id = await addItem();
 		let calls = 0;
+
 		const synced = await syncItem(
 			opts,
 			id,
 			plaidFetch(() => {
 				calls += 1;
+
 				return response(
 					calls === 1
 						? page({
@@ -4678,6 +4971,7 @@ describe("syncItem reports which rows it changed", () => {
 				);
 			}),
 		);
+
 		expect(idsOf(synced)).toEqual([await rowId("a"), await rowId("b")]);
 	});
 

@@ -8,6 +8,17 @@ import { verifyPlaidWebhook } from "../plaid/webhook-verify";
 import { enabled } from "./plaid";
 
 type App = { Bindings: Env & PlaidEnv };
+
+// True for a parsed JSON value that is an object: not null, not a number or string, and not an array.
+function isWebhookObject(value: unknown): value is Webhook {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// True for a value that is a string: a Plaid field that is only used when it holds text.
+function isText(value: unknown): value is string {
+	return typeof value === "string";
+}
+
 type Webhook = {
 	item_id?: unknown;
 	webhook_type?: unknown;
@@ -35,6 +46,7 @@ const relinkCodes = new Set([
 	"PENDING_DISCONNECT",
 	"USER_PERMISSION_REVOKED",
 ]);
+
 const transientErrors = new Set<string>(TRANSIENT_ITEM_ERROR_CODES);
 
 export const webhooks = new Hono<App>();
@@ -42,24 +54,32 @@ export const webhooks = new Hono<App>();
 webhooks.post("/webhooks/plaid", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 	const rawBody = await c.req.text();
+
 	const verification = await verifyPlaidWebhook(
 		c.env,
 		rawBody,
 		c.req.header("Plaid-Verification"),
 	);
+
 	if (verification === "unavailable") return c.body(null, 503);
+
 	if (verification === "invalid") return c.body(null, 401);
 	let parsed: unknown;
+
 	try {
 		parsed = JSON.parse(rawBody);
 	} catch {
 		return c.body(null, 400);
 	}
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+
+	if (!isWebhookObject(parsed)) {
 		return c.body(null, 200);
 	}
-	const body = parsed as Webhook;
-	if (typeof body.item_id !== "string") return c.body(null, 200);
+
+	const body = parsed;
+
+	if (!isText(body.item_id)) return c.body(null, 200);
+
 	const item = await c.env.DB.prepare(
 		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held, connection_revision FROM plaid_items WHERE plaid_item_id = ?",
 	)
@@ -73,7 +93,9 @@ webhooks.post("/webhooks/plaid", async (c) => {
 			attention_held: number;
 			connection_revision: number;
 		}>();
+
 	if (!item) return c.body(null, 200);
+
 	if (item.disconnected_at !== null) return c.body(null, 200);
 
 	if (
@@ -85,37 +107,45 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		c.executionCtx.waitUntil(
 			syncItemAndSort(c.env, item.id, undefined, {
 				historyComplete: body.historical_update_complete === true,
-			}).catch((error: unknown) => {
+			}).catch((cause: unknown) => {
 				const requestId =
-					error instanceof PlaidError ? error.request_id : undefined;
+					cause instanceof PlaidError ? cause.request_id : undefined;
+
 				console.error(`plaid webhook sync error ${requestId ?? ""}`.trim());
 			}),
 		);
+
 		return c.body(null, 200);
 	}
 
 	const itemError = body.error?.error_code;
+
 	const isItemError =
 		body.webhook_type === "ITEM" &&
 		body.webhook_code === "ERROR" &&
-		!(typeof itemError === "string" && transientErrors.has(itemError));
+		!(isText(itemError) && transientErrors.has(itemError));
+
 	const isRelinkWarning =
 		body.webhook_type === "ITEM" &&
-		typeof body.webhook_code === "string" &&
+		isText(body.webhook_code) &&
 		relinkCodes.has(body.webhook_code);
+
 	if (isRelinkWarning) {
 		// No `seen` is passed here, so the store reads the bank now, and a race with a sync or a relink is tried again
 		// against the latest state. A relink warning is never made stale by a repair or a sync, so it must not be
 		// dropped (decision 173). Only a race it loses three times comes back here as lost-race: the warning did not
 		// land, so the answer is 503, and Plaid sends the webhook again.
 		const result = await markNeedsAttention(c.env.DB, item.id, "relink");
+
 		if (result === "lost-race") {
 			console.error(
 				`plaid webhook ${String(body.webhook_code)} lost a race for item ${item.id}`,
 			);
+
 			return c.body(null, 503);
 		}
 	}
+
 	if (isItemError) {
 		c.executionCtx.waitUntil(
 			(async () => {
@@ -129,18 +159,21 @@ webhooks.post("/webhooks/plaid", async (c) => {
 							revision: item.connection_revision,
 						},
 					});
+
 					if (result === "lost-race") {
 						console.error(
 							`plaid webhook ITEM error lost a race for item ${item.id}`,
 						);
 					}
 				}
-			})().catch((error: unknown) => {
+			})().catch((cause: unknown) => {
 				const requestId =
-					error instanceof PlaidError ? error.request_id : undefined;
+					cause instanceof PlaidError ? cause.request_id : undefined;
+
 				console.error(`plaid webhook item error ${requestId ?? ""}`.trim());
 			}),
 		);
 	}
+
 	return c.body(null, 200);
 });

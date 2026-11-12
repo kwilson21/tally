@@ -30,6 +30,7 @@ import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
 const TODAY = "2026-10-05";
+
 export const dollars = (cents: number) =>
 	formatCents(cents, { wholeDollars: true });
 
@@ -37,19 +38,24 @@ export const dollars = (cents: number) =>
 // Sample data, in the demo's style: October, five days in.
 
 type Cat = { name: string; icon: string; color: string };
+
 const KIDS: Cat = { name: "Kids", icon: "kids", color: "cat-ochre" };
 const GAS: Cat = { name: "Gas", icon: "gas", color: "cat-slate" };
+
 const GROCERIES: Cat = {
 	name: "Groceries",
 	icon: "groceries",
 	color: "cat-blue",
 };
+
 const HOUSEHOLD: Cat = {
 	name: "Household",
 	icon: "household",
 	color: "cat-brown",
 };
+
 export const RENT_CAT: Cat = { name: "Rent", icon: "rent", color: "cat-slate" };
+
 export const UTILITIES: Cat = {
 	name: "Utilities",
 	icon: "utilities",
@@ -83,8 +89,10 @@ export const ELECTRIC = bill(
 	"2026-10-08",
 	HOUSEHOLD,
 );
+
 const DAYCARE = bill(2, "Daycare", 24000, "due", "2026-10-09", KIDS);
 export const SWIM = bill(3, "Swim lessons", 6000, "due", "2026-10-10", KIDS);
+
 export const INTERNET = bill(
 	4,
 	"Internet",
@@ -93,6 +101,7 @@ export const INTERNET = bill(
 	"2026-10-18",
 	HOUSEHOLD,
 );
+
 export const CAR = bill(
 	5,
 	"Car insurance",
@@ -101,14 +110,18 @@ export const CAR = bill(
 	"2026-10-20",
 	GAS,
 );
+
 export const RENT = bill(6, "Rent", 120000, "paid", "2026-10-01", RENT_CAT);
+
 /** A yearly bill: paid in March, so Bills shows next March's as Upcoming. */
 const SOCCER = bill(7, "Youth soccer", 54000, "upcoming", "2027-03-15", KIDS);
 
 const rows = (bills: BillRowData[]) =>
 	bills.map((b) => <BillRow bill={b} today={TODAY} />);
+
 const sum = (bills: BillRowData[]) =>
 	bills.reduce((n, b) => n + b.amountCents, 0);
+
 /** Bills' status sentence, as the page writes it. */
 export const toPay = (n: number, cents: number) =>
 	`${n} ${n === 1 ? "bill" : "bills"} to pay soon, ${formatCents(cents)} in all`;
@@ -254,6 +267,7 @@ const FRIDAYS = [
 	"2026-10-23",
 	"2026-10-30",
 ];
+
 const FRIDAYS_PAID = 1;
 const DAYCARE_AMOUNT = formatCents(DAYCARE.amountCents);
 
@@ -372,11 +386,13 @@ function Pick({
 const DAYS = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split(
 	" ",
 );
+
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
 		new Date(Date.UTC(2026, i, 1)),
 	),
 );
+
 const FREQUENCIES = [
 	["monthly", "Monthly"],
 	["yearly", "Yearly"],
@@ -384,7 +400,9 @@ const FREQUENCIES = [
 	["biweekly", "Every two weeks"],
 	["quarterly", "Quarterly"],
 ] as const;
+
 const FORM_CATEGORIES = [KIDS, HOUSEHOLD, GAS];
+
 /** The bill filled in for each new frequency: one that really repeats that often. */
 const FORM_BILLS = {
 	weekly: { name: "Daycare", amount: "240.00", category: KIDS },
@@ -402,6 +420,7 @@ const FORM_BILLS = {
  */
 function frequencyForm(id: string, often: "weekly" | "biweekly" | "quarterly") {
 	const { name, amount, category } = FORM_BILLS[often];
+
 	return (
 		<FormSheet>
 			<h2 class="font-serif text-4xl font-semibold tracking-tight">
@@ -517,6 +536,7 @@ const rentPayment = (date: string, cents: number) => (
 		</Button>
 	</div>
 );
+
 /** Rent's August: one payment, as every occurrence looks today. */
 const augustRent = (
 	<BillOccurrenceRow
@@ -768,12 +788,16 @@ const categoryTick = (
 // unpaid bill due this month. Soccer is next due in March, so it isn't in October's.
 
 const MONTH_BILLS = [ELECTRIC, SWIM, INTERNET, CAR, RENT, SOCCER];
+
 const perMonth = (b: BillRowData) =>
 	b === SOCCER ? Math.round(b.amountCents / 12) : b.amountCents;
+
 const MONTHLY_TOTAL = MONTH_BILLS.reduce((n, b) => n + perMonth(b), 0);
+
 const LEFT_IN_OCTOBER = MONTH_BILLS.filter(
 	(b) => b.status !== "paid" && b.dueDate.startsWith("2026-10"),
 ).reduce((n, b) => n + b.amountCents, 0);
+
 const SOCCER_A_MONTH = `about ${dollars(perMonth(SOCCER))} a month`;
 const SOON = [ELECTRIC, SWIM];
 
@@ -844,6 +868,7 @@ const yearlyShare = totalsList({
 
 const OLD_PRICE = 1549;
 const NEW_PRICE = 1799;
+
 const HISTORY: [string, number][] = [
 	["October", NEW_PRICE],
 	["January", OLD_PRICE],

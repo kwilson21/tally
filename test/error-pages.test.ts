@@ -2,6 +2,8 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { retryHref } from "../src/error-pages";
 import { app } from "../src/index";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -17,40 +19,48 @@ const brokenWorker = () => {
 					throw new Error(SECRET);
 				};
 			}
-			const value = Reflect.get(target, prop);
-			return typeof value === "function" ? value.bind(target) : value;
+
+			// SAFETY: the proxy forwards only the members the code under test reads from D1Database; any other key reads as undefined on the real binding.
+			const value: unknown = target[prop as keyof D1Database];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
-	return { ...env, DB } as Env;
+
+	return envWith(env, { DB });
 };
 
 const fail = (path: string, headers: Record<string, string> = {}) =>
 	app.request(`${BASE}${path}`, { headers }, brokenWorker());
 
 /** A form post that fails on the way to the database, as a plain browser form sends it. */
-const failPost = (path: string, referer?: string) =>
-	app.request(
+const failPost = (path: string, referer?: string) => {
+	const headers = {
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	};
+
+	return app.request(
 		`${BASE}${path}`,
 		{
 			method: "POST",
-			headers: {
-				Origin: BASE,
-				"content-type": "application/x-www-form-urlencoded",
-				...(referer ? { Referer: referer } : {}),
-			},
+			headers: referer ? { ...headers, Referer: referer } : headers,
 			body: "budget=350.00",
 		},
 		brokenWorker(),
 	);
+};
 
 const text = async (res: Response) => res.text();
 
 // keyboard.js asks for #keys, and htmx names that target by its tag and id: the region is a div.
 const keysHeaders = { "HX-Request": "true", "HX-Target": "div#keys" };
+
 /** The keys region Layout draws, as keys-routes.test.ts reads it: from #keys to the toasts. */
 const keysRegion = (html: string) => {
 	const start = html.indexOf('<div id="keys"');
 	const end = html.indexOf('<div id="toasts"', start);
+
 	return start === -1 || end === -1 ? "" : html.slice(start, end);
 };
 
@@ -72,6 +82,7 @@ describe("the 404 page (app.notFound)", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/no-such-page`)
 		).text();
+
 		expect(html).toContain("[&amp;&gt;svg]:size-44");
 		expect(html).toContain('stroke-width="1.75"');
 		expect(html).toMatch(
@@ -93,6 +104,7 @@ describe("the 404 page (app.notFound)", () => {
 		const res = await exports.default.fetch(`${BASE}/no-such-page`, {
 			headers: { "HX-Request": "true" },
 		});
+
 		expect(res.status).toBe(404);
 		// No body: a reply that matches no hx-select would otherwise swap in nothing and remove a sheet.
 		expect(await res.text()).toBe("");
@@ -107,6 +119,7 @@ describe("the 404 page (app.notFound)", () => {
 		const res = await exports.default.fetch(`${BASE}/budget/999999`, {
 			headers: { "HX-Request": "true" },
 		});
+
 		expect(res.status).toBe(404);
 		expect(await res.text()).toBe("");
 		expect(res.headers.get("HX-Reswap")).toBe("none");
@@ -118,6 +131,7 @@ describe("the 404 page (app.notFound)", () => {
 			const res = await exports.default.fetch(`${BASE}/no-such-page?keys`, {
 				headers: keysHeaders,
 			});
+
 			expect(res.status).toBe(200);
 			expect(res.headers.get("HX-Reswap")).toBeNull();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -130,6 +144,7 @@ describe("the 404 page (app.notFound)", () => {
 			const res = await exports.default.fetch(`${BASE}/no-such-page`, {
 				headers: keysHeaders,
 			});
+
 			expect(await text(res)).toContain('<div id="keys"></div>');
 		});
 
@@ -137,6 +152,7 @@ describe("the 404 page (app.notFound)", () => {
 			const res = await exports.default.fetch(`${BASE}/no-such-page?keys`, {
 				headers: { "HX-Request": "true", "HX-Target": "div#main" },
 			});
+
 			expect(res.status).toBe(404);
 			expect(await text(res)).toBe("");
 			expect(res.headers.get("HX-Reswap")).toBe("none");
@@ -211,9 +227,11 @@ describe("the 500 page (app.onError)", () => {
 
 		it("never echoes another site's Referer", async () => {
 			quiet();
+
 			const html = await text(
 				await failPost("/budget/1", "https://evil.example/budget/1?x=1"),
 			);
+
 			expect(html).not.toContain("Try again");
 			expect(html).not.toContain("evil.example");
 		});
@@ -285,10 +303,12 @@ describe("the 500 page (app.onError)", () => {
 
 		it("still gives any other htmx request on a failing page the empty 500 htmx does not swap", async () => {
 			quiet();
+
 			const res = await fail("/?keys", {
 				"HX-Request": "true",
 				"HX-Target": "div#main",
 			});
+
 			expect(res.status).toBe(500);
 			expect(await text(res)).toBe("");
 			expect(res.headers.get("HX-Reswap")).toBe("none");
@@ -319,6 +339,7 @@ describe("the 500 page (app.onError)", () => {
 			},
 			body: "note=hi",
 		});
+
 		expect(res.status).toBe(403);
 		expect(await res.text()).not.toContain("Something went wrong");
 	});

@@ -3,8 +3,10 @@
 export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	const repairFailure = "Couldn't fix the connection. Try again.";
 	let plaidSdkLoad;
+
 	const loadPlaidSdk = () => {
 		if (globalThis.Plaid) return Promise.resolve(globalThis.Plaid);
+
 		if (plaidSdkLoad) return plaidSdkLoad;
 		plaidSdkLoad = new Promise((resolve, reject) => {
 			const script = document.createElement("script");
@@ -20,73 +22,96 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			plaidSdkLoad = undefined;
 			throw error;
 		});
+
 		return plaidSdkLoad;
 	};
+
 	const repairAlert = (region, responseBody, itemId) => {
 		const liveRegion = itemId
 			? document.querySelector(
 					`[data-bank-item-id="${itemId}"] [data-fix-error]`,
 				)
 			: undefined;
+
 		const serverAlert = responseBody
 			? new DOMParser()
 					.parseFromString(responseBody, "text/html")
 					.querySelector('[role="alert"]')?.textContent
 			: undefined;
+
 		const alert = document.createElement("p");
 		alert.setAttribute("role", "alert");
 		alert.textContent = serverAlert?.trim() || repairFailure;
 		(liveRegion || region).replaceChildren(alert);
 	};
+
 	const setRepairBusy = (repairButton, value) => {
 		repairButton.disabled = value;
 		repairButton.setAttribute("aria-busy", String(value));
 		repairButton.classList.toggle("htmx-request", value);
 	};
+
 	// The banks with a fix running. A refresh can redraw a bank's button mid-fix, so a second click
 	// is refused by id, and the busy state reaches whichever button is on screen.
 	const repairing = new Set();
+
 	const repairClick = async (event) => {
 		const repairButton = event.target?.closest?.("[data-fix-connection]");
+
 		if (!repairButton) return;
 		const itemId = repairButton.getAttribute("data-item-id");
 		const section = repairButton.closest("[data-bank-item-id]");
 		const repairError = section?.querySelector("[data-fix-error]");
+
 		if (!itemId || !repairError || repairing.has(itemId)) return;
+
 		const setBusy = (value) => {
 			if (value) repairing.add(itemId);
 			else repairing.delete(itemId);
+
 			const live = document.querySelector(
 				`[data-bank-item-id="${itemId}"] [data-fix-connection]`,
 			);
+
 			for (const button of new Set([repairButton, live])) {
 				if (button) setRepairBusy(button, value);
 			}
 		};
+
 		setBusy(true);
 		repairError.replaceChildren();
+
 		try {
 			const Plaid = await loadPlaidSdk();
+
 			const response = await fetch(`/plaid/items/${itemId}/link-token`, {
 				method: "POST",
 			});
+
 			if (!response.ok) {
 				repairAlert(repairError, await response.text(), itemId);
 				setBusy(false);
+
 				return;
 			}
+
 			const { link_token: token } = await response.json();
+
 			const link = Plaid.create({
 				token,
 				onSuccess: async () => {
 					let requestContext;
 					let announcement;
+
 					const finished = (requestEvent) => {
 						requestContext = requestEvent.detail?.ctx;
 						const trigger = requestContext?.hx?.trigger;
+
 						if (typeof trigger !== "string") return;
+
 						try {
 							const events = JSON.parse(trigger);
+
 							if (Object.hasOwn(events, "announce")) {
 								announcement = events.announce;
 								delete events.announce;
@@ -96,8 +121,10 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							// Leave malformed headers to htmx.
 						}
 					};
+
 					repairButton.addEventListener("htmx:after:request", finished);
 					repairButton.addEventListener("htmx:finally:request", finished);
+
 					try {
 						await htmx.ajax("POST", `/plaid/items/${itemId}/repaired`, {
 							source: repairButton,
@@ -107,30 +134,38 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					} catch {
 						repairAlert(repairError, undefined, itemId);
 						setBusy(false);
+
 						return;
 					} finally {
 						repairButton.removeEventListener("htmx:after:request", finished);
 						repairButton.removeEventListener("htmx:finally:request", finished);
 					}
+
 					if (
 						!requestContext?.response ||
 						requestContext.response.status >= 400
 					) {
 						repairAlert(repairError, requestContext?.text, itemId);
 						setBusy(false);
+
 						return;
 					}
+
 					setBusy(true);
 					let newSummary;
+
 					try {
 						const refresh = await fetch("/accounts");
+
 						if (refresh.ok) {
 							const parsed = new DOMParser().parseFromString(
 								await refresh.text(),
 								"text/html",
 							);
+
 							newSummary = parsed.querySelector("#accounts-summary");
 							const oldSummary = document.querySelector("#accounts-summary");
+
 							if (newSummary && oldSummary) {
 								oldSummary.replaceWith(newSummary);
 								htmx.process(newSummary);
@@ -139,6 +174,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					} catch {
 						// The repair succeeded; report the stale view below.
 					}
+
 					if (announcement) {
 						document.body.dispatchEvent(
 							new CustomEvent("announce", {
@@ -147,6 +183,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							}),
 						);
 					}
+
 					if (!newSummary) {
 						repairAlert(
 							repairError,
@@ -154,14 +191,18 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							itemId,
 						);
 						setBusy(false);
+
 						return;
 					}
+
 					const refreshedBank = newSummary.querySelector?.(
 						`[data-bank-item-id="${itemId}"]`,
 					);
+
 					const focusTarget =
 						refreshedBank?.querySelector?.("h2") ??
 						document.querySelector("[data-link-bank]");
+
 					focusTarget?.focus();
 					setBusy(false);
 				},
@@ -170,6 +211,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					setBusy(false);
 				},
 			});
+
 			link.open();
 		} catch {
 			repairAlert(repairError, undefined, itemId);
@@ -178,19 +220,24 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	};
 
 	const genericFailure = "Couldn't link the bank. Try again.";
+
 	// Link a bank lives inside #accounts-summary, which a refresh replaces (decision 55), so its
 	// button and error region are looked up when needed rather than kept from page load.
 	const linkErrorRegion = () =>
 		document.querySelector("[data-link-bank-error]");
+
 	const showAlert = (message) => {
 		const region = linkErrorRegion();
+
 		if (region) {
 			const alert = document.createElement("p");
 			alert.setAttribute("role", "alert");
 			alert.textContent = message;
 			region.replaceChildren(alert);
+
 			return;
 		}
+
 		// No error region is on screen (a first-week redraw can take it away while Plaid's window is open), so the
 		// words still reach the person as a toast: the same "toast" event an HX-Trigger toast dispatches (toast.js).
 		document.body.dispatchEvent(
@@ -200,25 +247,31 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			}),
 		);
 	};
+
 	const showFailure = (responseText) => {
 		const serverAlert = responseText
 			? new DOMParser()
 					.parseFromString(responseText, "text/html")
 					.querySelector('[role="alert"]')?.textContent
 			: undefined;
+
 		showAlert(serverAlert?.trim() || genericFailure);
 	};
+
 	// One link at a time: a refresh (a fix finishing, say) can redraw Link a bank mid-link, so a
 	// second click is refused, and the busy state reaches whichever button is on screen.
 	let linking = false;
+
 	const linkClick = async (button) => {
 		if (linking) return;
 		// What a success redraws: Accounts' list by default; setup's screens set their own (LinkBank's data attributes).
 		const refreshUrl = button.dataset?.linkBankRefresh || "/accounts";
 		const refreshTarget = button.dataset?.linkBankTarget || "#accounts-summary";
+
 		const busy = (value) => {
 			linking = value;
 			const live = document.querySelector("[data-link-bank]");
+
 			for (const target of new Set([button, live])) {
 				if (!target) continue;
 				target.disabled = value;
@@ -226,29 +279,40 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 				target.classList.toggle("htmx-request", value);
 			}
 		};
+
 		busy(true);
 		linkErrorRegion()?.replaceChildren();
+
 		try {
 			const Plaid = await loadPlaidSdk();
 			const response = await fetch("/plaid/link-token", { method: "POST" });
+
 			if (!response.ok) {
 				showFailure(await response.text());
 				busy(false);
+
 				return;
 			}
+
 			const { link_token: token } = await response.json();
+
 			const link = Plaid.create({
 				token,
 				onSuccess: async (publicToken) => {
 					let announcement;
+
 					try {
 						let exchangeContext;
+
 						const finished = (event) => {
 							exchangeContext = event.detail?.ctx;
 							const trigger = exchangeContext?.hx?.trigger;
+
 							if (typeof trigger !== "string") return;
+
 							try {
 								const events = JSON.parse(trigger);
+
 								if (Object.hasOwn(events, "announce")) {
 									announcement = events.announce;
 									delete events.announce;
@@ -258,14 +322,17 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 								// Leave malformed headers to htmx's normal handling.
 							}
 						};
+
 						// The exchange's source is the clicked button while it is on the page, else the live Link a bank, else
 						// the body. A first-week redraw can replace the button while Plaid's window is open, and htmx 4 sends
 						// nothing for a source that is no longer in the document, so the exchange never depends on the one clicked.
 						const source = button.isConnected
 							? button
 							: (document.querySelector("[data-link-bank]") ?? document.body);
+
 						source.addEventListener("htmx:after:request", finished);
 						source.addEventListener("htmx:finally:request", finished);
+
 						try {
 							await htmx.ajax("POST", "/plaid/exchange", {
 								source,
@@ -280,30 +347,39 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							source.removeEventListener("htmx:after:request", finished);
 							source.removeEventListener("htmx:finally:request", finished);
 						}
+
 						if (
 							!exchangeContext?.response ||
 							exchangeContext.response.status >= 400
 						) {
 							showFailure(exchangeContext?.text);
+
 							return;
 						}
+
 						// The POST's completion removes htmx-request from its source.
 						busy(true);
 						let refreshed = false;
+
 						try {
 							const refreshResponse = await fetch(refreshUrl);
+
 							// Setup has moved on (the questions or Home), so show the page the redirect reached, not a swap.
 							if (refreshResponse.ok && refreshResponse.redirected) {
 								document.location.assign(refreshResponse.url);
+
 								return;
 							}
+
 							if (refreshResponse.ok) {
 								const parsed = new DOMParser().parseFromString(
 									await refreshResponse.text(),
 									"text/html",
 								);
+
 								const newSummary = parsed.querySelector(refreshTarget);
 								const currentSummary = document.querySelector(refreshTarget);
+
 								if (newSummary && currentSummary) {
 									currentSummary.replaceWith(newSummary);
 									htmx.process(newSummary);
@@ -313,6 +389,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						} catch {
 							// The exchange succeeded, so report the stale summary below.
 						}
+
 						if (announcement) {
 							document.body.dispatchEvent(
 								new CustomEvent("announce", {
@@ -321,15 +398,20 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 								}),
 							);
 						}
+
 						if (!refreshed) {
 							const bank = announcement?.replace(/[.!?]$/, "") || "Bank linked";
+
 							const stale =
 								refreshTarget === "#accounts-summary" ? "list" : "page";
+
 							showAlert(
 								`${bank}, but the ${stale} didn't refresh. Reload the page to see it.`,
 							);
+
 							return;
 						}
+
 						// The refresh drew a new button, or setup's status line; focus that, not the one clicked. The status
 						// wins over the screen's own Link another bank (the foot keeps one).
 						(
@@ -347,6 +429,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 					busy(false);
 				},
 			});
+
 			link.open();
 		} catch {
 			showFailure();
@@ -372,10 +455,12 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 			body: "",
 		}).catch(() => {});
+
 	const skipWhileLinking = (event) => {
 		if (!linking || !event.target?.hasAttribute?.("data-waits-for-link"))
 			return;
 		event.preventDefault();
+
 		if (event.target.id === "home-seen") presencePing();
 	};
 
@@ -383,7 +468,9 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	if (document.addEventListener) {
 		document.addEventListener("click", (event) => {
 			const linkButton = event.target?.closest?.("[data-link-bank]");
+
 			if (linkButton) return linkClick(linkButton);
+
 			return repairClick(event);
 		});
 		document.addEventListener("htmx:before:request", skipWhileLinking);

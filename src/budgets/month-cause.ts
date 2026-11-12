@@ -22,20 +22,28 @@ export function monthCauses(
 	uncategorizedCents: number,
 ): MonthCause[] {
 	return [
-		...rows
-			.filter((row) => row.spentCents > row.budgetCents)
-			.map((row) => ({
-				name: row.name,
-				cents: row.spentCents - row.budgetCents,
-				kind: "over" as const,
-			})),
-		...unbudgeted
-			.filter((row) => row.spentCents > 0)
-			.map((row) => ({
-				name: row.name,
-				cents: row.spentCents,
-				kind: "unbudgeted" as const,
-			})),
+		...rows.flatMap((row) =>
+			row.spentCents > row.budgetCents
+				? [
+						{
+							name: row.name,
+							cents: row.spentCents - row.budgetCents,
+							kind: "over" as const,
+						},
+					]
+				: [],
+		),
+		...unbudgeted.flatMap((row) =>
+			row.spentCents > 0
+				? [
+						{
+							name: row.name,
+							cents: row.spentCents,
+							kind: "unbudgeted" as const,
+						},
+					]
+				: [],
+		),
 		...(uncategorizedCents > 0
 			? [
 					{
@@ -61,24 +69,30 @@ export function monthCause(
 	overCents: number,
 ): { text: string; lead: string; named: NamedCause[] } | null {
 	if (overCents <= 0) return null;
+
+	// The index keeps each cause's place in the input, which orders ties the same way as its place among the causes above 0.
 	const largest = causes
-		.filter((cause) => cause.cents > 0)
-		.map((cause, index) => ({ cause, index }))
+		.flatMap((cause, index) => (cause.cents > 0 ? [{ cause, index }] : []))
 		.sort((a, b) => b.cause.cents - a.cause.cents || a.index - b.index)
 		.slice(0, 2)
 		.sort((a, b) => a.index - b.index)
 		.map(({ cause }) => cause);
+
 	if (largest.length === 0) return null;
 	const shareCents = largest.reduce((sum, cause) => sum + cause.cents, 0);
 	const share = shareCents * 2 > overCents ? "Most of it" : "Part of it";
+
 	const amount = (cause: MonthCause) =>
 		`${cause.name} ${wholeUnlessTiny(cause.cents)}`;
+
 	// Needs a category is the only uncategorized cause, so this is true only when it is the one cause named.
 	const onlyUncategorized = largest.every(
 		(cause) => cause.kind === "uncategorized",
 	);
+
 	const allOver = largest.every((cause) => cause.kind === "over");
 	const noBudget = largest.every((cause) => cause.kind !== "over");
+
 	const lead = onlyUncategorized
 		? `${share} still needs a category: `
 		: allOver
@@ -86,10 +100,13 @@ export function monthCause(
 			: noBudget
 				? `${share} had no budget: `
 				: `${share}: `;
+
 	const named = largest.map((cause): NamedCause => {
 		if (onlyUncategorized)
 			return { words: wholeUnlessTiny(cause.cents), kind: cause.kind };
+
 		if (allOver || noBudget) return { words: amount(cause), kind: cause.kind };
+
 		return {
 			words:
 				cause.kind === "over"
@@ -98,6 +115,7 @@ export function monthCause(
 			kind: cause.kind,
 		};
 	});
+
 	return {
 		text: `${lead}${named.map((name) => name.words).join(" and ")}.`,
 		lead,

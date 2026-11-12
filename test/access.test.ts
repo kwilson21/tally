@@ -9,13 +9,17 @@ import {
 import { resetDemo } from "../src/demo/reset";
 
 const encoder = new TextEncoder();
-const encode = (value: unknown) =>
+
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const encode = (value: Json) =>
 	btoa(String.fromCharCode(...encoder.encode(JSON.stringify(value))))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
 
 async function keys() {
+	// SAFETY: an RSASSA-PKCS1-v1_5 key generated with the sign and verify usages is a key pair, not a single key.
 	const pair = (await crypto.subtle.generateKey(
 		{
 			name: "RSASSA-PKCS1-v1_5",
@@ -26,6 +30,7 @@ async function keys() {
 		true,
 		["sign", "verify"],
 	)) as CryptoKeyPair;
+
 	return {
 		privateKey: pair.privateKey,
 		jwk: {
@@ -40,11 +45,12 @@ async function keys() {
 async function token(
 	privateKey: CryptoKey,
 	team: string,
-	overrides: Record<string, unknown> = {},
-	header: Record<string, unknown> = {},
+	overrides: Record<string, Json> = {},
+	header: Record<string, Json> = {},
 ) {
 	const now = Math.floor(Date.now() / 1000);
 	const encodedHeader = encode({ alg: "RS256", kid: "test-key", ...header });
+
 	const encodedPayload = encode({
 		aud: ["test-aud"],
 		iss: `https://${team}`,
@@ -53,7 +59,9 @@ async function token(
 		email: "Family.Member@Example.COM",
 		...overrides,
 	});
+
 	const signed = `${encodedHeader}.${encodedPayload}`;
+
 	const signature = new Uint8Array(
 		await crypto.subtle.sign(
 			"RSASSA-PKCS1-v1_5",
@@ -61,6 +69,7 @@ async function token(
 			encoder.encode(signed),
 		),
 	);
+
 	return `${signed}.${btoa(String.fromCharCode(...signature))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
@@ -70,14 +79,17 @@ async function token(
 async function tokenWithPayload(
 	privateKey: CryptoKey,
 	payload: string,
-	header: Record<string, unknown> = {},
+	header: Record<string, Json> = {},
 ) {
 	const encodedHeader = encode({ alg: "RS256", kid: "test-key", ...header });
+
 	const encodedPayload = btoa(payload)
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
+
 	const signed = `${encodedHeader}.${encodedPayload}`;
+
 	const signature = new Uint8Array(
 		await crypto.subtle.sign(
 			"RSASSA-PKCS1-v1_5",
@@ -85,21 +97,22 @@ async function tokenWithPayload(
 			encoder.encode(signed),
 		),
 	);
+
 	return `${signed}.${btoa(String.fromCharCode(...signature))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/, "")}`;
 }
 
-const request = (jwt?: string, emailHeader?: string) =>
-	new Request("https://tally.test/", {
-		headers: {
-			...(jwt ? { "Cf-Access-Jwt-Assertion": jwt } : {}),
-			...(emailHeader
-				? { "Cf-Access-Authenticated-User-Email": emailHeader }
-				: {}),
-		},
-	});
+const request = (jwt?: string, emailHeader?: string) => {
+	const headers: Record<string, string> = {};
+
+	if (jwt) headers["Cf-Access-Jwt-Assertion"] = jwt;
+
+	if (emailHeader) headers["Cf-Access-Authenticated-User-Email"] = emailHeader;
+
+	return new Request("https://tally.test/", { headers });
+};
 
 describe("verifiedEmail", () => {
 	afterEach(() => {
@@ -177,9 +190,11 @@ describe("verifiedEmail", () => {
 	it("fetches only once for an unknown kid when the cache is empty", async () => {
 		const team = "unknown.cloudflareaccess.com";
 		const { privateKey, jwk } = await keys();
+
 		const fetch = vi.fn(async () =>
 			Response.json({ keys: [{ ...jwk, kid: "another-key" }] }),
 		);
+
 		vi.stubGlobal("fetch", fetch);
 		const jwt = await token(privateKey, team);
 		expect(
@@ -196,6 +211,7 @@ describe("verifiedEmail", () => {
 		const { privateKey, jwk } = await keys();
 		const fetch = vi.fn(async () => Response.json({ keys: [jwk] }));
 		vi.stubGlobal("fetch", fetch);
+
 		for (const kid of ["forged-one", "forged-two"]) {
 			const jwt = await token(privateKey, team, {}, { kid });
 			expect(
@@ -205,6 +221,7 @@ describe("verifiedEmail", () => {
 				}),
 			).toBeNull();
 		}
+
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 
@@ -235,14 +252,17 @@ describe("verifiedEmail", () => {
 		const team = "concurrent.cloudflareaccess.com";
 		const { privateKey, jwk } = await keys();
 		let resolveFetch: ((response: Response) => void) | undefined;
+
 		const fetch = vi.fn(
 			() =>
 				new Promise<Response>((resolve) => {
 					resolveFetch = resolve;
 				}),
 		);
+
 		vi.stubGlobal("fetch", fetch);
 		const jwt = await token(privateKey, team);
+
 		const verification = Promise.all([
 			verifiedEmail(request(jwt), {
 				ACCESS_TEAM_DOMAIN: team,
@@ -253,6 +273,7 @@ describe("verifiedEmail", () => {
 				ACCESS_AUD: "test-aud",
 			}),
 		]);
+
 		expect(fetch).toHaveBeenCalledTimes(1);
 		resolveFetch?.(Response.json({ keys: [jwk] }));
 		expect(await verification).toEqual([
@@ -270,6 +291,7 @@ describe("verifiedEmail", () => {
 		);
 		const base = `"aud":["test-aud"],"iss":"https://${team}","email":"member@example.com"`;
 		const future = Math.floor(Date.now() / 1000) + 300;
+
 		for (const claims of [
 			`{${base},"exp":1e309}`,
 			`{${base},"exp":${future},"nbf":1e309}`,
@@ -310,10 +332,12 @@ describe("verifiedEmail", () => {
 		vi.stubGlobal("fetch", fetch);
 		const jwt = await token(privateKey, team);
 		const [header, payload, signature = ""] = jwt.split(".");
+
 		const standardSignature = signature
 			.replaceAll("-", "+")
 			.replaceAll("_", "/")
 			.padEnd(Math.ceil(signature.length / 4) * 4, "=");
+
 		expect(
 			await verifiedEmail(
 				request(`${header}.${payload}.${standardSignature}`),
@@ -365,21 +389,25 @@ describe("verified Access identity and household members", () => {
 		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
 		await removeHouseholdMember(env.DB, "family.member@example.com");
 		const jwt = await token(privateKey, team);
+
 		const identity = await verifiedAccessIdentity(request(jwt), {
 			ACCESS_TEAM_DOMAIN: team,
 			ACCESS_AUD: "test-aud",
 		});
+
 		if (!identity) throw new Error("Expected a verified Access identity");
 		expect(identity).toEqual({
 			email: "family.member@example.com",
 			issuedAt: null,
 		});
 		await noteHouseholdMember(env.DB, identity.email, identity.issuedAt);
+
 		const row = await env.DB.prepare(
 			"SELECT removed_at FROM household_members WHERE email = ?",
 		)
 			.bind(identity.email)
 			.first<{ removed_at: string | null }>();
+
 		expect(row?.removed_at).not.toBeNull();
 	});
 
@@ -392,29 +420,36 @@ describe("verified Access identity and household members", () => {
 		);
 		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
 		await removeHouseholdMember(env.DB, "family.member@example.com");
+
 		const earlier = await token(privateKey, team, {
 			iat: Math.floor(Date.now() / 1000) - 60,
 		});
+
 		const oldIdentity = await verifiedAccessIdentity(request(earlier), {
 			ACCESS_TEAM_DOMAIN: team,
 			ACCESS_AUD: "test-aud",
 		});
+
 		if (!oldIdentity)
 			throw new Error("Expected a verified old Access identity");
 		await noteHouseholdMember(env.DB, oldIdentity.email, oldIdentity.issuedAt);
+
 		let row = await env.DB.prepare(
 			"SELECT removed_at FROM household_members WHERE email = ?",
 		)
 			.bind(oldIdentity.email)
 			.first<{ removed_at: string | null }>();
+
 		expect(row?.removed_at).not.toBeNull();
 
 		const newerIat = Math.floor(Date.now() / 1000) + 1;
 		const jwt = await token(privateKey, team, { iat: newerIat });
+
 		const identity = await verifiedAccessIdentity(request(jwt), {
 			ACCESS_TEAM_DOMAIN: team,
 			ACCESS_AUD: "test-aud",
 		});
+
 		if (!identity) throw new Error("Expected a verified Access identity");
 		expect(identity.issuedAt).toBe(newerIat);
 		await noteHouseholdMember(env.DB, identity.email, identity.issuedAt);
@@ -428,10 +463,12 @@ describe("verified Access identity and household members", () => {
 		const firstTime = await token(privateKey, team, {
 			email: "new.member@example.com",
 		});
+
 		const newIdentity = await verifiedAccessIdentity(request(firstTime), {
 			ACCESS_TEAM_DOMAIN: team,
 			ACCESS_AUD: "test-aud",
 		});
+
 		if (!newIdentity)
 			throw new Error("Expected a verified first-time Access identity");
 		expect(newIdentity).toEqual({
@@ -470,6 +507,7 @@ describe("Access middleware", () => {
 		const response = await exports.default.fetch("http://tally.test/", {
 			headers: { "Cf-Access-Authenticated-User-Email": "forged@example.com" },
 		});
+
 		expect(response.status).toBe(403);
 		expect(await response.text()).toBe("Sign in through Cloudflare Access.");
 	});
@@ -481,11 +519,13 @@ describe("Access middleware", () => {
 			vi.fn(async () => Response.json({ keys: [jwk] })),
 		);
 		const jwt = await token(privateKey, "route.cloudflareaccess.com");
+
 		const id = (
 			await env.DB.prepare("SELECT id FROM transactions LIMIT 1").first<{
 				id: number;
 			}>()
 		)?.id;
+
 		const response = await exports.default.fetch(
 			`http://tally.test/transactions/${id}`,
 			{
@@ -504,12 +544,15 @@ describe("Access middleware", () => {
 				}).toString(),
 			},
 		);
+
 		expect(response.status).toBe(303);
+
 		const row = await env.DB.prepare(
 			"SELECT updated_by FROM transactions WHERE id = ?",
 		)
 			.bind(id)
 			.first<{ updated_by: string }>();
+
 		expect(row?.updated_by).toBe("family.member@example.com");
 	});
 
@@ -518,7 +561,9 @@ describe("Access middleware", () => {
 			"http://tally.test/webhooks/plaid",
 			{ method: "POST", headers: { Origin: "http://tally.test" } },
 		);
+
 		expect(webhook.status).not.toBe(403);
+
 		for (const path of [
 			"/webhooks/plaidX",
 			"/webhooks/plaid/",
@@ -549,10 +594,13 @@ describe("verifiedEmail explains a refusal in the log", () => {
 		expect(await verifiedEmail(request(jwt), env)).toBeNull();
 		expect(warn).toHaveBeenCalledTimes(1);
 		const logged = String(warn.mock.calls[0]?.join(" "));
+
 		if (jwt) {
 			for (const part of jwt.split(".")) expect(logged).not.toContain(part);
 		}
+
 		expect(logged).not.toMatch(/family\.member/i);
+
 		return logged;
 	};
 
@@ -607,9 +655,11 @@ describe("verifiedEmail explains a refusal in the log", () => {
 			"fetch",
 			vi.fn(async () => Response.json({ keys: [jwk] })),
 		);
+
 		const jwt = await token(privateKey, team, {
 			iss: "https://elsewhere.cloudflareaccess.com",
 		});
+
 		expect(
 			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
 		).toBe(
@@ -669,9 +719,11 @@ describe("verifiedEmail explains a refusal in the log", () => {
 			"fetch",
 			vi.fn(async () => Response.json({ keys: [jwk] })),
 		);
+
 		const jwt = await token(privateKey, team, {
 			exp: Math.floor(Date.now() / 1000) - 120,
 		});
+
 		expect(
 			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
 		).toBe("Access sign-in refused: the token has expired or isn't valid yet");
@@ -680,10 +732,12 @@ describe("verifiedEmail explains a refusal in the log", () => {
 	it("says the refresh for an unknown key id couldn't fetch the keys", async () => {
 		const team = "log-refresh.cloudflareaccess.com";
 		const { privateKey, jwk } = await keys();
+
 		const fetch = vi
 			.fn()
 			.mockResolvedValueOnce(Response.json({ keys: [{ ...jwk, kid: "old" }] }))
 			.mockResolvedValueOnce(new Response("down", { status: 503 }));
+
 		vi.stubGlobal("fetch", fetch);
 		vi.useFakeTimers({ toFake: ["Date"] });
 		const jwt = await token(privateKey, team);

@@ -130,10 +130,13 @@ beforeAll(async () => {
 			"INSERT INTO accounts (name, type, subtype, is_liability, balance_cents) VALUES ('Partition','depository','checking',0,0)",
 		)
 		.run();
+
 	const account = await db
 		.prepare("SELECT id FROM accounts WHERE name = 'Partition'")
 		.first<{ id: number }>();
+
 	if (!account) throw new Error("the test account was not inserted");
+
 	for (const seed of SEEDS) {
 		const row = await db
 			.prepare(
@@ -158,8 +161,10 @@ beforeAll(async () => {
 				seed.refundOf ? (rowIds.get(seed.refundOf) ?? null) : null,
 			)
 			.first<{ id: number }>();
+
 		if (!row) throw new Error(`could not seed ${seed.name}`);
 		rowIds.set(seed.name, row.id);
+
 		if (seed.billLinked) {
 			await db
 				.prepare(
@@ -183,6 +188,7 @@ async function monthRows(): Promise<Row[]> {
 		)
 		.bind(MONTH)
 		.all<Row>();
+
 	return results;
 }
 
@@ -197,7 +203,9 @@ async function contextFor(r: Row, byId: Map<number, Row>): Promise<Context> {
 				.all<{ id: number }>()
 		).results.map((x) => x.id),
 	);
+
 	const target = r.refund_of_id === null ? undefined : byId.get(r.refund_of_id);
+
 	return {
 		paysBillOrPlan: linkedIds.has(r.id),
 		refundTarget: target
@@ -212,8 +220,11 @@ async function contextFor(r: Row, byId: Map<number, Row>): Promise<Context> {
 /** The bucket classify() puts a row in, for How Tally works. Split parents are not in the diagram at all. */
 function bucketOf(r: Row, c: Classified): Bucket | "split_parent" {
 	if (r.is_split === 1) return "split_parent";
+
 	if (c.questions.heldForReview) return "held";
+
 	if (!c.questions.included) return "excluded";
+
 	return "counted";
 }
 
@@ -222,6 +233,7 @@ describe("every transaction of a month lands in exactly one How Tally bucket", (
 		const rows = await monthRows();
 		const byId = new Map(rows.map((r) => [r.id, r]));
 		const names = new Map([...rowIds].map(([name, id]) => [id, name]));
+
 		for (const r of rows) {
 			const c = classify(r, await contextFor(r, byId));
 			const seed = SEEDS.find((s) => s.name === names.get(r.id));
@@ -232,10 +244,13 @@ describe("every transaction of a month lands in exactly one How Tally bucket", (
 
 	it("the SQL totals the diagrams show add up to the month's rows, with the same count per bucket", async () => {
 		const rows = await monthRows();
+
 		const expectedCount = (bucket: Bucket | "split_parent") =>
 			SEEDS.filter((s) => s.expect === bucket).length;
+
 		const counts = await monthCounts(db, MONTH);
 		const breakdown = await excludedBreakdown(db, MONTH);
+
 		const excludedTotal =
 			breakdown.transfer + breakdown.reimbursement + breakdown.byPerson;
 

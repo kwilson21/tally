@@ -99,6 +99,7 @@ describe("HomeTop", () => {
 			hasBudgets: false,
 			status: "No budgets set yet.",
 		});
+
 		expect(html).toContain("−$45");
 		expect(html).toContain("No budgets set yet.");
 		expect(html).not.toContain(
@@ -130,6 +131,7 @@ describe("HomeTop", () => {
 			bankDate: "as of Oct 2",
 			bankLine: ["Chase stopped updating Oct 2"],
 		});
+
 		expect(html).not.toContain("forecast");
 		expect(html).not.toContain("as of Oct 2");
 		expect(html).not.toContain("Fix");
@@ -152,6 +154,7 @@ describe("HomeTop with Apple Card's line", () => {
 			bankLine: ["Chase stopped updating Oct 2"],
 			appleLine: APPLE,
 		});
+
 		expect(html.indexOf("Chase stopped updating Oct 2")).toBeLessThan(
 			html.indexOf("Apple Card hasn&#39;t been updated since Oct 12"),
 		);
@@ -176,6 +179,7 @@ describe("HomeTop with Apple Card's line", () => {
 			bankLine: ["Chase stopped updating Oct 2"],
 			appleLine: APPLE,
 		});
+
 		expect(html).not.toContain("Apple Card");
 		expect(html).not.toContain("Chase stopped updating");
 		expect(html).not.toContain('href="/accounts/apple-card"');

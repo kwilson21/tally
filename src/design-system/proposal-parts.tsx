@@ -268,6 +268,7 @@ export function stepsOf(
 /** The five lines, with "Your first tally · N of 5" over them. */
 export function TallySteps({ steps }: { steps: StepLine[] }) {
 	const done = steps.filter((s) => s.done).length;
+
 	return (
 		<div class="mt-4">
 			<p class="text-sm text-muted">Your first tally · {done} of 5</p>

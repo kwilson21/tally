@@ -274,6 +274,8 @@ const PATHS = {
 } satisfies Record<string, Child>;
 
 export type IconName = keyof typeof PATHS;
+
+// SAFETY: PATHS is the literal object above, so Object.keys lists exactly its keys, and IconName is keyof typeof PATHS.
 export const ICON_NAMES = Object.keys(PATHS) as IconName[];
 
 type IconProps = { name: IconName; class?: string };
@@ -327,7 +329,9 @@ export function RowArrow({
 			</SavedSlot>
 		);
 	}
+
 	const base = `${ROW_ARROW_BOX} text-muted group-hover/row:text-ink`;
+
 	return (
 		<Icon name="chevron-right" class={extra ? `${base} ${extra}` : base} />
 	);

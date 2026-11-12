@@ -44,19 +44,25 @@ export async function readAiTally(
 ): Promise<AiTallyCounts> {
 	const thisMonth = today.slice(0, 7);
 	const lastMonth = monthsBefore(thisMonth, 1);
+
 	const { results } = await db
 		.prepare(AI_TALLY_SQL)
 		.bind(`${lastMonth}-01`, `${monthsBefore(thisMonth, -1)}-01`)
 		.all<{ month: string; kind: string; total: number; changed: number }>();
+
 	const rows = (month: string) => results.filter((row) => row.month === month);
+
 	const total = (month: string) =>
 		rows(month).reduce((sum, row) => sum + row.total, 0);
+
 	const month =
 		total(thisMonth) > 0 || total(lastMonth) === 0 ? thisMonth : lastMonth;
+
 	const count = (kind: string) =>
 		rows(month)
 			.filter((row) => row.kind === kind)
 			.reduce((sum, row) => sum + row.total, 0);
+
 	return {
 		month,
 		sorted: count("category"),
@@ -82,6 +88,7 @@ export function jevAnswerLogStatement(
 	turnId?: string,
 ): D1PreparedStatement {
 	const held = turnId === undefined ? "" : ` AND ${turnHeldSql("?5")}`;
+
 	return db
 		.prepare(
 			`INSERT OR IGNORE INTO ai_log (kind, transaction_id, household_day)

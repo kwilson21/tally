@@ -21,6 +21,7 @@ const CARD =
 /** Create, or the family's own category with this name: Add to it, or Restore it when archived (decisions 101, 110). */
 function createWords(name: string, existing?: string, archived?: boolean) {
 	if (!existing) return `Create ${name}`;
+
 	return archived ? `Restore ${existing}` : `Add to ${existing}`;
 }
 
@@ -191,6 +192,7 @@ export function OrganizeNewCategoryCard({
 	error?: string;
 }) {
 	const more = others === 0 ? "" : ` and ${others} more`;
+
 	return (
 		<form
 			method="post"

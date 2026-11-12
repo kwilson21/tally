@@ -29,6 +29,7 @@ describe("groupBySameCleanedText", () => {
 			row(1, "Audible"),
 			row(2, "AUDIBLE  09/02"),
 		]);
+
 		expect(groups).toHaveLength(1);
 		expect(groups[0]?.cleanedText).toBe("audible");
 		expect(groups[0]?.note).toBeNull();
@@ -40,6 +41,7 @@ describe("groupBySameCleanedText", () => {
 			row(1, "CHECKCARD 0921 CVS"),
 			row(2, "CHECKCARD 1137 CVS"),
 		]);
+
 		expect(groups).toHaveLength(1);
 		expect(groups[0]?.cleanedText).toBe("cvs");
 		expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
@@ -54,6 +56,7 @@ describe("groupBySameCleanedText", () => {
 			row(1, "Kindle Unltd*TE3E10I7 WA 07/26", { merchantKey: "Amazon" }),
 			row(2, "Audible", { merchantKey: "Amazon" }),
 		]);
+
 		expect(groups).toEqual([]);
 	});
 
@@ -63,6 +66,7 @@ describe("groupBySameCleanedText", () => {
 			row(2, "Audible", { merchantKey: "Amazon" }),
 			row(3, "Audible", { merchantKey: "Amazon" }),
 		]);
+
 		expect(groups.map((g) => g.cleanedText)).toEqual(["audible"]);
 		expect(groups[0]?.rows.map((r) => r.id)).toEqual([2, 3]);
 	});
@@ -82,6 +86,7 @@ describe("groupBySameCleanedText", () => {
 			row(2, "Audible", { mixed: true }),
 			row(3, "Audible"),
 		]);
+
 		expect(groups).toHaveLength(1);
 		expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 3]);
 	});
@@ -113,6 +118,7 @@ describe("groupBySameCleanedText", () => {
 				row(1, "APPLE.COM/BILL CA 09/30", { whatItWasNote: note }),
 				row(2, "POS DEBIT APPLE.COM/BILL", { whatItWasNote: note }),
 			]);
+
 			expect(groups).toHaveLength(1);
 			expect(groups[0]?.cleanedText).toBe("apple.com/bill");
 			expect(groups[0]?.note).toBe(note);
@@ -133,6 +139,7 @@ describe("groupBySameCleanedText", () => {
 				row(1, "APPLE.COM/BILL CUPERTINO CA", { whatItWasNote: note }),
 				row(2, "APPLE.COM/BILL CUPERTINO CA 09/30", { whatItWasNote: note }),
 			]);
+
 			expect(groups).toHaveLength(1);
 			expect(groups[0]?.cleanedText).toBe("apple.com/bill cupertino");
 			expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
@@ -143,6 +150,7 @@ describe("groupBySameCleanedText", () => {
 				row(1, "APPLE.COM/BILLING INC"),
 				row(2, "APPLE.COM/BILLING INC 09/30"),
 			]);
+
 			expect(groups).toHaveLength(1);
 			expect(groups[0]?.cleanedText).toBe("apple.com/billing inc");
 			expect(groups[0]?.note).toBeNull();
@@ -162,6 +170,7 @@ describe("groupBySameCleanedText", () => {
 				row(1, "APPLE.COM/BILL CA 09/30", { whatItWasNote: note }),
 				row(2, "POS DEBIT APPLE.COM/BILL"),
 			]);
+
 			expect(groups).toEqual([]);
 		});
 
@@ -179,6 +188,7 @@ describe("groupBySameCleanedText", () => {
 				row(1, "APPLE.COM/BILL CA 09/30", { whatItWasNote: "App  Store" }),
 				row(2, "APPLE.COM/BILL CA 10/01", { whatItWasNote: "app store " }),
 			]);
+
 			expect(groups).toHaveLength(1);
 			expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
 		});
@@ -203,6 +213,7 @@ describe("groupBySameCleanedText", () => {
 			row(3, "NETFLIX 09/02"),
 			row(4, "Audible CA 09/03"),
 		]);
+
 		expect(groups.map((g) => g.cleanedText)).toEqual(["netflix", "audible"]);
 		expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 3]);
 		expect(groups[1]?.rows.map((r) => r.id)).toEqual([2, 4]);

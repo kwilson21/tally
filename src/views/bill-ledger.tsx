@@ -151,6 +151,7 @@ export function LedgerPayments({
 	focusTransactionId?: number;
 }) {
 	const unlink = `/bills/${billId}/occurrences/${period}/unlink`;
+
 	return (
 		<>
 			{payments.map((payment) => (

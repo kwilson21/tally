@@ -11,39 +11,53 @@ import { resetDemo } from "../src/demo/reset";
 // saved, and saving changes only the time zone: "today" follows it, a transaction's date never moves.
 
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 };
+
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message: string; type: string };
-		announce?: string;
-	};
+
+/** The HX-Trigger payload the page sends: a toast and an announcement. */
+type HxTrigger = {
+	toast?: { message: string; type: string };
+	announce?: string;
+};
+
+const trigger = (res: Response): HxTrigger =>
+	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
 
 /** The Household section's time zone row: from the section to the bank sign-in emails block after it. */
 const group = (html: string) =>
 	html.split('id="household"')[1]?.split('<div id="household-emails"')[0] ?? "";
+
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, " ")
 		.replaceAll("&#39;", "'")
 		.replace(/\s+/g, " ");
+
 const summary = (html: string) =>
 	group(html).match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0] ?? "";
+
 /** The select's options: each value and name, in order, and whether it is the chosen one. */
 const options = (html: string) =>
 	[...group(html).matchAll(/<option([^>]*)>([^<]*)<\/option>/g)].map((m) => ({
@@ -51,7 +65,9 @@ const options = (html: string) =>
 		name: m[2],
 		selected: /\sselected(\s|>|=|$)/.test(m[1] ?? ""),
 	}));
+
 const chosen = (html: string) => options(html).find((o) => o.selected)?.value;
+
 const savedZone = async () =>
 	(
 		await env.DB.prepare(
@@ -67,6 +83,7 @@ const at = (instant: string) => {
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
+
 afterEach(() => {
 	vi.useRealTimers();
 });
@@ -188,10 +205,12 @@ describe("GET /settings: the Household group", () => {
 		expect(cancel).toContain('hx-select="#time-zone-disclosure"');
 		// One row, and it is a <details>; the row holds no other <details>, so its first close ends it.
 		expect(html.match(/id="time-zone-disclosure"/g)).toHaveLength(1);
+
 		const row =
 			html.match(
 				/<details[^>]*\sid="time-zone-disclosure"[^>]*>[\s\S]*?<\/details>/,
 			)?.[0] ?? "";
+
 		expect(row).not.toBe("");
 		expect(row).toContain("<select");
 		expect(row).toContain('name="time_zone"');
@@ -229,6 +248,7 @@ describe("POST /settings/time-zone", () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "America/Chicago",
 		});
+
 		expect(res.status).toBe(200);
 		expect(await savedZone()).toBe("America/Chicago");
 		// The group comes back as saved, for htmx to swap in.
@@ -247,6 +267,7 @@ describe("POST /settings/time-zone", () => {
 		const { html } = await post("/settings/time-zone", {
 			time_zone: "America/Denver",
 		});
+
 		expect(summary(html)).toContain("autofocus");
 		expect(html.match(/autofocus/g)).toHaveLength(1);
 	});
@@ -255,6 +276,7 @@ describe("POST /settings/time-zone", () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "America/Puerto_Rico",
 		});
+
 		expect(await savedZone()).toBe("America/Puerto_Rico");
 		expect(textOf(summary(html)).trim()).toBe("Time zone Puerto Rico");
 		expect(trigger(res).announce).toBe(
@@ -266,6 +288,7 @@ describe("POST /settings/time-zone", () => {
 		const { res } = await post("/settings/time-zone", {
 			time_zone: "America/New_York",
 		});
+
 		expect(res.status).toBe(200);
 		expect(await savedZone()).toBe("America/New_York");
 	});
@@ -276,6 +299,7 @@ describe("POST /settings/time-zone", () => {
 			{ time_zone: "America/Los_Angeles" },
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/settings/household");
 		expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -320,6 +344,7 @@ describe("POST /settings/time-zone", () => {
 			{ time_zone: "Not/AZone" },
 			false,
 		);
+
 		expect(res.status).toBe(422);
 		expect(res.headers.get("Location")).toBeNull();
 		expect(group(html)).toContain('role="alert"');
@@ -328,6 +353,7 @@ describe("POST /settings/time-zone", () => {
 
 	it("changes only the time zone: other settings, categories and every transaction's date stay", async () => {
 		await saveAiSwitches(env.DB, { categories: false });
+
 		const before = {
 			dates: await env.DB.prepare(
 				"SELECT id, date FROM transactions ORDER BY id",
@@ -339,6 +365,7 @@ describe("POST /settings/time-zone", () => {
 				"SELECT key, value FROM household_settings WHERE key <> 'time_zone' ORDER BY key",
 			).all(),
 		};
+
 		expect(before.dates.results.length).toBeGreaterThan(0);
 		await post("/settings/time-zone", { time_zone: "Pacific/Honolulu" });
 		await post("/settings/time-zone", { time_zone: "Europe/London" });
@@ -384,6 +411,7 @@ describe("POST /settings/time-zone", () => {
 			},
 			body: "time_zone=America%2FChicago",
 		});
+
 		expect(res.status).toBe(403);
 		expect(await savedZone()).toBe(DEFAULT_TIME_ZONE);
 	});
@@ -446,6 +474,7 @@ describe("a save that moves the household into another month", () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "Europe/London",
 		});
+
 		expect(res.status).toBe(200);
 		expect(html).toContain('id="household"');
 		expect(html).not.toContain("hx-swap-oob");

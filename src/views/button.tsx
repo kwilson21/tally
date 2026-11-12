@@ -28,6 +28,7 @@ function Content({
 	busyLabel?: string;
 }) {
 	if (!busyLabel) return <>{children}</>;
+
 	return (
 		<>
 			<span class="contents [.htmx-request_&]:hidden">{children}</span>
@@ -52,8 +53,10 @@ export function Button({
 	const look = layout?.split(/\s+/).some((token) => token.startsWith("px-"))
 		? LOOK[kind].replace(/(?:^|\s)px-\S+/, "")
 		: LOOK[kind];
+
 	const className = `${look}${layout ? ` ${layout}` : ""}${busyLabel ? " [&.htmx-request]:opacity-100!" : ""}`;
 	const buttonClassName = `${className} disabled:opacity-40`;
+
 	if (href && disabled) {
 		return (
 			<button type="button" disabled {...attrs} class={buttonClassName}>
@@ -61,6 +64,7 @@ export function Button({
 			</button>
 		);
 	}
+
 	if (href) {
 		return (
 			<a
@@ -72,6 +76,7 @@ export function Button({
 			</a>
 		);
 	}
+
 	return (
 		<button disabled={disabled} {...attrs} class={buttonClassName}>
 			<Content busyLabel={busyLabel}>{children}</Content>

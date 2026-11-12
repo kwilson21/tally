@@ -8,6 +8,7 @@
 	const MARK = "data-sheet-inert";
 	// Toasts stay usable while a sheet is open (an Undo's button), and so does the announcer.
 	const KEPT_OPEN = ["toasts", "announcer"];
+
 	const TABBABLE =
 		"a[href], button, input, select, textarea, summary, [tabindex]";
 
@@ -15,6 +16,7 @@
 		[...document.querySelectorAll(selector)].find(
 			(node) => !node.closest("[inert]"),
 		);
+
 	const openSheet = () => live("[data-sheet]");
 
 	// Focus on nothing in the sheet (the body, or a row the sheet now covers) moves into it: to its [autofocus] field,
@@ -24,20 +26,26 @@
 	// ever gets a tabindex added: a field with one would drop out of the Tab order.
 	function takeFocus(sheet) {
 		const active = document.activeElement;
+
 		if (
 			sheet.contains(active) ||
 			document.getElementById("toasts")?.contains(active)
 		)
 			return;
 		const field = sheet.querySelector("[autofocus]");
+
 		if (field) {
 			field.focus();
+
 			return;
 		}
+
 		const title = document.getElementById(
 			sheet.getAttribute("aria-labelledby"),
 		);
+
 		if (!title) return;
+
 		if (!title.hasAttribute("tabindex")) title.setAttribute("tabindex", "-1");
 		title.focus();
 	}
@@ -50,12 +58,16 @@
 			marked.removeAttribute("inert");
 			marked.removeAttribute(MARK);
 		}
+
 		const sheet = openSheet();
+
 		if (!sheet) return;
 		sheet.setAttribute("aria-modal", "true");
 		let node = sheet;
+
 		while (node !== document.body && node.parentElement) {
 			const parent = node.parentElement;
+
 			for (const sibling of parent.children) {
 				if (
 					sibling === node ||
@@ -68,8 +80,10 @@
 				sibling.setAttribute("inert", "");
 				sibling.setAttribute(MARK, "");
 			}
+
 			node = parent;
 		}
+
 		takeFocus(sheet);
 	}
 
@@ -78,6 +92,7 @@
 		if (event.key !== "Escape" || event.isComposing || event.defaultPrevented)
 			return;
 		const close = live("[data-sheet-close]");
+
 		if (!close) return;
 		event.preventDefault();
 		close.click();
@@ -86,6 +101,7 @@
 	// A stop is a control that can take focus now: in the Tab order, enabled and drawn.
 	function stopsIn(root) {
 		if (!root) return [];
+
 		return [...root.querySelectorAll(TABBABLE)].filter(
 			(node) =>
 				node.tabIndex >= 0 && !node.disabled && node.getClientRects().length,
@@ -101,13 +117,17 @@
 			a.name !== "" &&
 			a.name === b.name &&
 			a.form === b.form);
+
 	function oneStopPerGroup(stops) {
 		const kept = [];
+
 		for (const node of stops) {
 			const group = stops.filter((other) => sameGroup(node, other));
+
 			if (group[0] === node)
 				kept.push(group.find((radio) => radio.checked) ?? node);
 		}
+
 		return kept;
 	}
 
@@ -119,22 +139,29 @@
 	document.addEventListener("keydown", (event) => {
 		if (event.key !== "Tab" || event.defaultPrevented) return;
 		const sheet = openSheet();
+
 		if (!sheet) return;
 		const sheetStops = oneStopPerGroup(stopsIn(sheet));
+
 		const cycle = [
 			...sheetStops,
 			...stopsIn(document.getElementById("toasts")),
 		];
+
 		const focused = document.activeElement;
 		const at = cycle.findIndex((stop) => sameGroup(stop, focused));
+
 		if (at === -1) {
 			event.preventDefault();
 			(event.shiftKey ? sheetStops.at(-1) : sheetStops[0])?.focus();
+
 			return;
 		}
+
 		const seam = sheetStops.length;
 		const next = at + (event.shiftKey ? -1 : 1);
 		const sameRegion = next < seam === at < seam;
+
 		if (next >= 0 && next < cycle.length && sameRegion) return;
 		event.preventDefault();
 		cycle[(next + cycle.length) % cycle.length].focus();

@@ -35,6 +35,7 @@ type SetupStep = {
 function StepDot({ n, state }: { n: number; state: StepState }) {
 	const base =
 		"inline-flex size-7 shrink-0 items-center justify-center rounded-full text-sm tabular-nums";
+
 	if (state === "done")
 		return (
 			<span class={`${base} bg-ink text-paper`}>
@@ -42,12 +43,14 @@ function StepDot({ n, state }: { n: number; state: StepState }) {
 				<span class="sr-only">Step {n}, done</span>
 			</span>
 		);
+
 	if (state === "current")
 		return (
 			<span class={`${base} border-2 border-ink font-semibold text-ink`}>
 				{n}
 			</span>
 		);
+
 	return <span class={`${base} border border-rule text-muted`}>{n}</span>;
 }
 
@@ -73,6 +76,7 @@ function SetupSteps({ steps }: { steps: SetupStep[] }) {
 function StepBar({ done, label }: { done: number; label: string }) {
 	const bar = (i: number) =>
 		i < done ? "bg-ink" : i === done && done < 4 ? "bg-ink/40" : "bg-rule";
+
 	return (
 		<div>
 			<p class="text-sm text-muted">{label}</p>

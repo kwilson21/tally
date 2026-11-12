@@ -15,6 +15,7 @@ const PILL: Record<Tier, [string, string]> = {
 /** A tier's name as a small pill. */
 export function TierPill({ tier }: { tier: Tier }) {
 	const [label, look] = PILL[tier];
+
 	return (
 		<span class={`rounded-full px-2.5 py-0.5 text-sm font-medium ${look}`}>
 			{label}

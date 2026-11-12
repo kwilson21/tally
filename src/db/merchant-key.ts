@@ -123,5 +123,6 @@ export async function merchantKeyOfBankText(
 		)
 		.bind(bankText)
 		.first<{ merchantKey: string }>();
+
 	return row?.merchantKey ?? bankText;
 }

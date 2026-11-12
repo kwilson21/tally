@@ -67,11 +67,13 @@ describe("month-end chart labels", () => {
 
 	it("uses the category set, not arrival order, to resolve mixed collisions", () => {
 		const names = ["Holiday", "Holidays", "Home Improvement"];
+
 		const expected = new Map([
 			["Holiday", "Holiday"],
 			["Holidays", "Holiday."],
 			["Home Improvement", "Home"],
 		]);
+
 		for (const order of [
 			names,
 			[...names].reverse(),
@@ -105,6 +107,7 @@ describe("month-end chart labels", () => {
 			"Gifts",
 			"Pets",
 		];
+
 		const labels = monthEndLabels(names);
 		expect(labels).toEqual([
 			"Groc.",

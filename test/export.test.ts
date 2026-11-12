@@ -5,6 +5,24 @@ import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
 
+/** A value the export writes for one column: text, a whole number or a decimal, or null. */
+type Cell = string | number | null;
+
+/** One exported row: its columns by name. */
+type Row = Record<string, Cell>;
+
+/** The JSON export: a list of rows per table, plus the file's version and time (both scalar). */
+type ExportJson = Record<string, Cell | Row[]>;
+
+/** The rows of one table in the JSON export; throws when the table is not a list. */
+function rowsOf(data: ExportJson, table: string): Row[] {
+	const rows = data[table];
+
+	if (!Array.isArray(rows)) throw new Error(`expected ${table} to be a list`);
+
+	return rows;
+}
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
@@ -14,20 +32,21 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"INSERT INTO category_suggestions (name,status) VALUES ('Pet Care','dismissed')",
 		).run();
+
 		const suggestion = await env.DB.prepare(
 			"SELECT id FROM category_suggestions WHERE name='Pet Care'",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET jev_none_fit=1,category_suggestion_id=? WHERE id=1",
 		)
 			.bind(suggestion?.id)
 			.run();
-		const data = (await (
+
+		const data: { category_suggestions: Row[]; transactions: Row[] } = await (
 			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-		).json()) as {
-			category_suggestions: Record<string, unknown>[];
-			transactions: Record<string, unknown>[];
-		};
+		).json();
+
 		expect(data.category_suggestions).toContainEqual(
 			expect.objectContaining({ name: "Pet Care", status: "dismissed" }),
 		);
@@ -41,12 +60,13 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET income_source = 'jev', credit_reviewed = 0, credit_reviewed_by = NULL, income_confidence = 0.71, transfer_confidence = 0.62 WHERE id = 1",
 		).run();
+
 		const response = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
 		);
-		const data = (await response.json()) as {
-			transactions: Record<string, unknown>[];
-		};
+
+		const data: { transactions: Row[] } = await response.json();
+
 		expect(data.transactions[0]).toMatchObject({
 			income_source: "jev",
 			income_confidence: 0.71,
@@ -59,9 +79,11 @@ describe("data exports", () => {
 		const columns = await env.DB.prepare(
 			"PRAGMA table_info(transactions)",
 		).all<{ name: string }>();
-		const data = (await (
+
+		const data: { transactions: Row[] } = await (
 			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-		).json()) as { transactions: Record<string, unknown>[] };
+		).json();
+
 		const exported = new Set(Object.keys(data.transactions[0] ?? {}));
 		expect(
 			columns.results
@@ -74,9 +96,10 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET merchant_name = 'Target', pending = 1 WHERE id = 1",
 		).run();
-		const data = (await (
+
+		const data: { transactions: Row[] } = await (
 			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-		).json()) as { transactions: Record<string, unknown>[] };
+		).json();
 
 		expect(data.transactions[0]).toMatchObject({
 			merchant_name: "Target",
@@ -121,6 +144,7 @@ describe("data exports", () => {
 		const csv = await (
 			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
 		).text();
+
 		const [header = "", ...rows] = csv.split("\r\n");
 
 		expect(header).toBe(
@@ -191,6 +215,7 @@ describe("data exports", () => {
 		const csv = await (
 			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
 		).text();
+
 		const row = (raw: string) =>
 			csv.split("\r\n").find((line) => line.includes(raw)) ?? "";
 
@@ -215,6 +240,7 @@ describe("data exports", () => {
 		const res = await exports.default.fetch(
 			`${BASE}/settings/export/transactions.csv`,
 		);
+
 		const csv = await res.text();
 
 		expect(res.status).toBe(200);
@@ -240,12 +266,12 @@ describe("data exports", () => {
 				"INSERT INTO maybe_names (transaction_id, name, claim, categories_key, created_at) VALUES (2, NULL, 'claim-token-two', NULL, '2026-11-01 09:05:00')",
 			),
 		]);
+
 		const text = await (
 			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
 		).text();
-		const data = JSON.parse(text) as {
-			maybe_names: Record<string, unknown>[];
-		};
+
+		const data: { maybe_names: Row[] } = JSON.parse(text);
 
 		expect(data.maybe_names).toHaveLength(2);
 		expect(data.maybe_names).toEqual(
@@ -317,8 +343,9 @@ describe("data exports", () => {
 		const res = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
 		);
+
 		const body = await res.text();
-		const data = JSON.parse(body) as Record<string, unknown>;
+		const data: ExportJson = JSON.parse(body);
 
 		expect(res.headers.get("content-type")).toContain("application/json");
 		expect(res.headers.get("content-disposition")).toBe(
@@ -327,6 +354,7 @@ describe("data exports", () => {
 		expect(res.headers.get("cache-control")).toBe("no-store");
 		expect(data).toHaveProperty("schema_version", 1);
 		expect(data).toHaveProperty("exported_at");
+
 		for (const table of [
 			"categories",
 			"category_archive_periods",
@@ -351,6 +379,7 @@ describe("data exports", () => {
 		]) {
 			expect(data[table], table).toBeInstanceOf(Array);
 		}
+
 		const exportedColumns = {
 			categories: [
 				"archived",
@@ -504,17 +533,18 @@ describe("data exports", () => {
 				"merchant_key",
 			],
 		} as const;
+
 		for (const [table, columns] of Object.entries(exportedColumns)) {
-			expect(
-				Object.keys((data[table] as object[])[0] ?? {}).sort(),
-				table,
-			).toEqual([...columns].sort());
+			expect(Object.keys(rowsOf(data, table)[0] ?? {}).sort(), table).toEqual(
+				[...columns].sort(),
+			);
 		}
-		expect((data.bills as object[])[0]).toMatchObject({
+
+		expect(rowsOf(data, "bills")[0]).toMatchObject({
 			id: 1,
 			added_on: "2026-09-01",
 		});
-		expect((data.documents as object[])[0]).toEqual({
+		expect(rowsOf(data, "documents")[0]).toEqual({
 			filename: "statement.pdf",
 			uploaded_at: "2026-09-12 10:30:00",
 		});
@@ -531,11 +561,13 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES ('dana@example.com', 'https://push.example.test/send/never-export-this-endpoint', 'p256dh-never-export', 'auth-never-export')",
 		).run();
+
 		const response = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
 		);
+
 		const body = await response.text();
-		const data = JSON.parse(body) as Record<string, unknown>;
+		const data: ExportJson = JSON.parse(body);
 		expect(data).not.toHaveProperty("push_subscriptions");
 		expect(body).not.toContain("push_subscriptions");
 		expect(body).not.toContain("never-export-this-endpoint");
@@ -547,10 +579,12 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"INSERT INTO maybe_answers (kind, confidence, answer, household_day) VALUES ('transfer', 0.5, 'yes', '2026-10-03')",
 		).run();
+
 		const body = await (
 			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
 		).text();
-		const data = JSON.parse(body) as Record<string, unknown>;
+
+		const data: ExportJson = JSON.parse(body);
 		expect(data.maybe_answers).toEqual([
 			{
 				id: 1,
@@ -567,6 +601,7 @@ describe("data exports", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/settings/data`)
 		).text();
+
 		expect(html).toContain("Your data");
 		expect(html).toContain(
 			"Everything Tally has stored, to keep or open elsewhere. Bank logins are never included.",
@@ -583,17 +618,20 @@ describe("data exports", () => {
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people (name) VALUES ('Kids') RETURNING id",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET note = 'Soccer shoes', note_guessed = 1, note_state = 'guessed', kind = 'one_off', kind_guessed = 1, for_person_id = ?, for_person_guessed = 1, details_asked = 1, note_tried_at = '2026-10-06 09:00:00' WHERE id = 1",
 		)
 			.bind(person?.id)
 			.run();
-		const json = (await (
-			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-		).json()) as {
-			transactions: Record<string, unknown>[];
+
+		const json: {
+			transactions: Row[];
 			household_people: { id: number; name: string }[];
-		};
+		} = await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).json();
+
 		expect(json.household_people).toContainEqual({
 			id: person?.id,
 			name: "Kids",
@@ -609,18 +647,22 @@ describe("data exports", () => {
 			for_person_id: person?.id,
 			for_person_guessed: 1,
 		});
+
 		const csv = await (
 			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
 		).text();
+
 		expect(csv).toContain("kind,for,note");
 		expect(csv).toContain("One-off,Kids,Soccer shoes");
 
 		await env.DB.prepare("DELETE FROM household_people WHERE id = ?")
 			.bind(person?.id)
 			.run();
+
 		const removedCsv = await (
 			await exports.default.fetch(`${BASE}/settings/export/transactions.csv`)
 		).text();
+
 		expect(removedCsv).toContain("One-off,no one,Soccer shoes");
 	});
 
@@ -628,12 +670,15 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
 		).run();
+
 		const response = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
 		);
-		const data = (await response.json()) as {
+
+		const data: {
 			plaid_items: { status: string }[];
-		};
+		} = await response.json();
+
 		expect(data.plaid_items[0]?.status).toBe("disconnected");
 	});
 
@@ -641,20 +686,24 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
 		).run();
+
 		const response = await exports.default.fetch(
 			`${BASE}/settings/export/tally.json`,
 		);
-		const data = (await response.json()) as {
+
+		const data: {
 			accounts: {
 				plaid_item_id: number;
 				bank: string;
 				bank_disconnected: number;
 			}[];
-		};
+		} = await response.json();
+
 		const first = data.accounts.find((a) => a.plaid_item_id === 1);
 		const other = data.accounts.find((a) => a.plaid_item_id !== 1);
 		expect(first?.bank_disconnected).toBe(1);
-		expect(typeof first?.bank).toBe("string");
+		expect(first?.bank).toEqual(expect.any(String));
+
 		if (other) expect(other.bank_disconnected).toBe(0);
 	});
 
@@ -665,12 +714,15 @@ describe("data exports", () => {
 			bank: string | null;
 			bank_disconnected: number | null;
 		};
-		const accounts = async () =>
-			(
-				(await (
-					await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-				).json()) as { accounts: ExportedAccount[] }
-			).accounts;
+
+		const accounts = async (): Promise<ExportedAccount[]> => {
+			const data: { accounts: ExportedAccount[] } = await (
+				await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+			).json();
+
+			return data.accounts;
+		};
+
 		const plaidBefore = (await accounts()).find((a) => a.plaid_item_id === 1);
 		// Inserted as import.ts does: no plaid_item_id, so the bank comes from the card's own name.
 		await env.DB.prepare(

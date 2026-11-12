@@ -45,6 +45,7 @@ export function LedgerField({
 	const describedBy =
 		[hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(" ") ||
 		undefined;
+
 	return (
 		<div class="flex flex-col gap-1">
 			<label for={id} class={hideLabel ? "sr-only" : "text-sm text-muted"}>

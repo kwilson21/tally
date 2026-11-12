@@ -9,6 +9,7 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import appCss from "../src/styles/app.css?raw";
+import { isMethod, present } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 /** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
@@ -24,10 +25,12 @@ const cssRules = [
 ].flatMap(([, selectors = "", body = ""]) =>
 	selectors.split(",").map((selector) => ({ selector: selector.trim(), body })),
 );
+
 const hidesWith = (selector: string) =>
 	cssRules.some(
 		(rule) => rule.selector === selector && /display:\s*none/.test(rule.body),
 	);
+
 const endsWithRule = (ending: string, display: RegExp) =>
 	cssRules.some(
 		(rule) => rule.selector.endsWith(ending) && display.test(rule.body),
@@ -52,6 +55,7 @@ const occurrenceRow = (html: string, label: string) =>
 // The demo, the month names and the "Link a payment" copy all follow the household's today, so the clock is pinned
 // to October 2026 for the whole file (#808).
 beforeEach(() => pinClock());
+
 afterEach(() => vi.useRealTimers());
 
 describe("Bills", () => {
@@ -67,9 +71,11 @@ describe("Bills", () => {
 			const month = today.slice(0, 7);
 			const currentMonth = Number(today.slice(5, 7));
 			await env.DB.prepare("DELETE FROM bills").run();
+
 			const paidBy = await env.DB.prepare(
 				"SELECT id, amount_cents FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
 			).first<{ id: number; amount_cents: number }>();
+
 			expect(paidBy).toBeDefined();
 			// Each occurrence here is paid at 90% or more (decision 101), so none is part paid. The paid fixture's
 			// $1,000.00 pays a $1,012.34 bill, leaving $12.34 of it.
@@ -115,10 +121,13 @@ describe("Bills", () => {
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9304,?,9392,'user','linked')",
 				).bind(today.slice(0, 4)),
 			]);
+
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills")
 			).text();
+
 			expect(html).toContain("<title>Bills · Tally</title>");
+
 			for (const heading of [
 				"Overdue",
 				"Due in the next 7 days",
@@ -131,6 +140,7 @@ describe("Bills", () => {
 			expect(html).toMatch(
 				/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
 			);
+
 			// Paid this month takes the paid row's full amount, not the $12.34 a 98.8% payment leaves (issue #601).
 			for (const [status, total] of [
 				["Overdue", "$123.45"],
@@ -181,10 +191,12 @@ describe("Bills", () => {
 			)
 				.bind(dueDay)
 				.run();
+
 			if (paidPeriod) {
 				const transaction = await env.DB.prepare(
 					"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
 				).first<{ id: number }>();
+
 				expect(transaction).toBeDefined();
 				await env.DB.prepare(
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9399,?,?,'user','linked')",
@@ -192,10 +204,13 @@ describe("Bills", () => {
 					.bind(paidPeriod, transaction?.id ?? 0)
 					.run();
 			}
+
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills")
 			).text();
+
 			expect(html).toContain("$100 still to pay in October");
+
 			for (const status of [
 				"Overdue",
 				"Due in the next 7 days",
@@ -203,6 +218,7 @@ describe("Bills", () => {
 				"Paid this month",
 			])
 				expect(html.includes(status)).toBe(groups.includes(status));
+
 			for (const status of groups)
 				expect(groupUnder(html, status)).toContain(
 					'<span class="ml-auto shrink-0 tabular-nums">$100.00',
@@ -216,17 +232,21 @@ describe("Bills", () => {
 			vi.setSystemTime(new Date("2026-10-08T16:00:00Z"));
 			await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 			await env.DB.prepare("DELETE FROM bills").run();
+
 			if (includeOverdueBill) {
 				await env.DB.prepare(
 					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9398,'Monthly occurrence fixture',10000,28,'monthly',5,'MONTHLY OCCURRENCE FIXTURE')",
 				).run();
 			}
+
 			await env.DB.prepare(
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9397,'Upcoming fixture',5000,20,'monthly',5,'UPCOMING FIXTURE')",
 			).run();
+
 			const transaction = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
 			).first<{ id: number }>();
+
 			expect(transaction).toBeDefined();
 			await env.DB.prepare(
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9397,'2026-09',?,'user','linked')",
@@ -237,28 +257,38 @@ describe("Bills", () => {
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills")
 			).text();
+
 			const sections = [
 				...html.matchAll(/<section class="mt-4">([\s\S]*?)<\/section>/g),
 			];
+
 			const groups = new Map<string, { total: number; rowTotal: number }>();
+
 			for (const [, section] of sections) {
 				// The group's total is the only ml-auto span in its section (rows never use it).
 				const heading = section?.match(
 					/<span class="ml-auto shrink-0 tabular-nums">\$([\d,]+\.\d{2})/,
 				);
+
 				if (!heading || !section) continue;
+
 				const title = section.match(
 					/>(Overdue|Due in the next 7 days|Upcoming|Paid this month)<\/h2>/,
 				)?.[1];
+
 				if (!title) continue;
+
 				const rows = [
 					...section.matchAll(
 						/<span class="shrink-0 text-lg tabular-nums">\$([\d,]+\.\d{2})<\/span>/g,
 					),
 				];
+
 				const cents = (value: string) =>
 					Math.round(Number(value.replaceAll(",", "")) * 100);
+
 				const headingTotal = heading[1];
+
 				if (!headingTotal) continue;
 				groups.set(title, {
 					total: cents(headingTotal),
@@ -268,16 +298,20 @@ describe("Bills", () => {
 					),
 				});
 			}
+
 			expect(groups.size).toBe(includeOverdueBill ? 2 : 1);
 			// Upcoming also counts October 28, which no row lists, and names it under the heading (decision 122).
 			const unlistedUpcomingCents = includeOverdueBill ? 10000 : 0;
+
 			for (const [title, group] of groups)
 				expect(group.total).toBe(
 					group.rowTotal + (title === "Upcoming" ? unlistedUpcomingCents : 0),
 				);
+
 			if (includeOverdueBill) expect(groups.get("Overdue")?.total).toBe(10000);
 			else expect(groups.has("Overdue")).toBe(false);
 			expect(groups.get("Upcoming")?.total).toBe(5000 + unlistedUpcomingCents);
+
 			if (includeOverdueBill)
 				expect(html).toContain(
 					"Includes Monthly occurrence fixture on Oct 28</p>",
@@ -295,8 +329,10 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		const link =
 			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a><\/div><\/div>/;
+
 		expect(html).toMatch(link);
 		// Only the page's own link: each status heading's Why? goes to the same section too (#341).
 		expect(html.match(/aria-label="How this works: bills"/g)).toHaveLength(1);
@@ -309,18 +345,22 @@ describe("Bills", () => {
 		expect(
 			withoutKeysDetails(html.slice(foot, html.indexOf('id="sheet"'))),
 		).not.toMatch(/<(section|ul|li|h[1-6]|p|details)\b/);
+
 		// The section it points to is on How Tally works.
 		const how = await (
 			await exports.default.fetch("http://tally.test/how-it-works")
 		).text();
+
 		expect(how).toMatch(/<section[^>]*id="bills"/);
 	});
 
 	it("keeps the How this works link when there are no bills", async () => {
 		await env.DB.prepare("DELETE FROM bills").run();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html).toContain('href="/how-it-works#bills"');
 	});
 
@@ -328,8 +368,10 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
+
 		const link =
 			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a><\/div><\/div>/;
+
 		expect(html).toMatch(link);
 		const foot = html.search(link);
 		expect(foot).toBeGreaterThan(html.indexOf('id="bill-finding-list"'));
@@ -346,6 +388,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch(`http://tally.test${path}`)
 		).text();
+
 		expect(html).toMatch(
 			new RegExp(
 				`<h1 class="font-serif text-5xl font-semibold tracking-tight">\\s*${title}\\s*</h1>`,
@@ -357,6 +400,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
+
 		expect(html).toContain(
 			'<h2 id="bill-sheet-title" class="font-serif text-4xl font-semibold tracking-tight"',
 		);
@@ -369,9 +413,11 @@ describe("Bills", () => {
 		const defaultHtml = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
+
 		expect(defaultHtml).toContain(
 			"Then every 3 months: January, April, July and October.",
 		);
+
 		const post = (body: URLSearchParams) =>
 			exports.default.fetch("http://tally.test/bills", {
 				method: "POST",
@@ -381,6 +427,7 @@ describe("Bills", () => {
 				},
 				body,
 			});
+
 		const html = await (
 			await post(
 				new URLSearchParams({
@@ -394,6 +441,7 @@ describe("Bills", () => {
 				}),
 			)
 		).text();
+
 		const encoded = html.replaceAll("&#39;", "'").replaceAll("&amp;", "&");
 		expect(encoded).toContain(
 			"Then every 3 months: October, January, April and July.",
@@ -404,9 +452,11 @@ describe("Bills", () => {
 		// Pinned, so "Next" is the same date whatever day the suite runs on (the afterEach restores the clock).
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+
 		const form = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
+
 		for (const words of [
 			"Monthly",
 			"Yearly",
@@ -422,6 +472,7 @@ describe("Bills", () => {
 
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+
 		const response = await exports.default.fetch("http://tally.test/bills", {
 			method: "POST",
 			headers: {
@@ -438,6 +489,7 @@ describe("Bills", () => {
 				merchant_raw_name: "BIWEEKLY FIXTURE",
 			}),
 		});
+
 		expect(await response.text()).toContain(
 			"Then every two weeks from that date. Next: Oct 16.",
 		);
@@ -446,6 +498,7 @@ describe("Bills", () => {
 	it("says the next every-two-weeks date after today, however old the anchor is", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+
 		try {
 			const response = await exports.default.fetch("http://tally.test/bills", {
 				method: "POST",
@@ -463,6 +516,7 @@ describe("Bills", () => {
 					merchant_raw_name: "BIWEEKLY FIXTURE",
 				}),
 			});
+
 			expect(await response.text()).toContain(
 				"Then every two weeks from that date. Next: Oct 16.",
 			);
@@ -512,6 +566,7 @@ describe("Bills", () => {
 				}),
 			})
 		).text();
+
 		expect(html).toContain("Choose a date.");
 		expect(html).not.toContain("Enter a day from 1 to 31.");
 	});
@@ -534,6 +589,7 @@ describe("Bills", () => {
 				merchant_raw_name: "EVERY TWO WEEKS FIXTURE",
 			}),
 		});
+
 		expect(response.status).toBe(303);
 		expect(
 			await env.DB.prepare(
@@ -551,6 +607,7 @@ describe("Bills", () => {
 			category_id: "1",
 			merchant_raw_name: "CITY GYM",
 		});
+
 		const res = await exports.default.fetch("http://tally.test/bills", {
 			method: "POST",
 			headers: {
@@ -560,6 +617,7 @@ describe("Bills", () => {
 			},
 			body,
 		});
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain("Bill added");
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
@@ -583,6 +641,7 @@ describe("Bills", () => {
 				},
 				body: new URLSearchParams(fields),
 			});
+
 		const stored = (name: string) =>
 			env.DB.prepare(
 				"SELECT id, merchant_raw_name AS text, merchant_raw_text AS flag FROM bills WHERE name = ?",
@@ -595,6 +654,7 @@ describe("Bills", () => {
 			const charge = await env.DB.prepare(
 				"SELECT id, date FROM transactions WHERE raw_name = 'CHECKCARD 0921 CVS'",
 			).first<{ id: number; date: string }>();
+
 			const res = await saveBill("/bills", {
 				name: "Pharmacy",
 				amount: "16.43",
@@ -603,14 +663,17 @@ describe("Bills", () => {
 				category_id: "1",
 				merchant_raw_name: "CHECKCARD 0921 CVS",
 			});
+
 			expect(res.status).toBe(303);
 			const bill = await stored("Pharmacy");
 			expect(bill).toMatchObject({ text: "CVS Pharmacy", flag: 0 });
+
 			const linked = await env.DB.prepare(
 				"SELECT transaction_id AS id FROM bill_payments WHERE bill_id = ? AND status = 'linked'",
 			)
 				.bind(bill?.id)
 				.all();
+
 			expect(linked.results).toEqual([{ id: charge?.id }]);
 		});
 
@@ -623,6 +686,7 @@ describe("Bills", () => {
 					.bind(text)
 					.first("n"),
 			).toBe(0);
+
 			const res = await saveBill("/bills", {
 				name: "Vet",
 				amount: "40",
@@ -631,6 +695,7 @@ describe("Bills", () => {
 				category_id: "1",
 				merchant_raw_name: text,
 			});
+
 			expect(res.status).toBe(303);
 			expect(await stored("Vet")).toMatchObject({ text, flag: 0 });
 		});
@@ -639,6 +704,7 @@ describe("Bills", () => {
 			await env.DB.prepare(
 				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9681,'Legacy pharmacy',1643,14,'monthly',1,'CHECKCARD 0921 CVS',1)",
 			).run();
+
 			const res = await saveBill("/bills/9681", {
 				name: "Legacy pharmacy",
 				amount: "17.00",
@@ -647,6 +713,7 @@ describe("Bills", () => {
 				category_id: "1",
 				merchant_raw_name: "CHECKCARD 0921 CVS",
 			});
+
 			expect(res.status).toBe(303);
 			expect(
 				await env.DB.prepare(
@@ -659,6 +726,7 @@ describe("Bills", () => {
 			await env.DB.prepare(
 				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9682,'Changed pharmacy',1643,14,'monthly',1,'OLD PHARMACY TEXT',1)",
 			).run();
+
 			const res = await saveBill("/bills/9682", {
 				name: "Changed pharmacy",
 				amount: "16.43",
@@ -667,6 +735,7 @@ describe("Bills", () => {
 				category_id: "1",
 				merchant_raw_name: "CHECKCARD 0921 CVS",
 			});
+
 			expect(res.status).toBe(303);
 			expect(await stored("Changed pharmacy")).toMatchObject({
 				text: "CVS Pharmacy",
@@ -679,12 +748,14 @@ describe("Bills", () => {
 			const charge = await env.DB.prepare(
 				"SELECT id, date FROM transactions WHERE raw_name = 'CHECKCARD 0921 CVS'",
 			).first<{ id: number; date: string }>();
+
 			const dueDay = String(Number(charge?.date.slice(8)));
 			await env.DB.prepare(
 				"INSERT INTO bills (id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,merchant_raw_text) VALUES (9683,'Legacy CVS',1643,?,'monthly',1,'CVS Pharmacy',1)",
 			)
 				.bind(Number(dueDay))
 				.run();
+
 			const res = await saveBill("/bills/9683", {
 				name: "Legacy CVS",
 				amount: "16.43",
@@ -693,14 +764,17 @@ describe("Bills", () => {
 				category_id: "1",
 				merchant_raw_name: "CHECKCARD 0921 CVS",
 			});
+
 			expect(res.status).toBe(303);
 			expect(await stored("Legacy CVS")).toMatchObject({
 				text: "CVS Pharmacy",
 				flag: 0,
 			});
+
 			const linked = await env.DB.prepare(
 				"SELECT transaction_id AS id FROM bill_payments WHERE bill_id = 9683 AND status = 'linked'",
 			).all();
+
 			expect(linked.results).toEqual([{ id: charge?.id }]);
 		});
 	});
@@ -709,6 +783,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
+
 		expect(html).toMatch(/id="bill-sheet-title"[^>]*autofocus/);
 		expect(html).toContain('class="bill-form');
 		expect(html).toContain('class="bill-month');
@@ -718,9 +793,11 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		const details = html.match(
 			/<details[^>]*>\s*<summary[^>]*>[\s\S]*?<\/summary>/,
 		);
+
 		expect(details?.[0]).toMatch(/<details class="group /);
 		expect(details?.[0]).toContain("group-open:rotate-90");
 		expect(details?.[0]).toContain('data-icon="chevron-right"');
@@ -731,6 +808,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		const start = html.indexOf('<details class="group ');
 		const disclosure = html.slice(start, html.indexOf("</details>", start));
 		expect(disclosure).toMatch(
@@ -744,9 +822,11 @@ describe("Bills", () => {
 
 	it("does not call an inactive-only bill list empty", async () => {
 		await env.DB.prepare("UPDATE bills SET active=0").run();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html).toContain("Inactive (9)");
 		expect(html).not.toContain("No bills yet.");
 		// With bills but none due, the count is accurate and stays.
@@ -758,9 +838,11 @@ describe("Bills", () => {
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM bills"),
 		]);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html).toContain("No bills yet.");
 		expect(html).not.toContain("to pay soon");
 	});
@@ -782,6 +864,7 @@ describe("Bills", () => {
 				merchant_raw_name: "TAX",
 			}),
 		});
+
 		const html = await res.text();
 		expect(html.match(/role="alert"/g)?.length).toBe(2);
 		expect(html).toContain("Choose a month.");
@@ -806,6 +889,7 @@ describe("Bills", () => {
 				merchant_raw_name: "GYM",
 			}),
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/bills");
 	});
@@ -828,10 +912,12 @@ describe("Bills", () => {
 				merchant_raw_name: "APPLE.COM/BILL",
 			}),
 		});
+
 		expect(edit.headers.get("HX-Trigger")).toContain('"announce":"Bill saved"');
 		expect(
 			await env.DB.prepare("SELECT name FROM bills WHERE id=1").first("name"),
 		).toBe("Movies");
+
 		for (const [action, message] of [
 			["deactivate", "Bill deactivated"],
 			["reactivate", "Bill reactivated"],
@@ -843,6 +929,7 @@ describe("Bills", () => {
 					headers: { "HX-Request": "true", Origin: "http://tally.test" },
 				},
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain(
 				`"announce":"${message}"`,
 			);
@@ -871,25 +958,30 @@ describe("Bills", () => {
 		).toEqual(new Set(["overdue", "due", "upcoming", "paid"]));
 		const late = rows.find((row) => row.name === "Water");
 		expect(late).toBeTruthy();
+
 		const waterPayment = await env.DB.prepare(
 			`SELECT t.date, CASE WHEN length(bp.period)=4 THEN bp.period || '-' || printf('%02d', b.anchor_month) ELSE bp.period END || '-' || printf('%02d', b.due_day) AS due
 			 FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id JOIN transactions t ON t.id=bp.transaction_id
 			 WHERE b.name='Water' AND bp.status='linked' ORDER BY bp.period DESC LIMIT 1`,
 		).first<{ date: string; due: string }>();
+
 		expect(waterPayment).toBeTruthy();
 		expect(
 			Math.floor(Date.parse(`${waterPayment?.date}T00:00:00Z`) / 86400000) -
 				Math.floor(Date.parse(`${waterPayment?.due}T00:00:00Z`) / 86400000),
 		).toBe(3);
+
 		const future = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE date > ?",
 		)
 			.bind(date)
 			.first<{ n: number }>();
+
 		expect(future?.n).toBe(0);
 		const onTime = rows.find((row) => row.name === "Streaming");
 		expect(onTime?.status).toBe("paid");
 		expect(onTime?.paidDate).toBe(onTime?.dueDate);
+
 		const lookalike = await env.DB.prepare(
 			`SELECT t.id, t.date, t.amount_cents, bp.status
 			 FROM transactions t
@@ -906,9 +998,11 @@ describe("Bills", () => {
 				amount_cents: number;
 				status: string | null;
 			}>();
+
 		expect(lookalike).toBeTruthy();
 		expect(Boolean(lookalike?.date && lookalike.date <= date)).toBe(true);
 		expect(lookalike?.status).toBeNull();
+
 		// The demo's set-aside stays small enough that Safe to spend stays positive. Rent is set aside for what's left of
 		// it (decision 101), and from the 25th, when next month's rent falls due within seven days, all of it (decision 62).
 		const setAside = rows
@@ -917,21 +1011,26 @@ describe("Bills", () => {
 				(sum, row) => sum + Math.max(0, row.amountCents - row.paidCents),
 				0,
 			);
+
 		expect(setAside).toBeLessThan(170_000);
 	});
 
 	it("shows the demo's weekly Daycare total for its five October Fridays", async () => {
 		await resetDemo(env.DB, "2026-10-31");
+
 		const bill = await env.DB.prepare(
 			"SELECT id,amount_cents,frequency FROM bills WHERE name='Daycare'",
 		).first<{ id: number; amount_cents: number; frequency: string }>();
+
 		expect(bill).toEqual({ id: 8, amount_cents: 24000, frequency: "weekly" });
 		const { rows } = await loadBillRows(env.DB, "2026-10-31");
 		const daycare = rows.find((row) => row.name === "Daycare");
+
 		// Every October Friday is paid by now, so the next one (November's first) is shown too; October's are the total.
 		const october = (daycare?.totalOccurrences ?? []).filter((occurrence) =>
 			occurrence.dueDate.startsWith("2026-10"),
 		);
+
 		expect(october.map((occurrence) => occurrence.dueDate).sort()).toEqual([
 			"2026-10-02",
 			"2026-10-09",
@@ -942,9 +1041,11 @@ describe("Bills", () => {
 		expect(
 			october.reduce((sum, occurrence) => sum + occurrence.amountCents, 0),
 		).toBe(120000);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html).toContain("Daycare");
 		expect(
 			october.reduce((sum, occurrence) => sum + occurrence.amountCents, 0),
@@ -953,9 +1054,11 @@ describe("Bills", () => {
 
 	it("pays the demo's past Daycare Fridays from its own Childcare budget", async () => {
 		await resetDemo(env.DB, "2026-10-10");
+
 		const category = await env.DB.prepare(
 			"SELECT c.name AS name, b.amount_cents AS budget FROM bills d JOIN categories c ON c.id = d.category_id JOIN budget_amounts b ON b.category_id = c.id WHERE d.name = 'Daycare'",
 		).first<{ name: string; budget: number }>();
+
 		expect(category).toEqual({ name: "Childcare", budget: 120000 });
 		const { rows } = await loadBillRows(env.DB, "2026-10-10");
 		const daycare = rows.find((row) => row.name === "Daycare");
@@ -979,15 +1082,19 @@ describe("Bills", () => {
 		// The 20th: Eating Out has been over since the 13th, and Gas is near its limit but not over (#322).
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-20T15:00:00Z"));
+
 		try {
 			await resetDemo(env.DB, "2026-10-20");
+
 			const html = await (
 				await exports.default.fetch("http://tally.test/")
 			).text();
+
 			const headline =
 				html.match(
 					/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([^<]*)</,
 				)?.[1] ?? "";
+
 			expect(headline).toMatch(/^\$\d/);
 			expect(html).toContain(
 				"Eating Out is $86 over. Other budgets are on track.",
@@ -1005,15 +1112,19 @@ describe("Bills", () => {
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9396,'Weekly fixture',10000,5,'weekly',5,'WEEKLY FIXTURE')",
 		).run();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html.match(/\d+ bills? to pay soon, \$[\d.]+ in all/)?.[0]).toBe(
 			"1 bill to pay soon, $200.00 in all",
 		);
+
 		const home = await (
 			await exports.default.fetch("http://tally.test/")
 		).text();
+
 		expect(home).toContain("Weekly fixture");
 		expect(home).toContain("Bills due soon");
 	});
@@ -1026,9 +1137,11 @@ describe("Bills", () => {
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9395,'Weekly fixture',24000,5,'weekly',5,'WEEKLY FIXTURE')",
 		).run();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
 			"1 bill to pay soon, $480.00 in all",
 		);
@@ -1042,9 +1155,11 @@ describe("Bills", () => {
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9397,'Friday fixture',24000,5,'weekly',5,'FRIDAY FIXTURE')",
 		).run();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		// October's five Fridays are unpaid (the 2nd to the 23rd overdue, the 30th due), and Nov 6 is due in a week.
 		expect(html.match(/\d+ bills? to pay soon, \$[\d,.]+ in all/)?.[0]).toBe(
 			"1 bill to pay soon, $1,440.00 in all",
@@ -1064,9 +1179,11 @@ describe("Bills", () => {
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 9398,'2026-10',id,'user','linked' FROM transactions LIMIT 1",
 			),
 		]);
+
 		const home = await (
 			await exports.default.fetch("http://tally.test/")
 		).text();
+
 		expect(home).toContain("Bills due soon");
 		expect(home).toContain("Rent fixture");
 	});
@@ -1090,9 +1207,11 @@ describe("Bills", () => {
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9631,'2026-10-02',9641,'user','linked'),(9631,'2026-10-09',9642,'user','linked'),(9632,'2026-09',9643,'user','linked')",
 			),
 		]);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		// Due is the shown Oct 16 Friday. Upcoming is Oct 23 and Oct 30 plus the monthly bill's Oct 28.
 		expect(groupUnder(html, "Due in the next 7 days")).toContain(
 			'<span class="ml-auto shrink-0 tabular-nums">$240.00</span>',
@@ -1114,6 +1233,7 @@ describe("Bills", () => {
 				},
 				body,
 			});
+
 		const body = new URLSearchParams({
 			name: "Gym",
 			amount: "42.50",
@@ -1122,6 +1242,7 @@ describe("Bills", () => {
 			category_id: "1",
 			merchant_raw_name: "CITY GYM",
 		}).toString();
+
 		expect((await post("/bills/999999", body)).status).toBe(404);
 		expect((await post("/bills/999999/deactivate")).status).toBe(404);
 		expect((await post("/bills/999999/reactivate")).status).toBe(404);
@@ -1131,13 +1252,18 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
+
 		// A new bill's Cancel returns focus to Add a bill (#87).
 		expect(html).toMatch(
 			/<a[^>]*href="\/bills\?focus=add-bill"[^>]*>\s*Cancel/,
 		);
-		const { id } = (await env.DB.prepare(
-			"SELECT id FROM bills WHERE active=1 LIMIT 1",
-		).first<{ id: number }>()) as { id: number };
+
+		const { id } = present(
+			await env.DB.prepare(
+				"SELECT id FROM bills WHERE active=1 LIMIT 1",
+			).first<{ id: number }>(),
+		);
+
 		const res = await exports.default.fetch(
 			`http://tally.test/bills/${id}/deactivate`,
 			{
@@ -1145,6 +1271,7 @@ describe("Bills", () => {
 				headers: { "HX-Request": "true", Origin: "http://tally.test" },
 			},
 		);
+
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
 	});
 
@@ -1152,9 +1279,12 @@ describe("Bills", () => {
 	// exclusion, and linking or unlinking never writes the exclusion (spec §6.1 rule 4, §8.5).
 	describe("a payment Plaid or Jev excluded that pays a bill", () => {
 		const MONTH = "2026-07";
+
 		type Machine = "plaid" | "jev";
+
 		const BILL =
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9300,'Mortgage',150000,5,'monthly',5,'LANDLORD LLC')";
+
 		/** A 1500.00 payment: a loan payment for Plaid, a transfer Jev flagged for Jev. */
 		const setUp = async (source: Machine) => {
 			await env.DB.batch([
@@ -1167,6 +1297,7 @@ describe("Bills", () => {
 				).bind(source),
 			]);
 		};
+
 		/** A split bank transaction of 2000.00 whose 1500.00 part is the bill's payment, excluded whole. */
 		const setUpSplit = async (source: Machine) => {
 			await env.DB.batch([
@@ -1187,38 +1318,47 @@ describe("Bills", () => {
 				).bind(source),
 			]);
 		};
+
 		const state = async (...ids: number[]) =>
 			(
 				await env.DB.prepare(
 					`SELECT id, excluded, excluded_source FROM transactions WHERE id IN (${ids.join(",")}) ORDER BY id`,
 				).all()
 			).results;
+
 		const spent = async () =>
 			summarizeMonth({
 				month: MONTH,
 				...(await loadMonth(env.DB, MONTH)),
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
-		const post = (path: string, body?: Record<string, string>) =>
-			exports.default.fetch(`http://tally.test${path}`, {
+
+		const post = (path: string, body?: Record<string, string>) => {
+			const headers = new Headers({
+				Origin: "http://tally.test",
+				"HX-Request": "true",
+			});
+
+			if (body)
+				headers.set("content-type", "application/x-www-form-urlencoded");
+
+			return exports.default.fetch(`http://tally.test${path}`, {
 				method: "POST",
 				redirect: "manual",
-				headers: {
-					Origin: "http://tally.test",
-					"HX-Request": "true",
-					...(body
-						? { "content-type": "application/x-www-form-urlencoded" }
-						: {}),
-				},
-				...(body ? { body: new URLSearchParams(body) } : {}),
+				headers,
+				body: body ? new URLSearchParams(body) : undefined,
 			});
+		};
+
 		const link = (transaction: number) =>
 			post("/bills/9300/link", {
 				transaction_id: String(transaction),
 				period: MONTH,
 				opened_period: MONTH,
 			});
+
 		const unlink = () => post(`/bills/9300/occurrences/${MONTH}/unlink`);
+
 		const linkedBy = async () =>
 			(
 				await env.DB.prepare(
@@ -1251,6 +1391,7 @@ describe("Bills", () => {
 			async (source) => {
 				await setUpSplit(source);
 				const base = await spent();
+
 				const whole = [9310, 9311, 9312].map((id) => ({
 					id,
 					excluded: 1,
@@ -1318,11 +1459,14 @@ describe("Bills", () => {
 		let html = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
+
 		expect(html).toContain("Payments");
 		expect(html).toContain("Not this one");
+
 		const linked = await env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked'",
 		).first<{ period: string }>();
+
 		const unlink = await exports.default.fetch(
 			`http://tally.test/bills/1/occurrences/${linked?.period}/unlink`,
 			{
@@ -1331,6 +1475,7 @@ describe("Bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
+
 		expect(unlink.headers.get("HX-Trigger")).toContain("Payment unlinked");
 		expect(
 			await env.DB.prepare(
@@ -1355,9 +1500,11 @@ describe("Bills", () => {
 				"UPDATE bills SET frequency='yearly',anchor_month=12,due_day=1 WHERE id=1",
 			),
 		]);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
+
 		expect(html).toContain("2025");
 		expect(html).toContain("Overdue");
 	});
@@ -1380,12 +1527,14 @@ describe("Bills", () => {
 					merchant_raw_name: "NO AUTOMATIC REMATCH",
 				}),
 			});
+
 		const count = async () =>
 			(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=1",
 				).first<{ n: number }>()
 			)?.n;
+
 		const before = await count();
 		expect(before).toBeGreaterThan(0);
 		const refused = await change();
@@ -1414,6 +1563,7 @@ describe("Bills", () => {
 		await env.DB.prepare(
 			"UPDATE bills SET frequency='yearly',anchor_month=3 WHERE id=1",
 		).run();
+
 		const res = await exports.default.fetch("http://tally.test/bills/1", {
 			method: "POST",
 			headers: {
@@ -1430,6 +1580,7 @@ describe("Bills", () => {
 				merchant_raw_name: "APPLE.COM/BILL",
 			}),
 		});
+
 		expect(await res.text()).toContain(
 			"To change when it&#39;s due, deactivate it and add a new bill.",
 		);
@@ -1450,6 +1601,7 @@ describe("Bills", () => {
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,'2026-10-09',id,'user','linked' FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
 			),
 		]);
+
 		const res = await exports.default.fetch("http://tally.test/bills/1", {
 			method: "POST",
 			headers: {
@@ -1465,6 +1617,7 @@ describe("Bills", () => {
 				merchant_raw_name: "APPLE.COM/BILL",
 			}),
 		});
+
 		expect(await res.text()).toContain(
 			"To change when it&#39;s due, deactivate it and add a new bill.",
 		);
@@ -1482,14 +1635,18 @@ describe("Bills", () => {
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT 1,?,id,'user','linked' FROM transactions LIMIT 1",
 			).bind(todayIn(DEFAULT_TIME_ZONE).slice(0, 7)),
 		]);
+
 		const earlier = new Date(
 			`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}-01T00:00:00Z`,
 		);
+
 		earlier.setUTCMonth(earlier.getUTCMonth() - 5);
 		const period = earlier.toISOString().slice(0, 7);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
+
 		expect(html).toContain(`occurrences/${period}/link`);
 		expect(html).toContain("No payment");
 	});
@@ -1514,14 +1671,18 @@ describe("Bills", () => {
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9611,'2026-02',9621,'user','linked')",
 				),
 			]);
+
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills/9611")
 			).text();
+
 			expect(occurrenceRow(html, "February")).toContain("Feb Monthly Payment");
 			expect(occurrenceRow(html, "February")).toContain("$123.45");
+
 			const picker = await exports.default.fetch(
 				"http://tally.test/bills/9611/occurrences/2026-02/link",
 			);
+
 			expect(picker.status).toBe(200);
 		});
 
@@ -1537,9 +1698,11 @@ describe("Bills", () => {
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9612,'2026-02-06',9622,'user','linked')",
 				),
 			]);
+
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills/9612")
 			).text();
+
 			expect(occurrenceRow(html, "Fri, Feb 6")).toContain("Feb Friday Payment");
 			expect(occurrenceRow(html, "Fri, Feb 6")).toContain("$240.00");
 		});
@@ -1563,6 +1726,7 @@ describe("Bills", () => {
 			)
 				.bind(frequency, frequency === "biweekly" ? "2026-10-02" : null)
 				.run();
+
 			return (
 				await exports.default.fetch("http://tally.test/bills/9501")
 			).text();
@@ -1573,9 +1737,11 @@ describe("Bills", () => {
 			expect(html).toContain("No payment");
 			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Link a payment");
 			expect(occurrenceRow(html, "Fri, Nov 6")).toContain("Due");
+
 			const bills = await (
 				await exports.default.fetch("http://tally.test/bills")
 			).text();
+
 			expect(bills).toContain("Due Nov 6 · every Friday");
 		});
 
@@ -1612,12 +1778,14 @@ describe("Bills", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9921,1,'2026-10-02',1000,'LATE PAYER'),(9922,1,'2026-10-20',1000,'EARLY PAYER')",
 			),
 		]);
+
 		const explain = async (period: string, transactionId: number) =>
 			(
 				await exports.default.fetch(
 					`http://tally.test/bills/1/month-explanation?period=${period}&transaction_id=${transactionId}`,
 				)
 			).text();
+
 		// September's bill, paid on October 2: it counts in September, not the bank's October.
 		expect(await explain("2026-09", 9921)).toContain(
 			"It counts in September&#39;s spending, not October&#39;s.",
@@ -1641,11 +1809,13 @@ describe("Bills", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9901,1,'2026-10-06',1000,'PICKER NEAR'),(9902,1,'2026-10-05',1000,'PICKER FAR')",
 			),
 		]);
+
 		const html = await (
 			await exports.default.fetch(
 				"http://tally.test/bills/1/occurrences/2026-10-09/link",
 			)
 		).text();
+
 		expect(html).toContain('value="9901"');
 		expect(html).not.toContain('value="9902"');
 
@@ -1661,6 +1831,7 @@ describe("Bills", () => {
 				opened_period: "2026-10-09",
 			}),
 		});
+
 		expect(await res.text()).toContain("isn&#39;t within 3 days of");
 		expect(
 			await env.DB.prepare(
@@ -1673,6 +1844,7 @@ describe("Bills", () => {
 	// neither offered in the picker nor linked by a POST that names it.
 	describe("a credit is not a payment", () => {
 		const period = "2026-10";
+
 		const link = (transaction: number, due: string) =>
 			exports.default.fetch("http://tally.test/bills/1/link", {
 				method: "POST",
@@ -1686,22 +1858,26 @@ describe("Bills", () => {
 					opened_period: due,
 				}),
 			});
+
 		const pickerHtml = async (due: string) =>
 			(
 				await exports.default.fetch(
 					`http://tally.test/bills/1/occurrences/${due}/link`,
 				)
 			).text();
+
 		const billStatus = async () =>
 			(await loadBillRows(env.DB, "2026-10-10")).rows.find(
 				(row) => row.id === 1,
 			)?.status;
+
 		const paidOccurrences = async (due: string) =>
 			env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=1 AND period=? AND status='linked'",
 			)
 				.bind(due)
 				.first("n");
+
 		const safeToSpend = async () =>
 			(await (await exports.default.fetch("http://tally.test/")).text()).match(
 				/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([^<]*)</,
@@ -1731,6 +1907,7 @@ describe("Bills", () => {
 				status: await billStatus(),
 				safe: await safeToSpend(),
 			};
+
 			expect(before.status).toBe("due");
 			const res = await link(9951, period);
 			expect(await res.text()).toMatch(
@@ -1760,6 +1937,7 @@ describe("Bills", () => {
 				status: await billStatus(),
 				safe: await safeToSpend(),
 			};
+
 			expect(before.status).not.toBe("paid");
 			const res = await link(9953, friday);
 			expect(await res.text()).toMatch(
@@ -1790,16 +1968,19 @@ describe("Bills", () => {
 	// copy of the page (a second <main>, #announcer, skip link and sidebar) nested in it.
 	describe("choosing a month in Link a payment", () => {
 		const period = "2026-10";
+
 		const pickerFor = (headers: Record<string, string> = {}, chosen = period) =>
 			exports.default.fetch(
 				`http://tally.test/bills/1/occurrences/${chosen}/link`,
 				{ headers },
 			);
+
 		// What the vendored htmx 4 sends when a month chip (inside section#payment-picker) asks for its picker.
 		const monthChipRequest = {
 			"HX-Request": "true",
 			"HX-Target": "section#payment-picker",
 		};
+
 		const pickerSection = (html: string) =>
 			html.match(/<section id="payment-picker"[\s\S]*?<\/section>/)?.[0] ?? "";
 
@@ -1876,10 +2057,12 @@ describe("Bills", () => {
 			expect(html).toContain(
 				'<div id="bill-month-explanation" aria-live="polite">',
 			);
+
 			const line =
 				html.match(
 					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
 				)?.[1] ?? "";
+
 			expect(line).not.toContain('class="sr-only"');
 			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 				announce: `${count} payments to link`,
@@ -1909,10 +2092,12 @@ describe("Bills", () => {
 			expect(html).toContain(
 				'<div id="bill-month-explanation" aria-live="polite">',
 			);
+
 			const line =
 				html.match(
 					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
 				)?.[1] ?? "";
+
 			expect(line).not.toContain("No payments to link");
 			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 				announce: "No payments to link",
@@ -1935,11 +2120,13 @@ describe("Bills", () => {
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
+
 		const html = await (
 			await exports.default.fetch(
 				`http://tally.test/bills/1/occurrences/${period}/link`,
 			)
 		).text();
+
 		expect(html).toContain('hx-target="#payment-picker"');
 		expect(html).toContain(
 			'hx-include="[name=&#39;transaction_id&#39;],[name=&#39;period&#39;]"',
@@ -1953,9 +2140,11 @@ describe("Bills", () => {
 	it("reports the selected month when a payment is outside its 30-day window", async () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();
+
 		const old = await env.DB.prepare(
 			"SELECT id FROM transactions ORDER BY date LIMIT 1",
 		).first<number>("id");
+
 		const res = await exports.default.fetch("http://tally.test/bills/1/link", {
 			method: "POST",
 			headers: {
@@ -1968,6 +2157,7 @@ describe("Bills", () => {
 				opened_period: period,
 			}),
 		});
+
 		expect(await res.text()).toContain(
 			`That payment isn&#39;t within 30 days of`,
 		);
@@ -1977,20 +2167,24 @@ describe("Bills", () => {
 		const linked = await env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
 		).first<{ period: string }>();
+
 		// A Paid month takes no picker (#205), so the picker opens on a month the page still offers to link. A month
 		// chip asks for it with HX-Request, which keeps the month choices on a month with nothing to link yet.
 		const page = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
+
 		const open = /\/bills\/1\/occurrences\/([^/]+)\/link#payment-picker/.exec(
 			page,
 		)?.[1];
+
 		const html = await (
 			await exports.default.fetch(
 				`http://tally.test/bills/1/occurrences/${open}/link`,
 				{ headers: { "HX-Request": "true" } },
 			)
 		).text();
+
 		expect(html).toContain("Which month&#39;s bill does it pay?");
 		expect(html).not.toContain(`name="period" value="${linked?.period}"`);
 		expect(html).toContain("A late payment counts in its bill&#39;s month");
@@ -2005,6 +2199,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
+
 		expect(html).not.toContain("rounded-control bg-band");
 		expect(html).toContain('class="size-4"');
 		expect(html).toContain("-ml-2");
@@ -2017,6 +2212,7 @@ describe("Bills", () => {
 		const linked = await env.DB.prepare(
 			"SELECT period,transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
 		).first<{ period: string; transaction_id: number }>();
+
 		const unlink = await exports.default.fetch(
 			`http://tally.test/bills/1/occurrences/${linked?.period}/unlink`,
 			{
@@ -2024,6 +2220,7 @@ describe("Bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
+
 		const unlinkTrigger = JSON.parse(unlink.headers.get("HX-Trigger") ?? "{}");
 		expect(unlinkTrigger.toast).toMatchObject({
 			message: "Payment unlinked",
@@ -2033,6 +2230,7 @@ describe("Bills", () => {
 		expect(unlinkTrigger.announce).toBe(
 			"Payment unlinked. Undo for 10 seconds.",
 		);
+
 		const link = await exports.default.fetch("http://tally.test/bills/1/link", {
 			method: "POST",
 			headers: {
@@ -2046,6 +2244,7 @@ describe("Bills", () => {
 				opened_period: String(linked?.period),
 			}),
 		});
+
 		expect(JSON.parse(link.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Payment linked", type: "success" },
 			announce: "Payment linked",
@@ -2073,6 +2272,7 @@ describe("Bills", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,category_source) SELECT 9202,id,?,10000,'MERCHANT RULE',3,'merchant_rule' FROM accounts LIMIT 1",
 			).bind(today),
 		]);
+
 		const link = (bill: number, transaction: number) =>
 			exports.default.fetch(`http://tally.test/bills/${bill}/link`, {
 				method: "POST",
@@ -2123,6 +2323,7 @@ describe("Bills", () => {
 			{ id: 9201, categoryId: 3, categorySource: "user" },
 			{ id: 9202, categoryId: 3, categorySource: "merchant_rule" },
 		]);
+
 		for (const id of [9201, 9202]) {
 			await exports.default.fetch(
 				`http://tally.test/bills/9200/occurrences/${period}/unlink`,
@@ -2156,15 +2357,19 @@ describe("Bills", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9300,id,?,10000,'UNCATEGORIZED BILL' FROM accounts LIMIT 1",
 			).bind(today),
 		]);
+
 		const count = async () => {
 			const html = await (
 				await exports.default.fetch("http://tally.test/")
 			).text();
+
 			return Number(
 				html.match(/(\\d+) transactions need\\s+a\\s+category/)?.[1],
 			);
 		};
+
 		const before = await count();
+
 		const res = await exports.default.fetch("http://tally.test/bills/1/link", {
 			method: "POST",
 			headers: {
@@ -2177,6 +2382,7 @@ describe("Bills", () => {
 				opened_period: period,
 			}),
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -2191,6 +2397,7 @@ describe("Bills", () => {
 			`http://tally.test/bills/1/occurrences/${period}/unlink`,
 			{ method: "POST", headers: { Origin: "http://tally.test" } },
 		);
+
 		const relink = await exports.default.fetch(
 			"http://tally.test/bills/9300/link",
 			{
@@ -2206,6 +2413,7 @@ describe("Bills", () => {
 				}),
 			},
 		);
+
 		expect(relink.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -2265,6 +2473,7 @@ describe("Bills", () => {
 			).bind(day),
 		]);
 		const statements = [];
+
 		for (let i = 0; i < 55; i++)
 			statements.push(
 				env.DB.prepare(
@@ -2288,11 +2497,13 @@ describe("Bills", () => {
 			).bind(period),
 		);
 		await env.DB.batch(statements);
+
 		const html = await (
 			await exports.default.fetch(
 				`http://tally.test/bills/1/occurrences/${period}/link`,
 			)
 		).text();
+
 		// Every eligible payment stays reachable, even the furthest in amount, and the one the person said Not this one
 		// to stays listed last, under "You said not this one" (#340).
 		expect(
@@ -2325,6 +2536,7 @@ describe("Bills", () => {
 	describe("a payment's own name shows as typed (decision 101)", () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const due = `${period}-15`;
+
 		/** A monthly bill due on the 15th, and nothing else until a test adds the transactions it needs. */
 		const bill = [
 			env.DB.prepare("DELETE FROM bill_payments"),
@@ -2333,11 +2545,13 @@ describe("Bills", () => {
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9400,'Streaming',1500,15,'monthly','AMAZON')",
 			),
 		];
+
 		const bankAmazon = (id: number, ownName: string | null, extra = "") =>
 			env.DB.prepare(
 				`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,own_name${extra ? ",is_split" : ""})
 				 SELECT ?,id,?,1500,'AMZN MKTP US*2K4',?${extra ? ", 1" : ""} FROM accounts LIMIT 1`,
 			).bind(id, due, ownName);
+
 		const pickerHtml = async () =>
 			(
 				await exports.default.fetch(
@@ -2353,19 +2567,23 @@ describe("Bills", () => {
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9400,?,9401,'user','linked')",
 				).bind(period),
 			]);
+
 			// The bill's page lists each occurrence with the payment that paid it.
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills/9400")
 			).text();
+
 			expect(html).toContain("DOG BED");
 			expect(html).not.toContain("Amzn mktp");
 		});
 
 		it("lists a candidate that has its own name by that name, exactly as typed", async () => {
 			await env.DB.batch([...bill, bankAmazon(9401, "DOG BED")]);
+
 			const picker = (await pickerHtml()).split(
 				'<section id="payment-picker"',
 			)[1];
+
 			expect(picker).toContain('value="9401"');
 			expect(picker).toContain("DOG BED");
 			expect(picker).not.toContain("Amzn mktp");
@@ -2379,9 +2597,11 @@ describe("Bills", () => {
 					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id) SELECT 9402,id,?,1500,'AMZN MKTP US*2K4',9401 FROM accounts LIMIT 1",
 				).bind(due),
 			]);
+
 			const picker = (await pickerHtml()).split(
 				'<section id="payment-picker"',
 			)[1];
+
 			expect(picker).toContain('value="9402"');
 			expect(picker).toContain("DOG BED");
 			expect(picker).not.toContain("Amzn mktp");
@@ -2409,29 +2629,38 @@ describe("Bill guards", () => {
 			merchant_raw_name: "CITY GYM",
 			...over,
 		});
-	const post = (path: string, body: URLSearchParams, htmx = true) =>
-		exports.default.fetch(`http://tally.test${path}`, {
+
+	const post = (path: string, body: URLSearchParams, htmx = true) => {
+		const headers = new Headers({
+			"content-type": "application/x-www-form-urlencoded",
+			Origin: "http://tally.test",
+		});
+
+		if (htmx) headers.set("HX-Request", "true");
+
+		return exports.default.fetch(`http://tally.test${path}`, {
 			method: "POST",
 			redirect: "manual",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				Origin: "http://tally.test",
-				...(htmx ? { "HX-Request": "true" } : {}),
-			},
+			headers,
 			body,
 		});
+	};
+
 	const billCount = async () =>
 		(
 			await env.DB.prepare("SELECT COUNT(*) AS n FROM bills").first<{
 				n: number;
 			}>()
 		)?.n;
+
 	const nameOf = async (id: number) =>
 		env.DB.prepare("SELECT name FROM bills WHERE id=?").bind(id).first("name");
+
 	const amountOf = async (id: number) =>
 		env.DB.prepare("SELECT amount_cents FROM bills WHERE id=?")
 			.bind(id)
 			.first("amount_cents");
+
 	/** The confirm chip's input tag, or undefined when the form has none. */
 	const confirmChip = (html: string) =>
 		html.match(/<input[^>]*name="confirm_amount"[^>]*>/)?.[0];
@@ -2477,6 +2706,7 @@ describe("Bill guards", () => {
 					"/bills/1",
 					fields({ name, amount: "3.99", merchant_raw_name: "APPLE.COM/BILL" }),
 				);
+
 				expect(res.headers.get("HX-Trigger")).toContain(
 					'"announce":"Bill saved"',
 				);
@@ -2489,6 +2719,7 @@ describe("Bill guards", () => {
 				"/bills/1",
 				fields({ name: " water", merchant_raw_name: "APPLE.COM/BILL" }),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("You already have a bill called Water.");
@@ -2507,6 +2738,7 @@ describe("Bill guards", () => {
 						.run();
 			});
 			const rentIds = [9, 10];
+
 			const edit = (id: number, over: Record<string, string>) =>
 				post(
 					`/bills/${id}`,
@@ -2551,6 +2783,7 @@ describe("Bill guards", () => {
 		it("compares names as the database does: spaces and A to Z only", async () => {
 			const add = (name: string) =>
 				post("/bills", fields({ name, merchant_raw_name: name }));
+
 			expect((await add("Café")).headers.get("HX-Trigger")).toContain(
 				"Bill added",
 			);
@@ -2579,6 +2812,7 @@ describe("Bill guards", () => {
 				"/bills",
 				fields({ name: "old PHONE plan", merchant_raw_name: "PHONE CO" }),
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain("Bill added");
 			expect(
 				await env.DB.prepare(
@@ -2592,12 +2826,14 @@ describe("Bill guards", () => {
 				`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
 				 VALUES('old phone plan',4000,3,'monthly',5,'PHONE CO')`,
 			).run();
+
 			for (const htmx of [true, false]) {
 				const res = await post(
 					"/bills/7/reactivate",
 					new URLSearchParams(),
 					htmx,
 				);
+
 				const html = await res.text();
 				expect(res.status).toBe(200);
 				expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -2634,64 +2870,89 @@ describe("Bill guards", () => {
 	describe("a duplicate that lands between the check and the write", () => {
 		const competing = (name: string) =>
 			`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES('${name}',1000,1,'monthly',5,'RIVAL CO')`;
+
 		/** The worker's env with a DB that runs `rival` just before the first statement starting with `sql` runs. */
 		const racing = (sql: string, rival: string) => {
 			let raced = false;
+
 			const guard = (statement: D1PreparedStatement): D1PreparedStatement => {
 				const proxy: D1PreparedStatement = new Proxy(statement, {
 					get(target, prop) {
 						if (prop === "bind")
 							return (...values: unknown[]) => {
 								const bound = guard(target.bind(...values));
+
 								if (matched.has(proxy)) matched.add(bound);
+
 								return bound;
 							};
+
 						if (prop === "run")
 							return async () => {
 								if (!raced) {
 									raced = true;
 									await env.DB.prepare(rival).run();
 								}
+
 								return target.run();
 							};
-						const value = Reflect.get(target, prop);
-						return typeof value === "function" ? value.bind(target) : value;
+
+						// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 statement
+						// it wraps is exactly what the code under test does, and an absent key reads as undefined.
+						const value: unknown = target[prop as keyof D1PreparedStatement];
+
+						return isMethod(value) ? value.bind(target) : value;
 					},
 				});
+
 				wrapped.set(proxy, statement);
+
 				return proxy;
 			};
+
 			// A save's bill and its amount row go in one batch, so the rival also lands just before a batch
 			// that holds a matching statement; the batch itself gets the real statements.
 			const matched = new Set<D1PreparedStatement>();
 			const wrapped = new Map<D1PreparedStatement, D1PreparedStatement>();
+
 			const rivalFirst = async () => {
 				if (!raced) {
 					raced = true;
 					await env.DB.prepare(rival).run();
 				}
 			};
+
 			const DB = new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop === "prepare")
 						return (text: string) => {
 							const statement = target.prepare(text);
+
 							if (!text.startsWith(sql)) return statement;
 							const proxy = guard(statement);
 							matched.add(proxy);
+
 							return proxy;
 						};
+
 					if (prop === "batch")
 						return async (statements: D1PreparedStatement[]) => {
 							if (statements.some((s) => matched.has(s))) await rivalFirst();
+
 							return target.batch(statements.map((s) => wrapped.get(s) ?? s));
 						};
-					const value = Reflect.get(target, prop);
-					return typeof value === "function" ? value.bind(target) : value;
+
+					// SAFETY: a Proxy get trap receives the key as a property name; reading it from the D1 database it wraps
+					// is exactly what the code under test does, and an absent key reads as undefined.
+					const value: unknown = target[prop as keyof D1Database];
+
+					return isMethod(value) ? value.bind(target) : value;
 				},
 			});
+
 			return { ...env, DB };
 		};
+
 		const send = (path: string, body: URLSearchParams, worker: Env) =>
 			app.request(
 				`http://tally.test${path}`,
@@ -2706,6 +2967,7 @@ describe("Bill guards", () => {
 				},
 				worker,
 			);
+
 		const gyms = async () =>
 			(
 				await env.DB.prepare(
@@ -2719,6 +2981,7 @@ describe("Bill guards", () => {
 				fields({ name: "Gym" }),
 				racing("INSERT INTO bills", competing("gym")),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("You already have a bill called gym.");
@@ -2732,6 +2995,7 @@ describe("Bill guards", () => {
 				fields({ name: "Gym", merchant_raw_name: "APPLE.COM/BILL" }),
 				racing("UPDATE bills SET name", competing("gym")),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("You already have a bill called gym.");
@@ -2746,6 +3010,7 @@ describe("Bill guards", () => {
 				new URLSearchParams(),
 				racing("UPDATE bills SET active", competing("Old phone plan")),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("You already have a bill called Old phone plan.");
@@ -2764,6 +3029,7 @@ describe("Bill guards", () => {
 				`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
 				 VALUES('old phone plan',4000,3,'monthly',5,'PHONE CO')`,
 			).run();
+
 		const statusOf = (id: number) =>
 			env.DB.prepare("SELECT name,active FROM bills WHERE id=?")
 				.bind(id)
@@ -2773,12 +3039,15 @@ describe("Bill guards", () => {
 			const plain = await (
 				await exports.default.fetch("http://tally.test/bills/7/edit")
 			).text();
+
 			expect(plain).toContain('formaction="/bills/7/reactivate"');
 			expect(plain).not.toContain("reactivate?rename");
 			await repeatActive();
+
 			const refused = await (
 				await post("/bills/7/reactivate", new URLSearchParams())
 			).text();
+
 			expect(refused).toContain('formaction="/bills/7/reactivate?rename=1"');
 			expect(refused).toContain('hx-post="/bills/7/reactivate?rename=1"');
 			// The sheet's Name field holds the bill's name, ready to be changed.
@@ -2789,10 +3058,12 @@ describe("Bill guards", () => {
 
 		it("renames and reactivates in one step when the new name is free", async () => {
 			await repeatActive();
+
 			const res = await post(
 				"/bills/7/reactivate?rename=1",
 				new URLSearchParams({ name: "  Old phone plan (2022) " }),
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain(
 				'"announce":"Bill reactivated"',
 			);
@@ -2804,11 +3075,13 @@ describe("Bill guards", () => {
 
 		it("redirects the same way without JavaScript", async () => {
 			await repeatActive();
+
 			const res = await post(
 				"/bills/7/reactivate?rename=1",
 				new URLSearchParams({ name: "Old phone plan (2022)" }),
 				false,
 			);
+
 			expect(res.status).toBe(303);
 			expect(res.headers.get("location")).toBe("/bills");
 			expect(await statusOf(7)).toEqual({
@@ -2819,10 +3092,12 @@ describe("Bill guards", () => {
 
 		it("refuses again when the typed name is also taken, keeping what was typed", async () => {
 			await repeatActive();
+
 			const res = await post(
 				"/bills/7/reactivate?rename=1",
 				new URLSearchParams({ name: "WATER" }),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("You already have a bill called Water.");
@@ -2836,6 +3111,7 @@ describe("Bill guards", () => {
 				"/bills/7/reactivate?rename=1",
 				new URLSearchParams({ name: "  " }),
 			);
+
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(await res.text()).toContain("Enter a name.");
 			expect(await statusOf(7)).toEqual({ name: "Old phone plan", active: 0 });
@@ -2846,6 +3122,7 @@ describe("Bill guards", () => {
 				"/bills/7/reactivate",
 				new URLSearchParams({ name: "Something else" }),
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain("Bill reactivated");
 			expect(await statusOf(7)).toEqual({ name: "Old phone plan", active: 1 });
 		});
@@ -2861,6 +3138,7 @@ describe("Bill guards", () => {
 					.bind(billId)
 					.all<{ period: string; transactionId: number }>()
 			).results;
+
 		const pageText = async (path: string) =>
 			(await exports.default.fetch(`http://tally.test${path}`)).text();
 
@@ -2948,10 +3226,12 @@ describe("Bill guards", () => {
 	describe("amounts over $100,000.00", () => {
 		it("comes back with the alert line and an unticked chip, and saves nothing", async () => {
 			const before = await billCount();
+
 			const res = await post(
 				"/bills",
 				fields({ name: "Rent", amount: "150000.00" }),
 			);
+
 			const html = await res.text();
 			expect(res.status).toBe(200);
 			expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -2973,11 +3253,13 @@ describe("Bill guards", () => {
 			// The set-aside refuses an occurrence above $100,000,000 (MAX_OCCURRENCE_CENTS), so one must never be
 			// saved: it would break Home and Bills on every later visit.
 			const before = await billCount();
+
 			for (const confirm_amount of ["", "10000000001"]) {
 				const res = await post(
 					"/bills",
 					fields({ name: "Castle", amount: "100000000.01", confirm_amount }),
 				);
+
 				const html = await res.text();
 				expect(res.headers.get("HX-Trigger")).toBeNull();
 				expect(html).toMatch(
@@ -2985,6 +3267,7 @@ describe("Bill guards", () => {
 				);
 				expect(html).not.toContain("is a lot for a bill");
 			}
+
 			expect(await billCount()).toBe(before);
 		});
 
@@ -2997,6 +3280,7 @@ describe("Bill guards", () => {
 					confirm_amount: "10000000000",
 				}),
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain("Bill added");
 			expect(
 				(await exports.default.fetch("http://tally.test/bills")).status,
@@ -3008,16 +3292,19 @@ describe("Bill guards", () => {
 				"/bills",
 				fields({ name: "Land", amount: "100,000.00" }),
 			);
+
 			expect(exact.headers.get("HX-Trigger")).toContain("Bill added");
 			expect(
 				await env.DB.prepare(
 					"SELECT amount_cents FROM bills WHERE name='Land'",
 				).first("amount_cents"),
 			).toBe(10_000_000);
+
 			const over = await post(
 				"/bills",
 				fields({ name: "Land 2", amount: "100000.01" }),
 			);
+
 			expect(over.headers.get("HX-Trigger")).toBeNull();
 			expect(await over.text()).toContain("$100,000.01 is a lot for a bill.");
 			expect(
@@ -3036,6 +3323,7 @@ describe("Bill guards", () => {
 					confirm_amount: "15000000",
 				}),
 			);
+
 			expect(res.headers.get("HX-Trigger")).toContain(
 				'"announce":"Bill added"',
 			);
@@ -3048,6 +3336,7 @@ describe("Bill guards", () => {
 
 		it("asks again when the amount changed after confirming", async () => {
 			const before = await billCount();
+
 			const res = await post(
 				"/bills",
 				fields({
@@ -3056,6 +3345,7 @@ describe("Bill guards", () => {
 					confirm_amount: "15000000",
 				}),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(await billCount()).toBe(before);
@@ -3072,8 +3362,10 @@ describe("Bill guards", () => {
 					"/bills",
 					fields({ name: "Rent", amount: "150000.00", confirm_amount }),
 				);
+
 				expect(res.headers.get("HX-Trigger")).toBeNull();
 			}
+
 			expect(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bills WHERE name='Rent'",
@@ -3087,15 +3379,18 @@ describe("Bill guards", () => {
 				fields({ name: "Rent", amount: "150000" }),
 				false,
 			);
+
 			expect(asked.status).toBe(200);
 			const html = await asked.text();
 			expect(html).toContain("<form");
 			expect(html).toContain("Yes, $150,000.00 is right");
+
 			const saved = await post(
 				"/bills",
 				fields({ name: "Rent", amount: "150000", confirm_amount: "15000000" }),
 				false,
 			);
+
 			expect(saved.status).toBe(303);
 			expect(saved.headers.get("location")).toBe("/bills");
 		});
@@ -3106,16 +3401,19 @@ describe("Bill guards", () => {
 				amount: "150000.00",
 				merchant_raw_name: "APPLE.COM/BILL",
 			};
+
 			const asked = await post("/bills/1", fields(edit));
 			const html = await asked.text();
 			expect(asked.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain("$150,000.00 is a lot for a bill.");
 			expect(confirmChip(html)).toContain('value="15000000"');
 			expect(await amountOf(1)).toBe(299);
+
 			const saved = await post(
 				"/bills/1",
 				fields({ ...edit, confirm_amount: "15000000" }),
 			);
+
 			expect(saved.headers.get("HX-Trigger")).toContain(
 				'"announce":"Bill saved"',
 			);
@@ -3126,25 +3424,30 @@ describe("Bill guards", () => {
 			await env.DB.prepare(
 				"UPDATE bills SET amount_cents=20000000 WHERE id=1",
 			).run();
+
 			const edit = {
 				name: "Streaming plus",
 				amount: "200000.00",
 				merchant_raw_name: "APPLE.COM/BILL",
 			};
+
 			const asked = await post("/bills/1", fields(edit));
 			expect(asked.headers.get("HX-Trigger")).toBeNull();
 			expect(await asked.text()).toContain("Yes, $200,000.00 is right");
 			expect(await nameOf(1)).toBe("Streaming");
+
 			const saved = await post(
 				"/bills/1",
 				fields({ ...edit, confirm_amount: "20000000" }),
 			);
+
 			expect(saved.headers.get("HX-Trigger")).toContain("Bill saved");
 			expect(await nameOf(1)).toBe("Streaming plus");
 		});
 
 		it("keeps a ticked chip, without the alert, when another field needs fixing", async () => {
 			const before = await billCount();
+
 			const res = await post(
 				"/bills",
 				fields({
@@ -3153,6 +3456,7 @@ describe("Bill guards", () => {
 					confirm_amount: "15000000",
 				}),
 			);
+
 			const html = await res.text();
 			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(await billCount()).toBe(before);
@@ -3169,6 +3473,7 @@ describe("Bill guards", () => {
 			const html = await (
 				await post("/bills", fields({ name: "water", amount: "150000.00" }))
 			).text();
+
 			expect(html).toContain("You already have a bill called Water.");
 			expect(html).toContain("$150,000.00 is a lot for a bill.");
 			expect(html.match(/role="alert"/g)?.length).toBe(2);
@@ -3178,10 +3483,13 @@ describe("Bill guards", () => {
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills/new")
 			).text();
+
 			expect(confirmChip(html)).toBeUndefined();
+
 			const bad = await (
 				await post("/bills", fields({ name: "Gym", due_day: "40" }))
 			).text();
+
 			expect(confirmChip(bad)).toBeUndefined();
 		});
 	});
@@ -3193,11 +3501,13 @@ describe("Bills' status headings and inactive bills", () => {
 		vi.setSystemTime(new Date("2026-10-10T16:00:00Z"));
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		await env.DB.prepare("DELETE FROM bills").run();
+
 		const [paid, earlier] = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 2",
 			).all<{ id: number }>()
 		).results;
+
 		await env.DB.batch([
 			// Overdue: due Oct 3 and not paid.
 			env.DB.prepare(
@@ -3244,6 +3554,7 @@ describe("Bills' status headings and inactive bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		const group = groupUnder(html, heading).split("</section>")[0] ?? "";
 		expect(group).toContain(`>${heading}</h2>`);
 		expect(group).not.toContain('aria-label="Why?');
@@ -3253,9 +3564,11 @@ describe("Bills' status headings and inactive bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		const summary =
 			html.match(/<p class="mt-2 flex flex-wrap[^"]*">[\s\S]*?<\/p>/)?.[0] ??
 			"";
+
 		expect(summary).toMatch(
 			/bills? to pay soon, \$[\d,.]+ in all<span aria-hidden="true" class="not-italic">·<\/span><span class="font-sans not-italic"><a href="\/how-it-works#bills" aria-label="Why\? bills to pay soon"/,
 		);
@@ -3269,9 +3582,11 @@ describe("Bills' status headings and inactive bills", () => {
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM bills"),
 		]);
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		expect(html).not.toContain("to pay soon");
 		expect(html).not.toContain('aria-label="Why?');
 	});
@@ -3280,8 +3595,10 @@ describe("Bills' status headings and inactive bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
+
 		const row =
 			html.split("<li").find((item) => item.includes(">Old phone plan<")) ?? "";
+
 		expect(row).toContain("Monthly, on the 15th");
 		expect(row).not.toContain("Due ");
 	});

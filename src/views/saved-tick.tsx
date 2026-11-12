@@ -24,7 +24,9 @@ export type SavedMark = "toast" | "undo" | "held";
 /** The class a saved row gets, or none. CSS keeps the tick for the toast's stay (app.css, "saved row"). */
 export function savedRowClass(saved?: SavedMark): string {
 	if (saved === undefined) return "";
+
 	if (saved === "toast") return "row-saved";
+
 	return saved === "undo" ? "row-saved-undo" : "row-saved-held";
 }
 

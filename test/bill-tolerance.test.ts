@@ -42,11 +42,13 @@ describe("the bill amount tolerance", () => {
 			amountCents,
 			categoryId: null,
 		});
+
 		const found = (later: number) =>
 			findBillSuggestions([
 				charge("2026-08-01", BILL),
 				charge("2026-08-31", later),
 			]).length;
+
 		expect(found(BILL + EDGE)).toBe(1);
 		expect(found(BILL + EDGE + 1)).toBe(0);
 	});
