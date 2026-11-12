@@ -12,21 +12,13 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { readSetup, setupView, storedTimeMs } from "../src/first-tally/setup";
 import { flaggedBanks, homeBankNotice } from "../src/stale-bank";
-import { isMethod } from "./helpers/present";
+import { isMemberOf, isMethod } from "./helpers/present";
 
 // Home's setup (P125 E, spec §8.8): what the first week shows, from the record, the banks and what Jev still owes.
 const TODAY = "2026-10-14";
 
 /** Noon on TODAY, in UTC: the clock the sort's "recent" and "over an hour" are read against. */
 const NOW = Date.parse("2026-10-14T12:00:00Z");
-
-/** True when `prop` is a member of `target`, so reading it is a typed read. */
-function isMemberOf<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): prop is keyof Target {
-	return prop in target;
-}
 
 /**
  * The test database with `hook` awaited just before readSetup's repair writes stroke one (its only INSERT into the record):

@@ -8,6 +8,7 @@ import {
 	holdCashDelete,
 	restoreCashDelete,
 } from "../src/transactions/cash-undo";
+import { isMethod } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -29,10 +30,6 @@ function isJsonObject(value: Json | undefined): value is JsonObject {
 
 function isText(value: Json | undefined): value is string {
 	return typeof value === "string";
-}
-
-function isMethod(value: unknown): value is (...args: never[]) => void {
-	return typeof value === "function";
 }
 
 function rowOf(row: Row | null): Row {

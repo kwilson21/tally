@@ -2,30 +2,10 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syncAllItems } from "../src/plaid/sync-all";
 import { encryptToken } from "../src/plaid/token-crypto";
-import { isMethod, present } from "./helpers/present";
+import { forwardMember, present } from "./helpers/present";
 
 /** A JSON value, as a Plaid or test response body can be. */
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
-
-/** True when `prop` is a member of `target`, so a Proxy can read it with a typed key. */
-function isMember<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): prop is keyof Target {
-	return prop in target;
-}
-
-/** A Proxy's read of `target`'s member `prop`: a method is bound to `target`, anything else is returned as it is. */
-function forwardMember<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): Target[keyof Target] | ((...args: never[]) => object) | undefined {
-	if (!isMember(target, prop)) return undefined;
-
-	const value = target[prop];
-
-	return isMethod(value) ? value.bind(target) : value;
-}
 
 const KEY = btoa("01234567890123456789012345678901");
 

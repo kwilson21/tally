@@ -25,3 +25,23 @@ export function isMethod(
 ): value is (...args: never[]) => object {
 	return typeof value === "function";
 }
+
+/** True when `prop` names a member of `target`: lets a Proxy trap read `target[prop]` without a cast. */
+export function isMemberOf<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
+
+/** A Proxy's read of `target`'s member `prop`: a method is bound to `target`, anything else is returned as it is. */
+export function forwardMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): Target[keyof Target] | ((...args: never[]) => object) | undefined {
+	if (!isMemberOf(target, prop)) return undefined;
+
+	const value = target[prop];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
