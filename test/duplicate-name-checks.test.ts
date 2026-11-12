@@ -44,12 +44,21 @@ function savedId(id: number | null): number {
 /** Another member's write, run before the refused batch. */
 type Write = () => Promise<D1Result>;
 
-/** The database, except that its batch first runs `between`, then is refused with `error`, as a duplicate would refuse it. */
-function failingBatch(error: Error, ...between: Write[]) {
+/**
+ * The database, except that the batch that saves first runs `between`, then is refused with `error`, as a duplicate
+ * would refuse it. `reads` is how many batches the save makes before that one to read its facts (decision 209).
+ */
+function failingBatch(error: Error, reads: number, ...between: Write[]) {
+	let batches = 0;
+
 	return new Proxy(db, {
 		get(target, property) {
 			if (property === "batch")
-				return async () => {
+				return async (statements: D1PreparedStatement[]) => {
+					batches++;
+
+					if (batches <= reads) return db.batch(statements);
+
 					for (const write of between) await write();
 
 					throw error;
@@ -141,7 +150,7 @@ describe("a duplicate name refused by a suggestion's batch", () => {
 			];
 
 			const id = await saveSuggestion(
-				failingBatch(error, rivalInsert),
+				failingBatch(error, 0, rivalInsert),
 				"Subscriptions",
 				made,
 			);
@@ -161,7 +170,7 @@ describe("a duplicate name refused by a suggestion's batch", () => {
 
 		await expect(
 			saveSuggestion(
-				failingBatch(new Error("no such table: merchants")),
+				failingBatch(new Error("no such table: merchants"), 0),
 				"Subscriptions",
 				made,
 			),
@@ -176,7 +185,7 @@ describe("a duplicate name refused by a suggestion's batch", () => {
 
 			expect(
 				await createFromSuggestion(
-					failingBatch(error),
+					failingBatch(error, 1),
 					id,
 					{ ticked: made, shown: made, notes: {} },
 					"person",
@@ -191,7 +200,7 @@ describe("a duplicate name refused by a suggestion's batch", () => {
 
 		await expect(
 			createFromSuggestion(
-				failingBatch(new Error("no such table: merchants")),
+				failingBatch(new Error("no such table: merchants"), 1),
 				id,
 				{ ticked: made, shown: made, notes: {} },
 				"person",

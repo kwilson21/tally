@@ -161,6 +161,29 @@ function racing(...between: Write[]) {
 	});
 }
 
+/**
+ * The same for a save that reads its facts in a batch of its own first (decision 209): the first batch is that read,
+ * and the writes land once, just before the next batch, which is the save. The rule is then asked again on fresh rows.
+ */
+function racingSave(...between: Write[]) {
+	let batches = 0;
+
+	return new Proxy(db, {
+		get(target, property) {
+			if (property === "batch")
+				return async (statements: D1PreparedStatement[]) => {
+					batches++;
+
+					if (batches === 2) for (const write of between) await write();
+
+					return db.batch(statements);
+				};
+
+			return forwardMember(target, property);
+		},
+	});
+}
+
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
@@ -492,20 +515,22 @@ describe("saveSuggestion", () => {
 		];
 
 		const id = present(await saveSuggestion(db, "Subscriptions", made));
-		await db
-			.prepare(
-				`CREATE TRIGGER exclude_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET excluded=1 WHERE category_suggestion_id=NEW.id; END`,
-			)
-			.run();
+
+		// Another member's write, landing between the save's read and its batch.
+		const rival = () =>
+			db
+				.prepare(
+					`UPDATE transactions SET excluded=1 WHERE category_suggestion_id=${id}`,
+				)
+				.run();
 
 		const result = await createFromSuggestion(
-			db,
+			racingSave(rival),
 			id,
 			{ ticked: made, shown: made, notes: {} },
 			"person",
 		);
 
-		await db.prepare("DROP TRIGGER exclude_during_create").run();
 		expect(result).toMatchObject({ ok: false, reason: "empty" });
 
 		for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
@@ -520,21 +545,24 @@ describe("saveSuggestion", () => {
 		];
 
 		const id = present(await saveSuggestion(db, "Subscriptions", made));
-		await db
-			.prepare(
-				`CREATE TRIGGER dismiss_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE category_suggestions SET status='dismissed' WHERE id=NEW.id; END`,
-			)
-			.run();
+
+		// Another member's write, landing between the save's read and its batch.
+		const rival = () =>
+			db
+				.prepare(
+					`UPDATE category_suggestions SET status='dismissed' WHERE id=${id}`,
+				)
+				.run();
+
 		const before = (await categories()).length;
 
 		const result = await createFromSuggestion(
-			db,
+			racingSave(rival),
 			id,
 			{ ticked: made, shown: made, notes: {} },
 			"person",
 		);
 
-		await db.prepare("DROP TRIGGER dismiss_during_create").run();
 		expect(result).toEqual({ ok: false, reason: "gone" });
 		expect(await categories()).toHaveLength(before);
 		expect(await suggestion(id)).toMatchObject({ status: "dismissed" });
@@ -552,24 +580,27 @@ describe("saveSuggestion", () => {
 
 		// tidyName reads "École" as it is, so the suggestion keeps its capital; the other save files "école".
 		const id = present(await saveSuggestion(db, "École", made));
+
 		// The other save files an active "école" (its key is "école") after the page was drawn and before this write.
 		// The write finds it by its key, as the read would have, so the ticks join it (decision 101) instead of failing.
-		await db
-			.prepare(
-				`CREATE TRIGGER take_accent_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,name_key,icon,color,sort_order) VALUES('école','école','tag','cat-blue',99); END`,
-			)
-			.run();
+		// Another member's write, landing between the save's read and its batch.
+		const rival = () =>
+			db
+				.prepare(
+					`INSERT INTO categories(name,name_key,icon,color,sort_order) VALUES('école','école','tag','cat-blue',99)`,
+				)
+				.run();
+
 		let result: Awaited<ReturnType<typeof createFromSuggestion>>;
 
 		try {
 			result = await createFromSuggestion(
-				db,
+				racingSave(rival),
 				id,
 				{ ticked: made, shown: made, notes: {} },
 				"person",
 			);
 		} finally {
-			await db.prepare("DROP TRIGGER take_accent_during_create").run();
 		}
 
 		expect(result).toEqual({
@@ -592,20 +623,22 @@ describe("saveSuggestion", () => {
 		];
 
 		const id = present(await saveSuggestion(db, "Subscriptions", made));
-		await db
-			.prepare(
-				`CREATE TRIGGER take_name_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES(NEW.name,'tag','cat-blue',99); END`,
-			)
-			.run();
+
+		// Another member's write, landing between the save's read and its batch.
+		const rival = () =>
+			db
+				.prepare(
+					`INSERT INTO categories(name,icon,color,sort_order) VALUES('Subscriptions','tag','cat-blue',99)`,
+				)
+				.run();
 
 		const result = await createFromSuggestion(
-			db,
+			racingSave(rival),
 			id,
 			{ ticked: made, shown: made, notes: {} },
 			"person",
 		);
 
-		await db.prepare("DROP TRIGGER take_name_during_create").run();
 		// The name was made during the write, so the ticked ones join that category (decision 101); no duplicate.
 		expect(result).toMatchObject({
 			ok: true,
@@ -640,20 +673,22 @@ describe("saveSuggestion", () => {
 				)
 				.bind(`Limit ${i}`, 100 + i)
 				.run();
-		await db
-			.prepare(
-				`CREATE TRIGGER fill_limit_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES('Concurrent category','tag','cat-blue',999); END`,
-			)
-			.run();
+
+		// Another member's write, landing between the save's read and its batch.
+		const rival = () =>
+			db
+				.prepare(
+					`INSERT INTO categories(name,icon,color,sort_order) VALUES('Concurrent category','tag','cat-blue',999)`,
+				)
+				.run();
 
 		const result = await createFromSuggestion(
-			db,
+			racingSave(rival),
 			id,
 			{ ticked: made, shown: made, notes: {} },
 			"person",
 		);
 
-		await db.prepare("DROP TRIGGER fill_limit_during_create").run();
 		expect(result).toMatchObject({
 			ok: false,
 			reason: "invalid",
@@ -1407,20 +1442,22 @@ describe("createFromSuggestion", () => {
 
 		it("files nothing when a shown purchase is saved during the write, after the claim", async () => {
 			const { id, made } = await pending();
-			await db
-				.prepare(
-					`CREATE TRIGGER save_one_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ${present(made[0])}; END`,
-				)
-				.run();
+
+			// Another member's write, landing between the save's read and its batch.
+			const rival = () =>
+				db
+					.prepare(
+						`UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ${present(made[0])}`,
+					)
+					.run();
 
 			const result = await createFromSuggestion(
-				db,
+				racingSave(rival),
 				id,
 				{ ticked: made, shown: made, notes: {}, whole: true },
 				"person",
 			);
 
-			await db.prepare("DROP TRIGGER save_one_during_create").run();
 			expect(result).toEqual(nothing);
 
 			for (const tx of made.slice(1))
@@ -1438,7 +1475,7 @@ describe("createFromSuggestion", () => {
 			const { id, made } = await pending();
 
 			const result = await createFromSuggestion(
-				racing(() =>
+				racingSave(() =>
 					db
 						.prepare(
 							"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
@@ -1471,7 +1508,7 @@ describe("createFromSuggestion", () => {
 			const id = present(await saveSuggestion(db, "Subscriptions", made));
 
 			const result = await createFromSuggestion(
-				racing(() =>
+				racingSave(() =>
 					addNeverSuggest(db, {
 						merchantKey: "CHEWY.COM",
 						kind: "new_category",
@@ -1525,7 +1562,7 @@ describe("createFromSuggestion", () => {
 				const { id, made } = await pending();
 
 				const result = await createFromSuggestion(
-					racing(() =>
+					racingSave(() =>
 						db
 							.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
 							.bind(present(made[0]))
@@ -1701,20 +1738,21 @@ describe("createFromSuggestion", () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
 			await fillTo(49);
-			await db
-				.prepare(
-					`CREATE TRIGGER fill_limit_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES('Concurrent category','tag','cat-blue',999); END`,
-				)
-				.run();
+
+			// Another member's write, landing between the save's read and its batch.
+			const rival = () =>
+				db
+					.prepare(
+						`INSERT INTO categories(name,icon,color,sort_order) VALUES('Concurrent category','tag','cat-blue',999)`,
+					)
+					.run();
 
 			const result = await createFromSuggestion(
-				db,
+				racingSave(rival),
 				id,
 				{ ticked: made, shown: made, notes: {} },
 				"person",
 			);
-
-			await db.prepare("DROP TRIGGER fill_limit_during_restore").run();
 
 			expect(result).toEqual({
 				ok: false,
@@ -1734,20 +1772,21 @@ describe("createFromSuggestion", () => {
 		it("restores nothing when the ticks are taken away during the write, so no category is left restored", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
-			await db
-				.prepare(
-					`CREATE TRIGGER untick_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_suggestion_id = NULL WHERE category_suggestion_id = NEW.id; END`,
-				)
-				.run();
+
+			// Another member's write, landing between the save's read and its batch.
+			const rival = () =>
+				db
+					.prepare(
+						`UPDATE transactions SET category_suggestion_id = NULL WHERE category_suggestion_id = ${id}`,
+					)
+					.run();
 
 			const result = await createFromSuggestion(
-				db,
+				racingSave(rival),
 				id,
 				{ ticked: made, shown: made, notes: {} },
 				"person",
 			);
-
-			await db.prepare("DROP TRIGGER untick_during_restore").run();
 
 			expect(result).toEqual({
 				ok: false,
@@ -1766,20 +1805,21 @@ describe("createFromSuggestion", () => {
 		it("leaves it archived when a shown purchase is saved during the write, so no restore is left behind", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
-			await db
-				.prepare(
-					`CREATE TRIGGER save_one_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ${present(made[0])}; END`,
-				)
-				.run();
+
+			// Another member's write, landing between the save's read and its batch.
+			const rival = () =>
+				db
+					.prepare(
+						`UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ${present(made[0])}`,
+					)
+					.run();
 
 			const result = await createFromSuggestion(
-				db,
+				racingSave(rival),
 				id,
 				{ ticked: made, shown: made, notes: {}, whole: true },
 				"person",
 			);
-
-			await db.prepare("DROP TRIGGER save_one_during_restore").run();
 
 			expect(result).toEqual({
 				ok: false,
@@ -1861,7 +1901,7 @@ describe("createFromSuggestion", () => {
 			const archived = await archivedPetCare();
 
 			const result = await createFromSuggestion(
-				racing(
+				racingSave(
 					() => setArchived(db, archived, false, "2026-09-01"),
 					() =>
 						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
@@ -1909,7 +1949,7 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racing(() => setArchived(db, archived, false, "2026-09-01")),
+				racingSave(() => setArchived(db, archived, false, "2026-09-01")),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person",
@@ -1939,7 +1979,7 @@ describe("createFromSuggestion", () => {
 			const archived = await archivedPetCare();
 
 			const result = await createFromSuggestion(
-				racing(
+				racingSave(
 					() => setArchived(db, archived, false, "2026-09-01"),
 					() =>
 						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
@@ -2010,7 +2050,7 @@ describe("createFromSuggestion", () => {
 			const today = await householdToday(db);
 
 			const result = await createFromSuggestion(
-				racing(() =>
+				racingSave(() =>
 					saveCategory(db, archived, { name: "école" }).then(() => undefined),
 				),
 				id,
@@ -2051,7 +2091,7 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racing(() =>
+				racingSave(() =>
 					saveCategory(db, archived, { name: "Ecole" }).then(() => undefined),
 				),
 				id,
@@ -2501,7 +2541,7 @@ describe("createFromSuggestion", () => {
 			const before = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racing(...(d.between?.(s) ?? [])),
+				racingSave(...(d.between?.(s) ?? [])),
 				s.id,
 				{ ticked: s.made.slice(0, 2), shown: s.made, notes: {} },
 				"person@example.com",

@@ -4,6 +4,7 @@
 // database. Whether the review still asks a question is the queue's own check (src/db/suggestions-queue.ts), read as a
 // fact, so the page and the rule cannot disagree. The saves' guards are in src/db/suggestion-saves.ts (decision 190).
 import * as Data from "effect/Data";
+import { NOTE_MAX } from "../limits";
 import { categorySuggestionMachine } from "../machines/category-suggestion";
 import {
 	merchantSuggestionMachine,
@@ -12,10 +13,12 @@ import {
 import { next } from "../machines/next";
 import { COLORS, nameKey, sameName } from "../settings/category-form";
 import { nameSource } from "../transactions/name-suggestions";
+import { tidyName } from "../transactions/tidy-name";
 import {
 	active,
 	type CategoryFacts,
 	hasRoom,
+	ListFull,
 	lastPlace,
 	listHasRoom,
 	nameChecks,
@@ -559,4 +562,177 @@ export const answerNameSuggestion = rule({
 	}),
 	writesText:
 		"Settles the suggestion as accepted or turned down, sets the merchant's name when one was chosen, and logs a kept guess once.",
+});
+
+// A suggested new category's Yes: the ticked purchases go in a category with the suggested name. The family's active
+// category with that name takes them (decision 101), an archived one comes back with them (decision 110), and
+// otherwise the category is made. The suggestion's own move is the category suggestion machine's ACCEPT.
+
+export type CreateRequest = {
+	suggestionId: number;
+	/** The purchases the card showed, and the ones left ticked. */
+	shown: number[];
+	ticked: number[];
+	/** The note typed under each shown purchase. */
+	notes: Record<number, string>;
+	/** Organize's Create (#705): every shown purchase is filed or none is. */
+	whole: boolean;
+	/** The household's date (YYYY-MM-DD) a restored category's archive period closes on. */
+	today: string;
+	who: string;
+};
+
+export type CreateFacts = CategoryFacts & {
+	suggestion: SuggestionState;
+	/** The shown purchases the suggestion still holds, each still waiting for a category and not hidden by a Never suggest line. */
+	suggested: number[];
+};
+
+/** What the rule saves. The suggestion's other purchases are released by the save itself, whatever their number. */
+export type CreateWrite = {
+	suggestionId: number;
+	status: string;
+	/** Where the ticked purchases go: a new category, an archived one brought back, or an active one the family has. */
+	category:
+		| {
+				kind: "create";
+				name: string;
+				nameKey: string;
+				color: string;
+				sortOrder: number;
+		  }
+		| {
+				kind: "restore";
+				id: number;
+				name: string;
+				sortOrder: number;
+				on: string;
+		  }
+		| { kind: "attach"; id: number; name: string };
+	/** The ticked purchases to file, lowest id first. */
+	file: number[];
+	/** The shown purchases left unticked, which are released and asked about again. */
+	leftOut: number[];
+	/** The notes kept on unticked purchases. */
+	notes: { id: number; note: string }[];
+	who: string;
+	expectedVersion: string;
+};
+
+export class NothingTicked extends Data.TaggedError("NothingTicked") {
+	readonly say = "Tick at least one transaction, or say No to this suggestion.";
+}
+
+export class NoteTooLong extends Data.TaggedError("NoteTooLong") {
+	readonly say = `Keep each note under ${NOTE_MAX} characters.`;
+}
+
+type CreateGiven = CreateRequest & {
+	to: string | null;
+	suggested: number[];
+	file: number[];
+	category: CreateWrite["category"];
+	room: boolean;
+	version: string;
+};
+
+export const createFromSuggestion = rule({
+	name: "Say Yes to a suggested new category",
+	given: (request: CreateRequest, facts: CreateFacts): CreateGiven => {
+		const name = tidyName(facts.suggestion.name);
+		const sameNamed = facts.categories.filter((c) => sameName(c.name, name));
+
+		// An active category with the name always wins; else the archived one (the lowest id) comes back.
+		const existing =
+			sameNamed.find((c) => !c.archived) ??
+			[...sameNamed].sort((a, b) => a.id - b.id)[0];
+
+		return {
+			...request,
+			to: move(facts.suggestion, "ACCEPT").to,
+			suggested: facts.suggested,
+			file: [...new Set(request.ticked)]
+				.filter((id) => facts.suggested.includes(id))
+				.sort((a, b) => a - b),
+			category:
+				existing === undefined
+					? {
+							kind: "create",
+							name,
+							nameKey: nameKey(name),
+							// SAFETY: COLORS is a fixed, non-empty list and the index is taken modulo its length, so the entry exists.
+							color: COLORS[facts.categories.length % COLORS.length] as string,
+							sortOrder: lastPlace(facts.categories) + 1,
+						}
+					: existing.archived
+						? {
+								kind: "restore",
+								id: existing.id,
+								name: existing.name,
+								sortOrder: lastPlace(active(facts)) + 1,
+								on: request.today,
+							}
+						: { kind: "attach", id: existing.id, name: existing.name },
+			room: hasRoom(facts),
+			version: facts.version,
+		};
+	},
+	refusals: [
+		unless(
+			term<CreateGiven>(
+				"the suggestion is waiting, so the machine allows a Yes",
+				(g) => g.to !== null,
+			),
+			() => new SuggestionChanged(),
+		),
+		unless(
+			term<CreateGiven>(
+				"from Organize, every shown purchase is still suggested",
+				(g) => !g.whole || g.suggested.length === new Set(g.shown).size,
+			),
+			() => new NothingTicked(),
+		),
+		unless(
+			term<CreateGiven>(
+				"at least one ticked purchase is still suggested",
+				(g) => g.file.length > 0,
+			),
+			() => new NothingTicked(),
+		),
+		unless(
+			term<CreateGiven>(`each note is ${NOTE_MAX} characters or fewer`, (g) =>
+				Object.values(g.notes).every((note) => note.length <= NOTE_MAX),
+			),
+			() => new NoteTooLong(),
+		),
+		unless(
+			term<CreateGiven>(
+				"the list has room for an archived category to come back",
+				(g) => g.category.kind !== "restore" || g.room,
+			),
+			() => new ListFull({ action: "restore" }),
+		),
+		unless(
+			term<CreateGiven>(
+				"the list has room for a new category",
+				(g) => g.category.kind !== "create" || g.room,
+			),
+			() => new ListFull({ action: "add" }),
+		),
+	],
+	writes: (g): CreateWrite => ({
+		suggestionId: g.suggestionId,
+		// SAFETY: the first refusal answered a null `to`, so it is a state here.
+		status: g.to as string,
+		category: g.category,
+		file: g.file,
+		leftOut: g.suggested.filter((id) => !g.file.includes(id)),
+		notes: g.suggested
+			.filter((id) => !g.file.includes(id) && (g.notes[id] ?? "").trim() !== "")
+			.map((id) => ({ id, note: (g.notes[id] ?? "").trim() })),
+		who: g.who,
+		expectedVersion: g.version,
+	}),
+	writesText:
+		"Files the ticked purchases in the category as the person's own choice, making it or bringing it back first when no active category has the name; keeps the notes on unticked purchases; releases the suggestion's other purchases; and marks the suggestion made.",
 });

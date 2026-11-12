@@ -594,7 +594,9 @@ describe("Organize: the card above the chips", () => {
 
 	it("Create answers that the suggestion changed when another tab saved one of its purchases", async () => {
 		await env.DB.prepare(
-			`CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}; END`,
+			// Another tab saved it after the card was drawn. A save that lands between this Create's read and its batch is
+			// covered against the database (test/category-suggestions-db.test.ts).
+			`UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}`,
 		).run();
 
 		const { res, html } = await post("/transactions/organize/suggestion", [
@@ -603,7 +605,6 @@ describe("Organize: the card above the chips", () => {
 			["shown", String(petsmart)],
 		]);
 
-		await env.DB.prepare("DROP TRIGGER file_during_create").run();
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"That suggestion was changed somewhere else. Here's the current list.",
@@ -776,16 +777,18 @@ describe("Organize: Create files only the purchases the card showed", () => {
 });
 
 describe("Organize without JavaScript: a changed answer says so on the page", () => {
-	it("says it changed in the card when another tab saved one of its purchases during Create, and files nothing", async () => {
+	it("says it changed in the card when another tab saved one of its purchases before Create, and files nothing", async () => {
 		await env.DB.prepare(
-			`CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}; END`,
+			// Another tab saved it after the card was drawn. A save that lands between this Create's read and its batch is
+			// covered against the database (test/category-suggestions-db.test.ts).
+			`UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}`,
 		).run();
 
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
 			fields(chewy, petsmart),
 			false,
-		).finally(() => env.DB.prepare("DROP TRIGGER file_during_create").run());
+		);
 
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();

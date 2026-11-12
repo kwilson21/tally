@@ -4,7 +4,11 @@ import {
 	addMoreLikeThis,
 	answerMoneyMaybe,
 	answerNameSuggestion,
+	type CreateFacts,
+	type CreateRequest,
+	type CreateWrite,
 	chooseCategory,
+	createFromSuggestion,
 	dismissNewCategory,
 	type FileFacts,
 	fileInCategory,
@@ -506,5 +510,156 @@ describe("Answer a suggested name for a merchant", () => {
 		["a person already chose a name", { ...WAITING, named: true }],
 	])("refuses when %s", (_story, facts) => {
 		expect(ask({ kind: "keep" }, facts)).toEqual(ANSWERED);
+	});
+});
+
+describe("Say Yes to a suggested new category", () => {
+	/** "Pet Care" waits, holding purchases 11, 12 and 13; the family has Groceries, Eating Out and an archived Pets. */
+	const WAITING: CreateFacts = {
+		suggestion: { status: "pending", name: "Pet Care" },
+		suggested: [11, 12, 13],
+		categories: [
+			{ id: GROCERIES, name: "Groceries", archived: false, sortOrder: 1 },
+			{ id: EATING_OUT, name: "Eating Out", archived: false, sortOrder: 2 },
+			{ id: 9, name: "Pets", archived: true, sortOrder: 3 },
+		],
+		version: VERSION,
+	};
+
+	const named = (name: string): CreateFacts => ({
+		...WAITING,
+		suggestion: { status: "pending", name },
+	});
+
+	const full = (facts: CreateFacts): CreateFacts => ({
+		...facts,
+		categories: [
+			...Array.from({ length: 50 }, (_, i) => ({
+				id: 100 + i,
+				name: `Category ${i + 1}`,
+				archived: false,
+				sortOrder: i + 1,
+			})),
+			{ id: 9, name: "Pets", archived: true, sortOrder: 51 },
+		],
+	});
+
+	const request: CreateRequest = {
+		suggestionId: 5,
+		shown: [11, 12, 13],
+		ticked: [13, 11],
+		notes: { 12: "  the vet  ", 11: "ignored: it is ticked" },
+		whole: false,
+		today: TODAY,
+		who: WHO,
+	};
+
+	const ask = (facts: CreateFacts, changes: Partial<CreateRequest> = {}) =>
+		answerOf(createFromSuggestion.decide({ ...request, ...changes }, facts));
+
+	const saves = (category: CreateWrite["category"]) =>
+		write({
+			suggestionId: 5,
+			status: "created",
+			category,
+			file: [11, 13],
+			leftOut: [12],
+			notes: [{ id: 12, note: "the vet" }],
+			who: WHO,
+			expectedVersion: VERSION,
+		});
+
+	const NOTHING = refuse(
+		"NothingTicked",
+		"Tick at least one transaction, or say No to this suggestion.",
+	);
+
+	it.each([
+		[
+			"makes the category, files the ticked purchases and keeps the unticked one's note",
+			WAITING,
+			saves({
+				kind: "create",
+				name: "Pet Care",
+				nameKey: "pet care",
+				color: "cat-ochre",
+				sortOrder: 4,
+			}),
+		],
+		[
+			"adds them to the active category with that name, as the family stored it",
+			named("eating out"),
+			saves({ kind: "attach", id: EATING_OUT, name: "Eating Out" }),
+		],
+		[
+			"brings back an archived category with that name, at the end of the active list",
+			named("PETS"),
+			saves({ kind: "restore", id: 9, name: "Pets", sortOrder: 3, on: TODAY }),
+		],
+	])("%s", (_story, facts, answer) => {
+		expect(ask(facts)).toEqual(answer);
+	});
+
+	it("files only ticked purchases the suggestion still holds, each once", () => {
+		expect(
+			ask({ ...WAITING, suggested: [11, 12] }, { ticked: [11, 11, 13, 99] }),
+		).toMatchObject({ save: { file: [11], leftOut: [12] } });
+	});
+
+	it.each([
+		[
+			"a suggestion that was already answered",
+			{ ...WAITING, suggestion: { status: "dismissed", name: "Pet Care" } },
+			{},
+			refuse(
+				"SuggestionChanged",
+				"That suggestion was changed somewhere else. Here's the current list.",
+			),
+		],
+		["nothing ticked", WAITING, { ticked: [] }, NOTHING],
+		[
+			"ticks the suggestion no longer holds",
+			{ ...WAITING, suggested: [12] },
+			{},
+			NOTHING,
+		],
+		[
+			"Organize's Create when a shown purchase is no longer suggested",
+			{ ...WAITING, suggested: [11, 13] },
+			{ whole: true },
+			NOTHING,
+		],
+		[
+			"a note that is too long",
+			WAITING,
+			{ notes: { 12: "x".repeat(501) } },
+			refuse("NoteTooLong", "Keep each note under 500 characters."),
+		],
+		[
+			"a 51st active category",
+			full(WAITING),
+			{},
+			refuse(
+				"ListFull",
+				"Tally has room for 50 categories. Archive one to add another.",
+			),
+		],
+		[
+			"bringing a category back into a full list",
+			full(named("Pets")),
+			{},
+			refuse(
+				"ListFull",
+				"Tally has room for 50 categories. Archive one to restore another.",
+			),
+		],
+	])("refuses %s", (_story, facts, changes, answer) => {
+		expect(ask(facts, changes)).toEqual(answer);
+	});
+
+	it("still adds to an active category when the list is full", () => {
+		expect(ask(full(named("category 7")))).toMatchObject({
+			save: { category: { kind: "attach", id: 106 } },
+		});
 	});
 });
