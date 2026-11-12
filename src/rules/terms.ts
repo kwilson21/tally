@@ -1,4 +1,4 @@
-// Named terms for the Effect rules (decision 204): a condition's English text is its name, and rules share the same
+// Named terms for the Effect rules (decision 205): a condition's English text is its name, and rules share the same
 // term (decision 198's one vocabulary). A rule lists its refusals as terms, so its rule sheet can be generated from the
 // list, and checks them in order with `check`.
 import * as Effect from "effect/Effect";

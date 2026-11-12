@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Database } from "../src/db/database";
 
-// The proof decision 204 asks for before any handler uses the XState and Effect bridge: inside the Workers runtime,
+// The proof decision 205 asks for before any handler uses the XState and Effect bridge: inside the Workers runtime,
 // against a real D1, a machine is restored from what Tally's tables hold (a status column, not the bridge's own
 // snapshot), takes one event, waits on outside work, and the state it lands on is saved. The machine here is a small
 // stand-in written for this test; no handler uses the bridge yet.

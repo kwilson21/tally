@@ -29,6 +29,7 @@ import {
 	pendingSuggestionPage,
 } from "../db/category-suggestions";
 import { Database } from "../db/database";
+import { isUniqueViolation } from "../db/errors";
 import { waitsForRunStatement } from "../db/first-tally";
 import {
 	displayName,
@@ -1354,8 +1355,7 @@ function retry(
 }
 
 /** The database refused a name that differs only in capitals: someone saved it a moment earlier. */
-const nameTaken = (cause: unknown) =>
-	cause instanceof Error && /UNIQUE/.test(cause.message);
+export const nameTaken = (cause: unknown) => isUniqueViolation(cause);
 
 /**
  * The category was archived, restored or never existed: another screen got there first. The
@@ -1745,13 +1745,13 @@ settings.post("/settings/time-zone", async (c) => {
 	);
 });
 
-/** Runs a category rule's program for this request: its database is the request's own (decision 204). */
+/** Runs a category rule's program for this request: its database is the request's own (decision 205). */
 const run = (
 	c: Context<App>,
 	program: Effect.Effect<Response | Promise<Response>, never, Database>,
 ) => Effect.runPromise(program.pipe(Effect.provideService(Database, c.env.DB)));
 
-/** The typed name, read at the edge (decision 204): the tidied name, or the sentence to show under the field. */
+/** The typed name, read at the edge (decision 205): the tidied name, or the sentence to show under the field. */
 const typedName = (form: FormData) =>
 	readAtEdge(CategoryName, String(form.get("name") ?? ""));
 

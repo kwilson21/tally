@@ -34,7 +34,7 @@ export const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
 
 /**
- * A typed category name, at the edge (decision 204): text in, the tidied name out, or one of the two sentences. Whether
+ * A typed category name, at the edge (decision 205): text in, the tidied name out, or one of the two sentences. Whether
  * the name is free is for the rules (src/rules/categories.ts), which know the stored list.
  */
 export const CategoryName = Schema.String.pipe(

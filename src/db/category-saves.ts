@@ -17,6 +17,7 @@ import {
 } from "../rules/categories";
 import type { Refusal } from "../rules/terms";
 import { Database } from "./database";
+import { isUniqueViolation } from "./errors";
 
 /**
  * The whole list as one text, as SQL: every category's id, whether it is archived, its place and its name. Two reads
@@ -143,10 +144,10 @@ export class ListChangedSinceRead extends Data.TaggedError(
 /** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a NULL name. */
 const GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
 
-/** Runs a save's batch, and says what its failure was: `refusalFor` names the failures a person can be told about. */
-const runBatch = <E>(
+/** Runs a save's batch, and says what its failure was. `whenNameTaken` makes the refusal for a save that sets a name. */
+const runBatch = <E = never>(
 	statements: D1PreparedStatement[],
-	refusalFor: (message: string) => E | undefined,
+	whenNameTaken?: () => E,
 ) =>
 	Effect.gen(function* () {
 		const db = yield* Database;
@@ -156,30 +157,27 @@ const runBatch = <E>(
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.catch((cause): Effect.Effect<never, ListChangedSinceRead | E> => {
-				const message = cause instanceof Error ? cause.message : "";
-
-				if (GUARD_RAISED.test(message))
+				if (cause instanceof Error && GUARD_RAISED.test(cause.message))
 					return Effect.fail(new ListChangedSinceRead());
-				const refusal = refusalFor(message);
 
 				// Anything else is a defect: it is not caught, and the request fails as it would have.
-				return refusal === undefined ? Effect.die(cause) : Effect.fail(refusal);
+				return whenNameTaken && isUniqueViolation(cause)
+					? Effect.fail(whenNameTaken())
+					: Effect.die(cause);
 			}),
 		);
 	});
 
 /** Runs a save's batch. The guard's failure becomes ListChangedSinceRead; anything else is a defect. */
 export const saveCategories = (statements: D1PreparedStatement[]) =>
-	runBatch<never>(statements, () => undefined);
+	runBatch(statements);
 
 /**
  * Runs a batch that sets a name (an add or a rename). The unique name indexes settle two saves at once (migrations 0005
  * and 0052), and their failure becomes the NameTaken refusal.
  */
 export const saveNamedCategory = (statements: D1PreparedStatement[]) =>
-	runBatch(statements, (message) =>
-		/UNIQUE/.test(message) ? new NameTaken() : undefined,
-	);
+	runBatch(statements, () => new NameTaken());
 
 /**
  * Reads the list, asks a category rule and saves what it decides in one batch. When the guard raises, it reads and
