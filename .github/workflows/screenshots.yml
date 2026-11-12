@@ -58,6 +58,10 @@ jobs:
             # A base from before the switch to pnpm (decision 204) has only npm's lockfile, so npm installs and runs it:
             # pnpm would install it afresh without a lockfile and pick newer versions than the base was built with.
             if [ -f pnpm-lock.yaml ]; then
+              # The base may pin an older pnpm than this PR's (the one installed here), and pmOnFail: error would stop
+              # it. The base is already-merged code, so it runs with this PR's pnpm; the override lasts for this
+              # subshell only and reaches the pnpm that wrangler's build command starts.
+              export PNPM_CONFIG_PM_ON_FAIL=ignore
               pnpm install --frozen-lockfile
               run="pnpm run" exec="pnpm exec"
             else
