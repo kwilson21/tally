@@ -2,6 +2,8 @@
 // its names are kept, and how a person's choice settles a suggestion. Which names to show is decided by
 // src/transactions/name-suggestions.ts.
 
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { householdToday } from "../dates";
 import {
 	type NameSource,
@@ -13,6 +15,7 @@ import { tidyName } from "../transactions/tidy-name";
 import { KEPT_NAME_LOG_SQL } from "./ai-log";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { merchantKeySql, merchantNamesJsonSql } from "./merchant-key";
+import { merchants } from "./schema";
 
 /**
  * What a name's text is trimmed of in SQL: spaces, tab and CR, the set the table's CHECK and the backfill use
@@ -397,8 +400,9 @@ export async function settleSuggestion(
 }
 
 /**
- * The display names the merchants table has for these raw merchant keys, one query: a key with no row (or no display name)
- * maps to null. The ledger and the first week's lines name a merchant with this, falling back to tidyName.
+ * The display names the merchants table has for these raw merchant keys, one query: a key whose row has no display name
+ * maps to null, and a key with no row is not in the Map. The ledger and the first week's lines name a merchant with this,
+ * falling back to tidyName.
  */
 export async function merchantDisplayNames(
 	db: D1Database,
@@ -406,12 +410,14 @@ export async function merchantDisplayNames(
 ): Promise<Map<string, string | null>> {
 	if (keys.length === 0) return new Map();
 
-	const { results } = await db
-		.prepare(
-			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
+	// json_each takes the whole list as one bound value: D1 allows only 100 bound values in a statement.
+	const rows = await drizzle(db)
+		.select({ key: merchants.rawName, displayName: merchants.displayName })
+		.from(merchants)
+		.where(
+			sql`${merchants.rawName} IN (SELECT value FROM json_each(${JSON.stringify(keys)}))`,
 		)
-		.bind(JSON.stringify(keys))
-		.all<{ key: string; displayName: string | null }>();
+		.all();
 
-	return new Map(results.map((row) => [row.key, row.displayName]));
+	return new Map(rows.map((row) => [row.key, row.displayName]));
 }

@@ -12,7 +12,7 @@
 			"!worker-configuration.d.ts",
 			"!.wrangler",
 			"!node_modules",
-			"!package-lock.json",
+			"!pnpm-lock.yaml",
 			"!tools/oxlint/anti-slop"
 		]
 	},

@@ -3,8 +3,8 @@
 // asks (`INSTRUCTIONS`, the same messages, the same limits), runs each answer through production's own name
 // check (`cleanSuggestedNames`), and returns a markdown report to read side by side. It decides nothing: a
 // person reads the names. Never deploy it: it bills Workers AI. Only bank texts are sent, no amounts or
-// dates, as in production. It needs `npx wrangler login`. Run it locally:
-//   npx wrangler dev --config scripts/compare-names/wrangler.jsonc --port 8798
+// dates, as in production. It needs `pnpm exec wrangler login`. Run it locally:
+//   pnpm exec wrangler dev --config scripts/compare-names/wrangler.jsonc --port 8798
 //   curl -s http://localhost:8798/ > report.md
 // Add ?models=granite,gemma4 (see CANDIDATES), ?limit=20 (first N texts) or ?tokens=400 (the answer budget;
 // production uses 60) to run a slice. ?task=notes or ?task=categories asks the same models production's other two

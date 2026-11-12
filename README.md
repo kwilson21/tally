@@ -11,15 +11,15 @@ One small TypeScript server on Cloudflare builds each page, stores data in a SQL
 
 ## Run locally
 
-Node 26 or newer (`.nvmrc`; `nvm use` picks it up).
+Node 26 or newer (`.nvmrc`; `nvm use` picks it up) and [pnpm](https://pnpm.io/installation) at exactly the version `package.json` names in `packageManager` (another version stops with an error, decision 204).
 
-    npm install
+    pnpm install
     cp .dev.vars.example .dev.vars   # fill in values; never commit this file
-    npm run dev
+    pnpm run dev
 
 ## Checks
 
-    npm run typecheck && npm run lint && npm test
+    pnpm run typecheck && pnpm run lint && pnpm test
 
 ## Deploy the demo
 
@@ -27,38 +27,38 @@ Deploys are manual and done by the owner. The demo is the `demo` environment in 
 
 **Once, before the first deploy.** In the Cloudflare dashboard, open thesuperhuman.us → DNS → Records and search for `tally-demo`. Nothing should be there. The first deploy creates that one record (managed by Cloudflare, pointing at the Worker) and its certificate. Run it in a normal terminal: if a record already exists, Wrangler asks before replacing it, but in a script or CI it replaces it without asking.
 
-    npx wrangler login
-    npx wrangler d1 migrations apply DB --env demo --remote
-    npx wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"
+    pnpm exec wrangler login
+    pnpm exec wrangler d1 migrations apply DB --env demo --remote
+    pnpm exec wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"
 
 **Once, to load the sample data** into the empty database. Seed dates follow today's date, so this copies a freshly seeded local database. First empty the local database and start the app:
 
-    rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local
-    npm run dev                      # leave running
+    rm -rf .wrangler/state/v3/d1 && pnpm run db:migrate:local
+    pnpm run dev                      # leave running
 
 Then, in a second terminal, run this as one command. It stops at the first failure. The `grep` checks that the export really holds transactions, which catches a reset that was skipped (for example when local Plaid credentials are set) because the local database started empty. So stale or empty data is never loaded.
 
-    npm run db:seed:local && \
-    npx wrangler d1 export DB --local --no-schema --output seed.sql \
+    pnpm run db:seed:local && \
+    pnpm exec wrangler d1 export DB --local --no-schema --output seed.sql \
       --table categories --table accounts --table budget_amounts --table merchants --table transactions && \
     grep -q 'INSERT INTO "transactions"' seed.sql && \
-    npx wrangler d1 execute DB --env demo --remote --file seed.sql && \
+    pnpm exec wrangler d1 execute DB --env demo --remote --file seed.sql && \
     rm seed.sql
 
 **Every day at 09:00 UTC** (4–5 am Eastern, 1–2 am Pacific, depending on daylight saving) the demo resets itself to the sample data. Visitors' edits last until the next reset. After the first deploy, the cron shows in the Cloudflare dashboard under Workers → `tally-demo` → Settings → Trigger events.
 
-**After each merge to `main`:** pull `main`, then `npx wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"`. If a PR added a migration, run the `migrations apply` line first.
+**After each merge to `main`:** pull `main`, then `pnpm exec wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"`. If a PR added a migration, run the `migrations apply` line first.
 
 **Check it** on a phone and a laptop: the page loads over HTTPS, Home shows the Rivera household, every nav link works, and the browser console shows no errors.
 
-**Undo.** `npx wrangler rollback --env demo` puts back the previous version of the code. `npx wrangler d1 time-travel restore tally-demo --env demo --timestamp=<time>` puts back the data as it was at that time. D1 keeps 30 days of history on Workers Paid and 7 days on Workers Free.
+**Undo.** `pnpm exec wrangler rollback --env demo` puts back the previous version of the code. `pnpm exec wrangler d1 time-travel restore tally-demo --env demo --timestamp=<time>` puts back the data as it was at that time. D1 keeps 30 days of history on Workers Paid and 7 days on Workers Free.
 
 ## Versions and releases
 
-Each production deploy is a release named by its date, `vYYYY.MM.DD` (a second one the same day adds `.2`), decision 98. Deploys are owner-approved. From a clean checkout of `origin/main`, after `npm run build`:
+Each production deploy is a release named by its date, `vYYYY.MM.DD` (a second one the same day adds `.2`), decision 98. Deploys are owner-approved. From a clean checkout of `origin/main`, after `pnpm run build`:
 
-    npx wrangler d1 migrations apply DB --env production --remote
-    npx wrangler deploy --env production --message "vYYYY.MM.DD <short sha>" --var "APP_VERSION:vYYYY.MM.DD <short sha>"
+    pnpm exec wrangler d1 migrations apply DB --env production --remote
+    pnpm exec wrangler deploy --env production --message "vYYYY.MM.DD <short sha>" --var "APP_VERSION:vYYYY.MM.DD <short sha>"
 
 Then publish the release on the same commit, with notes that list the PRs merged since the previous release and the migrations applied:
 
@@ -66,4 +66,4 @@ Then publish the release on the same commit, with notes that list the PRs merged
     git log --first-parent --format='- %s' <previous tag>..<sha>
     gh release create vYYYY.MM.DD --target <full sha> --title vYYYY.MM.DD --notes-file <notes>
 
-A demo deploy uses the same message with `demo` in place of the release name, and gets no tag. The `--var` flag injects `APP_VERSION` into the code at deploy time, as an alternative to `vars` in `wrangler.jsonc`, and feedback reports store it with the build they came from. Without `--keep-vars`, Wrangler deletes all vars before setting the ones in `wrangler.jsonc` (`npx wrangler deploy --help`), so a deploy without `--var` leaves `APP_VERSION` unset: pass it on every deploy. Before applying migrations, `npx wrangler d1 time-travel info <database> --env <env>` prints a bookmark to restore to.
+A demo deploy uses the same message with `demo` in place of the release name, and gets no tag. The `--var` flag injects `APP_VERSION` into the code at deploy time, as an alternative to `vars` in `wrangler.jsonc`, and feedback reports store it with the build they came from. Without `--keep-vars`, Wrangler deletes all vars before setting the ones in `wrangler.jsonc` (`pnpm exec wrangler deploy --help`), so a deploy without `--var` leaves `APP_VERSION` unset: pass it on every deploy. Before applying migrations, `pnpm exec wrangler d1 time-travel info <database> --env <env>` prints a bookmark to restore to.
