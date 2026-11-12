@@ -8,6 +8,7 @@ import { suggestTransactionNotes } from "../src/suggest-names-pending";
 import { parseFilters } from "../src/transactions/filters";
 import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
+import { isMethod } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 type AiInput = { messages: { content: string }[] };
@@ -54,12 +55,6 @@ function isDbMember(
 	property: PropertyKey,
 ): property is keyof D1Database {
 	return property in target;
-}
-
-function isMethod<Member>(
-	value: Member,
-): value is Extract<Member, (...args: never[]) => object> {
-	return typeof value === "function";
 }
 
 async function get(path: string) {

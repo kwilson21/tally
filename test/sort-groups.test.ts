@@ -15,6 +15,7 @@ import {
 	sortGroups,
 } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
+import { itemAt } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -68,15 +69,6 @@ async function addWaiting(n: number): Promise<number[]> {
 	}
 
 	return ids;
-}
-
-/** The id of the `index`th row a test inserted. The row exists, so a missing one is a broken test. */
-function idAt(ids: readonly number[], index: number): number {
-	const id = ids[index];
-
-	if (id === undefined) throw new Error(`no inserted row at index ${index}`);
-
-	return id;
 }
 
 const categoryOf = async (id: number) =>
@@ -197,7 +189,7 @@ describe("sortGroups with a fake step runner", () => {
 		expect(asks).toHaveLength(1);
 		expect(asks[0]?.attempts).toBe(1);
 		expect(done.asked).toBe(1);
-		expect(await categoryOf(idAt(ids, 0))).toBeNull();
+		expect(await categoryOf(itemAt(ids, 0))).toBeNull();
 	});
 
 	it("an ask step at attempt 2 makes no Jev call and gives the row no failure mark", async () => {
@@ -224,7 +216,7 @@ describe("sortGroups with a fake step runner", () => {
 			.first<{ f: string | null }>();
 
 		expect(failed?.f).toBeNull();
-		expect(await categoryOf(idAt(ids, 1))).toBeNull();
+		expect(await categoryOf(itemAt(ids, 1))).toBeNull();
 	});
 
 	it("replaying the same step results makes no Jev call and writes nothing again", async () => {
@@ -498,9 +490,9 @@ describe("sortGroups with a fake step runner", () => {
 
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		expect(done.asked).toBe(2);
-		expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
-		expect(await categoryOf(idAt(ids, 1))).toBeNull();
-		expect(await categoryOf(idAt(ids, 0))).toBeNull();
+		expect(await categoryOf(itemAt(ids, 2))).not.toBeNull();
+		expect(await categoryOf(itemAt(ids, 1))).toBeNull();
+		expect(await categoryOf(itemAt(ids, 0))).toBeNull();
 		// Three calls were reserved and two were used (one answer, one lost), so one is given back.
 		expect(await callsUsed()).toBe(2);
 		expect(await turnRow()).toBeNull();
@@ -1067,8 +1059,8 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			},
 		);
 
-		expect(await categoryOf(idAt(ids, 1))).toBe(personal);
-		expect(await logged([idAt(ids, 1)])).toBe(0);
+		expect(await categoryOf(itemAt(ids, 1))).toBe(personal);
+		expect(await logged([itemAt(ids, 1)])).toBe(0);
 		expect(done.asked).toBe(3);
 	});
 
@@ -1219,7 +1211,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		"a row whose %s changed after the read keeps no answer, and the rest of the group is saved",
 		async (_label, sql, before) => {
 			const ids = await addWaiting(3);
-			const target = idAt(ids, 1);
+			const target = itemAt(ids, 1);
 
 			if (before) await changeRow(before, target);
 
@@ -1244,8 +1236,8 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			expect(fetchImpl).toHaveBeenCalledTimes(3);
 			expect(await categoryOf(target)).toBeNull();
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
-			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+			expect(await categoryOf(itemAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(itemAt(ids, 2))).not.toBeNull();
 			expect(done).toEqual({ asked: 3, applied: 2 });
 			expect(await callsUsed()).toBe(3);
 		},
@@ -1253,7 +1245,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 
 	it("a credit a person reviewed, asked only for its category, keeps no answer once its note changed", async () => {
 		const ids = await addWaiting(3);
-		const credit = idAt(ids, 2);
+		const credit = itemAt(ids, 2);
 		await changeRow(
 			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 			credit,
@@ -1328,7 +1320,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 	it("a row whose kind changed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = idAt(ids, 1);
+		const target = itemAt(ids, 1);
 
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
@@ -1360,14 +1352,14 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			)?.d;
 
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
+		expect(await detailsAsked(itemAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a row whose person was renamed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = idAt(ids, 1);
+		const target = itemAt(ids, 1);
 		await changeRow(
 			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
 			target,
@@ -1402,14 +1394,14 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			)?.d;
 
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
+		expect(await detailsAsked(itemAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a row whose account type changed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = idAt(ids, 1);
+		const target = itemAt(ids, 1);
 		await changeRow(
 			"UPDATE transactions SET account_id = 2 WHERE id = ?",
 			target,
@@ -1442,7 +1434,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			)?.d;
 
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
+		expect(await detailsAsked(itemAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
@@ -1624,7 +1616,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 		"a row whose answer names %s, archived between the read and the save, keeps no answer and no log row, and the rest of the group is saved",
 		async (_label, answer, archived) => {
 			const ids = await addWaiting(3);
-			const target = idAt(ids, 1);
+			const target = itemAt(ids, 1);
 
 			const fake = fakeSteps({
 				beforeAttempt: async (name, attempt) => {
@@ -1650,9 +1642,9 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				confidence: null,
 			});
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
-			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
-			expect(await logged([idAt(ids, 0), idAt(ids, 2)])).toBe(2);
+			expect(await categoryOf(itemAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(itemAt(ids, 2))).not.toBeNull();
+			expect(await logged([itemAt(ids, 0), itemAt(ids, 2)])).toBe(2);
 			expect(await callsUsed()).toBe(3);
 		},
 	);
@@ -1674,7 +1666,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 		async (_label, answer) => {
 			expect((await makeCategory(db, { name: PROBE })).ok).toBe(true);
 			const ids = await addWaiting(3);
-			const target = idAt(ids, 1);
+			const target = itemAt(ids, 1);
 
 			// Two tries at most: before the fix the batch fails on the removed category's foreign key every time.
 			const fake = fakeSteps({
@@ -1703,16 +1695,16 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				confidence: null,
 			});
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
-			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
-			expect(await logged([idAt(ids, 0), idAt(ids, 2)])).toBe(2);
+			expect(await categoryOf(itemAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(itemAt(ids, 2))).not.toBeNull();
+			expect(await logged([itemAt(ids, 0), itemAt(ids, 2)])).toBe(2);
 			expect(await callsUsed()).toBe(3);
 		},
 	);
 
 	it("a credit asked only for its category keeps no answer when its category was archived since the read", async () => {
 		const ids = await addWaiting(3);
-		const credit = idAt(ids, 2);
+		const credit = itemAt(ids, 2);
 		await changeRow(
 			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 			credit,

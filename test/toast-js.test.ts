@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import toastSource from "../public/js/toast.js?raw";
 import appStyles from "../src/styles/app.css?raw";
 import { Icon } from "../src/views/icons";
+import { present } from "./helpers/present";
 
 it("names u on the Undo button, the key keyboard.js presses while the toast shows (decision 118)", () => {
 	expect(toastSource).toContain('setAttribute("aria-keyshortcuts", "u")');
@@ -194,14 +195,6 @@ type EventDetail = {
 	passive?: boolean;
 	value?: string;
 };
-
-/** The value a test looked for, which the page must have made: a missing one fails the test here. */
-function present<Node>(node: Node | null | undefined): Node {
-	if (node === null || node === undefined)
-		throw new Error("the page has no node for this test to read");
-
-	return node;
-}
 
 /** Every ResizeObserver toast.js made on the current page, so a test can see what it asked of each. */
 let resizeObservers: FakeResizeObserver[] = [];

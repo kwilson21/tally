@@ -1,0 +1,241 @@
+import { describe, expect, it } from "vitest";
+import {
+	addCategory,
+	archiveCategory,
+	type CategoryFacts,
+	moveCategory,
+	renameCategory,
+	restoreCategory,
+} from "../src/rules/categories";
+import { nothingToDo, refuse, write } from "../src/rules/rule";
+import { CategoryName, MoveDirection } from "../src/settings/category-form";
+
+// The categories area's five rules as stories (decisions 187, 192): each row is what was asked, what was stored, and
+// what the rule answers. The date is an input (decision 195); nothing here touches a clock or a database.
+
+const VERSION = "v1";
+const TODAY = "2026-11-12";
+
+/** A list from short rows: [id, name] is active, [id, name, "archived"] is not. Places count up from 1. */
+const list = (
+	...rows: ([number, string] | [number, string, "archived"])[]
+): CategoryFacts => ({
+	version: VERSION,
+	categories: rows.map(([id, name, archived], i) => ({
+		id,
+		name,
+		archived: archived === "archived",
+		sortOrder: i + 1,
+	})),
+});
+
+const HOUSE = list(
+	[1, "Groceries"],
+	[2, "Eating Out"],
+	[3, "Gas"],
+	[4, "Pets", "archived"],
+);
+
+/** A list of 50 active categories, the most Tally keeps, and one archived. */
+const FULL = list(
+	...Array.from({ length: 50 }, (_, i): [number, string] => [
+		i + 1,
+		`Category ${i + 1}`,
+	]),
+	[51, "Pets", "archived"],
+);
+
+const CHANGED = refuse(
+	"CategoryChanged",
+	"That category was changed somewhere else. Here's the current list.",
+);
+
+const RESERVED = refuse(
+	"NameReserved",
+	"That name is reserved for Tally. Pick another.",
+);
+
+const ARCHIVED_NAME = refuse(
+	"NameArchived",
+	"An archived category has that name. Restore it instead.",
+);
+
+const TAKEN = refuse("NameTaken", "That name is taken.");
+
+describe("Add a category", () => {
+	const ask = (name: string, facts: CategoryFacts) =>
+		addCategory.decide({ name }, facts);
+
+	it.each([
+		[
+			"adds it at the end, with the next colour in turn",
+			"Travel",
+			HOUSE,
+			write({
+				name: "Travel",
+				nameKey: "travel",
+				color: "cat-brown",
+				sortOrder: 5,
+				expectedVersion: VERSION,
+			}),
+		],
+		[
+			"adds the first category",
+			"Travel",
+			list(),
+			write({
+				name: "Travel",
+				nameKey: "travel",
+				color: "cat-blue",
+				sortOrder: 1,
+				expectedVersion: VERSION,
+			}),
+		],
+		["refuses Jev's reserved name", "none of these FIT", HOUSE, RESERVED],
+		["refuses a name an active category has", "gas", HOUSE, TAKEN],
+		["refuses a name an archived category has", "PETS", HOUSE, ARCHIVED_NAME],
+		[
+			"refuses a 51st active category",
+			"Travel",
+			FULL,
+			refuse(
+				"ListFull",
+				"Tally has room for 50 categories. Archive one to add another.",
+			),
+		],
+		[
+			"says the name is taken before it says the list is full",
+			"category 7",
+			FULL,
+			TAKEN,
+		],
+	])("%s", (_story, name, facts, answer) => {
+		expect(ask(name, facts)).toEqual(answer);
+	});
+});
+
+describe("Rename a category", () => {
+	const ask = (id: number, name: string, facts: CategoryFacts = HOUSE) =>
+		renameCategory.decide({ id, name }, facts);
+
+	const saves = (id: number, name: string, nameKey: string) =>
+		write({ id, name, nameKey, expectedVersion: VERSION });
+
+	it.each([
+		["renames it", 1, "Food at home", saves(1, "Food at home", "food at home")],
+		[
+			"changes only its capitals",
+			1,
+			"GROCERIES",
+			saves(1, "GROCERIES", "groceries"),
+		],
+		["has nothing to do for the name it already has", 3, "Gas", nothingToDo()],
+		["refuses a name another active category has", 1, "gas", TAKEN],
+		["refuses a name an archived category has", 1, "Pets", ARCHIVED_NAME],
+		["refuses Jev's reserved name", 1, "None of these fit", RESERVED],
+		["refuses a category that does not exist", 999, "X", CHANGED],
+		["refuses an archived category", 4, "Animals", CHANGED],
+		[
+			"refuses an archived category even for the name it has",
+			4,
+			"Pets",
+			CHANGED,
+		],
+	])("%s", (_story, id, name, answer) => {
+		expect(ask(id, name)).toEqual(answer);
+	});
+});
+
+describe("Archive a category", () => {
+	const ask = (id: number) =>
+		archiveCategory.decide({ id, today: TODAY }, HOUSE);
+
+	it.each([
+		[
+			"archives it from today",
+			2,
+			write({ id: 2, on: TODAY, expectedVersion: VERSION }),
+		],
+		["has nothing to do for one already archived", 4, nothingToDo()],
+		["refuses a category that does not exist", 999, CHANGED],
+	])("%s", (_story, id, answer) => {
+		expect(ask(id)).toEqual(answer);
+	});
+});
+
+describe("Restore a category", () => {
+	const ask = (id: number, facts: CategoryFacts) =>
+		restoreCategory.decide({ id, today: TODAY }, facts);
+
+	it.each([
+		[
+			"restores it to the end of the list",
+			4,
+			HOUSE,
+			write({ id: 4, on: TODAY, sortOrder: 4, expectedVersion: VERSION }),
+		],
+		["has nothing to do for one already active", 2, HOUSE, nothingToDo()],
+		["refuses a category that does not exist", 999, HOUSE, CHANGED],
+		[
+			"refuses a 51st active category",
+			51,
+			FULL,
+			refuse(
+				"ListFull",
+				"Tally has room for 50 categories. Archive one to restore another.",
+			),
+		],
+		[
+			"has nothing to do for an active one even when the list is full",
+			7,
+			FULL,
+			nothingToDo(),
+		],
+	])("%s", (_story, id, facts, answer) => {
+		expect(ask(id, facts)).toEqual(answer);
+	});
+});
+
+describe("Move a category", () => {
+	const ask = (id: number, direction: "up" | "down") =>
+		moveCategory.decide({ id, direction }, HOUSE);
+
+	const saves = (...order: number[]) =>
+		write({ order, expectedVersion: VERSION });
+
+	it.each([
+		["moves it up one place", 3, "up", saves(1, 3, 2)],
+		["moves it down one place", 1, "down", saves(2, 1, 3)],
+		["has nothing to do at the top", 1, "up", nothingToDo()],
+		["has nothing to do at the bottom", 3, "down", nothingToDo()],
+		["refuses a category that does not exist", 999, "up", CHANGED],
+		["refuses an archived category", 4, "up", CHANGED],
+	] as const)("%s", (_story, id, direction, answer) => {
+		expect(ask(id, direction)).toEqual(answer);
+	});
+});
+
+describe("the edge", () => {
+	it.each([
+		["  Food   at home ", "Food at home"],
+		["Café", "Café"],
+	])("reads the name %j as %j", (typed, name) => {
+		expect(CategoryName.parse(typed)).toBe(name);
+	});
+
+	it.each([
+		["", "Give the category a name."],
+		["   ", "Give the category a name."],
+		["x".repeat(41), "Keep the name to 40 characters."],
+	])("refuses the name %j", (typed, sentence) => {
+		const read = CategoryName.safeParse(typed);
+
+		expect(read.success).toBe(false);
+		expect(read.error?.issues[0]?.message).toBe(sentence);
+	});
+
+	it("reads a move's direction, and nothing else", () => {
+		expect(MoveDirection.parse("up")).toBe("up");
+		expect(MoveDirection.safeParse("sideways").success).toBe(false);
+	});
+});

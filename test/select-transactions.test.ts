@@ -5,7 +5,7 @@ import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { FOLLOWS_PURCHASE } from "../src/db/counted-month";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
-import { isMethod, itemAt } from "./helpers/present";
+import { forwardMember, itemAt } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 /** One row of the snapshot the tests compare before and after a write. */
@@ -19,26 +19,6 @@ type SnapshotRow = {
 
 /** The shape of the HX-Trigger header the routes send: the toast and the announcer line. */
 type HxTrigger = { toast?: { message: string }; announce?: string };
-
-/** True when `prop` is a member of `target`, so a Proxy can read it with a typed key. */
-function isMember<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): prop is keyof Target {
-	return prop in target;
-}
-
-/** A Proxy's read of `target`'s member `prop`: a method is bound to `target`, anything else is returned as it is. */
-function forwardMember<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): Target[keyof Target] | ((...args: never[]) => object) | undefined {
-	if (!isMember(target, prop)) return undefined;
-
-	const value = target[prop];
-
-	return isMethod(value) ? value.bind(target) : value;
-}
 
 const request = async (path: string, init?: RequestInit) => {
 	const headers = new Headers(init?.headers);

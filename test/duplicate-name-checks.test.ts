@@ -8,7 +8,7 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { nameTaken } from "../src/routes/settings";
-import { member } from "./helpers/member";
+import { forwardMember } from "./helpers/present";
 
 // Four places recognise a duplicate name from the database's refusal: saveSuggestion's catch, createFromSuggestion's
 // catch, makeCategory and settings' nameTaken. Each recognises a plain driver error and a Drizzle-wrapped one ("Failed
@@ -55,7 +55,7 @@ function failingBatch(error: Error, ...between: Write[]) {
 					throw error;
 				};
 
-			return member(target, property);
+			return forwardMember(target, property);
 		},
 	});
 }
@@ -73,7 +73,7 @@ function failingCategoryInsert(error: Error) {
 						throw error;
 					};
 
-				return member(target, property);
+				return forwardMember(target, property);
 			},
 		});
 
@@ -88,7 +88,7 @@ function failingCategoryInsert(error: Error) {
 						: statement;
 				};
 
-			return member(target, property);
+			return forwardMember(target, property);
 		},
 	});
 }

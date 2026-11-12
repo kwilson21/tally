@@ -11,6 +11,8 @@ One small TypeScript server on Cloudflare builds each page, stores data in a SQL
 
 ## Run locally
 
+Node 26 or newer (`.nvmrc`; `nvm use` picks it up).
+
     npm install
     cp .dev.vars.example .dev.vars   # fill in values; never commit this file
     npm run dev

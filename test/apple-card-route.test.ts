@@ -8,6 +8,7 @@ import { readGateInputs } from "../src/first-tally/gate";
 import { accounts } from "../src/routes/accounts";
 import type { SortParams } from "../src/sort-start";
 import { envWith } from "./helpers/doubles";
+import { isMemberOf, isMethod } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -52,22 +53,9 @@ const ctx = () => ({
 const settled = (context: ReturnType<typeof ctx>) =>
 	Promise.all(context.waitUntil.mock.calls.map(([promise]) => promise));
 
-/** A D1 method: it takes any arguments and returns a statement, a result, a promise or a plain value. */
-type Method = (
-	...args: never[]
-) => object | string | number | boolean | null | undefined;
-
-function isMethod(value: unknown): value is Method {
-	return typeof value === "function";
-}
-
-function hasKey<T extends object>(target: T, key: PropertyKey): key is keyof T {
-	return key in target;
-}
-
 /** The member `key` of `target`, read as Reflect.get reads it with `target` as the receiver (undefined when absent). */
 function memberOf<T extends object>(target: T, key: PropertyKey) {
-	return hasKey(target, key) ? target[key] : undefined;
+	return isMemberOf(target, key) ? target[key] : undefined;
 }
 
 /**

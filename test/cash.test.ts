@@ -16,6 +16,7 @@ import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { entryKeyOf } from "../src/transactions/cash";
 import { CashForm } from "../src/views/cash-form";
+import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 
@@ -27,14 +28,6 @@ async function request(path: string, init?: RequestInit) {
 
 /** A row of `SELECT *` or a column alias query: every value is a SQL string, number or null. */
 type SqlRow = Record<string, string | number | null>;
-
-/** The row a query returned; fails the test when the query returned none. */
-function requireRow<Row>(row: Row | null | undefined): Row {
-	if (row === null || row === undefined)
-		throw new Error("expected the query to return a row");
-
-	return row;
-}
 
 beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
 
@@ -373,7 +366,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Bill-linked cash' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -466,7 +459,7 @@ describe("cash lifecycle", () => {
 
 		expect(created.res.status).toBe(200);
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Editable cash' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -531,7 +524,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		return requireRow(
+		return present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 			)
@@ -676,7 +669,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Future guard' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -707,7 +700,7 @@ describe("cash lifecycle", () => {
 			"SELECT t.id, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id LIMIT 1",
 		).first<{ id: number; bank: string }>();
 
-		const bankId = requireRow(bankRow).id;
+		const bankId = present(bankRow).id;
 		const bankPanel = await request(`/transactions/${bankId}`);
 		expect(bankPanel.html).toContain(
 			`From ${bankRow?.bank}. Its date and amount stay as the bank sent them. If something&#39;s off, you can split it, exclude it, or count it in another month.`,
@@ -757,7 +750,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Split edit' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -934,7 +927,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Split part cash' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -950,7 +943,7 @@ describe("cash lifecycle", () => {
 			"demo",
 		);
 
-		const part = requireRow(
+		const part = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id=? ORDER BY id LIMIT 1",
 			)
@@ -1004,7 +997,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Ten year cash' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -1079,7 +1072,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Month move cash' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -1130,7 +1123,7 @@ describe("cash lifecycle", () => {
 			}),
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Refund guard cash' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -1293,8 +1286,8 @@ describe("cash lifecycle", () => {
 			row;
 
 		expect(restoredParent).not.toBeNull();
-		expect(withoutIds(requireRow(restoredParent))).toEqual(
-			withoutIds(requireRow(before.parent)),
+		expect(withoutIds(present(restoredParent))).toEqual(
+			withoutIds(present(before.parent)),
 		);
 		expect(restoredParts.map(withoutIds)).toEqual(before.parts.map(withoutIds));
 	});
@@ -1380,7 +1373,7 @@ describe("cash lifecycle", () => {
 			category: "1",
 		});
 
-		const id = requireRow(
+		const id = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Rule cash shop' ORDER BY id DESC LIMIT 1",
 			).first<{ id: number }>(),
@@ -1821,7 +1814,7 @@ describe("cash lifecycle", () => {
 			});
 
 		const farmersMarket = async () =>
-			requireRow(
+			present(
 				await env.DB.prepare(
 					"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.raw_name='Farmers market'",
 				).first<{ id: number }>(),
@@ -2007,7 +2000,7 @@ describe("cash lifecycle", () => {
 
 		await syncItem(
 			{ ...env, TOKEN_ENCRYPTION_KEY: key },
-			requireRow(item).id,
+			present(item).id,
 			fetchImpl,
 		);
 		expect(
@@ -2145,7 +2138,7 @@ describe("adding cash twice by retrying (a lost reply, a failed render)", () => 
 
 		const split = await saveSplit(
 			env.DB,
-			requireRow(parent).id,
+			present(parent).id,
 			[
 				{ categoryId: 1, amountCents: 1200 },
 				{ categoryId: 2, amountCents: 800 },
@@ -2310,7 +2303,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	};
 
 	const idByName = async (merchant: string) =>
-		requireRow(
+		present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
 			)
@@ -2388,7 +2381,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.bind(b?.id, id)
 			.run();
 
-		return { id, a: requireRow(a).id, b: requireRow(b).id };
+		return { id, a: present(a).id, b: present(b).id };
 	};
 
 	const BILL = 9950;
@@ -3348,7 +3341,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		});
 		const plain = await idByName("Plain cash");
 
-		const bank = requireRow(
+		const bank = present(
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t JOIN accounts ac ON ac.id = t.account_id WHERE ac.type <> 'cash' AND t.parent_id IS NULL AND t.is_split = 0 AND t.flag_income = 0 ORDER BY t.id LIMIT 1",
 			).first<{ id: number }>(),
@@ -3398,7 +3391,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { id, a, b } = await splitCash("Out of date");
 		const before = await stateOf(id);
 
-		const foreign = requireRow(
+		const foreign = present(
 			await env.DB.prepare(
 				"SELECT t.id FROM transactions t WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.id <> ? ORDER BY t.id LIMIT 1",
 			)
@@ -3949,8 +3942,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 					totalCents: 10000,
 					amountWasCents: 9000,
 					parts: [
-						{ id: requireRow(a).id, categoryId: 1, amountCents: 6000 },
-						{ id: requireRow(b).id, categoryId: 5, amountCents: 3000 },
+						{ id: present(a).id, categoryId: 1, amountCents: 6000 },
+						{ id: present(b).id, categoryId: 5, amountCents: 3000 },
 						{ id: null, categoryId: 5, amountCents: 1000 },
 					],
 				},
@@ -3994,8 +3987,8 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"demo",
 		);
 		const [partA, partB] = await partsOf(id);
-		const a = requireRow(partA).id;
-		const b = requireRow(partB).id;
+		const a = present(partA).id;
+		const b = present(partB).id;
 		expect([await dismissalsOn(a), await dismissalsOn(b)]).toEqual([1, 1]);
 
 		await expect(
@@ -4015,7 +4008,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			),
 		).resolves.toEqual({ saved: true });
 
-		const added = requireRow(
+		const added = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)",
 			)
@@ -4136,11 +4129,11 @@ describe("a bank transaction split into parts", () => {
 			"SELECT t.id, t.amount_cents AS amountCents, p.institution_name AS bank FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_items p ON p.id=a.plaid_item_id WHERE t.parent_id IS NULL AND t.is_split = 0 AND a.type <> 'cash' AND ABS(t.amount_cents) >= 2 ORDER BY t.id LIMIT 1",
 		).first<{ id: number; amountCents: number; bank: string }>();
 
-		const amount = requireRow(bank).amountCents;
+		const amount = present(bank).amountCents;
 		const half = Math.trunc(amount / 2);
 		await saveSplit(
 			env.DB,
-			requireRow(bank).id,
+			present(bank).id,
 			[
 				{ amountCents: half, categoryId: 1 },
 				{ amountCents: amount - half, categoryId: 5 },
