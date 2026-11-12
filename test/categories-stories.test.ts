@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { describe, expect, it } from "vitest";
+import { readAtEdge } from "../src/edge";
 import {
 	addCategory,
 	archiveCategory,
@@ -14,7 +15,6 @@ import {
 	CategoryId,
 	CategoryName,
 	MoveDirection,
-	readAtEdge,
 } from "../src/settings/category-form";
 
 // The categories area's five rules as stories (decisions 187, 204): each row is what was asked, what was stored, and

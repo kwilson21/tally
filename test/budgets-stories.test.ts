@@ -1,5 +1,6 @@
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
-import * as z from "zod";
 import { MAX_BUDGET_CENTS } from "../src/budgets/amount";
 import {
 	type BudgetFacts,
@@ -178,13 +179,13 @@ describe("the rules' sheet", () => {
 	});
 
 	it("gives every answer one of exactly three kinds (the contract of decision 192)", () => {
-		const Answer = z.discriminatedUnion("kind", [
-			z.strictObject({ kind: z.literal("write"), write: z.unknown() }),
-			z.strictObject({ kind: z.literal("nothingToDo") }),
-			z.strictObject({
-				kind: z.literal("refuse"),
-				type: z.string().min(1),
-				say: z.string().min(1),
+		const Answer = Schema.Union([
+			Schema.Struct({ kind: Schema.Literal("write"), write: Schema.Unknown }),
+			Schema.Struct({ kind: Schema.Literal("nothingToDo") }),
+			Schema.Struct({
+				kind: Schema.Literal("refuse"),
+				type: Schema.NonEmptyString,
+				say: Schema.NonEmptyString,
 			}),
 		]);
 
@@ -209,6 +210,12 @@ describe("the rules' sheet", () => {
 		];
 
 		for (const answer of answers)
-			expect(Answer.safeParse(answer).success).toBe(true);
+			expect(
+				Result.isSuccess(
+					Schema.decodeUnknownResult(Answer, { onExcessProperty: "error" })(
+						answer,
+					),
+				),
+			).toBe(true);
 	});
 });

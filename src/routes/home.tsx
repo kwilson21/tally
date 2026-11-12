@@ -6,7 +6,6 @@ import { appleCardNotice } from "../apple-card/stale";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
 import {
-	CategoryId,
 	MAX_BUDGET_CENTS,
 	NudgeDirection,
 	parseBudgetAmount,
@@ -31,6 +30,7 @@ import { COUNTED_JOINS, countedMonthSql } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
+import { readAtEdge } from "../edge";
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
@@ -45,6 +45,7 @@ import {
 	saveSavingsGoal,
 } from "../rules/budgets";
 import { handle } from "../rules/rule";
+import { CategoryId } from "../settings/category-form";
 import {
 	asOfDate,
 	type FlaggedBank,
@@ -608,12 +609,12 @@ const closeBudgetAttrs = (categoryId: number) => ({
  * month. This is the one place a budget request reads the date; it passes it on to renderHome.
  */
 async function activeCategory(c: Context<App>) {
-	const id = CategoryId.safeParse(c.req.param("id"));
+	const id = readAtEdge(CategoryId, c.req.param("id"));
 
-	if (!id.success) return null;
+	if (!id.ok) return null;
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
-	const category = await budgetCategory(c.env.DB, id.data, month);
+	const category = await budgetCategory(c.env.DB, id.value, month);
 
 	return category && !category.archived ? { category, today, month } : null;
 }
@@ -1029,11 +1030,11 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 
 	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
-	const way = NudgeDirection.safeParse(c.req.param("direction"));
+	const way = readAtEdge(NudgeDirection, c.req.param("direction"));
 
-	if (!active || !way.success) return c.notFound();
+	if (!active || !way.ok) return c.notFound();
 	const { category, today, month } = active;
-	const direction = way.data;
+	const direction = way.value;
 	// Two taps at once (two phones) both count: the one that saves second finds the budget changed, and decides again.
 	const facts = budgetFactsFrom(c.env.DB, category, month);
 

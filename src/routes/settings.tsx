@@ -54,6 +54,7 @@ import { runningRecheck, startResortFor } from "../db/resort-start";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
 import { waitingForJevSql } from "../db/transactions";
+import { readAtEdge } from "../edge";
 import { hxTrigger } from "../htmx";
 import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
 import { reconnectRecipients } from "../reconnect/reminders";
@@ -71,7 +72,6 @@ import {
 	CategoryId,
 	CategoryName,
 	MoveDirection,
-	readAtEdge,
 	sameName,
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";

@@ -1,10 +1,8 @@
 // What the Settings form may save for a category, checked before anything is written (spec §7).
-import * as Effect from "effect/Effect";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
-import * as SchemaIssue from "effect/SchemaIssue";
 import { NONE_FIT } from "../ai/decide";
+import { readAtEdge, readText } from "../edge";
 import { CATEGORY_NAME_MAX } from "../limits";
 
 /** New categories take the next color in turn, so neighbors differ. */
@@ -34,18 +32,6 @@ export type CategoryErrors = Partial<Record<"name", string>>;
 
 export const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
-
-/** A decode that reads `text` into a value with `read`, or refuses with the sentence `read` gives. Nothing is encoded back. */
-const readText = <T>(read: (text: string) => { value: T } | { say: string }) =>
-	SchemaGetter.transformEffect<T, string>((text, options) => {
-		const answer = read(text);
-
-		return "value" in answer
-			? Effect.succeed(answer.value)
-			: Effect.fail(
-					new SchemaIssue.InvalidValue({ message: answer.say }, text, options),
-				);
-	});
 
 /**
  * A typed category name, at the edge (decision 204): text in, the tidied name out, or one of the two sentences. Whether
@@ -82,21 +68,6 @@ export const CategoryId = Schema.String.pipe(
 
 /** Which way a category moves in the list, from the address. */
 export const MoveDirection = Schema.Literals(["up", "down"]);
-
-/**
- * Reads a form field or a part of the address at the edge, from plain code: the typed value, or the sentence that says why not. An edge whose words a
- * person reads gives its own sentence (readText); any other failure's sentence is Schema's, and is for a log only.
- */
-export function readAtEdge<S extends Schema.ConstraintDecoder<unknown>>(
-	schema: S,
-	input: string,
-): { ok: true; value: S["Type"] } | { ok: false; say: string } {
-	const read = Schema.decodeUnknownResult(schema)(input);
-
-	return Result.isSuccess(read)
-		? { ok: true, value: read.success }
-		: { ok: false, say: read.failure.message };
-}
 
 /**
  * A category name as the form compares it: ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. It is stored
