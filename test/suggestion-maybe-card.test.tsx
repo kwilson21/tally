@@ -165,6 +165,7 @@ describe("an existing category: one tap, no name field (decision 165, #965)", ()
 			suggestedName: "Books & media",
 			categories: withBooks,
 		});
+
 		const tap = html.indexOf("Put it in");
 		expect(tap).toBeGreaterThan(html.indexOf('value="yes"'));
 		expect(tap).toBeLessThan(html.indexOf("Something else"));

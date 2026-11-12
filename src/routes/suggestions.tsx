@@ -570,6 +570,7 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 	const ai = c.env.AI;
 	const name = await suggestedCategoryName(db, ai, item);
 	const categories = (await categoryNames(db)).filter((c) => !c.archived);
+
 	// The name is asked and kept as it was (decision 161); the one function decides the row (#965): a name that is the
 	// guess itself, or none, draws nothing (decision 166), the same empty answer as no name.
 	const row = suggestedRow({

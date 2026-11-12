@@ -3956,6 +3956,7 @@ describe("a category guess's answers each do one thing (#965)", () => {
 		headers: Record<string, string> = {},
 	) {
 		const body = new URLSearchParams(fields).toString();
+
 		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
 			method: "POST",
 			redirect: "manual",
@@ -4069,6 +4070,7 @@ describe("a category guess's answers each do one thing (#965)", () => {
 	it("a plain post of a one tap with no HX-Current-URL still answers, from the request's own address", async () => {
 		const { ids, id } = await categoryCard();
 		const groceries = await categoryId("Groceries");
+
 		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
 			method: "POST",
 			redirect: "manual",
@@ -4112,6 +4114,7 @@ describe("a category guess's answers each do one thing (#965)", () => {
 
 	it("Something else with neither a category nor a name asks for one of the two", async () => {
 		const { id } = await categoryCard();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "else", category: "", new_name: "   " },
@@ -4175,6 +4178,7 @@ describe("a category guess's answers each do one thing (#965)", () => {
 
 	it("a category that is not a number, with no name, is refused as gone", async () => {
 		const { id } = await categoryCard();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "else", category: "abc", new_name: "" },
@@ -4205,6 +4209,7 @@ describe("a category guess's answers each do one thing (#965)", () => {
 
 	it("a refused typed name under Something else redraws it open, its error on the field, with no loader", async () => {
 		const { ids, id } = await categoryCard();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "else", new_name: "x".repeat(41) },
@@ -4242,6 +4247,7 @@ describe("a category guess's answers each do one thing (#965)", () => {
 
 	it("at 50 active categories a name under Something else is refused in words, and the field stays open", async () => {
 		const { ids, id } = await categoryCard();
+
 		const active = await countOf(
 			"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
 		);
