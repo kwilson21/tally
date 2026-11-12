@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 60,
+	"legacyBaseline": 59,
 	"handlers": [
 		{
 			"method": "POST",
@@ -439,7 +439,9 @@
 			"path": "/resort/undo",
 			"file": "resort.tsx",
 			"area": "sorting",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/sorting.ts",
+			"stories": "test/sorting-stories.test.ts"
 		},
 		{
 			"method": "POST",

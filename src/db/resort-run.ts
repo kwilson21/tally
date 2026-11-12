@@ -12,10 +12,14 @@
 // claim is open. A row is the same transaction only while its Plaid id and amount are the ones the run recorded, so a
 // deleted row whose id another purchase reused is never restored or undone.
 
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
-
+import type { UndoFacts, UndoWrite } from "../rules/sorting";
 import { COUNTED_JOINS } from "./counted-month";
+import { Database } from "./database";
+import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 import { WAITING } from "./more-like-this";
 import {
 	RESORT_CANDIDATE_MAX,
@@ -882,75 +886,173 @@ export async function closeToastOnce(
 }
 
 /**
- * Undo: puts back the snapshot of each moved row that still reads as the run left it (its category is the one it moved
- * into, its source is Jev, and it is the same transaction), and only while the record's claimed Undo is open. A row
- * that changed since is left alone and counted in `changedSince`. `expired` is true when no Undo is open for the run
- * (none, not yet claimed, or the ten seconds have passed); then nothing is restored, and an expired record is removed.
+ * The moved rows of the record at ?1, as SQL: its `rows` list, or NULL when there is no record or it is not one
+ * parseMoved would read. SQLite's JSON functions fail on text that is not JSON, so each is asked only after a check.
  */
-export async function undoRun(
+const UNDO_ROWS = `(SELECT CASE WHEN json_valid(value) AND json_type(value, '$.rows') = 'array'
+		THEN json_extract(value, '$.rows') END FROM household_settings WHERE key = ?1)`;
+
+/** The transactions a record moved, as they stand now. A deleted row is not among them. */
+const UNDO_ROWS_NOW = `SELECT id, category_id AS categoryId, category_source AS source, plaid_transaction_id AS plaidId,
+		amount_cents AS amountCents
+	FROM transactions WHERE id IN (SELECT CASE WHEN s.type = 'object' THEN json_extract(s.value, '$.id') END
+		FROM json_each(${UNDO_ROWS}) s)`;
+
+/**
+ * Everything the Undo rule reads as one text, as SQL (?1 is the record's key): whether the record is there and until
+ * when its Undo is open, and each moved row's category, source and identity now. The bank id is in hex, so none can
+ * look like the marks between the parts.
+ */
+const UNDO_VERSION = `(SELECT COALESCE((SELECT CASE WHEN json_valid(value) THEN COALESCE(json_extract(value, '$.until'), 'unclaimed')
+			ELSE 'unreadable' END || ':' || length(value)
+		FROM household_settings WHERE key = ?1), 'none') || '/'
+	|| COALESCE((SELECT group_concat(id || ':' || COALESCE(categoryId, '') || ':' || COALESCE(source, '') || ':'
+		|| COALESCE(hex(plaidId), '') || ':' || amountCents, '|') FROM (${UNDO_ROWS_NOW} ORDER BY id)), ''))`;
+
+/** What the Undo rule reads: the run's record, its moved rows as they stand now, and the version of both, in one batch. */
+export async function undoFacts(
 	db: D1Database,
-	{ runId, now }: { runId: string; now: number },
-): Promise<{ restored: number; changedSince: number; expired: boolean }> {
+	runId: string,
+): Promise<UndoFacts> {
 	const key = movedKey(runId);
 
-	const existing = await db
-		.prepare("SELECT value FROM household_settings WHERE key = ?")
-		.bind(key)
-		.first<{ value: string }>();
+	// SAFETY: the batch below lists exactly three statements, so its results are the three D1Results typed here. A batch
+	// is one transaction, so the version is of the very record and rows read beside it.
+	const [stored, now, version] = (await db.batch([
+		db.prepare("SELECT value FROM household_settings WHERE key = ?1").bind(key),
+		db.prepare(UNDO_ROWS_NOW).bind(key),
+		db.prepare(`SELECT ${UNDO_VERSION} AS version`).bind(key),
+	])) as [
+		D1Result<{ value: string }>,
+		D1Result<UndoFacts["now"][number]>,
+		D1Result<{ version: string }>,
+	];
 
-	if (!existing) return { restored: 0, changedSince: 0, expired: true };
-	const record = parseMoved(existing.value);
+	const value = stored.results[0]?.value;
+	const record = value === undefined ? null : parseMoved(value);
 
-	if (!record) return { restored: 0, changedSince: 0, expired: true };
-	const moved = record.rows.length;
-
-	// Parameter ?1 is the record's key, ?2 the time. The record's own `until` (null until claimed) is checked in every write.
-	const live = `EXISTS (SELECT 1 FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') >= ?2)`;
-	const rows = `(SELECT json_extract(value, '$.rows') FROM household_settings WHERE key = ?1)`;
-
-	const undoSnap = (column: string) =>
-		`(SELECT json_extract(s.value, '$.snapshot.${column}') FROM json_each(${rows}) s WHERE json_extract(s.value, '$.id') = transactions.id)`;
-
-	const restore = db
-		.prepare(
-			`UPDATE transactions SET
-				category_id = ${undoSnap("category_id")},
-				category_source = ${undoSnap("category_source")},
-				category_confidence = ${undoSnap("category_confidence")},
-				jev_category_id = ${undoSnap("jev_category_id")},
-				jev_none_fit = ${undoSnap("jev_none_fit")},
-				jev_mixed = ${undoSnap("jev_mixed")},
-				jev_also_category_id = ${undoSnap("jev_also_category_id")},
-				jev_failed_at = ${undoSnap("jev_failed_at")},
-				jev_attempts = COALESCE(${undoSnap("jev_attempts")}, jev_attempts),
-				updated_at = datetime('now')
-			WHERE id IN (SELECT json_extract(s.value, '$.id') FROM json_each(${rows}) s)
-				AND category_id = (SELECT json_extract(s.value, '$.categoryId') FROM json_each(${rows}) s WHERE json_extract(s.value, '$.id') = transactions.id)
-				AND category_source = 'jev'
-				AND ${sameRunRow("transactions", rows)}
-				AND ${live}`,
-		)
-		.bind(key, now);
-
-	const remove = db
-		.prepare(
-			"DELETE FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') >= ?2",
-		)
-		.bind(key, now);
-
-	const expiredRemove = db
-		.prepare(
-			"DELETE FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') < ?2",
-		)
-		.bind(key, now);
-
-	const [restored, removed] = await db.batch([restore, remove, expiredRemove]);
-
-	if ((removed?.meta.changes ?? 0) === 0) {
-		return { restored: 0, changedSince: 0, expired: true };
-	}
-
-	const count = restored?.meta.changes ?? 0;
-
-	return { restored: count, changedSince: moved - count, expired: false };
+	return {
+		record: record && {
+			until: record.until,
+			rows: record.rows.map((row) => ({
+				id: row.id,
+				categoryId: row.categoryId,
+				plaidId: row.plaid_transaction_id,
+				amountCents: row.amount_cents,
+				snapshot: row.snapshot,
+			})),
+		},
+		now: now.results,
+		version: version.results[0]?.version ?? "",
+	};
 }
+
+/**
+ * The Undo's save, one batch. First the guard: it adds nothing while the record and the moved rows are still as the
+ * rule read them, and tries to add a setting with no value when they are not. The value is NOT NULL, so that fails the
+ * statement and the whole batch with an error undoChangedSinceRead knows (SQLite's RAISE works only inside a trigger).
+ * Then one small statement puts each row back, so no statement nears D1's 100 bound values, and the record is removed,
+ * which closes the Undo. A record stored before decision 182 has no failure counter: the row's own is kept.
+ */
+export function undoSaveStatements(
+	db: D1Database,
+	save: UndoWrite,
+): D1PreparedStatement[] {
+	const key = movedKey(save.runId);
+	const at = new Date(save.now).toISOString().slice(0, 19).replace("T", " ");
+
+	return [
+		db
+			.prepare(
+				`INSERT INTO household_settings (key, value) SELECT 'resort_undo_guard', NULL WHERE ${UNDO_VERSION} IS NOT ?2`,
+			)
+			.bind(key, save.expectedVersion),
+		...save.restore.map((was) =>
+			db
+				.prepare(
+					`UPDATE transactions SET category_id = ?2, category_source = ?3, category_confidence = ?4,
+						jev_category_id = ?5, jev_none_fit = ?6, jev_mixed = ?7, jev_also_category_id = ?8, jev_failed_at = ?9,
+						jev_attempts = COALESCE(?10, jev_attempts), updated_at = ?11
+					WHERE id = ?1`,
+				)
+				.bind(
+					was.id,
+					was.category_id,
+					was.category_source,
+					was.category_confidence,
+					was.jev_category_id,
+					was.jev_none_fit,
+					was.jev_mixed,
+					was.jev_also_category_id,
+					was.jev_failed_at,
+					was.jev_attempts ?? null,
+					at,
+				),
+		),
+		db.prepare("DELETE FROM household_settings WHERE key = ?1").bind(key),
+	];
+}
+
+/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to store a NULL setting. */
+const UNDO_GUARD_RAISED =
+	/NOT NULL constraint failed: household_settings\.value/;
+
+/** Whether an Undo's save failed because what the rule read had changed, and not for any other reason. */
+export function undoChangedSinceRead(error: Error): boolean {
+	return UNDO_GUARD_RAISED.test(error.message);
+}
+
+/**
+ * Undo: reads the run's record and its moved rows, asks the rule and saves what it decides in one batch, asking again
+ * on fresh rows when the guard raises (decideAndSave). It answers with how many rows went back and how many had changed
+ * since and stayed. When the rule refuses because no Undo is open, an expired record is removed before the refusal is
+ * passed on, so a record whose ten seconds have passed does not wait for the sweep.
+ */
+export const decideUndo = <E>(
+	undoRule: {
+		decide: (
+			request: { runId: string; now: number },
+			facts: UndoFacts,
+		) => Effect.Effect<Option.Option<UndoWrite>, E>;
+	},
+	request: { runId: string; now: number },
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const { decided } = yield* decideAndSave({
+			facts: Effect.promise(() => undoFacts(db, request.runId)),
+			decide: (facts) => undoRule.decide(request, facts),
+			save: (write) =>
+				Effect.tryPromise({
+					try: () => db.batch(undoSaveStatements(db, write)),
+					catch: (cause) => cause,
+				}).pipe(
+					Effect.catch((cause) =>
+						cause instanceof Error && undoChangedSinceRead(cause)
+							? Effect.fail(new ChangedSinceRead())
+							: Effect.die(cause),
+					),
+				),
+			gaveUp:
+				"The re-checked rows kept changing while an Undo was being saved.",
+		}).pipe(
+			Effect.tapError(() =>
+				Effect.promise(() =>
+					db
+						.prepare(
+							"DELETE FROM household_settings WHERE key = ?1 AND json_valid(value) AND json_extract(value, '$.until') < ?2",
+						)
+						.bind(movedKey(request.runId), request.now)
+						.run(),
+				),
+			),
+		);
+
+		const write = Option.getOrUndefined(decided);
+
+		return {
+			restored: write?.restore.length ?? 0,
+			changedSince: write?.changedSince ?? 0,
+		};
+	});

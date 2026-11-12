@@ -54,6 +54,9 @@ export const FINISHED_ANNOUNCEMENT = "Tally finished re-checking.";
 /** What the announcer says when a Create starts a run, beside the Create's own words. */
 export const STARTED_ANNOUNCEMENT = "Tally is re-checking related rows.";
 
+/** What an Undo that is no longer open says. */
+export const TOO_LATE_TO_UNDO = "Too late to undo that.";
+
 /** What Undo says: how many went back, and how many changed since the run and stayed where they are. */
 export type UndoOutcome = {
 	expired: boolean;
@@ -69,8 +72,7 @@ type UndoWords = {
 
 /** The Undo answer's words and type. An expired Undo is an error, as a refused answer is elsewhere in the app. */
 export function undoWords(outcome: UndoOutcome): UndoWords {
-	if (outcome.expired)
-		return { message: "Too late to undo that.", type: "error" };
+	if (outcome.expired) return { message: TOO_LATE_TO_UNDO, type: "error" };
 
 	const stayed =
 		outcome.changedSince === 0
