@@ -6,11 +6,8 @@ import { householdToday } from "../src/dates";
 import { readAiTally } from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
-import {
-	addNeverSuggest,
-	neverSuggestRules,
-	removeNeverSuggest,
-} from "../src/db/never-suggest";
+import { addNeverSuggest, neverSuggestRules } from "../src/db/never-suggest";
+import { removeNeverSuggest } from "../src/db/settings-saves";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import {
 	getTransaction,

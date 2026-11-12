@@ -95,16 +95,13 @@ export async function addNeverSuggest(
 }
 
 /**
- * Removes the clicked line and returns it, so the toast can name it, with how many lines went. The store's
- * other lines of the same kind go too: the store-name line and the bank-text lines of its charges, under
- * every key the store goes by (decision 101), so a later sync can't copy a removed line back. A stale Remove
- * changes nothing and returns null: the line is gone already, or its id now names another store's or kind's
- * line (SQLite can reuse a deleted id), so the form's store and kind must match the line too.
+ * The clicked line, read for its Remove: null when it is gone already, or when its id now names another store's or
+ * kind's line (SQLite can reuse a deleted id), so the form's store and kind must match the line too.
  */
-export async function removeNeverSuggest(
+export async function neverSuggestLine(
 	db: D1Database,
 	{ id, merchantKey, kind }: { id: number; merchantKey: string; kind: string },
-): Promise<{ rule: NeverSuggestRule; removedCount: number } | null> {
+): Promise<NeverSuggestRule | null> {
 	const knownKind = NEVER_SUGGEST_KINDS.find((known) => known === kind);
 
 	if (knownKind === undefined) return null;
@@ -116,21 +113,25 @@ export async function removeNeverSuggest(
 		.bind(id, merchantKey, knownKind)
 		.first<Row>();
 
-	if (!rule) return null;
+	return rule ? toRule(rule) : null;
+}
 
-	const result = await db
+/**
+ * The statement that removes a line and the store's other lines of the same kind: the store-name line and the
+ * bank-text lines of its charges, under every key the store goes by (decision 101), so a later sync can't copy a
+ * removed line back.
+ */
+export const removeNeverSuggestStatement = (
+	db: D1Database,
+	rule: Pick<NeverSuggestRule, "merchantKey" | "kind">,
+) =>
+	db
 		.prepare(
 			`WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
 				keys(k) AS (SELECT n FROM names UNION SELECT raw_name FROM transactions WHERE merchant_name IN (SELECT n FROM names))
 			DELETE FROM never_suggest_rules WHERE kind = ?2 AND merchant_key IN (SELECT k FROM keys)`,
 		)
-		.bind(rule.merchantKey, rule.kind)
-		.run();
-
-	return result.meta.changes > 0
-		? { rule: toRule(rule), removedCount: result.meta.changes }
-		: null;
-}
+		.bind(rule.merchantKey, rule.kind);
 
 /** The line as Settings reads it aloud and shows it: "Never suggest income for Venmo". */
 export function neverSuggestRuleLine(rule: NeverSuggestRule): string {
