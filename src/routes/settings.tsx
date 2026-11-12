@@ -11,14 +11,15 @@ import {
 	saveAiSwitches,
 } from "../db/ai-switches";
 import { changeBankTextRule } from "../db/bank-text-rules";
+import { categoryNames, settingsCategories } from "../db/categories";
 import {
-	addCategory,
-	categoryNames,
-	moveCategory,
-	saveCategory,
-	setArchived,
-	settingsCategories,
-} from "../db/categories";
+	addCategoryStatements,
+	archiveCategoryStatements,
+	decideCategory,
+	moveCategoryStatements,
+	renameCategoryStatements,
+	restoreCategoryStatements,
+} from "../db/category-saves";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
@@ -55,10 +56,19 @@ import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
 import { reconnectRecipients } from "../reconnect/reminders";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import {
+	addCategory,
+	archiveCategory,
+	type CategoryFacts,
+	moveCategory,
+	renameCategory,
+	restoreCategory,
+} from "../rules/categories";
+import { handle } from "../rules/rule";
+import {
 	type CategoryErrors,
-	fullMessage,
-	parseCategory,
-	restoreProblem,
+	CategoryId,
+	CategoryName,
+	MoveDirection,
 	sameName,
 } from "../settings/category-form";
 import { tallyExport, transactionsCsv } from "../settings/export";
@@ -1732,108 +1742,162 @@ settings.post("/settings/time-zone", async (c) => {
 	);
 });
 
+/** The typed name, read at the edge (decision 191): the tidied name, or the sentence to show under the field. */
+function typedName(form: FormData) {
+	const read = CategoryName.safeParse(String(form.get("name") ?? ""));
+
+	return read.success
+		? { ok: true as const, name: read.data }
+		: { ok: false as const, errors: { name: read.error.issues[0]?.message } };
+}
+
+const CHANGED = "CategoryChanged";
+
 settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();
-	const parsed = parseCategory(form, await categoryNames(c.env.DB), null);
+	const typed = typedName(form);
 
-	if (!parsed.ok) return retry(c, "new", form, parsed.errors);
-	let id: number | null;
+	if (!typed.ok) return retry(c, "new", form, typed.errors);
+	let answer: Awaited<ReturnType<typeof added>>;
 
 	try {
-		id = await addCategory(c.env.DB, parsed.value);
+		answer = await added(c.env.DB, typed.name);
 	} catch (error) {
+		// The unique name indexes settle two saves at once (migrations 0005 and 0052).
 		if (nameTaken(error))
 			return retry(c, "new", form, { name: "That name is taken." });
 		throw error;
 	}
 
-	// Another save filled the list between the form's check and this write.
-	if (id === null) return retry(c, "new", form, { name: fullMessage("add") });
+	return handle(answer.outcome, {
+		write: (save) => {
+			const id = Number(answer.saved?.[1]?.meta.last_row_id);
 
-	return done(
-		c,
-		`Added ${parsed.value.name}`,
-		`Added ${parsed.value.name}. Set its budget on Home.`,
-		{ page: "categories", focus: id, saved: { kind: "category", id } },
-	);
+			return done(
+				c,
+				`Added ${save.name}`,
+				`Added ${save.name}. Set its budget on Home.`,
+				{ page: "categories", focus: id, saved: { kind: "category", id } },
+			);
+		},
+		nothingToDo: () => {
+			throw new Error("Adding a category always has something to do.");
+		},
+		refuse: (_type, say) => retry(c, "new", form, { name: say }),
+	});
 });
 
+const added = (db: D1Database, name: string) =>
+	decideCategory(db, addCategory, { name }, addCategoryStatements);
+
 settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
-	const { all, category } = await find(c);
+	const id = CategoryId.safeParse(c.req.param("id"));
 
-	if (!category || category.archived) return gone(c);
+	if (!id.success) return gone(c);
 	const form = await c.req.formData();
-	const parsed = parseCategory(form, all, category.id);
+	const typed = typedName(form);
 
-	if (!parsed.ok) return retry(c, category.id, form, parsed.errors);
+	if (!typed.ok) {
+		// A category that is no longer in the list has no row to show the sentence on.
+		const { category } = await find(c);
+
+		return category && !category.archived
+			? retry(c, id.data, form, typed.errors)
+			: gone(c);
+	}
+
+	let answer: Awaited<ReturnType<typeof renamed>>;
 
 	try {
-		await saveCategory(c.env.DB, category.id, parsed.value);
+		answer = await renamed(c.env.DB, id.data, typed.name);
 	} catch (error) {
 		if (nameTaken(error))
-			return retry(c, category.id, form, { name: "That name is taken." });
+			return retry(c, id.data, form, { name: "That name is taken." });
 		throw error;
 	}
 
 	// A rename marks its own row (P119 A, #71); Archive and Move take the row out of its place, so they mark nothing.
-	return done(c, `Saved ${parsed.value.name}`, `Saved ${parsed.value.name}.`, {
-		page: "categories",
-		focus: category.id,
-		saved: { kind: "category", id: category.id },
+	const saved = () =>
+		done(c, `Saved ${typed.name}`, `Saved ${typed.name}.`, {
+			page: "categories",
+			focus: id.data,
+			saved: { kind: "category", id: id.data },
+		});
+
+	return handle(answer.outcome, {
+		write: saved,
+		nothingToDo: saved,
+		refuse: (type, say) =>
+			type === CHANGED ? gone(c) : retry(c, id.data, form, { name: say }),
 	});
 });
 
+const renamed = (db: D1Database, id: number, name: string) =>
+	decideCategory(db, renameCategory, { id, name }, renameCategoryStatements);
+
+/** The name of the category a rule was asked about, from the list it decided on. */
+const nameIn = (facts: CategoryFacts, id: number) =>
+	facts.categories.find((x) => x.id === id)?.name ?? "";
+
 settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
-	const { category } = await find(c);
+	const id = CategoryId.safeParse(c.req.param("id"));
 
-	if (!category || category.archived) return gone(c);
-	await setArchived(
+	if (!id.success) return gone(c);
+
+	const { outcome, facts } = await decideCategory(
 		c.env.DB,
-		category.id,
-		true,
-		await householdToday(c.env.DB),
+		archiveCategory,
+		{ id: id.data, today: await householdToday(c.env.DB) },
+		archiveCategoryStatements,
 	);
 
-	return done(
-		c,
-		`Archived ${category.name}`,
-		`Archived ${category.name}. Its transactions keep their category.`,
-		// Its row is gone, so focus goes to the Archived list it moved to.
-		{ page: "categories", focus: "archived" },
-	);
+	const name = nameIn(facts, id.data);
+
+	// A second press finds it archived already and gets the first press's answer (decision 194).
+	const archived = () =>
+		done(
+			c,
+			`Archived ${name}`,
+			`Archived ${name}. Its transactions keep their category.`,
+			// Its row is gone, so focus goes to the Archived list it moved to.
+			{ page: "categories", focus: "archived" },
+		);
+
+	return handle(outcome, {
+		write: archived,
+		nothingToDo: archived,
+		refuse: () => gone(c),
+	});
 });
 
 settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
-	const { all, category } = await find(c);
+	const id = CategoryId.safeParse(c.req.param("id"));
 
-	if (!category?.archived) return gone(c);
-	const problem = restoreProblem(all);
+	if (!id.success) return gone(c);
 
-	if (problem)
-		return renderPage(c, "categories", { restoreError: problem, status: 422 });
+	const { outcome, facts } = await decideCategory(
+		c.env.DB,
+		restoreCategory,
+		{ id: id.data, today: await householdToday(c.env.DB) },
+		restoreCategoryStatements,
+	);
 
-	if (
-		!(await setArchived(
-			c.env.DB,
-			category.id,
-			false,
-			await householdToday(c.env.DB),
-		))
-	) {
-		// Someone restored it a moment earlier, or the list filled up.
-		const now = (await find(c)).category;
+	const name = nameIn(facts, id.data);
 
-		if (!now?.archived) return gone(c);
-
-		return renderPage(c, "categories", {
-			restoreError: fullMessage("restore"),
-			status: 422,
+	// A second press finds it back already and gets the first press's answer (decision 194).
+	const restored = () =>
+		done(c, `Restored ${name}`, `Restored ${name}.`, {
+			page: "categories",
+			focus: id.data,
 		});
-	}
 
-	return done(c, `Restored ${category.name}`, `Restored ${category.name}.`, {
-		page: "categories",
-		focus: category.id,
+	return handle(outcome, {
+		write: restored,
+		nothingToDo: restored,
+		refuse: (type, say) =>
+			type === CHANGED
+				? gone(c)
+				: renderPage(c, "categories", { restoreError: say, status: 422 }),
 	});
 });
 
@@ -1841,28 +1905,45 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 settings.post(
 	"/settings/categories/:id{[0-9]+}/move/:direction{up|down}",
 	async (c) => {
-		const { category } = await find(c);
+		const id = CategoryId.safeParse(c.req.param("id"));
+		const direction = MoveDirection.safeParse(c.req.param("direction"));
 
-		if (!category || category.archived) return gone(c);
-		const direction = c.req.param("direction") === "up" ? "up" : "down";
-		await moveCategory(c.env.DB, category.id, direction);
-		const timeZone = await householdTimeZone(c.env.DB);
-		const today = todayIn(timeZone);
-		const { active } = await settingsCategories(c.env.DB, today.slice(0, 7));
-		const position = active.findIndex((x) => x.id === category.id) + 1;
+		if (!id.success || !direction.success) return gone(c);
 
-		return done(
-			c,
-			`Moved ${category.name}`,
-			`Moved ${category.name} ${direction}. It's now ${position} of ${active.length}.`,
-			// Stay open, so the same button can be pressed again.
-			{
-				page: "categories",
-				open: category.id,
-				focus: category.id,
-				today,
-				timeZone,
-			},
+		const { outcome, facts } = await decideCategory(
+			c.env.DB,
+			moveCategory,
+			{ id: id.data, direction: direction.data },
+			moveCategoryStatements,
 		);
+
+		// At the end of the list there is nowhere to go, and the answer says where it is, as a move does.
+		const moved = async () => {
+			const name = nameIn(facts, id.data);
+			const timeZone = await householdTimeZone(c.env.DB);
+			const today = todayIn(timeZone);
+			const { active } = await settingsCategories(c.env.DB, today.slice(0, 7));
+			const position = active.findIndex((x) => x.id === id.data) + 1;
+
+			return done(
+				c,
+				`Moved ${name}`,
+				`Moved ${name} ${direction.data}. It's now ${position} of ${active.length}.`,
+				// Stay open, so the same button can be pressed again.
+				{
+					page: "categories",
+					open: id.data,
+					focus: id.data,
+					today,
+					timeZone,
+				},
+			);
+		};
+
+		return handle(outcome, {
+			write: moved,
+			nothingToDo: moved,
+			refuse: () => gone(c),
+		});
 	},
 );

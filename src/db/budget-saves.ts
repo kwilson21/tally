@@ -8,6 +8,7 @@ import type {
 } from "../rules/budgets";
 import type { Outcome } from "../rules/rule";
 import { type BudgetCategory, budgetCategory } from "./budgets";
+import { decideAndSaveWith } from "./guarded-save";
 
 /** A category's budget in `month`, as SQL: the latest amount at or before it, or NULL when it has none yet. */
 const BUDGET_IN_MONTH =
@@ -94,28 +95,17 @@ export function changedSinceRead(error: Error): boolean {
 	return GUARD_RAISED.test(error.message);
 }
 
-/**
- * Reads, decides and saves. `decide` reads the facts and asks the rule; a write is saved with `save`. When the guard
- * raises (another writer changed the facts between the read and the save), it reads and decides again, three times in
- * all, so two taps at once both count. It then gives up with an error; any other failure is passed on at once.
- */
+/** Reads, decides and saves a budget or the savings goal, asking again when the guard raises (decideAndSaveWith). */
 export async function decideAndSave<W>(
 	decide: () => Promise<Outcome<W>>,
 	save: (what: W) => D1PreparedStatement,
 ): Promise<Outcome<W>> {
-	for (let attempt = 1; attempt <= 3; attempt++) {
-		const outcome = await decide();
+	const { outcome } = await decideAndSaveWith({
+		decide,
+		save: (what: W) => save(what).run(),
+		changedSinceRead,
+		gaveUp: "The budget kept changing while it was being saved.",
+	});
 
-		if (outcome.kind !== "write") return outcome;
-
-		try {
-			await save(outcome.write).run();
-
-			return outcome;
-		} catch (error) {
-			if (!(error instanceof Error && changedSinceRead(error))) throw error;
-		}
-	}
-
-	throw new Error("The budget kept changing while it was being saved.");
+	return outcome;
 }
