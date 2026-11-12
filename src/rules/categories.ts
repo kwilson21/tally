@@ -122,6 +122,9 @@ type NameChecks = ReturnType<typeof nameChecks>;
 
 type Found = { category: StoredCategory | undefined };
 
+/** The answer when what was asked is already true: nothing is saved, and the person gets the first press's answer. */
+const nothingToDo = <W>() => Effect.succeed(Option.none<W>());
+
 // The terms, shared between the rules.
 
 const nameIsNotReserved = unless(
@@ -180,21 +183,21 @@ export const addCategory = {
 	writesText:
 		"Adds the category at the end of the list, with the tag icon and the next colour in turn.",
 	decide: (request: { name: string }, facts: CategoryFacts) =>
-		Effect.gen(function* () {
-			yield* check(
-				{ ...nameChecks(request.name, facts, null), room: hasRoom(facts) },
-				addRefusals,
-			);
-
-			return Option.some<AddCategoryWrite>({
-				name: request.name,
-				nameKey: nameKey(request.name),
-				// SAFETY: COLORS is a fixed, non-empty list and the index is taken modulo its length, so the entry exists.
-				color: COLORS[facts.categories.length % COLORS.length] as string,
-				sortOrder: lastPlace(facts.categories) + 1,
-				expectedVersion: facts.version,
-			});
-		}),
+		check(
+			{ ...nameChecks(request.name, facts, null), room: hasRoom(facts) },
+			addRefusals,
+		).pipe(
+			Effect.as(
+				Option.some<AddCategoryWrite>({
+					name: request.name,
+					nameKey: nameKey(request.name),
+					// SAFETY: COLORS is a fixed, non-empty list and the index is taken modulo its length, so the entry exists.
+					color: COLORS[facts.categories.length % COLORS.length] as string,
+					sortOrder: lastPlace(facts.categories) + 1,
+					expectedVersion: facts.version,
+				}),
+			),
+		),
 };
 
 const alreadyNamed = term<Found & { name: string }>(
@@ -214,24 +217,26 @@ export const renameCategory = {
 	nothingToDoIf: alreadyNamed,
 	refusals: renameRefusals,
 	writesText: "Sets the category's name.",
-	decide: (request: { id: number; name: string }, facts: CategoryFacts) =>
-		Effect.gen(function* () {
-			const given = {
-				...nameChecks(request.name, facts, request.id),
-				category: find(facts, request.id),
-				name: request.name,
-			};
+	decide: (request: { id: number; name: string }, facts: CategoryFacts) => {
+		const given = {
+			...nameChecks(request.name, facts, request.id),
+			category: find(facts, request.id),
+			name: request.name,
+		};
 
-			if (alreadyNamed.holds(given)) return Option.none<RenameCategoryWrite>();
-			yield* check(given, renameRefusals);
-
-			return Option.some<RenameCategoryWrite>({
-				id: request.id,
-				name: request.name,
-				nameKey: nameKey(request.name),
-				expectedVersion: facts.version,
-			});
-		}),
+		return alreadyNamed.holds(given)
+			? nothingToDo<RenameCategoryWrite>()
+			: check(given, renameRefusals).pipe(
+					Effect.as(
+						Option.some<RenameCategoryWrite>({
+							id: request.id,
+							name: request.name,
+							nameKey: nameKey(request.name),
+							expectedVersion: facts.version,
+						}),
+					),
+				);
+	},
 };
 
 const alreadyArchived = term<Found>(
@@ -247,20 +252,21 @@ export const archiveCategory = {
 	refusals: archiveRefusals,
 	writesText:
 		"Archives the category from today and opens its archive period. Nothing is deleted.",
-	decide: (request: { id: number; today: string }, facts: CategoryFacts) =>
-		Effect.gen(function* () {
-			const given = { category: find(facts, request.id) };
+	decide: (request: { id: number; today: string }, facts: CategoryFacts) => {
+		const given = { category: find(facts, request.id) };
 
-			if (alreadyArchived.holds(given))
-				return Option.none<ArchiveCategoryWrite>();
-			yield* check(given, archiveRefusals);
-
-			return Option.some<ArchiveCategoryWrite>({
-				id: request.id,
-				on: request.today,
-				expectedVersion: facts.version,
-			});
-		}),
+		return alreadyArchived.holds(given)
+			? nothingToDo<ArchiveCategoryWrite>()
+			: check(given, archiveRefusals).pipe(
+					Effect.as(
+						Option.some<ArchiveCategoryWrite>({
+							id: request.id,
+							on: request.today,
+							expectedVersion: facts.version,
+						}),
+					),
+				);
+	},
 };
 
 const alreadyActive = term<Found>(
@@ -276,21 +282,22 @@ export const restoreCategory = {
 	refusals: restoreRefusals,
 	writesText:
 		"Puts the category back at the end of the active list and closes its archive period today.",
-	decide: (request: { id: number; today: string }, facts: CategoryFacts) =>
-		Effect.gen(function* () {
-			const given = { category: find(facts, request.id), room: hasRoom(facts) };
+	decide: (request: { id: number; today: string }, facts: CategoryFacts) => {
+		const given = { category: find(facts, request.id), room: hasRoom(facts) };
 
-			if (alreadyActive.holds(given))
-				return Option.none<RestoreCategoryWrite>();
-			yield* check(given, restoreRefusals);
-
-			return Option.some<RestoreCategoryWrite>({
-				id: request.id,
-				on: request.today,
-				sortOrder: lastPlace(active(facts)) + 1,
-				expectedVersion: facts.version,
-			});
-		}),
+		return alreadyActive.holds(given)
+			? nothingToDo<RestoreCategoryWrite>()
+			: check(given, restoreRefusals).pipe(
+					Effect.as(
+						Option.some<RestoreCategoryWrite>({
+							id: request.id,
+							on: request.today,
+							sortOrder: lastPlace(active(facts)) + 1,
+							expectedVersion: facts.version,
+						}),
+					),
+				);
+	},
 };
 
 type Places = { order: number[]; from: number; to: number };
@@ -311,26 +318,27 @@ export const moveCategory = {
 	decide: (
 		request: { id: number; direction: "up" | "down" },
 		facts: CategoryFacts,
-	) =>
-		Effect.gen(function* () {
-			const order = active(facts).map((c) => c.id);
-			const from = order.indexOf(request.id);
-			const to = request.direction === "up" ? from - 1 : from + 1;
+	) => {
+		const order = active(facts).map((c) => c.id);
+		const from = order.indexOf(request.id);
+		const to = request.direction === "up" ? from - 1 : from + 1;
 
-			if (alreadyAtThatEnd.holds({ order, from, to }))
-				return Option.none<MoveCategoryWrite>();
-			yield* check({ category: find(facts, request.id) }, moveRefusals);
-
-			return Option.some<MoveCategoryWrite>({
-				order: order.map((id, i) =>
-					// SAFETY: from and to are both places in order here: the refusal and nothing-to-do above answered the rest.
-					i === from
-						? (order[to] as number)
-						: i === to
-							? (order[from] as number)
-							: id,
-				),
-				expectedVersion: facts.version,
-			});
-		}),
+		return alreadyAtThatEnd.holds({ order, from, to })
+			? nothingToDo<MoveCategoryWrite>()
+			: check({ category: find(facts, request.id) }, moveRefusals).pipe(
+					Effect.as(
+						Option.some<MoveCategoryWrite>({
+							order: order.map((id, i) =>
+								// SAFETY: from and to are both places in order here: the refusal and nothing-to-do above answered the rest.
+								i === from
+									? (order[to] as number)
+									: i === to
+										? (order[from] as number)
+										: id,
+							),
+							expectedVersion: facts.version,
+						}),
+					),
+				);
+	},
 };
