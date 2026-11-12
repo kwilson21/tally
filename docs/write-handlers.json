@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 62,
+	"legacyBaseline": 61,
 	"handlers": [
 		{
 			"method": "POST",
@@ -176,7 +176,9 @@
 			"path": "/feedback",
 			"file": "feedback.tsx",
 			"area": "feedback",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/feedback.ts",
+			"stories": "test/feedback-stories.test.ts"
 		},
 		{
 			"method": "POST",

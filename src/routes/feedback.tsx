@@ -1,13 +1,23 @@
+import * as Effect from "effect/Effect";
 import { Hono } from "hono";
+import { runWith } from "../db/database";
+import { decideFeedback } from "../db/feedback-saves";
 import {
 	diagnosticsEnabled,
 	normalizeFeedbackContext,
 } from "../feedback/diagnostics";
 import {
+	FEEDBACK_FEELINGS,
+	FEEDBACK_TYPES,
+	readFeedbackForm,
+	safePath,
+} from "../feedback/form";
+import {
 	sanitizeFeedbackMessage,
 	sanitizeFeedbackRoute,
 } from "../feedback/privacy";
-import { FEEDBACK_MESSAGE_MAX } from "../limits";
+import { sendFeedback } from "../rules/feedback";
+import type { Refusal } from "../rules/terms";
 import { FeedbackForm, type FeedbackValues } from "../views/feedback-form";
 import { Layout } from "../views/layout";
 
@@ -32,31 +42,8 @@ type FeedbackRow = {
 	attempts: number;
 };
 
-const TYPES = new Set(["Bug", "Idea", "Question", "Other"]);
-
-const FEELINGS = new Set([
-	"Frustrated",
-	"Confused",
-	"Okay",
-	"Happy",
-	"Delighted",
-]);
-
-function safePath(value: string | null, navigation = false) {
-	try {
-		const url = new URL(value ?? "/", "http://tally.invalid");
-		const normalized = url.pathname;
-
-		return url.origin === "http://tally.invalid" &&
-			(normalized === "/" || /^\/[^/\\]/.test(normalized))
-			? navigation
-				? `${normalized}${url.search}`
-				: normalized.slice(0, 160)
-			: "/";
-	} catch {
-		return "/";
-	}
-}
+const TYPES = new Set<string>(FEEDBACK_TYPES);
+const FEELINGS = new Set<string>(FEEDBACK_FEELINGS);
 
 const FEEDBACK_LIMIT_COOKIE = "__Host-tally-feedback-limit";
 
@@ -158,131 +145,81 @@ feedback.get("/feedback", async (c) => {
 
 feedback.post("/feedback", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
-	const data = await c.req.formData();
-	const rawType = String(data.get("type") ?? "");
-	const rawFeeling = String(data.get("feeling") ?? "");
-	const rawMessage = String(data.get("message") ?? "").replace(/\r\n/g, "\n");
+	const sent = readFeedbackForm(await c.req.formData());
+	const diagnosticsOn = diagnosticsEnabled(c.env);
 
 	const values = {
-		type: TYPES.has(rawType) ? rawType : "Other",
-		feeling: FEELINGS.has(rawFeeling) ? rawFeeling : "Okay",
-		message: sanitizeFeedbackMessage(rawMessage).trim(),
-		from: sanitizeFeedbackRoute(String(data.get("from") ?? "/")),
-		returnTo: safePath(
-			String(data.get("return_to") ?? data.get("from") ?? "/"),
-			true,
-		),
+		type: sent.type,
+		feeling: sent.feeling,
+		message: sent.message,
+		from: sent.from,
+		returnTo: sent.returnTo,
 	};
 
-	const limitId = feedbackLimitId(c.req.header("cookie"));
+	/** The form again with a refusal's sentence. `review` asks the person to confirm the cleaned message before sending. */
+	const refused = (
+		refusal: Refusal,
+		status: 200 | 400 | 422 | 429,
+		review = false,
+	) =>
+		Effect.succeed({
+			saved: null,
+			page: c.html(
+				view(values, false, {
+					error: refusal.say,
+					diagnosticsEnabled: diagnosticsOn,
+					reviewRequired: review,
+				}),
+				status,
+			),
+		});
 
-	if (!limitId) {
-		const response = await c.html(
-			view(values, false, {
-				error: "Your form expired. Review the cleaned message and send again.",
-				diagnosticsEnabled: diagnosticsEnabled(c.env),
-				reviewRequired: true,
+	const answer = await runWith(
+		c.env.DB,
+		decideFeedback(sendFeedback, {
+			sender: feedbackLimitId(c.req.header("cookie")),
+			// The time of the send, as SQLite writes it in UTC (decision 195: the rule and the save read no clock).
+			now: new Date().toISOString().slice(0, 19).replace("T", " "),
+			type: sent.type,
+			feeling: sent.feeling,
+			message: sent.message,
+			typedLength: sent.typedLength,
+			reviewed: sent.reviewed,
+			page: sent.from,
+			device: sent.device,
+			clientContext:
+				diagnosticsOn && sent.clientContext
+					? JSON.stringify(sent.clientContext)
+					: null,
+			appVersion: c.env.APP_VERSION || null,
+		}).pipe(
+			Effect.map(({ saved }) => ({ saved: saved ?? null, page: null })),
+			Effect.catchTags({
+				// An expired form gets a new id, so the same message can be sent again.
+				FormExpired: (refusal) =>
+					refused(refusal, 400, true).pipe(
+						Effect.map(({ page }) => ({
+							saved: null,
+							page: Promise.resolve(page).then((response) =>
+								setFeedbackLimitCookie(response, crypto.randomUUID()),
+							),
+						})),
+					),
+				MessageTooLong: (refusal) => refused(refusal, 422),
+				NoMessage: (refusal) => refused(refusal, 422),
+				// An unreviewed message is the form's next step, so it is not an error status.
+				NotReviewed: (refusal) => refused(refusal, 200, true),
+				TooManyThisHour: (refusal) => refused(refusal, 429),
 			}),
-			400,
-		);
+		),
+	);
 
-		return setFeedbackLimitCookie(response, crypto.randomUUID());
-	}
-
-	if (
-		!rawMessage.trim() ||
-		rawMessage.length > FEEDBACK_MESSAGE_MAX ||
-		!values.message
-	) {
-		return c.html(
-			view(values, false, {
-				error:
-					rawMessage.length > FEEDBACK_MESSAGE_MAX
-						? `Keep the message to ${FEEDBACK_MESSAGE_MAX.toLocaleString("en-US")} characters.`
-						: "Write a message before sending.",
-				diagnosticsEnabled: diagnosticsEnabled(c.env),
-			}),
-			422,
-		);
-	}
-
-	if (
-		String(data.get("message_reviewed") ?? "") !== values.message ||
-		data.get("confirm_review") !== "yes"
-	) {
-		return c.html(
-			view(values, false, {
-				error: "Review the cleaned message, confirm below, and send again.",
-				diagnosticsEnabled: diagnosticsEnabled(c.env),
-				reviewRequired: true,
-			}),
-		);
-	}
-
-	const diagnosticsOn = diagnosticsEnabled(c.env);
-	let clientContext: ReturnType<typeof normalizeFeedbackContext> = null;
-
-	if (diagnosticsOn && data.get("include_diagnostics") === "yes") {
-		try {
-			clientContext = normalizeFeedbackContext(
-				JSON.parse(String(data.get("client_context") ?? "")),
-				values.from,
-			);
-		} catch {
-			clientContext = null;
-		}
-	}
-
-	const columns = diagnosticsOn
-		? ", client_context, app_version"
-		: ", app_version";
-
-	const placeholders = diagnosticsOn ? ", ?, ?" : ", ?";
-
-	const device =
-		String(data.get("device_category")) === "Mobile browser"
-			? "Mobile browser"
-			: String(data.get("device_category")) === "Tablet browser"
-				? "Tablet browser"
-				: String(data.get("device_category")) === "Desktop browser"
-					? "Desktop browser"
-					: "Unknown";
-
-	const params: (string | null)[] = [
-		limitId,
-		values.type,
-		values.feeling,
-		values.message.trim(),
-		values.from,
-		device,
-	];
-
-	if (diagnosticsOn)
-		params.push(clientContext ? JSON.stringify(clientContext) : null);
-	params.push(c.env.APP_VERSION || null);
-	params.push(limitId);
-
-	const result = await c.env.DB.prepare(
-		`INSERT INTO feedback (actor, type, feeling, message, page, device${columns})
-		 SELECT ?, ?, ?, ?, ?, ?${placeholders}
-		 WHERE (SELECT COUNT(*) FROM feedback WHERE actor = ? AND created_at > datetime('now', '-1 hour')) < 10`,
-	)
-		.bind(...params)
-		.run();
-
-	if (result.meta.changes === 0) {
-		return c.html(
-			view(values, false, {
-				error: "You've sent 10 messages this hour. Try again later.",
-				diagnosticsEnabled: diagnosticsOn,
-			}),
-			429,
-		);
-	}
+	if (answer.page) return answer.page;
+	const saved = answer.saved;
 
 	if (c.env.FEEDBACK_GITHUB_TOKEN) {
 		const row = await c.env.DB.prepare("SELECT * FROM feedback WHERE id = ?")
-			.bind(result.meta.last_row_id)
+			.bind(saved)
 			.first<FeedbackRow>();
 
 		if (row)
