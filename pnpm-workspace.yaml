@@ -1,0 +1,6 @@
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  fsevents: true
+  workerd: true
+pmOnFail: error

@@ -13,7 +13,7 @@
 	// Runs before `wrangler dev` and `wrangler deploy`, so generated CSS and htmx always ship.
 	// Watch only src/: the build writes into public/, which would otherwise retrigger itself.
 	"build": {
-		"command": "npm run build",
+		"command": "pnpm run build",
 		"watch_dir": "src"
 	},
 	// Sorting runs as a Workflow (decision 139). Names are unique per account, one per environment.
@@ -42,7 +42,7 @@
 		"DEMO": "true"
 	},
 	"env": {
-		// The public demo (decision 26). Deploy with: npx wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"
+		// The public demo (decision 26). Deploy with: pnpm exec wrangler deploy --env demo --message "demo <short sha>" --var "APP_VERSION:demo <short sha>"
 		"demo": {
 			// Served only here. Cloudflare creates the DNS record and certificate on deploy.
 			"routes": [
@@ -80,7 +80,7 @@
 			// Workers AI suggests merchant names in the demo too (spec §4.1), after each nightly reset.
 			"ai": { "binding": "AI" }
 		},
-		// The family's app (#23). Deploy with: npx wrangler deploy --env production --message "vYYYY.MM.DD <short sha>" --var "APP_VERSION:vYYYY.MM.DD <short sha>" (owner-approved only, README "Versions and releases").
+		// The family's app (#23). Deploy with: pnpm exec wrangler deploy --env production --message "vYYYY.MM.DD <short sha>" --var "APP_VERSION:vYYYY.MM.DD <short sha>" (owner-approved only, README "Versions and releases").
 		// Cloudflare Access guards every path but /webhooks/plaid. Secrets and Plaid settings are set with
 		// `wrangler secret put --env production`, never here.
 		"production": {
@@ -124,7 +124,7 @@
 			// Workers AI suggests merchant names (spec §7, #33), only through src/ai/suggest-name.ts. It needs no
 			// secret. Bindings aren't inherited, so it's repeated in each environment; the nightly job skips the step
 			// where there is none. Local development has none: an AI binding always runs on Cloudflare's side, so at
-			// the top level it would make every `npm test` and `npm run dev` open a remote connection and may incur
+			// the top level it would make every `pnpm test` and `pnpm run dev` open a remote connection and may incur
 			// usage charges. Tests hand the code a fake `AI` instead.
 			"ai": { "binding": "AI" }
 		}

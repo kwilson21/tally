@@ -6,7 +6,7 @@
 // condition is watched two ways: an htmx upgrade fails test/patch-htmx.test.ts until someone reads the changelog, and an
 // anchor that is gone fails the build (the error says the bug may be fixed).
 //
-// patchHtmx(source) is pure. Run as a script, this writes public/vendor/htmx.min.js (npm run build:vendor).
+// patchHtmx(source) is pure. Run as a script, this writes public/vendor/htmx.min.js (pnpm run build:vendor).
 
 const PATCHES = [
 	{
