@@ -18,6 +18,7 @@ import { addNeverSuggest } from "../src/db/never-suggest";
 import { newCategoryItem } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { member } from "./helpers/member";
 
 // Which transactions count as "Jev was sure none of the categories fit" (spec §7, #51), where a
 // suggestion and the transactions behind it are kept, and what a person's Create and Dismiss do.
@@ -151,31 +152,6 @@ const categories = async () =>
 
 /** One of the other member's writes, each of which the tests here make: a category change or an insert. */
 type Write = () => Promise<boolean | number | D1Result | undefined>;
-
-type Method = (...args: never[]) => void;
-
-function isMember<Target extends object>(
-	target: Target,
-	property: PropertyKey,
-): property is keyof Target {
-	return property in target;
-}
-
-function isMethod(value: unknown): value is Method {
-	return typeof value === "function";
-}
-
-/** A member of a database or statement as a proxy hands it on: a method bound to its target, anything else as it is. */
-function member<Target extends object>(
-	target: Target,
-	property: PropertyKey,
-): Target[keyof Target] | Method | undefined {
-	if (!isMember(target, property)) return undefined;
-
-	const value = target[property];
-
-	return isMethod(value) ? value.bind(target) : value;
-}
 
 /** Another member's writes land between a save's read and its batch; only that save runs against the proxy. */
 function racing(...between: Write[]) {
@@ -692,6 +668,48 @@ describe("saveSuggestion", () => {
 			error: "Tally has room for 50 categories. Archive one to add another.",
 		});
 		expect((await categories()).filter((c) => !c.archived)).toHaveLength(50);
+	});
+});
+
+describe("saveSuggestion: a pending row another save filed first", () => {
+	it("attaches the purchases to that row when it appears between the read and the batch (the UNIQUE catch)", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		];
+
+		const before = (await categories()).length;
+
+		const id = known(
+			await saveSuggestion(
+				racing(() =>
+					db
+						.prepare(
+							"INSERT INTO category_suggestions (name, status) VALUES ('Subscriptions', 'pending')",
+						)
+						.run(),
+				),
+				"Subscriptions",
+				made,
+			),
+		);
+
+		const pendingRows = await db
+			.prepare(
+				"SELECT id FROM category_suggestions WHERE name = 'Subscriptions' AND status = 'pending'",
+			)
+			.all<{ id: number }>();
+
+		expect(pendingRows.results).toEqual([{ id }]);
+		expect(await suggestion(id)).toMatchObject({
+			name: "Subscriptions",
+			status: "pending",
+		});
+
+		for (const tx of made)
+			expect((await row(tx))?.category_suggestion_id).toBe(id);
+		expect((await categories()).length).toBe(before);
 	});
 });
 

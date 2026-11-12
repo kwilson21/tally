@@ -1341,7 +1341,7 @@ function retry(
 }
 
 /** The database refused a name that differs only in capitals: someone saved it a moment earlier. */
-const nameTaken = (cause: unknown) =>
+export const nameTaken = (cause: unknown) =>
 	cause instanceof Error && /UNIQUE/.test(cause.message);
 
 /**
