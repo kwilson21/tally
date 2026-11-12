@@ -26,12 +26,3 @@ export function savingsGoalStatement(
 		)
 		.bind(month, cents);
 }
-
-/** Sets the monthly savings goal from `month` on, preserving earlier months. */
-export async function setSavingsGoal(
-	db: D1Database,
-	cents: number,
-	month: string,
-): Promise<void> {
-	await savingsGoalStatement(db, cents, month).run();
-}

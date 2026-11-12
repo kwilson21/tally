@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 70,
+	"legacyBaseline": 67,
 	"handlers": [
 		{
 			"method": "POST",
@@ -104,21 +104,27 @@
 			"path": "/budget/:id{[0-9]+}",
 			"file": "home.tsx",
 			"area": "budgets",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/budgets.ts",
+			"stories": "test/budgets-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/budget/:id{[0-9]+}/nudge/:direction{up|down}",
 			"file": "home.tsx",
 			"area": "budgets",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/budgets.ts",
+			"stories": "test/budgets-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/savings-goal",
 			"file": "home.tsx",
 			"area": "budgets",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/budgets.ts",
+			"stories": "test/budgets-stories.test.ts"
 		},
 		{
 			"method": "POST",
