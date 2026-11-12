@@ -396,3 +396,71 @@ export const fileInCategory = rule({
 	writesText:
 		"Files the purchase in the category as the person's own choice, making the category first when no active one has the name, and records a Yes when it is Tally's guess and Something else when it is not.",
 });
+
+// "N more look like this" (decision 157): after a purchase is filed, the ticked purchases that look like it go in the
+// same category.
+
+export type MoreRequest = {
+	filedId: number;
+	/** The category the card showed. */
+	categoryId: number;
+	who: string;
+};
+
+export type MoreFacts = {
+	/** The filed purchase's category, when a person filed it. Null when the purchase is gone or no person filed it. */
+	filed: { categoryId: number; categoryName: string; archived: boolean } | null;
+	/** The ticked purchases that look like the filed one (the ids posted are checked, never trusted), and whether each still waits for a category. */
+	ticked: { id: number; waiting: boolean }[];
+	/** Stands for everything above as it was read. A save lands only while the stored rows still have this version. */
+	version: string;
+};
+
+/** What the rule saves: the purchases to file in the category, and how many it left because someone decided them. */
+export type MoreWrite = MoreRequest & {
+	name: string;
+	move: number[];
+	skipped: number;
+	expectedVersion: string;
+};
+
+export class CardChanged extends Data.TaggedError("CardChanged") {
+	readonly say = "That purchase was changed somewhere else, so nothing moved.";
+}
+
+type Filed = { filed: MoreFacts["filed"]; categoryId: number };
+
+export const addMoreLikeThis = rule({
+	name: "Add the purchases that look like the one just filed",
+	given: (request: MoreRequest, facts: MoreFacts) => ({
+		...request,
+		...facts,
+	}),
+	refusals: [
+		unless(
+			term<Filed>(
+				"a person filed the purchase the card came from",
+				(g) => g.filed !== null,
+			),
+			() => new AlreadyAnswered(),
+		),
+		unless(
+			term<Filed>(
+				"that purchase is still in the category the card showed, and the category is active",
+				(g) => g.filed?.categoryId === g.categoryId && !g.filed.archived,
+			),
+			() => new CardChanged(),
+		),
+	],
+	writes: (g): MoreWrite => ({
+		filedId: g.filedId,
+		categoryId: g.categoryId,
+		who: g.who,
+		name: g.filed?.categoryName ?? "",
+		move: g.ticked.filter((row) => row.waiting).map((row) => row.id),
+		skipped: g.ticked.filter((row) => !row.waiting).length,
+		expectedVersion: g.version,
+	}),
+	writesText:
+		"Files each ticked purchase that still waits in the category as the person's own choice, and leaves the ones someone decided meanwhile.",
+});

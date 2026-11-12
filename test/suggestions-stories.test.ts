@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
 	acceptCategoryGuess,
+	addMoreLikeThis,
 	answerMoneyMaybe,
 	chooseCategory,
 	dismissNewCategory,
 	type FileFacts,
 	fileInCategory,
 	type MaybeFacts,
+	type MoreFacts,
 	neverSuggestStores,
 } from "../src/rules/suggestions";
 import { answerOf, refuse, write } from "./helpers/rule-answers";
@@ -340,5 +342,83 @@ describe("Answer a Maybe category with a category of your own", () => {
 		expect(ask({ name: "Travel" }, hidden, true)).toMatchObject({
 			kind: "write",
 		});
+	});
+});
+
+describe("Add the purchases that look like the one just filed", () => {
+	const FILED: MoreFacts = {
+		filed: {
+			categoryId: GROCERIES,
+			categoryName: "Groceries",
+			archived: false,
+		},
+		ticked: [
+			{ id: 11, waiting: true },
+			{ id: 12, waiting: false },
+			{ id: 13, waiting: true },
+		],
+		version: VERSION,
+	};
+
+	const request = { filedId: 7, categoryId: GROCERIES, who: WHO };
+
+	const ask = (facts: MoreFacts) =>
+		answerOf(addMoreLikeThis.decide(request, facts));
+
+	const CHANGED = refuse(
+		"CardChanged",
+		"That purchase was changed somewhere else, so nothing moved.",
+	);
+
+	it("files the ticked purchases that still wait, and counts the ones someone decided", () => {
+		expect(ask(FILED)).toEqual(
+			write({
+				...request,
+				name: "Groceries",
+				move: [11, 13],
+				skipped: 1,
+				expectedVersion: VERSION,
+			}),
+		);
+	});
+
+	it("moves nothing when nothing ticked looks like it", () => {
+		expect(ask({ ...FILED, ticked: [] })).toMatchObject({
+			save: { move: [], skipped: 0 },
+		});
+	});
+
+	it.each([
+		[
+			"the purchase is gone, or no person filed it",
+			{ ...FILED, filed: null },
+			ANSWERED,
+		],
+		[
+			"the purchase moved to another category",
+			{
+				...FILED,
+				filed: {
+					categoryId: EATING_OUT,
+					categoryName: "Eating Out",
+					archived: false,
+				},
+			},
+			CHANGED,
+		],
+		[
+			"its category was archived",
+			{
+				...FILED,
+				filed: {
+					categoryId: GROCERIES,
+					categoryName: "Groceries",
+					archived: true,
+				},
+			},
+			CHANGED,
+		],
+	])("refuses when %s", (_story, facts, answer) => {
+		expect(ask(facts)).toEqual(answer);
 	});
 });

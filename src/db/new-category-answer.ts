@@ -6,9 +6,7 @@ import { cleanBankText } from "../clean-bank-text";
 import {
 	activeNamed,
 	fullMessage,
-	MAX_ACTIVE,
 	nameForm,
-	nameKey,
 	normalizeName,
 	parseCategory,
 } from "../settings/category-form";
@@ -17,7 +15,6 @@ import { COLORS, categoryNames } from "./categories";
 import { purchaseNamesToAvoid } from "./category-suggestions";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
-import { categoryAskedSql } from "./suggestions-queue";
 
 /**
  * The limit's words on the Maybe card: the category form's full message, and the offer to add to one the family has

@@ -37,7 +37,6 @@ import {
 	decideNeverSuggest,
 } from "../db/suggestion-saves";
 import {
-	categoryAskedSql,
 	neverSuggestAskedSql,
 	type SuggestionItem,
 	suggestionQueue,
@@ -99,22 +98,6 @@ type Values = CardValues & { id: string };
 
 /** The words when a one tap's category is gone or archived since the card was drawn (#965). */
 const CATEGORY_GONE = "That category is gone. Choose another.";
-
-/** The active category with this id, read from a posted field, or null. Number("") is 0, so the empty text is checked first. */
-async function activeCategoryById(
-	db: D1Database,
-	raw: string,
-): Promise<{ id: number; name: string } | null> {
-	const text = raw.trim();
-	const chosen = Number(text);
-
-	if (text === "" || !Number.isInteger(chosen)) return null;
-
-	return db
-		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
-		.bind(chosen)
-		.first<{ id: number; name: string }>();
-}
 
 export const suggestions = new Hono<App>();
 

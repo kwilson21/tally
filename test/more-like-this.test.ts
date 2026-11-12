@@ -585,7 +585,9 @@ describe("Add checks the filed purchase in the same write (Codex P2)", () => {
 		});
 	});
 
-	it("moves nothing, and reports changed, when the filed purchase is deleted after its read", async () => {
+	// The rule is asked again on the fresh rows (decision 190), so a purchase deleted a moment earlier reads as any
+	// deleted purchase does: gone.
+	it("moves nothing, and reports gone, when the filed purchase is deleted after its read", async () => {
 		const { groceries, filed, peer } = await filedAndPeer();
 
 		const raced = raceAfterFiledRead(db, () =>
@@ -599,7 +601,7 @@ describe("Add checks the filed purchase in the same write (Codex P2)", () => {
 			who: "Kazon",
 		});
 
-		expect(result).toEqual({ ok: false, reason: "changed" });
+		expect(result).toEqual({ ok: false, reason: "gone" });
 		expect(await state(peer)).toEqual({ categoryId: null, source: null });
 	});
 });
