@@ -284,8 +284,10 @@ describe("a rule's terms", () => {
 			"no archived category has the name",
 			"no other active category has the name",
 		]);
-		expect(archiveCategory.nothingToDoIf.text).toBe(
+		expect(archiveCategory.nothingToDoIf?.text).toBe(
 			"the category is already archived",
 		);
+		// Adding always has something to do, so that rule names no such term.
+		expect(addCategory.nothingToDoIf).toBeUndefined();
 	});
 });
