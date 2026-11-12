@@ -2,11 +2,14 @@
 // 206). The rule decides in TypeScript; the database only checks that what the rule read has not changed since, and
 // raises an error when it has, so an answer is never saved against a question the review no longer asks.
 import * as Effect from "effect/Effect";
-import type * as Option from "effect/Option";
+import * as Option from "effect/Option";
 import type {
 	CategoryMaybeWrite,
 	MaybeFacts,
 	MoneyMaybeWrite,
+	NeverSuggestFacts,
+	NeverSuggestRequest,
+	NeverSuggestWrite,
 } from "../rules/suggestions";
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
@@ -14,6 +17,7 @@ import { incomeGuessSql, PERSON_INCOME_SET_SQL } from "./income";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
+	neverSuggestAskedSql,
 	transferAskedSql,
 } from "./suggestions-queue";
 
@@ -183,14 +187,24 @@ export function maybeChangedSinceRead(error: Error): boolean {
 	return GUARD_RAISED.test(error.message);
 }
 
-/** Runs a save's batch, and reads the guard's error as ChangedSinceRead; any other failure is a defect. */
+/** Only the Never suggest guard can try to keep a line with no date. */
+const NEVER_SUGGEST_GUARD_RAISED =
+	/NOT NULL constraint failed: never_suggest_rules\.decided_on/;
+
+/** Whether a save failed because what the rule read had changed, and not for any other reason. */
+export function neverSuggestChangedSinceRead(error: Error): boolean {
+	return NEVER_SUGGEST_GUARD_RAISED.test(error.message);
+}
+
+/** Runs a save's batch, and reads a guard's error as ChangedSinceRead; any other failure is a defect. */
 const saveBatch = (db: D1Database, statements: D1PreparedStatement[]) =>
 	Effect.tryPromise({
 		try: () => db.batch(statements),
 		catch: (cause) => cause,
 	}).pipe(
 		Effect.catch((cause) =>
-			cause instanceof Error && maybeChangedSinceRead(cause)
+			cause instanceof Error &&
+			(maybeChangedSinceRead(cause) || neverSuggestChangedSinceRead(cause))
 				? Effect.fail(new ChangedSinceRead())
 				: Effect.die(cause),
 		),
@@ -248,4 +262,78 @@ export const decideCategoryMaybe = <
 			save: (write) => saveBatch(db, categoryMaybeStatements(db, write)),
 			gaveUp: GAVE_UP,
 		});
+	});
+
+/** The stores the question about item ?1 still asks about, in order, as one text: what the Never suggest rule reads. */
+const askedStores = (kind: NeverSuggestRequest["kind"]) =>
+	`COALESCE((SELECT group_concat(hex(key), '|') FROM (SELECT key FROM (${neverSuggestAskedSql(kind)}) ORDER BY key)), '')`;
+
+/** What the Never suggest rule reads: the stores the question still asks about, and their version. */
+export async function neverSuggestFacts(
+	db: D1Database,
+	kind: NeverSuggestRequest["kind"],
+	itemId: number,
+): Promise<NeverSuggestFacts> {
+	// SAFETY: the batch below lists exactly two statements, so its results are the two D1Results typed here. A batch is
+	// one transaction, so the version is of the very stores read beside it.
+	const [stores, version] = (await db.batch([
+		db.prepare(`SELECT key FROM (${neverSuggestAskedSql(kind)})`).bind(itemId),
+		db.prepare(`SELECT ${askedStores(kind)} AS version`).bind(itemId),
+	])) as [D1Result<{ key: string }>, D1Result<{ version: string }>];
+
+	return {
+		asked: stores.results.map((row) => row.key),
+		version: version.results[0]?.version ?? "",
+	};
+}
+
+/**
+ * The Never suggest save, one batch: the guard, which tries to keep a line with no date when the question's stores have
+ * changed since the rule read them, then the lines. The stores go in as one JSON value, so any number of them is one
+ * bound value; the unique index stays as the backstop (INSERT OR IGNORE).
+ */
+export const neverSuggestStatements = (
+	db: D1Database,
+	save: NeverSuggestWrite,
+) => [
+	db
+		.prepare(
+			`INSERT INTO never_suggest_rules (merchant_key, kind, decided_on)
+			SELECT 'guard', ?2, NULL WHERE ${askedStores(save.kind)} IS NOT ?3`,
+		)
+		.bind(save.itemId, save.kind, save.expectedVersion),
+	db
+		.prepare(
+			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+			SELECT value, ?1, ?2 FROM json_each(?3)`,
+		)
+		.bind(save.kind, save.today, JSON.stringify(save.stores)),
+];
+
+/**
+ * Reads the question's stores, asks the rule and keeps the lines it decides in one batch, asking again on fresh stores
+ * when the guard raises (decideAndSave). Answers with the stores that got a line.
+ */
+export const decideNeverSuggest = <E>(
+	storesRule: {
+		decide: (
+			request: NeverSuggestRequest,
+			facts: NeverSuggestFacts,
+		) => Effect.Effect<Option.Option<NeverSuggestWrite>, E>;
+	},
+	request: NeverSuggestRequest,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const { decided } = yield* decideAndSave({
+			facts: Effect.promise(() =>
+				neverSuggestFacts(db, request.kind, request.itemId),
+			),
+			decide: (facts) => storesRule.decide(request, facts),
+			save: (write) => saveBatch(db, neverSuggestStatements(db, write)),
+			gaveUp: GAVE_UP,
+		});
+
+		return Option.getOrUndefined(decided)?.stores ?? [];
 	});

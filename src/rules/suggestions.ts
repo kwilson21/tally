@@ -166,3 +166,56 @@ export const chooseCategory = rule({
 	writesText:
 		"Sets the transaction to the chosen category as the person's own choice, and records a Yes when that is Tally's guess and Something else when it is not.",
 });
+
+// The question after a No (decision 101): "Never suggest this for these stores again?"
+
+export type NeverSuggestRequest = {
+	kind: "income" | "transfer" | "new_category";
+	/** The item's number: the transaction's, or the suggestion's for a new category. */
+	itemId: number;
+	/** The stores the form posted, each once. */
+	stores: string[];
+	/** The household's date (YYYY-MM-DD) the lines are decided on. */
+	today: string;
+};
+
+export type NeverSuggestFacts = {
+	/** The stores the question about this item still asks about. None once the No is taken back or the lines are kept. */
+	asked: string[];
+	/** Stands for those stores as they were read. A save lands only while the question still asks about the same ones. */
+	version: string;
+};
+
+/** What the rule saves: one "Never suggest" line for each store. */
+export type NeverSuggestWrite = Omit<NeverSuggestRequest, "stores"> & {
+	stores: string[];
+	expectedVersion: string;
+};
+
+export const neverSuggestStores = rule({
+	name: "Say Yes to never suggesting this for a store",
+	given: (request: NeverSuggestRequest, facts: NeverSuggestFacts) => ({
+		...request,
+		// Only the question's own stores get a line, whatever the form posted.
+		stores: request.stores.filter((store) => facts.asked.includes(store)),
+		version: facts.version,
+	}),
+	refusals: [
+		unless(
+			term<{ stores: string[] }>(
+				"the question still asks about at least one of the stores",
+				(g) => g.stores.length > 0,
+			),
+			() => new AlreadyAnswered(),
+		),
+	],
+	writes: (g): NeverSuggestWrite => ({
+		kind: g.kind,
+		itemId: g.itemId,
+		stores: g.stores,
+		today: g.today,
+		expectedVersion: g.version,
+	}),
+	writesText:
+		"Keeps one Never suggest line for each of the question's stores, dated today.",
+});

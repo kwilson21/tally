@@ -4,6 +4,7 @@ import {
 	answerMoneyMaybe,
 	chooseCategory,
 	type MaybeFacts,
+	neverSuggestStores,
 } from "../src/rules/suggestions";
 import { answerOf, refuse, write } from "./helpers/rule-answers";
 
@@ -137,5 +138,48 @@ describe("Answer a Maybe category with Something else", () => {
 		],
 	])("%s", (_story, categoryId, facts, answer) => {
 		expect(ask(categoryId, facts)).toEqual(answer);
+	});
+});
+
+describe("Say Yes to never suggesting this for a store", () => {
+	const ask = (stores: string[], asked: string[]) =>
+		answerOf(
+			neverSuggestStores.decide(
+				{ kind: "new_category", itemId: 5, stores, today: TODAY },
+				{ asked, version: VERSION },
+			),
+		);
+
+	const keeps = (...stores: string[]) =>
+		write({
+			kind: "new_category",
+			itemId: 5,
+			stores,
+			today: TODAY,
+			expectedVersion: VERSION,
+		});
+
+	it.each([
+		[
+			"keeps a line for each store",
+			["petco", "chewy"],
+			["petco", "chewy"],
+			keeps("petco", "chewy"),
+		],
+		[
+			"leaves out a store the question does not ask about",
+			["petco", "costco"],
+			["petco", "chewy"],
+			keeps("petco"),
+		],
+		[
+			"refuses when the question asks about none of them",
+			["costco"],
+			["petco"],
+			ANSWERED,
+		],
+		["refuses when the question is no longer asked", ["petco"], [], ANSWERED],
+	])("%s", (_story, stores, asked, answer) => {
+		expect(ask(stores, asked)).toEqual(answer);
 	});
 });

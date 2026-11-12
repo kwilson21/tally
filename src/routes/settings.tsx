@@ -1282,7 +1282,7 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 
 	const labels = await writeNeverSuggest(c.env.DB, {
 		kind: "new_category",
-		id,
+		itemId: id,
 		stores,
 		today: await householdToday(c.env.DB),
 	});

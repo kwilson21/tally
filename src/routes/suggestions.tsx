@@ -33,7 +33,11 @@ import {
 	suggestedCategoryName,
 } from "../db/new-category-answer";
 import { runningRecheck, startResortFor } from "../db/resort-start";
-import { decideCategoryMaybe, decideMoneyMaybe } from "../db/suggestion-saves";
+import {
+	decideCategoryMaybe,
+	decideMoneyMaybe,
+	decideNeverSuggest,
+} from "../db/suggestion-saves";
 import {
 	categoryAskedSql,
 	neverSuggestAskedSql,
@@ -49,6 +53,8 @@ import {
 	acceptCategoryGuess,
 	answerMoneyMaybe,
 	chooseCategory,
+	type NeverSuggestRequest,
+	neverSuggestStores,
 } from "../rules/suggestions";
 import { CategoryId } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
@@ -232,35 +238,22 @@ async function storeLabels(
 }
 
 /**
- * Yes on a question (decision 101): writes one "Never suggest" line for each store the question asked about, and only
- * while it is still that question, so a No that changed under it writes nothing (#440). Returns the stores' labels, or
- * null when no line was written. Settings' categories asks the same question after its No (decision 120).
+ * Yes on a question (decision 101): the rule keeps one "Never suggest" line for each store the question still asks
+ * about, so a No that changed under it writes nothing (#440). Returns the stores' labels, or null when the rule
+ * refuses because the question is no longer asked. Settings' categories asks the same question after its No (decision 120).
  */
 export async function writeNeverSuggest(
 	db: D1Database,
-	input: {
-		kind: NeverSuggestKind;
-		/** The item's number: the suggestion's, for a new category. */
-		id: number;
-		stores: string[];
-		today: string;
-	},
+	request: NeverSuggestRequest,
 ): Promise<string | null> {
-	const { results } = await db
-		.prepare(
-			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
-			SELECT q.key, ?2, ?3 FROM (${neverSuggestAskedSql(input.kind)}) q
-			WHERE q.key IN (SELECT value FROM json_each(?4)) RETURNING merchant_key`,
-		)
-		.bind(input.id, input.kind, input.today, JSON.stringify(input.stores))
-		.all<{ merchant_key: string }>();
+	const kept = await runWith(
+		db,
+		decideNeverSuggest(neverSuggestStores, request).pipe(
+			Effect.catchTag("AlreadyAnswered", () => Effect.succeed(null)),
+		),
+	);
 
-	const written = new Set(results.map((row) => row.merchant_key));
-	const known = input.stores.filter((store) => written.has(store));
-
-	if (known.length === 0) return null;
-
-	return joinStores([...(await storeLabels(db, known)).values()]);
+	return kept && joinStores([...(await storeLabels(db, kept)).values()]);
 }
 
 /** The toast's and announcement's words once a question's Yes has written its lines (decision 101). */
@@ -728,7 +721,7 @@ suggestions.post(PATH, async (c) => {
 
 		const labels = await writeNeverSuggest(db, {
 			kind: knownKind,
-			id: Number(found[2]),
+			itemId: Number(found[2]),
 			stores,
 			today,
 		});
