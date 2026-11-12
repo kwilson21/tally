@@ -7,6 +7,7 @@ import {
 } from "../db/merchant-key";
 import { tidyName } from "../transactions/tidy-name";
 import { BILL_AMOUNT_TOLERANCE_PERCENT } from "./status";
+import { MAX_OCCURRENCE_CENTS } from "./totals";
 
 /** Rules for finding monthly bills from recent charges (spec §8.2, P18). */
 export const BILL_FIND_MONTHS = 3;
@@ -60,6 +61,10 @@ export function findBillSuggestions(
 		const latest = list.at(-1);
 
 		if (latest === undefined) continue;
+
+		// A found bill is saved at its newest charge's amount, and the set-aside refuses an occurrence past this
+		// (docs/verification.md, "Numbers"), so a charge past it is never offered.
+		if (latest.amountCents > MAX_OCCURRENCE_CENTS) continue;
 
 		const partner = list.slice(0, -1).some((previous) => {
 			const days = dayNumber(latest.date) - dayNumber(previous.date);
