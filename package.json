@@ -28,7 +28,8 @@
 		"html2canvas": "^1.4.1",
 		"htmx.org": "^4.0.0",
 		"pele": "1.13.0",
-		"xstate": "6.0.0-beta.1"
+		"xstate": "6.0.0-beta.1",
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.14",
