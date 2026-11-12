@@ -3,6 +3,9 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"engines": {
+		"node": ">=26"
+	},
 	"scripts": {
 		"build:css": "tailwindcss -i ./src/styles/app.css -o ./public/assets/app.css --minify",
 		"build:vendor": "mkdir -p public/vendor && node scripts/patch-htmx.mjs && cp node_modules/html2canvas/dist/html2canvas.min.js public/vendor/html2canvas.min.js",
