@@ -1,5 +1,5 @@
 // Typed fake data for the catalog. It never touches the database; TypeScript checks each value
-// against the component's props, so a changed component fails `npm run typecheck` here first.
+// against the component's props, so a changed component fails `pnpm run typecheck` here first.
 import { appleCardNotice } from "../apple-card/stale";
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import { daysBefore } from "../dates";

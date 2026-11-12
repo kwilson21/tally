@@ -13,22 +13,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Installs the pnpm version package.json names in packageManager (decision 204).
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
       - uses: actions/setup-node@v7
         with:
           # .nvmrc pins Node's current LTS line (decision 203). It has Temporal built in; test:feedback-integration runs
           # the app under plain Node, and src/dates.ts uses it.
           node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - run: npm run build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
       # Proves the demo and production configs are valid without deploying (no account or secrets needed).
-      - run: npx wrangler deploy --dry-run --env demo --outdir "$RUNNER_TEMP/demo-dry-run"
+      - run: pnpm exec wrangler deploy --dry-run --env demo --outdir "$RUNNER_TEMP/demo-dry-run"
         env:
           WRANGLER_SEND_METRICS: "false"
-      - run: npx wrangler deploy --dry-run --env production --outdir "$RUNNER_TEMP/production-dry-run"
+      - run: pnpm exec wrangler deploy --dry-run --env production --outdir "$RUNNER_TEMP/production-dry-run"
         env:
           WRANGLER_SEND_METRICS: "false"
-      - run: npm run typecheck
+      - run: pnpm run typecheck
       # Decision 188: Dafny checks the contracts on the files in LemmaScript-files.txt. Pinned by version and checksum;
       # the unpacked tool is dev-only and never part of the Worker.
       - name: Install Dafny 4.9.0
@@ -37,7 +39,7 @@ jobs:
           echo "b21575395f2fe3dbcaca09a8219fe29c99d248134e516e95dc3f0c3687d16c27  $RUNNER_TEMP/dafny.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/dafny.zip" -d "$RUNNER_TEMP/dafny-install"
           echo "$RUNNER_TEMP/dafny-install/dafny" >> "$GITHUB_PATH"
-      - run: npx lsc check --backend=dafny
-      - run: npm run lint
-      - run: npm run test:feedback-integration
-      - run: npm test
+      - run: pnpm exec lsc check --backend=dafny
+      - run: pnpm run lint
+      - run: pnpm run test:feedback-integration
+      - run: pnpm test

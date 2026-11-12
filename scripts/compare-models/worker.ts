@@ -1,8 +1,8 @@
 // Measures Clef and Clef-flash against Jev on the demo seed (decision 136, #729). It asks each model Tally's own
 // call (askJev) about every demo case, once with the demo's 7 categories and once with 50, scores each answer
 // with decide at JEV_THRESHOLD, and returns a markdown report. Never deploy it: it bills Workers AI and Jev.
-// Only JEV_API_KEY is read from the env file. It needs `npx wrangler login`. Run it locally:
-//   npx wrangler dev --config scripts/compare-models/wrangler.jsonc --env-file "$(pwd)/.dev.vars" --port 8799
+// Only JEV_API_KEY is read from the env file. It needs `pnpm exec wrangler login`. Run it locally:
+//   pnpm exec wrangler dev --config scripts/compare-models/wrangler.jsonc --env-file "$(pwd)/.dev.vars" --port 8799
 //   curl -s http://localhost:8799/
 // The env file path must be absolute, since Wrangler resolves it from the config's folder. Add ?model=clef&list=demo
 // (model: jev, clef or clef-flash; list: demo or fifty) to run one slice.

@@ -3,13 +3,14 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"packageManager": "pnpm@12.18.0",
 	"engines": {
 		"node": ">=26"
 	},
 	"scripts": {
 		"build:css": "tailwindcss -i ./src/styles/app.css -o ./public/assets/app.css --minify",
 		"build:vendor": "mkdir -p public/vendor && node scripts/patch-htmx.mjs && cp node_modules/html2canvas/dist/html2canvas.min.js public/vendor/html2canvas.min.js",
-		"build": "npm run build:vendor && npm run build:css",
+		"build": "pnpm run build:vendor && pnpm run build:css",
 		"dev": "wrangler dev",
 		"cf-typegen": "wrangler types",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local",
@@ -44,6 +45,7 @@
 		"playwright": "^1.63.0",
 		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2",
+		"vite": "8.3.0",
 		"vitest": "^4.1.11",
 		"wrangler": "^4.158.0"
 	}
