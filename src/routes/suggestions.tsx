@@ -956,12 +956,14 @@ suggestions.post(PATH, async (c) => {
 			const filedAs = async (
 				target: Exclude<NewCategoryTarget, { ok: false }>,
 				refuse: (nameError?: string) => Values,
+				typedByPerson: boolean,
 			) => {
 				const result = await fileInNewCategory(db, {
 					transactionId: item.transactionId,
 					target,
 					today,
 					who,
+					typedByPerson,
 				});
 
 				if (!result.ok) {
@@ -1005,10 +1007,11 @@ suggestions.post(PATH, async (c) => {
 			const typedName = async (
 				typed: string,
 				refuse: (nameError?: string) => Values,
+				typedByPerson: boolean,
 			) => {
 				const target = newCategoryTarget(typed, await categoryNames(db));
 
-				if (target.ok) return filedAs(target, () => refuse());
+				if (target.ok) return filedAs(target, () => refuse(), typedByPerson);
 
 				// The limit is the card's message; a refused name is named by its own field (aria-invalid).
 				const limit = target.error === FULL_NEW_CATEGORY;
@@ -1047,16 +1050,17 @@ suggestions.post(PATH, async (c) => {
 							name: category.name,
 						},
 						() => ({ id }),
+						false,
 					);
 				}
 
 				const typed = String(form.get("new_name") ?? "");
 
-				return typedName(typed, (nameError) => ({
-					id,
-					newName: typed,
-					newNameError: nameError,
-				}));
+				return typedName(
+					typed,
+					(nameError) => ({ id, newName: typed, newNameError: nameError }),
+					false,
+				);
 			}
 
 			// Something else (#965): one category, or one new name, never both. A name with no category is made the same way
@@ -1084,11 +1088,11 @@ suggestions.post(PATH, async (c) => {
 					});
 
 				if (hasName)
-					return typedName(typed, (nameError) => ({
-						id,
-						elseName: typed,
-						elseNameError: nameError,
-					}));
+					return typedName(
+						typed,
+						(nameError) => ({ id, elseName: typed, elseNameError: nameError }),
+						true,
+					);
 
 				const chosen = await activeCategoryById(db, category);
 

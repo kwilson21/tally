@@ -4289,4 +4289,105 @@ describe("a category guess's answers each do one thing (#965)", () => {
 			holder.AI = before;
 		}
 	});
+
+	// #965 review: Never suggest for a new category stops Tally's proposal. It must not refuse a name a person types under
+	// Something else, which is the person's own choice; the dashed row's stale create stays refused.
+	describe("on a store with Never suggest for a new category (#965 review)", () => {
+		async function neverNew() {
+			const card = await categoryCard();
+			await db
+				.prepare(
+					"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+				)
+				.bind(LUPITA)
+				.run();
+
+			return card;
+		}
+
+		it("Something else with only a new name makes the category and files the purchase", async () => {
+			const { ids, id } = await neverNew();
+
+			const { res } = await post(
+				"/settings/suggestions",
+				{ id, answer: "else", category: "", new_name: "Brunch" },
+				true,
+			);
+
+			expect(trigger(res).toast?.message).toBe(
+				"Made Brunch and set Lupita's Taqueria to it.",
+			);
+			const made = await row("SELECT id FROM categories WHERE name = 'Brunch'");
+			expect(made).not.toBeNull();
+			expect(await filedIn(ids.category)).toEqual({ category_id: made?.id });
+		});
+
+		it("Something else with a name the family has files there, and says Added", async () => {
+			const { ids, id } = await neverNew();
+			const groceries = await categoryId("Groceries");
+
+			const { res } = await post(
+				"/settings/suggestions",
+				{ id, answer: "else", category: "", new_name: "groceries" },
+				true,
+			);
+
+			expect(trigger(res).toast?.message).toBe(
+				"Added Lupita's Taqueria to Groceries.",
+			);
+			expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+		});
+
+		it("Something else with only a chosen category still sets it", async () => {
+			const { ids, id } = await neverNew();
+			const groceries = await categoryId("Groceries");
+
+			const { res } = await post(
+				"/settings/suggestions",
+				{ id, answer: "else", category: String(groceries), new_name: "" },
+				true,
+			);
+
+			expect(trigger(res).toast?.message).toBe(
+				"Set Lupita's Taqueria to Groceries.",
+			);
+			expect(await filedIn(ids.category)).toEqual({ category_id: groceries });
+		});
+
+		it("the dashed row's create with a new name is still refused as stale, and makes nothing", async () => {
+			const { ids, id } = await neverNew();
+
+			const { res } = await post(
+				"/settings/suggestions",
+				{ id, answer: "create", new_name: "Brunch" },
+				true,
+			);
+
+			expect(trigger(res).toast?.message).toBe(
+				"That one was already answered.",
+			);
+			expect(
+				await row("SELECT id FROM categories WHERE name = 'Brunch'"),
+			).toBeNull();
+			expect(await filedIn(ids.category)).toEqual({ category_id: null });
+		});
+
+		it("the lazy row gives such a store no name, so no one-tap or new row is drawn even with AI on", async () => {
+			const { id } = await neverNew();
+			await saveAiSwitches(db, { categories: true });
+			const holder: Env & { AI?: Ai } = env;
+			const before = holder.AI;
+			holder.AI = fakeAi(vi.fn(async () => "Groceries"));
+
+			try {
+				const { html } = await get(
+					`/settings/suggestions/new-category?id=${id}`,
+				);
+
+				expect(html.trim()).toBe("");
+			} finally {
+				holder.AI = before;
+			}
+		});
+	});
 });
