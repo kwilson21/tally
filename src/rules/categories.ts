@@ -1,6 +1,10 @@
-// The categories area's rules (decisions 187 and 192): add, rename, archive, restore and move a category. Each takes a
-// typed request and the stored list and answers what to save. The date is an input (decision 195), and nothing here
-// parses, reads a clock or touches the database. The save's guard is in src/db/category-saves.ts (decision 190).
+// The categories area's rules (decisions 187 and 204): add, rename, archive, restore and move a category. Each takes a
+// typed request and the stored list, and either answers what to save (or nothing, when what was asked is already true)
+// or fails with a named refusal. The date is an input (decision 195), and nothing here parses, reads a clock or touches
+// the database. The save's guard is in src/db/category-saves.ts (decision 190).
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { NONE_FIT } from "../ai/decide";
 import {
 	COLORS,
@@ -9,7 +13,7 @@ import {
 	nameKey,
 	sameName,
 } from "../settings/category-form";
-import { defineRule2, type Term, term, unless } from "./rule";
+import { check, term, unless } from "./terms";
 
 export type StoredCategory = {
 	id: number;
@@ -59,6 +63,33 @@ export type MoveCategoryWrite = {
 	expectedVersion: string;
 };
 
+// The refusals: one class each, with the sentence a person reads.
+
+export class CategoryChanged extends Data.TaggedError("CategoryChanged") {
+	readonly say =
+		"That category was changed somewhere else. Here's the current list.";
+}
+
+export class NameReserved extends Data.TaggedError("NameReserved") {
+	readonly say = "That name is reserved for Tally. Pick another.";
+}
+
+export class NameArchived extends Data.TaggedError("NameArchived") {
+	readonly say = "An archived category has that name. Restore it instead.";
+}
+
+export class NameTaken extends Data.TaggedError("NameTaken") {
+	readonly say = "That name is taken.";
+}
+
+export class ListFull extends Data.TaggedError("ListFull")<{
+	readonly action: "add" | "restore";
+}> {
+	get say() {
+		return fullMessage(this.action);
+	}
+}
+
 const active = (facts: CategoryFacts) =>
 	facts.categories.filter((c) => !c.archived);
 
@@ -66,6 +97,9 @@ const lastPlace = (categories: StoredCategory[]) =>
 	categories.reduce((last, c) => Math.max(last, c.sortOrder), 0);
 
 const hasRoom = (facts: CategoryFacts) => active(facts).length < MAX_ACTIVE;
+
+const find = (facts: CategoryFacts, id: number) =>
+	facts.categories.find((c) => c.id === id);
 
 /** What a typed name runs into: Tally's own name, and another category with the same name (an active one first). */
 const nameChecks = (
@@ -86,12 +120,13 @@ const nameChecks = (
 
 type NameChecks = ReturnType<typeof nameChecks>;
 
-const never = <G>(text: string): Term<G> => term<G>(text, () => false);
+type Found = { category: StoredCategory | undefined };
+
+// The terms, shared between the rules.
 
 const nameIsNotReserved = unless(
 	term<NameChecks>("the name is not Tally's own", (g) => !g.reserved),
-	"NameReserved",
-	"That name is reserved for Tally. Pick another.",
+	() => new NameReserved(),
 );
 
 const noArchivedCategoryHasTheName = unless(
@@ -99,8 +134,7 @@ const noArchivedCategoryHasTheName = unless(
 		"no archived category has the name",
 		(g) => !g.archivedHasName,
 	),
-	"NameArchived",
-	"An archived category has that name. Restore it instead.",
+	() => new NameArchived(),
 );
 
 const noOtherCategoryHasTheName = unless(
@@ -108,29 +142,20 @@ const noOtherCategoryHasTheName = unless(
 		"no other active category has the name",
 		(g) => !g.activeHasName,
 	),
-	"NameTaken",
-	"That name is taken.",
+	() => new NameTaken(),
 );
 
-const CHANGED =
-	"That category was changed somewhere else. Here's the current list.";
-
 const categoryIsActive = unless(
-	term<{ category: StoredCategory | undefined }>(
+	term<Found>(
 		"the category is in the active list",
 		(g) => g.category?.archived === false,
 	),
-	"CategoryChanged",
-	CHANGED,
+	() => new CategoryChanged(),
 );
 
 const categoryExists = unless(
-	term<{ category: StoredCategory | undefined }>(
-		"the category exists",
-		(g) => g.category !== undefined,
-	),
-	"CategoryChanged",
-	CHANGED,
+	term<Found>("the category exists", (g) => g.category !== undefined),
+	() => new CategoryChanged(),
 );
 
 const listHasRoom = (action: "add" | "restore") =>
@@ -139,191 +164,173 @@ const listHasRoom = (action: "add" | "restore") =>
 			`fewer than ${MAX_ACTIVE} categories are active`,
 			(g) => g.room,
 		),
-		"ListFull",
-		fullMessage(action),
+		() => new ListFull({ action }),
 	);
 
-type AddGiven = NameChecks & {
-	name: string;
-	room: boolean;
-	color: string;
-	sortOrder: number;
-	version: string;
-};
+const addRefusals = [
+	nameIsNotReserved,
+	noArchivedCategoryHasTheName,
+	noOtherCategoryHasTheName,
+	listHasRoom("add"),
+];
 
-type RenameGiven = NameChecks & {
-	id: number;
-	name: string;
-	category: StoredCategory | undefined;
-	version: string;
-};
-
-type ArchiveGiven = {
-	id: number;
-	today: string;
-	category: StoredCategory | undefined;
-	version: string;
-};
-
-type RestoreGiven = ArchiveGiven & { room: boolean; sortOrder: number };
-
-type MoveGiven = {
-	category: StoredCategory | undefined;
-	/** The active ids in the order they are in now. */
-	order: number[];
-	from: number;
-	to: number;
-	version: string;
-};
-
-const find = (facts: CategoryFacts, id: number) =>
-	facts.categories.find((c) => c.id === id);
-
-export const addCategory = defineRule2({
+export const addCategory = {
 	name: "Add a category",
-	given: (request: { name: string }, facts: CategoryFacts): AddGiven => ({
-		...nameChecks(request.name, facts, null),
-		name: request.name,
-		room: hasRoom(facts),
-		// SAFETY: COLORS is a fixed, non-empty list and the index is taken modulo its length, so the entry exists.
-		color: COLORS[facts.categories.length % COLORS.length] as string,
-		sortOrder: lastPlace(facts.categories) + 1,
-		version: facts.version,
-	}),
-	nothingToDoIf: never<AddGiven>(
-		"never: adding always makes a new category, and a name that exists is refused",
-	),
-	refusals: [
-		nameIsNotReserved,
-		noArchivedCategoryHasTheName,
-		noOtherCategoryHasTheName,
-		listHasRoom("add"),
-	],
-	writes: (g): AddCategoryWrite => ({
-		name: g.name,
-		nameKey: nameKey(g.name),
-		color: g.color,
-		sortOrder: g.sortOrder,
-		expectedVersion: g.version,
-	}),
+	refusals: addRefusals,
 	writesText:
 		"Adds the category at the end of the list, with the tag icon and the next colour in turn.",
-});
+	decide: (request: { name: string }, facts: CategoryFacts) =>
+		Effect.gen(function* () {
+			yield* check(
+				{ ...nameChecks(request.name, facts, null), room: hasRoom(facts) },
+				addRefusals,
+			);
 
-export const renameCategory = defineRule2({
+			return Option.some<AddCategoryWrite>({
+				name: request.name,
+				nameKey: nameKey(request.name),
+				// SAFETY: COLORS is a fixed, non-empty list and the index is taken modulo its length, so the entry exists.
+				color: COLORS[facts.categories.length % COLORS.length] as string,
+				sortOrder: lastPlace(facts.categories) + 1,
+				expectedVersion: facts.version,
+			});
+		}),
+};
+
+const alreadyNamed = term<Found & { name: string }>(
+	"the category is in the active list and already has exactly that name",
+	(g) => g.category?.archived === false && g.category.name === g.name,
+);
+
+const renameRefusals = [
+	categoryIsActive,
+	nameIsNotReserved,
+	noArchivedCategoryHasTheName,
+	noOtherCategoryHasTheName,
+];
+
+export const renameCategory = {
 	name: "Rename a category",
-	given: (
-		request: { id: number; name: string },
-		facts: CategoryFacts,
-	): RenameGiven => ({
-		...nameChecks(request.name, facts, request.id),
-		...request,
-		category: find(facts, request.id),
-		version: facts.version,
-	}),
-	nothingToDoIf: term<RenameGiven>(
-		"the category is in the active list and already has exactly that name",
-		(g) => g.category?.archived === false && g.category.name === g.name,
-	),
-	refusals: [
-		categoryIsActive,
-		nameIsNotReserved,
-		noArchivedCategoryHasTheName,
-		noOtherCategoryHasTheName,
-	],
-	writes: (g): RenameCategoryWrite => ({
-		id: g.id,
-		name: g.name,
-		nameKey: nameKey(g.name),
-		expectedVersion: g.version,
-	}),
+	nothingToDoIf: alreadyNamed,
+	refusals: renameRefusals,
 	writesText: "Sets the category's name.",
-});
+	decide: (request: { id: number; name: string }, facts: CategoryFacts) =>
+		Effect.gen(function* () {
+			const given = {
+				...nameChecks(request.name, facts, request.id),
+				category: find(facts, request.id),
+				name: request.name,
+			};
 
-export const archiveCategory = defineRule2({
+			if (alreadyNamed.holds(given)) return Option.none<RenameCategoryWrite>();
+			yield* check(given, renameRefusals);
+
+			return Option.some<RenameCategoryWrite>({
+				id: request.id,
+				name: request.name,
+				nameKey: nameKey(request.name),
+				expectedVersion: facts.version,
+			});
+		}),
+};
+
+const alreadyArchived = term<Found>(
+	"the category is already archived",
+	(g) => g.category?.archived === true,
+);
+
+const archiveRefusals = [categoryExists];
+
+export const archiveCategory = {
 	name: "Archive a category",
-	given: (
-		request: { id: number; today: string },
-		facts: CategoryFacts,
-	): ArchiveGiven => ({
-		...request,
-		category: find(facts, request.id),
-		version: facts.version,
-	}),
-	nothingToDoIf: term<ArchiveGiven>(
-		"the category is already archived",
-		(g) => g.category?.archived === true,
-	),
-	refusals: [categoryExists],
-	writes: (g): ArchiveCategoryWrite => ({
-		id: g.id,
-		on: g.today,
-		expectedVersion: g.version,
-	}),
+	nothingToDoIf: alreadyArchived,
+	refusals: archiveRefusals,
 	writesText:
 		"Archives the category from today and opens its archive period. Nothing is deleted.",
-});
+	decide: (request: { id: number; today: string }, facts: CategoryFacts) =>
+		Effect.gen(function* () {
+			const given = { category: find(facts, request.id) };
 
-export const restoreCategory = defineRule2({
+			if (alreadyArchived.holds(given))
+				return Option.none<ArchiveCategoryWrite>();
+			yield* check(given, archiveRefusals);
+
+			return Option.some<ArchiveCategoryWrite>({
+				id: request.id,
+				on: request.today,
+				expectedVersion: facts.version,
+			});
+		}),
+};
+
+const alreadyActive = term<Found>(
+	"the category is already in the active list",
+	(g) => g.category?.archived === false,
+);
+
+const restoreRefusals = [categoryExists, listHasRoom("restore")];
+
+export const restoreCategory = {
 	name: "Restore a category",
-	given: (
-		request: { id: number; today: string },
-		facts: CategoryFacts,
-	): RestoreGiven => ({
-		...request,
-		category: find(facts, request.id),
-		room: hasRoom(facts),
-		sortOrder: lastPlace(active(facts)) + 1,
-		version: facts.version,
-	}),
-	nothingToDoIf: term<RestoreGiven>(
-		"the category is already in the active list",
-		(g) => g.category?.archived === false,
-	),
-	refusals: [categoryExists, listHasRoom("restore")],
-	writes: (g): RestoreCategoryWrite => ({
-		id: g.id,
-		on: g.today,
-		sortOrder: g.sortOrder,
-		expectedVersion: g.version,
-	}),
+	nothingToDoIf: alreadyActive,
+	refusals: restoreRefusals,
 	writesText:
 		"Puts the category back at the end of the active list and closes its archive period today.",
-});
+	decide: (request: { id: number; today: string }, facts: CategoryFacts) =>
+		Effect.gen(function* () {
+			const given = { category: find(facts, request.id), room: hasRoom(facts) };
 
-export const moveCategory = defineRule2({
+			if (alreadyActive.holds(given))
+				return Option.none<RestoreCategoryWrite>();
+			yield* check(given, restoreRefusals);
+
+			return Option.some<RestoreCategoryWrite>({
+				id: request.id,
+				on: request.today,
+				sortOrder: lastPlace(active(facts)) + 1,
+				expectedVersion: facts.version,
+			});
+		}),
+};
+
+type Places = { order: number[]; from: number; to: number };
+
+const alreadyAtThatEnd = term<Places>(
+	"the category is in the active list and already at that end of it",
+	(g) => g.from !== -1 && (g.to < 0 || g.to >= g.order.length),
+);
+
+const moveRefusals = [categoryIsActive];
+
+export const moveCategory = {
 	name: "Move a category",
-	given: (
-		request: { id: number; direction: "up" | "down" },
-		facts: CategoryFacts,
-	): MoveGiven => {
-		const order = active(facts).map((c) => c.id);
-		const from = order.indexOf(request.id);
-
-		return {
-			category: find(facts, request.id),
-			order,
-			from,
-			to: request.direction === "up" ? from - 1 : from + 1,
-			version: facts.version,
-		};
-	},
-	nothingToDoIf: term<MoveGiven>(
-		"the category is in the active list and already at that end of it",
-		(g) => g.from !== -1 && (g.to < 0 || g.to >= g.order.length),
-	),
-	refusals: [categoryIsActive],
-	writes: (g): MoveCategoryWrite => ({
-		order: g.order.map((id, i) =>
-			// SAFETY: from and to are both places in order here: the refusal and nothing-to-do above answered the rest.
-			i === g.from
-				? (g.order[g.to] as number)
-				: i === g.to
-					? (g.order[g.from] as number)
-					: id,
-		),
-		expectedVersion: g.version,
-	}),
+	nothingToDoIf: alreadyAtThatEnd,
+	refusals: moveRefusals,
 	writesText:
 		"Swaps the category with its neighbour that way and numbers the active list 1, 2, 3…",
-});
+	decide: (
+		request: { id: number; direction: "up" | "down" },
+		facts: CategoryFacts,
+	) =>
+		Effect.gen(function* () {
+			const order = active(facts).map((c) => c.id);
+			const from = order.indexOf(request.id);
+			const to = request.direction === "up" ? from - 1 : from + 1;
+
+			if (alreadyAtThatEnd.holds({ order, from, to }))
+				return Option.none<MoveCategoryWrite>();
+			yield* check({ category: find(facts, request.id) }, moveRefusals);
+
+			return Option.some<MoveCategoryWrite>({
+				order: order.map((id, i) =>
+					// SAFETY: from and to are both places in order here: the refusal and nothing-to-do above answered the rest.
+					i === from
+						? (order[to] as number)
+						: i === to
+							? (order[from] as number)
+							: id,
+				),
+				expectedVersion: facts.version,
+			});
+		}),
+};

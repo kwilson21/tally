@@ -1,15 +1,19 @@
 import { env } from "cloudflare:workers";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	addCategoryStatements,
 	archiveCategoryStatements,
-	categoriesChangedSinceRead,
-	categoryFacts,
-	decideCategory,
+	decideCategory as decideCategoryIn,
 	moveCategoryStatements,
+	categoryFacts as readCategoryFacts,
 	renameCategoryStatements,
 	restoreCategoryStatements,
+	saveCategories,
+	saveNamedCategory,
 } from "../src/db/category-saves";
+import { Database } from "../src/db/database";
 import { resetDemo } from "../src/demo/reset";
 import {
 	addCategory,
@@ -18,11 +22,44 @@ import {
 	renameCategory,
 	restoreCategory,
 } from "../src/rules/categories";
+import type { Refusal } from "../src/rules/terms";
 
 // The categories area's guard (decision 190): a save lands only while the list the rule read is still the list, and a
 // miss raises an error the save loop recognises, so nothing is saved on a stale list and the rule is asked again.
 
 const db = env.DB;
+
+/** Runs a program of the categories area against the test database. */
+const run = <A, E>(program: Effect.Effect<A, E, Database>) =>
+	Effect.runPromise(program.pipe(Effect.provideService(Database, db)));
+
+const categoryFacts = (_db: D1Database) => run(readCategoryFacts);
+
+const decideCategory = <Request, W, E extends Refusal>(
+	rule: Parameters<typeof decideCategoryIn<Request, W, E>>[0],
+	request: Request,
+	statements: (db: D1Database, save: W) => D1PreparedStatement[],
+) =>
+	run(
+		decideCategoryIn(rule, request, statements).pipe(
+			Effect.match({
+				onFailure: (refusal) => ({ refused: refusal._tag }),
+				onSuccess: (answer) => answer,
+			}),
+		),
+	);
+
+/** How a save's batch ended: saved, the guard raised (the list changed), the name was taken, or it failed some other way. */
+const ending = (statements: D1PreparedStatement[]) =>
+	run(
+		saveNamedCategory(statements).pipe(
+			Effect.match({
+				onFailure: (failure) => failure._tag,
+				onSuccess: () => "saved",
+			}),
+		),
+	);
+
 const TODAY = "2026-09-22";
 
 const rows = async () =>
@@ -55,20 +92,6 @@ const periods = async (id: number) =>
 
 const activeNames = async () =>
 	(await rows()).filter((c) => !c.archived).map((c) => c.name);
-
-/** The error a batch fails with, or null when it runs. */
-const raised = async (statements: D1PreparedStatement[]) => {
-	try {
-		await db.batch(statements);
-	} catch (error) {
-		return error instanceof Error ? error : new Error(String(error));
-	}
-
-	return null;
-};
-
-const guardRaised = (error: Error | null) =>
-	error !== null && categoriesChangedSinceRead(error);
 
 /** Another screen's change, between a rule's read and its save. */
 const someoneElseRenames = () =>
@@ -268,39 +291,39 @@ describe("a save on a list that changed since the rule read it", () => {
 			await someoneElseRenames();
 			const before = await rows();
 
-			expect(guardRaised(await raised(statements(version)))).toBe(true);
+			expect(await ending(statements(version))).toBe("ListChangedSinceRead");
 			expect(await rows()).toEqual(before);
 			expect(await periods(1)).toEqual([]);
 		},
 	);
 
-	it("does not take a taken name's error for the guard's", async () => {
+	it("says a taken name is taken, and does not take it for the guard's error", async () => {
 		const { version } = await categoryFacts(db);
 
-		const error = await raised(
+		const statements = () =>
 			renameCategoryStatements(db, {
 				id: 1,
 				name: "Gas",
 				nameKey: "gas",
 				expectedVersion: version,
-			}),
-		);
+			});
 
-		expect(error?.message).toMatch(/UNIQUE/);
-		expect(guardRaised(error)).toBe(false);
+		expect(await ending(statements())).toBe("NameTaken");
+		// A save that sets no name has no such refusal: the same failure there is a defect, and the request fails.
+		await expect(run(saveCategories(statements()))).rejects.toThrow(/UNIQUE/);
 	});
 });
 
 describe("decideCategory", () => {
-	it("saves a write and answers with the list it decided on and the batch's results", async () => {
+	it("saves what the rule decided and answers with the list it decided on and the batch's results", async () => {
 		const answer = await decideCategory(
-			db,
 			addCategory,
 			{ name: "Travel" },
 			addCategoryStatements,
 		);
 
-		expect(answer.outcome.kind).toBe("write");
+		if ("refused" in answer) throw new Error(`Refused: ${answer.refused}`);
+		expect(Option.isSome(answer.decided)).toBe(true);
 		expect(answer.facts.categories).toHaveLength(7);
 		expect(Number(answer.saved?.[1]?.meta.last_row_id)).toBe(
 			(await rows()).find((c) => c.name === "Travel")?.id,
@@ -311,24 +334,20 @@ describe("decideCategory", () => {
 		const before = await rows();
 
 		const refused = await decideCategory(
-			db,
 			renameCategory,
 			{ id: 1, name: "gas" },
 			renameCategoryStatements,
 		);
 
 		const nothing = await decideCategory(
-			db,
 			restoreCategory,
 			{ id: 1, today: TODAY },
 			restoreCategoryStatements,
 		);
 
-		expect(refused.outcome).toMatchObject({
-			kind: "refuse",
-			type: "NameTaken",
-		});
-		expect(nothing.outcome.kind).toBe("nothingToDo");
+		expect(refused).toEqual({ refused: "NameTaken" });
+		expect("decided" in nothing && Option.isNone(nothing.decided)).toBe(true);
+		expect("saved" in nothing && nothing.saved).toBeUndefined();
 		expect(await rows()).toEqual(before);
 	});
 
@@ -336,7 +355,6 @@ describe("decideCategory", () => {
 		let asked = 0;
 
 		const answer = await decideCategory(
-			db,
 			{
 				decide: (
 					request: { id: number; direction: "up" | "down" },
@@ -364,7 +382,7 @@ describe("decideCategory", () => {
 		);
 
 		expect(asked).toBe(2);
-		expect(answer.outcome.kind).toBe("write");
+		expect("decided" in answer && Option.isSome(answer.decided)).toBe(true);
 		expect((await activeNames()).slice(0, 3)).toEqual([
 			"Eating Out",
 			"Groceries",
@@ -376,20 +394,16 @@ describe("decideCategory", () => {
 		let n = 0;
 
 		await expect(
-			decideCategory(
-				db,
-				archiveCategory,
-				{ id: 1, today: TODAY },
-				(d, save) => [
-					d
-						.prepare("UPDATE categories SET sort_order = sort_order + ?")
-						.bind(++n),
-					...archiveCategoryStatements(d, save),
-				],
-			),
+			decideCategory(archiveCategory, { id: 1, today: TODAY }, (d, save) => [
+				d
+					.prepare("UPDATE categories SET sort_order = sort_order + ?")
+					.bind(++n),
+				...archiveCategoryStatements(d, save),
+			]),
 		).rejects.toThrow(
 			"The categories kept changing while one was being saved.",
 		);
+		expect(n).toBe(3);
 		expect((await rows()).find((c) => c.id === 1)?.archived).toBe(0);
 	});
 });

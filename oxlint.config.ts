@@ -13,6 +13,10 @@ export default defineConfig({
 	],
 	jsPlugins: [
 		{ name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
+		{
+			name: "anti-slop-effect",
+			specifier: "./tools/oxlint/anti-slop/effect/index.ts",
+		},
 	],
 	rules: {
 		"oxc/no-accumulating-spread": "error",
@@ -34,8 +38,21 @@ export default defineConfig({
 		"anti-slop/no-widen-then-assert": "error",
 		"anti-slop/require-readable-spacing": "error",
 		"anti-slop/require-safety-comment-for-type-assertion": "error",
+		"anti-slop-effect/no-manual-effect-error-tag": "error",
+		"anti-slop-effect/no-manual-tag-comparison": "error",
+		"anti-slop-effect/no-manual-tagged-construction": "error",
 	},
 	overrides: [
+		{
+			// Two of the Effect rules read any code as if it were Effect code: one takes every imported make… function for an
+			// Effect service constructor, and one wants Effect's Match for every chained ternary. Effect style is for the write
+			// handlers' rules and saves only (decision 204), so those two apply to the files written in it.
+			files: ["src/rules/**", "src/db/*-saves.ts", "src/db/database.ts"],
+			rules: {
+				"anti-slop-effect/no-service-constructor-imports": "error",
+				"anti-slop-effect/prefer-effect-match": "error",
+			},
+		},
 		{
 			// The feedback form's Node suite stands in for Cloudflare Access by mocking src/access; giving identity a
 			// second way in just for this suite would be a change to how Tally reads who is signed in.

@@ -1,3 +1,5 @@
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vitest";
 import {
 	addCategory,
@@ -7,11 +9,38 @@ import {
 	renameCategory,
 	restoreCategory,
 } from "../src/rules/categories";
-import { nothingToDo, refuse, write } from "../src/rules/rule";
-import { CategoryName, MoveDirection } from "../src/settings/category-form";
+import type { Refusal } from "../src/rules/terms";
+import {
+	CategoryId,
+	CategoryName,
+	MoveDirection,
+	readAtEdge,
+} from "../src/settings/category-form";
 
-// The categories area's five rules as stories (decisions 187, 192): each row is what was asked, what was stored, and
+// The categories area's five rules as stories (decisions 187, 204): each row is what was asked, what was stored, and
 // what the rule answers. The date is an input (decision 195); nothing here touches a clock or a database.
+
+/** What a story expects: what to save, nothing to do, or a named refusal with its sentence. */
+const write = <W>(save: W) => ({ kind: "write" as const, save });
+const nothingToDo = () => ({ kind: "nothingToDo" as const });
+
+const refuse = (type: string, say: string) => ({
+	kind: "refuse" as const,
+	type,
+	say,
+});
+
+/** Runs a rule's answer, which needs nothing handed in, and puts it in a story's words. */
+const answerOf = <W, E extends Refusal>(
+	decided: Effect.Effect<Option.Option<W>, E>,
+) =>
+	Effect.runSync(
+		Effect.match(decided, {
+			onFailure: (refusal) => refuse(refusal._tag, refusal.say),
+			onSuccess: (save) =>
+				Option.isSome(save) ? write(save.value) : nothingToDo(),
+		}),
+	);
 
 const VERSION = "v1";
 const TODAY = "2026-11-12";
@@ -64,7 +93,7 @@ const TAKEN = refuse("NameTaken", "That name is taken.");
 
 describe("Add a category", () => {
 	const ask = (name: string, facts: CategoryFacts) =>
-		addCategory.decide({ name }, facts);
+		answerOf(addCategory.decide({ name }, facts));
 
 	it.each([
 		[
@@ -116,7 +145,7 @@ describe("Add a category", () => {
 
 describe("Rename a category", () => {
 	const ask = (id: number, name: string, facts: CategoryFacts = HOUSE) =>
-		renameCategory.decide({ id, name }, facts);
+		answerOf(renameCategory.decide({ id, name }, facts));
 
 	const saves = (id: number, name: string, nameKey: string) =>
 		write({ id, name, nameKey, expectedVersion: VERSION });
@@ -148,7 +177,7 @@ describe("Rename a category", () => {
 
 describe("Archive a category", () => {
 	const ask = (id: number) =>
-		archiveCategory.decide({ id, today: TODAY }, HOUSE);
+		answerOf(archiveCategory.decide({ id, today: TODAY }, HOUSE));
 
 	it.each([
 		[
@@ -165,7 +194,7 @@ describe("Archive a category", () => {
 
 describe("Restore a category", () => {
 	const ask = (id: number, facts: CategoryFacts) =>
-		restoreCategory.decide({ id, today: TODAY }, facts);
+		answerOf(restoreCategory.decide({ id, today: TODAY }, facts));
 
 	it.each([
 		[
@@ -198,7 +227,7 @@ describe("Restore a category", () => {
 
 describe("Move a category", () => {
 	const ask = (id: number, direction: "up" | "down") =>
-		moveCategory.decide({ id, direction }, HOUSE);
+		answerOf(moveCategory.decide({ id, direction }, HOUSE));
 
 	const saves = (...order: number[]) =>
 		write({ order, expectedVersion: VERSION });
@@ -218,9 +247,9 @@ describe("Move a category", () => {
 describe("the edge", () => {
 	it.each([
 		["  Food   at home ", "Food at home"],
-		["Café", "Café"],
+		["Cafe\u0301", "Café"],
 	])("reads the name %j as %j", (typed, name) => {
-		expect(CategoryName.parse(typed)).toBe(name);
+		expect(readAtEdge(CategoryName, typed)).toEqual({ ok: true, value: name });
 	});
 
 	it.each([
@@ -228,14 +257,35 @@ describe("the edge", () => {
 		["   ", "Give the category a name."],
 		["x".repeat(41), "Keep the name to 40 characters."],
 	])("refuses the name %j", (typed, sentence) => {
-		const read = CategoryName.safeParse(typed);
+		expect(readAtEdge(CategoryName, typed)).toEqual({
+			ok: false,
+			say: sentence,
+		});
+	});
 
-		expect(read.success).toBe(false);
-		expect(read.error?.issues[0]?.message).toBe(sentence);
+	it("reads a category's id from the address, and only a whole number above zero", () => {
+		expect(readAtEdge(CategoryId, "12")).toEqual({ ok: true, value: 12 });
+
+		for (const text of ["0", "-3", "1.5", "abc", ""])
+			expect(readAtEdge(CategoryId, text).ok).toBe(false);
 	});
 
 	it("reads a move's direction, and nothing else", () => {
-		expect(MoveDirection.parse("up")).toBe("up");
-		expect(MoveDirection.safeParse("sideways").success).toBe(false);
+		expect(readAtEdge(MoveDirection, "up")).toEqual({ ok: true, value: "up" });
+		expect(readAtEdge(MoveDirection, "sideways").ok).toBe(false);
+	});
+});
+
+describe("a rule's terms", () => {
+	it("lists each rule's refusals by their English text, in the order they are checked", () => {
+		expect(renameCategory.refusals.map((r) => r.unless.text)).toEqual([
+			"the category is in the active list",
+			"the name is not Tally's own",
+			"no archived category has the name",
+			"no other active category has the name",
+		]);
+		expect(archiveCategory.nothingToDoIf.text).toBe(
+			"the category is already archived",
+		);
 	});
 });

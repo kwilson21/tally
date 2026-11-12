@@ -26,7 +26,9 @@
 		"test:feedback-integration": "vitest run --config vitest.feedback.config.ts"
 	},
 	"dependencies": {
+		"@xstate/effect": "1.0.0-alpha.12",
 		"drizzle-orm": "0.45.4",
+		"effect": "4.1.4",
 		"hono": "^4.13.8",
 		"html2canvas": "^1.4.1",
 		"htmx.org": "^4.0.0",
