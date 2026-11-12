@@ -1,2 +1,3 @@
 src/budget.ts
 src/transactions/split.ts
+src/db/accounts.ts
