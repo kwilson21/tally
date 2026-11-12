@@ -2,11 +2,14 @@
 import { budgetForMonth } from "../budget";
 import {
 	type CategoryValue,
+	COLORS,
 	fullMessage,
 	MAX_ACTIVE,
 	nameKey,
 	sameName,
 } from "../settings/category-form";
+
+export { COLORS };
 
 export type SettingsCategory = {
 	id: number;
@@ -16,15 +19,6 @@ export type SettingsCategory = {
 	/** This month's budget, or null for none (spec §6). */
 	budgetCents: number | null;
 };
-
-/** New categories take the next color in turn, so neighbors differ. */
-export const COLORS = [
-	"cat-blue",
-	"cat-plum",
-	"cat-slate",
-	"cat-ochre",
-	"cat-brown",
-];
 
 type Row = {
 	id: number;

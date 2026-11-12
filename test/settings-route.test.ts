@@ -678,7 +678,6 @@ describe("saving a category", () => {
 describe("a page left open while someone else changed a category", () => {
 	it.each([
 		["save", "/settings/categories/2"],
-		["archive", "/settings/categories/2/archive"],
 		["move", "/settings/categories/2/move/up"],
 	])(
 		"shows the current list with a message on %s, instead of emptying the section",
@@ -698,11 +697,102 @@ describe("a page left open while someone else changed a category", () => {
 		},
 	);
 
-	it("does the same on restore, once it's already back", async () => {
+	it("does the same for a category that was never there", async () => {
+		for (const path of ["archive", "restore", "move/down"]) {
+			const { res, html } = await post(`/settings/categories/999/${path}`, {});
+
+			expect(res.status).toBe(404);
+			expect(html).toMatch(/<section id="categories"/);
+			expect(html).toContain("That category was changed somewhere else.");
+		}
+	});
+
+	it("shows the name's error on the open row for a name that can't be saved, and the message when the row is gone", async () => {
+		const open = await post("/settings/categories/1", { name: " " });
+
+		expect(open.res.status).toBe(422);
+		expect(open.html).toMatch(/role="alert"[^>]*>Give the category a name\./);
+		await post("/settings/categories/2/archive", {});
+		const gone = await post("/settings/categories/2", { name: " " });
+
+		expect(gone.res.status).toBe(404);
+		expect(gone.html).toContain("That category was changed somewhere else.");
+	});
+});
+
+// Every command is safe to repeat (decision 194): a second press of the same button gets the first press's answer.
+describe("pressing a category's button again", () => {
+	it("answers a second Archive as the first, and opens no second archive period", async () => {
+		await post("/settings/categories/2/archive", {});
+		const { res, html } = await post("/settings/categories/2/archive", {});
+
+		expect(res.status).toBe(200);
+		expect(html).toContain("Archived (1)");
+		expect(trigger(res).announce).toBe(
+			"Archived Eating Out. Its transactions keep their category.",
+		);
+
+		const periods = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM category_archive_periods WHERE category_id = 2",
+		).first<{ n: number }>();
+
+		expect(periods?.n).toBe(1);
+	});
+
+	it("answers a second Restore as the first, and leaves the category where it is", async () => {
+		await post("/settings/categories/2/archive", {});
+		await post("/settings/categories/2/restore", {});
 		const { res, html } = await post("/settings/categories/2/restore", {});
-		expect(res.status).toBe(404);
-		expect(html).toMatch(/<section id="categories"/);
-		expect(html).toContain("That category was changed somewhere else.");
+
+		expect(res.status).toBe(200);
+		expect(rowNames(html).at(-1)).toBe("Eating Out");
+		expect(trigger(res).announce).toBe("Restored Eating Out.");
+	});
+
+	it("answers Restore on a category that was never archived the same way, even with the list full", async () => {
+		await env.DB.prepare(
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 43)
+			 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
+		).run();
+		const { res } = await post("/settings/categories/2/restore", {});
+
+		expect(res.status).toBe(200);
+		expect(trigger(res).announce).toBe("Restored Eating Out.");
+	});
+
+	it("answers a rename to the name it has as a save", async () => {
+		const { res } = await post("/settings/categories/3", { name: "Gas" });
+
+		expect(res.status).toBe(200);
+		expect(trigger(res).announce).toBe("Saved Gas.");
+	});
+
+	it("answers a move past the end of the list by saying where the category is", async () => {
+		const { res, html } = await post("/settings/categories/1/move/up", {});
+
+		expect(res.status).toBe(200);
+		expect(rowNames(html)[0]).toBe("Groceries");
+		expect(trigger(res).announce).toBe("Moved Groceries up. It's now 1 of 7.");
+	});
+});
+
+describe("two category saves at the same moment", () => {
+	it("lands both a move and a rename sent together", async () => {
+		// Whichever save lands second finds the list changed: its guard raises, and its rule is asked again.
+		const [moved, renamed] = await Promise.all([
+			post("/settings/categories/3/move/up", {}),
+			post("/settings/categories/1", { name: "Food at home" }),
+		]);
+
+		expect(moved.res.status).toBe(200);
+		expect(renamed.res.status).toBe(200);
+		const { html } = await get("/settings/categories");
+
+		expect(rowNames(html).slice(0, 3)).toEqual([
+			"Food at home",
+			"Gas",
+			"Eating Out",
+		]);
 	});
 });
 

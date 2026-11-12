@@ -44,8 +44,5 @@ export function parseBudgetAmount(
 		: { ok: false, error: read.error.issues[0]?.message ?? NOT_DOLLARS };
 }
 
-/** A category's id from the address: a whole number above zero. */
-export const CategoryId = z.coerce.number().pipe(z.int().positive());
-
 /** Which way a nudge goes, from the address. */
 export const NudgeDirection = z.enum(["up", "down"]);

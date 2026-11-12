@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 67,
+	"legacyBaseline": 62,
 	"handlers": [
 		{
 			"method": "POST",
@@ -131,35 +131,45 @@
 			"path": "/settings/categories",
 			"file": "settings.tsx",
 			"area": "categories",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/categories.ts",
+			"stories": "test/categories-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/categories/:id{[0-9]+}",
 			"file": "settings.tsx",
 			"area": "categories",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/categories.ts",
+			"stories": "test/categories-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/categories/:id{[0-9]+}/archive",
 			"file": "settings.tsx",
 			"area": "categories",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/categories.ts",
+			"stories": "test/categories-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/categories/:id{[0-9]+}/move/:direction{up|down}",
 			"file": "settings.tsx",
 			"area": "categories",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/categories.ts",
+			"stories": "test/categories-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/categories/:id{[0-9]+}/restore",
 			"file": "settings.tsx",
 			"area": "categories",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/categories.ts",
+			"stories": "test/categories-stories.test.ts"
 		},
 		{
 			"method": "POST",

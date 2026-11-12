@@ -6,7 +6,6 @@ import { appleCardNotice } from "../apple-card/stale";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
 import {
-	CategoryId,
 	MAX_BUDGET_CENTS,
 	NudgeDirection,
 	parseBudgetAmount,
@@ -45,6 +44,7 @@ import {
 	saveSavingsGoal,
 } from "../rules/budgets";
 import { handle } from "../rules/rule";
+import { CategoryId } from "../settings/category-form";
 import {
 	asOfDate,
 	type FlaggedBank,
