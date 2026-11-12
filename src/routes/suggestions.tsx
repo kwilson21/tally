@@ -26,15 +26,13 @@ import {
 } from "../db/never-suggest";
 import {
 	FULL_NEW_CATEGORY,
-	fileInNewCategory,
-	type NewCategoryTarget,
-	newCategoryTarget,
 	pendingCategoryNames,
 	suggestedCategoryName,
 } from "../db/new-category-answer";
 import { runningRecheck, startResortFor } from "../db/resort-start";
 import {
 	decideCategoryMaybe,
+	decideFile,
 	decideMoneyMaybe,
 	decideNeverSuggest,
 } from "../db/suggestion-saves";
@@ -53,10 +51,12 @@ import {
 	acceptCategoryGuess,
 	answerMoneyMaybe,
 	chooseCategory,
+	type FileRequest,
+	fileInCategory,
 	type NeverSuggestRequest,
 	neverSuggestStores,
 } from "../rules/suggestions";
-import { CategoryId } from "../settings/category-form";
+import { CategoryId, CategoryName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -880,37 +880,55 @@ suggestions.post(PATH, async (c) => {
 			}
 
 			// The category answers each do one thing (#965). A create with a category is the one tap; a create with a name is the
-			// dashed new row. Both file through filedAs, so the create, the filing and the re-check are one path.
-			// The purchase is filed in an active category the family has, or in a new one made from the typed name.
+			// dashed new row. Both go through the one rule (fileInCategory), so the create, the filing and the re-check are one
+			// path. `refuse` gives the card's values back, with a refused name's sentence on its own field (aria-invalid).
 			const filedAs = async (
-				target: Exclude<NewCategoryTarget, { ok: false }>,
+				target: FileRequest["target"],
 				refuse: (nameError?: string) => Values,
 				typedByPerson: boolean,
 			) => {
-				const result = await fileInNewCategory(db, {
-					transactionId: item.transactionId,
-					target,
-					today,
-					who,
-					typedByPerson,
-				});
-
-				if (!result.ok) {
-					if (result.reason === "gone") return stale();
-
-					return renderScreen(c, {
+				const again = (values: Values, error?: string) =>
+					renderScreen(c, {
 						reviewUrl,
-						values: refuse(),
-						error: FULL_NEW_CATEGORY,
+						values,
+						error,
 						status: 422,
 						focus: true,
 					});
-				}
+
+				const result = await runWith(
+					db,
+					decideFile(fileInCategory, {
+						transactionId: item.transactionId,
+						target,
+						today,
+						who,
+						typedByPerson,
+					}).pipe(
+						Effect.map((filed) => ({ filed })),
+						Effect.catchTags({
+							AlreadyAnswered: () => Effect.succeed({ refused: stale }),
+							CategoryGone: (gone) =>
+								Effect.succeed({ refused: () => again(refuse(), gone.say) }),
+							// The limit is the card's message, with the offer to add to a category the family has.
+							ListFull: () =>
+								Effect.succeed({
+									refused: () => again(refuse(), FULL_NEW_CATEGORY),
+								}),
+						}),
+						Effect.catch((name) =>
+							Effect.succeed({ refused: () => again(refuse(name.say)) }),
+						),
+					),
+				);
+
+				if ("refused" in result) return result.refused();
+				const { name, created } = result.filed;
 
 				// Only a new category starts the re-check (decision 157): an Add to changes nothing the run would sort.
 				// The card's same-text peers (the "N more look like this" offer) are read before the run starts and kept out of
 				// it, so the card still offers them to the person (#842 round 2).
-				const rechecking = result.created
+				const rechecking = created
 					? await startResortFor(c.env, db, {
 							filedId: item.transactionId,
 							excludeIds: (
@@ -919,50 +937,44 @@ suggestions.post(PATH, async (c) => {
 						})
 					: null;
 
-				const after = await suggestionQueue(db);
-
 				return done(
-					result.created
-						? `Made ${result.name} and set ${item.label} to it.`
-						: `Added ${item.label} to ${result.name}.`,
-					after,
+					created
+						? `Made ${name} and set ${item.label} to it.`
+						: `Added ${item.label} to ${name}.`,
+					await suggestionQueue(db),
 					rechecking ? STARTED_ANNOUNCEMENT : "",
 					item.transactionId,
 				);
 			};
 
-			// A typed name, checked as the category form checks it (decision 156): a name the family already has files the
-			// purchase in that one, and a refused name redraws the card with `refuse`'s values and its error on the field.
-			const typedName = async (
+			// A typed name, read at the edge as the category form reads it (decision 156); a name the family already has
+			// files the purchase in that one.
+			const typedName = (
 				typed: string,
 				refuse: (nameError?: string) => Values,
 				typedByPerson: boolean,
 			) => {
-				const target = newCategoryTarget(typed, await categoryNames(db));
+				const name = readAtEdge(CategoryName, typed);
 
-				if (target.ok) return filedAs(target, () => refuse(), typedByPerson);
-
-				// The limit is the card's message; a refused name is named by its own field (aria-invalid).
-				const limit = target.error === FULL_NEW_CATEGORY;
-
-				return renderScreen(c, {
-					reviewUrl,
-					values: refuse(limit ? undefined : target.error),
-					error: limit ? target.error : undefined,
-					status: 422,
-					focus: true,
-				});
+				return name.ok
+					? filedAs({ name: name.value }, refuse, typedByPerson)
+					: renderScreen(c, {
+							reviewUrl,
+							values: refuse(name.say),
+							status: 422,
+							focus: true,
+						});
 			};
 
 			// The dashed row (decision 156, #965): the one tap posts the category's id; the new row posts only a name.
 			if (answer === "create") {
 				if (form.has("category")) {
-					const category = await activeCategoryById(
-						db,
-						form.get("category")?.toString() ?? "",
+					const tapped = readAtEdge(
+						CategoryId,
+						(form.get("category")?.toString() ?? "").trim(),
 					);
 
-					if (!category)
+					if (!tapped.ok)
 						return renderScreen(c, {
 							reviewUrl,
 							values: { id },
@@ -971,16 +983,7 @@ suggestions.post(PATH, async (c) => {
 							focus: true,
 						});
 
-					return filedAs(
-						{
-							ok: true,
-							kind: "existing",
-							id: category.id,
-							name: category.name,
-						},
-						() => ({ id }),
-						false,
-					);
+					return filedAs({ categoryId: tapped.value }, () => ({ id }), false);
 				}
 
 				const typed = String(form.get("new_name") ?? "");

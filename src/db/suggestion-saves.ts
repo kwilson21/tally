@@ -3,17 +3,28 @@
 // raises an error when it has, so an answer is never saved against a question the review no longer asks.
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type {
-	CategoryMaybeWrite,
-	MaybeFacts,
-	MoneyMaybeWrite,
-	NeverSuggestFacts,
-	NeverSuggestRequest,
-	NeverSuggestWrite,
+import * as Predicate from "effect/Predicate";
+import { NameTaken, type StoredCategory } from "../rules/categories";
+import {
+	type CategoryMaybeWrite,
+	type FileFacts,
+	type FileRequest,
+	type FileWrite,
+	fileInCategory,
+	type MaybeFacts,
+	type MoneyMaybeWrite,
+	type NeverSuggestFacts,
+	type NeverSuggestRequest,
+	type NeverSuggestWrite,
 } from "../rules/suggestions";
-import { Database } from "./database";
+import type { Refusal } from "../rules/terms";
+import { LIST, LIST_VERSION } from "./category-saves";
+import { Database, runWith } from "./database";
+import { isUniqueViolation } from "./errors";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 import { incomeGuessSql, PERSON_INCOME_SET_SQL } from "./income";
+import { neverSuggestedSql } from "./never-suggest";
+import type { NewCategoryTarget } from "./new-category-answer";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
@@ -337,3 +348,181 @@ export const decideNeverSuggest = <E>(
 
 		return Option.getOrUndefined(decided)?.stores ?? [];
 	});
+
+// A Maybe category answered with a category of the person's own (the rule fileInCategory).
+
+/** Whether Tally may still propose a new category for the row `t`'s store, as SQL: no Never suggest line hides it. */
+const MAY_PROPOSE = `(NOT ${neverSuggestedSql("t", "new_category")})`;
+
+/**
+ * Everything the filing rule reads as one text, as SQL (?1 the transaction): the whole category list, and for the
+ * purchase whether the review still asks, whether Tally may propose, the guess and the guessed category.
+ */
+const FILE_VERSION = `(${LIST_VERSION} || '/' || COALESCE((SELECT ${QUESTION.category.asked} || ':' || ${MAY_PROPOSE} || ':'
+	|| COALESCE(t.category_confidence, '') || ':' || COALESCE(t.jev_category_id, '') FROM transactions t WHERE t.id = ?1), 'none'))`;
+
+/** What the filing rule reads: the family's categories and the purchase's question, with their version, in one batch. */
+export async function fileFacts(
+	db: D1Database,
+	transactionId: number,
+): Promise<FileFacts> {
+	// SAFETY: the batch below lists exactly three statements, so its results are the three D1Results typed here. A batch
+	// is one transaction, so the version is of the very rows read beside it.
+	const [list, purchase, version] = (await db.batch([
+		db.prepare(LIST),
+		db
+			.prepare(
+				`SELECT ${QUESTION.category.asked} AS asked, ${MAY_PROPOSE} AS mayPropose, t.category_confidence AS confidence,
+					t.jev_category_id AS guessedCategoryId FROM transactions t WHERE t.id = ?1`,
+			)
+			.bind(transactionId),
+		db.prepare(`SELECT ${FILE_VERSION} AS version`).bind(transactionId),
+	])) as [
+		D1Result<Omit<StoredCategory, "archived"> & { archived: number }>,
+		D1Result<{
+			asked: number;
+			mayPropose: number;
+			confidence: number | null;
+			guessedCategoryId: number | null;
+		}>,
+		D1Result<{ version: string }>,
+	];
+
+	const row = purchase.results[0];
+
+	return {
+		categories: list.results.map((c) => ({ ...c, archived: c.archived === 1 })),
+		asked: row?.asked === 1,
+		mayPropose: row?.mayPropose === 1,
+		confidence: row?.confidence ?? null,
+		guessedCategoryId: row?.guessedCategoryId ?? null,
+		version: version.results[0]?.version ?? "",
+	};
+}
+
+/**
+ * The filing's save, one batch: the guard (the Maybes' own, over the list and the purchase), the new category when the
+ * rule makes one, the answer's record, and the purchase's category. A new category is found by the key it was just
+ * stored with. No budget row is written.
+ */
+export const fileStatements = (db: D1Database, save: FileWrite) => [
+	db
+		.prepare(
+			`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+			SELECT 'category', NULL, 'yes', ?2 WHERE ${FILE_VERSION} IS NOT ?3`,
+		)
+		.bind(save.transactionId, save.today, save.expectedVersion),
+	...(save.create
+		? [
+				db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', ?, ?)",
+					)
+					.bind(
+						save.create.name,
+						save.create.nameKey,
+						save.create.color,
+						save.create.sortOrder,
+					),
+			]
+		: []),
+	record(db, "category", save.record, save),
+	db
+		.prepare(
+			`UPDATE transactions SET category_id = COALESCE(?1, (SELECT id FROM categories WHERE name_key = ?2 AND archived = 0)),
+				category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
+				split_removed_bills = NULL, updated_by = ?3, updated_at = datetime('now')
+			WHERE id = ?4`,
+		)
+		.bind(
+			save.categoryId,
+			save.create?.nameKey ?? null,
+			save.who,
+			save.transactionId,
+		),
+];
+
+/**
+ * Reads the filing's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the
+ * guard raises (decideAndSave). The unique indexes on a category's name stay as the backstop: a name they refuse that
+ * the rule's own comparison let through is answered as taken. Answers with the category's name and whether it was made.
+ */
+export const decideFile = <E extends Refusal>(
+	fileRule: {
+		decide: (
+			request: FileRequest,
+			facts: FileFacts,
+		) => Effect.Effect<Option.Option<FileWrite>, E>;
+	},
+	request: FileRequest,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const { decided } = yield* decideAndSave({
+			facts: Effect.promise(() => fileFacts(db, request.transactionId)),
+			decide: (facts) => fileRule.decide(request, facts),
+			save: (write) =>
+				Effect.tryPromise({
+					try: () => db.batch(fileStatements(db, write)),
+					catch: (cause) => cause,
+				}).pipe(
+					Effect.catch(
+						(cause): Effect.Effect<never, ChangedSinceRead | NameTaken> =>
+							cause instanceof Error && maybeChangedSinceRead(cause)
+								? Effect.fail(new ChangedSinceRead())
+								: isUniqueViolation(cause)
+									? Effect.fail(new NameTaken())
+									: Effect.die(cause),
+					),
+				),
+			gaveUp: GAVE_UP,
+		});
+
+		const write = Option.getOrUndefined(decided);
+
+		return { name: write?.name ?? "", created: write?.create != null };
+	});
+
+export type FileResult =
+	| { ok: true; name: string; created: boolean }
+	/** The purchase was answered, or changed, since the card was drawn: nothing was made or filed. */
+	| { ok: false; reason: "gone" }
+	/** The family has its 50 active categories: nothing was made or filed. */
+	| { ok: false; reason: "limit" };
+
+/**
+ * The filing as the rule decides it, for a caller that only tells a full list from every other refusal: the category's
+ * name and whether it was made, or why nothing was filed.
+ */
+export const fileInNewCategory = (
+	db: D1Database,
+	input: {
+		transactionId: number;
+		target: Exclude<NewCategoryTarget, { ok: false }>;
+		today: string;
+		who: string;
+		typedByPerson?: boolean;
+	},
+): Promise<FileResult> =>
+	runWith(
+		db,
+		decideFile(fileInCategory, {
+			transactionId: input.transactionId,
+			today: input.today,
+			who: input.who,
+			typedByPerson: input.typedByPerson ?? false,
+			target:
+				input.target.kind === "existing"
+					? { categoryId: input.target.id }
+					: { name: input.target.name },
+		}).pipe(
+			Effect.match({
+				onSuccess: (filed): FileResult => ({ ok: true, ...filed }),
+				onFailure: (refusal): FileResult => ({
+					ok: false,
+					reason: Predicate.isTagged(refusal, "ListFull") ? "limit" : "gone",
+				}),
+			}),
+		),
+	);

@@ -4,6 +4,8 @@ import {
 	answerMoneyMaybe,
 	chooseCategory,
 	dismissNewCategory,
+	type FileFacts,
+	fileInCategory,
 	type MaybeFacts,
 	neverSuggestStores,
 } from "../src/rules/suggestions";
@@ -216,5 +218,127 @@ describe("Say No to a suggested new category", () => {
 		["one that does not exist", null],
 	])("refuses %s", (_story, status) => {
 		expect(ask(status)).toEqual(CHANGED);
+	});
+});
+
+describe("Answer a Maybe category with a category of your own", () => {
+	/** The family's list: Groceries and Eating Out active, Pets archived, and a purchase the review asks about. */
+	const HOUSE: FileFacts = {
+		categories: [
+			{ id: GROCERIES, name: "Groceries", archived: false, sortOrder: 1 },
+			{ id: EATING_OUT, name: "Eating Out", archived: false, sortOrder: 2 },
+			{ id: 9, name: "Pets", archived: true, sortOrder: 3 },
+		],
+		asked: true,
+		mayPropose: true,
+		confidence: 0.64,
+		guessedCategoryId: GROCERIES,
+		version: VERSION,
+	};
+
+	const FULL: FileFacts = {
+		...HOUSE,
+		categories: Array.from({ length: 50 }, (_, i) => ({
+			id: i + 1,
+			name: `Category ${i + 1}`,
+			archived: false,
+			sortOrder: i + 1,
+		})),
+	};
+
+	const ask = (
+		target: { categoryId: number } | { name: string },
+		facts: FileFacts = HOUSE,
+		typedByPerson = false,
+	) =>
+		answerOf(
+			fileInCategory.decide({ ...answeredBy, target, typedByPerson }, facts),
+		);
+
+	const files = (
+		categoryId: number | null,
+		name: string,
+		record: "yes" | "something_else",
+		create: { color: string; sortOrder: number } | null = null,
+	) =>
+		write({
+			...answeredBy,
+			create: create && { name, nameKey: name.toLowerCase(), ...create },
+			categoryId,
+			name,
+			record,
+			confidence: 0.64,
+			expectedVersion: VERSION,
+		});
+
+	it.each([
+		[
+			"files it in the category tapped",
+			{ categoryId: EATING_OUT },
+			files(EATING_OUT, "Eating Out", "something_else"),
+		],
+		[
+			"records a Yes when the category tapped is Tally's guess",
+			{ categoryId: GROCERIES },
+			files(GROCERIES, "Groceries", "yes"),
+		],
+		[
+			"files it in the active category with the typed name, as the family stored it",
+			{ name: "eating out" },
+			files(EATING_OUT, "Eating Out", "something_else"),
+		],
+		[
+			"makes a new category for a new name, at the end with the next colour",
+			{ name: "Travel" },
+			files(null, "Travel", "something_else", {
+				color: "cat-ochre",
+				sortOrder: 4,
+			}),
+		],
+		["refuses a tapped category that is archived", { categoryId: 9 }, GONE],
+		["refuses a tapped category that does not exist", { categoryId: 99 }, GONE],
+		[
+			"refuses Jev's reserved name",
+			{ name: "None of these fit" },
+			refuse("NameReserved", "That name is reserved for Tally. Pick another."),
+		],
+		[
+			"refuses a name an archived category has",
+			{ name: "pets" },
+			refuse(
+				"NameArchived",
+				"An archived category has that name. Restore it instead.",
+			),
+		],
+	])("%s", (_story, target, answer) => {
+		expect(ask(target)).toEqual(answer);
+	});
+
+	it("refuses a 51st active category, and still adds to one the family has", () => {
+		expect(ask({ name: "Travel" }, FULL)).toEqual(
+			refuse(
+				"ListFull",
+				"Tally has room for 50 categories. Archive one to add another.",
+			),
+		);
+		expect(ask({ name: "category 7" }, FULL)).toMatchObject({
+			kind: "write",
+			save: { categoryId: 7, create: null },
+		});
+	});
+
+	it("says the question was answered before it says the list is full", () => {
+		expect(ask({ name: "Travel" }, { ...FULL, asked: false })).toEqual(
+			ANSWERED,
+		);
+	});
+
+	it("refuses Tally's own proposal for a store with a Never suggest line, and not a name the person typed", () => {
+		const hidden = { ...HOUSE, mayPropose: false };
+
+		expect(ask({ name: "Travel" }, hidden)).toEqual(ANSWERED);
+		expect(ask({ name: "Travel" }, hidden, true)).toMatchObject({
+			kind: "write",
+		});
 	});
 });

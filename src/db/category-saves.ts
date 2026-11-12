@@ -20,8 +20,12 @@ import { ChangedSinceRead, decideAndSave } from "./guarded-save";
  * give the same text only while nothing the rules look at has changed. The name is in hex, so no name can look like
  * the marks between the parts.
  */
-const LIST_VERSION = `(SELECT COALESCE(group_concat(id || ':' || archived || ':' || sort_order || ':' || hex(name), '|'), '')
+export const LIST_VERSION = `(SELECT COALESCE(group_concat(id || ':' || archived || ':' || sort_order || ':' || hex(name), '|'), '')
 	FROM (SELECT id, archived, sort_order, name FROM categories ORDER BY id))`;
+
+/** Every category, active ones first in the order the list shows, as SQL. */
+export const LIST =
+	"SELECT id, name, archived, sort_order AS sortOrder FROM categories ORDER BY archived, sort_order, name, id";
 
 /** What the category rules read: every category, active ones first in the order the list shows, and the list's version. */
 export const categoryFacts = Effect.gen(function* () {
@@ -31,9 +35,7 @@ export const categoryFacts = Effect.gen(function* () {
 	// is one transaction, so the version is of the very list read beside it.
 	const [list, version] = (yield* Effect.promise(() =>
 		db.batch([
-			db.prepare(
-				"SELECT id, name, archived, sort_order AS sortOrder FROM categories ORDER BY archived, sort_order, name, id",
-			),
+			db.prepare(LIST),
 			db.prepare(`SELECT ${LIST_VERSION} AS version`),
 		]),
 	)) as [

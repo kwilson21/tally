@@ -89,19 +89,20 @@ export class ListFull extends Data.TaggedError("ListFull")<{
 	}
 }
 
-const active = (facts: CategoryFacts) =>
+export const active = (facts: CategoryFacts) =>
 	facts.categories.filter((c) => !c.archived);
 
-const lastPlace = (categories: StoredCategory[]) =>
+export const lastPlace = (categories: StoredCategory[]) =>
 	categories.reduce((last, c) => Math.max(last, c.sortOrder), 0);
 
-const hasRoom = (facts: CategoryFacts) => active(facts).length < MAX_ACTIVE;
+export const hasRoom = (facts: CategoryFacts) =>
+	active(facts).length < MAX_ACTIVE;
 
 const find = (facts: CategoryFacts, id: number) =>
 	facts.categories.find((c) => c.id === id);
 
 /** What a typed name runs into: Tally's own name, and another category with the same name (an active one first). */
-const nameChecks = (
+export const nameChecks = (
 	name: string,
 	facts: CategoryFacts,
 	self: number | null,
@@ -123,12 +124,12 @@ type Found = { category: StoredCategory | undefined };
 
 // The terms, shared between the rules.
 
-const nameIsNotReserved = unless(
+export const nameIsNotReserved = unless(
 	term<NameChecks>("the name is not Tally's own", (g) => !g.reserved),
 	() => new NameReserved(),
 );
 
-const noArchivedCategoryHasTheName = unless(
+export const noArchivedCategoryHasTheName = unless(
 	term<NameChecks>(
 		"no archived category has the name",
 		(g) => !g.archivedHasName,
@@ -157,7 +158,7 @@ const categoryExists = unless(
 	() => new CategoryChanged(),
 );
 
-const listHasRoom = (action: "add" | "restore") =>
+export const listHasRoom = (action: "add" | "restore") =>
 	unless(
 		term<{ room: boolean }>(
 			`fewer than ${MAX_ACTIVE} categories are active`,

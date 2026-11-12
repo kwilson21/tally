@@ -6,6 +6,17 @@
 import * as Data from "effect/Data";
 import { categorySuggestionMachine } from "../machines/category-suggestion";
 import { next } from "../machines/next";
+import { COLORS, nameKey, sameName } from "../settings/category-form";
+import {
+	active,
+	type CategoryFacts,
+	hasRoom,
+	lastPlace,
+	listHasRoom,
+	nameChecks,
+	nameIsNotReserved,
+	noArchivedCategoryHasTheName,
+} from "./categories";
 import { rule, term, unless } from "./terms";
 
 /** What a Maybe's rule reads about its transaction. */
@@ -277,4 +288,111 @@ export const dismissNewCategory = rule({
 	}),
 	writesText:
 		"Marks the suggestion dismissed, so the name is never suggested again.",
+});
+
+// A Maybe category answered with a category of the person's own: one the family has (the one tap), or a name, which
+// files the purchase in the active category with that name or makes a new one (decision 156).
+
+export type FileRequest = Answered & {
+	target: { categoryId: number } | { name: string };
+	/**
+	 * True for a name the person typed under Something else: a Never suggest line for a new category stops Tally's
+	 * proposal, not the person's own choice, so it does not refuse that name.
+	 */
+	typedByPerson: boolean;
+};
+
+export type FileFacts = CategoryFacts & {
+	/** Whether the review still asks about this purchase's category. */
+	asked: boolean;
+	/** Whether Tally may still propose a new category for the purchase's store (no Never suggest line). */
+	mayPropose: boolean;
+	confidence: number | null;
+	guessedCategoryId: number | null;
+};
+
+/** What the rule saves: the new category when one is made, the answer's record, and the purchase's category. */
+export type FileWrite = Answered & {
+	create: {
+		name: string;
+		nameKey: string;
+		color: string;
+		sortOrder: number;
+	} | null;
+	/** The category the purchase goes in when the family already has it. Null when it is the one made here. */
+	categoryId: number | null;
+	/** The category's name as the family stored it, or as it is made. */
+	name: string;
+	record: "yes" | "something_else";
+	confidence: number;
+	expectedVersion: string;
+};
+
+export const fileInCategory = rule({
+	name: "Answer a Maybe category with a category of your own",
+	given: (request: FileRequest, facts: FileFacts) => {
+		const { target } = request;
+		const named = "name" in target;
+
+		const existing = active(facts).find((c) =>
+			named ? sameName(c.name, target.name) : c.id === target.categoryId,
+		);
+
+		const creating = named && !existing;
+
+		return {
+			...request,
+			...(named
+				? nameChecks(target.name, facts, null)
+				: { reserved: false, archivedHasName: false, activeHasName: false }),
+			active: named || existing !== undefined,
+			asked: facts.asked && (request.typedByPerson || facts.mayPropose),
+			confidence: facts.confidence,
+			room: !creating || hasRoom(facts),
+			create: creating
+				? {
+						name: target.name,
+						nameKey: nameKey(target.name),
+						// SAFETY: COLORS is a fixed, non-empty list and the index is taken modulo its length, so the entry exists.
+						color: COLORS[facts.categories.length % COLORS.length] as string,
+						sortOrder: lastPlace(facts.categories) + 1,
+					}
+				: null,
+			categoryId: existing?.id ?? null,
+			name: existing?.name ?? (named ? target.name : ""),
+			record:
+				existing !== undefined && existing.id === facts.guessedCategoryId
+					? ("yes" as const)
+					: ("something_else" as const),
+			version: facts.version,
+		};
+	},
+	refusals: [
+		unless(
+			term<{ active: boolean }>(
+				"the chosen category is in the active list",
+				(g) => g.active,
+			),
+			() => new CategoryGone(),
+		),
+		nameIsNotReserved,
+		noArchivedCategoryHasTheName,
+		// A stale answer never reads as the limit, so this is checked before the list's room.
+		stillAsked,
+		listHasRoom("add"),
+	],
+	writes: (g): FileWrite => ({
+		transactionId: g.transactionId,
+		today: g.today,
+		who: g.who,
+		create: g.create,
+		categoryId: g.categoryId,
+		name: g.name,
+		record: g.record,
+		// SAFETY: `stillAsked` refused a null confidence before `writes` runs, so it is a number here.
+		confidence: g.confidence as number,
+		expectedVersion: g.version,
+	}),
+	writesText:
+		"Files the purchase in the category as the person's own choice, making the category first when no active one has the name, and records a Yes when it is Tally's guess and Something else when it is not.",
 });

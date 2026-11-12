@@ -5,10 +5,10 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import {
 	categoriesKey,
 	FULL_NEW_CATEGORY,
-	fileInNewCategory,
 	newCategoryTarget,
 	suggestedCategoryName,
 } from "../src/db/new-category-answer";
+import { fileInNewCategory } from "../src/db/suggestion-saves";
 import { resetDemo } from "../src/demo/reset";
 import { MAX_ACTIVE } from "../src/settings/category-form";
 import { fakeAi } from "./helpers/doubles";
