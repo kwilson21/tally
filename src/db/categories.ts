@@ -7,6 +7,7 @@ import {
 	nameKey,
 	sameName,
 } from "../settings/category-form";
+import { isUniqueViolation } from "./errors";
 
 export type SettingsCategory = {
 	id: number;
@@ -125,7 +126,7 @@ export async function makeCategory(
 		if (id !== null) return { ok: true, id };
 	} catch (error) {
 		// The unique name indexes settle two saves at once (migrations 0005 and 0052).
-		if (!(error instanceof Error && /UNIQUE/i.test(error.message))) throw error;
+		if (!isUniqueViolation(error)) throw error;
 	}
 
 	const taken = (await categoryNames(db)).some((category) =>
