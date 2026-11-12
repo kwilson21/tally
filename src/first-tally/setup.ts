@@ -74,7 +74,7 @@ export type SetupView = {
 const HOUR_MS = 3_600_000;
 
 /**
- * The hour (UTC) of the daily run: wrangler.jsonc's `0 9 * * *` cron, the run that syncs and starts the night's sort
+ * The hour (UTC) of the daily run: cloudflare.config.ts's `0 9 * * *` cron, the run that syncs and starts the night's sort
  * (src/index.tsx `runScheduled`).
  */
 export const DAILY_RUN_UTC_HOUR = 9;

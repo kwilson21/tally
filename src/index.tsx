@@ -104,7 +104,7 @@ app.onError(serverErrorPage);
  */
 const RECONNECT_EMAIL_CRON = "0 10 * * *";
 
-/** Every minute, production only (wrangler.jsonc): the ready push, then the ready email (decisions 146 and 149). */
+/** Every minute, production only (cloudflare.config.ts): the ready push, then the ready email (decisions 146 and 149). */
 const READY_EMAIL_CRON = "* * * * *";
 
 /**

@@ -262,7 +262,7 @@ describe("the tally's counts", () => {
 		const [a] = await someIds(1);
 		await logCategory(present(a), TODAY);
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
-		// The tests' env has no AI binding (wrangler.jsonc), so the page gets a stub that records any ask.
+		// The tests' env has no AI binding (cloudflare.config.ts), so the page gets a stub that records any ask.
 		const ai = fakeAi(vi.fn(async () => ({ response: "Some Place" })));
 
 		const page = await app.request(`${BASE}/settings`, {}, { ...env, AI: ai });

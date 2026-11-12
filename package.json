@@ -11,9 +11,9 @@
 		"build:css": "tailwindcss -i ./src/styles/app.css -o ./public/assets/app.css --minify",
 		"build:vendor": "mkdir -p public/vendor && node scripts/patch-htmx.mjs && cp node_modules/html2canvas/dist/html2canvas.min.js public/vendor/html2canvas.min.js",
 		"build": "pnpm run build:vendor && pnpm run build:css",
-		"dev": "wrangler dev",
-		"cf-typegen": "wrangler types",
-		"db:migrate:local": "wrangler d1 migrations apply DB --local",
+		"dev": "cf dev",
+		"cf-typegen": "cf workers types",
+		"db:migrate:local": "cf d1 migrations apply 00000000-0000-4000-8000-000000000000 --local",
 		"db:seed:local": "curl -fsS \"http://127.0.0.1:8787/cdn-cgi/handler/scheduled\"",
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
 		"lint": "biome check . && oxlint",
@@ -40,6 +40,7 @@
 		"@cloudflare/vitest-plugin": "^1.6.0",
 		"@oxlint/plugins": "1.93.0",
 		"@tailwindcss/cli": "^4.3.3",
+		"cf": "1.0.0-beta.30",
 		"lemmascript": "0.6.6",
 		"oxlint": "1.93.0",
 		"playwright": "^1.63.0",
@@ -47,6 +48,6 @@
 		"typescript": "^7.0.2",
 		"vite": "8.3.0",
 		"vitest": "^4.1.11",
-		"wrangler": "^4.158.0"
+		"wrangler": "^4.160.0"
 	}
 }
