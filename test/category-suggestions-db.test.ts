@@ -663,6 +663,48 @@ describe("saveSuggestion", () => {
 	});
 });
 
+describe("saveSuggestion: a pending row another save filed first", () => {
+	it("attaches the purchases to that row when it appears between the read and the batch (the UNIQUE catch)", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		];
+
+		const before = (await categories()).length;
+
+		const id = present(
+			await saveSuggestion(
+				racing(() =>
+					db
+						.prepare(
+							"INSERT INTO category_suggestions (name, status) VALUES ('Subscriptions', 'pending')",
+						)
+						.run(),
+				),
+				"Subscriptions",
+				made,
+			),
+		);
+
+		const pendingRows = await db
+			.prepare(
+				"SELECT id FROM category_suggestions WHERE name = 'Subscriptions' AND status = 'pending'",
+			)
+			.all<{ id: number }>();
+
+		expect(pendingRows.results).toEqual([{ id }]);
+		expect(await suggestion(id)).toMatchObject({
+			name: "Subscriptions",
+			status: "pending",
+		});
+
+		for (const tx of made)
+			expect((await row(tx))?.category_suggestion_id).toBe(id);
+		expect((await categories()).length).toBe(before);
+	});
+});
+
 describe("namesToAvoid", () => {
 	it("holds every category, archived ones too, and every name a person dismissed, but not a pending one", async () => {
 		await db
