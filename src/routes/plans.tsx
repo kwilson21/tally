@@ -1,26 +1,43 @@
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
 import { addressOf } from "../address";
 import { householdToday, monthName, monthsBefore, shortDay } from "../dates";
+import { runWith } from "../db/database";
 import {
-	holdPlanDelete,
-	insertPlan,
-	linkPlanPayment,
+	addPlanStatements,
+	decideDeletePlan,
+	decideEditPlan,
+	decideLinkPayment,
+	decideMovePlan,
+	decidePlan,
+	decideRestorePlan,
+	decideUnlinkPayment,
+} from "../db/plan-saves";
+import {
 	loadPlan,
-	movePlanToMonth,
-	PLAN_UNDO_MS,
-	type PlanFields,
 	type PlannedExpense,
-	paysBillOrPlan,
 	planPaymentCandidates,
-	restorePlanDelete,
-	unlinkPlanPayment,
-	updatePlan,
 } from "../db/planned-expenses";
 import { hxTrigger } from "../htmx";
 import { PLAN_NAME_MAX } from "../limits";
 import { centsToAmount, formatCents, toCents } from "../money";
+import {
+	addPlan,
+	deletePlan as deletePlanRule,
+	editPlan,
+	linkPayment,
+	movePlan,
+	PLAN_UNDO_MS,
+	type PlanFields,
+	PlanGone,
+	PlanMovedOrPaid,
+	PlanUndoExpired,
+	restorePlan,
+	unlinkPayment,
+} from "../rules/plans";
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Layout } from "../views/layout";
@@ -204,7 +221,15 @@ plans.post("/plans", async (c) => {
 
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { values, errors }, today);
-	await insertPlan(c.env.DB, fields, actor(c));
+	await runWith(
+		c.env.DB,
+		decidePlan(
+			addPlan,
+			{ ...fields, who: actor(c) },
+			async () => null,
+			addPlanStatements,
+		),
+	);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 
@@ -218,9 +243,16 @@ plans.post("/plans/undo-delete", async (c) => {
 	const form = await c.req.parseBody();
 	const token = isText(form.token) ? form.token : undefined;
 
+	// A token that is not one of Tally's names no held delete, so the rule refuses it as it refuses one that expired.
 	const restored =
 		token && /^[0-9a-f-]{36}$/i.test(token)
-			? await restorePlanDelete(c.env.DB, token)
+			? await runWith(
+					c.env.DB,
+					decideRestorePlan(restorePlan, { token, now: Date.now() }).pipe(
+						Effect.map(({ decided }) => Option.getOrNull(decided)),
+						Effect.catchTag("PlanUndoExpired", () => Effect.succeed(null)),
+					),
+				)
 			: null;
 
 	const today = await householdToday(c.env.DB);
@@ -237,7 +269,7 @@ plans.post("/plans/undo-delete", async (c) => {
 					undoDone: token,
 				}
 			: {
-					message: "Undo expired. The planned expense stays deleted.",
+					message: new PlanUndoExpired().say,
 					type: "error",
 					undoDone: token,
 				},
@@ -386,45 +418,37 @@ plans.post("/plans/:id/link", async (c) => {
 	if (!plan) return c.notFound();
 	const transaction = Number((await c.req.parseBody()).transaction_id);
 
-	const linked =
-		Number.isInteger(transaction) &&
-		transaction > 0 &&
-		(await linkPlanPayment(c.env.DB, id, transaction));
+	// The rule says why a link is refused, in the bill side's words (decision 82). A plan paid by the time its link is
+	// sent says so first, as a paid bill month does (#623), and the page names the plan.
+	const refusal = await runWith(
+		c.env.DB,
+		decideLinkPayment(linkPayment, {
+			id,
+			transactionId:
+				Number.isInteger(transaction) && transaction > 0 ? transaction : 0,
+		}).pipe(
+			Effect.as(null),
+			Effect.catchTag("PlanAlreadyPaid", () =>
+				Effect.succeed({
+					_tag: "paid" as const,
+					say: `${plan.name} is already paid.`,
+				}),
+			),
+			Effect.catch((refused) => Effect.succeed(refused)),
+		),
+	);
+
+	if (refusal?._tag === "PlanGone") return c.notFound();
+
+	if (refusal) return planPage(c, id, refusal.say);
 
 	// Linking stays on the plan's page, which now shows it paid (decision 101), as the bill page's link does.
-	if (linked) {
-		if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
+	if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
 
-		return withToast(await planPage(c, id), {
-			message: "Payment linked",
-			type: "success",
-		});
-	}
-
-	// A plan paid by the time its link is sent says so first, as a paid bill month does (decision 82, #623).
-	// It is read again here, so a link that lands after the route's first load gets the same sentence.
-	const now = await loadPlan(c.env.DB, id);
-
-	if (!now) return c.notFound();
-
-	if (now.transactionId) return planPage(c, id, `${now.name} is already paid.`);
-
-	// The refusal names what the payment already pays, in the bill side's words (decision 82).
-	const paid = Number.isInteger(transaction)
-		? await paysBillOrPlan(c.env.DB, transaction)
-		: null;
-
-	if (paid === "bill")
-		return planPage(c, id, "That payment already pays a bill.");
-
-	if (paid === "plan")
-		return planPage(c, id, "That payment already pays a planned expense.");
-
-	return planPage(
-		c,
-		id,
-		`That payment can't be linked. It may already pay a bill or a planned expense.`,
-	);
+	return withToast(await planPage(c, id), {
+		message: "Payment linked",
+		type: "success",
+	});
 });
 
 plans.post("/plans/:id/unlink", async (c) => {
@@ -437,7 +461,16 @@ plans.post("/plans/:id/unlink", async (c) => {
 	const onPage = form.from === "plan";
 	// The sheet's own form carries the opener, so its redrawn sheet still closes to the plan's page.
 	const opener = form.opener === "plan";
-	const unlinked = await unlinkPlanPayment(c.env.DB, id);
+
+	// A stale sheet's second Unlink finds the plan unpaid already, and the rule has nothing to do.
+	const unlinked = await runWith(
+		c.env.DB,
+		decideUnlinkPayment(unlinkPayment, { id }).pipe(
+			Effect.map(({ decided }) => Option.isSome(decided)),
+			Effect.catchTag("PlanGone", () => Effect.succeed(false)),
+		),
+	);
+
 	const today = await householdToday(c.env.DB);
 
 	if (!c.req.header("HX-Request"))
@@ -464,7 +497,14 @@ plans.post("/plans/:id/move", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
 	const plan = await loadPlan(c.env.DB, id);
-	const moved = plan ? await movePlanToMonth(c.env.DB, id, month) : false;
+
+	const moved = await runWith(
+		c.env.DB,
+		decideMovePlan(movePlan, { id, toMonth: month }).pipe(
+			Effect.as(true),
+			Effect.catchTag("PlanMovedOrPaid", () => Effect.succeed(false)),
+		),
+	);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 
@@ -476,14 +516,14 @@ plans.post("/plans/:id/move", async (c) => {
 					type: "success",
 				}
 			: {
-					message: "That planned expense is already moved or paid.",
+					message: new PlanMovedOrPaid().say,
 					type: "error",
 				},
 	);
 });
 
 /** The answer for a plan that is gone when a person acts on it (a delete, or a save that finds it deleted). */
-const PLAN_GONE = "That planned expense is already gone.";
+const PLAN_GONE = new PlanGone().say;
 
 /** Deletes a plan, and offers Undo for ten seconds (decision 101), like a cash entry. */
 async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
@@ -491,14 +531,24 @@ async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
-	const token = await holdPlanDelete(c.env.DB, id);
+	// The Undo's token and the time are made here and handed to the rule (decision 195).
+	const token = crypto.randomUUID();
+
+	const held = await runWith(
+		c.env.DB,
+		decideDeletePlan(deletePlanRule, { id, token, now: Date.now() }).pipe(
+			Effect.as(true),
+			Effect.catchTag("PlanGone", () => Effect.succeed(false)),
+		),
+	);
+
 	const today = await householdToday(c.env.DB);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	const deleted = `${verb} ${plan.name}, ${formatCents(plan.amountCents)}.`;
 	const response = atBills(await billsPage(c, undefined, today));
 
-	if (!token) {
+	if (!held) {
 		return withToast(response, {
 			message: PLAN_GONE,
 			type: "error",
@@ -542,7 +592,20 @@ plans.post("/plans/:id", async (c) => {
 
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { plan, values, errors, opener }, today);
-	const { saved, unlinked } = await updatePlan(c.env.DB, id, fields);
+
+	// Deleted after this handler read it: the rule refuses, and the answer is the gone one a delete gives (#202).
+	const { saved, unlinked } = await runWith(
+		c.env.DB,
+		decideEditPlan(editPlan, { id, fields }).pipe(
+			Effect.map(({ decided }) => ({
+				saved: true,
+				unlinked: Option.getOrUndefined(decided)?.unlinked ?? false,
+			})),
+			Effect.catchTag("PlanGone", () =>
+				Effect.succeed({ saved: false, unlinked: false }),
+			),
+		),
+	);
 
 	// Deleted after this save read it: the answer is the gone one a delete gives, never "Saved" or the plan's address (#202).
 	if (!saved) {

@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 53,
+	"legacyBaseline": 45,
 	"handlers": [
 		{
 			"method": "POST",
@@ -253,56 +253,72 @@
 			"path": "/plans",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/delete",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/drop",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/link",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/move",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/unlink",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/undo-delete",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
