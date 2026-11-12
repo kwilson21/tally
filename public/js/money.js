@@ -10,6 +10,7 @@ const money = new Intl.NumberFormat("en-US", {
 	style: "currency",
 	currency: "USD",
 });
+
 const wholeMoney = new Intl.NumberFormat("en-US", {
 	style: "currency",
 	currency: "USD",
@@ -19,6 +20,7 @@ const wholeMoney = new Intl.NumberFormat("en-US", {
 /** A dollar text (already checked against DOLLARS) as unsigned integer cents. */
 function unsignedCents(text) {
 	const [whole = "", fraction = ""] = text.replace(/[$,]/g, "").split(".");
+
 	return Number(whole || "0") * 100 + Number(fraction.padEnd(2, "0"));
 }
 
@@ -28,14 +30,20 @@ function unsignedCents(text) {
  */
 export function fieldCents(text, credit = false) {
 	const trimmed = text.trim();
+
 	if (trimmed === "") return 0;
+
 	if (credit && trimmed.startsWith("-")) {
 		const body = trimmed.slice(1);
+
 		if (!DOLLARS.test(body)) return null;
 		const cents = unsignedCents(body);
+
 		return cents === 0 ? 0 : -cents;
 	}
+
 	if (!DOLLARS.test(trimmed)) return null;
+
 	return unsignedCents(trimmed);
 }
 
@@ -48,6 +56,7 @@ function isCredit(input) {
 export function showCents(cents) {
 	const sign = cents < 0 ? "-" : "";
 	const size = Math.abs(cents);
+
 	return `${sign}${Math.floor(size / 100)}.${String(size % 100).padStart(2, "0")}`;
 }
 
@@ -62,28 +71,36 @@ export function dollars(cents, whole = false) {
  */
 export function nudged(text, delta, credit = false) {
 	const cents = fieldCents(text, credit);
+
 	if (cents === null) return text;
+
 	if (credit) return showCents(cents + delta);
+
 	if (cents === 0 && delta < 0) return text;
+
 	return showCents(Math.max(0, cents + delta));
 }
 
 /** The next whole dollar, or null when there are no cents to round. */
 export function roundedUp(text) {
 	const cents = fieldCents(text);
+
 	if (cents === null || cents % 100 === 0) return null;
+
 	return showCents(Math.ceil(cents / 100) * 100);
 }
 
 /** Typing stops at two decimals: a pasted amount is cut to them. */
 export function capDecimals(text) {
 	const dot = text.indexOf(".");
+
 	return dot === -1 ? text : text.slice(0, dot + 3);
 }
 
 /** True when the text has a digit after its second decimal place. */
 export function thirdDecimal(text) {
 	const dot = text.indexOf(".");
+
 	return dot !== -1 && text.length - dot - 1 > 2;
 }
 
@@ -102,6 +119,7 @@ export function roundState(text, offer, used) {
 	const up = roundedUp(text);
 	const kept = up === null ? offer : String(fieldCents(up));
 	const usedKept = fieldCents(text) === Number(used) ? used : "";
+
 	return {
 		offer: kept,
 		label: kept === "" ? "" : `Round to ${dollars(Number(kept), true)}`,
@@ -114,6 +132,7 @@ export function roundState(text, offer, used) {
 /** Says a message in the announcer. Clearing it first and setting it a frame later makes each one say itself again. */
 function say(message) {
 	const region = document.getElementById("announcer");
+
 	if (!region) return;
 	region.textContent = "";
 	requestAnimationFrame(() => {
@@ -124,28 +143,35 @@ function say(message) {
 /** Brings the steps, Round to and chips in line with the field's text. */
 export function update(root) {
 	const input = root.querySelector("[data-money-input]");
+
 	if (!input) return;
 	const credit = isCredit(input);
 	const cents = fieldCents(input.value, credit);
+
 	for (const step of root.querySelectorAll("[data-nudge]")) {
 		step.disabled =
 			cents === null ||
 			(!credit && cents === 0 && Number(step.dataset.nudge) < 0);
 	}
+
 	const round = root.querySelector("[data-roundup]");
+
 	if (round) {
 		const state = roundState(
 			input.value,
 			round.dataset.roundup ?? "",
 			round.dataset.rounded ?? "",
 		);
+
 		round.dataset.roundup = state.offer;
 		round.dataset.rounded = state.used;
+
 		if (state.label)
 			round.querySelector("[data-roundup-label]").textContent = state.label;
 		round.hidden = state.hidden;
 		round.setAttribute("aria-pressed", String(state.pressed));
 	}
+
 	for (const chip of root.querySelectorAll("[data-set]")) {
 		chip.setAttribute(
 			"aria-pressed",
@@ -157,19 +183,23 @@ export function update(root) {
 /** Puts new text in the field and says the amount, so a button and the arrow keys are heard alike. */
 export function set(root, text) {
 	const input = root.querySelector("[data-money-input]");
+
 	if (!input) return;
 	input.value = text;
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 	update(root);
 	const cents = fieldCents(text, isCredit(input));
+
 	if (cents !== null) say(dollars(cents));
 }
 
 /** Moves the amount by `delta` cents, when that changes it. */
 export function nudge(root, delta) {
 	const input = root.querySelector("[data-money-input]");
+
 	if (!input) return;
 	const next = nudged(input.value, delta, isCredit(input));
+
 	if (next !== input.value) set(root, next);
 }
 
@@ -180,17 +210,20 @@ export function nudge(root, delta) {
 export function press(root, button) {
 	if (button.disabled || !root.querySelector("[data-money-input]")) return;
 	const hadFocus = document.activeElement === button;
+
 	if (button.dataset.nudge) {
 		nudge(root, Number(button.dataset.nudge));
 	} else if (button.dataset.set) {
 		set(root, showCents(Number(button.dataset.set)));
 	} else {
 		const up = roundedUp(root.querySelector("[data-money-input]").value);
+
 		if (up !== null) {
 			button.dataset.rounded = String(fieldCents(up));
 			set(root, up);
 		}
 	}
+
 	if (hadFocus && button.dataset.nudge && button.disabled) {
 		root
 			.querySelector(`[data-nudge="${-Number(button.dataset.nudge)}"]`)
@@ -201,7 +234,9 @@ export function press(root, button) {
 /** ↑ and ↓ in the field change the amount by a cent, and by a dollar with Shift, as the original's number field did. */
 export function onKeydown(event) {
 	const input = event.target;
+
 	if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+
 	if (
 		!input.matches?.("[data-money-input]") ||
 		event.altKey ||
@@ -210,6 +245,7 @@ export function onKeydown(event) {
 	)
 		return;
 	const root = input.closest("[data-money]");
+
 	if (!root) return;
 	event.preventDefault();
 	const step = event.shiftKey ? 100 : 1;
@@ -219,11 +255,13 @@ export function onKeydown(event) {
 /** A typed third decimal is refused before it lands: the box and the caret stay as they were. */
 export function onBeforeInput(event) {
 	const input = event.target;
+
 	if (
 		event.inputType !== "insertText" ||
 		!input.matches?.("[data-money-input]")
 	)
 		return;
+
 	if (
 		refusesInsert(
 			input.value,
@@ -238,10 +276,13 @@ export function onBeforeInput(event) {
 /** A pasted amount is cut to two decimals, then the steps follow the text. */
 export function onInput(event) {
 	const input = event.target;
+
 	if (!input.matches?.("[data-money-input]")) return;
 	const capped = capDecimals(input.value);
+
 	if (capped !== input.value) input.value = capped;
 	const root = input.closest("[data-money]");
+
 	if (root) update(root);
 }
 
@@ -253,7 +294,9 @@ if (typeof document !== "undefined") {
 		const button = event.target.closest?.(
 			"[data-nudge], [data-roundup], [data-set]",
 		);
+
 		const root = button?.closest("[data-money]");
+
 		if (button && root) press(root, button);
 	});
 

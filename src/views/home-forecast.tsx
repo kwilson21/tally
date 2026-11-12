@@ -21,9 +21,11 @@ export function HomeForecast({
 	differenceCents: number;
 }) {
 	const under = differenceCents >= 0;
+
 	const shownCents = under
 		? Math.floor(differenceCents / 100) * 100
 		: Math.ceil(-differenceCents / 100) * 100;
+
 	const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 	const left = 10;
 	const right = 340;
@@ -31,23 +33,31 @@ export function HomeForecast({
 	const base = 142;
 	let cumulativeCents = 0;
 	let peakCents = 0;
+
 	for (const cents of spentByDay.slice(0, day)) {
 		cumulativeCents += cents;
 		peakCents = Math.max(peakCents, cumulativeCents);
 	}
+
 	const ymax = Math.max(budgetCents, endCents, peakCents, 1);
+
 	const x = (d: number) =>
 		left + ((d - 1) / (daysInMonth - 1)) * (right - left);
+
 	const y = (cents: number) => base - (cents / ymax) * (base - top);
 	let running = 0;
+
 	const actual = spentByDay
 		.slice(0, day)
 		.map((cents, index) => {
 			running += cents;
+
 			return `${x(index + 1).toFixed(1)},${y(running).toFixed(1)}`;
 		})
 		.join(" ");
+
 	const monthLabel = monthName(month).slice(0, 3);
+
 	return (
 		<figure class="mt-3">
 			<svg

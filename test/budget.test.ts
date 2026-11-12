@@ -59,6 +59,7 @@ describe("summarizeMonth with a linked refund", () => {
 			],
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(summary.uncategorized).toEqual({ spentCents: 6000, count: 1 });
 	});
 });
@@ -85,6 +86,7 @@ describe("summarizeMonth", () => {
 				],
 				unpaidDueBillsCents: 50000,
 			});
+
 		expect(finished(0).totalBudgetCents - finished(0).totalSpentCents).toBe(
 			8600,
 		);
@@ -110,6 +112,7 @@ describe("summarizeMonth", () => {
 				transactions: [tx(1, 20000), tx(1, -5000), tx(null, -300000, income)],
 				unpaidDueBillsCents: 0,
 			});
+
 		const flagged = summarize(true);
 		expect(flagged.totalSpentCents).toBe(15000);
 		expect(flagged.incomeCents).toBe(300000);
@@ -188,6 +191,7 @@ describe("summarizeMonth", () => {
 			transactions: [tx(3, 5000)],
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(s.categories.map((c) => c.name)).toEqual([
 			"Groceries",
 			"Eating Out",
@@ -286,6 +290,7 @@ describe("summarizeMonth limits", () => {
 			savingsGoalCents: MAX_CENTS_PER_AMOUNT,
 			unpaidPlansCents: MAX_CENTS_PER_AMOUNT,
 		});
+
 		expect(summary.totalSpentCents).toBe(0);
 	});
 
@@ -317,6 +322,7 @@ describe("summarizeMonth limits", () => {
 		const rows = Array.from({ length: MAX_COUNTED_TRANSACTIONS + 1 }, () =>
 			tx(1, 1),
 		);
+
 		expect(() => month({ transactions: rows })).toThrow(RangeError);
 		expect(() =>
 			month({ transactions: rows.slice(0, MAX_COUNTED_TRANSACTIONS) }),
@@ -326,11 +332,13 @@ describe("summarizeMonth limits", () => {
 	it("names no amount in its error, since transaction details are never logged", () => {
 		const secret = MAX_CENTS_PER_AMOUNT + 123456789;
 		let message = "";
+
 		try {
 			month({ transactions: [tx(1, secret)] });
 		} catch (error) {
-			message = (error as Error).message;
+			if (error instanceof Error) message = error.message;
 		}
+
 		expect(message).not.toBe("");
 		expect(message).not.toContain(String(secret));
 	});

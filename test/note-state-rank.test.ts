@@ -3,17 +3,26 @@ import { describe, expect, it } from "vitest";
 import {
 	laterNoteState,
 	NOTE_RANK,
+	NOTE_STATES,
 	type NoteState,
 	noteRankSql,
 	noteStateMachine,
 	pendingNoteWinsSql,
 } from "../src/machines/note-state";
 
-const STATES = Object.keys(noteStateMachine.config.states ?? {}) as NoteState[];
+/** Whether a machine state is one of NOTE_STATES: a state the rank table must cover. */
+function isNoteState(value: string): value is NoteState {
+	return NOTE_STATES.some((state) => state === value);
+}
+
+const MACHINE_STATES = Object.keys(noteStateMachine.config.states ?? {});
+const STATES = MACHINE_STATES.filter(isNoteState);
 
 describe("the rank of each note state", () => {
 	it("gives every state of the machine exactly one rank, and no other", () => {
+		expect(STATES).toEqual(MACHINE_STATES);
 		expect(Object.keys(NOTE_RANK).sort()).toEqual([...STATES].sort());
+
 		for (const state of STATES) {
 			expect(Number.isInteger(NOTE_RANK[state]), state).toBe(true);
 		}
@@ -26,6 +35,7 @@ describe("the rank of each note state", () => {
 			).first<{
 				rank: number;
 			}>();
+
 			expect(row?.rank, state).toBe(NOTE_RANK[state]);
 		}
 	});
@@ -75,6 +85,7 @@ describe("laterNoteState", () => {
 		["no_call", "tried_empty", "no_call"],
 		["no_call", "guessed", "guessed"], // a note in the row outranks a Jev no
 	];
+
 	for (const [a, b, expected] of MUST_HOLD) {
 		it(`${a} with ${b} is ${expected}`, () => {
 			expect(laterNoteState(a, b)).toBe(expected);
@@ -92,6 +103,7 @@ describe("pendingNoteWinsSql", () => {
 				)
 					.bind(pending, posted)
 					.first<{ wins: number }>();
+
 				const expected = NOTE_RANK[pending] > NOTE_RANK[posted] ? 1 : 0;
 				expect(row?.wins, `${pending} over ${posted}`).toBe(expected);
 			}

@@ -204,6 +204,7 @@ const maybeIncomePanel = (
 /** The group as P41 B draws it, Income switched off, with P43 A's "In October" tally under it. */
 function AiDidScreen({ income }: { income: Child }) {
 	const states = [true, true, false, true];
+
 	return (
 		<div class="overflow-hidden">
 			{/* Scrolled past the group's heading and its line (88px), so the switches and the whole
@@ -437,6 +438,7 @@ const RULES_A_TO_Z: Rule[] = [
 /** P69 A's row: the merchant, its category and how many it has sorted, with Remove. */
 function RuleRow({ rule, grouped }: { rule: Rule; grouped?: boolean }) {
 	const [merchant, cat, n] = rule;
+
 	return (
 		<li class="flex min-h-16 items-center gap-4 py-2">
 			{!grouped && <CategoryIcon icon={cat.icon} color={cat.color} />}
@@ -614,6 +616,7 @@ const selectPageOnly = (
 
 const PRIVACY_END =
 	"This is best-effort redaction, not a guarantee that a report contains no personal information.";
+
 const PRIVACY_TAIL = `It cannot reliably identify arbitrary names or every sensitive detail in prose; inspect the text and remove anything you do not want to send. The Worker repeats redaction before storage and private GitHub filing. New feedback records do not include your sign-in email. A random one-hour limiter cookie provides a best-effort per-browser rate limit; it can be cleared and is not a person-level identity or security boundary. Tally stores the report type, feeling, cleaned message, approved route category, coarse device category, and submission time in Cloudflare D1. Private GitHub filing receives the cleaned report fields without the sign-in email or submission time. ${PRIVACY_END}`;
 
 /** A ledger-line text area (prototype, like LedgerField): a small muted label, the text on a rule. */
@@ -835,6 +838,7 @@ type QuietBillProps = {
 /** P72 A's Add a bill, as BillA draws it, with the pieces these two questions change given. */
 function QuietBill(props: QuietBillProps) {
 	const { id, bill: b } = props;
+
 	return (
 		<TallSheet
 			behind={billsBehind}
@@ -1194,6 +1198,7 @@ function NamesList({ look }: { look: Look }) {
 			/>
 		),
 	);
+
 	return (
 		<>
 			<Title>Transactions</Title>
@@ -1283,6 +1288,7 @@ function NameQuestion({
 	source: Child;
 }) {
 	const guess = of === "guess";
+
 	return (
 		<>
 			<ReviewHead

@@ -16,12 +16,14 @@ import type {
 } from "../src/first-tally/first-page";
 import { questionHeading, questionScreen } from "../src/routes/first-page";
 import { safeToSpendText } from "../src/views/home-top";
+import { itemAt } from "./helpers/present";
 
 // The screen a model draws at /setup (P142 A, decision 148, #773): the question its step asks, one screen at a time, and the
 // heading each draws, which the in-place redraw announces. Each branch of questionScreen is drawn here, the setup finish (#774)
 // included.
 
 const EVERY_OTHER_FRIDAY = ["2026-09-11", "2026-09-25", "2026-10-09"];
+
 const PAY: PayMerchant = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
@@ -38,7 +40,8 @@ const charge = (name: string, amountCents: number, dueDay: number) =>
 		dueDay,
 		categoryId: 1,
 		chargeCount: 2,
-	}) as BillSuggestion;
+	}) satisfies BillSuggestion;
+
 const KEEP = [charge("Netflix", 1549, 5), charge("Spotify", 1199, 9)];
 const WAITING = [charge("Gym", 4500, 3)];
 
@@ -46,6 +49,7 @@ const MONTHS = [
 	{ month: "2026-08", spentCents: 61000 },
 	{ month: "2026-09", spentCents: 67400 },
 ];
+
 const GROCERIES: BudgetAsk = {
 	id: 1,
 	name: "Groceries",
@@ -54,6 +58,7 @@ const GROCERIES: BudgetAsk = {
 	months: MONTHS,
 	suggestion: { amountCents: 65000, months: MONTHS },
 };
+
 const EATING: BudgetAsk = {
 	id: 2,
 	name: "Eating Out",
@@ -62,6 +67,7 @@ const EATING: BudgetAsk = {
 	months: MONTHS,
 	suggestion: { amountCents: 15000, months: MONTHS },
 };
+
 const GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
@@ -110,7 +116,7 @@ const notDone = (over: Partial<Extract<BudgetsStep, { done: false }>> = {}) =>
 		firstDate: "2026-08-01",
 		nothingAsked: null,
 		...over,
-	}) as BudgetsStep;
+	}) satisfies BudgetsStep;
 
 const render = (
 	model: FirstPageModel,
@@ -125,6 +131,7 @@ const render = (
 const h1Of = (markup: string) =>
 	markup.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/)?.[1]?.replaceAll("&#39;", "'") ??
 	null;
+
 /** Whether the screen's h1 takes focus. */
 const h1Focused = (markup: string) => /<h1\b[^>]*\sautofocus/.test(markup);
 
@@ -164,20 +171,20 @@ describe("questionScreen", () => {
 	});
 
 	it("keeps all the suggestions while keep all is open, in its own form to /setup/budgets", () => {
-		const markup = render(SCREENS[2]?.model as FirstPageModel);
+		const markup = render(itemAt(SCREENS, 2).model);
 		expect(h1Of(markup)).toBe(keepAllQuestion(2));
 		expect(markup).toContain('action="/setup/budgets"');
 		expect(markup).toContain("Go one at a time");
 	});
 
 	it("asks one category when keep all isn't open, with its question and no Keep all", () => {
-		const markup = render(SCREENS[3]?.model as FirstPageModel);
+		const markup = render(itemAt(SCREENS, 3).model);
 		expect(h1Of(markup)).toBe(askHeading(GAS));
 		expect(markup).not.toContain("Keep all");
 	});
 
 	it("asks the savings question once no category is left to ask", () => {
-		const markup = render(SCREENS[4]?.model as FirstPageModel);
+		const markup = render(itemAt(SCREENS, 4).model);
 		expect(h1Of(markup)).toBe("Save some each month?");
 		expect(markup).toContain('action="/setup/savings"');
 	});
@@ -186,6 +193,7 @@ describe("questionScreen", () => {
 		const markup = render(
 			modelOf({ payAnswered: true, budgets: { done: true }, finish: FINISH }),
 		);
+
 		expect(markup).toContain('id="setup-screen"');
 		expect(h1Of(markup)).toBe(FINISH_HEADING);
 		expect(markup).toContain("Safe to spend in October");
@@ -206,6 +214,7 @@ describe("questionScreen", () => {
 				finish: FINISH,
 			}),
 		);
+
 		expect(h1Of(markup)).toBe(FINISH_HEADING);
 		expect(markup).not.toContain("Is this your pay?");
 		expect(markup).not.toContain('action="/setup/pay"');
@@ -231,29 +240,32 @@ describe("questionScreen", () => {
 			budgets: { done: true },
 			finish: FINISH,
 		});
+
 		expect(h1Focused(render(finish, true))).toBe(true);
 		expect(h1Focused(render(finish, false))).toBe(false);
 	});
 
 	it("moves the focus from a refused amount's heading to its field, as the one-at-a-time screen does", () => {
-		const refused = render(SCREENS[3]?.model as FirstPageModel, true, {
+		const refused = render(itemAt(SCREENS, 3).model, true, {
 			budgetError: {
 				text: "Enter a dollar amount, like 250 or 250.50.",
 				typed: "lots",
 			},
 		});
+
 		expect(h1Focused(refused)).toBe(false);
 		expect(refused).toMatch(/<input\b[^>]*\sautofocus/);
 		expect(refused).toContain('value="lots"');
 	});
 
 	it("passes a refused Save it to the savings screen, with its words and the focus in its field", () => {
-		const markup = render(SCREENS[4]?.model as FirstPageModel, true, {
+		const markup = render(itemAt(SCREENS, 4).model, true, {
 			savingsError: {
 				text: "Enter an amount greater than $0, or choose Not now.",
 				typed: "",
 			},
 		});
+
 		expect(markup).toContain(
 			"Enter an amount greater than $0, or choose Not now.",
 		);
@@ -284,6 +296,7 @@ describe("questionScreen", () => {
 				budgets: notDone({ asks: [GAS] }),
 			}),
 		);
+
 		expect(markup).toContain("Your bills");
 		expect(markup).toContain("1 more waits in");
 		expect(markup).toContain('href="/bills/find"');
@@ -295,6 +308,7 @@ describe("questionScreen", () => {
 				budgets: notDone({ asks: [], nothingAsked: "no-categories" }),
 			}),
 		);
+
 		expect(markup).toContain("Your pay");
 		expect(markup).toContain("Your bills");
 		expect(markup).toContain("No categories to budget yet.");
@@ -323,13 +337,13 @@ describe("questionHeading", () => {
 	it("names each question's heading, as the screen draws it", () => {
 		expect(questionHeading(modelOf({ pay: [PAY] }))).toBe("Is this your pay?");
 		expect(questionHeading(modelOf({ keep: KEEP }))).toBe(keepHeading(2));
-		expect(questionHeading(SCREENS[2]?.model as FirstPageModel)).toBe(
+		expect(questionHeading(itemAt(SCREENS, 2).model)).toBe(
 			"Keep these budgets?",
 		);
-		expect(questionHeading(SCREENS[3]?.model as FirstPageModel)).toBe(
+		expect(questionHeading(itemAt(SCREENS, 3).model)).toBe(
 			"Do you want a Gas budget?",
 		);
-		expect(questionHeading(SCREENS[4]?.model as FirstPageModel)).toBe(
+		expect(questionHeading(itemAt(SCREENS, 4).model)).toBe(
 			"Save some each month?",
 		);
 	});
@@ -339,6 +353,7 @@ describe("questionHeading", () => {
 			payAnswered: true,
 			budgets: notDone({ asks: [GROCERIES, GAS], keepAllOpen: true }),
 		});
+
 		expect(questionHeading(model)).toBe(keepAllQuestion(1));
 		expect(h1Of(render(model))).toBe(keepAllQuestion(1));
 	});

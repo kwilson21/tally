@@ -84,6 +84,7 @@ describe("the Maybe card's three answers, in order (decision 156)", () => {
 		const html = card({
 			suggestUrl: `${PATH}/new-category?id=category-9&skip=income-1`,
 		});
+
 		expect(html).toContain('hx-trigger="load"');
 		expect(html).toContain(
 			`hx-get="${PATH}/new-category?id=category-9&amp;skip=income-1"`,
@@ -97,6 +98,7 @@ describe("the Maybe card's three answers, in order (decision 156)", () => {
 			values: { id: "category-9", newName: "Books and audio" },
 			error: "Give the category a name.",
 		});
+
 		expect(html).toContain('value="Books and audio"');
 		expect(html).toMatch(/<details[^>]*border-dashed[^>]*\bopen/);
 		expect(html).toContain('role="alert"');
@@ -143,6 +145,7 @@ describe("the dashed row for an existing category (decision 165)", () => {
 			categories: withBooks,
 			values: { id: "category-9", newName: "books & MEDIA" },
 		});
+
 		expect(html).toContain("Existing category: Books &amp; media");
 		expect(html).not.toContain("New category:");
 		expect(html).toMatch(
@@ -156,6 +159,7 @@ describe("the dashed row for an existing category (decision 165)", () => {
 			suggestedName: "Books & audio",
 			categories: withBooks,
 		});
+
 		expect(html).toContain("New category: Books &amp; audio");
 		expect(html).not.toContain("Existing category");
 		expect(html).toMatch(
@@ -186,6 +190,7 @@ describe("the suggestion row is not shown when it is the guess's own category (d
 			suggestedName: "Entertainment",
 			suggestUrl: `${PATH}/new-category?id=category-9`,
 		});
+
 		expect(html).not.toContain('hx-trigger="load"');
 		expect(html).toContain("Yes, Entertainment");
 	});
@@ -196,6 +201,7 @@ describe("the suggestion row is not shown when it is the guess's own category (d
 			suggestedName: "Books & media",
 			categories: withBooks,
 		});
+
 		expect(html).toContain("Tally&#39;s suggestion: ");
 		expect(html).toContain("Existing category: Books &amp; media");
 		expect(html).toContain("Save and next");
@@ -215,6 +221,7 @@ describe("the suggestion row is not shown when it is the guess's own category (d
 			values: { id: "category-9", newName: "Entertainment" },
 			error: "Give the category a name.",
 		});
+
 		expect(html).toContain('name="new_name"');
 	});
 });

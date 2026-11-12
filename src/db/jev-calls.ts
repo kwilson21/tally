@@ -34,6 +34,7 @@ export async function reserveJevCalls(
 ): Promise<number> {
 	if (cap < 1 || wanted < 1) return 0;
 	const key = keyFor(day);
+
 	const [recorded] = await db.batch<{ value: string }>([
 		// A plain INSERT, never an upsert: a second reserve for the same group must fail whole.
 		db
@@ -65,6 +66,7 @@ export async function reserveJevCalls(
 			)
 			.bind(`jev_reserved_${daysBefore(day, 2)}`),
 	]);
+
 	return Number(recorded?.results[0]?.value ?? 0);
 }
 
@@ -89,6 +91,7 @@ export function giveBackReservedJevCallsStatement(
 			WHERE key = ?`,
 		turnId,
 	);
+
 	return db
 		.prepare(guarded.sql)
 		.bind(
@@ -110,6 +113,7 @@ export function dropReservedJevCallsStatement(
 		"DELETE FROM household_settings WHERE key = ?",
 		turnId,
 	);
+
 	return db
 		.prepare(guarded.sql)
 		.bind(reservedKeyFor(day, turnId), ...guarded.binds);

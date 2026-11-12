@@ -18,6 +18,7 @@ export function AccountsTop({
 	action?: Child;
 }) {
 	const netWorth = formatCents(netWorthCents, { wholeDollars: true });
+
 	return (
 		<>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Accounts</h1>

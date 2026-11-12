@@ -63,15 +63,19 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 
 	it("draws the head as P120 B's: the name as the one headline, its amount in muted words, then the bank's text small", async () => {
 		const html = await page();
+
 		const name = html.indexOf(
 			'<h1 id="page-title" class="font-serif text-3xl font-semibold tracking-tight">Streaming</h1>',
 		);
+
 		const amount = html.indexOf(
 			'<p class="text-muted">$2.99 a month, due the 15th</p>',
 		);
+
 		const bank = html.indexOf(
 			'<p class="text-sm text-muted">APPLE.COM/BILL</p>',
 		);
+
 		expect(name).toBeGreaterThan(-1);
 		expect(amount).toBeGreaterThan(name);
 		expect(bank).toBeGreaterThan(amount);
@@ -96,12 +100,15 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 
 	it("folds the consecutive months with no payment into one row, April to August, that says how many months it holds", async () => {
 		const html = await page();
+
 		const fold = html
 			.split("<details")
 			.find((part) => part.includes("April to August"));
+
 		expect(fold).toBeDefined();
 		expect(fold).toContain("No payment");
 		expect(fold).toContain("5 months with no payment");
+
 		for (const month of ["August", "July", "June", "May", "April"])
 			expect(fold).toContain(`>${month}<`);
 	});
@@ -134,12 +141,14 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9605,'Water',4000,20,'monthly',5,'DUE FIXTURE')",
 			),
 		);
+
 		const october = monthRow(
 			await (
 				await exports.default.fetch("http://tally.test/bills/9605")
 			).text(),
 			"October",
 		);
+
 		expect(october).toContain("Due Oct 20 · $40.00");
 		expect(october).toContain(
 			'href="/bills/9605/occurrences/2026-10/link#payment-picker"',
@@ -151,6 +160,7 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 			(await page())
 				.split("<details")
 				.find((part) => part.includes("April to August")) ?? "";
+
 		expect(fold).toContain(
 			`href="/bills/${BILL}/occurrences/2026-07/link#payment-picker"`,
 		);
@@ -259,16 +269,20 @@ describe("which charges a month offers as found (#604)", () => {
 		expect(monthRow(html, "September")).toContain(
 			`href="/bills/${BILL}/occurrences/2026-09/link?transaction_id=${FOUND}#payment-picker"`,
 		);
+
 		const picker = await (
 			await exports.default.fetch(
 				`http://tally.test/bills/${BILL}/occurrences/2026-09/link?transaction_id=${FOUND}`,
 			)
 		).text();
+
 		const section = picker.slice(
 			picker.indexOf('<section id="payment-picker"'),
 		);
+
 		const first =
 			section.match(/<input[^>]*name="transaction_id"[^>]*>/)?.[0] ?? "";
+
 		expect(first).toContain(`value="${FOUND}"`);
 		expect(first).toContain("checked");
 		expect(first).toContain("required");
@@ -285,14 +299,17 @@ describe("which charges a month offers as found (#604)", () => {
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,'2026-09',?,'user','dismissed')",
 			).bind(BILL, 9603),
 		);
+
 		const picker = await (
 			await exports.default.fetch(
 				`http://tally.test/bills/${BILL}/occurrences/2026-09/link?transaction_id=9603`,
 			)
 		).text();
+
 		const section = picker.slice(
 			picker.indexOf('<section id="payment-picker"'),
 		);
+
 		const turnedAwayLine = section.indexOf("You said not this one");
 		expect(turnedAwayLine).toBeGreaterThan(-1);
 		expect(section.match(/<input[^>]*value="9603"[^>]*>/)?.[0]).toContain(

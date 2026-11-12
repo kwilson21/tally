@@ -6,6 +6,7 @@ import {
 } from "../src/transactions/result-count";
 
 const TODAY = "2026-09-22";
+
 const base: Filters = {
 	q: "",
 	month: "2026-09",
@@ -16,6 +17,7 @@ const base: Filters = {
 	page: 1,
 	raw: false,
 };
+
 const CARD = "Chase Card ••9921";
 const one = { total: 12, first: 1, shown: 12, pages: 1 };
 
@@ -174,6 +176,7 @@ describe("resultCount", () => {
 			resultCount(one, { ...base, account: 3 }, null, TODAY, CARD),
 			resultCount(one, { ...base, account: 4 }, null, TODAY, "Cash"),
 		];
+
 		expect(new Set(texts).size).toBe(texts.length);
 	});
 
@@ -355,8 +358,10 @@ describe("resultCountParts", () => {
 			categoryName: string | null,
 		) => {
 			const p = resultCountParts(page, f, categoryName, TODAY);
+
 			return p.before + p.figures + p.after;
 		};
+
 		expect(joined(one, base, null)).toBe(resultCount(one, base, null, TODAY));
 		const page = { total: 35, first: 26, shown: 10, pages: 2 };
 		expect(joined(page, { ...base, category: 1 }, "Groceries")).toBe(

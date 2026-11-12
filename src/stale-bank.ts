@@ -32,16 +32,22 @@ export function homeBankNotice(
 	today: string,
 ): { words: string[]; asOf?: string; since?: string } | null {
 	if (flagged.length === 0) return null;
+
 	const sorted = [...flagged].sort((a, b) => {
 		if (a.since && b.since)
 			return a.since.localeCompare(b.since) || a.name.localeCompare(b.name);
+
 		if (a.since) return -1;
+
 		if (b.since) return 1;
+
 		return a.name.localeCompare(b.name);
 	});
+
 	const dated = sorted.find(
 		(bank): bank is FlagWords & { since: string } => bank.since !== undefined,
 	);
+
 	const visible = sorted
 		.slice(0, 3)
 		.map((bank) =>
@@ -49,12 +55,14 @@ export function homeBankNotice(
 				? `${bank.name} needs signing in`
 				: `${bank.name} stopped updating ${shortDay(bank.since, today)}`,
 		);
+
 	if (sorted.length > 3) {
 		const more = sorted.length - 3;
 		visible.push(
 			`and ${more} more bank${more === 1 ? "" : "s"} need${more === 1 ? "s" : ""} a fix`,
 		);
 	}
+
 	return {
 		words: visible,
 		...(dated && {
@@ -73,7 +81,9 @@ export function asOfDate(
 	today: string,
 ): string | undefined {
 	const given = dates.filter((date): date is string => date !== undefined);
+
 	if (given.length === 0) return undefined;
+
 	// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
 	return shortDay(
 		given.reduce((earliest, date) => (date < earliest ? date : earliest)),
@@ -89,6 +99,7 @@ export function asOfDate(
 export function bankFlag(bank: BankSync, today: string): FlaggedBank | null {
 	if (bank.disconnected) return null;
 	const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+
 	if (bank.needsAttention)
 		return {
 			id: bank.id,
@@ -96,9 +107,11 @@ export function bankFlag(bank: BankSync, today: string): FlaggedBank | null {
 			reason: "sign-in",
 			...(since && { since }),
 		};
+
 	// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
 	if (since !== undefined && since <= daysBefore(today, STALE_AFTER_DAYS))
 		return { id: bank.id, name: bank.name, reason: "stale", since };
+
 	return null;
 }
 

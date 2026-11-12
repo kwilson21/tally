@@ -30,6 +30,7 @@ describe("parseFilters", () => {
 		expect(parseFilters(raw, "2026-09", true).raw).toBe(true);
 		expect(parseFilters(raw, "2026-09", false).raw).toBe(false);
 		expect(parseFilters(raw, "2026-09").raw).toBe(false);
+
 		for (const other of ["raw=0", "raw=", "raw=true", "raw=2"])
 			expect(
 				parseFilters(new URLSearchParams(other), "2026-09", true).raw,
@@ -110,6 +111,7 @@ describe("filtersToQuery", () => {
 			"2026-09",
 			true,
 		);
+
 		expect(filtersToQuery(f, "2026-09")).toBe("q=bakery&page=2&raw=1");
 		expect(
 			filtersToQuery(

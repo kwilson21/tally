@@ -8,38 +8,46 @@ import { accounts } from "../src/routes/accounts";
 import { home } from "../src/routes/home";
 import { setupRoute } from "../src/routes/setup";
 import { sameOrigin } from "../src/security";
+import { envWith } from "./helpers/doubles";
 
 // Setup on its own pages (P142 A, decision 148, spec §8.8), through the routes: the welcome before a bank, Reading your bank after
 // one, the redirects that send a family to them and back to Home, the daily run's wait (decision 150), the Your banks poll and the
 // presence check-in (decisions 146 and 151).
 
 const TODAY = "2026-10-14";
+
 /** Noon on TODAY, in UTC: the clock the sort's times are read against, in summer time for the zones below. */
 const NOW = Date.parse("2026-10-14T12:00:00Z");
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
-const plaidFamily = {
-	...family,
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
+
+const plaidFamily = envWith(family, {
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-} as unknown as Env;
+});
+
 // RFC 8292's VAPID pair from Appendix A: a valid P-256 pair, so the route's key check passes.
-const VAPID = {
-	...family,
+const VAPID = envWith(family, {
 	VAPID_PUBLIC_KEY:
 		"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8",
 	VAPID_PRIVATE_KEY: "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
-} as unknown as Env;
+});
+
 const PERSON = "person@example.com";
+
 /** The presence check-in is a form post behind the same-origin guard and the signed-in member, as src/index.tsx mounts it. */
 const seen = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 seen.use("*", sameOrigin);
+
 seen.use("*", async (c, next) => {
 	c.set("actor", PERSON);
 	await next();
 });
+
 seen.route("/", home);
+
 const PLAID_MODULE = 'src="/js/plaid-link.js"';
 const PLAID_SCRIPT = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
 
@@ -52,14 +60,20 @@ const readable = (html: string) =>
 
 const setup = async (bindings: Env, path = "/setup", init?: RequestInit) => {
 	const res = await setupRoute.request(path, init ?? {}, bindings);
-	return { res, html: readable(await res.text()) };
-};
-const homePage = async (bindings: Env, path = "/", init?: RequestInit) => {
-	const res = await home.request(path, init ?? {}, bindings);
+
 	return { res, html: readable(await res.text()) };
 };
 
-const writeRecord = (value: unknown) =>
+const homePage = async (bindings: Env, path = "/", init?: RequestInit) => {
+	const res = await home.request(path, init ?? {}, bindings);
+
+	return { res, html: readable(await res.text()) };
+};
+
+/** A JSON value, as the stored setup record holds it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const writeRecord = (value: Json) =>
 	env.DB.prepare(
 		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 	)
@@ -293,11 +307,13 @@ describe("GET /setup/banks: the Your banks poll", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
 		).run();
+
 		const ready = await setupRoute.request(
 			"/setup/banks?step=reading",
 			{},
 			family,
 		);
+
 		expect(ready.status).toBe(200);
 		expect(ready.headers.get("HX-Retarget")).toBe("#setup-screen");
 		expect(ready.headers.get("HX-Reswap")).toBe("outerHTML");
@@ -341,6 +357,7 @@ describe("POST /home/seen with a step (the presence check-in, decisions 146 and 
 			},
 			bindings,
 		);
+
 		return { res };
 	};
 
@@ -407,9 +424,11 @@ describe("GET / in the family app: setup sends a new family to /setup (decision 
 	it("answers an htmx request with HX-Redirect to /setup, not a 303", async () => {
 		await noBank();
 		await writeRecord({ strokes: {}, budgets: {} });
+
 		const { res } = await homePage(family, "/", {
 			headers: { "HX-Request": "true" },
 		});
+
 		expect(res.status).toBe(204);
 		expect(res.headers.get("HX-Redirect")).toBe("/setup");
 	});
@@ -456,6 +475,7 @@ describe("GET / in the family app: setup sends a new family to /setup (decision 
 describe("the reading screen, moved from Home's setup (#772, decision 148)", () => {
 	const EMAIL_LINE =
 		"You can close this page. Tally emails you the moment your questions are ready.";
+
 	const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 	it("loads Plaid Link with Link another bank at the foot, with Plaid on, and never Have more accounts? on Home", async () => {
@@ -537,9 +557,11 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		const { html } = await setup(family);
 		expect(html).toContain("Reading your bank");
+
 		const stored = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(JSON.parse(stored?.value ?? "null")?.strokes.bank).toBe(TODAY);
 	});
 
@@ -563,6 +585,7 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		)
 			.bind(TODAY)
 			.run();
+
 		if (signIn)
 			await env.DB.prepare(
 				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = (SELECT MIN(id) FROM plaid_items)",
@@ -619,6 +642,7 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		const bank = await env.DB.prepare(
 			"SELECT MIN(id) AS id FROM plaid_items",
 		).first<{ id: number }>();
+
 		const id = bank?.id ?? 0;
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = NULL WHERE id = ?",
@@ -648,6 +672,7 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 			"fetch",
 			vi.fn(async () => Response.json({})),
 		);
+
 		const response = await accounts.request(
 			`/accounts/${id}/disconnect`,
 			{
@@ -660,11 +685,14 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 			},
 			plaidFamily,
 		);
+
 		vi.unstubAllGlobals();
 		expect(response.status).toBeLessThan(400);
+
 		const stored = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(JSON.parse(stored?.value ?? "null")).toEqual({
 			strokes: {},
 			budgets: {},
@@ -679,6 +707,7 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		const bank = await env.DB.prepare(
 			"SELECT MIN(id) AS id FROM plaid_items",
 		).first<{ id: number }>();
+
 		const id = bank?.id ?? 0;
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = NULL WHERE id = ?",
@@ -695,6 +724,7 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		)
 			.bind(await encryptToken("route-access-token", KEY), id)
 			.run();
+
 		const set = {
 			strokes: {
 				bank: "2026-10-13",
@@ -704,11 +734,13 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 			},
 			budgets: {},
 		};
+
 		await writeRecord(set);
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => Response.json({})),
 		);
+
 		const response = await accounts.request(
 			`/accounts/${id}/disconnect`,
 			{
@@ -721,11 +753,14 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 			},
 			plaidFamily,
 		);
+
 		vi.unstubAllGlobals();
 		expect(response.status).toBeLessThan(400);
+
 		const stored = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(JSON.parse(stored?.value ?? "null")).toEqual(set);
 		const { res, html } = await setup(plaidFamily);
 		expect(res.status).toBe(200);

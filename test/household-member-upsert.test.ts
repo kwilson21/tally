@@ -6,6 +6,7 @@ import {
 } from "../src/db/reconnect";
 
 const EMAIL = "dana@example.com";
+
 // 2026-01-01 00:00:00 UTC, the removal time every case below pins.
 const REMOVED_AT = "2026-01-01 00:00:00";
 const REMOVED_AT_UNIX = 1767225600;

@@ -53,16 +53,22 @@ export async function historyStart(
 			cardEarliest: string | null;
 			cards: number;
 		}>();
+
 	const bank = facts?.bankEarliest ?? null;
 	const ninetyDaysBack = daysBefore(today, 90);
+
 	if (
 		(facts?.connected ?? 0) > 0 &&
 		((facts?.loading ?? 0) > 0 || bank === null)
 	)
 		return bank !== null && bank < ninetyDaysBack ? bank : ninetyDaysBack;
+
 	if (bank !== null) return bank;
+
 	if (facts?.cardEarliest) return facts.cardEarliest;
+
 	if ((facts?.cards ?? 0) > 0) return ninetyDaysBack;
+
 	return null;
 }
 
@@ -73,9 +79,12 @@ export async function historyStart(
 function suggestableName(row: AppleRow): string | null {
 	// A name is stored trimmed, and its key must equal it, so a padded Merchant is trimmed before it is suggested.
 	const name = (row.merchant ?? "").trim();
+
 	if (!name) return null;
+
 	if (name === row.description || name === tidyName(row.description))
 		return null;
+
 	return name;
 }
 
@@ -98,8 +107,11 @@ async function heldTwins(
 			),
 		),
 	];
+
 	const held = new Map<string, Set<number>>();
+
 	if (keys.length === 0) return held;
+
 	const found = await db
 		.prepare(
 			`SELECT t.upload_key AS key, t.upload_twin AS twin
@@ -108,11 +120,13 @@ async function heldTwins(
 		)
 		.bind(JSON.stringify(keys))
 		.all<{ key: string; twin: number }>();
+
 	for (const { key, twin } of found.results) {
 		const twins = held.get(key) ?? new Set<number>();
 		twins.add(twin);
 		held.set(key, twins);
 	}
+
 	return held;
 }
 
@@ -121,8 +135,10 @@ function chunkRows<T>(items: T[]): T[][] {
 	const chunks: T[][] = [];
 	let current: T[] = [];
 	let size = 2;
+
 	for (const item of items) {
 		const itemSize = JSON.stringify(item).length + 1;
+
 		if (
 			current.length > 0 &&
 			(current.length >= ROWS_PER_STATEMENT ||
@@ -132,10 +148,13 @@ function chunkRows<T>(items: T[]): T[][] {
 			current = [];
 			size = 2;
 		}
+
 		current.push(item);
 		size += itemSize;
 	}
+
 	if (current.length > 0) chunks.push(current);
+
 	return chunks;
 }
 
@@ -151,16 +170,19 @@ export async function importAppleCard(
 	options: { by: string; today: string; balanceCents: number | null },
 ): Promise<ImportResult | { ok: false; error: string }> {
 	const start = await historyStart(db, options.today);
+
 	if (start === null)
 		return {
 			ok: false,
 			error: "Link a bank first. Tally's history starts with your bank's.",
 		};
+
 	const plan: ImportPlan = planImport(
 		rows,
 		start,
 		await heldTwins(db, rows, start),
 	);
+
 	const { today, balanceCents, by } = options;
 
 	const statements: D1PreparedStatement[] = [
@@ -205,6 +227,7 @@ export async function importAppleCard(
 			twin,
 		})),
 	);
+
 	// Rows are inserted by key and twin, so a row Tally holds (the same key, the same or a higher twin) is skipped. The
 	// insert's own WHERE 1 keeps SQLite from reading ON CONFLICT as a join clause, as merchant-names.ts does.
 	for (const chunk of rowChunks)
@@ -243,21 +266,27 @@ export async function importAppleCard(
 		...new Set(
 			plan.add.flatMap(({ row }) => {
 				const name = suggestableName(row);
+
 				return name ? [name] : [];
 			}),
 		),
 	];
+
 	if (names.length > 0)
 		statements.push(...suggestBankNames(db, names, "1", []));
 
 	const results = await db.batch<{ id: number }>(statements);
 	const accountId = results[1]?.results[0]?.id;
+
 	if (accountId === undefined)
 		throw new Error("The Apple Card account wasn't found after its upload");
+
 	const addedIds = results
 		.slice(2, 2 + rowChunks.length)
 		.flatMap((result) => result.results.map((stored) => stored.id));
+
 	const added = addedIds.length;
+
 	return {
 		ok: true,
 		accountId,

@@ -9,6 +9,7 @@
  */
 const V4_UUID =
 	/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/g;
+
 const PLACEHOLDER = "<uuid>";
 
 /** Code-unit order, so sorting never depends on the locale. */
@@ -18,6 +19,7 @@ const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 // <style>, which is matched so that its raw text is left as it is.
 const TAG =
 	/<(script|style)\b[\s\S]*?<\/\1\s*>|<([a-zA-Z][\w:-]*)((?: [^\s"'<>/=]+="[^"]*")*)>/gi;
+
 const ATTRIBUTE = / ([^\s"'<>/=]+)="([^"]*)"/g;
 
 /**
@@ -32,11 +34,14 @@ const ATTRIBUTE = / ([^\s"'<>/=]+)="([^"]*)"/g;
  */
 function sortTag(tag, raw, name, attributes) {
 	if (raw !== undefined) return tag;
+
 	const pairs = [...(attributes ?? "").matchAll(ATTRIBUTE)].map((m) => [
 		m[1],
 		m[2],
 	]);
+
 	pairs.sort(([a], [b]) => compare(a, b));
+
 	return `<${name}${pairs.map(([key, value]) => ` ${key}="${value}"`).join("")}>`;
 }
 
@@ -65,7 +70,9 @@ export function normalizeDom(html) {
 export async function sha256Hex(data) {
 	const bytes =
 		typeof data === "string" ? new TextEncoder().encode(data) : data;
+
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
+
 	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
@@ -86,6 +93,7 @@ function normalizeLoad({ dom, assets, css }) {
 	const sorted = assets
 		.map(({ path, sha256 }) => ({ path, sha256 }))
 		.sort((a, b) => compare(a.path, b.path) || compare(a.sha256, b.sha256));
+
 	return { dom: normalizeDom(dom), assets: sorted, css };
 }
 
@@ -109,6 +117,7 @@ export async function fingerprintOf(load) {
 export function changedParts(head, base) {
 	const a = normalizeLoad(head);
 	const b = normalizeLoad(base);
+
 	return PARTS.filter(
 		(part) => JSON.stringify(a[part]) !== JSON.stringify(b[part]),
 	);
@@ -157,23 +166,30 @@ export function cleanSelector(selectorText) {
 			":first-line",
 			":first-letter",
 		]);
+
 		const isNameChar = (ch) => /[\w-]/.test(ch) || ch >= "\u0080";
+
 		// The index just past the identifier that starts at i (an escape is part of it).
 		const identEnd = (text, i) => {
 			let j = i;
+
 			while (j < text.length) {
 				if (text[j] === "\\") j += 2;
 				else if (isNameChar(text[j])) j++;
 				else break;
 			}
+
 			return Math.min(j, text.length);
 		};
+
 		// The index just past the ")" or "]" that closes the bracket opened at i.
 		const closeOf = (text, i) => {
 			let depth = 0;
 			let quote = "";
+
 			for (let j = i; j < text.length; j++) {
 				const ch = text[j];
+
 				if (ch === "\\") j++;
 				else if (quote) {
 					if (ch === quote) quote = "";
@@ -181,23 +197,29 @@ export function cleanSelector(selectorText) {
 				else if (ch === "(" || ch === "[") depth++;
 				else if (ch === ")" || ch === "]") {
 					depth--;
+
 					if (depth === 0) return j + 1;
 				}
 			}
+
 			return text.length;
 		};
+
 		// A compound with its pseudo-elements and user-action pseudo-classes taken out.
 		const takeOut = (text) => {
 			let out = "";
 			let bracket = 0;
 			let quote = "";
+
 			for (let i = 0; i < text.length; ) {
 				const ch = text[i];
+
 				if (ch === "\\") {
 					out += text.slice(i, i + 2);
 					i += 2;
 					continue;
 				}
+
 				if (quote) {
 					if (ch === quote) quote = "";
 				} else if (ch === '"' || ch === "'") quote = ch;
@@ -205,33 +227,42 @@ export function cleanSelector(selectorText) {
 				else if (ch === "]") bracket = Math.max(0, bracket - 1);
 				else if (ch === ":" && bracket === 0) {
 					let end = -1;
+
 					if (text[i + 1] === ":") {
 						end = identEnd(text, i + 2);
+
 						if (text[end] === "(") end = closeOf(text, end);
 					} else {
 						const name = text.slice(i, identEnd(text, i + 1));
 						const open = i + name.length;
+
 						if (UNTESTABLE.has(name.toLowerCase())) end = open;
 						else if (text[open] === "(") {
 							// A functional pseudo-class: its argument is cleaned, and the whole function is
 							// taken out when the argument lost anything.
 							const close = closeOf(text, open);
+
 							if (text[close - 1] === ")") {
 								const argument = text.slice(open + 1, close - 1);
+
 								if (clean(argument) !== argument) end = close;
 							}
 						}
 					}
+
 					if (end > i) {
 						i = end;
 						continue;
 					}
 				}
+
 				out += ch;
 				i++;
 			}
+
 			return out;
 		};
+
 		// Compounds and the separators between them (whitespace, >, + and ~ outside brackets) are cut
 		// apart, so a compound that is emptied can become `*`. Commas outside brackets split the parts.
 		let out = "";
@@ -239,25 +270,31 @@ export function cleanSelector(selectorText) {
 		let kind = "";
 		let depth = 0;
 		let quote = "";
+
 		const flush = () => {
 			out += kind === "compound" ? takeOut(run) || "*" : run;
 			run = "";
 			kind = "";
 		};
+
 		const add = (type, text) => {
 			if (kind !== type) flush();
 			kind = type;
 			run += text;
 		};
+
 		for (let i = 0; i < selectorText.length; ) {
 			const ch = selectorText[i];
+
 			if (ch === "\\") {
 				add("compound", selectorText.slice(i, i + 2));
 				i += 2;
 				continue;
 			}
+
 			if (quote) {
 				add("compound", ch);
+
 				if (ch === quote) quote = "";
 			} else if (ch === '"' || ch === "'") {
 				quote = ch;
@@ -272,10 +309,14 @@ export function cleanSelector(selectorText) {
 				else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
 				add("compound", ch);
 			}
+
 			i++;
 		}
+
 		flush();
+
 		return out;
 	};
+
 	return clean(selectorText);
 }

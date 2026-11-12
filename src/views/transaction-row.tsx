@@ -23,20 +23,26 @@ export function rowCaption(row: ListRow): Caption {
 	const paidBillName = row.parentId
 		? (row.billName ?? row.parentBillName)
 		: row.billName;
+
 	const paidBill =
 		row.paysBill && paidBillName ? `paid ${paidBillName} bill` : null;
+
 	// A payment for a planned expense says what it paid, by the plan's name (P101's row, owner's pick decision 101).
 	const paidPlan = row.paysPlan && row.planName ? `paid ${row.planName}` : null;
 	const paid = paidBill ?? paidPlan;
+
 	// A refund the bank's change unlinked says why, with the purchase's date, until a person links it again (decision 99).
 	const unlinked = row.refundUnlinkedPurchaseDate
 		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
 		: null;
+
 	// A payment linked to a bill or a planned expense counts, so it isn't called excluded (spec §8.5); it reads as what it is.
 	if (row.excluded && !row.paysBill && !row.paysPlan)
 		return { kind: "excluded", caption: "Excluded", tag: false };
+
 	if (maybeIncomeVisible(row))
 		return { kind: "needs", caption: "Maybe income", tag: false };
+
 	if (
 		!row.followsPurchase &&
 		!row.creditReviewed &&
@@ -44,6 +50,7 @@ export function rowCaption(row: ListRow): Caption {
 		!row.income
 	)
 		return { kind: "needs", caption: "Review credit", tag: false };
+
 	if (row.parentId)
 		return {
 			kind: "category",
@@ -58,14 +65,17 @@ export function rowCaption(row: ListRow): Caption {
 				.join(" · "),
 			tag: false,
 		};
+
 	if (row.isSplit)
 		return {
 			kind: "category",
 			caption: ["Split transaction", paid].filter(Boolean).join(" · "),
 			tag: false,
 		};
+
 	// An income row says only Income, even when a bank change removed its split; its restored category and note stay in the edit panel.
 	if (row.income) return { kind: "income", caption: "Income", tag: false };
+
 	// The note stays on the purchase until a person changes or confirms its category (decision 99), so it
 	// is shown beside the category it went back to, or in Needs category when it has none.
 	if (
@@ -75,6 +85,7 @@ export function rowCaption(row: ListRow): Caption {
 		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.${unpaidBillsNote(row.splitRemovedBills)}`;
 		// The refunds and the bill follow the note, in the same order as a categorized row (#313, #382).
 		const facts = [note, refunded(row), paid];
+
 		return row.categoryId === null
 			? {
 					kind: "needs",
@@ -87,6 +98,7 @@ export function rowCaption(row: ListRow): Caption {
 					tag: false,
 				};
 	}
+
 	// A linked refund and its purchase each say so after the category (P19). A refund the bank's change
 	// unlinked says why instead (decision 99).
 	const pair =
@@ -94,6 +106,7 @@ export function rowCaption(row: ListRow): Caption {
 		(row.refundPurchaseDate
 			? `Refund for ${shortDay(row.refundPurchaseDate, row.date)}`
 			: refunded(row));
+
 	if (row.categoryName)
 		return {
 			kind: "category",
@@ -102,8 +115,10 @@ export function rowCaption(row: ListRow): Caption {
 		};
 	// A refund and the bill or plan it paid both say so ahead of the note, in the same order as a categorized row (#313).
 	const facts = [pair, paid].filter(Boolean).join(" · ") || null;
+
 	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
 	if (row.followsPurchase) return { kind: "needs", caption: facts, tag: false };
+
 	return {
 		kind: "needs",
 		caption:
@@ -129,12 +144,14 @@ function RowIcon({ row, kind }: { row: ListRow; kind: Caption["kind"] }) {
 				color={row.categoryColor ?? ""}
 			/>
 		);
+
 	const [name, tone] =
 		kind === "income"
 			? (["income", "text-ink"] as const)
 			: kind === "excluded"
 				? (["transfer", "text-muted"] as const)
 				: (["circle-dashed", "text-muted"] as const);
+
 	return (
 		<span class={`shrink-0 ${tone}`}>
 			<Icon name={name} class="size-7" />
@@ -166,42 +183,52 @@ export function TransactionRow({
 	saved?: SavedMark;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
+
 	// A bank change's sentence keeps its place on the row over a Maybe category; the edit panel still shows the suggestion.
 	const bankChangeSaid =
 		Boolean(row.refundUnlinkedPurchaseDate) ||
 		row.splitRemovedFromCents != null;
+
 	const maybeCategoryName = bankChangeSaid ? null : row.maybeCategoryName;
+
 	const maybeCategory =
 		kind === "needs" && tag && maybeCategoryName?.startsWith("new:")
 			? { name: maybeCategoryName.slice(4), kind: "new" as const }
 			: kind === "needs" && tag && maybeCategoryName
 				? { name: maybeCategoryName, kind: "category" as const }
 				: null;
+
 	// Needs category is said in words, in place of the pill (P118 A); a Maybe guess keeps its dashed tag instead.
 	const needsWords = tag && !maybeCategory;
+
 	// "Counts in …" shows when a bill moved the month, except where a refund's caption already names it.
 	const countsIn =
 		row.countsInMonth &&
 		row.countsInMonth !== row.refundPurchaseDate?.slice(0, 7)
 			? row.countsInMonth
 			: null;
+
 	// Pending (P34 A, decision 72) joins the one caption line in muted words, never cut off. On a row that
 	// needs a category it takes the bank text's place; after a lone category or Income it reads
 	// "Groceries · Pending"; when the caption already says more (Excluded, Split from…, Refund for…,
 	// Counts in…) it goes first, so it is always the first thing read.
 	const pending = row.pending === true;
+
 	const caption =
 		(pending || !bankText) && kind === "needs" && tag && said === row.rawName
 			? null
 			: said;
+
 	const guessedNoteShown = Boolean(
 		row.noteGuessed && kind === "needs" && caption === row.note,
 	);
+
 	const pendingLast =
 		pending &&
 		!countsIn &&
 		(kind === "income" ||
 			(kind === "category" && caption === row.categoryName));
+
 	const pendingFirst = pending && !pendingLast;
 	// A Maybe tag is 44px tall, taller than a 24px caption line, so its line makes room for it and sits a
 	// gap below the name's dashed underline (DESIGN.md: a gap under a dashed underline).
@@ -209,6 +236,7 @@ export function TransactionRow({
 	const Row = href ? "a" : "div";
 	// Only a row with a link has an arrow for the tick to take (P119 A, #71).
 	const mark = href ? saved : undefined;
+
 	const content = (
 		<>
 			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
@@ -309,5 +337,6 @@ export function TransactionRow({
 			</Row>
 		</>
 	);
+
 	return bare ? content : <li data-transaction={row.id}>{content}</li>;
 }

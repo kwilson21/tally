@@ -85,6 +85,7 @@ describe("PlanPaymentPicker's payments as rows (#645)", () => {
 	it("draws each payment as a 44px row with the transaction row's look, not a chip", () => {
 		const rows = rowsOf(plan([1, 2, 3, 4, 5].map((id) => planPayment(id))));
 		expect(rows).toHaveLength(5);
+
 		for (const row of rows) {
 			const open = row.slice(0, row.indexOf(">"));
 			expect(open).toContain("min-h-11");
@@ -102,10 +103,12 @@ describe("PlanPaymentPicker's payments as rows (#645)", () => {
 		const html = plan([1, 2, 3, 4, 5, 6, 7].map((id) => planPayment(id)));
 		expect(valuesOf(html)).toEqual(["1", "2", "3", "4", "5", "6", "7"]);
 		expect(html.match(/<details/g)).toHaveLength(1);
+
 		const fold = html.slice(
 			html.indexOf("<details"),
 			html.indexOf("</details>"),
 		);
+
 		expect(fold).toContain("Show all 7 charges");
 		expect(fold).toContain('value="6"');
 		expect(fold).toContain('value="7"');
@@ -139,12 +142,15 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 		expect(rows).toHaveLength(7);
 		expect(html.indexOf('value="5"')).toBeLessThan(html.indexOf("<details"));
 		expect(html.indexOf('value="6"')).toBeGreaterThan(html.indexOf("<details"));
+
 		for (const row of rows) {
 			expect(row.slice(0, row.indexOf(">"))).toContain("min-h-11");
 			expect(row).not.toContain("rounded-full border border-rule px-4");
 		}
+
 		const inputs = radioInputs(html);
 		expect(inputs).toHaveLength(7);
+
 		for (const input of inputs) {
 			expect(input).toContain('hx-get="/bills/1/month-explanation"');
 			expect(input).toContain('hx-target="#bill-month-explanation"');
@@ -160,6 +166,7 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 				excluded: true,
 			}),
 		]);
+
 		expect(wordsOf(rowsOf(html)[0] ?? "")).toBe(
 			"Zelle Oct 1 · Excluded $1,850.00",
 		);
@@ -179,6 +186,7 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 			...[1, 2, 3, 4, 5].map((id) => payment(id)),
 			payment(6, { turnedAway: true }),
 		]);
+
 		expect(html).toContain('<details class="group border-b border-rule">');
 		expect(html).toContain("Show all 6 charges");
 	});
@@ -191,11 +199,14 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 			],
 			6,
 		);
+
 		expect(html).toMatch(/<details[^>]* open=""/);
+
 		const fold = html.slice(
 			html.indexOf("<details"),
 			html.indexOf("</details>"),
 		);
+
 		expect(fold.indexOf("You said not this one")).toBeGreaterThan(
 			fold.indexOf("Show all 6 charges"),
 		);
@@ -210,6 +221,7 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 			...[1, 2, 3, 4, 5].map((id) => payment(id)),
 			payment(6, { turnedAway: true }),
 		]);
+
 		expect(html).toContain("<details");
 		expect(html).not.toMatch(/<details[^>]* open=""/);
 	});
@@ -220,6 +232,7 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 			payment(2),
 			payment(3, { turnedAway: true }),
 		]);
+
 		expect(html).not.toContain("<details");
 		expect(html.indexOf("You said not this one")).toBeGreaterThan(
 			html.indexOf('value="2"'),
@@ -256,19 +269,24 @@ describe("a picker's check mark in Show all N charges (#645, Codex 4299994834)",
 				.concat(payment(7, { turnedAway: true })),
 			7,
 		);
+
 		const fold = html.slice(
 			html.indexOf("<details"),
 			html.indexOf("</details>"),
 		);
+
 		expect(html).toMatch(/<details[^>]* open=""/);
 		expect(radioInputs(fold)).toHaveLength(2);
+
 		const checked = radioInputs(fold).filter((input) =>
 			/\bchecked\b/.test(input),
 		);
+
 		expect(checked).toHaveLength(1);
 		expect(checked[0]).toContain('value="7"');
 		const rows = rowsOf(html);
 		expect(rows).toHaveLength(7);
+
 		for (const row of rows) expectRowOwnsItsCheck(row);
 		expect(html).not.toContain("group-has-[:checked]:flex");
 		expect(html).toContain('<details class="group border-b border-rule"');
@@ -277,6 +295,7 @@ describe("a picker's check mark in Show all N charges (#645, Codex 4299994834)",
 		const planHtml = plan([1, 2, 3, 4, 5, 6, 7].map((id) => planPayment(id)));
 		const planRows = rowsOf(planHtml);
 		expect(planRows).toHaveLength(7);
+
 		for (const row of planRows) expectRowOwnsItsCheck(row);
 		expect(planHtml).not.toContain("group-has-[:checked]:flex");
 		expect(planHtml).toContain('<details class="group border-b border-rule"');

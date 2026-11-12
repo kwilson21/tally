@@ -36,6 +36,7 @@ describe("ProgressRow that opens", () => {
 		const html = await budget({
 			nudge: { href: "/budget/3/nudge", id: "nudge-3" },
 		});
+
 		expect(html).not.toContain("chevron-right");
 		expect(html).toContain("row-opens");
 	});
@@ -66,6 +67,7 @@ describe("ProgressRow that opens", () => {
 			reserveArrow: true,
 			nudge: { href: "/budget/3/nudge", id: "nudge-3" },
 		});
+
 		expect(html).not.toContain("size-5 shrink-0 -ml-3 -mr-2");
 	});
 });
@@ -76,6 +78,7 @@ describe("SavingsGoalRow that opens", () => {
 			amountCents: 50000,
 			href: "/savings-goal",
 		}).toString();
+
 		expect(html).toMatch(
 			new RegExp(
 				`<svg ${ARROW} self-start mt-1"[^>]*data-icon="chevron-right"`,
@@ -89,6 +92,7 @@ describe("SavingsGoalRow that opens", () => {
 			amountCents: null,
 			href: "/savings-goal",
 		}).toString();
+
 		expect(html).toContain("Set a goal");
 		expect(html).not.toContain("chevron-right");
 		expect(html).not.toContain("row-opens");
@@ -112,6 +116,7 @@ describe("BillRow", () => {
 			today: "2026-10-14",
 			href: "/bills/1",
 		}).toString();
+
 		expect(html).toMatch(
 			new RegExp(`</span><svg ${ARROW}"[^>]*data-icon="chevron-right"`),
 		);

@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { addressOf } from "../address";
 import { type AppleRow, parseAppleCsv } from "../apple-card/csv";
 import { historyStart, importAppleCard } from "../apple-card/import";
@@ -12,6 +13,7 @@ import {
 	appleCardAccount,
 	type Bank,
 	countedAccounts,
+	MAX_BALANCE_CENTS,
 	netWorthCents,
 } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
@@ -53,6 +55,7 @@ import {
 import { enabled } from "./plaid";
 
 type App = { Bindings: Env; Variables: { actor: string } };
+
 export const accounts = new Hono<App>();
 
 const SyncNow = () => (
@@ -72,14 +75,19 @@ const SyncNow = () => (
 
 /** Apple Card's words (spec §8.10). The errors go under the field they are about; the size gate's go in a toast when htmx asks. */
 const NO_FILE = "Choose the CSV file Apple exported.";
+
 const TOO_BIG =
 	"This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file.";
+
 const COULDNT_TELL =
 	"Tally couldn't tell how big this file is. Try the upload again.";
+
 const BAD_BALANCE =
 	"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.";
+
 /** The request's most bytes, checked before its body is read: the file's cap and its form fields. */
 const REQUEST_CAP = 1_100_000;
+
 /** The file's most bytes, checked after it's read (a year of one card is far smaller). */
 const FILE_CAP = 1_000_000;
 
@@ -121,6 +129,7 @@ async function uploadSheet(
 	still = false,
 ) {
 	const card = await appleCardAccount(env.DB);
+
 	return (
 		<div id="sheet">
 			<BottomSheet
@@ -159,11 +168,13 @@ async function AccountsSummary({
 	focus?: "apple-card";
 }) {
 	const today = await householdToday(env.DB);
+
 	// One read for the headline's accounts, the line's balances and the Apple Card, so they agree.
 	const { banks, points, added, appleCard } = await accountsWithHistory(
 		env.DB,
 		today,
 	);
+
 	const history = netWorthView(points, today, added);
 	const plaidEnabled = enabled(env);
 	const demo = env.DEMO === "true";
@@ -172,6 +183,7 @@ async function AccountsSummary({
 	const addCard = !cardKept && (await historyStart(env.DB, today)) !== null;
 	// Nothing to add up before any bank or kept card (decision 55): the empty state, with a removed card's group below it.
 	const empty = banks.length === 0 && !cardKept;
+
 	return (
 		<div id="accounts-summary">
 			{alert && (
@@ -262,9 +274,10 @@ function accountsPage(
 	c: Context<App>,
 	alert?: string,
 	extra: { sheet?: Child; focus?: "apple-card" } = {},
-	status = 200,
+	status: ContentfulStatusCode = 200,
 ) {
 	const plaidEnabled = enabled(c.env);
+
 	return c.html(
 		<Layout
 			title="Accounts · Tally"
@@ -280,13 +293,14 @@ function accountsPage(
 				focus={extra.focus}
 			/>
 		</Layout>,
-		status as 200,
+		status,
 	);
 }
 
 accounts.get("/accounts", (c) => {
 	const focus =
 		c.req.query("focus") === "apple-card" ? "apple-card" : undefined;
+
 	// Cancel from the upload sheet: say so, and put focus back on the action the sheet opened from.
 	if (focus && c.req.header("HX-Request")) {
 		const message = "Apple Card upload cancelled.";
@@ -295,6 +309,7 @@ accounts.get("/accounts", (c) => {
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
 	}
+
 	return accountsPage(c, undefined, { focus });
 });
 
@@ -305,10 +320,18 @@ accounts.get("/accounts", (c) => {
  */
 accounts.get("/accounts/apple-card", async (c) => {
 	const sheet = await uploadSheet(c.env, await householdToday(c.env.DB));
+
 	return accountsPage(c, undefined, { sheet });
 });
 
 /** The body's fields, or none when it can't be read as a form (the upload then says there's no file). */
+/** True for a form value that is text (a file part is not a balance). */
+function isText(
+	value: string | File | (string | File)[] | undefined,
+): value is string {
+	return typeof value === "string";
+}
+
 async function readForm(c: Context<App>) {
 	try {
 		return await c.req.parseBody();
@@ -319,14 +342,18 @@ async function readForm(c: Context<App>) {
 
 /**
  * A balance as integer cents: blank is no balance, a leading minus is a credit, and anything else (or a value that isn't
- * a safe whole number of cents) is null. toCents names the text it refused, so the text is dropped, never rethrown.
+ * a safe whole number of cents, or is past $100,000,000 either way) is null. toCents names the text it refused, so the text is dropped, never rethrown.
  */
 function parseBalance(text: string): { cents: number | null } | null {
 	const trimmed = text.trim();
+
 	if (trimmed === "") return { cents: null };
+
 	try {
 		const cents = toCents(trimmed);
-		return Number.isSafeInteger(cents)
+
+		// Net worth refuses a balance past MAX_BALANCE_CENTS (docs/verification.md, "Numbers"), so one is never saved.
+		return Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_BALANCE_CENTS
 			? { cents: cents === 0 ? 0 : cents }
 			: null;
 	} catch {
@@ -347,14 +374,17 @@ async function sizeRefused(
 			"HX-Trigger",
 			hxTrigger({ toast: { message: words, type: "error" }, announce: words }),
 		);
+
 		return c.body(null, 422);
 	}
+
 	const sheet = await uploadSheet(
 		c.env,
 		today,
 		{ fileError: words, focus: "file" },
 		true,
 	);
+
 	return accountsPage(c, undefined, { sheet }, 422);
 }
 
@@ -366,7 +396,9 @@ async function uploadRefused(
 	isHtmx: boolean,
 ) {
 	const sheet = await uploadSheet(c.env, today, form, true);
+
 	if (isHtmx) return c.html(<AccountsSummary env={c.env} sheet={sheet} />, 422);
+
 	return accountsPage(c, undefined, { sheet }, 422);
 }
 
@@ -378,6 +410,7 @@ function uploadDone(c: Context<App>, message: string, isHtmx: boolean) {
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", "/accounts");
+
 	return c.html(<AccountsSummary env={c.env} focus="apple-card" />);
 }
 
@@ -387,27 +420,34 @@ function uploadDone(c: Context<App>, message: string, isHtmx: boolean) {
  */
 async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 	const today = await householdToday(c.env.DB);
+
 	const latest = await c.env.DB.prepare(
 		"SELECT MAX(t.date) AS date FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id IS NOT NULL",
 	).first<{ date: string | null }>();
+
 	const anchor = latest?.date ?? today;
 	const read = parseAppleCsv(appleCardSample(anchor));
+
 	// The sample is written by the code above, so a sample that doesn't read is a bug, never a visitor's mistake.
 	if (!read.ok) throw new Error("The demo's Apple Card sample doesn't read");
+
 	const result = await importAppleCard(c.env.DB, read.rows, {
 		by: c.get("actor"),
 		today,
 		balanceCents: APPLE_CARD_SAMPLE_BALANCE_CENTS,
 	});
+
 	if (!result.ok) throw new Error("The demo's Apple Card sample has no start");
 	// The same steps the real upload's rows get, first, so a failure in the months below never drops the sorting.
 	await afterUpload(c, result.addedIds);
+
 	try {
 		await demoCardMonths(c.env.DB, anchor);
 	} catch {
 		// Fixed words only: the demo's months are not worth a row or an error's detail in the log.
 		console.error("apple card months failed");
 	}
+
 	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
 }
 
@@ -420,7 +460,9 @@ async function sampleUpload(c: Context<App>, isHtmx: boolean) {
  */
 async function afterUpload(c: Context<App>, addedIds: number[]) {
 	const steps = await afterSyncSteps(c.env.DB);
+
 	if (steps.rulesFailed) console.error("apple card rules failed");
+
 	if (steps.billsFailed) {
 		console.error("apple card bills failed");
 		c.executionCtx.waitUntil(
@@ -429,6 +471,7 @@ async function afterUpload(c: Context<App>, addedIds: number[]) {
 			),
 		);
 	}
+
 	if (addedIds.length > 0)
 		c.executionCtx.waitUntil(
 			sortAfterSync(
@@ -472,32 +515,39 @@ async function demoCardMonths(db: D1Database, anchor: string) {
  */
 accounts.post("/accounts/apple-card", async (c) => {
 	const isHtmx = c.req.header("HX-Request") === "true";
+
 	// The demo takes no file: its sample is added instead, and its body is never read (spec §8.10).
 	if (c.env.DEMO === "true") return sampleUpload(c, isHtmx);
 	const today = await householdToday(c.env.DB);
 	// The request's length, before its body is read: a length that isn't digits, or one over the cap, is refused.
 	const declared = c.req.header("content-length") ?? "";
+
 	if (!/^\d+$/.test(declared))
 		return sizeRefused(c, today, COULDNT_TELL, isHtmx);
+
 	if (Number(declared) > REQUEST_CAP)
 		return sizeRefused(c, today, TOO_BIG, isHtmx);
 
 	const form = await readForm(c);
 	const file = form.file;
-	const balanceText = typeof form.balance === "string" ? form.balance : "";
+	const balanceText = isText(form.balance) ? form.balance : "";
 	let fileError: string | undefined;
 	let rows: AppleRow[] | null = null;
+
 	if (!(file instanceof File) || file.name === "") fileError = NO_FILE;
 	else if (file.size > FILE_CAP) fileError = TOO_BIG;
 	else {
 		const read = parseAppleCsv(
 			new TextDecoder("utf-8").decode(await file.arrayBuffer()),
 		);
+
 		if (read.ok) rows = read.rows;
 		else fileError = read.error;
 	}
+
 	const balance = parseBalance(balanceText);
 	const balanceError = balance === null ? BAD_BALANCE : undefined;
+
 	if (
 		fileError !== undefined ||
 		balanceError !== undefined ||
@@ -521,6 +571,7 @@ accounts.post("/accounts/apple-card", async (c) => {
 		today,
 		balanceCents: balance.cents,
 	});
+
 	if (!result.ok)
 		return uploadRefused(
 			c,
@@ -531,6 +582,7 @@ accounts.post("/accounts/apple-card", async (c) => {
 
 	// The same steps a sync's rows get: merchant rules and bill matching now, then the sorting in the background.
 	await afterUpload(c, result.addedIds);
+
 	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
 });
 
@@ -543,14 +595,19 @@ function syncOutcome(
 		return {
 			alert: `Couldn't sync ${result.failedBanks.join(", ")}. Try again later.`,
 		};
+
 	// The banks synced, but sorting what arrived didn't finish, so the list may not be right yet.
 	if (result.afterSyncFailed)
 		return { alert: "Couldn't sync accounts. Try again later." };
+
 	if (result.synced === 0 && result.busy > 0)
 		return { message: "Already synced a moment ago.", type: "info" };
+
 	if (result.synced === 0 && banks.every((b) => b.needsAttention))
 		return { message: "Fix the connection first.", type: "info" };
+
 	if (result.added === 0) return { message: "Nothing new", type: "success" };
+
 	return {
 		message: `${result.added} new ${result.added === 1 ? "transaction" : "transactions"}`,
 		type: "success",
@@ -565,8 +622,10 @@ accounts.post("/accounts/sync", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 	const isHtmx = c.req.header("HX-Request") === "true";
 	let alert: string | undefined;
+
 	try {
 		const result = await syncAllItems(c.env, undefined, Date.now, true);
+
 		// Even when one bank failed, the others may have brought transactions in. Jev is asked about
 		// those only. When the rules step failed, the pass applies them itself, as the nightly run does.
 		if (result.changedIds.length > 0)
@@ -576,6 +635,7 @@ accounts.post("/accounts/sync", async (c) => {
 				}),
 			);
 		const outcome = syncOutcome(result, await accountsByBank(c.env.DB));
+
 		if ("alert" in outcome) alert = outcome.alert;
 		else if (!isHtmx) return c.redirect("/accounts", 303);
 		else
@@ -593,8 +653,10 @@ accounts.post("/accounts/sync", async (c) => {
 		);
 		alert = "Couldn't sync accounts. Try again later.";
 	}
+
 	// Without htmx a failure can't ride a redirect, so the whole page carries the alert.
 	if (!isHtmx) return accountsPage(c, alert);
+
 	return c.html(<AccountsSummary env={c.env} alert={alert} />);
 });
 
@@ -635,6 +697,7 @@ function DisconnectPage({
 	address?: string;
 }) {
 	const url = `/accounts/${item.id}/disconnect`;
+
 	return (
 		<Layout
 			title={`Disconnect ${item.institution_name}? · Tally`}
@@ -695,7 +758,9 @@ function DisconnectPage({
 accounts.get("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
+
 	if (!item || item.disconnected_at !== null) return c.notFound();
+
 	return c.html(<DisconnectPage item={item} address={addressOf(c)} />);
 });
 
@@ -707,22 +772,27 @@ async function backToAccounts(c: Context<App>, message: string) {
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", "/accounts");
+
 	return accountsPage(c);
 }
 
 accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
+
 	if (!item) return c.notFound();
 	const already = `${item.institution_name} is already disconnected.`;
+
 	if (item.disconnected_at !== null) return backToAccounts(c, already);
 	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
-	const plaidEnv = c.env as Env & PlaidEnv;
+	const plaidEnv: Env & PlaidEnv = c.env;
+
 	try {
 		const token = await decryptToken(
 			item.access_token_encrypted,
-			plaidEnv.TOKEN_ENCRYPTION_KEY as string,
+			plaidEnv.TOKEN_ENCRYPTION_KEY ?? "",
 		);
+
 		try {
 			await removeItem(plaidEnv, token);
 		} catch (error) {
@@ -742,10 +812,12 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 			502,
 		);
 	}
+
 	// One batch is one transaction. Each delete runs only while the bank is still connected, and the
 	// disconnect comes last, so a second submit (another tab kept the history) deletes nothing.
 	const stillConnected =
 		"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND disconnected_at IS NULL)";
+
 	// The pay record's copies of the deposits go first, since they are found through the bank's transactions.
 	const statements = deleteHistory
 		? [
@@ -761,10 +833,12 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 				).bind(item.id, item.id),
 			]
 		: [];
+
 	// Before setup is done, the last connected bank going takes the four strokes back (spec §8.8), in this batch.
 	statements.push(takeBackBankStrokes(c.env.DB, item.id));
 	statements.push(disconnectStatement(c.env.DB, item.id));
 	let results: D1Result[];
+
 	try {
 		results = await c.env.DB.batch(statements);
 	} catch {
@@ -778,7 +852,9 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 			502,
 		);
 	}
+
 	if (results.at(-1)?.meta.changes === 0) return backToAccounts(c, already);
+
 	return backToAccounts(
 		c,
 		deleteHistory
@@ -795,6 +871,7 @@ async function cardTransactionCount(db: D1Database, accountId: number) {
 		)
 		.bind(accountId)
 		.first<{ n: number }>();
+
 	return row?.n ?? 0;
 }
 
@@ -835,7 +912,9 @@ function RemovePage({
 accounts.get("/accounts/apple-card/remove", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const card = await appleCardAccount(c.env.DB);
+
 	if (!card || card.removedAt !== null) return c.notFound();
+
 	return c.html(
 		<RemovePage
 			count={await cardTransactionCount(c.env.DB, card.id)}
@@ -849,9 +928,11 @@ accounts.post("/accounts/apple-card/remove", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const card = await appleCardAccount(c.env.DB);
 	const already = "Apple Card is already removed.";
+
 	// No card (another tab deleted it with its transactions) or a removed one: there's nothing left to remove, as Disconnect's is.
 	if (!card || card.removedAt !== null) return backToAccounts(c, already);
 	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
+
 	// Keeping the rows only marks the card removed and clears its balance, so it leaves net worth until a balance is typed.
 	// Deleting runs the pay cleanup first (it finds the card's rows), then the rows, their balances, and the account last,
 	// so the account's changes say whether this removal went through. Each statement needs the card still kept.
@@ -873,9 +954,11 @@ accounts.post("/accounts/apple-card/remove", async (c) => {
 					"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card' AND removed_at IS NULL",
 				),
 			];
+
 	// The count the failure page shows is read before the batch: a failed batch must not be followed by a read that can fail too.
 	const count = await cardTransactionCount(c.env.DB, card.id);
 	let results: D1Result[];
+
 	try {
 		results = await c.env.DB.batch(statements);
 	} catch {
@@ -889,7 +972,9 @@ accounts.post("/accounts/apple-card/remove", async (c) => {
 			502,
 		);
 	}
+
 	if (results.at(-1)?.meta.changes === 0) return backToAccounts(c, already);
+
 	return backToAccounts(
 		c,
 		deleteHistory

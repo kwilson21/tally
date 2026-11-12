@@ -9,9 +9,13 @@ const pair = await crypto.subtle.generateKey(
 	true,
 	["sign", "verify"],
 );
+
 const publicKey = Buffer.from(
 	await crypto.subtle.exportKey("raw", pair.publicKey),
 ).toString("base64url");
+
 const { d } = await crypto.subtle.exportKey("jwk", pair.privateKey);
+
 if (typeof d !== "string") throw new Error("The private key has no scalar.");
+
 process.stdout.write(`${JSON.stringify({ publicKey, privateKey: d })}\n`);

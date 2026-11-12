@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
+type HtmxTrigger = { toast: { message: string } };
+
 const db = env.DB;
 const BASE = "http://tally.test";
 const GROCERIES = 1;
 const KIDS = 4;
 const HOUSEHOLD = 5;
 const PURCHASE = 9201;
+
 /** $45.00 on Sep 5, and $20.00 on Sep 6: both refund the purchase. */
 const FIRST = 9202;
 const SECOND = 9203;
@@ -30,9 +33,11 @@ beforeEach(async () => {
 const readable = (html: string) => html.replace(/&#39;/g, "'");
 
 const TOKEN = /^[0-9a-f-]{36}$/;
+
 /** A drawing's token: the hidden input every drawing of the sheet carries (SplitForm's sheet). */
 const tokenOf = (html: string) =>
 	html.match(/name="sheet"[^>]*value="([^"]+)"/)?.[1] ?? "";
+
 /** A fresh drawing of the sheet, as GET /split draws it. */
 const drawSheet = async () =>
 	readable(
@@ -42,6 +47,7 @@ const drawSheet = async () =>
 			)
 		).text(),
 	);
+
 /** The parts a line request posts, before its sheet token and any answers. */
 const LINE_PARTS: [string, string][] = [
 	["part_category", String(KIDS)],
@@ -76,6 +82,7 @@ async function post(path: string, fields: [string, string][]) {
 		},
 		body: new URLSearchParams(fields),
 	});
+
 	return { res, html: readable(await res.text()) };
 }
 
@@ -101,6 +108,7 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 		const res = await exports.default.fetch(
 			`${BASE}/transactions/${PURCHASE}/split?back=%2Ftransactions`,
 		);
+
 		const html = readable(await res.text());
 		expect(html).toContain("The refund on Sep 5 goes with");
 		expect(html).toContain("The refund on Sep 6 goes with");
@@ -118,10 +126,12 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 
 	it("gives each drawing of the sheet its own token, in its hidden input and its label ids", async () => {
 		const drawn = await drawSheet();
+
 		const { html: added } = await post(
 			`/transactions/${PURCHASE}/split`,
 			parts(["add", "1"]),
 		);
+
 		const first = tokenOf(drawn);
 		const second = tokenOf(added);
 		expect(first).toMatch(TOKEN);
@@ -136,6 +146,7 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			`/transactions/${PURCHASE}/split`,
 			parts(["refund_9203", "none"]),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
 		expect(html).toContain(
@@ -150,6 +161,7 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			`/transactions/${PURCHASE}/split`,
 			parts(["refund_9202", "1"], ["refund_9203", "none"]),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"The refund is $45.00, and Household is only $40.00.",
@@ -163,22 +175,27 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			`/transactions/${PURCHASE}/split`,
 			parts(["refund_9202", "0"], ["refund_9203", "none"]),
 		);
+
 		expect(res.status).toBe(200);
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 5 now counts with Kids.",
 		);
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 6 is no longer linked.",
 		);
+
 		const kids = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? AND category_id = ?",
 			)
 			.bind(PURCHASE, KIDS)
 			.first<{ id: number }>();
+
 		expect(await linkOf(FIRST)).toBe(kids?.id);
 		expect(await linkOf(SECOND)).toBeNull();
 	});
@@ -188,10 +205,13 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			`/transactions/${PURCHASE}/split`,
 			parts(["refund_9202", "none"], ["refund_9203", "none"]),
 		);
+
 		expect(res.status).toBe(200);
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
 		expect(trigger.toast.message).toContain("2 refunds are no longer linked.");
 		expect(trigger.toast.message).not.toContain("The refund on");
 		expect(await linkOf(FIRST)).toBeNull();
@@ -200,11 +220,13 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 
 	it("redraws only the part labels out of band, so no reply can uncheck or revert a pick", async () => {
 		const token = tokenOf(await drawSheet());
+
 		const { res, html } = await post(`/transactions/${PURCHASE}/split/line`, [
 			...LINE_PARTS,
 			["sheet", token],
 			[`refund_${FIRST}`, "1"],
 		]);
+
 		expect(res.status).toBe(200);
 		// Only the amount is tabular; the category name and the dot are normal text (#676, decision 128).
 		expect(html).toMatch(
@@ -217,9 +239,11 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 				`<span id="refund-${token}-${SECOND}-part-1"[^>]*hx-swap-oob="true"[^>]*>Household · <span class="tabular-nums">\\$40\\.00</span></span>`,
 			),
 		);
+
 		const outerLabel = html.match(
 			new RegExp(`<span id="refund-${token}-${FIRST}-part-0"[^>]*>`),
 		)?.[0];
+
 		expect(outerLabel).toBeDefined();
 		expect(outerLabel).not.toContain("tabular-nums");
 		expect(html).not.toContain('id="refund-choices"');
@@ -229,15 +253,19 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 
 	it("draws a label update for an earlier drawing onto nothing on a redrawn sheet", async () => {
 		const token = tokenOf(await drawSheet());
+
 		const { res, html } = await post(`/transactions/${PURCHASE}/split/line`, [
 			...LINE_PARTS,
 			["sheet", token],
 			[`refund_${FIRST}`, "1"],
 		]);
+
 		expect(res.status).toBe(200);
+
 		const labels = [
 			...html.matchAll(/<span id="([^"]+)"[^>]*hx-swap-oob="true"/g),
 		].map((match) => match[1]);
+
 		expect(labels).toEqual([
 			`refund-${token}-${FIRST}-part-0`,
 			`refund-${token}-${FIRST}-part-1`,
@@ -246,6 +274,7 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 		]);
 		const redrawn = await drawSheet();
 		expect(tokenOf(redrawn)).not.toBe(token);
+
 		for (const label of labels) expect(redrawn).not.toContain(`id="${label}"`);
 	});
 
@@ -257,6 +286,7 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			...fields,
 			[`refund_${FIRST}`, "1"],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(html).toContain('id="split-line"');
 		expect(html).not.toContain("hx-swap-oob");
@@ -273,16 +303,20 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			"test",
 			{ [FIRST]: 0 },
 		);
+
 		const cash = await db
 			.prepare("SELECT id FROM accounts WHERE type = 'cash' LIMIT 1")
 			.first<{ id: number }>();
+
 		await db
 			.prepare("UPDATE transactions SET account_id = ? WHERE id = ?")
 			.bind(cash?.id ?? 0, PURCHASE)
 			.run();
+
 		const res = await exports.default.fetch(
 			`${BASE}/transactions/${PURCHASE}/split?back=%2Ftransactions&total=12000`,
 		);
+
 		const html = readable(await res.text());
 		expect(res.status).toBe(200);
 		expect(html).toContain("Change them to match");
@@ -296,9 +330,11 @@ describe("a credit that no longer follows its purchase is not asked about", () =
 			.prepare("UPDATE transactions SET credit_reviewed = 0 WHERE id = ?")
 			.bind(SECOND)
 			.run();
+
 		const res = await exports.default.fetch(
 			`${BASE}/transactions/${PURCHASE}/split?back=%2Ftransactions`,
 		);
+
 		const html = readable(await res.text());
 		expect(html).toContain("The refund on Sep 5 goes with");
 		expect(html).not.toContain("The refund on Sep 6 goes with");
@@ -309,14 +345,18 @@ describe("a credit that no longer follows its purchase is not asked about", () =
 			.prepare("UPDATE transactions SET credit_reviewed = 0 WHERE id = ?")
 			.bind(SECOND)
 			.run();
+
 		const { res } = await post(
 			`/transactions/${PURCHASE}/split`,
 			parts(["refund_9202", "0"]),
 		);
+
 		expect(res.status).toBe(200);
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 6 is no longer linked.",
 		);
@@ -335,10 +375,12 @@ describe("a credit that no longer follows its purchase is not asked about", () =
 				)
 				.bind(SECOND)
 				.run();
+
 			const { res } = await post(
 				`/transactions/${PURCHASE}/split`,
 				parts(["refund_9202", "0"]),
 			);
+
 			expect(res.status).toBe(200);
 			expect(await linkOf(SECOND)).toBeNull();
 		},
@@ -349,9 +391,11 @@ describe("a credit that no longer follows its purchase is not asked about", () =
 			.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
 			.bind(PURCHASE)
 			.run();
+
 		const res = await exports.default.fetch(
 			`${BASE}/transactions/${PURCHASE}/split?back=%2Ftransactions`,
 		);
+
 		expect(readable(await res.text())).not.toContain("goes with");
 	});
 });
@@ -397,6 +441,7 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 		const res = await exports.default.fetch(
 			`${BASE}/transactions/${SPLIT_PURCHASE}/split?back=%2Ftransactions`,
 		);
+
 		const html = readable(await res.text());
 		expect(html.match(/goes with/g)).toHaveLength(1);
 		expect(html).toContain("The refund on Sep 7 goes with");
@@ -415,6 +460,7 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			parts(),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
 		expect(html).toContain(
@@ -429,6 +475,7 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			parts([`refund_${SPLIT_REFUND}`, "1"]),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"The refund is $50.00, and Household is only $40.00.",
@@ -441,19 +488,24 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			parts([`refund_${SPLIT_REFUND}`, "0"]),
 		);
+
 		expect(res.status).toBe(200);
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 7 now counts with Kids.",
 		);
+
 		const kids = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? AND category_id = ?",
 			)
 			.bind(SPLIT_PURCHASE, KIDS)
 			.first<{ id: number }>();
+
 		expect(await linkOf(SPLIT_REFUND)).toBe(kids?.id);
 		expect(await linkOf(REFUND_KIDS)).toBe(kids?.id);
 		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(kids?.id);
@@ -464,10 +516,13 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			parts([`refund_${SPLIT_REFUND}`, "none"]),
 		);
+
 		expect(res.status).toBe(200);
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
 		expect(trigger.toast.message).toContain(
 			"The refund on Sep 7 is no longer linked.",
 		);
@@ -479,17 +534,21 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 
 	it("leaves a part linked elsewhere out of the fit, and moves the split refund with the rest", async () => {
 		await linkElsewhere(REFUND_KIDS);
+
 		const { res } = await post(
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			sized("80.00", "20.00", [`refund_${SPLIT_REFUND}`, "1"]),
 		);
+
 		expect(res.status).toBe(200);
+
 		const household = await db
 			.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? AND category_id = ?",
 			)
 			.bind(SPLIT_PURCHASE, HOUSEHOLD)
 			.first<{ id: number }>();
+
 		expect(await linkOf(SPLIT_REFUND)).toBe(household?.id);
 		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(household?.id);
 		expect(await linkOf(REFUND_KIDS)).toBe(OTHER_SHOP);
@@ -497,10 +556,12 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 
 	it("names the moving sum when that is too big for its part, and saves nothing", async () => {
 		await linkElsewhere(REFUND_KIDS);
+
 		const { res, html } = await post(
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			sized("85.00", "15.00", [`refund_${SPLIT_REFUND}`, "1"]),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
 		expect(html).toContain(
@@ -515,6 +576,7 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			sized("80.00", "20.00", [`refund_${SPLIT_REFUND}`, "1"]),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			"The refund is $50.00, and Household is only $20.00.",
@@ -526,20 +588,26 @@ describe("a split refund is asked about like any linked refund, and its parts ar
 
 	it("gives no line to a split refund with no part still following it, and unlinks it with a toast", async () => {
 		await linkElsewhere(REFUND_KIDS, REFUND_HOUSEHOLD);
+
 		const page = await exports.default.fetch(
 			`${BASE}/transactions/${SPLIT_PURCHASE}/split?back=%2Ftransactions`,
 		);
+
 		const html = readable(await page.text());
 		expect(html).not.toContain("goes with");
 		expect(html).not.toContain(`name="refund_${SPLIT_REFUND}"`);
+
 		const { res } = await post(
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			parts(),
 		);
+
 		expect(res.status).toBe(200);
-		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-			toast: { message: string };
-		};
+
+		const trigger: HtmxTrigger = JSON.parse(
+			res.headers.get("HX-Trigger") ?? "{}",
+		);
+
 		expect(
 			trigger.toast.message.match(/The refund on Sep 7 is no longer linked\./g),
 		).toHaveLength(1);

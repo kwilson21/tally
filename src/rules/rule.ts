@@ -3,6 +3,7 @@
 // database (decision 195). This file may not grow past about 80 lines without a decision entry.
 
 declare const made: unique symbol;
+
 /** Only write(), nothingToDo() and refuse() can make one: a hand-written literal has no brand and fails the typecheck. */
 type Made = { readonly [made]: true };
 
@@ -15,9 +16,14 @@ export type Outcome<W> = Made &
 	);
 
 export const write = <W>(what: W) =>
+	// SAFETY: this constructor is where a write outcome gets its brand, and it holds only that kind's fields.
 	({ kind: "write", write: what }) as Outcome<W>;
+
+// SAFETY: this constructor is where a nothing-to-do outcome gets its brand, and it holds only its kind.
 export const nothingToDo = () => ({ kind: "nothingToDo" }) as Outcome<never>;
+
 export const refuse = (type: string, say: string) =>
+	// SAFETY: this constructor is where a refusal gets its brand, and it holds only that kind's fields.
 	({ kind: "refuse", type, say }) as Outcome<never>;
 
 /** Runs the one branch for this outcome's kind. Leaving a kind out fails the typecheck. */
@@ -30,7 +36,9 @@ export function handle<W, R>(
 	},
 ): R {
 	if (outcome.kind === "write") return on.write(outcome.write);
+
 	if (outcome.kind === "nothingToDo") return on.nothingToDo();
+
 	return on.refuse(outcome.type, outcome.say);
 }
 
@@ -39,6 +47,7 @@ export type Term<G> = {
 	readonly text: string;
 	readonly holds: (given: G) => boolean;
 };
+
 export const term = <G>(
 	text: string,
 	holds: (given: G) => boolean,
@@ -53,6 +62,7 @@ export type Refusal<G> = {
 	readonly type: string;
 	readonly say: string;
 };
+
 export const unless = <G>(
 	condition: Term<G>,
 	type: string,
@@ -76,8 +86,10 @@ export function defineRule2<Request, Facts, G, W>(rule: {
 		...rule,
 		decide(request: Request, facts: Facts): Outcome<W> {
 			const given = rule.given(request, facts);
+
 			if (rule.nothingToDoIf.holds(given)) return nothingToDo();
 			const refused = rule.refusals.find((r) => !r.unless.holds(given));
+
 			return refused
 				? refuse(refused.type, refused.say)
 				: write(rule.writes(given));

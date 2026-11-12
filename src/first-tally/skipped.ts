@@ -45,15 +45,20 @@ function runBack(
 	last: "bills" | "budgets",
 ): SkippedNote[] {
 	const notes: SkippedNote[] = [];
+
 	if (last === "budgets") {
 		const budgets = model.budgets;
+
 		if (!budgets || budgets.done || budgets.nothingAsked === null) return [];
 		notes.unshift(skippedBudgets(budgets.nothingAsked));
 	}
+
 	if (!billsAskedNothing(model)) return notes;
 	notes.unshift(skippedBills(model.waiting.length));
+
 	if (!payAskedNothing(model)) return notes;
 	notes.unshift(skippedPay());
+
 	return notes;
 }
 
@@ -65,11 +70,15 @@ function runBack(
  */
 export function skippedNotes(model: FirstPageModel): SkippedNote[] {
 	if (model.pay.length > 0) return [];
+
 	if (model.keep.length > 0)
 		return payAskedNothing(model) ? [skippedPay()] : [];
 	const budgets = model.budgets;
+
 	if (!budgets || budgets.done) return [];
+
 	if (budgets.asks.length > 0)
 		return model.budgetsAnswered ? [] : runBack(model, "bills");
+
 	return runBack(model, "budgets");
 }

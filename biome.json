@@ -12,7 +12,8 @@
 			"!worker-configuration.d.ts",
 			"!.wrangler",
 			"!node_modules",
-			"!package-lock.json"
+			"!package-lock.json",
+			"!tools/oxlint/anti-slop"
 		]
 	},
 	"formatter": {

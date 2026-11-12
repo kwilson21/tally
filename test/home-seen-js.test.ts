@@ -11,17 +11,22 @@ type RequestEvent = {
 	defaultPrevented: boolean;
 	preventDefault: () => void;
 };
+
 type RequestListener = (event: RequestEvent) => void;
+
+/** The element a request starts from: a check-in or another element, or nothing at all. */
+type RequestSource = { id?: string } | undefined;
 
 function fakeDocument(visibilityState: string) {
 	const listeners = new Map<string, RequestListener[]>();
+
 	const document = {
 		visibilityState,
 		addEventListener: vi.fn((name: string, listener: RequestListener) => {
 			listeners.set(name, [...(listeners.get(name) ?? []), listener]);
 		}),
 		/** The before-request event htmx 4 dispatches on a request's source, and whether a listener cancelled it. */
-		beforeRequest(source: unknown) {
+		beforeRequest(source: RequestSource) {
 			const event: RequestEvent = {
 				target: source,
 				defaultPrevented: false,
@@ -29,11 +34,14 @@ function fakeDocument(visibilityState: string) {
 					event.defaultPrevented = true;
 				},
 			};
+
 			for (const listener of listeners.get("htmx:before:request") ?? [])
 				listener(event);
+
 			return event;
 		},
 	};
+
 	return document;
 }
 
@@ -56,6 +64,7 @@ describe("home-seen.js: a tab that isn't on screen counts as away (decision 149)
 		for (const state of ["hidden", "visible"]) {
 			const document = fakeDocument(state);
 			setupHomeSeen({ document });
+
 			const others = [
 				{ id: "your-banks" },
 				{ id: "setup-next" },
@@ -63,6 +72,7 @@ describe("home-seen.js: a tab that isn't on screen counts as away (decision 149)
 				{},
 				undefined,
 			];
+
 			for (const other of others)
 				expect(document.beforeRequest(other).defaultPrevented).toBe(false);
 		}

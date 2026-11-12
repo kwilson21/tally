@@ -41,6 +41,7 @@ export function BankGroup({
 		disconnected || lastSyncedAt === undefined
 			? null
 			: syncedAtLabel(lastSyncedAt, now);
+
 	return (
 		<section class="mt-8" data-bank-item-id={fixAttrs?.["data-item-id"]}>
 			<h2 class="text-muted" tabindex={-1}>

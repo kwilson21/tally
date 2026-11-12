@@ -15,7 +15,7 @@ const OTHERS = Object.entries(
 		query: "?raw",
 		import: "default",
 		eager: true,
-	}) as Record<string, string>,
+	}),
 );
 
 describe("the sync timing numbers", () => {
@@ -30,9 +30,11 @@ describe("the sync timing numbers", () => {
 
 	it("are not spelled out again in src/plaid: no lease, cooldown or run-budget literal in the sync files", () => {
 		const offenders: string[] = [];
+
 		for (const [file, text] of OTHERS)
 			for (const line of text.split("\n")) {
 				if (/^\s*(?:\/\/|\/?\*)/.test(line)) continue;
+
 				if (
 					/datetime\('now', '[+-]\d+ (?:minutes?|seconds?)'\)/.test(line) ||
 					/\b\d+ \* 60 \* 1000\b/.test(line)
@@ -41,6 +43,7 @@ describe("the sync timing numbers", () => {
 						`${file.replace("../", "")}: ${line.trim().slice(0, 90)}`,
 					);
 			}
+
 		expect(offenders).toEqual([]);
 	});
 });

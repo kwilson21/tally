@@ -19,6 +19,7 @@ describe("trendsExample", () => {
 			cents: c,
 			partial: i === cents.length - 1,
 		}));
+
 	const row = (name: string, run: number, cents: number[]): TrendRowData => ({
 		id: 1,
 		name,
@@ -30,6 +31,7 @@ describe("trendsExample", () => {
 		months: months(cents),
 		label: "",
 	});
+
 	const full = (over: Partial<Extract<TrendsPage, { kind: "full" }>>) =>
 		({
 			kind: "full",
@@ -446,6 +448,7 @@ describe("netWorthExample with a credit balance (Apple Card, #766)", () => {
 			{ balanceCents: 124018, isLiability: true },
 			{ balanceCents: -1200, isLiability: true },
 		]);
+
 		expect(text).toBe(
 			"$5,012.00 in accounts − $1,240.18 owed = $3,771.82 net worth.",
 		);

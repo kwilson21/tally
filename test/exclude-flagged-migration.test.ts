@@ -38,6 +38,7 @@ describe("migration 0004: exclude what Jev already flagged (#27)", () => {
 				"UPDATE transactions SET flag_reimbursement = 1 WHERE raw_name = 'TST* CORNER DELI'",
 			),
 		]);
+
 		const before = await db
 			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE excluded = 1")
 			.first<{ n: number }>();
@@ -45,28 +46,35 @@ describe("migration 0004: exclude what Jev already flagged (#27)", () => {
 		for (const sql of statements) await db.prepare(sql).run();
 
 		expect(await excludedOf("VENMO *J RIVERA")).toBe(1);
+
 		const source = await db
 			.prepare(
 				"SELECT excluded_source FROM transactions WHERE raw_name = 'VENMO *J RIVERA' LIMIT 1",
 			)
 			.first<{ excluded_source: string | null }>();
+
 		expect(source?.excluded_source).toBe("jev");
 		expect(await excludedOf("TST* CORNER DELI")).toBe(1);
 		expect(await excludedOf("SQ *LOCAL BAKERY 4432")).toBe(0);
+
 		const venmoAndDeli = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name IN ('VENMO *J RIVERA', 'TST* CORNER DELI') AND excluded = 0",
 			)
 			.first<{ n: number }>();
+
 		expect(venmoAndDeli?.n).toBe(0);
+
 		const after = await db
 			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE excluded = 1")
 			.first<{ n: number }>();
+
 		const flagged = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name IN ('VENMO *J RIVERA', 'TST* CORNER DELI')",
 			)
 			.first<{ n: number }>();
+
 		expect(after?.n).toBe((before?.n ?? 0) + (flagged?.n ?? 0));
 	});
 });

@@ -53,6 +53,7 @@ export function BottomSheet({
 	children,
 }: Props) {
 	const arrival = still ? "" : "sheet-panel ";
+
 	return (
 		<>
 			<a

@@ -18,6 +18,7 @@ export type PaymentPickerCandidate = {
 	/** The person said Not this one to it for this month: it is listed last, under "You said not this one" (#340). */
 	turnedAway?: boolean;
 };
+
 export type PaymentPickerPeriod = {
 	value: string;
 	label: string;
@@ -47,6 +48,7 @@ export function BillMonthExplanation({
 	const bankMonth = paymentDate.slice(0, 7);
 	const countedMonth = billPaymentMonth(bill, period, bankMonth);
 	const bankName = month(bankMonth);
+
 	return (
 		<p class="text-sm text-muted">
 			{countedMonth !== bankMonth
@@ -111,11 +113,14 @@ export function BillPaymentPicker({
 }) {
 	const action = `/bills/${billId}/link`;
 	const windowDays = manualLinkWindowDays(bill.frequency);
+
 	const opened =
 		periods.find((period) => period.value === openedPeriod) ?? periods[0];
+
 	const selectedPayment = candidates.find(
 		(candidate) => candidate.id === selectedTransactionId,
 	);
+
 	const emptyState = (
 		<EmptyState
 			kind="search"
@@ -123,9 +128,11 @@ export function BillPaymentPicker({
 			hint={`There are no eligible, unclaimed payments within ${windowDays} days.`}
 		/>
 	);
+
 	// A page that opens on a month with nothing to link shows the empty state alone. Once a payment is listed, or a
 	// month choice has swapped the picker in (rerender), the month choices stay, so another month can still be picked.
 	const monthChoices = candidates.length > 0 || rerender;
+
 	// Link it's found charge, or any payment named in the address, leads the list so it opens checked and first (#604).
 	const ordered =
 		selectedPayment && !selectedPayment.turnedAway
@@ -134,6 +141,7 @@ export function BillPaymentPicker({
 					...candidates.filter((candidate) => candidate !== selectedPayment),
 				]
 			: candidates;
+
 	// A turned-away payment comes last, under its own muted line; each keeps its place in the list, so the first is required.
 	const listed = ordered.map((candidate, index) => ({ candidate, index }));
 	const regular = listed.filter(({ candidate }) => !candidate.turnedAway);
@@ -142,12 +150,14 @@ export function BillPaymentPicker({
 	const folds = candidates.length > CLOSEST_PAYMENTS;
 	const drawn = regular.slice(0, CLOSEST_PAYMENTS);
 	const folded = regular.slice(CLOSEST_PAYMENTS);
+
 	// The fold opens when the checked payment is inside it, or when no payment is drawn outside it.
 	const foldOpen =
 		drawn.length === 0 ||
 		[...folded, ...turnedAway].some(
 			({ candidate }) => candidate.id === selectedTransactionId,
 		);
+
 	const turnedAwayGroup = turnedAway.length ? (
 		<fieldset class="mt-2">
 			<legend class="text-sm text-muted">You said not this one</legend>
@@ -158,6 +168,7 @@ export function BillPaymentPicker({
 			/>
 		</fieldset>
 	) : null;
+
 	return (
 		<section
 			id="payment-picker"

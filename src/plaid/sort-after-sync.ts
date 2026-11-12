@@ -29,6 +29,7 @@ export async function sortAfterSync(
 		bySync: true,
 		rulesApplied,
 	};
+
 	await startSorting(env, params);
 }
 
@@ -43,6 +44,8 @@ export async function syncItemAndSort(
 	{ historyComplete = false }: { historyComplete?: boolean } = {},
 ): Promise<SyncResult> {
 	const synced = await syncItem(env, itemRowId, fetchImpl, { historyComplete });
+
 	if (!("skipped" in synced)) await sortAfterSync(env, synced);
+
 	return synced;
 }

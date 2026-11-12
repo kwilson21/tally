@@ -174,12 +174,14 @@ const ACME = {
 	),
 	displayName: "Acme Corp",
 };
+
 const SAVINGS = {
 	...tx(902, "2026-10-10", "ONLINE TRANSFER TO SAV ...5678", 50000, undefined, {
 		excluded: true,
 	}),
 	displayName: "Transfer to Savings",
 };
+
 const BLUE_BOTTLE = {
 	...tx(903, "2026-10-12", "SQ *BLUE BOTTLE COF 0217", 675, EATING_OUT),
 	displayName: "Blue Bottle Coffee",
@@ -327,6 +329,7 @@ function PartRow({
 	replay?: { step: string };
 }) {
 	const rule = ruled ? "border-t border-ink" : "";
+
 	if (!found || !line.found) {
 		return (
 			<li class={`${sub ? "pb-2" : ""} ${rule}`}>
@@ -335,6 +338,7 @@ function PartRow({
 			</li>
 		);
 	}
+
 	if (!replay) {
 		return (
 			<li class={`py-3 ${rule}`}>
@@ -342,6 +346,7 @@ function PartRow({
 			</li>
 		);
 	}
+
 	return (
 		<li class={`py-3 ${rule} ${replay.step}`}>
 			<div class="grid">
@@ -383,6 +388,7 @@ function TallysPart({
 		<ul class="divide-y divide-rule border-y border-rule">
 			{TALLY_LINES.slice(from, to).map((line, j) => {
 				const i = from + j;
+
 				return (
 					<PartRow
 						line={line}
@@ -424,6 +430,7 @@ function BudgetRows({ rows }: { rows: Budget[] }) {
 /** A budget the pencil has set but the ink hasn't: the amount in muted words, a dashed track, a muted fill, no status colour. */
 function PencilRow({ budget }: { budget: Budget }) {
 	const { fillPct } = barGeometry(budget.spentCents, budget.budgetCents);
+
 	return (
 		<li class="flex items-start gap-4 py-3">
 			<CategoryIcon icon={budget.icon} color={budget.color} />
@@ -498,13 +505,16 @@ function Notebook({
 		if (replay) {
 			return `stroke-ink proposal-first-stroke${i === 4 ? " proposal-first-cross" : ""}`;
 		}
+
 		if (drawLast) {
 			return i === strokes - 1
 				? "stroke-ink proposal-first-draw"
 				: "stroke-ink";
 		}
+
 		return ink ? "stroke-ink" : "stroke-muted";
 	};
+
 	return (
 		<NotebookDrawing
 			strokes={replay ? 5 : strokes}
@@ -990,6 +1000,7 @@ const bReplay = (
 		<ul class="mt-6 divide-y divide-rule">
 			{BUDGETS.slice(0, 2).map((b) => {
 				const { fillPct } = barGeometry(b.spentCents, b.budgetCents);
+
 				return (
 					<li class="py-3">
 						<div class="flex items-baseline justify-between gap-3">

@@ -3,6 +3,7 @@
 
 /** Full-page tries before a page is taken in slices instead. */
 export const ATTEMPTS = 3;
+
 /** Height of one slice in CSS pixels. Each slice is its own, much smaller, capture. */
 export const SLICE_HEIGHT = 16000;
 
@@ -25,6 +26,7 @@ export async function captureWithRetries({
 	log = console.warn,
 }) {
 	let last;
+
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
 			return await capture();
@@ -33,11 +35,14 @@ export async function captureWithRetries({
 			log(
 				`${label}: attempt ${attempt} of ${attempts} failed (${error.message}).`,
 			);
+
 			if (attempt < attempts) await wait(attempt * 1000);
 		}
 	}
+
 	if (!fallback) throw last;
 	log(`${label}: every full-page try failed, so it is taken in slices.`);
+
 	return fallback();
 }
 
@@ -57,6 +62,7 @@ export async function captureSlices({
 	log,
 }) {
 	const shots = [];
+
 	for (const [i, band] of bands.entries())
 		shots.push(
 			await captureWithRetries({
@@ -67,6 +73,7 @@ export async function captureSlices({
 				log,
 			}),
 		);
+
 	return shots;
 }
 
@@ -90,13 +97,16 @@ export function pageShooter({
 	log,
 }) {
 	let sliced = height > SLICE_HEIGHT;
+
 	return () => {
 		if (sliced) return slices();
+
 		return captureWithRetries({
 			label,
 			capture: whole,
 			fallback: async () => {
 				sliced = true;
+
 				return slices();
 			},
 			attempts,
@@ -115,7 +125,9 @@ export function pageShooter({
  */
 export function sliceBands(height, sliceHeight = SLICE_HEIGHT) {
 	const bands = [];
+
 	for (let y = 0; y < height; y += sliceHeight)
 		bands.push({ y, height: Math.min(sliceHeight, height - y) });
+
 	return bands;
 }

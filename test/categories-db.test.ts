@@ -10,6 +10,7 @@ import {
 } from "../src/db/categories";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const MONTH = "2026-09";
@@ -65,13 +66,16 @@ describe("setArchived", () => {
 		const before = await db
 			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = 2")
 			.first<{ n: number }>();
+
 		await setArchived(db, 2, true);
 		expect(await names()).not.toContain("Eating Out");
 		await setArchived(db, 2, false);
 		expect(await names()).toContain("Eating Out");
+
 		const after = await db
 			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = 2")
 			.first<{ n: number }>();
+
 		expect(after?.n).toBe(before?.n);
 	});
 });
@@ -126,9 +130,11 @@ describe("restoring after a move", () => {
 			"Rent",
 			"Eating Out",
 		]);
+
 		const orders = await db
 			.prepare("SELECT sort_order FROM categories WHERE archived = 0")
 			.all<{ sort_order: number }>();
+
 		const values = orders.results.map((r) => r.sort_order);
 		expect(new Set(values).size).toBe(values.length);
 	});
@@ -156,13 +162,16 @@ describe("categoryNames", () => {
 
 	it("lists an archived category after the active ones, even one added first, so a lookup by name finds the active one", async () => {
 		// Migration 0052 kept a Unicode-case pair: the archived 'École' has the lower id.
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 1) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 1) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await setArchived(db, archived, true, "2026-07-15");
 		await db
 			.prepare(
@@ -297,6 +306,7 @@ describe("the 50-category limit, checked in the same write", () => {
 				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
 			)
 			.run();
+
 	const count = async (sql: string) =>
 		(await db.prepare(sql).first<{ n: number }>())?.n;
 

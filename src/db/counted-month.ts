@@ -138,6 +138,7 @@ export const COUNTED_TRANSACTION = `${INCLUDED} AND t.is_split = 0
  */
 export function occurrenceMonthSql(period: string, bill: string) {
 	const quarterMonth = `printf('%s-%02d',substr(${period},1,4),(((${bill}.anchor_month-1+(((CAST(substr(${period},7,1) AS INTEGER)-(((${bill}.anchor_month-1)/3)+1)+4)%4)*3))%12)+1))`;
+
 	return `CASE WHEN ${bill}.frequency='yearly' THEN ${period} || '-' || printf('%02d',${bill}.anchor_month) WHEN ${bill}.frequency IN ('weekly','biweekly') THEN substr(${period},1,7) WHEN ${bill}.frequency='quarterly' THEN ${quarterMonth} ELSE ${period} END`;
 }
 
@@ -145,6 +146,7 @@ export function occurrenceMonthSql(period: string, bill: string) {
 function billMonthSql(transaction: string, payment: string, bill: string) {
 	const bankMonth = `substr(${transaction}.date,1,7)`;
 	const occurrenceMonth = occurrenceMonthSql(`${payment}.period`, bill);
+
 	return `CASE WHEN ${payment}.period IS NOT NULL AND (${occurrenceMonth}) < ${bankMonth} THEN (${occurrenceMonth}) ELSE ${bankMonth} END`;
 }
 
@@ -190,16 +192,21 @@ export type CountedBill = {
 export function billPeriodMonth(bill: CountedBill, period: string): string {
 	if (bill.frequency === "yearly")
 		return `${period}-${String(bill.anchorMonth ?? 1).padStart(2, "0")}`;
+
 	if (bill.frequency === "weekly" || bill.frequency === "biweekly")
 		return period.slice(0, 7);
+
 	if (bill.frequency === "quarterly") {
 		const anchor = bill.anchorMonth ?? 1;
 		const firstQuarter = Math.floor((anchor - 1) / 3) + 1;
 		const quarter = Number(period.slice(6, 7));
+
 		const month =
 			((anchor - 1 + ((quarter - firstQuarter + 4) % 4) * 3) % 12) + 1;
+
 		return `${period.slice(0, 4)}-${String(month).padStart(2, "0")}`;
 	}
+
 	return period;
 }
 
@@ -214,5 +221,6 @@ export function billPaymentMonth(
 	bankMonth: string,
 ): string {
 	const occurrence = billPeriodMonth(bill, period);
+
 	return occurrence < bankMonth ? occurrence : bankMonth;
 }

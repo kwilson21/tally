@@ -15,15 +15,19 @@ import {
 // order, then what to save. A small made-up rule shows it: moving a counter to a number from 0 to 10.
 
 type Given = { asked: number; now: number; locked: boolean };
+
 const alreadyThere = term<Given>(
 	"the counter is already at that number",
 	(g) => g.asked === g.now,
 );
+
 const unlocked = term<Given>("the counter is not locked", (g) => !g.locked);
+
 const inRange = term<Given>(
 	"the number is from 0 to 10",
 	(g) => g.asked >= 0 && g.asked <= 10,
 );
+
 const setCounter = defineRule2({
 	name: "Set the counter",
 	given: (
@@ -43,7 +47,7 @@ const setCounter = defineRule2({
 });
 
 /** What every outcome looks like, whatever the rule: exactly one of three kinds, with only that kind's fields. */
-const OutcomeShape = z.discriminatedUnion("kind", [
+const AnyOutcome = z.discriminatedUnion("kind", [
 	z.strictObject({ kind: z.literal("write"), write: z.unknown() }),
 	z.strictObject({ kind: z.literal("nothingToDo") }),
 	z.strictObject({
@@ -101,13 +105,15 @@ describe("the rule shape (decision 192)", () => {
 			setCounter.decide({ asked: 4 }, { now: 4, locked: false }),
 			setCounter.decide({ asked: 4 }, { now: 1, locked: true }),
 		];
+
 		expect(outcomes.map((o) => o.kind)).toEqual([
 			"write",
 			"nothingToDo",
 			"refuse",
 		]);
+
 		for (const outcome of outcomes)
-			expect(OutcomeShape.safeParse(outcome).success).toBe(true);
+			expect(AnyOutcome.safeParse(outcome).success).toBe(true);
 	});
 
 	it("hands each kind to its own branch, and only that one", () => {
@@ -117,6 +123,7 @@ describe("the rule shape (decision 192)", () => {
 				nothingToDo: () => "already",
 				refuse: (type, say) => `${type}: ${say}`,
 			});
+
 		expect(said(write({ counter: 4 }))).toBe("saved 4");
 		expect(said(nothingToDo())).toBe("already");
 		expect(said(refuse("Locked", "That counter is locked."))).toBe(

@@ -9,6 +9,8 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { noneFitTransactions } from "../src/db/category-suggestions";
 import { saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { fakeFetch } from "./helpers/doubles";
+import { present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Spec §5, §7 (#51): when Jev says none of the categories fit, Tally keeps that as a fact of its own
@@ -16,13 +18,16 @@ import { recordSorting } from "./record-sorting";
 // confidence and no pick, is never mistaken for it.
 
 const db = env.DB;
+
 recordSorting({ sort: true });
+
 const JEV_KEY = { JEV_API_KEY: "jev-key" };
 
 /** A fake Jev answering every call with `choice` at `confidence`. */
 function fakeJev(choice: string, confidence: number) {
 	const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 		if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
+
 		return Response.json({
 			answers: {
 				category: { type: "choice", choice, confidence },
@@ -32,16 +37,19 @@ function fakeJev(choice: string, confidence: number) {
 			},
 		});
 	});
-	return fetchImpl as unknown as typeof fetch & typeof fetchImpl;
+
+	return fakeFetch(fetchImpl);
 }
 
-const idOf = async (rawName: string) =>
-	(
-		await db
-			.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
-			.bind(rawName)
-			.first<{ id: number }>()
-	)?.id as number;
+const idOf = async (rawName: string) => {
+	const row = await db
+		.prepare("SELECT id FROM transactions WHERE raw_name = ? LIMIT 1")
+		.bind(rawName)
+		.first<{ id: number }>();
+
+	return present(row).id;
+};
+
 const marked = (id: number) =>
 	db
 		.prepare(
@@ -97,6 +105,7 @@ describe("saveJevResult", () => {
 			decision({ suggestedCategoryId: 1, confidence: 0.5 }),
 		);
 		await saveJevResult(db, c, decision());
+
 		for (const id of [a, b, c])
 			expect(await marked(id)).toMatchObject({ jev_none_fit: 0 });
 	});
@@ -139,6 +148,7 @@ describe("categorizePending marks what Jev said", () => {
 			jev_category_id: null,
 			category_confidence: 0.92,
 		});
+
 		for (let copy = 0; copy < 2; copy++)
 			await db
 				.prepare(
@@ -190,6 +200,7 @@ describe("categorizePending marks what Jev said", () => {
 			await idOf("POS 4417 CITY PARKING"),
 			await idOf("SQ *FARMERS MKT"),
 		];
+
 		await db
 			.prepare(
 				"UPDATE transactions SET category_confidence = 0.95, jev_none_fit = 1 WHERE id IN (?, ?)",
@@ -202,6 +213,7 @@ describe("categorizePending marks what Jev said", () => {
 			ids.map((id) => askAgain({ DB: db, ...JEV_KEY, SORT: env.SORT }, id)),
 		);
 		expect(jev).toHaveBeenCalledTimes(2);
+
 		for (const id of ids)
 			expect(await marked(id)).toMatchObject({
 				jev_none_fit: 0,

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { saveSplit } from "../src/db/transactions";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { isMethod, present } from "./helpers/present";
 
 // Issue #418: what one Plaid sync page writes, and how many D1 statements its batch holds. Sources, read 2026-10-13:
 // Plaid's /transactions/sync `count` is "The number of transaction updates to fetch" (default 100, max 500;
@@ -18,8 +19,10 @@ import { encryptToken } from "../src/plaid/token-crypto";
 
 const ROWS = 100;
 const KEY = btoa("01234567890123456789012345678901");
+
 /** D1 binds at most this many values to one statement (developers.cloudflare.com/d1/platform/limits, read 2026-10-13). */
 const D1_BOUND_VALUES = 100;
+
 /**
  * The statements a page's batch holds beyond its rows: the lock renewal, the cursor, and the merchant names and
  * suggestions, and the planned-expense check that unlinks a payment the bank changed. Measured at 5 to 7 on this branch, so
@@ -36,7 +39,25 @@ const ACCOUNT = {
 	balances: { current: 10 },
 };
 
-const transaction = (overrides: Record<string, unknown> = {}) => ({
+/** One transaction as Plaid's sync sends it. */
+type PlaidTransaction = {
+	transaction_id: string;
+	account_id: string;
+	date: string;
+	amount: number;
+	name: string;
+	merchant_name: string | null;
+	pending: boolean;
+	personal_finance_category: { primary: string };
+	pending_transaction_id?: string;
+};
+
+/** A JSON value, as a fake Plaid response carries it. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+const transaction = (
+	overrides: Partial<PlaidTransaction> = {},
+): PlaidTransaction => ({
 	transaction_id: "transaction-1",
 	account_id: "account-1",
 	date: "2026-09-27",
@@ -48,7 +69,7 @@ const transaction = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const response = (body: unknown) =>
+const response = (body: Json) =>
 	new Response(JSON.stringify(body), {
 		status: 200,
 		headers: { "content-type": "application/json" },
@@ -56,12 +77,14 @@ const response = (body: unknown) =>
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
-	return result?.id as number;
+
+	return present(result).id;
 }
 
 /**
@@ -70,9 +93,12 @@ async function addItem() {
  */
 function counting(db: D1Database) {
 	const batches: number[] = [];
+
 	const counted = new Proxy(db, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
+			// SAFETY: the property is a key of this D1 binding (the code under test reads only its members), and a key the binding lacks reads as undefined.
+			const value = target[property as keyof D1Database];
+
 			if (property === "prepare") {
 				return (sql: string) => {
 					const statement = target.prepare(sql);
@@ -82,27 +108,33 @@ function counting(db: D1Database) {
 							if (values.length > D1_BOUND_VALUES) {
 								throw new Error("too many SQL variables");
 							}
+
 							return bind(...values);
 						},
 					});
+
 					return statement;
 				};
 			}
+
 			if (property === "batch") {
 				return (list: D1PreparedStatement[]) => {
 					batches.push(list.length);
+
 					return target.batch(list);
 				};
 			}
-			return typeof value === "function" ? value.bind(target) : value;
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
-	return { db: counted as D1Database, batches: () => batches };
+
+	return { db: counted, batches: () => batches };
 }
 
 type Page = {
-	added?: unknown[];
-	modified?: unknown[];
+	added?: PlaidTransaction[];
+	modified?: PlaidTransaction[];
 	removed?: string[];
 	hasMore?: boolean;
 };
@@ -110,11 +142,14 @@ type Page = {
 /** Plaid as the pages describe it, in order, on the one account. */
 function plaid(pages: Page[]) {
 	let served = 0;
+
 	return vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get")) {
 			return response({ accounts: [ACCOUNT] });
 		}
+
 		const page = pages[served++] ?? {};
+
 		return response({
 			added: page.added ?? [],
 			modified: page.modified ?? [],
@@ -198,7 +233,8 @@ async function seedSplit(plaidId: string, pending: boolean) {
 	)
 		.bind(plaidId, `SHOP ${plaidId}`, pending ? 1 : 0)
 		.first<{ id: number }>();
-	const parentId = parent?.id as number;
+
+	const parentId = present(parent).id;
 	await saveSplit(
 		env.DB,
 		parentId,
@@ -225,6 +261,7 @@ async function pendingCount() {
 	const row = await env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM transactions WHERE pending = 1",
 	).first<{ n: number }>();
+
 	return row?.n;
 }
 
@@ -240,9 +277,11 @@ describe("a page with more rows than D1 binds values to one statement (issue #41
 			[{ added: Array.from({ length: 150 }, (_, i) => plain(i)) }],
 			counted.db,
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions",
 		).first<{ n: number }>();
+
 		expect(row?.n).toBe(150);
 	});
 
@@ -260,9 +299,11 @@ describe("a page with more rows than D1 binds values to one statement (issue #41
 		const id = await addItem();
 		const fetchImpl = plaid([{}]);
 		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
+
 		const sync = fetchImpl.mock.calls.find(([url]) =>
 			String(url).endsWith("/transactions/sync"),
 		);
+
 		expect(JSON.parse(String(sync?.[1]?.body)).count).toBe(100);
 	});
 });
@@ -272,10 +313,12 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 
 	const plainRows = () => Array.from({ length: ROWS }, (_, i) => plain(i));
 	const postedRows = () => Array.from({ length: ROWS }, (_, i) => posted(i));
+
 	const modifiedRows = () =>
 		Array.from({ length: ROWS }, (_, i) =>
 			transaction({ transaction_id: `a${i}`, name: `SHOP ${i}`, amount: 7 }),
 		);
+
 	const removedRows = () => Array.from({ length: ROWS }, (_, i) => `a${i}`);
 
 	// Measured on this branch with runAfterSync off, so the batch is the page's own: per row, 9 for an added row,
@@ -285,13 +328,13 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 	// 100 plus PAGE_STATEMENTS.
 	it.each([
 		{
-			shape: "added",
+			kind: "added",
 			perRow: 9,
 			seed: async () => {},
 			page: (): Page => ({ added: plainRows() }),
 		},
 		{
-			shape: "modified",
+			kind: "modified",
 			perRow: 9,
 			seed: async (id: number) => {
 				await syncPages(id, [{ added: plainRows() }]);
@@ -299,7 +342,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 			page: (): Page => ({ modified: modifiedRows() }),
 		},
 		{
-			shape: "removed",
+			kind: "removed",
 			perRow: 1,
 			seed: async (id: number) => {
 				await syncPages(id, [{ added: plainRows() }]);
@@ -307,7 +350,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 			page: (): Page => ({ removed: removedRows() }),
 		},
 		{
-			shape: "removed split",
+			kind: "removed split",
 			perRow: 1,
 			seed: async () => {
 				for (let i = 0; i < ROWS; i++) await seedSplit(`a${i}`, false);
@@ -315,13 +358,13 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 			page: (): Page => ({ removed: removedRows() }),
 		},
 		{
-			shape: "pending rekey",
+			kind: "pending rekey",
 			perRow: 10,
 			seed: async () => seedPending(ROWS),
 			page: (): Page => ({ added: postedRows() }),
 		},
 		{
-			shape: "pending merge",
+			kind: "pending merge",
 			perRow: 42,
 			seed: async () => {
 				await seedPending(ROWS);
@@ -330,7 +373,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 			page: (): Page => ({ added: postedRows() }),
 		},
 		{
-			shape: "split removal",
+			kind: "split removal",
 			perRow: 9,
 			seed: async () => {
 				for (let i = 0; i < ROWS; i++) await seedSplit(`a${i}`, false);
@@ -338,7 +381,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 			page: (): Page => ({ modified: modifiedRows() }),
 		},
 		{
-			shape: "merge onto split",
+			kind: "merge onto split",
 			perRow: 42,
 			seed: async () => {
 				for (let i = 0; i < ROWS; i++) await seedSplit(`p${i}`, true);
@@ -347,7 +390,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 			page: (): Page => ({ added: postedRows() }),
 		},
 	])(
-		"a page of $shape rows is one batch of at most $perRow statements a row, plus the page's own",
+		"a page of $kind rows is one batch of at most $perRow statements a row, plus the page's own",
 		async ({ perRow, seed, page }) => {
 			const id = await addItem();
 			await syncPages(id, [{}]);

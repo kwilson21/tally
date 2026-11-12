@@ -10,7 +10,8 @@ import { Layout } from "../src/views/layout";
 
 const PAPER = "#fbf8f2";
 
-const manifest = JSON.parse(manifestText) as {
+/** The fields of the web app manifest the tests read. */
+type Manifest = {
 	name: string;
 	short_name: string;
 	start_url: string;
@@ -19,6 +20,8 @@ const manifest = JSON.parse(manifestText) as {
 	theme_color: string;
 	icons: { src: string; sizes: string; type: string; purpose: string }[];
 };
+
+const manifest: Manifest = JSON.parse(manifestText);
 
 describe("the web app manifest", () => {
 	it("names Tally, starts at the root, and opens standalone", () => {
@@ -36,6 +39,7 @@ describe("the web app manifest", () => {
 	it("has 192 and 512 icons, both PNG, for any purpose", () => {
 		const icon = (size: string) =>
 			manifest.icons.find((item) => item.sizes === size);
+
 		expect(icon("192x192")).toMatchObject({
 			src: "/icons/icon-192.png",
 			type: "image/png",

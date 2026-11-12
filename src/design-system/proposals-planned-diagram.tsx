@@ -16,8 +16,10 @@ const SPENT = 253500;
 const PLANNED = 27000;
 const SAFE = 7251;
 const BILLS = BUDGET - SPENT - PLANNED - SAFE;
+
 // Without Planned, the same budget, spending and bills leave $342.51 (today's four boxes).
 const TODAY_SAFE = BUDGET - SPENT - BILLS;
+
 // The six-box picture adds a $50.00 savings goal, which leaves $22.51.
 const SAVINGS = 5000;
 const SIX_SAFE = BUDGET - SPENT - BILLS - PLANNED - SAVINGS;
@@ -173,7 +175,9 @@ const SLOT = 22;
 const LINE_H = 68;
 
 type Cell = { op: string } | { label: string; cents: number; last?: boolean };
+
 const op = (sign: string): Cell => ({ op: sign });
+
 const box = (label: string, cents: number, last = false): Cell => ({
 	label,
 	cents,
@@ -190,7 +194,9 @@ function Line({ cells }: { cells: Cell[] }) {
 		(sum, cell) => sum + ("op" in cell ? SLOT : BOX),
 		0,
 	);
+
 	let x = 0;
+
 	return (
 		<svg
 			aria-hidden="true"
@@ -206,8 +212,10 @@ function Line({ cells }: { cells: Cell[] }) {
 		>
 			{cells.map((cell) => {
 				const left = x;
+
 				if ("op" in cell) {
 					x += SLOT;
+
 					return (
 						<text
 							x={left + SLOT / 2}
@@ -220,9 +228,11 @@ function Line({ cells }: { cells: Cell[] }) {
 						</text>
 					);
 				}
+
 				x += BOX;
 				const cx = left + BOX / 2;
 				const over = cell.cents < 0;
+
 				return (
 					<g>
 						<rect
@@ -306,12 +316,14 @@ const ROW_ONE: Cell[] = [
 	op("−"),
 	box("Bills due", BILLS),
 ];
+
 const ROW_TWO: Cell[] = [
 	op("−"),
 	box("Planned", PLANNED),
 	op("="),
 	box("Safe to spend", SAFE, true),
 ];
+
 /** With a savings goal too, the second line is longer: 345 px, which fits a phone's 350 px column. */
 const ROW_TWO_WITH_GOAL: Cell[] = [
 	op("−"),
@@ -334,6 +346,7 @@ const FOUR_BOXES: [string, number][] = [
 	["Bills due", BILLS],
 	["Safe to spend", TODAY_SAFE],
 ];
+
 const FIVE_BOXES: [string, number][] = [
 	["Budget", BUDGET],
 	["Spent", SPENT],
@@ -359,6 +372,7 @@ function ScaledRow({
 }) {
 	const gap = 22;
 	const boxW = (width - 2 - gap * (boxes.length - 1)) / boxes.length;
+
 	return (
 		<svg
 			class="h-auto w-full max-w-md"
@@ -376,6 +390,7 @@ function ScaledRow({
 				const x = 1 + i * (boxW + gap);
 				const last = i === boxes.length - 1;
 				const cx = x + boxW / 2;
+
 				return (
 					<g>
 						<rect

@@ -17,78 +17,95 @@ export const notBudgetedId = (chartId: string) => `${chartId}-not-budgeted`;
 /** The id of a finished month's Needs a category row, which its cause line links to (decision 121). */
 export const needsCategoryId = (chartId: string) => `${chartId}-needs-category`;
 
-const SHORT_NAMES: Record<string, string> = {
-	Groceries: "Groc.",
-	"Eating Out": "Eating",
-	Gas: "Gas",
-	Kids: "Kids",
-	Household: "Home",
-	Utilities: "Util.",
-	Clothing: "Cloth.",
-	Gifts: "Gifts",
-	Pets: "Pets",
-};
+const SHORT_NAMES = new Map<string, string>([
+	["Groceries", "Groc."],
+	["Eating Out", "Eating"],
+	["Gas", "Gas"],
+	["Kids", "Kids"],
+	["Household", "Home"],
+	["Utilities", "Util."],
+	["Clothing", "Cloth."],
+	["Gifts", "Gifts"],
+	["Pets", "Pets"],
+]);
+
 /** Short labels for a finished-month chart, disambiguated by the full category set. */
 export function monthEndLabels(names: string[]): string[] {
 	const normalized = names.map((name) =>
 		name.normalize("NFC").trim().replace(/\s+/g, " "),
 	);
+
 	const words = normalized.map((name) => name.split(/\s+/));
 	const extra = names.map(() => 0);
 	const fullSpecial = names.map(() => false);
+
 	const labelAt = (index: number) => {
 		const name = normalized[index] ?? "";
 		const parts = words[index] ?? [name];
 		const first = Array.from(parts[0] ?? "");
+
 		const count = Math.min(
 			first.length,
 			6 + (parts.length === 1 ? (extra[index] ?? 0) : 0),
 		);
+
 		const base = `${first.slice(0, count).join("")}${count < first.length ? "." : ""}`;
+
 		if (fullSpecial[index]) return name;
+
 		if ((extra[index] ?? 0) === 0)
-			return Object.hasOwn(SHORT_NAMES, name)
-				? (SHORT_NAMES[name] ?? base)
-				: base;
+			return SHORT_NAMES.has(name) ? (SHORT_NAMES.get(name) ?? base) : base;
+
 		if (parts.length === 1) return base || name;
 		let remaining = extra[index] ?? 0;
+
 		const suffix = parts.slice(1).flatMap((part) => {
 			if (remaining <= 0) return [];
 			const chars = Array.from(part);
 			const shown = chars.slice(0, remaining);
 			remaining -= shown.length;
+
 			return [`${shown.join("")}${shown.length < chars.length ? "." : ""}`];
 		});
+
 		return [base, ...suffix].filter(Boolean).join(" ") || name;
 	};
+
 	for (let pass = 0; pass <= names.length * 2; pass++) {
 		const groups = new Map<string, number[]>();
+
 		for (let index = 0; index < names.length; index++) {
 			const label = labelAt(index);
 			groups.set(label, [...(groups.get(label) ?? []), index]);
 		}
+
 		const duplicates = [...groups.values()].filter((group) => group.length > 1);
+
 		if (!duplicates.length)
 			return uniqueLabels(names.map((_, index) => labelAt(index)));
+
 		for (const group of duplicates) {
 			for (const index of group) {
-				if (Object.hasOwn(SHORT_NAMES, normalized[index] ?? ""))
-					fullSpecial[index] = true;
+				if (SHORT_NAMES.has(normalized[index] ?? "")) fullSpecial[index] = true;
 				else extra[index] = (extra[index] ?? 0) + 1;
 			}
 		}
 	}
+
 	return uniqueLabels(names.map((name, index) => normalized[index] || name));
 }
 
 function uniqueLabels(labels: string[]): string[] {
 	const used = new Set<string>();
+
 	return labels.map((label) => {
 		const base = label.normalize("NFC").trim();
 		let result = base;
+
 		for (let suffix = 2; used.has(result); suffix++)
 			result = `${base} ${suffix}`;
 		used.add(result);
+
 		return result;
 	});
 }
@@ -96,8 +113,10 @@ function uniqueLabels(labels: string[]): string[] {
 // At text-sm, 8 SVG units per Unicode code point is a conservative width estimate.
 const labelNeedsCap = (text: string, cap = 62) =>
 	Array.from(text).length * 8 > cap;
+
 // Home's lg:max-w-2xl column is 672px; the wide copy of a ten-category chart stays within #300's 667px.
 const WIDE_COPY_MAX = 667;
+
 // The wide copy's room after its last bar: 6 units, then the budget word at the same estimate.
 const BUDGET_WORD_ROOM = 6 + Array.from("budget").length * 8;
 
@@ -116,39 +135,47 @@ function EndBars({
 	const unit = 72;
 	const barWidth = 42;
 	const labels = monthEndLabels(rows.map((row) => row.name));
+
 	const step =
 		rows.length > 1 && !scrolls
 			? Math.min(66, (areaRight - left - barWidth) / (rows.length - 1))
 			: 66;
+
 	// The wide copy of six to ten categories tightens its spacing so it fits WIDE_COPY_MAX with the budget word.
 	const wideStep = Math.min(
 		66,
 		(WIDE_COPY_MAX - left - barWidth - BUDGET_WORD_ROOM) / (rows.length - 1),
 	);
+
 	const x0 = !scrolls
 		? left + (areaRight - left - ((rows.length - 1) * step + barWidth)) / 2
 		: left;
+
 	const names = rows
 		.map(
 			(row) =>
 				`${row.name} ${wholeUnlessTiny(row.spentCents)} of ${wholeUnlessTiny(row.budgetCents)}`,
 		)
 		.join(", ");
+
 	// The 44px of trailing space is the phone cue's room. Only a copy where the cue shows reserves it.
 	const chart = (cueSpace: boolean) => {
 		// The wide copy has no cue: it ends at its last bar and keeps only the budget word's room.
 		const wide = scrolls && !cueSpace;
 		const barStep = wide ? wideStep : step;
 		const lastBarEnd = x0 + Math.max(0, rows.length - 1) * barStep + barWidth;
+
 		const width = wide
 			? lastBarEnd + BUDGET_WORD_ROOM
 			: Math.max(
 					350,
 					left + Math.max(0, rows.length - 1) * 66 + 42 + (cueSpace ? 44 : 0),
 				);
+
 		const lineEnd = wide ? lastBarEnd : scrolls ? width : areaRight;
 		const wordX = wide ? lastBarEnd + 6 : scrolls ? width - 4 : areaRight + 6;
 		const labelCap = wide ? Math.min(62, barStep - 4) : 62;
+
 		return (
 			<svg
 				viewBox={`0 0 ${width} 142`}
@@ -177,13 +204,16 @@ function EndBars({
 				{rows.map((row, index) => {
 					const base = 112;
 					const over = row.spentCents > row.budgetCents;
+
 					const height = Math.max(
 						3,
 						Math.round(
 							endBarRatio(row.spentCents, row.budgetCents).ratio * unit,
 						),
 					);
+
 					const x = x0 + index * barStep;
+
 					return (
 						<g>
 							<rect
@@ -233,6 +263,7 @@ function EndBars({
 			</svg>
 		);
 	};
+
 	// The wrapper's id is the bars' target for a finished month's cause line (MonthEnd).
 	if (!scrolls)
 		return (
@@ -240,6 +271,7 @@ function EndBars({
 				{chart(false)}
 			</div>
 		);
+
 	return (
 		<div id={`${chartId}-bars`} class="relative mt-4">
 			{/* A section with a name is a region landmark, and the arrow keys scroll it, so it takes focus. */}
@@ -345,6 +377,7 @@ const CAUSE_LINK =
 /** Where a named cause is listed: an over-budget category in the bars, the rest in Not budgeted or its Needs a category row. */
 function causeHref(chartId: string, kind: CauseKind) {
 	if (kind === "over") return `#${chartId}-bars`;
+
 	return `#${kind === "unbudgeted" ? notBudgetedId(chartId) : needsCategoryId(chartId)}`;
 }
 
@@ -371,6 +404,7 @@ export function MonthEnd({
 	const over = budgeted && amountCents < 0;
 	const sign = !budgeted && amountCents < 0 ? "−" : "";
 	const amount = sign + wholeUnlessTiny(Math.abs(amountCents));
+
 	// Only an Over month names its causes. When they all share a place the line is one link to it; otherwise each named cause links to its own.
 	const cause = over
 		? monthCause(
@@ -378,6 +412,7 @@ export function MonthEnd({
 				-amountCents,
 			)
 		: null;
+
 	return (
 		<section aria-label={`${monthName} ended`}>
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>
@@ -414,7 +449,9 @@ function CauseLine({
 	cause: { text: string; lead: string; named: NamedCause[] };
 }) {
 	const [first] = cause.named;
+
 	if (!first) return null;
+
 	if (cause.named.every((named) => named.kind === first.kind))
 		return (
 			<p class="mt-2 text-muted">
@@ -423,6 +460,7 @@ function CauseLine({
 				</a>
 			</p>
 		);
+
 	return (
 		<p class="mt-2 text-muted">
 			{cause.lead}
@@ -456,7 +494,9 @@ export function PastNotBudgeted({
 		needsCategory && (needsCategory.count > 0 || needsCategory.spentCents !== 0)
 			? needsCategory
 			: undefined;
+
 	if (items.length === 0 && !needs) return null;
+
 	return (
 		<>
 			<h3

@@ -29,9 +29,11 @@ export function StartHere({
 	safeToSpendCents: number;
 }) {
 	const { paycheck, transfer, bakery, lineCount } = lines;
+
 	const bankLines = [paycheck, transfer, bakery].filter(
 		(row): row is ListRow => row !== null,
 	);
+
 	return (
 		<section id="start-here" aria-labelledby="start-here-title" class="mt-8">
 			<div class="flex items-center justify-between gap-4">

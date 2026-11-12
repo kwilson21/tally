@@ -12,18 +12,23 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { trends } from "../src/routes/trends";
 import { sameDaysCaption } from "../src/trends";
+import { envWith } from "./helpers/doubles";
 import { pinClock } from "./pinned-clock";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
+
 	return { res, html: await res.text() };
 };
-const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+
+const notDemo = envWith(env, { DEMO: "false" });
+
 /** One list on the page: its `<section>` by the id its heading carries. */
 const section = (html: string, id: string) =>
 	html.match(
 		new RegExp(`<section aria-labelledby="${id}-title">[\\s\\S]*?</section>`),
 	)?.[0] ?? "";
+
 const text = (html: string) =>
 	html
 		.replace(/<svg[\s\S]*?<\/svg>/g, " ")
@@ -99,10 +104,12 @@ describe("GET /trends with the demo seed", () => {
 
 	it("shows the demo's story: Going well, Worth a look, then every other category", async () => {
 		const { html } = await get("/trends");
+
 		const names = (id: string) =>
 			[...section(html, id).matchAll(/text-lg leading-6">([^<]+)</g)].map(
 				(m) => m[1],
 			);
+
 		expect(names("going-well")).toEqual(["Groceries", "Gas", "Household"]);
 		expect(text(section(html, "going-well"))).toContain(
 			"5 months under budget",
@@ -126,9 +133,11 @@ describe("GET /trends with the demo seed", () => {
 
 	it("gives each row six small bars, the last dashed, and the amounts in words", async () => {
 		const { html } = await get("/trends");
+
 		const row = section(html, "worth-a-look").match(
 			/<svg[^>]*role="img"[^>]*>[\s\S]*?<\/svg>/,
 		)?.[0];
+
 		expect(row).toBeDefined();
 		expect(row?.match(/<rect/g)).toHaveLength(6);
 		expect(row?.match(/stroke-dasharray/g)).toHaveLength(1);
@@ -152,11 +161,14 @@ describe("GET /trends with the demo seed", () => {
 
 	it("sends every Why? and How this works link to a section of How Tally works that exists", async () => {
 		const { html } = await get("/trends");
+
 		const targets = new Set(
 			[...html.matchAll(/href="\/how-it-works#([a-z]+)"/g)].map((m) => m[1]),
 		);
+
 		expect([...targets]).toEqual(["trends"]);
 		const how = (await get("/how-it-works")).html;
+
 		for (const id of targets)
 			expect(how).toMatch(new RegExp(`<section[^>]*id="${id}"`));
 	});

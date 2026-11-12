@@ -918,6 +918,7 @@ function TodaySettingsCard({
 				<ul class="mt-2 divide-y divide-rule border-t border-rule">
 					{suggestion.rows.map((row) => {
 						const checked = ticked ? ticked.includes(row.id) : true;
+
 						return (
 							<SelectableTransactionRow
 								row={row}
@@ -1008,6 +1009,7 @@ function TodaySuggestionCard({
 	categories?: { id: number; name: string }[];
 }) {
 	const count = item.rows.length;
+
 	return (
 		<div class="flex flex-col gap-5">
 			<div>

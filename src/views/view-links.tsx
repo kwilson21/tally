@@ -20,6 +20,7 @@ export function ViewLinks({
 }) {
 	const link = "inline-flex min-h-11 items-center";
 	const here = `${link} font-semibold text-ink no-underline`;
+
 	return (
 		<nav id={id} aria-label="View" class="flex flex-wrap items-center gap-x-2">
 			<a

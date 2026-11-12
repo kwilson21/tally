@@ -10,6 +10,7 @@ import { SelectField } from "./select-field";
 import { WhyLink } from "./why-link";
 
 type Category = { id: number; name: string };
+
 /**
  * A part row. `partId` is the saved part a correction updates; a new row has none. `kept` is that part's
  * own category when it is archived: the row's select offers it, and no other row does. `guess` is the category
@@ -42,6 +43,7 @@ export function SplitLine({
 	amounts: string[];
 }) {
 	const status = splitStatus(parentCents, amounts);
+
 	return (
 		<p
 			class={`flex items-center gap-2 text-lg font-medium ${status.kind === "over" ? "text-over" : "text-ink"}`}
@@ -64,6 +66,7 @@ export function SplitLine({
 function partLabel(value: SplitValue, index: number, categories: Category[]) {
 	const category = categories.find((cat) => String(cat.id) === value.category);
 	const cents = positiveCents(value.amount);
+
 	return category && cents !== null ? (
 		<>
 			{category.name}
@@ -189,6 +192,7 @@ export function PartCategory({
 }) {
 	const guessed = isGuessedPart(value);
 	const swap = oob ? "outerHTML" : undefined;
+
 	return (
 		<>
 			<label
@@ -287,6 +291,7 @@ export function SplitForm({
 	sheet?: string;
 }) {
 	const correcting = totalCents !== undefined && amountWas !== undefined;
+
 	return (
 		<form
 			method="post"

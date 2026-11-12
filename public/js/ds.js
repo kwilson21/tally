@@ -3,6 +3,7 @@
 // real toast. It never intercepts or fakes a request.
 document.addEventListener("click", (event) => {
 	const button = event.target.closest?.("[data-ds-toast]");
+
 	if (!button) return;
 	const message = button.dataset.dsMessage;
 	button.dispatchEvent(

@@ -14,8 +14,11 @@ const count = (n: number) => n.toLocaleString("en-US");
 /** A bank's words at the right of its row. Nothing stored yet says "Reading" or "Paused" alone. */
 export function bankWords(state: BankState, transactions: number): string {
 	const soFar = transactions > 0 ? ` · ${count(transactions)} so far` : "";
+
 	if (state === "in") return `90 days in · ${count(transactions)}`;
+
 	if (state === "paused") return `Paused${soFar}`;
+
 	return `Reading${soFar}`;
 }
 
@@ -44,12 +47,15 @@ export function YourBanks({
 	oob?: boolean;
 }) {
 	const states = banks.map((bank) => ({ bank, state: bankState(bank, today) }));
+
 	const polling =
 		polls &&
 		(keepPolling || states.some(({ state }) => state === "being-read"));
+
 	const inIds = states
 		.filter(({ state }) => state === "in")
 		.map(({ bank }) => bank.id);
+
 	return (
 		<section
 			id="your-banks"

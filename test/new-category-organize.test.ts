@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { organize } from "../src/routes/organize";
+import { isMethod, present } from "./helpers/present";
 
 type TestApp = { Bindings: Env; Variables: { actor: string } };
 
@@ -12,15 +13,18 @@ const TODAY = todayIn(DEFAULT_TIME_ZONE);
 
 async function get(path = "/transactions/organize") {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
 async function post(fields: Record<string, string | string[]>) {
 	const form = new URLSearchParams();
+
 	for (const [key, value] of Object.entries(fields)) {
 		for (const item of Array.isArray(value) ? value : [value])
 			form.append(key, item);
 	}
+
 	const res = await exports.default.fetch(`${BASE}/transactions/organize`, {
 		method: "POST",
 		redirect: "manual",
@@ -31,6 +35,7 @@ async function post(fields: Record<string, string | string[]>) {
 		},
 		body: form.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -71,7 +76,8 @@ async function saveWith(db: D1Database, fields: Record<string, string>) {
 		c.set("actor", "demo");
 		await next();
 	});
-	app.route("/", organize as unknown as Hono<TestApp>);
+	app.route("/", organize);
+
 	const res = await app.request(
 		"/transactions/organize",
 		{
@@ -85,6 +91,7 @@ async function saveWith(db: D1Database, fields: Record<string, string>) {
 		},
 		{ ...env, DB: db },
 	);
+
 	return { res, html: await res.text() };
 }
 
@@ -95,20 +102,24 @@ async function saveWith(db: D1Database, fields: Record<string, string>) {
 function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
 	let raced = false;
 	const filing = `UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'${onlyUnfiled ? " AND category_id IS NULL" : ""}`;
+
 	return new Proxy(env.DB, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
 			if (property === "batch")
 				return async (statements: D1PreparedStatement[]) => {
 					if (!raced) {
 						raced = true;
 						await env.DB.prepare(filing).run();
 					}
+
 					return target.batch(statements);
 				};
-			return typeof value === "function" ? value.bind(target) : value;
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 /** The Harbor Supply rule as the merchants table holds it now. */
@@ -145,6 +156,7 @@ describe("a group another save files while this one saves", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
 		).run();
+
 		const chosen = await env.DB.prepare(
 			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
 		).first<{ id: number }>();
@@ -167,14 +179,20 @@ describe("a group another save files while this one saves", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = 1 WHERE raw_name = 'HARBOR SUPPLY'",
 		).run();
-		const chosen = (await env.DB.prepare(
-			"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
-		).first<{ id: number }>()) as { id: number };
-		const older = (await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-01-05', 500, 'HARBOR SUPPLY', ?, 'user') RETURNING id",
-		)
-			.bind(chosen.id)
-			.first<{ id: number }>()) as { id: number };
+
+		const chosen = present(
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE id <> 1 AND archived = 0 ORDER BY id LIMIT 1",
+			).first<{ id: number }>(),
+		);
+
+		const older = present(
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-01-05', 500, 'HARBOR SUPPLY', ?, 'user') RETURNING id",
+			)
+				.bind(chosen.id)
+				.first<{ id: number }>(),
+		);
 
 		const { res } = await saveWith(otherSaveFilesFirst(true), {
 			group: "Harbor Supply",
@@ -232,9 +250,11 @@ describe("New category in Organize", () => {
 		expect(html).toMatch(
 			/id="new-category-name-error" role="alert"[^>]*>That name is taken\./,
 		);
+
 		const uncategorized = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id IS NULL",
 		).first<{ n: number }>();
+
 		expect(uncategorized?.n).toBe(2);
 	});
 
@@ -250,23 +270,28 @@ describe("New category in Organize", () => {
 
 		expect(res.status).toBe(200);
 		expect(await filedIn("Pets")).toBe(2);
+
 		const made = await env.DB.prepare(
 			"SELECT sort_order AS sortOrder FROM categories WHERE name = 'Pets'",
 		).first<{ sortOrder: number }>();
+
 		const last = await env.DB.prepare(
 			"SELECT MAX(sort_order) AS last FROM categories WHERE name <> 'Pets'",
 		).first<{ last: number }>();
+
 		expect(made?.sortOrder).toBeGreaterThan(last?.last ?? 0);
 		expect(html).not.toContain("These might belong too:");
 	});
 
 	it("a 51st active category gives the full message and makes nothing", async () => {
 		await harborCharges(2);
-		const active = (
+
+		const active = present(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
-			).first<{ n: number }>()
-		)?.n as number;
+			).first<{ n: number }>(),
+		).n;
+
 		for (let i = active; i < 50; i++)
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
@@ -290,9 +315,11 @@ describe("New category in Organize", () => {
 				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
 			).first<{ n: number }>(),
 		).toEqual({ n: 0 });
+
 		const uncategorized = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'HARBOR SUPPLY' AND category_id IS NULL",
 		).first<{ n: number }>();
+
 		expect(uncategorized?.n).toBe(2);
 	});
 
@@ -303,6 +330,7 @@ describe("New category in Organize", () => {
 			`CREATE TRIGGER other_save_files_group AFTER INSERT ON categories WHEN NEW.name = 'Pets'
 			BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'; END`,
 		).run();
+
 		try {
 			const { res } = await post({
 				group: "Harbor Supply",

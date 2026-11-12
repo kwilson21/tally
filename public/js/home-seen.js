@@ -5,6 +5,7 @@
 export function setupHomeSeen({ document }) {
 	document.addEventListener("htmx:before:request", (event) => {
 		if (event.target?.id !== "home-seen") return;
+
 		if (document.visibilityState !== "hidden") return;
 		event.preventDefault();
 	});

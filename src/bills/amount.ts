@@ -14,15 +14,18 @@ export function amountForMonth(
 ): number {
 	let latest: AmountRow | undefined;
 	let earliest: AmountRow | undefined;
+
 	for (const row of rows) {
 		if (
 			row.effectiveMonth <= month &&
 			(!latest || row.effectiveMonth > latest.effectiveMonth)
 		)
 			latest = row;
+
 		if (!earliest || row.effectiveMonth < earliest.effectiveMonth)
 			earliest = row;
 	}
+
 	return (latest ?? earliest)?.amountCents ?? fallbackCents;
 }
 
@@ -42,10 +45,13 @@ export function latestPriceChange(
 	const ordered = [...rows].sort((a, b) =>
 		a.effectiveMonth.localeCompare(b.effectiveMonth),
 	);
+
 	let change: PriceChange | undefined;
+
 	for (let i = 1; i < ordered.length; i++) {
 		const before = ordered[i - 1];
 		const after = ordered[i];
+
 		if (!before || !after || before.amountCents === after.amountCents) continue;
 		change = {
 			effectiveMonth: after.effectiveMonth,
@@ -53,6 +59,7 @@ export function latestPriceChange(
 			direction: after.amountCents > before.amountCents ? "up" : "down",
 		};
 	}
+
 	return change;
 }
 
@@ -66,11 +73,13 @@ export function earlierAmount(
 	month: string,
 ): number | undefined {
 	let latest: AmountRow | undefined;
+
 	for (const row of rows)
 		if (
 			row.effectiveMonth < month &&
 			(!latest || row.effectiveMonth > latest.effectiveMonth)
 		)
 			latest = row;
+
 	return latest?.amountCents;
 }

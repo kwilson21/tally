@@ -11,14 +11,18 @@ export type UnpaidBill = { name: string; period: string };
 /** The occurrence in words: "2026", "September 2026", "Q3 2026" or "Sep 14, 2026". */
 function occurrenceWords(period: string): string {
 	const quarter = /^(\d{4})-Q([1-4])$/.exec(period);
+
 	if (quarter) return `Q${quarter[2]} ${quarter[1]}`;
+
 	if (/^\d{4}$/.test(period)) return period;
+
 	if (/^\d{4}-\d{2}$/.test(period))
 		return new Intl.DateTimeFormat("en-US", {
 			month: "long",
 			year: "numeric",
 			timeZone: "UTC",
 		}).format(new Date(`${period}-01T00:00:00Z`));
+
 	return new Intl.DateTimeFormat("en-US", {
 		month: "short",
 		day: "numeric",
@@ -34,23 +38,29 @@ function occurrenceWords(period: string): string {
 export function unpaidBillsSentence(bills: UnpaidBill[]): string {
 	if (bills.length > 1) return `${bills.length} bills are no longer paid.`;
 	const [bill] = bills;
+
 	if (!bill) return "";
+
 	return `The ${bill.name} bill for ${occurrenceWords(bill.period)} is no longer paid.`;
 }
 
 const isUnpaidBill = (value: unknown): value is UnpaidBill =>
 	typeof value === "object" &&
 	value !== null &&
-	typeof (value as UnpaidBill).name === "string" &&
-	typeof (value as UnpaidBill).period === "string";
+	"name" in value &&
+	typeof value.name === "string" &&
+	"period" in value &&
+	typeof value.period === "string";
 
 /** The bills a purchase's bank change stored, read back for its note; nothing for none or a damaged value. */
 export function parseUnpaidBills(
 	stored: string | null | undefined,
 ): UnpaidBill[] {
 	if (!stored) return [];
+
 	try {
 		const parsed: unknown = JSON.parse(stored);
+
 		return Array.isArray(parsed) ? parsed.filter(isUnpaidBill) : [];
 	} catch {
 		return [];
@@ -60,6 +70,7 @@ export function parseUnpaidBills(
 /** The sentence a purchase's note adds for the bills its bank change unlinked: " The … is no longer paid.", or "". */
 export function unpaidBillsNote(stored: string | null | undefined): string {
 	const sentence = unpaidBillsSentence(parseUnpaidBills(stored));
+
 	return sentence ? ` ${sentence}` : "";
 }
 

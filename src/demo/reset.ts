@@ -72,6 +72,7 @@ function balanceHistoryStatements(
 	balances: SeedBalance[],
 ): D1PreparedStatement[] {
 	const statements: D1PreparedStatement[] = [];
+
 	for (let i = 0; i < balances.length; i += BALANCES_PER_STATEMENT) {
 		const chunk = balances.slice(i, i + BALANCES_PER_STATEMENT);
 		statements.push(
@@ -82,6 +83,7 @@ function balanceHistoryStatements(
 				.bind(...chunk.flatMap((b) => [b.accountId, b.date, b.balanceCents])),
 		);
 	}
+
 	return statements;
 }
 
@@ -96,14 +98,17 @@ export async function resetDemo(
 	// The demo's bills count as added long before its history (decision 99, #337), so every seeded occurrence is
 	// judged as it was before that rule. No screen shows the day a demo bill was added.
 	const addedOn = "2000-01-01";
+
 	if (todayDay < 4) {
 		const waterPayment = seed.transactions.find(
 			(transaction) =>
 				transaction.rawName === "GOOGLE *YOUTUBE" &&
 				transaction.date.startsWith(today.slice(0, 7)),
 		);
+
 		if (waterPayment) waterPayment.date = today;
 	}
+
 	const b = (v: boolean) => (v ? 1 : 0);
 
 	await db.batch([
@@ -272,10 +277,13 @@ export async function resetDemo(
 			)
 			.bind(monthOffset(today, 1)),
 	]);
+
 	if (options.categoryExample) {
 		const petMonthNumber = Number(today.slice(5, 7)) - 2;
+
 		const petYearNumber =
 			Number(today.slice(0, 4)) + Math.floor((petMonthNumber - 1) / 12);
+
 		const petMonthNumberNormalized = ((petMonthNumber - 1 + 12) % 12) + 1;
 		const petYear = String(petYearNumber).padStart(4, "0");
 		const petMonth = `${petYear}-${String(petMonthNumberNormalized).padStart(2, "0")}`;
@@ -292,11 +300,13 @@ export async function resetDemo(
 					.bind(raw, display),
 			),
 		]);
+
 		const petSuggestion = await db
 			.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		await db.batch([
 			...[
 				["CHEWY.COM", "Chewy", 6412, 8],
@@ -316,6 +326,7 @@ export async function resetDemo(
 			),
 		]);
 	}
+
 	await matchBillPayments(db, today);
 }
 
@@ -326,6 +337,7 @@ function demoBills(
 	const day = Number(today.slice(8, 10));
 	// The soccer payment the yearly bill is linked to, so its amount matches (src/demo/seed.ts).
 	const soccerDay = SOCCER_DAY;
+
 	const paidSoccer = {
 		cents:
 			transactions.find(
@@ -335,6 +347,7 @@ function demoBills(
 						`${monthOffset(today, 3)}-${String(soccerDay).padStart(2, "0")}`,
 			)?.amountCents ?? 9000,
 	};
+
 	const paymentDay = (rawName: string) =>
 		Number(
 			transactions
@@ -342,23 +355,29 @@ function demoBills(
 				.sort((a, b) => b.date.localeCompare(a.date))[0]
 				?.date.slice(8) ?? day,
 		);
+
 	const threeDaysBeforePayment = (rawName: string) => {
 		const payment = transactions
 			.slice()
 			.reverse()
 			.find((transaction) => transaction.rawName === rawName)?.date;
+
 		const due = new Date(`${payment ?? today}T00:00:00Z`);
 		due.setUTCDate(due.getUTCDate() - 3);
+
 		return due.getUTCDate();
 	};
+
 	// The day before Netflix's charge, wherever the seed put it (the previous month's last day, on the 1st).
 	const netflixDue = daysBefore(
 		transactions.find((t) => t.rawName === NETFLIX.rawName)?.date ?? today,
 		1,
 	);
+
 	const plusThree = new Date(`${today}T00:00:00Z`);
 	plusThree.setUTCDate(plusThree.getUTCDate() + 3);
 	const dueSoon = plusThree.getUTCDate();
+
 	return [
 		[
 			1,

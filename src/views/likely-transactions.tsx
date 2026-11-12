@@ -23,6 +23,7 @@ export function LikelyAdd({
 				Add to {categoryName}
 			</Button>
 		);
+
 	// The count is its own tabular span; the words around it are normal text (#676, decision 128).
 	return (
 		<Button type="submit">
@@ -52,6 +53,7 @@ function LikelyReason({
 				{`Same merchant as ${shortDay(savedDate, today)} (${formatCents(Math.abs(savedCents))})`}
 			</span>
 		);
+
 	return (
 		<>
 			<span class="min-w-0 flex-1">
@@ -98,6 +100,7 @@ export function LikelyPanel({
 	today,
 }: PanelProps) {
 	const count = rows.filter((row) => ticked.has(row.id)).length;
+
 	return (
 		<>
 			<h2

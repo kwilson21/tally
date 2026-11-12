@@ -5,6 +5,7 @@ import { listTransactions } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 import { merchantNames, seedMerchant } from "./helpers/merchants";
+import { present } from "./helpers/present";
 
 // A name a person gives one transaction only (decision 101, spec §5 and §7): "This one only" leaves the
 // merchant's name, its suggestions and the other transactions alone; "All" renames the merchant for the
@@ -21,16 +22,21 @@ async function post(
 	htmx = false,
 ) {
 	const form = new URLSearchParams(fields);
+
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: form.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -49,7 +55,8 @@ async function charge(
 		)
 		.bind(`plaid-${crypto.randomUUID()}`, date, rawName, merchantName)
 		.first<{ id: number }>();
-	return row?.id as number;
+
+	return present(row).id;
 }
 
 const suggest = (key: string, names: string[]) =>
@@ -62,10 +69,12 @@ const merchant = async (key: string) => {
 		)
 		.bind(key)
 		.first<{ display_name: string | null; suggestion_status: string }>();
+
 	return found && { ...found, names: await merchantNames(db, key) };
 };
 
 const filters = parseFilters(new URLSearchParams("month=all"), "2026-09");
+
 const rowOf = async (id: number) =>
 	(await listTransactions(db, filters)).rows.find((r) => r.id === id);
 
@@ -88,6 +97,7 @@ async function amazon() {
 	const a = await charge(AMAZON, "Amazon", "2026-10-02");
 	const b = await charge(AMAZON, "Amazon", "2026-09-20");
 	const c = await charge(AMAZON, "Amazon", "2026-09-18");
+
 	return { a, b, c };
 }
 
@@ -105,11 +115,13 @@ beforeEach(async () => {
 describe("a name for one transaction (decision 101)", () => {
 	it("This one only renames one Amazon row to Dog bed, and the other Amazon rows still say Amazon", async () => {
 		const { a, b } = await amazon();
+
 		const { res } = await save(a, {
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		expect(res.status).toBe(303);
 		expect((await rowOf(a))?.displayName).toBe("Dog bed");
 		expect((await rowOf(b))?.displayName).toBe("Amazon");
@@ -137,6 +149,7 @@ describe("a name for one transaction (decision 101)", () => {
 	it("All with the merchant's own name typed still replaces this row's own name", async () => {
 		const { a, b } = await amazon();
 		await save(a, { name_pick: "own", merchant: "Dog bed", name_scope: "one" });
+
 		// The panel drew the name field as "Amazon" and the person left it there, ticking Type your own.
 		const { res } = await post(
 			`/transactions/${a}`,
@@ -149,6 +162,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Amazon");
 		expect((await rowOf(a))?.displayName).toBe("Amazon");
 		expect((await rowOf(b))?.displayName).toBe("Amazon");
@@ -261,6 +275,7 @@ describe("a name for one transaction (decision 101)", () => {
 
 	it("the toast names the store's own name for This one only, and the row shows it", async () => {
 		const { a } = await amazon();
+
 		const { res } = await post(
 			`/transactions/${a}`,
 			{
@@ -270,12 +285,14 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Amazon mktpl");
 		expect((await rowOf(a))?.displayName).toBe("Amazon mktpl");
 	});
 
 	it("the store's own name for All clears a named merchant, and the toast says the tidied text the rows now show", async () => {
 		const { a, b } = await amazon();
+
 		const { res } = await post(
 			`/transactions/${a}`,
 			{
@@ -285,6 +302,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Amazon mktpl");
 		expect(await merchant("Amazon")).toMatchObject({ display_name: null });
 		expect((await rowOf(a))?.displayName).toBe("Amazon mktpl");
@@ -294,6 +312,7 @@ describe("a name for one transaction (decision 101)", () => {
 	it("the store's own name for All turns a suggestion down and shows the tidied text", async () => {
 		const id = await charge(RAW);
 		await suggest(RAW, ["Blue Bottle Coffee"]);
+
 		const { res } = await post(
 			`/transactions/${id}`,
 			{
@@ -303,6 +322,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Blue bottle cof");
 		expect(await merchant(RAW)).toMatchObject({
 			display_name: null,
@@ -313,11 +333,13 @@ describe("a name for one transaction (decision 101)", () => {
 
 	it("a save with nothing ticked names a named merchant in the toast and announcement", async () => {
 		const { a } = await amazon();
+
 		const { res } = await post(
 			`/transactions/${a}`,
 			{ back: "/transactions?month=all", note: "Dinner" },
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Amazon");
 		expect(announceOf(res)).toBe("Saved Amazon.");
 	});
@@ -328,6 +350,7 @@ describe("a name for one transaction (decision 101)", () => {
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
 			.bind(a)
 			.run();
+
 		const { res } = await post(
 			`/transactions/${a}`,
 			{
@@ -337,6 +360,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Kept details for Dog bed");
 		expect(await merchant("Amazon")).toMatchObject({ display_name: "Amazon" });
 		expect((await rowOf(a))?.displayName).toBe("Dog bed");
@@ -350,6 +374,7 @@ describe("a name for one transaction (decision 101)", () => {
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		const { res } = await post(
 			`/transactions/${id}`,
 			{
@@ -359,6 +384,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Blue bottle cof");
 		expect(announceOf(res)).toBe("Saved Blue bottle cof.");
 		expect((await rowOf(id))?.displayName).toBe("Blue bottle cof");
@@ -367,11 +393,13 @@ describe("a name for one transaction (decision 101)", () => {
 	it("a save that names nothing while the row shows an undecided guess says just Saved.", async () => {
 		const id = await charge(RAW);
 		await suggest(RAW, ["Blue Bottle Coffee"]);
+
 		const { res } = await post(
 			`/transactions/${id}`,
 			{ back: "/transactions?month=all", note: "Dinner" },
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved.");
 		expect(announceOf(res)).toBe("Saved.");
 		expect(await merchant(RAW)).toMatchObject({
@@ -390,11 +418,13 @@ describe("a name for one transaction (decision 101)", () => {
 			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
 			.bind(a)
 			.run();
+
 		const { res } = await post(
 			`/transactions/${a}`,
 			{ back: "/transactions?month=all", note: "Dinner" },
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Dog bed");
 		expect(announceOf(res)).toBe("Saved Dog bed.");
 		expect((await rowOf(a))?.displayName).toBe("Dog bed");
@@ -413,9 +443,11 @@ describe("a name for one transaction (decision 101)", () => {
 			)
 			.bind(AMAZON, c)
 			.run();
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${b}?month=all`)
 		).text();
+
 		expect(html).toContain("Dog bed (Sep 18) keeps its own name.");
 		expect(html).toContain("All 3 from Amazon");
 	});
@@ -428,18 +460,24 @@ describe("a name for one transaction (decision 101)", () => {
 			)
 			.bind(a)
 			.run();
-		const part = (await db
-			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+
+		const part = present(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
 				 VALUES (1, '2026-10-02', 650, ?, 'Amazon', ?) RETURNING id`,
-			)
-			.bind(AMAZON, a)
-			.first<{ id: number }>()) as { id: number };
+				)
+				.bind(AMAZON, a)
+				.first<{ id: number }>(),
+		);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${part.id}?month=all`)
 		).text();
+
 		expect(html).not.toContain("this one too");
 		expect(html).not.toContain("Dog bed is replaced.");
+
 		const { res } = await post(
 			`/transactions/${part.id}`,
 			{
@@ -451,6 +489,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Dog bed");
 		expect(announceOf(res)).toBe("Saved Dog bed.");
 		expect(await merchant("Amazon")).toMatchObject({ display_name: "Prime" });
@@ -466,18 +505,23 @@ describe("a name for one transaction (decision 101)", () => {
 			)
 			.bind(a)
 			.run();
-		const part = (await db
-			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
+
+		const part = present(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
 				 VALUES (1, '2026-10-02', 650, ?, 'Amazon', ?) RETURNING id`,
-			)
-			.bind(AMAZON, a)
-			.first<{ id: number }>()) as { id: number };
+				)
+				.bind(AMAZON, a)
+				.first<{ id: number }>(),
+		);
+
 		const { res } = await post(
 			`/transactions/${part.id}`,
 			{ back: "/transactions?month=all", note: "Dinner" },
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Dog bed");
 	});
 
@@ -488,6 +532,7 @@ describe("a name for one transaction (decision 101)", () => {
 			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
 			.bind(a)
 			.run();
+
 		const part = await db
 			.prepare(
 				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id)
@@ -495,29 +540,36 @@ describe("a name for one transaction (decision 101)", () => {
 			)
 			.bind(AMAZON, a)
 			.first<{ id: number }>();
-		expect((await rowOf(part?.id as number))?.displayName).toBe("Dog bed");
+
+		expect((await rowOf(present(part).id))?.displayName).toBe("Dog bed");
 	});
 
 	it("the Name row says the bank's text only for a bank row, not for a cash entry", async () => {
 		const cash = await db
 			.prepare("SELECT id FROM accounts WHERE type = 'cash' LIMIT 1")
 			.first<{ id: number }>();
-		const id = (await db
-			.prepare(
-				`INSERT INTO transactions (account_id, date, amount_cents, raw_name)
+
+		const id = present(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name)
 				 VALUES (?, '2026-09-20', 2045, 'Farmers market') RETURNING id`,
-			)
-			.bind(cash?.id)
-			.first<{ id: number }>()) as { id: number };
+				)
+				.bind(cash?.id)
+				.first<{ id: number }>(),
+		);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${id.id}?month=all`)
 		).text();
+
 		expect(html).toContain('value="store"');
 		expect(html).not.toContain("The bank says");
 	});
 
 	it("The store's own name under This one only names this row with the bank's text, and the merchant keeps its name", async () => {
 		const { a, b } = await amazon();
+
 		const { res } = await post(
 			`/transactions/${a}`,
 			{
@@ -527,6 +579,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(toastOf(res)).toBe("Saved Amazon mktpl");
 		expect((await rowOf(a))?.displayName).toBe("Amazon mktpl");
@@ -538,6 +591,7 @@ describe("a name for one transaction (decision 101)", () => {
 		const id = await charge(RAW);
 		const other = await charge(RAW, null, "2026-09-18");
 		await suggest(RAW, ["Blue Bottle Coffee", "Blue Bottle"]);
+
 		const { res } = await post(
 			`/transactions/${id}`,
 			{
@@ -547,6 +601,7 @@ describe("a name for one transaction (decision 101)", () => {
 			},
 			true,
 		);
+
 		expect(toastOf(res)).toBe("Saved Blue bottle cof");
 		expect(await merchant(RAW)).toEqual({
 			display_name: null,
@@ -585,17 +640,19 @@ describe("a name for one transaction (decision 101)", () => {
 
 /** The toast message a save sends with its HTMX response. */
 function toastOf(res: Response): string | undefined {
-	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message?: string };
-	};
+	const trigger: { toast?: { message?: string } } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
+
 	return trigger.toast?.message;
 }
 
 /** The announcement a save sends with its HTMX response. */
 function announceOf(res: Response): string | undefined {
-	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		announce?: string;
-	};
+	const trigger: { announce?: string } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
+
 	return trigger.announce;
 }
 
@@ -606,6 +663,7 @@ describe("This one only on a split part counts the purchases (decision 101)", ()
 			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
 			.bind(c)
 			.run();
+
 		const part = await db
 			.prepare(
 				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, parent_id)
@@ -613,9 +671,11 @@ describe("This one only on a split part counts the purchases (decision 101)", ()
 			)
 			.bind(AMAZON, c)
 			.first<{ id: number }>();
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${part?.id}?month=all`)
 		).text();
+
 		expect(html).toContain("The other 3 stay as they are.");
 	});
 });

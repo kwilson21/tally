@@ -19,17 +19,20 @@ describe("buildSeed", () => {
 	])("designed totals hold on the last day, %s", (today, childcareCents) => {
 		const seed = buildSeed(today);
 		const month = today.slice(0, 7);
+
 		// A linked refund counts in its purchase's month (spec §6). The late Rent part is dated this month's 1st but
 		// reset links it to last month's bill, so it counts in last month (spec §6), not this one.
 		const lateRent = (t: (typeof seed.transactions)[number]) =>
 			t.rawName === RENT_PAYEE &&
 			t.amountCents === 50000 &&
 			t.date === `${month}-01`;
+
 		const countedDate = (t: (typeof seed.transactions)[number]) =>
 			lateRent(t)
 				? `${monthOffset(today, 1)}-01`
 				: (seed.transactions.find((p) => p.id === t.refundOfId)?.date ??
 					t.date);
+
 		const counted = seed.transactions.filter(
 			(t) => countedDate(t).startsWith(month) && !t.excluded && !t.isSplit,
 		);
@@ -49,6 +52,7 @@ describe("buildSeed", () => {
 		const spent = Object.fromEntries(
 			summary.categories.map((c) => [c.name, c.spentCents]),
 		);
+
 		expect(spent).toEqual({
 			Groceries: 39458,
 			"Eating Out": 34800,
@@ -82,9 +86,11 @@ describe("buildSeed", () => {
 		(today) => {
 			const seed = buildSeed(today);
 			const refund = seed.transactions.find((t) => t.refundOfId);
+
 			const purchase = seed.transactions.find(
 				(t) => t.id === refund?.refundOfId,
 			);
+
 			expect(refund).toMatchObject({
 				rawName: "TARGET T-1432",
 				amountCents: -2499,
@@ -111,6 +117,7 @@ describe("buildSeed", () => {
 		"has Local Bakery and the other uncategorized rows from the 1st, and the same ids, on %s",
 		(today) => {
 			const seed = buildSeed(today);
+
 			const uncategorized = [
 				"SQ *LOCAL BAKERY 4432",
 				"PAYPAL *XYZSHOP",
@@ -125,6 +132,7 @@ describe("buildSeed", () => {
 				"GOOGLE *YOUTUBE",
 				"DD *DOORDASH TACO",
 			];
+
 			for (const rawName of uncategorized)
 				expect(
 					seed.transactions.some(
@@ -153,9 +161,11 @@ describe("buildSeed", () => {
 	it("keeps earlier months' category totals as the history says, whatever the day", () => {
 		for (const today of ["2026-10-01", "2026-10-15", "2026-10-31"]) {
 			const seed = buildSeed(today);
+
 			// A linked refund counts in its purchase's month, as Trends counts it (spec §6).
 			const countedDate = (t: (typeof seed.transactions)[number]) =>
 				seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
+
 			const totals = (categoryId: number) =>
 				[5, 4, 3, 2, 1].map((monthsAgo) =>
 					seed.transactions
@@ -166,6 +176,7 @@ describe("buildSeed", () => {
 						)
 						.reduce((sum, t) => sum + t.amountCents, 0),
 				);
+
 			// The history table in src/demo/seed.ts, oldest month first, plus what else those months hold: Kids' last
 			// month has P19's Target purchase ($84.99) less its refund ($24.99), and Household's last two months have
 			// the repeat services ($61.48, YouTube, Procreate and the gym), with Apple's $2.99 in the last.
@@ -182,9 +193,11 @@ describe("buildSeed", () => {
 		"has Netflix's one $17.99 charge, last, in this month, on %s",
 		(today) => {
 			const seed = buildSeed(today);
+
 			const netflix = seed.transactions.filter(
 				(t) => t.rawName === "NETFLIX.COM",
 			);
+
 			expect(netflix).toHaveLength(1);
 			expect(netflix[0]).toMatchObject({ amountCents: 1799, categoryId: 5 });
 			expect(netflix[0]?.date.slice(0, 7)).toBe(today.slice(0, 7));
@@ -199,14 +212,17 @@ describe("buildSeed", () => {
 
 	it("gives the unpaid Electric and Internet bills' merchants no charges to offer", async () => {
 		const seed = buildSeed("2026-09-22");
+
 		for (const rawName of ["METRO ELECTRIC CO", "RIVERSIDE FIBER INTERNET"])
 			expect(seed.transactions.some((t) => t.rawName === rawName)).toBe(false);
 		await resetDemo(env.DB, "2026-09-22");
+
 		const bills = (
 			await env.DB.prepare(
 				"SELECT name, merchant_raw_name AS merchant FROM bills WHERE name IN ('Electric','Internet','Netflix') ORDER BY id",
 			).all<{ name: string; merchant: string }>()
 		).results;
+
 		expect(bills).toEqual([
 			{ name: "Electric", merchant: "METRO ELECTRIC CO" },
 			{ name: "Netflix", merchant: "NETFLIX.COM" },
@@ -216,10 +232,12 @@ describe("buildSeed", () => {
 
 	it("includes six months of history with Eating Out creeping up", () => {
 		const seed = buildSeed("2026-09-22");
+
 		const eatingOut = (month: string) =>
 			seed.transactions
 				.filter((t) => t.date.startsWith(month) && t.categoryId === 2)
 				.reduce((sum, t) => sum + t.amountCents, 0);
+
 		expect(
 			["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"].map(eatingOut),
 		).toEqual([17000, 19500, 21500, 24000, 26200]);
@@ -229,6 +247,7 @@ describe("buildSeed", () => {
 		const seed = buildSeed("2026-09-22");
 		const keys = seed.merchants.map((m) => m.key);
 		expect(new Set(keys).size).toBe(keys.length);
+
 		for (const t of seed.transactions)
 			expect(keys).toContain(t.merchantName ?? t.rawName);
 	});
@@ -262,6 +281,7 @@ describe("buildSeed", () => {
 
 describe("buildSeed's balance history (spec §9, feature 7)", () => {
 	const TODAYS = ["2026-10-05", "2026-09-01", "2026-03-31", "2027-01-31"];
+
 	/** The seed's Plaid accounts: the Cash account has no balance history. */
 	const bankAccounts = (today: string) =>
 		buildSeed(today).accounts.filter((a) => a.bankId !== null);
@@ -273,6 +293,7 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 			const dates = [...new Set(balanceHistory.map((r) => r.date))];
 			expect(dates[0]).toBe(chartStart(today));
 			expect(dates.at(-1)).toBe(today);
+
 			// No day is missing, and no day is after today.
 			for (const [i, date] of dates.entries())
 				if (i > 0) expect(daysBefore(date, 1)).toBe(dates[i - 1]);
@@ -294,6 +315,7 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 		"ends on each account's balance today, so the line meets the headline, on %s",
 		(today) => {
 			const { balanceHistory } = buildSeed(today);
+
 			for (const account of bankAccounts(today)) {
 				expect(
 					balanceHistory.find(
@@ -310,10 +332,12 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 			const seed = buildSeed(today);
 			const transfers = seed.transactions.filter((t) => t.flagTransfer);
 			expect(transfers.length).toBeGreaterThan(3);
+
 			const balance = (accountId: number, date: string) =>
 				seed.balanceHistory.find(
 					(r) => r.accountId === accountId && r.date === date,
 				)?.balanceCents ?? Number.NaN;
+
 			for (const t of transfers) {
 				const before = daysBefore(t.date, 1);
 				// Savings gains exactly the transfer.
@@ -336,9 +360,11 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 		"makes a net-worth line that rose, ending on today's net worth, on %s",
 		(today) => {
 			const seed = buildSeed(today);
+
 			const liability = new Map(
 				seed.accounts.map((a) => [a.id, a.isLiability]),
 			);
+
 			const points = netWorthSeries(
 				seed.balanceHistory.map((r) => ({
 					...r,
@@ -347,6 +373,7 @@ describe("buildSeed's balance history (spec §9, feature 7)", () => {
 				chartStart(today),
 				bankAccounts(today).map((a) => a.id),
 			);
+
 			// $4,210.55 + $12,400.00 − $842.17
 			expect(points.at(-1)).toEqual({ date: today, cents: 1576838 });
 			const view = netWorthView(points, today);
@@ -363,9 +390,11 @@ describe("resetDemo", () => {
 			"UPDATE categories SET archived = 1, archived_on = '2026-10-04' WHERE id = 1",
 		).run();
 		await resetDemo(env.DB, "2026-10-05");
+
 		const row = await env.DB.prepare(
 			"SELECT archived, archived_on FROM categories WHERE id = 1",
 		).first<{ archived: number; archived_on: string | null }>();
+
 		expect(row).toEqual({ archived: 0, archived_on: null });
 	});
 
@@ -374,9 +403,11 @@ describe("resetDemo", () => {
 			"INSERT INTO household_people (name) VALUES ('Kids')",
 		).run();
 		await resetDemo(env.DB, "2026-10-05");
+
 		const { results } = await env.DB.prepare(
 			"SELECT name FROM household_people ORDER BY id",
 		).all<{ name: string }>();
+
 		expect(results).toEqual([{ name: "Everyone" }]);
 	});
 
@@ -384,41 +415,51 @@ describe("resetDemo", () => {
 		const history = buildSeed("2026-10-05").balanceHistory;
 		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
 		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+
 		const { results } = await env.DB.prepare(
 			"SELECT account_id AS accountId, date, balance_cents AS balanceCents FROM balance_history ORDER BY date, account_id",
 		).all();
+
 		expect(results).toEqual(history);
 	});
 
 	it("gives Local Bakery id 110, which the edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const row = await env.DB.prepare(
 			"SELECT raw_name FROM transactions WHERE id = 110",
 		).first<{ raw_name: string }>();
+
 		expect(row?.raw_name).toBe("SQ *LOCAL BAKERY 4432");
 	});
 
 	it("gives the Craft Supply charge id 116, whose merchant has guessed names, which the names edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const row = await env.DB.prepare(
 			"SELECT raw_name FROM transactions WHERE id = 116",
 		).first<{ raw_name: string }>();
+
 		expect(row?.raw_name).toBe("SP * CRAFTSUPPLY");
 	});
 
 	it("gives the CVS Pharmacy merchant row number 24, which the review's Skip screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const row = await env.DB.prepare(
 			"SELECT raw_name FROM merchants WHERE rowid = 24",
 		).first<{ raw_name: string }>();
+
 		expect(row?.raw_name).toBe("CVS Pharmacy");
 	});
 
 	it("gives the CVS charge id 118, whose merchant has the bank's own name suggested, which the bank-name edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const row = await env.DB.prepare(
 			"SELECT raw_name, merchant_name FROM transactions WHERE id = 118",
 		).first<{ raw_name: string; merchant_name: string }>();
+
 		expect(row).toEqual({
 			raw_name: "CHECKCARD 0921 CVS",
 			merchant_name: "CVS Pharmacy",
@@ -427,9 +468,11 @@ describe("resetDemo", () => {
 
 	it("gives a Jev-picked Trader Joe's id 94, which the Jev edit-sheet screenshot uses", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const row = await env.DB.prepare(
 			"SELECT raw_name, category_source FROM transactions WHERE id = 94",
 		).first<{ raw_name: string; category_source: string }>();
+
 		expect(row).toEqual({
 			raw_name: "TRADER JOE'S #552",
 			category_source: "jev",
@@ -439,44 +482,58 @@ describe("resetDemo", () => {
 	it("reset adds the repeatable Pet Care suggestion from old posted none-fit charges without shifting this month's numbers", async () => {
 		await resetDemo(env.DB, "2026-10-05");
 		const before = await loadMonth(env.DB, "2026-10");
+
 		const totalsBefore = summarizeMonth({
 			month: "2026-10",
 			...before,
 			unpaidDueBillsCents: 0,
 		});
+
 		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+
 		const suggestion = await env.DB.prepare(
 			"SELECT name, status FROM category_suggestions WHERE name = 'Pet Care'",
 		).first<{ name: string; status: string }>();
+
 		expect(suggestion).toEqual({ name: "Pet Care", status: "pending" });
+
 		const rows = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet Care') AND amount_cents > 0 AND pending = 0 AND category_id IS NULL AND jev_none_fit = 1 AND category_confidence >= 0.8",
 		).first<{ n: number }>();
+
 		expect(rows?.n).toBeGreaterThanOrEqual(3);
+
 		const dates = await env.DB.prepare(
 			"SELECT MIN(date) AS earliest FROM transactions WHERE category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet Care')",
 		).first<{ earliest: string }>();
+
 		expect(dates?.earliest?.slice(0, 7)).toBe("2026-08");
 		const data = await loadMonth(env.DB, "2026-10");
+
 		const summary = summarizeMonth({
 			month: "2026-10",
 			...data,
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(summary.uncategorized).toEqual(totalsBefore.uncategorized);
 		expect(summary.totalSpentCents).toBe(totalsBefore.totalSpentCents);
 		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+
 		const repeated = await env.DB.prepare(
 			"SELECT name, status FROM category_suggestions WHERE name = 'Pet Care'",
 		).first<{ name: string; status: string }>();
+
 		expect(repeated).toEqual(suggestion);
 	});
 
 	it("stores the seed's merchant names, and every bill's key is its linked payment's merchant key", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const named = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE merchant_name IS NOT NULL",
 		).first<{ n: number }>();
+
 		expect(named?.n).toBeGreaterThan(5);
 
 		const { results } = await env.DB.prepare(
@@ -486,7 +543,9 @@ describe("resetDemo", () => {
 			JOIN transactions t ON t.id = bp.transaction_id
 			WHERE bp.status = 'linked'`,
 		).all<{ billKey: string; paymentKey: string }>();
+
 		expect(results.length).toBeGreaterThan(0);
+
 		for (const row of results) expect(row.billKey).toBe(row.paymentKey);
 
 		// Every transaction's display name is found under its key, so names resolve for both Amazons.
@@ -494,18 +553,22 @@ describe("resetDemo", () => {
 			`SELECT COUNT(*) AS n FROM transactions t
 			WHERE NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")})`,
 		).first<{ n: number }>();
+
 		expect(unresolved?.n).toBe(0);
 	});
 
 	it("seeds a few names Tally guessed, waiting for a person, on merchants nobody named (the demo never calls Workers AI)", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const { results } = await env.DB.prepare(
 			"SELECT raw_name, display_name FROM merchants WHERE suggestion_status = 'pending' ORDER BY raw_name",
 		).all<{
 			raw_name: string;
 			display_name: string | null;
 		}>();
+
 		const names = new Map<string, string[]>();
+
 		for (const m of results)
 			names.set(m.raw_name, await merchantNames(env.DB, m.raw_name));
 		expect(results.map((m) => m.raw_name)).toEqual([
@@ -515,11 +578,13 @@ describe("resetDemo", () => {
 			"SP * CRAFTSUPPLY",
 			"TST* CORNER DELI",
 		]);
+
 		// Up to three names, and none of them chosen.
 		for (const m of results) {
 			expect(m.display_name).toBeNull();
 			expect(names.get(m.raw_name)?.length).toBeLessThanOrEqual(3);
 		}
+
 		expect(names.get("CVS Pharmacy")).toEqual(["CVS Pharmacy"]);
 		expect(names.get("SP * CRAFTSUPPLY")).toEqual([
 			"Craft Supply Co",
@@ -529,22 +594,28 @@ describe("resetDemo", () => {
 
 	it("gives the seed's Jev-categorized rows a matching Jev pick", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const mismatched = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE category_source = 'jev' AND jev_category_id IS NOT category_id",
 		).first<{ n: number }>();
+
 		const others = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE COALESCE(category_source, '') != 'jev' AND jev_category_id IS NOT NULL",
 		).first<{ n: number }>();
+
 		expect(mismatched?.n).toBe(0);
 		expect(others?.n).toBe(0);
 	});
 
 	it("seeds the Costco split parts as the person's own picks, with no Jev confidence", async () => {
 		await resetDemo(env.DB, "2026-09-22");
+
 		const { results } = await env.DB.prepare(
 			"SELECT category_source AS source, category_confidence AS confidence FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
 		).all<{ source: string | null; confidence: number | null }>();
+
 		expect(results).toHaveLength(2);
+
 		for (const part of results)
 			expect(part).toEqual({ source: "user", confidence: null });
 	});
@@ -554,11 +625,13 @@ describe("resetDemo", () => {
 		await resetDemo(env.DB, "2026-09-30");
 
 		const data = await loadMonth(env.DB, "2026-09");
+
 		const summary = summarizeMonth({
 			month: "2026-09",
 			...data,
 			unpaidDueBillsCents: 0,
 		});
+
 		// Childcare's $1,200 budget less the four Fridays paid in September ($960), and Rent's $1,200 budget less the
 		// $600 paid this month, on the last day when the month's spending is all in (#322). The $245 rest is as above,
 		// and this month's Groceries budget ($950) is $250 above the $700 it was (#631).
@@ -577,6 +650,7 @@ describe("resetDemo", () => {
 		const { results } = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 		).all<{ n: number }>();
+
 		expect(results[0]?.n).toBe(1);
 	});
 });

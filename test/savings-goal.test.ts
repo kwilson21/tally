@@ -6,6 +6,8 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { home as homeRoutes } from "../src/routes/home";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
+import { envWith } from "./helpers/doubles";
+import { isMethod } from "./helpers/present";
 
 describe("savings goal history", () => {
 	it("uses the latest amount on or before the month", () => {
@@ -13,6 +15,7 @@ describe("savings goal history", () => {
 			{ effectiveMonth: "2026-10", amountCents: 50000 },
 			{ effectiveMonth: "2026-12", amountCents: 60000 },
 		];
+
 		expect(savingsGoalForMonth(amounts, "2026-09")).toBeNull();
 		expect(savingsGoalForMonth(amounts, "2026-11")).toBe(50000);
 		expect(savingsGoalForMonth(amounts, "2026-12")).toBe(60000);
@@ -53,6 +56,7 @@ describe("summarizeMonth with a savings goal", () => {
 			unpaidDueBillsCents: 14200,
 			savingsGoalCents: 90000,
 		});
+
 		expect(result.safeToSpendCents).toBe(-10200);
 	});
 });
@@ -112,10 +116,12 @@ describe("savings goal routes", () => {
 		expect(html).toContain("a month");
 		expect(html).toContain("Set aside from Safe to spend");
 		expect(html).toContain("$298");
+
 		const goalRow = html.slice(
 			html.indexOf('<li><a href="/savings-goal"'),
 			html.indexOf("</li>", html.indexOf('<li><a href="/savings-goal"')),
 		);
+
 		expect(goalRow).not.toContain("bar-fill");
 		expect(goalRow).not.toContain("nudge-");
 		expect(goalRow).toMatch(
@@ -136,17 +142,21 @@ describe("savings goal routes", () => {
 		expect(sheetHtml).toMatch(
 			/<a href="\/\?focus=savings-goal" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
 		);
+
 		const cancelled = await homeRoutes.fetch(
 			new Request("http://tally.test/?focus=savings-goal", {
 				headers: { "HX-Request": "true" },
 			}),
 			env,
 		);
+
 		const cancelTrigger = JSON.parse(
 			cancelled.headers.get("HX-Trigger") ?? "{}",
 		);
+
 		expect(cancelTrigger).toHaveProperty("toast");
 		expect(cancelTrigger).toHaveProperty("announce");
+
 		const saved = await homeRoutes.fetch(
 			new Request("http://tally.test/savings-goal", {
 				method: "POST",
@@ -158,14 +168,18 @@ describe("savings goal routes", () => {
 			}),
 			env,
 		);
+
 		const saveTrigger = JSON.parse(saved.headers.get("HX-Trigger") ?? "{}");
 		expect(saveTrigger).toHaveProperty("toast");
 		expect(saveTrigger).toHaveProperty("announce");
 		expect(saveTrigger.toast.message).toBe("Saved the savings goal");
+
 		const row = await env.DB.prepare(
 			"SELECT effective_month AS month, amount_cents AS cents FROM savings_goal_amounts ORDER BY effective_month DESC LIMIT 1",
 		).first();
+
 		expect(row).toEqual({ month, cents: 60000 });
+
 		const removed = await homeRoutes.fetch(
 			new Request("http://tally.test/savings-goal", {
 				method: "POST",
@@ -177,6 +191,7 @@ describe("savings goal routes", () => {
 			}),
 			env,
 		);
+
 		expect(removed.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -204,6 +219,7 @@ describe("savings goal routes", () => {
 			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-09', 50000)",
 		).run();
 		const before = await loadMonth(env.DB, "2026-09");
+
 		const resultBefore = summarizeMonth({
 			month: "2026-09",
 			...before,
@@ -214,6 +230,7 @@ describe("savings goal routes", () => {
 		const pastResponse = await exports.default.fetch(
 			"http://tally.test/?month=2026-09",
 		);
+
 		const pastHtml = await pastResponse.text();
 		expect(pastHtml).toContain("Savings");
 		expect(pastHtml).toContain("$500");
@@ -221,12 +238,14 @@ describe("savings goal routes", () => {
 		expect(pastHtml).not.toContain('href="/savings-goal"');
 		expect(pastHtml).not.toContain('hx-get="/savings-goal"');
 		const after = await loadMonth(env.DB, "2026-09");
+
 		const resultAfter = summarizeMonth({
 			month: "2026-09",
 			...after,
 			unpaidDueBillsCents: 0,
 			savingsGoalCents: after.savingsGoalCents,
 		});
+
 		expect(resultAfter).toEqual(resultBefore);
 
 		const currentResponse = await exports.default.fetch("http://tally.test/");
@@ -236,21 +255,27 @@ describe("savings goal routes", () => {
 
 	it("keeps Home's D1 statement count below the per-invocation limit", async () => {
 		let statements = 0;
+
 		const counted = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
+
 						return target.prepare(sql);
 					};
-				return typeof value === "function" ? value.bind(target) : value;
+
+				// SAFETY: the proxy forwards only the members the home route reads from D1Database; any other key reads as undefined on the real binding.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
-		await homeRoutes.fetch(new Request("http://tally.test/"), {
-			...env,
-			DB: counted as D1Database,
-		});
+
+		await homeRoutes.fetch(
+			new Request("http://tally.test/"),
+			envWith(env, { DB: counted }),
+		);
 		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
 	});
 
@@ -268,6 +293,7 @@ describe("savings goal routes", () => {
 			)
 				.bind(month)
 				.run();
+
 			const response = await homeRoutes.fetch(
 				new Request("http://tally.test/savings-goal", {
 					method: "POST",
@@ -279,6 +305,7 @@ describe("savings goal routes", () => {
 				}),
 				env,
 			);
+
 			const html = await response.text();
 			expect(response.status).toBe(422);
 			expect(html).toMatch(/role="alert"/);
@@ -287,9 +314,11 @@ describe("savings goal routes", () => {
 			expect(html).not.toContain(`from ${month} on`);
 			expect(html).toMatch(/<input[^>]*name="goal"[^>]*autofocus/);
 			expect(html).toMatch(/<input[^>]*name="goal"[^>]*aria-invalid="true"/);
+
 			const rejectionTrigger = JSON.parse(
 				response.headers.get("HX-Trigger") ?? "{}",
 			);
+
 			expect(rejectionTrigger).toHaveProperty("toast");
 			expect(rejectionTrigger).toHaveProperty("announce");
 			expect(rejectionTrigger.toast).toEqual({
@@ -322,12 +351,14 @@ describe("savings goal routes", () => {
 			.bind(month)
 			.run();
 		const before = await loadMonth(env.DB, month);
+
 		const initial = summarizeMonth({
 			...before,
 			month,
 			unpaidDueBillsCents: 0,
 			savingsGoalCents: before.savingsGoalCents,
 		}).safeToSpendCents;
+
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, excluded, flag_transfer) SELECT id, ?, 50000, 'SAVINGS TRANSFER', 1, 1 FROM accounts LIMIT 1",
 		)

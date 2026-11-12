@@ -4,6 +4,7 @@ import { matchBillPayments } from "../src/bills/match";
 import { billOccurrence } from "../src/bills/status";
 import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // Decision 99: removing a split, or replacing its parts, unlinks a part's bill payment and says so, as
 // refunds do (decision 60). The payment is not left to the parts' ON DELETE CASCADE, and the bills are named.
@@ -24,6 +25,7 @@ const MEMBERSHIP_SCHEDULE = {
 	dueDay: 15,
 	anchorMonth: 9,
 } as const;
+
 const TODAY = "2026-09-22";
 
 beforeEach(async () => {
@@ -98,6 +100,7 @@ async function linkedPeriods(billId: number) {
 		)
 		.bind(billId)
 		.all<{ period: string }>();
+
 	return new Set(results.map((row) => row.period));
 }
 
@@ -115,6 +118,7 @@ const membershipPart = {
 	categoryId: KIDS,
 	bill: { id: MEMBERSHIP, period: "2026" },
 };
+
 const groceriesPart = {
 	id: PART_GROCERIES,
 	cents: 1000,
@@ -272,6 +276,7 @@ async function dismissedPayments(billId: number) {
 			matched_by: string;
 			status: string;
 		}>();
+
 	return results;
 }
 
@@ -317,6 +322,7 @@ async function partIds(purchaseId: number) {
 		.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 		.bind(purchaseId)
 		.all<{ id: number }>();
+
 	return results.map((row) => row.id);
 }
 
@@ -338,6 +344,7 @@ async function linkedOn(billId: number) {
 			period: string;
 			matchedBy: string;
 		}>();
+
 	return results;
 }
 
@@ -478,15 +485,18 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 		new Proxy(db, {
 			get(target, prop) {
 				if (prop === "batch") return around;
-				const value = Reflect.get(target, prop);
-				return typeof value === "function" ? value.bind(target) : value;
+				// SAFETY: the proxy forwards only the members the code under test reads from D1Database; any other key reads as undefined on the real binding.
+				const value: unknown = target[prop as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 
 	/** Runs `race`, as one batch, on the database just before the save's batch, as a competing save would, so the save reads first. */
 	const racingBatch = (race: D1PreparedStatement[]) =>
 		batchAround(async (statements) => {
 			await db.batch(race);
+
 			return db.batch(statements);
 		});
 
@@ -502,7 +512,9 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 			)
 			.bind(billId)
 			.first<{ id: number }>();
+
 		if (!row) throw new Error(`No linked payment for bill ${billId}`);
+
 		return row.id;
 	};
 
@@ -525,6 +537,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 	it("refuses a re-split when a competing save moves a bill payment from one part to another, and writes nothing", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 		const before = await partIds(PURCHASE);
+
 		const racing = racingWith(
 			"UPDATE bill_payments SET transaction_id = ? WHERE bill_id = ? AND status = 'linked'",
 			[PART_GROCERIES, MEMBERSHIP],
@@ -560,6 +573,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 	it("refuses a re-split when a competing save moves a bill payment off its part onto the purchase, and writes nothing", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 		const before = await partIds(PURCHASE);
+
 		const racing = racingWith(
 			"UPDATE bill_payments SET transaction_id = ? WHERE bill_id = ? AND status = 'linked'",
 			[PURCHASE, MEMBERSHIP],
@@ -583,6 +597,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 	it("refuses a re-split when a competing save links a bill payment to a part after the read, and writes nothing", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 		const before = await partIds(PURCHASE);
+
 		const racing = racingWith(
 			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-09', ?, 'user', 'linked')",
 			[WATER, PART_GROCERIES],
@@ -609,6 +624,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 	it("refuses a re-split when a competing save unlinks a bill payment from its part after the read, and writes nothing", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 		const before = await partIds(PURCHASE);
+
 		const racing = racingWith(
 			"UPDATE bill_payments SET status = 'dismissed' WHERE bill_id = ? AND status = 'linked'",
 			[MEMBERSHIP],
@@ -657,6 +673,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 	it("rethrows a batch failure for another reason while a bill payment also moved, not the bill refusal", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 		const failure = new Error("D1_ERROR: network connection lost");
+
 		const racing = batchAround(async () => {
 			await db
 				.prepare(
@@ -707,6 +724,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 			await prepare();
 			const before = await partIds(PURCHASE);
 			const rowsBefore = await paymentRows();
+
 			const racing = racingWith(
 				"DELETE FROM bill_payments WHERE bill_id = ? AND status = 'linked'",
 				[MEMBERSHIP],
@@ -746,6 +764,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 			await seedSplit([membershipPart, groceriesPart]);
 			const before = await partIds(PURCHASE);
 			const paymentId = await linkedPaymentId(MEMBERSHIP);
+
 			const dismiss = reuseId
 				? db
 						.prepare(
@@ -757,6 +776,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 							"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'dismissed')",
 						)
 						.bind(MEMBERSHIP, "2026", PART_MEMBERSHIP);
+
 			const racing = racingBatch([
 				db
 					.prepare(
@@ -801,6 +821,7 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 			await seedSplit([membershipPart, groceriesPart]);
 			const before = await partIds(PURCHASE);
 			const paymentId = await linkedPaymentId(MEMBERSHIP);
+
 			const racing = racingBatch([
 				db.prepare("DELETE FROM bill_payments WHERE id = ?").bind(paymentId),
 				db
@@ -855,6 +876,7 @@ describe("Link a payment lists a split change's dismissal, and linking it links 
 			},
 			body: new URLSearchParams(body),
 		});
+
 	const picker = async () =>
 		(
 			await exports.default.fetch(
@@ -954,11 +976,13 @@ const seedPurchase = () =>
 
 describe("a person's own Not this one survives a split change (decision 105)", () => {
 	const smallPart = { ...groceriesPart, cents: 200 };
+
 	const partWithoutBill = {
 		id: PART_MEMBERSHIP,
 		cents: 4000,
 		categoryId: KIDS,
 	};
+
 	// The parts a $42.00 purchase splits into, one of which the membership's $40.00 still matches within 10%.
 	const replacement = [
 		{ categoryId: KIDS, amountCents: 3800 },
@@ -1222,6 +1246,7 @@ const internetPart = (id: number, cents: number, categoryId: number) => ({
 	categoryId,
 	bill: { id: INTERNET, period: "2026-09" },
 });
+
 const INTERNET_NAMED = [{ name: "Internet", period: "2026-09" }];
 
 describe("a split change names only the bill still unpaid after it (decisions 74 and 105)", () => {
