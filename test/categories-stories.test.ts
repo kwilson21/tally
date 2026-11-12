@@ -1,5 +1,3 @@
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import { describe, expect, it } from "vitest";
 import { readAtEdge } from "../src/edge";
 import {
@@ -10,37 +8,15 @@ import {
 	renameCategory,
 	restoreCategory,
 } from "../src/rules/categories";
-import type { Refusal } from "../src/rules/terms";
 import {
 	CategoryId,
 	CategoryName,
 	MoveDirection,
 } from "../src/settings/category-form";
+import { answerOf, nothingToDo, refuse, write } from "./helpers/rule-answers";
 
 // The categories area's five rules as stories (decisions 187, 206): each row is what was asked, what was stored, and
 // what the rule answers. The date is an input (decision 195); nothing here touches a clock or a database.
-
-/** What a story expects: what to save, nothing to do, or a named refusal with its sentence. */
-const write = <W>(save: W) => ({ kind: "write" as const, save });
-const nothingToDo = () => ({ kind: "nothingToDo" as const });
-
-const refuse = (type: string, say: string) => ({
-	kind: "refuse" as const,
-	type,
-	say,
-});
-
-/** Runs a rule's answer, which needs nothing handed in, and puts it in a story's words. */
-const answerOf = <W, E extends Refusal>(
-	decided: Effect.Effect<Option.Option<W>, E>,
-) =>
-	Effect.runSync(
-		Effect.match(decided, {
-			onFailure: (refusal) => refuse(refusal._tag, refusal.say),
-			onSuccess: (save) =>
-				Option.isSome(save) ? write(save.value) : nothingToDo(),
-		}),
-	);
 
 const VERSION = "v1";
 const TODAY = "2026-11-12";

@@ -1,5 +1,3 @@
-import * as Result from "effect/Result";
-import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
 import { MAX_BUDGET_CENTS } from "../src/budgets/amount";
 import {
@@ -8,9 +6,9 @@ import {
 	saveBudget,
 	saveSavingsGoal,
 } from "../src/rules/budgets";
-import { nothingToDo, refuse, write } from "../src/rules/rule";
+import { answerOf, nothingToDo, refuse, write } from "./helpers/rule-answers";
 
-// The budgets area's three rules as stories (decisions 187, 192): each row is what was asked, what was stored, and what
+// The budgets area's three rules as stories (decisions 187, 206): each row is what was asked, what was stored, and what
 // the rule answers. The month is an input (decision 195); nothing here touches a clock or a database.
 
 const MONTH = "2026-11";
@@ -39,7 +37,7 @@ const NO_BUDGET = refuse(
 
 describe("Save a budget", () => {
 	const ask = (cents: number, facts: BudgetFacts) =>
-		saveBudget.decide({ categoryId: 1, cents, month: MONTH }, facts);
+		answerOf(saveBudget.decide({ categoryId: 1, cents, month: MONTH }, facts));
 
 	const saves = (cents: number, expectedBudgetCents: number | null) =>
 		write({ categoryId: 1, month: MONTH, cents, expectedBudgetCents });
@@ -71,7 +69,9 @@ describe("Save a budget", () => {
 
 describe("Nudge a budget", () => {
 	const ask = (direction: "up" | "down", facts: BudgetFacts) =>
-		nudgeBudget.decide({ categoryId: 1, direction, month: MONTH }, facts);
+		answerOf(
+			nudgeBudget.decide({ categoryId: 1, direction, month: MONTH }, facts),
+		);
 
 	const saves = (cents: number, expectedBudgetCents: number) =>
 		write({ categoryId: 1, month: MONTH, cents, expectedBudgetCents });
@@ -117,7 +117,7 @@ describe("Nudge a budget", () => {
 
 describe("Save the savings goal", () => {
 	const ask = (cents: number, goalCents: number | null) =>
-		saveSavingsGoal.decide({ cents, month: MONTH }, { goalCents });
+		answerOf(saveSavingsGoal.decide({ cents, month: MONTH }, { goalCents }));
 
 	const saves = (cents: number, expectedGoalCents: number | null) =>
 		write({ month: MONTH, cents, expectedGoalCents });
@@ -144,9 +144,9 @@ describe("the rules' sheet", () => {
 		expect(
 			[saveBudget, nudgeBudget, saveSavingsGoal].map((rule) => ({
 				name: rule.name,
-				nothingToDoIf: rule.nothingToDoIf.text,
+				nothingToDoIf: rule.nothingToDoIf?.text,
 				refusals: rule.refusals.map(
-					(r) => `${r.type}: unless ${r.unless.text}`,
+					(r) => `${r.refuse()._tag}: unless ${r.unless.text}`,
 				),
 				writes: rule.writesText,
 			})),
@@ -176,46 +176,5 @@ describe("the rules' sheet", () => {
 				writes: "Sets the savings goal to that amount from this month on.",
 			},
 		]);
-	});
-
-	it("gives every answer one of exactly three kinds (the contract of decision 192)", () => {
-		const Answer = Schema.Union([
-			Schema.Struct({ kind: Schema.Literal("write"), write: Schema.Unknown }),
-			Schema.Struct({ kind: Schema.Literal("nothingToDo") }),
-			Schema.Struct({
-				kind: Schema.Literal("refuse"),
-				type: Schema.NonEmptyString,
-				say: Schema.NonEmptyString,
-			}),
-		]);
-
-		const answers = [
-			saveBudget.decide({ categoryId: 1, cents: 1, month: MONTH }, live(null)),
-			saveBudget.decide({ categoryId: 1, cents: 1, month: MONTH }, live(1)),
-			saveBudget.decide({ categoryId: 1, cents: 1, month: MONTH }, missing),
-			nudgeBudget.decide(
-				{ categoryId: 1, direction: "up", month: MONTH },
-				live(1),
-			),
-			nudgeBudget.decide(
-				{ categoryId: 1, direction: "down", month: MONTH },
-				live(0),
-			),
-			nudgeBudget.decide(
-				{ categoryId: 1, direction: "up", month: MONTH },
-				live(null),
-			),
-			saveSavingsGoal.decide({ cents: 1, month: MONTH }, { goalCents: null }),
-			saveSavingsGoal.decide({ cents: 1, month: MONTH }, { goalCents: 1 }),
-		];
-
-		for (const answer of answers)
-			expect(
-				Result.isSuccess(
-					Schema.decodeUnknownResult(Answer, { onExcessProperty: "error" })(
-						answer,
-					),
-				),
-			).toBe(true);
 	});
 });

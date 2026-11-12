@@ -70,7 +70,8 @@ export const rule = <
 		return parts.nothingToDoIf?.holds(given)
 			? Effect.succeed(Option.none<W>())
 			: check(given, parts.refusals).pipe(
-					Effect.as(Option.some(parts.writes(given))),
+					// `writes` runs only once every check has passed: it may rely on what the refusals ruled out.
+					Effect.map(() => Option.some(parts.writes(given))),
 				);
 	},
 });

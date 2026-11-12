@@ -1,31 +1,37 @@
-// The read, decide and save loop every converted area shares (decision 190). The rule decides in TypeScript; the save's
-// guard raises an error when what the rule read has changed since, and this asks again on fresh facts.
-import type { Outcome } from "../rules/rule";
+// The read, decide and save loop every converted area shares (decisions 190 and 206). The rule decides in TypeScript;
+// the save's guard raises an error when what the rule read has changed since, and this asks again on fresh facts.
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+
+/** The save found the facts changed since the rule read them. Never shown to a person: the rule is asked again. */
+export class ChangedSinceRead extends Data.TaggedError("ChangedSinceRead") {}
 
 /**
- * Reads, decides and saves. `decide` reads the facts and asks the rule; a write is saved with `save`. When the guard
- * raises (`changedSinceRead` knows its error: another writer changed the facts between the read and the save), it reads
- * and decides again, three times in all, so two taps at once both count. It then gives up with the `gaveUp` error; any
- * other failure is passed on at once. `saved` is what `save` answered, and is there only for a write.
+ * Reads the facts, asks the rule and saves what it decides. When the save's guard raises (another writer changed the
+ * facts between the read and the save), it reads and decides again, three times in all, so two taps at once both
+ * count; it then gives up with the `gaveUp` error. Answers with the facts it decided on, what the rule decided (nothing,
+ * when what was asked is already true), and what the save answered, which is there only when something was saved.
  */
-export async function decideAndSaveWith<W, S>(steps: {
-	decide: () => Promise<Outcome<W>>;
-	save: (what: W) => Promise<S>;
-	changedSinceRead: (error: Error) => boolean;
+export const decideAndSave = <F, W, E, S, E2, R1, R2>(steps: {
+	facts: Effect.Effect<F, never, R1>;
+	decide: (facts: F) => Effect.Effect<Option.Option<W>, E>;
+	save: (write: W) => Effect.Effect<S, ChangedSinceRead | E2, R2>;
 	gaveUp: string;
-}): Promise<{ outcome: Outcome<W>; saved?: S }> {
-	for (let attempt = 1; attempt <= 3; attempt++) {
-		const outcome = await steps.decide();
+}) =>
+	Effect.gen(function* () {
+		const facts = yield* steps.facts;
+		const decided = yield* steps.decide(facts);
 
-		if (outcome.kind !== "write") return { outcome };
+		const saved = Option.isSome(decided)
+			? yield* steps.save(decided.value)
+			: undefined;
 
-		try {
-			return { outcome, saved: await steps.save(outcome.write) };
-		} catch (error) {
-			if (!(error instanceof Error && steps.changedSinceRead(error)))
-				throw error;
-		}
-	}
-
-	throw new Error(steps.gaveUp);
-}
+		return { facts, decided, saved };
+	}).pipe(
+		Effect.retry({ times: 2, while: Predicate.isTagged("ChangedSinceRead") }),
+		Effect.catchTag("ChangedSinceRead", () =>
+			Effect.die(new Error(steps.gaveUp)),
+		),
+	);
