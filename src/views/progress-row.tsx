@@ -57,6 +57,7 @@ function Wrap({
 	children?: Child;
 }) {
 	const box = `flex items-start py-3 text-ink no-underline ${adjusting ? "min-w-0 flex-1 gap-3" : "gap-4"}`;
+
 	return href ? (
 		<a
 			href={href}
@@ -90,12 +91,15 @@ function Nudge({
 }) {
 	const to = nudgeCents(budgetCents, direction);
 	const stuck = to === budgetCents;
+
 	const label = stuck
 		? direction === "down"
 			? `${name} is at $0`
 			: `${name} is at the largest budget`
 		: `${direction === "down" ? "Lower" : "Raise"} ${name} to ${whole(to)}`;
+
 	const href = `${nudge.href}/${direction}`;
+
 	return (
 		<form method="post" action={href} hx-post={href} {...nudge.attrs}>
 			<button
@@ -130,16 +134,19 @@ export function ProgressRow({
 	const over = spentCents > budgetCents;
 	// An Adjust tap has no arrow (its − and + take the room), so it marks nothing (P119 A).
 	const mark = href && !nudge ? saved : undefined;
+
 	const nearLimit =
 		!over &&
 		budgetCents > 0 &&
 		spentCents >= 0 &&
 		spentCents * 5 >= budgetCents * 4;
+
 	const { fillPct } = barGeometry(spentCents, budgetCents);
 	// Cents only when there are some, as the status sentence says it: "$36 over", "$36.50 over".
 	const overBy = spentCents - budgetCents;
 	const overText = formatCents(overBy, { wholeDollars: overBy % 100 === 0 });
 	const nudgeProps = nudge && { name, budgetCents, nudge };
+
 	return (
 		<li class={nudge ? "flex items-center gap-2" : undefined}>
 			{nudgeProps && <Nudge direction="down" {...nudgeProps} />}

@@ -64,6 +64,7 @@ export function Switch({
 	]
 		.filter(Boolean)
 		.join(" ");
+
 	return (
 		<label
 			class={`group flex min-h-11 items-center gap-3 py-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}

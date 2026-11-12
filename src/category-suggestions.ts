@@ -4,21 +4,26 @@ export type NoneFit = {
 	merchant: string;
 	merchantKey: string;
 };
+
 export const MIN_GROUP = 3;
 export const MAX_MERCHANTS_SENT = 10;
 
 export function groupNoneFit(rows: NoneFit[]) {
 	const groups = new Map<string, NoneFit[]>();
+
 	for (const row of rows) {
 		const group = groups.get(row.theme);
+
 		if (group) group.push(row);
 		else groups.set(row.theme, [row]);
 	}
+
 	return [...groups.entries()]
 		.filter(([, group]) => group.length >= MIN_GROUP)
 		.sort(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b, "en"))
 		.map(([theme, group]) => {
 			const counts = new Map<string, { count: number; merchant: string }>();
+
 			// Counted by the name sent, so each distinct name is named once, even under one merchant's key.
 			for (const row of group) {
 				const found = counts.get(row.merchant);
@@ -27,6 +32,7 @@ export function groupNoneFit(rows: NoneFit[]) {
 					merchant: row.merchant,
 				});
 			}
+
 			return {
 				theme,
 				ids: group.map((row) => row.id).sort((a, b) => a - b),

@@ -69,6 +69,7 @@ describe("next (machine helper)", () => {
 					on: {
 						OPEN: ({ context }) => {
 							if (context.locked) return;
+
 							return { target: "open" };
 						},
 					},

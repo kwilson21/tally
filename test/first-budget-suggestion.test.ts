@@ -92,6 +92,7 @@ describe("firstBudgetSuggestion", () => {
 			month("2026-08", 60000),
 			month("2026-09", 60000),
 		];
+
 		expect(firstBudgetSuggestion(months)?.amountCents).toBe(60000);
 		// One cent over the boundary (a mean of $600.01) rounds up to the next $10.
 		months[2] = month("2026-09", 60003);

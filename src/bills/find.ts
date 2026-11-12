@@ -25,6 +25,7 @@ export type BillFindingCharge = {
 	categoryId: number | null;
 	defaultCategoryId?: number | null;
 };
+
 export type BillSuggestion = {
 	/** The merchant key, which becomes the new bill's `merchant_raw_name`. */
 	rawName: string;
@@ -41,20 +42,28 @@ export function findBillSuggestions(
 	charges: BillFindingCharge[],
 ): BillSuggestion[] {
 	const groups = new Map<string, BillFindingCharge[]>();
+
 	for (const charge of charges) {
 		const list = groups.get(charge.rawName) ?? [];
 		list.push(charge);
 		groups.set(charge.rawName, list);
 	}
+
 	const suggestions: BillSuggestion[] = [];
+
 	for (const list of groups.values()) {
 		list.sort((a, b) => a.date.localeCompare(b.date));
+
 		if (list.length < 2) continue;
 		// The newest charge must repeat an earlier one (other purchases may fall between),
 		// so a store that once matched by chance doesn't show up.
-		const latest = list[list.length - 1] as BillFindingCharge;
+		const latest = list.at(-1);
+
+		if (latest === undefined) continue;
+
 		const partner = list.slice(0, -1).some((previous) => {
 			const days = dayNumber(latest.date) - dayNumber(previous.date);
+
 			return (
 				days >= BILL_FIND_MIN_DAYS &&
 				days <= BILL_FIND_MAX_DAYS &&
@@ -62,15 +71,19 @@ export function findBillSuggestions(
 					previous.amountCents * BILL_AMOUNT_TOLERANCE_PERCENT
 			);
 		});
+
 		if (!partner) continue;
 		const counts = new Map<number, number>();
+
 		for (const row of list)
 			if (row.categoryId != null)
 				counts.set(row.categoryId, (counts.get(row.categoryId) ?? 0) + 1);
+
 		const categoryId =
 			latest.defaultCategoryId ??
 			[...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ??
 			null;
+
 		suggestions.push({
 			rawName: latest.rawName,
 			bankText: latest.bankText,
@@ -81,12 +94,14 @@ export function findBillSuggestions(
 			chargeCount: list.length,
 		});
 	}
+
 	return suggestions.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
 export function threeMonthsBack(today: string) {
 	const source = new Date(`${today}T00:00:00Z`);
 	const day = source.getUTCDate();
+
 	const date = new Date(
 		Date.UTC(
 			source.getUTCFullYear(),
@@ -94,19 +109,26 @@ export function threeMonthsBack(today: string) {
 			1,
 		),
 	);
+
 	const lastDay = new Date(
 		Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0),
 	).getUTCDate();
+
 	date.setUTCDate(Math.min(day, lastDay));
+
 	return date.toISOString().slice(0, 10);
 }
+
 /** A charge's merchant key and raw name; a split part has its purchase's. */
 const CHARGE_KEY = `COALESCE(${merchantKeySql("p")},${merchantKeySql("t")})`;
 const CHARGE_RAW = "COALESCE(p.raw_name,t.raw_name)";
+
 /** A charge's Plaid categories; a split part has its purchase's, since saveSplit doesn't copy them. */
 const CHARGE_PLAID = "COALESCE(p.plaid_category,t.plaid_category)";
+
 const CHARGE_PLAID_DETAILED =
 	"COALESCE(p.plaid_detailed_category,t.plaid_detailed_category)";
+
 const chargeMerchant = (column: "display_name" | "default_category_id") =>
 	merchantColumnOfSql(CHARGE_KEY, column);
 
@@ -126,6 +148,7 @@ export async function loadBillSuggestions(
 	today: string,
 ): Promise<BillSuggestion[]> {
 	const from = threeMonthsBack(today);
+
 	const { results } = await db
 		.prepare(`WITH last_linked AS (SELECT ${CHARGE_KEY} AS rawName, MAX(t.date) AS date
 	  FROM transactions t LEFT JOIN transactions p ON p.id=t.parent_id
@@ -148,5 +171,6 @@ export async function loadBillSuggestions(
 	  ORDER BY ${CHARGE_KEY},t.date`)
 		.bind(from, today, from, today)
 		.all<BillFindingCharge>();
+
 	return findBillSuggestions(results);
 }

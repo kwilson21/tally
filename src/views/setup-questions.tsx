@@ -87,10 +87,12 @@ export function Heading({
  */
 export function SkippedSteps({ notes }: { notes: SkippedNote[] }) {
 	if (notes.length === 0) return null;
+
 	return (
 		<ul class="mt-4 space-y-1 text-sm text-muted">
 			{notes.map((note) => {
 				const waiting = waitingWords(note.waiting);
+
 				return (
 					<li>
 						<span class="text-ink">{note.step}</span> · {note.text}
@@ -129,6 +131,7 @@ export function SetupPay({
 }) {
 	const { shown, earlier } = latestDeposits(merchant.deposits);
 	const latest = shown[0]?.date ?? "";
+
 	return (
 		<SetupScreen
 			foot={
@@ -228,10 +231,12 @@ export function SetupBills({
 	const shown = keep.slice(0, 5);
 	const rest = keep.slice(5);
 	const restCents = rest.reduce((sum, charge) => sum + charge.amountCents, 0);
+
 	const total = billsTotalLine(
 		keep.length,
 		keep.reduce((sum, charge) => sum + charge.amountCents, 0),
 	);
+
 	return (
 		<SetupScreen
 			foot={
@@ -299,6 +304,7 @@ function BudgetRow({ ask }: { ask: BudgetAsk }) {
 				`${shortMonthName(month.month.slice(0, 7))} ${dollarsWords(month.spentCents)}`,
 		)
 		.join(" · ");
+
 	return (
 		<li class="flex items-center gap-3 border-b border-rule py-2">
 			<CategoryIcon icon={ask.icon} color={ask.color} />
@@ -340,10 +346,12 @@ export function SetupBudgets({
 	const rest = asks.slice(5);
 	const amountOf = (ask: BudgetAsk) => ask.suggestion?.amountCents ?? 0;
 	const restCents = rest.reduce((sum, ask) => sum + amountOf(ask), 0);
+
 	const total = budgetsTotalLine(
 		asks.length,
 		asks.reduce((sum, ask) => sum + amountOf(ask), 0),
 	);
+
 	return (
 		<SetupScreen
 			foot={
@@ -433,9 +441,12 @@ export function SetupOneBudget({
 	idSuffix?: string;
 }) {
 	const suggestion = ask.suggestion;
+
 	const typed =
 		error?.typed ?? (suggestion ? centsToAmount(suggestion.amountCents) : "");
+
 	const oneForm = `one-budget${idSuffix}`;
+
 	const budgetForm = {
 		method: "post",
 		action: "/setup/budgets",
@@ -443,10 +454,13 @@ export function SetupOneBudget({
 		"hx-target": "#setup-screen",
 		"hx-swap": "outerHTML",
 	} as const;
+
 	const category = (
 		<input type="hidden" name="category" value={String(ask.id)} />
 	);
+
 	const shownMonth = <input type="hidden" name="month" value={month} />;
+
 	const amount = (
 		<MoneyInput
 			id={`budget-${ask.id}${idSuffix}`}
@@ -457,6 +471,7 @@ export function SetupOneBudget({
 			autofocus={error !== null}
 		/>
 	);
+
 	const skip = (
 		<form {...budgetForm}>
 			{category}
@@ -468,6 +483,7 @@ export function SetupOneBudget({
 			</div>
 		</form>
 	);
+
 	return (
 		<SetupScreen
 			foot={
@@ -574,7 +590,9 @@ export function SetupSavings({
 		"hx-target": "#setup-screen",
 		"hx-swap": "outerHTML",
 	} as const;
+
 	const shownMonth = <input type="hidden" name="month" value={month} />;
+
 	return (
 		<SetupScreen
 			foot={
@@ -630,7 +648,9 @@ export type BudgetError = { text: string; typed: string };
 /** The line that names what waits in Possible bills: the count in words, and the link that ends the sentence. */
 export function Waiting({ count }: { count: number }) {
 	const words = waitingWords(count);
+
 	if (!words) return null;
+
 	return (
 		<p class="mt-2 text-sm text-muted">
 			{words}{" "}

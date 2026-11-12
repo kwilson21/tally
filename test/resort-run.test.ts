@@ -20,6 +20,7 @@ import {
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { categoryAskedSql } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // The re-sort's run state (decision 160): the run and its progress in household_settings (`resort_run`), the rows it
 // moved in `resort_moved_<runId>`, the toast that closes it, and Undo for ten seconds after it. Nothing here calls Jev
@@ -33,6 +34,7 @@ const HOUR = 3_600_000;
 /** The run a start made. These tests start runs with candidates, so a null here is a broken test, not a result. */
 function runIdOf(started: { runId: string | null }): string {
 	if (started.runId === null) throw new Error("the start made no run");
+
 	return started.runId;
 }
 
@@ -41,6 +43,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -77,6 +80,7 @@ async function tx(fields: Fields = {}): Promise<number> {
 			fields.jevAlsoCategoryId ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -172,15 +176,18 @@ describe("startOrJoinRun", () => {
 	it("starts a run with its progress, ids and snapshots when none is running", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b = await tx({ plaidCategory: HINT, confidence: null });
+
 		const candidates = (await candidatesNow()).filter((c) =>
 			[a, b].includes(c.id),
 		);
+
 		const started = await startOrJoinRun(db, {
 			candidates,
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		expect(started.joined).toBe(false);
 		expect(started.newIds.sort()).toEqual([a, b].sort());
 		const run = await readRun(db);
@@ -203,18 +210,21 @@ describe("startOrJoinRun", () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const all = await candidatesNow();
+
 		const first = await startOrJoinRun(db, {
 			candidates: all.filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const second = await startOrJoinRun(db, {
 			candidates: all.filter((c) => c.id === a || c.id === b),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 1000,
 		});
+
 		expect(second.joined).toBe(true);
 		expect(second.runId).toBe(first.runId);
 		expect(second.newIds).toEqual([b]);
@@ -226,12 +236,14 @@ describe("startOrJoinRun", () => {
 	it("joins a fresh running run with nothing new without writing: no instance is counted", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const all = await candidatesNow();
+
 		const first = await startOrJoinRun(db, {
 			candidates: all.filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const stored = () =>
 			db
 				.prepare(
@@ -239,13 +251,16 @@ describe("startOrJoinRun", () => {
 				)
 				.first<{ value: string }>()
 				.then((row) => row?.value);
+
 		const before = await stored();
+
 		const joined = await startOrJoinRun(db, {
 			candidates: all.filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 1000,
 		});
+
 		expect(joined).toEqual({ runId: first.runId, newIds: [], joined: true });
 		// The stored text is untouched, so instances and every other field stay as they were.
 		expect(await stored()).toBe(before);
@@ -255,18 +270,21 @@ describe("startOrJoinRun", () => {
 	it("closes a stale run (older than 2 hours) and starts a new one", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const all = await candidatesNow();
+
 		const old = await startOrJoinRun(db, {
 			candidates: all,
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const later = await startOrJoinRun(db, {
 			candidates: all.filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 2 * HOUR + 1,
 		});
+
 		expect(later.joined).toBe(false);
 		expect(later.runId).not.toBe(old.runId);
 		expect((await readRun(db))?.status).toBe("running");
@@ -278,18 +296,21 @@ describe("startOrJoinRun", () => {
 	it("keeps a run that is exactly 2 hours old as fresh", async () => {
 		await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const all = await candidatesNow();
+
 		const first = await startOrJoinRun(db, {
 			candidates: all,
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const second = await startOrJoinRun(db, {
 			candidates: [],
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 2 * HOUR,
 		});
+
 		expect(second.joined).toBe(true);
 		expect(second.runId).toBe(first.runId);
 	});
@@ -303,6 +324,7 @@ describe("startOrJoinRun: categories and empty starts", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		expect(result).toEqual({ runId: null, newIds: [], joined: false });
 		expect(await readRun(db)).toBeNull();
 		expect(await settingsKeys()).toEqual([]);
@@ -312,18 +334,21 @@ describe("startOrJoinRun: categories and empty starts", () => {
 		const other = await otherCategory();
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b = await tx({ plaidCategory: "Books", confidence: 0.3 });
+
 		const first = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const joined = await startOrJoinRun(db, {
 			candidates: (await otherCandidates(other.id)).filter((c) => c.id === b),
 			categoryId: other.id,
 			categoryName: other.name,
 			now: T0 + 1000,
 		});
+
 		expect(joined).toEqual({ runId: first.runId, newIds: [b], joined: true });
 		const run = await readRun(db);
 		expect(run).toMatchObject({
@@ -376,12 +401,14 @@ describe("startOrJoinRun: categories and empty starts", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const again = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === a),
 			categoryId: other.id,
 			categoryName: other.name,
 			now: T0 + 1000,
 		});
+
 		expect(again.newIds).toEqual([]);
 		const run = await readRun(db);
 		expect(run?.total).toBe(1);
@@ -397,6 +424,7 @@ async function otherCategory(): Promise<{ id: number; name: string }> {
 		)
 		.bind(groceries, eatingOut)
 		.first<{ id: number; name: string }>();
+
 	return row ?? { id: 0, name: "" };
 }
 
@@ -408,6 +436,7 @@ async function otherCandidates(categoryId: number): Promise<ResortCandidate[]> {
 		categoryId,
 		categorySource: "user",
 	});
+
 	return resortCandidates(db, {
 		filedId: booksFiled,
 		newCategoryId: categoryId,
@@ -422,6 +451,7 @@ describe("bumpDoneStatement", () => {
 			await tx({ plaidCategory: HINT }),
 			await tx({ plaidCategory: HINT }),
 		];
+
 		await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => ids.includes(c.id)),
 			categoryId: groceries,
@@ -437,17 +467,21 @@ describe("bumpDoneStatement", () => {
 
 	it("is a no-op once the run is done", async () => {
 		await tx({ plaidCategory: HINT });
+
 		const started = await startOrJoinRun(db, {
 			candidates: await candidatesNow(),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+
 		const result = await bumpDoneStatement(db, {
 			runId: runIdOf(started),
 			rows: 1,
 		}).run();
+
 		expect(result.meta.changes).toBe(0);
 	});
 
@@ -456,25 +490,31 @@ describe("bumpDoneStatement", () => {
 			await tx({ plaidCategory: HINT }),
 			await tx({ plaidCategory: HINT }),
 		];
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => ids.includes(c.id)),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		expect(await takeSortingTurn(db, "turn-a")).toBe(true);
+
 		const wrong = await bumpDoneStatement(db, {
 			runId: runIdOf(started),
 			rows: 1,
 			turnId: "turn-b",
 		}).run();
+
 		expect(wrong.meta.changes).toBe(0);
 		expect((await readRun(db))?.done).toBe(0);
+
 		const right = await bumpDoneStatement(db, {
 			runId: runIdOf(started),
 			rows: 2,
 			turnId: "turn-a",
 		}).run();
+
 		expect(right.meta.changes).toBe(1);
 		expect((await readRun(db))?.done).toBe(2);
 		await releaseSortingTurn(db, "turn-a");
@@ -488,22 +528,26 @@ describe("finishRun", () => {
 			confidence: 0.58,
 			jevCategoryId: groceries,
 		});
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === stayed),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([stayed]);
 		// Plaid marks the purchase pending before the run ends. The category queue leaves a pending row out (owner decision).
 		await db
 			.prepare("UPDATE transactions SET pending = 1 WHERE id = ?")
 			.bind(stayed)
 			.run();
+
 		const result = await finishRun(db, {
 			runId: runIdOf(started),
 			now: T0 + 5000,
 		});
+
 		expect(result).toMatchObject({ needAnswer: 0 });
 		// Once it posts, the same question the count uses asks about it again, so the queue and the next count see it.
 		await db
@@ -524,12 +568,14 @@ describe("finishRun", () => {
 
 	it("marks the run done, records exactly the rows the sort moved into its category, and counts the Maybe rows left", async () => {
 		const moved = await tx({ plaidCategory: HINT, confidence: 0.58 });
+
 		// Jev guessed Groceries for it and is not sure: a Maybe the category queue asks about (decision 27, #842 round 2).
 		const stayed = await tx({
 			plaidCategory: HINT,
 			confidence: 0.58,
 			jevCategoryId: groceries,
 		});
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) =>
 				[moved, stayed].includes(c.id),
@@ -538,13 +584,16 @@ describe("finishRun", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([moved, stayed]);
 		await answer(moved, groceries);
+
 		// `stayed` is not reached: it is still untouched, so it is restored to its pre-run mark (0.58, a Maybe).
 		const result = await finishRun(db, {
 			runId: runIdOf(started),
 			now: T0 + 5000,
 		});
+
 		expect(result).toEqual({
 			moved: 1,
 			needAnswer: 1,
@@ -554,10 +603,12 @@ describe("finishRun", () => {
 			pending: 0,
 		});
 		expect((await readRun(db))?.status).toBe("done");
+
 		const record = await db
 			.prepare("SELECT value FROM household_settings WHERE key = ?")
 			.bind(`resort_moved_${started.runId}`)
 			.first<{ value: string }>();
+
 		const parsed = JSON.parse(record?.value ?? "{}");
 		expect(parsed).toMatchObject({
 			runId: runIdOf(started),
@@ -584,46 +635,55 @@ describe("finishRun", () => {
 
 	it("is idempotent: a second call changes nothing and returns the same counts", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([a]);
 		await answer(a, groceries);
+
 		const first = await finishRun(db, {
 			runId: runIdOf(started),
 			now: T0 + 5000,
 		});
+
 		const before = await db
 			.prepare(
 				"SELECT value FROM household_settings WHERE key IN ('resort_run', ?)",
 			)
 			.bind(`resort_moved_${started.runId}`)
 			.all();
+
 		const second = await finishRun(db, {
 			runId: runIdOf(started),
 			now: T0 + 9000,
 		});
+
 		const after = await db
 			.prepare(
 				"SELECT value FROM household_settings WHERE key IN ('resort_run', ?)",
 			)
 			.bind(`resort_moved_${started.runId}`)
 			.all();
+
 		expect(second).toEqual(first);
 		expect(after.results).toEqual(before.results);
 	});
 
 	it("does not restore a row a person or a later sort has already changed", async () => {
 		const sorted = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === sorted),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		// The row was asked again and got a confidence back: it is not untouched, so the run leaves it alone.
 		await db
 			.prepare("UPDATE transactions SET category_confidence = 0.5 WHERE id = ?")
@@ -641,12 +701,14 @@ describe("finishRun", () => {
 			jevMixed: 0.2,
 			jevAlsoCategoryId: groceries,
 		});
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === row),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([row]);
 		const cleared = await state(row);
 		expect(cleared?.confidence).toBeNull();
@@ -663,12 +725,14 @@ describe("finishRun", () => {
 
 	it("never moves a row the person filed by hand, even one that was a candidate", async () => {
 		const row = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === row),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
@@ -689,12 +753,14 @@ describe("finishRun", () => {
 
 	it("never calls Jev or Workers AI", async () => {
 		const row = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === row),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
@@ -710,12 +776,14 @@ describe("two categories in one run", () => {
 		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const g2 = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b1 = await tx({ plaidCategory: "Books", confidence: 0.3 });
+
 		const stray = await tx({
 			plaidCategory: HINT,
 			categoryId: groceries,
 			categorySource: "jev",
 			confidence: 0.9,
 		});
+
 		const first = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) =>
 				[g1, g2].includes(c.id),
@@ -724,6 +792,7 @@ describe("two categories in one run", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await startOrJoinRun(db, {
 			candidates: (await otherCandidates(other.id)).filter((c) => c.id === b1),
 			categoryId: other.id,
@@ -733,6 +802,7 @@ describe("two categories in one run", () => {
 		await clear([g1, g2, b1]);
 		await answer(g1, groceries);
 		await answer(b1, other.id);
+
 		return { g1, g2, b1, stray, other, runId: runIdOf(first) };
 	}
 
@@ -750,13 +820,17 @@ describe("two categories in one run", () => {
 			finished: true,
 			pending: 0,
 		});
+
 		const record = await db
 			.prepare("SELECT value FROM household_settings WHERE key = ?")
 			.bind(`resort_moved_${runId}`)
 			.first<{ value: string }>();
+
+		// SAFETY: finishRun stored this record under resort_moved_<run> as JSON with a rows list of { id, categoryId }.
 		const parsed = JSON.parse(record?.value ?? "{}") as {
 			rows: { id: number; categoryId: number }[];
 		};
+
 		expect(
 			Object.fromEntries(parsed.rows.map((r) => [r.id, r.categoryId])),
 		).toEqual({ [g1]: groceries, [b1]: other.id });
@@ -823,12 +897,14 @@ describe("two categories in one run", () => {
 		const other = await otherCategory();
 		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b1 = await tx({ plaidCategory: "Books", confidence: 0.3 });
+
 		const first = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === g1),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await startOrJoinRun(db, {
 			candidates: (await otherCandidates(other.id)).filter((c) => c.id === b1),
 			categoryId: other.id,
@@ -862,6 +938,8 @@ describe("two categories in one run", () => {
 			.run();
 		const result = await finishRun(db, { runId, now: T0 + 5000 });
 		expect(result.moved).toBe(2);
+
+		// SAFETY: the record under resort_moved_<run> is the JSON finishRun wrote, with a rows list of { id, categoryId }.
 		const record = JSON.parse(
 			(
 				await db
@@ -870,6 +948,7 @@ describe("two categories in one run", () => {
 					.first<{ value: string }>()
 			)?.value ?? "{}",
 		) as { rows: { id: number; categoryId: number }[] };
+
 		expect(
 			Object.fromEntries(record.rows.map((r) => [r.id, r.categoryId])),
 		).toEqual({ [g1]: groceries, [b1]: groceries });
@@ -878,6 +957,7 @@ describe("two categories in one run", () => {
 
 describe("finishRun: the category a moved row actually went to", () => {
 	const recordOf = async (runId: string) =>
+		// SAFETY: the record under resort_moved_<run> is the JSON finishRun wrote, with the rows, categories and byCategory it stores.
 		JSON.parse(
 			(
 				await db
@@ -893,12 +973,14 @@ describe("finishRun: the category a moved row actually went to", () => {
 
 	it("records a row Jev assigns to a different existing category, and Undo puts it back", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(started);
 		await clear([x]);
 		await answer(x, eatingOut);
@@ -925,6 +1007,7 @@ describe("finishRun: the category a moved row actually went to", () => {
 		const other = await otherCategory();
 		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const g2 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) =>
 				[g1, g2].includes(c.id),
@@ -933,6 +1016,7 @@ describe("finishRun: the category a moved row actually went to", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(started);
 		await clear([g1, g2]);
 		await answer(g1, groceries);
@@ -950,12 +1034,14 @@ describe("finishRun: the category a moved row actually went to", () => {
 
 	it("does not move a row left in no category", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([x]);
 		expect(
 			await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 }),
@@ -965,12 +1051,14 @@ describe("finishRun: the category a moved row actually went to", () => {
 
 	it("does not move a row a person answered, even into a different category", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([x]);
 		await db
 			.prepare(
@@ -991,12 +1079,14 @@ describe("finishRun: the category a moved row actually went to", () => {
 describe("finishRun: a row a person answered during the run", () => {
 	it("leaves it alone (its category is set, so it is not untouched)", async () => {
 		const row = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === row),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL WHERE id = ?",
@@ -1026,12 +1116,14 @@ describe("finishRun: one finish per sorting instance", () => {
 		const other = await otherCategory();
 		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b1 = await tx({ plaidCategory: "Books", confidence: 0.3 });
+
 		const first = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === g1),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await startOrJoinRun(db, {
 			candidates: (await otherCandidates(other.id)).filter((c) => c.id === b1),
 			categoryId: other.id,
@@ -1040,6 +1132,7 @@ describe("finishRun: one finish per sorting instance", () => {
 		});
 		await clear([g1, b1]);
 		await answer(g1, groceries);
+
 		return { g1, b1, other, runId: runIdOf(first) };
 	}
 
@@ -1086,9 +1179,12 @@ describe("finishRun: one finish per sorting instance", () => {
 			finished: true,
 			pending: 0,
 		});
+
+		// SAFETY: movedRecord reads the record finishRun stored as JSON, which has a rows list of { id }.
 		const parsed = JSON.parse((await movedRecord(runId)) ?? "{}") as {
 			rows: { id: number }[];
 		};
+
 		expect(parsed.rows.map((r) => r.id).sort((x, y) => x - y)).toEqual(
 			[g1, b1].sort((x, y) => x - y),
 		);
@@ -1097,16 +1193,19 @@ describe("finishRun: one finish per sorting instance", () => {
 
 	it("a repeated call with the same key counts once", async () => {
 		const { runId } = await joinedRun();
+
 		const once = await finishRun(db, {
 			runId,
 			now: T0 + 5000,
 			instanceKey: "A",
 		});
+
 		const twice = await finishRun(db, {
 			runId,
 			now: T0 + 5001,
 			instanceKey: "A",
 		});
+
 		expect(once.pending).toBe(1);
 		expect(twice).toEqual(once);
 		expect((await readRun(db))?.status).toBe("running");
@@ -1123,20 +1222,25 @@ describe("finishRun: one finish per sorting instance", () => {
 			pending: 0,
 		});
 		expect((await readRun(db))?.status).toBe("done");
+
+		// SAFETY: movedRecord reads the record finishRun stored as JSON, which has a rows list of { id }.
 		const parsed = JSON.parse((await movedRecord(runId)) ?? "{}") as {
 			rows: { id: number }[];
 		};
+
 		expect(parsed.rows.map((r) => r.id)).toEqual([g1]);
 	});
 
 	it("a run with one instance finalizes on its single keyed finish", async () => {
 		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === g1),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([g1]);
 		await answer(g1, groceries);
 		expect(
@@ -1172,19 +1276,24 @@ describe("finishRun: one finish per sorting instance", () => {
 		const { g1, runId } = await joinedRun();
 		await finishRun(db, { runId, now: T0 + 5000, instanceKey: "A" });
 		const late = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const next = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === late),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 2 * HOUR + 1,
 		});
+
 		expect(next.joined).toBe(false);
 		expect(await settingsKeys()).toEqual(
 			[`resort_moved_${runId}`, "resort_run"].sort(),
 		);
+
+		// SAFETY: movedRecord reads the record finishRun stored as JSON, which has a rows list of { id }.
 		const parsed = JSON.parse((await movedRecord(runId)) ?? "{}") as {
 			rows: { id: number }[];
 		};
+
 		expect(parsed.rows.map((r) => r.id)).toEqual([g1]);
 	});
 });
@@ -1192,12 +1301,14 @@ describe("finishRun: one finish per sorting instance", () => {
 describe("closeToastOnce", () => {
 	it("flips once: only the first call for a finished run says so", async () => {
 		const row = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === row),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		expect(await closeToastOnce(db, runIdOf(started), T0)).toBe(false);
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
 		expect(await closeToastOnce(db, runIdOf(started), T0 + 6000)).toBe(true);
@@ -1210,17 +1321,20 @@ describe("undoRun", () => {
 	async function finishedRunWithTwoMoved() {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const b = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => [a, b].includes(c.id)),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([a, b]);
 		await answer(a, groceries);
 		await answer(b, groceries);
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
 		await closeToastOnce(db, runIdOf(started), T0 + 5000);
+
 		return { a, b, runId: runIdOf(started) };
 	}
 
@@ -1318,21 +1432,25 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 	/** A finished run with one row moved into Groceries, not yet claimed. Returns the row and the run id. */
 	async function finishedUnclaimed(finishAt = T0 + 5000) {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([a]);
 		await answer(a, groceries);
 		await finishRun(db, { runId: runIdOf(started), now: finishAt });
+
 		return { a, runId: runIdOf(started) };
 	}
 
 	/** A fresh candidate row that starts the next run. */
 	async function nextRunStart(now: number) {
 		const c = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		return startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((x) => x.id === c),
 			categoryId: groceries,
@@ -1421,12 +1539,14 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 
 	it("a candidate deleted and its id reused by another row is not restored", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([x]);
 		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(x).run();
 		// Another purchase takes the same id: untouched, but a different transaction.
@@ -1446,12 +1566,14 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 
 	it("a moved row deleted and its id reused by another row is not undone", async () => {
 		const m = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === m),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([m]);
 		await answer(m, groceries);
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
@@ -1476,39 +1598,46 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 	});
 
 	/** A db whose next batch is preceded by `before` (the joiner that arrives between the key and the flip). */
-	function beforeNextBatch(before: () => Promise<unknown>): D1Database {
+	function beforeNextBatch(before: () => Promise<void>): D1Database {
 		let fired = false;
+
 		return new Proxy(db, {
-			get(target, prop) {
+			get(target, prop: keyof D1Database) {
 				if (prop === "batch") {
 					return async (statements: D1PreparedStatement[]) => {
 						if (!fired) {
 							fired = true;
 							await before();
 						}
+
 						return target.batch(statements);
 					};
 				}
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				const value = target[prop];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 	}
 
 	it("a joiner arriving between the instance's key and the flip keeps the run open", async () => {
 		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === g1),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(started);
 		await clear([g1]);
 		await answer(g1, groceries);
 		// A joiner with a new candidate (a joiner with nothing new writes nothing, so it can't race): a fresh row.
 		const g2 = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const joinerCandidates = (await candidatesNow()).filter((c) => c.id === g2);
+
 		const racing = beforeNextBatch(async () => {
 			// A joiner starts between A's key write and A's flip: instances goes to 2.
 			await startOrJoinRun(db, {
@@ -1518,6 +1647,7 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 				now: T0 + 3000,
 			});
 		});
+
 		expect(
 			await finishRun(racing, { runId, now: T0 + 4000, instanceKey: "A" }),
 		).toEqual({
@@ -1540,27 +1670,32 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 	it("a joined run never holds more than RESORT_CANDIDATE_MAX rows", async () => {
 		const range = (from: number, to: number) =>
 			Array.from({ length: to - from + 1 }, (_, i) => synthCandidate(from + i));
+
 		const first = await startOrJoinRun(db, {
 			candidates: range(900_000, 900_089),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const joined = await startOrJoinRun(db, {
 			candidates: range(900_090, 900_119),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 1000,
 		});
+
 		expect(joined.joined).toBe(true);
 		expect(joined.newIds).toHaveLength(RESORT_CANDIDATE_MAX - 90);
 		expect((await readRun(db))?.total).toBe(RESORT_CANDIDATE_MAX);
+
 		const full = await startOrJoinRun(db, {
 			candidates: range(900_120, 900_124),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0 + 2000,
 		});
+
 		expect(full).toMatchObject({
 			runId: first.runId,
 			newIds: [],
@@ -1578,6 +1713,7 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		expect(started.newIds).toHaveLength(RESORT_CANDIDATE_MAX);
 		expect((await readRun(db))?.total).toBe(RESORT_CANDIDATE_MAX);
 	});
@@ -1594,12 +1730,14 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 
 	it("a poll after the two hours gets no toast, and removes the unclaimed record", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === a),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([a]);
 		await answer(a, groceries);
 		const runId = runIdOf(started);
@@ -1612,12 +1750,14 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 
 	it("a candidate Jev failed on during the run keeps its failure marker", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		await clear([x]);
 		await db
 			.prepare(
@@ -1648,12 +1788,14 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 			.prepare("UPDATE transactions SET jev_attempts = 2 WHERE id = ?")
 			.bind(x)
 			.run();
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(started);
 		await clear([x]);
 		// Jev fails on the row during the run, then the run files it: the counter goes up by that failure.
@@ -1680,12 +1822,14 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 
 	it("a moved record from before the counter was kept leaves the counter as it is on undo", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) => c.id === x),
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(started);
 		await clear([x]);
 		await answer(x, groceries);
@@ -1710,12 +1854,14 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 
 	it("the identity a run stores comes from the candidate row it was given, not a later read", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 		const original = await db
 			.prepare(
 				"SELECT plaid_transaction_id AS plaid FROM transactions WHERE id = ?",
 			)
 			.bind(x)
 			.first<{ plaid: string }>();
+
 		const [candidate] = (await candidatesNow()).filter((c) => c.id === x);
 		expect(candidate?.plaidTransactionId).toBe(original?.plaid);
 		// The row's Plaid id changes after the candidate was read: the run keeps the one the candidate carried.
@@ -1772,6 +1918,7 @@ describe("reading the stored run and moved record", () => {
 				.bind(key)
 				.first<{ value: string }>()
 		)?.value ?? "";
+
 	const put = (key: string, value: string) =>
 		db
 			.prepare("UPDATE household_settings SET value = ? WHERE key = ?")
@@ -1782,15 +1929,18 @@ describe("reading the stored run and moved record", () => {
 	async function finishedRun() {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const candidates = (await candidatesNow()).filter((c) => c.id === a);
+
 		const started = await startOrJoinRun(db, {
 			candidates,
 			categoryId: groceries,
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(started);
 		await answer(a, groceries);
 		await finishRun(db, { runId, now: T0 + 5000 });
+
 		return runId;
 	}
 
@@ -1806,6 +1956,7 @@ describe("reading the stored run and moved record", () => {
 		await finishedRun();
 		const run = JSON.parse(await stored("resort_run"));
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			for (const bad of [
 				"not json",
@@ -1815,6 +1966,7 @@ describe("reading the stored run and moved record", () => {
 				await put("resort_run", bad);
 				expect(await readRun(db)).toBeNull();
 			}
+
 			expect(logged).toHaveBeenCalledWith(
 				"a stored re-sort record is unusable, none used",
 			);
@@ -1824,12 +1976,14 @@ describe("reading the stored run and moved record", () => {
 				JSON.stringify({ ...run, status: "running", total: "2" }),
 			);
 			const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
 			const started = await startOrJoinRun(db, {
 				candidates: (await candidatesNow()).filter((c) => c.id === a),
 				categoryId: groceries,
 				categoryName: "Groceries",
 				now: T0 + 10_000,
 			});
+
 			expect(started.runId).not.toBeNull();
 			expect((await readRun(db))?.id).toBe(started.runId);
 			// The log holds the fixed words only, never a row's text.
@@ -1843,6 +1997,7 @@ describe("reading the stored run and moved record", () => {
 		const runId = await finishedRun();
 		const record = JSON.parse(await stored(movedKey(runId)));
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
 		try {
 			await put(movedKey(runId), JSON.stringify({ ...record, rows: "x" }));
 			expect(await readMoved(db, runId)).toBeNull();

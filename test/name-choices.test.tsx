@@ -28,14 +28,18 @@ const rename: RenameFacts = {
 
 /** The class list of a note's hooks, one token per hook, so a hook is matched whole, never as part of another. */
 const folds = (note: string): string[] => note.split(" ");
+
 /** Reviewed ticked hides the note only with a linked purchase ticked too: the review alone doesn't make a refund follow. */
 const REVIEW_HOLD =
 	"group-has-[input[name=creditReviewed]:checked]/edit:group-has-[.linked-purchase:checked]/edit:hidden";
+
 /** A linked purchase ticked hides the note while the drawn link holds (Jev's review, linkHolds). */
 const LINK_HOLDS = "group-has-[.linked-purchase:checked]/edit:hidden";
+
 /** Exclude hides the note only while Reviewed is unticked, where the review lifts Plaid's exclusion (reviewLifts). */
 const EXCLUDE_UNLESS_REVIEWED =
 	"group-has-[input[name=excluded]:checked]/edit:group-has-[input[name=creditReviewed]:not(:checked)]/edit:hidden";
+
 const EXCLUDE_PLAIN = "group-has-[input[name=excluded]:checked]/edit:hidden";
 
 /** The one radio whose value is `value`, as its opening tag. */
@@ -43,7 +47,9 @@ function radio(html: string, value: string): string {
 	const tag = html
 		.split("<input")
 		.find((part) => part.includes(`value="${value}"`));
+
 	if (!tag) throw new Error(`no radio with value ${value}`);
+
 	return tag;
 }
 
@@ -94,6 +100,7 @@ describe("the Name row's choices carry the class that opens the Rename list", ()
 				tidied: "Blue bottle cof",
 			}),
 		);
+
 		expect(settings).not.toContain("This one only");
 		expect(settings).not.toContain("group-has-[.name-pick:checked]:flex");
 	});
@@ -162,7 +169,9 @@ describe("the re-guess note follows the edit form's controls", () => {
 		{ field: "name_scope", hooks: [] },
 	])("the note's hooks for $field", ({ field, hooks }) => {
 		const note = guessAgainClass(markup(rename));
+
 		for (const hook of hooks) expect(note).toContain(hook);
+
 		if (hooks.length === 0) expect(note).not.toContain(`input[name=${field}]`);
 	});
 
@@ -175,9 +184,11 @@ describe("the re-guess note follows the edit form's controls", () => {
 		expect(guessAgainClass(markup(rename))).toContain(
 			"group-has-[input[name=excluded]:checked]/edit:hidden",
 		);
+
 		const paysBill = guessAgainClass(
 			markup({ ...rename, excludeCounts: false }),
 		);
+
 		expect(paysBill).toContain("input[name=category]");
 		expect(paysBill).not.toContain("input[name=excluded]");
 	});
@@ -186,6 +197,7 @@ describe("the re-guess note follows the edit form's controls", () => {
 		const note = folds(
 			guessAgainClass(markup({ ...rename, reviewLifts: true })),
 		);
+
 		expect(note).toContain(EXCLUDE_UNLESS_REVIEWED);
 		expect(note).not.toContain(EXCLUDE_PLAIN);
 	});
@@ -200,6 +212,7 @@ describe("the re-guess note follows the edit form's controls", () => {
 		const note = guessAgainClass(
 			markup({ ...rename, reviewLifts: true, excludeCounts: false }),
 		);
+
 		expect(note).not.toContain("input[name=excluded]");
 	});
 

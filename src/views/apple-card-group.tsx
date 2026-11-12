@@ -39,6 +39,7 @@ export function AppleCardGroup({
 	focusUpload,
 }: Props) {
 	const counted = card.balanceOn !== null && !card.removed;
+
 	return (
 		<section class="mt-8" data-apple-card="">
 			<h2 class="text-muted" tabindex={-1}>

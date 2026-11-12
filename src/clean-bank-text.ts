@@ -82,10 +82,13 @@ const US_STATE_CODES = new Set([
 // The lookahead needs a space or the end after it, so "POS DEBITS" or a store called "POS DEBITING" is not cut.
 const PREFIX =
 	/^(?:(?:POS|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)\s+\d{3,}|POS(?=\s+\d)|POS\s+(?:DEBIT|CREDIT|PURCHASE)|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)(?=\s|$)\s*/i;
+
 // A payment processor's marker before "*" ("SQ *7ELEVEN"). Only the marker goes; the merchant after it stays.
 const PROCESSOR = /^(?:SQ|TST|DD|SP|PAYPAL)\s?\*\s*/i;
+
 // "*" then letters and digits, with at least one digit: a reference ID, not a word after a "*".
 const REFERENCE_ID = /\*[A-Z0-9]*\d[A-Z0-9]*/gi;
+
 // A month/day date, "09/30" or "9/3", with a real month (1-12) and day (1-31), as the last token of the text.
 // The lookbehind keeps it from cutting inside a URL path or a longer token.
 const DATE = /(?<![\w./])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])$/;
@@ -101,6 +104,7 @@ export function cleanBankText(raw: string): string {
 	text = text.replace(PROCESSOR, "");
 	text = text.replace(REFERENCE_ID, "");
 	text = stripTrailing(text);
+
 	// A processor's own store or reference code at the end ("SQ *BLUE BOTTLE COF 0412", "SQ *CAFE #552", "SQ *CAFE
 	// T-1432") varies per purchase, so it goes. The token is one with a # or three digits in a row, as tidy-name
 	// reads a store code. Only after a processor marker: "BLUE BOTTLE 0412" keeps its number, and "SQ *CAFE 22" keeps 22.
@@ -113,16 +117,19 @@ export function cleanBankText(raw: string): string {
 // "APPLE.COM/BILL CA 09/30" clean the same. A state code is only cut when something comes before it.
 function stripTrailing(text: string): string {
 	let previous: string;
+
 	do {
 		previous = text;
 		text = collapse(text.replace(DATE, ""));
 		const words = text.split(" ");
 		const last = words[words.length - 1];
+
 		if (words.length > 1 && last !== undefined && US_STATE_CODES.has(last)) {
 			words.pop();
 			text = words.join(" ");
 		}
 	} while (text !== previous);
+
 	return text;
 }
 

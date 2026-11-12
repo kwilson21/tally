@@ -7,8 +7,11 @@ export type BudgetAmount = {
 	effectiveMonth: string;
 	amountCents: number;
 };
+
 export type SavingsGoalAmount = { effectiveMonth: string; amountCents: number };
+
 export type Category = { id: number; name: string };
+
 /** A counted transaction: in the month, not excluded, not a split parent (the query guarantees this). */
 export type CountedTransaction = {
 	categoryId: number | null;
@@ -48,10 +51,13 @@ function latestEffectiveAmount<
 	matches: (amount: T) => boolean = () => true,
 ): number | null {
 	let best: T | undefined;
+
 	for (const amount of amounts) {
 		if (!matches(amount) || amount.effectiveMonth > month) continue;
+
 		if (!best || amount.effectiveMonth > best.effectiveMonth) best = amount;
 	}
+
 	return best?.amountCents ?? null;
 }
 
@@ -108,6 +114,7 @@ export const MAX_CATEGORIES = 10_000;
 /** Whether an amount is a whole number of cents inside the limit (an absent one is fine: it counts as zero). */
 function fits(cents: number | null | undefined): boolean {
 	if (cents === null || cents === undefined) return true;
+
 	return Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_CENTS_PER_AMOUNT;
 }
 
@@ -136,6 +143,7 @@ export function orZero(cents: number | null | undefined): number {
 
 export function summarizeMonth(input: MonthInput): MonthSummary {
 	assertWithinLimits(input);
+
 	return summarizeWithinLimits(input);
 }
 
@@ -174,9 +182,12 @@ function summarizeWithinLimits(input: MonthInput): MonthSummary {
 			incomeCents -= t.amountCents; // money in is negative under Plaid's convention
 			continue;
 		}
+
 		totalSpentCents += t.amountCents;
+
 		if (t.categoryId === null) {
 			uncategorizedCents += t.amountCents;
+
 			if (!t.linked) uncategorizedCount += 1;
 		} else {
 			spentByCategory.set(
@@ -187,9 +198,11 @@ function summarizeWithinLimits(input: MonthInput): MonthSummary {
 	}
 
 	const categories: CategorySummary[] = [];
+
 	for (const c of input.categories) {
 		//@ invariant forall(j: nat, j < categories.length ==> categories[j].spentCents === catTo(input.transactions, input.transactions.length, categories[j].id))
 		const budgetCents = budgetForMonth(input.amounts, c.id, input.month);
+
 		if (budgetCents === null) continue;
 		const spentCents = spentByCategory.get(c.id) ?? 0;
 		const leftCents = budgetCents - spentCents;
@@ -240,6 +253,7 @@ const listFormat = new Intl.ListFormat("en-US", {
 /** " 2 bills are overdue." (with its leading space), or nothing at 0: the clause Home's status line ends with. */
 export function overdueBillsClause(overdueBills: number): string {
 	if (overdueBills <= 0) return "";
+
 	return ` ${overdueBills} ${overdueBills === 1 ? "bill is" : "bills are"} overdue.`;
 }
 
@@ -250,24 +264,31 @@ export function statusSentence(
 	overdueBills = 0,
 ): string {
 	const bills = overdueBillsClause(overdueBills);
+
 	if (categories.length === 0) return `No budgets set yet.${bills}`;
 	const over = categories.filter((c) => c.over);
+
 	if (over.length === 0)
 		return overdueBills > 0
 			? `Budgets are on track.${bills}`
 			: "Everything is on track.";
+
 	const rest =
 		over.length < categories.length
 			? overdueBills > 0
 				? " Other budgets are on track."
 				: " Everything else is on track."
 			: "";
+
 	if (over.length === 1) {
+		// SAFETY: the length check on the line above proves `over` holds exactly one category.
 		const [only] = over as [CategorySummary];
 		const amount = -only.leftCents;
 		const text = formatCents(amount, { wholeDollars: amount % 100 === 0 });
+
 		return `${only.name} is ${text} over.${rest}${bills}`;
 	}
+
 	return `${listFormat.format(over.map((c) => c.name))} are over.${rest}${bills}`;
 }
 
@@ -281,7 +302,9 @@ export function outTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
+
 	return outTo(txs, n - 1) + (t.income ? 0 : t.amountCents);
 }
 
@@ -292,7 +315,9 @@ export function inTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
+
 	return inTo(txs, n - 1) + (t.income ? -t.amountCents : 0);
 }
 
@@ -303,7 +328,9 @@ export function uncatTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
+
 	return (
 		uncatTo(txs, n - 1) +
 		(!t.income && t.categoryId === null ? t.amountCents : 0)
@@ -317,7 +344,9 @@ export function uncatCountTo(txs: CountedTransaction[], n: number): number {
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
+
 	return (
 		uncatCountTo(txs, n - 1) +
 		(!t.income && t.categoryId === null && !t.linked ? 1 : 0)
@@ -335,7 +364,9 @@ export function catTo(
 	//@ requires n <= txs.length
 	//@ decreases n
 	if (n === 0) return 0;
+	// SAFETY: n is at least 1 here and the contract requires n <= txs.length, so txs[n - 1] is a transaction.
 	const t = txs[n - 1] as CountedTransaction;
+
 	return (
 		catTo(txs, n - 1, id) +
 		(!t.income && t.categoryId === id ? t.amountCents : 0)

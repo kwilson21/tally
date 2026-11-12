@@ -11,18 +11,22 @@ const ON_WORDS = "Notifications are on for this device.";
 /** The VAPID public key's bytes, from its base64url text. */
 function keyBytes(text) {
 	const base64 = text.replaceAll("-", "+").replaceAll("_", "/");
+
 	const padded = base64.padEnd(
 		base64.length + ((4 - (base64.length % 4)) % 4),
 		"=",
 	);
+
 	return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
 }
 
 /** A binary value as base64url without padding, as the subscribe route reads it. */
 function base64Url(buffer) {
 	let binary = "";
+
 	for (const byte of new Uint8Array(buffer))
 		binary += String.fromCharCode(byte);
+
 	return btoa(binary)
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
@@ -39,6 +43,7 @@ function sameBytes(first, second) {
 	if (!first || !second) return false;
 	const a = new Uint8Array(first);
 	const b = new Uint8Array(second);
+
 	return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
@@ -61,14 +66,17 @@ export function setupPush({
 	// The registration is made once, and each control waits for it. Nothing is asked: registering a worker is silent.
 	let registration = null;
 	let registering = null;
+
 	const register = () => {
 		registering ??= navigator.serviceWorker
 			.register(SW_URL, { scope: "/" })
 			.then(() => navigator.serviceWorker.ready)
 			.then((ready) => {
 				registration = ready;
+
 				return ready;
 			});
+
 		return registering;
 	};
 
@@ -76,6 +84,7 @@ export function setupPush({
 		"serviceWorker" in navigator &&
 		"PushManager" in window &&
 		"Notification" in window;
+
 	/**
 	 * The device the Home Screen hint names: "iPad", "iPhone" (an iPod too), or null for anything else. A user agent that names
 	 * iPad, iPhone or iPod keeps its own answer. An iPhone or iPad in Request Desktop Website mode reports Macintosh, and a real Mac
@@ -85,12 +94,17 @@ export function setupPush({
 	 */
 	const appleDevice = () => {
 		const agent = navigator.userAgent;
+
 		if (/iPad/.test(agent)) return "iPad";
+
 		if (/iPhone|iPod/.test(agent)) return "iPhone";
+
 		if (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1)
 			return Math.min(screen.width, screen.height) < 600 ? "iPhone" : "iPad";
+
 		return null;
 	};
+
 	/** The device for the hint, outside the Home Screen app (where Web Push works only): iPhone or iPad, or null for none. */
 	const hintDevice = () =>
 		navigator.standalone !== true &&
@@ -110,6 +124,7 @@ export function setupPush({
 	 */
 	const showHint = (node, device) => {
 		const hint = node.querySelector('[data-notify-state="iphone"]');
+
 		if (hint && device === "iPad")
 			hint.textContent = hint.textContent.replaceAll("iPhone", "iPad");
 		showState(node, "iphone");
@@ -118,6 +133,7 @@ export function setupPush({
 	/** The button's busy look, set on the element itself, as plaid-link.js does (Button's busyLabel shows through htmx-request). */
 	const setBusy = (node, busy) => {
 		const button = node.querySelector("[data-notify-on]");
+
 		if (!button) return;
 		button.disabled = busy;
 		button.setAttribute("aria-busy", String(busy));
@@ -129,6 +145,7 @@ export function setupPush({
 
 	const announce = (value) =>
 		document.dispatchEvent(new CustomEvent("announce", { detail: { value } }));
+
 	const toast = (message) =>
 		document.dispatchEvent(
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
@@ -141,6 +158,7 @@ export function setupPush({
 				p256dh: base64Url(subscription.getKey("p256dh")),
 				auth: base64Url(subscription.getKey("auth")),
 			};
+
 		return subscription.toJSON().keys;
 	};
 
@@ -150,12 +168,15 @@ export function setupPush({
 	 */
 	const save = (subscription, { restore = false } = {}) => {
 		const keys = keysOf(subscription);
+
 		const body = new URLSearchParams({
 			endpoint: subscription.endpoint,
 			p256dh: unpadded(keys.p256dh),
 			auth: unpadded(keys.auth),
 		});
+
 		if (restore) body.set("restore", "1");
+
 		return fetch(SUBSCRIBE_URL, {
 			method: "POST",
 			credentials: "same-origin",
@@ -167,6 +188,7 @@ export function setupPush({
 	/** Focus is on nothing, or on the body: a busy button that had it was disabled, and a browser drops it there (toast.js's #460). */
 	const focusLost = () => {
 		const active = document.activeElement;
+
 		return !active || active === document.body;
 	};
 
@@ -174,6 +196,7 @@ export function setupPush({
 	const backToOff = (node) => {
 		setBusy(node, false);
 		showState(node, "off");
+
 		if (focusLost()) node.querySelector("[data-notify-on]")?.focus();
 	};
 
@@ -184,22 +207,28 @@ export function setupPush({
 	 */
 	const subscribed = async (subscription, node) => {
 		let saved = false;
+
 		try {
 			saved = (await save(subscription)).ok;
 		} catch {
 			saved = false;
 		}
+
 		if (!saved) {
 			if (ownedElsewhere.get(node) !== subscription.endpoint)
 				await subscription.unsubscribe().catch(() => {});
 			const live = document.querySelector("[data-notify]");
+
 			if (live) backToOff(live);
 			toast(COULDNT_SAVE);
+
 			return;
 		}
+
 		// The device is this person's now (the save moved it), so nothing is kept from before the tap.
 		ownedElsewhere.delete(node);
 		const live = document.querySelector("[data-notify]");
+
 		if (live) {
 			setBusy(live, false);
 			showState(live, "on");
@@ -210,20 +239,26 @@ export function setupPush({
 	/** The tap's subscription was refused or failed: blocked, dismissed, or any other failure, each said as the design says. */
 	const refused = () => {
 		const live = document.querySelector("[data-notify]");
+
 		if (!live) return;
 		setBusy(live, false);
+
 		if (Notification.permission === "denied") {
 			// The Blocked line is the one thing said: it is shown and focused, as the On line is, so it is read once.
 			showState(live, "blocked");
 			focusOn(live, "blocked");
+
 			return;
 		}
+
 		if (Notification.permission === "default") {
 			// Dismissed: the button is usable again, focus stays on it, and nothing is announced.
 			showState(live, "off");
 			live.querySelector("[data-notify-on]")?.focus();
+
 			return;
 		}
+
 		backToOff(live);
 		toast(COULDNT_SAVE);
 	};
@@ -235,6 +270,7 @@ export function setupPush({
 	const tap = (node) => {
 		const key = keyBytes(node.getAttribute("data-vapid-key") ?? "");
 		let pending;
+
 		try {
 			pending = registration.pushManager.subscribe({
 				userVisibleOnly: true,
@@ -243,6 +279,7 @@ export function setupPush({
 		} catch (error) {
 			pending = Promise.reject(error);
 		}
+
 		setBusy(node, true);
 		pending.then((subscription) => subscribed(subscription, node), refused);
 	};
@@ -250,22 +287,30 @@ export function setupPush({
 	/** Sets up one control: its state from what the browser already has, once the registration is ready. */
 	const setUp = async (node) => {
 		node.setAttribute("data-notify-ready", "");
+
 		if (!supported()) {
 			const device = hintDevice();
+
 			if (device) showHint(node, device);
+
 			return;
 		}
+
 		try {
 			await register();
 		} catch {
 			return;
 		}
+
 		if (Notification.permission === "denied") {
 			showState(node, "blocked");
+
 			return;
 		}
+
 		const key = keyBytes(node.getAttribute("data-vapid-key") ?? "");
 		const subscription = await registration.pushManager.getSubscription();
+
 		if (
 			subscription &&
 			!sameBytes(subscription.options?.applicationServerKey, key)
@@ -284,8 +329,10 @@ export function setupPush({
 					showState(node, response.status === 409 ? "off" : "on");
 				})
 				.catch(() => showState(node, "on"));
+
 			return;
 		}
+
 		showState(node, "off");
 	};
 
@@ -298,6 +345,7 @@ export function setupPush({
 	document.addEventListener("click", (event) => {
 		if (!event.target?.closest?.("[data-notify-on]")) return;
 		const live = document.querySelector("[data-notify]");
+
 		if (live && registration) tap(live);
 	});
 	document.addEventListener("htmx:after:process", setUpAll);

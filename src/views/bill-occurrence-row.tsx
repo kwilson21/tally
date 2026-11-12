@@ -45,6 +45,7 @@ const statusLook = {
 
 export function StatusTag({ status }: { status: BillStatus | "not-paid" }) {
 	const look = statusLook[status];
+
 	return (
 		<span class="inline-flex shrink-0 items-center gap-1 rounded-control bg-band px-2 text-sm text-ink">
 			<span class={look.tone}>
@@ -72,7 +73,9 @@ export function PriceChanged({
 }) {
 	const answer = (verb: "accept" | "dismiss") =>
 		`/bills/${billId}/occurrences/${period}/price/${verb}`;
+
 	const charged = formatCents(offer.amountCents);
+
 	return (
 		<>
 			<p class="mt-1 text-lg">
@@ -153,6 +156,7 @@ export function BillOccurrenceRow({
 }) {
 	const unlink = `/bills/${billId}/occurrences/${period}/unlink`;
 	const link = `/bills/${billId}/occurrences/${period}/link#payment-picker`;
+
 	if (priceOffer && !payments.length)
 		return (
 			<li class="py-2">
@@ -165,6 +169,7 @@ export function BillOccurrenceRow({
 		);
 	// The clamped total decides, as the Bills row's does: a month whose payments count $0 reads as unpaid (#469).
 	const partPaid = paidCents > 0 && status !== "paid";
+
 	return (
 		<li class="py-2">
 			<p class="flex justify-between gap-3">

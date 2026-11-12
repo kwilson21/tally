@@ -11,6 +11,8 @@ import {
 import { INSTRUCTIONS, NAME_MODEL } from "../src/ai/suggest-name";
 import { buildSeed } from "../src/demo/seed";
 import catalog from "../worker-configuration.d.ts?raw";
+import { fakeAi as aiDouble } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 const TODAY = "2026-11-06";
 
@@ -20,17 +22,20 @@ type Body = {
 	temperature: number;
 };
 
+type Answer = object | string | null;
+
 /** A fake Workers AI that answers every call from `answer`, which sees the model id and the body it was sent. */
-const fakeAi = (answer: (model: string, body: Body) => unknown) => {
+const fakeAi = (answer: (model: string, body: Body) => Answer) => {
 	const run = vi.fn(async (model: string, body: Body) => answer(model, body));
-	return { ai: { run } as unknown as Ai, run };
+
+	return { ai: aiDouble(run), run };
 };
 
 describe("replyOf", () => {
 	it("reads Llama and Granite's `response` string", () => {
 		expect(replyOf({ response: "Trader Joe's" })).toEqual({
 			text: "Trader Joe's",
-			shape: "response",
+			form: "response",
 		});
 	});
 
@@ -38,9 +43,10 @@ describe("replyOf", () => {
 		const answer = {
 			choices: [{ message: { content: "Blue Bottle" }, finish_reason: "stop" }],
 		};
+
 		expect(replyOf(answer)).toEqual({
 			text: "Blue Bottle",
-			shape: "chat",
+			form: "chat",
 			finish: "stop",
 		});
 	});
@@ -48,7 +54,7 @@ describe("replyOf", () => {
 	it("reads a Responses-style answer (gpt-oss), by output_text or by its message items", () => {
 		expect(replyOf({ output_text: "Costco" })).toMatchObject({
 			text: "Costco",
-			shape: "responses",
+			form: "responses",
 		});
 		expect(
 			replyOf({
@@ -63,7 +69,7 @@ describe("replyOf", () => {
 					},
 				],
 			}),
-		).toMatchObject({ text: "Costco", shape: "responses" });
+		).toMatchObject({ text: "Costco", form: "responses" });
 	});
 
 	it("reports a model that spent its tokens thinking: no text, finish 'length'", () => {
@@ -75,9 +81,10 @@ describe("replyOf", () => {
 				},
 			],
 		};
+
 		expect(replyOf(answer)).toEqual({
 			text: null,
-			shape: "chat",
+			form: "chat",
 			finish: "length",
 			thoughtOnly: true,
 		});
@@ -92,25 +99,28 @@ describe("replyOf", () => {
 				},
 			],
 		};
+
 		expect(replyOf(stopped)).toEqual({
 			text: null,
-			shape: "chat",
+			form: "chat",
 			finish: "stop",
 		});
+
 		const reasoningItem = {
 			type: "reasoning",
 			content: [{ type: "reasoning_text", text: "hm" }],
 		};
+
 		expect(replyOf({ output: [reasoningItem] })).toEqual({
 			text: null,
-			shape: "responses",
+			form: "responses",
 		});
 		expect(
 			replyOf({
 				output: [reasoningItem],
 				incomplete_details: { reason: "max_output_tokens" },
 			}),
-		).toEqual({ text: null, shape: "responses", thoughtOnly: true });
+		).toEqual({ text: null, form: "responses", thoughtOnly: true });
 	});
 
 	it("marks an answer that has text but was cut off at the token limit", () => {
@@ -125,7 +135,7 @@ describe("replyOf", () => {
 			}),
 		).toEqual({
 			text: "Trader Joe's\nTrader",
-			shape: "chat",
+			form: "chat",
 			finish: "length",
 			truncated: true,
 		});
@@ -136,7 +146,7 @@ describe("replyOf", () => {
 			}),
 		).toMatchObject({
 			text: "Costco\nCost",
-			shape: "responses",
+			form: "responses",
 			truncated: true,
 		});
 		// A complete answer, and a shape that reports no finish reason, are not marked.
@@ -149,10 +159,10 @@ describe("replyOf", () => {
 	});
 
 	it("gives no text for anything it doesn't know", () => {
-		expect(replyOf(null)).toMatchObject({ text: null, shape: "unknown" });
+		expect(replyOf(null)).toMatchObject({ text: null, form: "unknown" });
 		expect(replyOf({ nope: 1 })).toMatchObject({
 			text: null,
-			shape: "unknown",
+			form: "unknown",
 		});
 	});
 });
@@ -177,9 +187,10 @@ describe("askNames", () => {
 		const { ai, run } = fakeAi(() => ({
 			response: "Netflix\nNetflix Streaming",
 		}));
+
 		const result = await askNames(ai, "@cf/test/model", "NETFLIX.COM", 60);
 		expect(run).toHaveBeenCalledTimes(1);
-		const [model, body] = run.mock.calls[0] as [string, Body];
+		const [model, body] = present(run.mock.calls[0]);
 		expect(model).toBe("@cf/test/model");
 		expect(body.messages).toEqual([
 			{ role: "system", content: INSTRUCTIONS },
@@ -197,6 +208,7 @@ describe("askNames", () => {
 		const { ai } = fakeAi(() => ({
 			response: "1. Costco\n- COSTCO WHSE #0421\nCostco ($42.10)\n",
 		}));
+
 		const result = await askNames(ai, "m", "COSTCO WHSE #0421", 60);
 		expect(result).toMatchObject({ ok: true, names: ["Costco"] });
 	});
@@ -207,6 +219,7 @@ describe("askNames", () => {
 				{ message: { content: "Costco\nCost" }, finish_reason: "length" },
 			],
 		}));
+
 		expect(await askNames(ai, "m", "COSTCO WHSE #0421", 60)).toMatchObject({
 			ok: true,
 			names: ["Costco", "Cost"],
@@ -218,6 +231,7 @@ describe("askNames", () => {
 		const { ai } = fakeAi(() => {
 			throw new Error("5007: No such model");
 		});
+
 		const result = await askNames(ai, "m", "X", 60);
 		expect(result).toMatchObject({ ok: false, error: "5007: No such model" });
 	});
@@ -231,6 +245,7 @@ describe("askNames", () => {
 				},
 			],
 		}));
+
 		expect(await askNames(ai, "m", "X", 60)).toMatchObject({
 			ok: false,
 			thoughtOnly: true,
@@ -249,11 +264,13 @@ describe("runNamesComparison", () => {
 					}
 				: { response: "Plain Name" },
 		);
+
 		const report = await runNamesComparison(
 			{ AI: ai },
 			{ models: ["granite", "gemma4"], limit: 3, tokens: 60 },
 			TODAY,
 		);
+
 		expect(run).toHaveBeenCalledTimes(6);
 		expect(report).toContain("Plain Name");
 		expect(report).toContain("Gemma Name");
@@ -282,27 +299,28 @@ describe("formatNamesReport", () => {
 							ok: true,
 							names: ["Alpha"],
 							ms: 100,
-							shape: "response",
+							form: "response",
 						},
-						{ text: "B", ok: true, names: [], ms: 300, shape: "response" },
+						{ text: "B", ok: true, names: [], ms: 300, form: "response" },
 					],
 				},
 				{
 					key: "gemma4",
 					results: [
-						{ text: "A", ok: false, error: "boom", ms: 50, shape: "unknown" },
+						{ text: "A", ok: false, error: "boom", ms: 50, form: "unknown" },
 						{
 							text: "B",
 							ok: false,
 							thoughtOnly: true,
 							ms: 70,
-							shape: "chat",
+							form: "chat",
 							finish: "length",
 						},
 					],
 				},
 			],
 		});
+
 		expect(report).toMatch(/granite[^\n]*\b2\b[^\n]*\b1\b/);
 		expect(report).toContain("Alpha");
 		expect(report).toContain("boom");
@@ -338,8 +356,10 @@ describe("CANDIDATES", () => {
 describe("the Worker's request handling", () => {
 	const env = () => {
 		const { ai, run } = fakeAi(() => ({ response: "Plain Name" }));
+
 		return { env: { AI: ai }, run };
 	};
+
 	const get = (path: string, init?: RequestInit) =>
 		new Request(`http://localhost:8798${path}`, init);
 
@@ -364,20 +384,24 @@ describe("the Worker's request handling", () => {
 
 	it("refuses a request a browser sends on behalf of another page, so a web page can't start a billed run", async () => {
 		const { env: e, run } = env();
+
 		const crossPage: Record<string, string>[] = [
 			{ "sec-fetch-site": "cross-site" },
 			{ "sec-fetch-site": "same-site" },
 			{ "sec-fetch-site": "same-origin" },
 			{ origin: "https://example.com" },
 		];
+
 		for (const headers of crossPage) {
 			expect((await worker.fetch(get("/", { headers }), e)).status).toBe(403);
 		}
+
 		expect(run).not.toHaveBeenCalled();
 	});
 
 	it("still runs for curl and for typing the address into a browser", async () => {
 		const { env: e, run } = env();
+
 		// Typing the address sends Sec-Fetch-Site: none; curl sends neither header.
 		const typed = await worker.fetch(
 			get("/?models=granite&limit=1", {
@@ -385,6 +409,7 @@ describe("the Worker's request handling", () => {
 			}),
 			e,
 		);
+
 		const curled = await worker.fetch(get("/?models=granite&limit=1"), e);
 		expect(typed.status).toBe(200);
 		expect(curled.status).toBe(200);
@@ -393,6 +418,7 @@ describe("the Worker's request handling", () => {
 
 	it("rejects a malformed limit or tokens instead of running everything", async () => {
 		const { env: e, run } = env();
+
 		for (const query of [
 			"?limit=abc",
 			"?limit=0",
@@ -408,6 +434,7 @@ describe("the Worker's request handling", () => {
 		]) {
 			expect((await worker.fetch(get(`/${query}`), e)).status).toBe(400);
 		}
+
 		expect(run).not.toHaveBeenCalled();
 	});
 });
@@ -425,7 +452,7 @@ describe("formatNamesReport cut-off answers", () => {
 						ok: true,
 						names: ["Alpha"],
 						ms: 10,
-						shape: "chat",
+						form: "chat",
 						finish: "stop",
 					},
 					{
@@ -433,7 +460,7 @@ describe("formatNamesReport cut-off answers", () => {
 						ok: true,
 						names: ["Beta", "Be"],
 						ms: 10,
-						shape: "chat",
+						form: "chat",
 						finish: "length",
 						truncated: true,
 					},
@@ -456,13 +483,14 @@ describe("formatNamesReport cut-off answers", () => {
 });
 
 describe("formatNamesReport response-shape note", () => {
-	const result = (shape: "response" | "chat") => ({
+	const result = (kind: "response" | "chat") => ({
 		text: "A",
 		ok: true,
 		names: ["Alpha"],
 		ms: 10,
-		shape,
+		form: kind,
 	});
+
 	const note = (report: string) =>
 		/shape \(([^\n]*)\) carries no finish reason/.exec(report)?.[1];
 
@@ -475,6 +503,7 @@ describe("formatNamesReport response-shape note", () => {
 				{ key: "granite", results: [result("chat")] },
 			],
 		});
+
 		expect(note(report)).toContain("Llama");
 		expect(note(report)).not.toContain("Granite");
 	});
@@ -485,6 +514,7 @@ describe("formatNamesReport response-shape note", () => {
 			tokens: 60,
 			models: [{ key: "granite", results: [result("chat")] }],
 		});
+
 		expect(report).not.toContain("carries no finish reason");
 	});
 });
@@ -494,12 +524,15 @@ describe("the note and category-name prompts, with a candidate model in place of
 
 	it("runs production's own note prompt against the chosen model, not NAME_MODEL", async () => {
 		const { ai, run } = fakeAi(() => ({ response: "Weekly groceries" }));
+
 		const report = await runNamesComparison(
 			{ AI: ai },
 			{ models: ["mistral-small"], limit: 2, task: "notes" },
 			TODAY,
 		);
+
 		expect(run).toHaveBeenCalledTimes(2);
+
 		for (const [model, body] of run.mock.calls) {
 			expect(model).toBe(CANDIDATES["mistral-small"].id);
 			// suggestNote's own wording, so the prompt is production's and not a copy.
@@ -507,18 +540,22 @@ describe("the note and category-name prompts, with a candidate model in place of
 				"Describe what this purchase was",
 			);
 		}
+
 		expect(report).toContain("Weekly groceries");
 		expect(report).toMatch(/^# .*note/im);
 	});
 
 	it("runs production's per-purchase category-name prompt, with the family's categories, against the chosen model", async () => {
 		const { ai, run } = fakeAi(() => ({ response: "Pet care" }));
+
 		const report = await runNamesComparison(
 			{ AI: ai },
 			{ models: ["granite"], limit: 30, task: "categories" },
 			TODAY,
 		);
+
 		expect(run).toHaveBeenCalledTimes(30);
+
 		for (const [model, body] of run.mock.calls) {
 			expect(model).toBe(CANDIDATES.granite.id);
 			// The family's categories go with every purchase (decision 165)...
@@ -527,6 +564,7 @@ describe("the note and category-name prompts, with a candidate model in place of
 			// it gives them as choices (purchaseNamesToAvoid). The fixtures have no archived or dismissed names.
 			expect(body.messages[1]?.content).toMatch(/Categories to avoid: $/);
 		}
+
 		// The cleaned bank text goes too (decision 164), when it says more than the store's name already does.
 		expect(
 			run.mock.calls.some(([, body]) =>
@@ -544,9 +582,11 @@ describe("the note and category-name prompts, with a candidate model in place of
 			{ models: ["granite"], limit: 80, task: "categories" },
 			TODAY,
 		);
+
 		const sent = run.mock.calls.map(
 			([, body]) => body.messages[1]?.content ?? "",
 		);
+
 		// "SQ *BLUE BOTTLE COFFEE 0231" is in the extra texts; production strips its "SQ *" marker before sending.
 		expect(sent.some((content) => content.includes("SQ *"))).toBe(false);
 		expect(sent.some((content) => /blue bottle coffee/i.test(content))).toBe(
@@ -567,20 +607,24 @@ describe("the note and category-name prompts, with a candidate model in place of
 
 	it("rejects an unknown task, with no billed call", async () => {
 		const { ai, run } = fakeAi(() => ({ response: "x" }));
+
 		const response = await worker.fetch(
 			new Request("http://localhost:8798/?task=bogus"),
 			{ AI: ai },
 		);
+
 		expect(response.status).toBe(400);
 		expect(run).not.toHaveBeenCalled();
 	});
 
 	it("takes ?task=notes through the Worker", async () => {
 		const { ai, run } = fakeAi(() => ({ response: "Weekly groceries" }));
+
 		const response = await worker.fetch(
 			new Request("http://localhost:8798/?task=notes&models=granite&limit=1"),
 			{ AI: ai },
 		);
+
 		expect(response.status).toBe(200);
 		expect(run).toHaveBeenCalledTimes(1);
 	});

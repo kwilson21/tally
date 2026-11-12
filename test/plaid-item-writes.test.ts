@@ -6,7 +6,7 @@ const sources = import.meta.glob("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const STORE = "../src/plaid/item-store.ts";
 
@@ -111,6 +111,7 @@ describe("the Plaid connection write guard", () => {
 			.flatMap(([path, text]) =>
 				protectedWrites(text).map((clause) => `${path}: SET ${clause.trim()}`),
 			);
+
 		expect(offenders).toEqual([]);
 	});
 });

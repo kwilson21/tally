@@ -21,6 +21,7 @@ describe("PlannedRow's arrow", () => {
 				href: "/plans/1/edit",
 			}),
 		);
+
 		expect(html).toContain("row-opens");
 		expect(html).toContain(String(RowArrow({})));
 		expect(html.indexOf(String(RowArrow({})))).toBeGreaterThan(
@@ -32,6 +33,7 @@ describe("PlannedRow's arrow", () => {
 		const html = String(
 			PlannedRow({ plan: PLAN, month: "2026-10", today: "2026-10-15" }),
 		);
+
 		expect(html).not.toContain("row-opens");
 		expect(html).not.toContain(String(RowArrow({})));
 	});
@@ -48,6 +50,7 @@ describe("PlanBand's pager dots", () => {
 				waiting: 1,
 			}),
 		);
+
 		expect(html).toContain("Car registration wasn&#39;t paid");
 		expect(html).not.toContain("rounded-full bg-ink");
 		expect(html).not.toContain("rounded-full bg-muted/40");
@@ -63,6 +66,7 @@ describe("PlanBand's pager dots", () => {
 				waiting: 2,
 			}),
 		);
+
 		expect(html.match(/size-2\.5 rounded-full/g)?.length).toBe(2);
 		expect(html).toContain("1 of 2 planned expenses that weren&#39;t paid");
 	});

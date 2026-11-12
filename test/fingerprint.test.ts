@@ -15,12 +15,14 @@ describe("normalizeDom", () => {
 	it("makes the Add cash entry key (transactions.tsx:1772) the same on two loads", () => {
 		const load = (key: string) =>
 			`<form action="/transactions/cash"><input type="hidden" name="entry_key" value="${key}"></form>`;
+
 		expect(normalizeDom(load(FIRST))).toBe(normalizeDom(load(SECOND)));
 	});
 
 	it("makes the split sheet's sheet id and refund ids (split-form.tsx:267) the same on two loads", () => {
 		const load = (sheet: string) =>
 			`<input type="hidden" name="sheet" value="${sheet}"><div id="refund-${sheet}-r1-part-0"></div>`;
+
 		expect(normalizeDom(load(FIRST))).toBe(normalizeDom(load(SECOND)));
 	});
 
@@ -40,8 +42,10 @@ describe("normalizeDom", () => {
 		// htmx and sheet.js set these in whichever order their scripts run, so two loads can list them differently.
 		const htmxFirst =
 			'<form data-htmx-powered="true" inert="" data-sheet-inert="">Edit</form>';
+
 		const inertFirst =
 			'<form inert="" data-sheet-inert="" data-htmx-powered="true">Edit</form>';
+
 		expect(normalizeDom(htmxFirst)).toBe(normalizeDom(inertFirst));
 	});
 
@@ -80,6 +84,7 @@ describe("fingerprintOf", () => {
 	it("is the same for two loads whose only difference is a v4 UUID", async () => {
 		const load = (key: string) =>
 			`<main><input name="entry_key" value="${key}"></main>`;
+
 		expect(await fingerprintOf({ dom: load(FIRST), assets, css })).toBe(
 			await fingerprintOf({ dom: load(SECOND), assets, css }),
 		);
@@ -207,6 +212,7 @@ describe("changedParts", () => {
 			assets: [...assets].reverse(),
 			css,
 		});
+
 		expect(changedParts(load(FIRST), load(SECOND))).toEqual([]);
 	});
 });
@@ -360,6 +366,7 @@ describe("cleanSelector", () => {
 
 	it("gives the same results when its source is run on its own, as screenshots.mjs does in the page", () => {
 		const page = new Function(`return (${cleanSelector.toString()})`)();
+
 		for (const selector of [
 			".hover\\:underline:hover",
 			"*,:before,:after,::backdrop",

@@ -4,36 +4,42 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
+import { envWith } from "./helpers/doubles";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
 
 // Remove Apple Card (spec §8.10, #766): kept by default, deleted with its transactions when asked. Modelled on Disconnect.
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
+
 /** Apple's MM/DD/YYYY for a YYYY-MM-DD day. The rows are dated from the real today, never a fixed date. */
 const apple = (day: string) =>
 	`${day.slice(5, 7)}/${day.slice(8, 10)}/${day.slice(0, 4)}`;
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
+
 const PLAID_LINK_SCRIPT =
 	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-const plaidBindings = {
-	...family,
+
+const plaidBindings = envWith(family, {
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-} as unknown as Env;
-const noPlaid = {
-	...family,
+});
+
+const noPlaid = envWith(family, {
 	PLAID_CLIENT_ID: undefined,
 	PLAID_SECRET: undefined,
-} as unknown as Env;
+});
 
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+
 app.use("*", async (c, next) => {
 	c.set("actor", "family@example.com");
 	await next();
 });
+
 app.route("/", accounts);
 
 const ctx = () => ({
@@ -49,15 +55,19 @@ async function uploadCard() {
 		`${apple(daysBefore(TODAY, 11))},${apple(daysBefore(TODAY, 10))},"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"`,
 		`${apple(daysBefore(TODAY, 9))},${apple(daysBefore(TODAY, 8))},"THAI PALACE 4 OAK ST SPRINGFIELD 00000 XX USA","Thai Palace","Restaurants","Purchase","24.10"`,
 	].join("\n");
+
 	const form = new FormData();
 	form.set("file", new File([csv], "apple.csv", { type: "text/csv" }));
 	form.set("balance", "1,240.18");
+
 	const request = new Request("http://tally.test/accounts/apple-card", {
 		method: "POST",
 		body: form,
 	});
+
 	const type = request.headers.get("content-type") ?? "";
 	const bytes = await request.arrayBuffer();
+
 	const res = await app.request(
 		"/accounts/apple-card",
 		{
@@ -72,6 +82,7 @@ async function uploadCard() {
 		family,
 		ctx(),
 	);
+
 	expect(res.status).toBe(200);
 }
 
@@ -79,10 +90,12 @@ const cardCount = () =>
 	env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM accounts WHERE subtype = 'apple_card'",
 	).first<{ n: number }>();
+
 const cardRowCount = () =>
 	env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
 	).first<{ n: number }>();
+
 const cardHistoryCount = () =>
 	env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM balance_history h JOIN accounts a ON a.id = h.account_id WHERE a.subtype = 'apple_card'",
@@ -94,17 +107,50 @@ async function post(
 	bindings: Env = family,
 	htmx = true,
 ) {
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		"content-type": "application/x-www-form-urlencoded",
-	};
-	if (htmx) headers["HX-Request"] = "true";
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await app.request(
 		path,
 		{ method: "POST", headers, body },
 		bindings,
 		ctx(),
 	);
+
 	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
+}
+
+/** Whether `prop` is a member of the D1 binding, so a Proxy over it may read it. */
+function isD1Member(
+	target: D1Database,
+	prop: string | symbol,
+): prop is keyof D1Database {
+	return prop in target;
+}
+
+/** Whether a D1 member is a function, so a Proxy can bind it to the real database. */
+function isFunction<Value>(
+	value: Value,
+): value is Extract<Value, CallableFunction> {
+	return typeof value === "function";
+}
+
+/** A member of the D1 binding: each one is a method, bound to the real database by d1Member. */
+type D1Member = D1Database[keyof D1Database];
+
+/** The real D1 member `prop`, with a function bound to the real database; undefined when there is none. */
+function d1Member(
+	target: D1Database,
+	prop: string | symbol,
+): D1Member | undefined {
+	if (!isD1Member(target, prop)) return undefined;
+
+	const value = target[prop];
+
+	return isFunction(value) ? value.bind(target) : value;
 }
 
 /** A database whose batch first runs `before`, as another tab does between this request's read and its batch. */
@@ -114,10 +160,11 @@ function racedDb(before: string): D1Database {
 			if (prop === "batch")
 				return async (statements: D1PreparedStatement[]) => {
 					await target.prepare(before).run();
+
 					return target.batch(statements);
 				};
-			const value = Reflect.get(target, prop, target);
-			return typeof value === "function" ? value.bind(target) : value;
+
+			return d1Member(target, prop);
 		},
 	});
 }
@@ -125,6 +172,7 @@ function racedDb(before: string): D1Database {
 // Another tab's keep, and its delete: the writes this request's batch can meet after its own read (spec §8.10).
 const OTHER_TAB_KEEPS =
 	"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card' AND removed_at IS NULL";
+
 const OTHER_TAB_DELETES = [
 	"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card')",
 	"DELETE FROM balance_history WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card')",
@@ -158,11 +206,13 @@ describe("Remove Apple Card (#766)", () => {
 		await env.DB.prepare(
 			"DELETE FROM transactions WHERE id IN (SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' ORDER BY t.id DESC LIMIT 1)",
 		).run();
+
 		const html = (
 			await (
 				await app.request("/accounts/apple-card/remove", {}, family)
 			).text()
 		).replaceAll("&#39;", "'");
+
 		expect(html).toContain(
 			"Its 1 transaction stays, so past months still add up, unless you tick the box below.",
 		);
@@ -174,14 +224,18 @@ describe("Remove Apple Card (#766)", () => {
 		expect(res.headers.get("HX-Trigger")).toContain("Removed Apple Card.");
 		expect(res.headers.get("HX-Push-Url")).toBe("/accounts");
 		expect(await cardRowCount()).toEqual({ n: 2 });
+
 		const card = await env.DB.prepare(
 			"SELECT balance_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
 		).first<{ balance_on: string | null; removed_at: string | null }>();
+
 		expect(card?.balance_on).toBeNull();
 		expect(card?.removed_at).not.toBeNull();
+
 		const html = (
 			await (await app.request("/accounts", {}, family)).text()
 		).replaceAll("&#39;", "'");
+
 		expect(html).toContain("Removed");
 		expect(html).toContain("Add Apple Card");
 		expect(html).not.toContain("Remove Apple Card</a>");
@@ -201,6 +255,7 @@ describe("Remove Apple Card (#766)", () => {
 		const card = await env.DB.prepare(
 			"SELECT t.id AS id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' ORDER BY t.id LIMIT 1",
 		).first<{ id: number }>();
+
 		const record = {
 			pay: {
 				"NORTHWIND PAYROLL": {
@@ -210,15 +265,18 @@ describe("Remove Apple Card (#766)", () => {
 				"KEEP ME": { at: "2026-10-01", yes: { "999999": true } },
 			},
 		};
+
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 		)
 			.bind(JSON.stringify(record))
 			.run();
 		await post("/accounts/apple-card/remove", "delete=yes");
+
 		const after = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
+
 		expect(Object.keys(JSON.parse(after?.value ?? "{}").pay ?? {})).toEqual([
 			"KEEP ME",
 		]);
@@ -235,29 +293,37 @@ describe("Remove Apple Card (#766)", () => {
 
 	it("says it's already removed when another tab keeps the card between this request's read and its batch, and changes nothing", async () => {
 		const history = await cardHistoryCount();
-		const { res } = await post("/accounts/apple-card/remove", "", {
-			...family,
-			DB: racedDb(OTHER_TAB_KEEPS),
-		} as unknown as Env);
+
+		const { res } = await post(
+			"/accounts/apple-card/remove",
+			"",
+			envWith(family, { DB: racedDb(OTHER_TAB_KEEPS) }),
+		);
+
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Apple Card is already removed.",
 		);
 		expect(await cardRowCount()).toEqual({ n: 2 });
 		expect(await cardHistoryCount()).toEqual(history);
+
 		// The other tab's change stands: the card is removed and its balance cleared, and nothing here changed it.
 		const card = await env.DB.prepare(
 			"SELECT balance_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
 		).first<{ balance_on: string | null; removed_at: string | null }>();
+
 		expect(card?.balance_on).toBeNull();
 		expect(card?.removed_at).not.toBeNull();
 	});
 
 	it("says it's already removed when another tab keeps the card while this request deletes it, and deletes nothing", async () => {
 		const history = await cardHistoryCount();
-		const { res } = await post("/accounts/apple-card/remove", "delete=yes", {
-			...family,
-			DB: racedDb(OTHER_TAB_KEEPS),
-		} as unknown as Env);
+
+		const { res } = await post(
+			"/accounts/apple-card/remove",
+			"delete=yes",
+			envWith(family, { DB: racedDb(OTHER_TAB_KEEPS) }),
+		);
+
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Apple Card is already removed.",
 		);
@@ -274,16 +340,20 @@ describe("Remove Apple Card (#766)", () => {
 					return async (statements: D1PreparedStatement[]) => {
 						for (const sql of OTHER_TAB_DELETES)
 							await target.prepare(sql).run();
+
 						return target.batch(statements);
 					};
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return d1Member(target, prop);
 			},
 		});
-		const { res } = await post("/accounts/apple-card/remove", "delete=yes", {
-			...family,
-			DB: deleted,
-		} as unknown as Env);
+
+		const { res } = await post(
+			"/accounts/apple-card/remove",
+			"delete=yes",
+			envWith(family, { DB: deleted }),
+		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"Apple Card is already removed.",
@@ -324,6 +394,7 @@ describe("Remove Apple Card (#766)", () => {
 			),
 			env.DB.prepare("DELETE FROM accounts WHERE subtype = 'apple_card'"),
 		]);
+
 		const res = await app.request(
 			"/accounts/apple-card/remove",
 			{
@@ -334,6 +405,7 @@ describe("Remove Apple Card (#766)", () => {
 			family,
 			ctx(),
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/accounts");
 	});
@@ -348,11 +420,12 @@ describe("Remove Apple Card (#766)", () => {
 	});
 
 	it("works without Plaid: the remove isn't gated on Plaid's enabled()", async () => {
-		const res = await app.request("/accounts/apple-card/remove", {}, {
-			...family,
-			PLAID_CLIENT_ID: undefined,
-			PLAID_SECRET: undefined,
-		} as unknown as Env);
+		const res = await app.request(
+			"/accounts/apple-card/remove",
+			{},
+			envWith(family, { PLAID_CLIENT_ID: undefined, PLAID_SECRET: undefined }),
+		);
+
 		expect(res.status).toBe(200);
 	});
 
@@ -363,6 +436,7 @@ describe("Remove Apple Card (#766)", () => {
 			{},
 			plaidBindings,
 		);
+
 		expect(withPlaid.status).toBe(200);
 		const html = await withPlaid.text();
 		expect(html).not.toContain(`src="${PLAID_LINK_SCRIPT}"`);
@@ -373,6 +447,7 @@ describe("Remove Apple Card (#766)", () => {
 			{},
 			noPlaid,
 		);
+
 		const plain = await withoutPlaid.text();
 		expect(plain).not.toContain(PLAID_LINK_SCRIPT);
 		expect(plain).not.toContain("/js/plaid-link.js");
@@ -384,14 +459,17 @@ describe("Remove Apple Card (#766)", () => {
 			get(target, prop) {
 				if (prop === "batch")
 					return () => Promise.reject(new Error("D1 is down"));
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return d1Member(target, prop);
 			},
 		});
-		const { res, html } = await post("/accounts/apple-card/remove", "", {
-			...plaidBindings,
-			DB: failingDb,
-		} as unknown as Env);
+
+		const { res, html } = await post(
+			"/accounts/apple-card/remove",
+			"",
+			envWith(plaidBindings, { DB: failingDb }),
+		);
+
 		expect(res.status).toBe(502);
 		expect(html).toContain("Couldn't remove Apple Card. Try again.");
 		expect(html).not.toContain(`src="${PLAID_LINK_SCRIPT}"`);
@@ -402,6 +480,7 @@ describe("Remove Apple Card (#766)", () => {
 		// Once the batch has failed, every later D1 call fails as well (a D1 that is down). The page's count was read
 		// before the batch, so the failure page needs no read after it and still answers, rather than a bare 500.
 		let down = false;
+
 		const downAfterBatch = new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop === "batch")
@@ -409,21 +488,26 @@ describe("Remove Apple Card (#766)", () => {
 						down = true;
 						throw new Error("D1 is down");
 					};
+
 				if (prop === "prepare")
 					return (sql: string) => {
 						if (down) throw new Error("D1 is down");
+
 						return target.prepare(sql);
 					};
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return d1Member(target, prop);
 			},
 		});
+
 		const historyBefore = await cardHistoryCount();
+
 		const { res, html } = await post(
 			"/accounts/apple-card/remove",
 			"delete=yes",
-			{ ...family, DB: downAfterBatch } as unknown as Env,
+			envWith(family, { DB: downAfterBatch }),
 		);
+
 		expect(res.status).toBe(502);
 		expect(html).toContain("<title>Remove Apple Card? · Tally</title>");
 		expect(html).toMatch(
@@ -437,9 +521,11 @@ describe("Remove Apple Card (#766)", () => {
 		// Nothing changed: the card is still kept, with the rows and history it had before the request.
 		expect(await cardCount()).toEqual({ n: 1 });
 		expect(await cardRowCount()).toEqual({ n: 2 });
+
 		const kept = await env.DB.prepare(
 			"SELECT removed_at FROM accounts WHERE subtype = 'apple_card'",
 		).first<{ removed_at: string | null }>();
+
 		expect(kept?.removed_at).toBeNull();
 		expect(await cardHistoryCount()).toEqual(historyBefore);
 	});

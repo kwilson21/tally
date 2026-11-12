@@ -29,12 +29,16 @@ const base: SetupView = {
 	waitsForRun: false,
 	runTime: "5 AM",
 };
+
 const view = (over: Partial<SetupView> = {}): SetupView => ({
 	...base,
 	...over,
 });
 
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+/** Rendered markup: a JSX result, which is a string when it is rendered. */
+type Markup = { toString(): string };
+
+const html = (node: Markup) => String(node).replaceAll("&#39;", "'");
 
 const CHASE_IN: YourBank = {
 	id: 3,
@@ -45,6 +49,7 @@ const CHASE_IN: YourBank = {
 	fresh: false,
 	count: 412,
 };
+
 const AMEX_PAUSED: YourBank = {
 	id: 5,
 	name: "American Express",
@@ -54,6 +59,7 @@ const AMEX_PAUSED: YourBank = {
 	fresh: true,
 	count: 86,
 };
+
 const TODAY = "2026-10-14";
 
 describe("readingStep", () => {
@@ -230,6 +236,7 @@ describe("SetupReading", () => {
 		const sorting = reading({
 			view: view({ sorting: true, sorted: 318, total: 412 }),
 		});
+
 		expect(sorting).toContain('<svg class="mt-3 block h-2 w-full"');
 		expect(sorting).toContain('width="77.2%"');
 		expect(sorting).toContain('class="fill-ink"');
@@ -237,6 +244,7 @@ describe("SetupReading", () => {
 		const slow = reading({
 			view: view({ sorting: true, slow: true, sorted: 900, total: 1500 }),
 		});
+
 		expect(slow).toContain('<svg class="mt-3 block h-2 w-full"');
 		expect(slow).toContain('width="60%"');
 
@@ -260,6 +268,7 @@ describe("SetupReading", () => {
 				total: 412,
 			}),
 		});
+
 		expect(markup).toContain("at about 10 AM");
 		expect(markup).toContain("Your three questions open once they're sorted.");
 		expect(markup).not.toContain("taking longer");
@@ -306,6 +315,7 @@ describe("SetupReading", () => {
 			bankLine: ["American Express needs signing in"],
 			yourBanks: { banks: [CHASE_IN, AMEX_PAUSED], today: TODAY, polls: false },
 		});
+
 		const bankLine = markup.indexOf("American Express needs signing in");
 		const yourBanks = markup.indexOf("Your banks");
 		const email = markup.indexOf("You can close this page.");
@@ -319,9 +329,11 @@ describe("SetupReading", () => {
 		const markup = reading({
 			linkBank: <button type="button">Link another bank</button>,
 		});
+
 		const button = markup.indexOf(
 			'<button type="button">Link another bank</button>',
 		);
+
 		expect(button).toBeGreaterThan(0);
 		expect(button).toBeLessThan(markup.indexOf(MORE_BANKS_LINE));
 		expect(markup.indexOf(MORE_BANKS_LINE)).toBeGreaterThan(
@@ -334,6 +346,7 @@ describe("SetupReading", () => {
 			polls: true,
 			view: view({ waitsForRun: true, sorting: true }),
 		});
+
 		expect(waiting).toContain('hx-post="/home/seen"');
 		expect(waiting).toContain('hx-vals="{&quot;step&quot;:&quot;run&quot;}"');
 
@@ -341,6 +354,7 @@ describe("SetupReading", () => {
 			polls: true,
 			view: view({ sorting: true, sorted: 318, total: 412 }),
 		});
+
 		expect(sorting).toContain(
 			'hx-vals="{&quot;step&quot;:&quot;sorting&quot;}"',
 		);

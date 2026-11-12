@@ -37,13 +37,17 @@ describe("accountsWithHistory", () => {
 
 	it("reads the banks and the balances in one batch, so a sync can't land between them", async () => {
 		const batches: number[] = [];
+
+		// SAFETY: accountsWithHistory calls only prepare and batch on this object; the other D1Database members are never read.
 		const db = {
 			prepare: (query: string) => env.DB.prepare(query),
 			batch: (statements: D1PreparedStatement[]) => {
 				batches.push(statements.length);
+
 				return env.DB.batch(statements);
 			},
-		} as unknown as D1Database;
+		} as D1Database;
+
 		const { banks, points } = await accountsWithHistory(db, TODAY);
 		expect(batches).toEqual([3]);
 		expect(banks).toHaveLength(2);

@@ -25,6 +25,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -60,6 +61,7 @@ async function tx(fields: {
 			fields.parentId ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -68,11 +70,13 @@ describe("learned lines: excluded rows", () => {
 		const bill = await db
 			.prepare("SELECT id FROM bills ORDER BY id LIMIT 1")
 			.first<{ id: number }>();
+
 		const excluded = await tx({
 			raw: "PG&E 0930",
 			category: "Entertainment",
 			excluded: 1,
 		});
+
 		await db
 			.prepare(
 				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
@@ -119,6 +123,7 @@ describe("learned lines: trips Jev calls mixed", () => {
 			jevCategory: "Groceries",
 			jevAlso: "Entertainment",
 		});
+
 		await tx({ raw: "TARGET 0412", category: "Groceries", parentId: parent });
 		expect(await loadLearnedLines(db)).toEqual([]);
 	});

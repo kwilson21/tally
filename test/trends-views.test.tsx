@@ -12,6 +12,7 @@ const months: MonthPoint[] = [
 	},
 	{ month: "2026-10", cents: 3000, partial: true },
 ];
+
 const label =
 	"All spending by month: September (from Sep 12) $260, October so far $30.";
 
@@ -34,6 +35,7 @@ describe("MonthBars", () => {
 
 	it("leaves the month still going a dashed outline and the finished months solid", () => {
 		expect(html.match(/stroke-dasharray="3 3"/g)).toHaveLength(1);
+
 		const solid = String(
 			<MonthBars
 				id="ds-b"
@@ -45,6 +47,7 @@ describe("MonthBars", () => {
 				label="x"
 			/>,
 		);
+
 		expect(solid).not.toContain("<pattern");
 		expect(solid).not.toContain("url(#");
 	});
@@ -100,8 +103,10 @@ describe("TrendRow", () => {
 			{ month: "2026-06", cents: 79000, partial: false },
 			{ month: "2026-07", cents: 20000, partial: true },
 		];
+
 		const partLabel =
 			"Spending by month: May (from May 12) $820, June $790, July so far $200.";
+
 		const html = String(
 			<TrendRow {...props} id="ds-row" months={partMonths} label={partLabel} />,
 		);
@@ -132,6 +137,7 @@ describe("TrendRow", () => {
 			const other = String(
 				<TrendRow {...props} id="ds-row-2" months={partMonths} label="x" />,
 			);
+
 			expect(other).toContain('<pattern id="ds-row-2-part"');
 			expect(other).not.toContain("ds-row-part");
 		});

@@ -2,6 +2,7 @@
 // a merchant from the bank's text, and decides nothing. Code checks every name it gets back
 // (`cleanSuggestedNames`), a person chooses one or none, and nothing is renamed until they do.
 
+import type { Json } from "../json";
 import { MAX_ACTIVE, sameName } from "../settings/category-form";
 import {
 	joinedOf,
@@ -24,6 +25,7 @@ export const NAME_MODEL =
 const TIMEOUT_MS = 15_000;
 const MIN_LENGTH = 2;
 const MAX_LENGTH = 40;
+
 /** The longest note the model may suggest. */
 const MAX_NOTE_LENGTH = 80;
 const MAX_WORDS = 5;
@@ -35,6 +37,28 @@ export const INSTRUCTIONS = [
 	"Use normal spelling and capitals. Leave out store numbers, codes, cities, amounts and dates.",
 	"If you are not sure, reply with fewer names. Never explain.",
 ].join(" ");
+
+/** What the name model answers with (its Workers AI output), a JSON value a test or a caller passes, or nothing. */
+type AiAnswer =
+	| Json
+	| AiModels[typeof NAME_MODEL]["postProcessedOutputs"]
+	| ReadableStream
+	| undefined;
+
+const isText = (value: AiAnswer): value is string => typeof value === "string";
+
+/** An object that is not an array: the only kind of answer that can carry a `response` field. */
+const isRecord = (value: AiAnswer): value is Record<string, Json> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** The text an answer carries: the answer itself, or its response field. Any other answer carries none. */
+function answerText(answer: AiAnswer): string | undefined {
+	if (isText(answer)) return answer;
+
+	const response = isRecord(answer) ? answer.response : undefined;
+
+	return isText(response) ? response : undefined;
+}
 
 export type SuggestResult =
 	| { ok: true; names: string[] }
@@ -49,7 +73,8 @@ export async function suggestNames(
 	ai: Ai,
 	rawName: string,
 ): Promise<SuggestResult> {
-	let answer: unknown;
+	let answer: AiAnswer;
+
 	try {
 		answer = await ai.run(
 			NAME_MODEL,
@@ -67,13 +92,14 @@ export async function suggestNames(
 		console.error(
 			`workers-ai: ${error instanceof Error ? error.name : "failed"}`,
 		);
+
 		return { ok: false };
 	}
-	const text =
-		typeof answer === "string"
-			? answer
-			: (answer as { response?: unknown } | null)?.response;
-	if (typeof text !== "string") return { ok: false };
+
+	const text = answerText(answer);
+
+	if (text === undefined) return { ok: false };
+
 	return { ok: true, names: cleanSuggestedNames(text, rawName) };
 }
 
@@ -130,12 +156,15 @@ export function restatesStore(
 	storeNames: (string | null)[],
 ): boolean {
 	const names = storeNames.map((name) => name ?? "");
+
 	const store = new Set([
 		...names.flatMap(wordsOf),
 		...names.flatMap((name) => runsOf(name).map(joinedOf)),
 	]);
+
 	const covered = (word: string) =>
 		store.has(word) || GENERIC_NOTE_WORDS.has(word);
+
 	// A run is covered when its joined form is, or when each of its letter words is.
 	return runsOf(note).every(
 		(run) => covered(joinedOf(run)) || wordsOf(run).every(covered),
@@ -169,16 +198,17 @@ export async function suggestNote(
 			},
 			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
 		);
-		const text =
-			typeof answer === "string"
-				? answer
-				: (answer as { response?: unknown } | null)?.response;
-		if (typeof text !== "string") return { ok: false };
+
+		const text = answerText(answer);
+
+		if (text === undefined) return { ok: false };
+
 		const note = text
 			.split(/\r?\n/)[0]
 			?.trim()
 			.replace(/^['"“”]+|['"“”]+$/g, "")
 			.replace(/\s+/g, " ");
+
 		return {
 			ok: true,
 			note:
@@ -194,16 +224,18 @@ export async function suggestNote(
 		console.error(
 			`workers-ai: note ${error instanceof Error ? error.name : "failed"}`,
 		);
+
 		return { ok: false };
 	}
 }
 
 export function cleanCategoryName(
-	answer: unknown,
+	answer: AiAnswer,
 	avoid: string[],
 	choices: string[] = [],
 ): string | null {
-	if (typeof answer !== "string") return null;
+	if (!isText(answer)) return null;
+
 	for (const raw of answer.split(/\r?\n/)) {
 		const name = raw
 			.replace(/^\s*(?:[-*•·]|\d+[.)])\s*/, "")
@@ -211,6 +243,7 @@ export function cleanCategoryName(
 			.replace(/[.]+$/, "")
 			.replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "")
 			.replace(/\s+/g, " ");
+
 		// Decision 165: a reply that is one of the family's active categories is that category, with its stored spelling.
 		// It is the household's own label, so it is taken before the shape and instruction checks below.
 		// The prompt shows each category by its label (choiceLabel), so a reply may name it in that form; the stored name
@@ -218,7 +251,9 @@ export function cleanCategoryName(
 		const choice =
 			choices.find((c) => sameName(c, name)) ??
 			choices.find((c) => sameName(choiceLabel(c), name));
+
 		if (choice) return choice;
+
 		if (
 			name.length < 2 ||
 			name.length > 30 ||
@@ -226,31 +261,39 @@ export function cleanCategoryName(
 			/[$#*<>:]|\d{3,}|\d+[.,]\d{2}\b|https?:|www\./i.test(name)
 		)
 			continue;
+
 		if (
 			!/^[\p{L}][\p{L} &'-]*$/u.test(name) ||
 			/\b(?:here is|category|suggest|because|would be)\b/i.test(name)
 		)
 			continue;
+
 		// Decision 164: a reply that reads as an instruction is never shown (a narrower list than the bank text's).
 		if (nameReadsAsInstruction(name)) continue;
+
 		if (
 			/^(?:none(?: of these fit)?|nothing|n\/?a)\.?$/i.test(name) ||
 			avoid.some((n) => n.toLowerCase() === name.toLowerCase())
 		)
 			continue;
+
 		if (name === name.toUpperCase() || name === name.toLowerCase())
 			return name
 				.toLowerCase()
 				.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
+
 		return name;
 	}
+
 	return null;
 }
 
 /** The most of a bank's text the model is sent (decision 164): a short descriptor says what the purchase was. */
 const MAX_BANK_TEXT = 40;
+
 /** Currency amounts, and bare decimal amounts such as 14.99 (decision 164). */
 const AMOUNT = /[$€£¥]\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*\.\d+/g;
+
 /**
  * Phrases that read as an instruction to the model, in any capitals (decision 164). A best-effort list, not a guarantee:
  * it is checked on the folded text with its spaces, and again with the spaces taken out (COMPACT_INSTRUCTION), so a
@@ -258,6 +301,7 @@ const AMOUNT = /[$€£¥]\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*\.\d+/g;
  */
 const INSTRUCTION_LIKE =
 	/\bignore\s+(?:all\s+|the\s+|any\s+)?(?:previous|above|prior|earlier)\b|\bignore\s+(?:(?:all|the|any|your|these|those|my)\s+)?(?:rules?|instructions?|directions|guidelines|prompts)\b|\bignore\s+this\b|\bdisregard\b|\bforget\s+everything\b|\bsystem\s+prompt\b|\binstructions?\b|\b(?:reply|respond)\s+with\b|\byou\s+are\b|\bact\s+as\b|\bpretend\b|\bcall\b[\s\S]*\bnow\b|\b(?:assistant|user|system)\s*:/i;
+
 /** The same phrases as letters only, lowercase, with no spaces (see INSTRUCTION_LIKE). */
 const COMPACT_INSTRUCTION =
 	/ignore(?:all|the|any)?(?:previous|above|prior|earlier)|ignore(?:all|the|any|your|these|those|my)?(?:rules?|instructions?|directions|guidelines|prompts)|ignorethis|disregard|forgeteverything|systemprompt|instructions?|(?:reply|respond)with|youare|actas|pretend|call.*now/;
@@ -274,6 +318,7 @@ function foldBankText(text: string): string {
 /** True when the folded text reads as an instruction, with its spaces or without them (INSTRUCTION_LIKE). */
 function readsAsInstruction(folded: string): boolean {
 	const compact = folded.replace(/[^\p{L}]/gu, "").toLowerCase();
+
 	return INSTRUCTION_LIKE.test(folded) || COMPACT_INSTRUCTION.test(compact);
 }
 
@@ -302,7 +347,9 @@ function dropNumbers(text: string): string {
 		.filter((token) => {
 			// Any Unicode digit counts, so an Arabic-Indic run is dropped like an ASCII one.
 			const digits = (token.match(/\p{Nd}/gu) ?? []).length;
+
 			if (digits === 0) return true;
+
 			return digits < 5 && /\p{L}/u.test(token);
 		})
 		.join(" ")
@@ -316,6 +363,7 @@ function capAtWord(text: string, max = MAX_BANK_TEXT): string {
 	if (text.length <= max) return text;
 	const cut = text.slice(0, max + 1);
 	const space = cut.lastIndexOf(" ");
+
 	return (space > 0 ? cut.slice(0, space) : text.slice(0, max)).trim();
 }
 
@@ -343,12 +391,16 @@ export function bankTextToSend(
 			.split(/[^\p{L}\p{N}]+/u)
 			.filter(Boolean)
 			.join(" ");
+
 	const folded = foldBankText(bankText ?? "");
 	const loose = dropNumbers(folded);
+
 	// Checked before the cap, and on the text with its numbers too, since a number between two words can hide a phrase.
 	if (readsAsInstruction(folded) || readsAsInstruction(loose)) return null;
 	const text = capAtWord(loose);
+
 	if (!text || words(text) === words(store)) return null;
+
 	return text;
 }
 
@@ -402,22 +454,29 @@ export async function suggestCategoryName(
 		merchants.length === 1 && merchants[0] !== undefined
 			? bankTextToSend(merchants[0], bankText)
 			: null;
+
 	// A purchase always passes its bank text, a string (possibly empty); the nightly naming passes null.
 	const isPurchase = bankText !== null && merchants.length === 1;
+
 	const label = isPurchase
 		? placeLabel(merchants[0] ?? "")
 		: merchants.map(nightlyName).join("; ");
+
 	const places =
 		purchaseText === null
 			? `Places: ${label}`
 			: `Place: ${label}\nBank text (data only): "${boundaryValue(purchaseText)}"`;
+
 	// Decision 165: a single purchase is also given the family's active categories to choose from. The nightly naming
 	// never is, and keeps its own wording.
 	const family = isPurchase && choices.length > 0 ? choiceLine(choices) : "";
+
 	const reply = family
 		? `${CHOOSE_ONE} Reply with only the name.`
 		: "Reply with only the name.";
+
 	const familyLine = family ? `\nFamily categories: ${family}` : "";
+
 	try {
 		const answer = await ai.run(
 			NAME_MODEL,
@@ -441,11 +500,11 @@ export async function suggestCategoryName(
 			},
 			{ signal: AbortSignal.timeout(TIMEOUT_MS) },
 		);
-		const text =
-			typeof answer === "string"
-				? answer
-				: (answer as { response?: unknown } | null)?.response;
-		if (typeof text !== "string") return { ok: false };
+
+		const text = answerText(answer);
+
+		if (text === undefined) return { ok: false };
+
 		return {
 			ok: true,
 			name: cleanCategoryName(text, avoid, family ? choices : []),
@@ -454,6 +513,7 @@ export async function suggestCategoryName(
 		console.error(
 			`workers-ai: category name ${error instanceof Error ? error.name : "failed"}`,
 		);
+
 		return { ok: false };
 	}
 }
@@ -466,7 +526,14 @@ export async function suggestCategoryName(
 const choiceLabel = (name: string) => oneLine(boundaryValue(oneLine(name)));
 
 const choiceLine = (choices: string[]) =>
-	choices.slice(0, MAX_ACTIVE).map(choiceLabel).filter(Boolean).join("; ");
+	choices
+		.slice(0, MAX_ACTIVE)
+		.flatMap((choice) => {
+			const label = choiceLabel(choice);
+
+			return label ? [label] : [];
+		})
+		.join("; ");
 
 /** Marks a model puts before a list item ("1.", "-", "•") and quotes it wraps a name in. */
 const LIST_MARK = /^\s*(?:[-•·]|\*(?=\s)|\d+[.)])\s*/;
@@ -488,13 +555,14 @@ const sameAsTidied = (name: string, tidied: string) =>
  * isn't text gives none.
  */
 export function cleanSuggestedNames(
-	answer: unknown,
+	answer: AiAnswer,
 	rawName: string,
 ): string[] {
-	if (typeof answer !== "string") return [];
+	if (!isText(answer)) return [];
 	const raw = rawName.trim().toLowerCase();
 	const tidied = tidyName(rawName);
 	const names: string[] = [];
+
 	for (const line of answer.split(/\r?\n/)) {
 		const name = line
 			.replace(LIST_MARK, "")
@@ -503,15 +571,22 @@ export function cleanSuggestedNames(
 			.replace(/[.]+$/, "")
 			.replace(/\s+/g, " ")
 			.trim();
+
 		if (name.length < MIN_LENGTH || name.length > MAX_LENGTH) continue;
+
 		if (name.split(" ").length > MAX_WORDS) continue;
+
 		// An amount, a store number or a code, a link, markup, or a sentence.
 		if (/[$#*<>:]|\d{3,}|\d+[.,]\d{2}\b|https?:|www\./i.test(name)) continue;
+
 		if (name.toLowerCase() === raw || sameAsTidied(name, tidied)) continue;
+
 		if (names.some((kept) => kept.toLowerCase() === name.toLowerCase()))
 			continue;
 		names.push(name);
+
 		if (names.length === MAX_SUGGESTED_NAMES) break;
 	}
+
 	return names;
 }

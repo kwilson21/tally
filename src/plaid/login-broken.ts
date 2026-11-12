@@ -9,11 +9,14 @@ export async function loginStillBroken(
 ): Promise<boolean> {
 	try {
 		if (!env.TOKEN_ENCRYPTION_KEY) return true;
+
 		const accessToken = await decryptToken(
 			accessTokenEncrypted,
 			env.TOKEN_ENCRYPTION_KEY,
 		);
+
 		const result = await getItem(env, accessToken, fetchImpl);
+
 		return result.item?.error !== null;
 	} catch {
 		// A failed lookup counts as still broken, so the login error is kept when Plaid can't confirm. A repair that

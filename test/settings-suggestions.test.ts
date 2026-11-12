@@ -11,6 +11,8 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { settings } from "../src/routes/settings";
+import { envWith } from "./helpers/doubles";
+import { isMethod, itemAt, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // Settings shows each suggested new category with the transactions behind it (spec §7, §8.3, P30 A, #51):
@@ -20,62 +22,78 @@ import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
 const sorting = recordSorting({ sort: true });
+
 type TestApp = { Bindings: Env; Variables: { actor: string } };
+
 // The route-only harness supplies the actor that src/index.tsx sets after verifying Access.
 const routeHarness = new Hono<TestApp>();
+
 routeHarness.use("*", async (c, next) => {
-	if ((c.env as { DEMO?: string }).DEMO === "false")
-		c.set("actor", "test@example.com");
+	const demo: string | undefined = c.env.DEMO;
+
+	if (demo === "false") c.set("actor", "test@example.com");
 	await next();
 });
-routeHarness.route("/", settings as unknown as Hono<TestApp>);
+
+routeHarness.route("/", settings);
+
 let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
 const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
 const background = () => Promise.all(waitUntil.mock.calls.map(([p]) => p));
 
+/** Bindings a test sets over the real env: any of the Worker's bindings or secrets, with DEMO as the tests write it. */
+type Bindings = Partial<
+	Omit<Env, "DEMO"> & { DEMO: string; JEV_API_KEY: string }
+>;
+
 async function request(
 	path: string,
 	init: RequestInit = {},
-	bindings: Record<string, unknown> = {},
+	bindings: Bindings = {},
 ) {
 	const res = await routeHarness.request(
 		path,
 		init,
-		{ ...env, ...bindings },
+		envWith(env, bindings),
 		ctx(),
 	);
+
 	return { res, html: await res.text() };
 }
+
 const get = (path = "/settings/categories", bindings = {}) =>
 	request(path, {}, bindings);
+
 async function post(
 	path: string,
 	fields: [string, string][] = [],
-	{
-		htmx = true,
-		bindings = {},
-	}: { htmx?: boolean; bindings?: Record<string, unknown> } = {},
+	{ htmx = true, bindings = {} }: { htmx?: boolean; bindings?: Bindings } = {},
 ) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const { res, html } = await request(
 		path,
 		{
 			method: "POST",
 			redirect: "manual",
-			headers: {
-				...(htmx ? { "HX-Request": "true" } : {}),
-				"content-type": "application/x-www-form-urlencoded",
-			},
+			headers,
 			body: new URLSearchParams(fields).toString(),
 		},
 		bindings,
 	);
+
 	return { res, html };
 }
-const trigger = (res: Response) =>
-	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { message: string };
-		announce?: string;
-	};
+
+type HtmxTrigger = { toast?: { message: string }; announce?: string };
+
+const trigger = (res: Response): HtmxTrigger =>
+	JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
 const textOf = (html: string) =>
 	html
 		.replace(/<[^>]+>/g, "")
@@ -84,37 +102,49 @@ const textOf = (html: string) =>
 
 function countingDb() {
 	let statements = 0;
+
 	const counted = new Proxy(db, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
 			if (property === "prepare")
 				return (sql: string) => {
 					statements += 1;
+
 					return target.prepare(sql);
 				};
-			return typeof value === "function" ? value.bind(target) : value;
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
 	});
-	return { db: counted as D1Database, statements: () => statements };
+
+	return { db: counted, statements: () => statements };
 }
 
 /** A database whose first write batch runs `between` first: another member's writes, landing after this save's read. */
-function racedOnce(...between: (() => Promise<unknown>)[]) {
+function racedOnce(
+	...between: (() => Promise<void> | Promise<boolean>)[]
+): D1Database {
 	let raced = false;
+
 	return new Proxy(db, {
 		get(target, property) {
 			if (property === "batch")
 				return async (statements: D1PreparedStatement[]) => {
 					if (!raced) {
 						raced = true;
+
 						for (const write of between) await write();
 					}
+
 					return db.batch(statements);
 				};
-			const value = Reflect.get(target, property);
-			return typeof value === "function" ? value.bind(target) : value;
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 async function bulkSuggestion(name: string, count: number) {
@@ -124,11 +154,15 @@ async function bulkSuggestion(name: string, count: number) {
 		)
 		.bind(count, name)
 		.all<{ id: number }>();
-	const id = (await saveSuggestion(
-		db,
-		name,
-		results.map((row) => row.id),
-	)) as number;
+
+	const id = present(
+		await saveSuggestion(
+			db,
+			name,
+			results.map((row) => row.id),
+		),
+	);
+
 	return { id, ids: results.map((row) => row.id) };
 }
 
@@ -144,6 +178,7 @@ async function addTx(
 		)
 		.bind(cents, rawName, over.note ?? null)
 		.run();
+
 	return Number(result.meta.last_row_id);
 }
 
@@ -153,13 +188,17 @@ const PETS: [string, number][] = [
 	["PETSMART 0412", 2399],
 	["AMAZON GIFT", 4520],
 ];
+
 /** A pending "Pet Care" suggestion over four transactions. */
 async function petCare(name = "Pet Care") {
 	const ids: number[] = [];
+
 	for (const [raw, cents] of PETS) ids.push(await addTx(raw, cents));
-	const id = (await saveSuggestion(db, name, ids)) as number;
+	const id = present(await saveSuggestion(db, name, ids));
+
 	return { id, ids };
 }
+
 const create = (
 	id: number,
 	ticked: number[],
@@ -190,6 +229,7 @@ const row = (id: number) =>
 			note: string | null;
 			updated_by: string | null;
 		}>();
+
 const categoryNamed = (name: string) =>
 	db
 		.prepare(
@@ -203,6 +243,7 @@ const categoryNamed = (name: string) =>
 			color: string;
 			archived: number;
 		}>();
+
 const status = async (id: number) =>
 	(
 		await db
@@ -243,10 +284,12 @@ describe("GET /settings with a suggestion", () => {
 		expect(at).toBeGreaterThan(section.indexOf('data-category="5"'));
 		expect(at).toBeLessThan(section.indexOf("Add category"));
 		const cardStart = section.lastIndexOf("<form", at);
+
 		const card = section.slice(
 			cardStart,
 			section.indexOf('data-row="new"', at),
 		);
+
 		// One card (decision 120, P135 A): no dashed box, no dashed icon, and no pills.
 		expect(card).toContain("rounded-control border border-rule");
 		expect(card).not.toContain("border-dashed");
@@ -256,12 +299,14 @@ describe("GET /settings with a suggestion", () => {
 		expect(card).toMatch(
 			/<p class="text-sm text-muted">Untick any that don&#39;t belong\.<\/p>/,
 		);
+
 		for (const n of ids) {
 			expect(card).toMatch(
 				new RegExp(`<input type="checkbox" name="ids" value="${n}"`),
 			);
 			expect(html).toContain(`name="shown" value="${n}"`);
 		}
+
 		const text = textOf(html);
 		expect(text).toContain("Chewy.com");
 		expect(text).toContain("$189.00");
@@ -283,6 +328,7 @@ describe("GET /settings with a suggestion", () => {
 	it("gives each transaction a note field that shows only while it is unticked, with no script", async () => {
 		const { id, ids } = await petCare();
 		const { html } = await get();
+
 		for (const n of ids) expect(html).toContain(`name="note_${n}"`);
 		expect(textOf(html)).toContain("A note for Amazon gift (optional)");
 		expect(textOf(html)).toContain(
@@ -316,6 +362,7 @@ describe("GET /settings with a suggestion", () => {
 	it("shows every pending suggestion, the one with the most transactions first", async () => {
 		await petCare();
 		const subs: number[] = [];
+
 		for (const raw of [
 			"NETFLIX",
 			"HULU",
@@ -327,9 +374,11 @@ describe("GET /settings with a suggestion", () => {
 			subs.push(await addTx(raw, 1299));
 		await saveSuggestion(db, "Subscriptions", subs);
 		const { html } = await get();
+
 		const names = [...html.matchAll(/A new category: ([^<]+)</g)].map(
 			(m) => m[1],
 		);
+
 		expect(names).toEqual(["Subscriptions", "Pet Care"]);
 	});
 
@@ -385,6 +434,7 @@ describe("creating the category", () => {
 	it("saves 100 unticked notes within D1's per-invocation query limit", async () => {
 		const { id, ids } = await bulkSuggestion("Note Batch", 101);
 		const counted = countingDb();
+
 		const { res } = await post(
 			`/settings/suggestions/${id}/create`,
 			[
@@ -394,6 +444,7 @@ describe("creating the category", () => {
 			],
 			{ bindings: { DB: counted.db } },
 		);
+
 		expect(res.status).toBe(200);
 		expect(counted.statements()).toBeLessThan(1000);
 	});
@@ -403,6 +454,7 @@ describe("creating the category", () => {
 		expect(res.status).toBe(200);
 		const created = await categoryNamed("Pet Care");
 		expect(created).toMatchObject({ icon: "tag", archived: 0 });
+
 		for (const n of ids.slice(0, 3))
 			expect(await row(n)).toMatchObject({
 				category_id: created?.id,
@@ -410,8 +462,8 @@ describe("creating the category", () => {
 				category_confidence: null,
 				updated_by: "demo",
 			});
-		expect((await row(ids[3] as number))?.category_id).toBeNull();
-		expect(await row(ids[3] as number)).toMatchObject({
+		expect((await row(itemAt(ids, 3)))?.category_id).toBeNull();
+		expect(await row(itemAt(ids, 3))).toMatchObject({
 			category_confidence: null,
 			jev_none_fit: 0,
 			category_suggestion_id: null,
@@ -433,7 +485,7 @@ describe("creating the category", () => {
 
 	it("says one transaction in the singular, and the left-out ones in the plural", async () => {
 		const { id, ids } = await petCare();
-		const { res } = await create(id, [ids[0] as number], ids);
+		const { res } = await create(id, [itemAt(ids, 0)], ids);
 		expect(trigger(res).toast?.message).toBe(
 			"Created Pet Care with 1 transaction",
 		);
@@ -453,14 +505,17 @@ describe("creating the category", () => {
 
 	it("makes a new Pet Care, not an error, when another member restores and renames the archived one before the write (decision 110)", async () => {
 		const { id, ids } = await petCare();
-		const archived = (
+
+		const archived = present(
 			await db
 				.prepare(
 					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 40) RETURNING id",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		await setArchived(db, archived, true, "2026-07-15");
+
 		// Another member restores and renames it once, between this save's read and its write.
 		const racing = racedOnce(
 			() => setArchived(db, archived, false, "2026-09-01"),
@@ -485,7 +540,7 @@ describe("creating the category", () => {
 		const made = await categoryNamed("Pet Care");
 		expect(made).toMatchObject({ archived: 0 });
 		expect(made?.id).not.toBe(archived);
-		expect(await row(ids[0] as number)).toMatchObject({
+		expect(await row(itemAt(ids, 0))).toMatchObject({
 			category_id: made?.id,
 			category_source: "user",
 		});
@@ -494,13 +549,15 @@ describe("creating the category", () => {
 
 	it("restores an active Pet Care that another member archived after the page was drawn, with the ticks in it (#522)", async () => {
 		const { id, ids } = await petCare();
-		const active = (
+
+		const active = present(
 			await db
 				.prepare(
 					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Pet Care', 'pet care', 'home', 'cat-plum', 40) RETURNING id",
 				)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		// Another member archives it once, between this save's read and its write.
 		const racing = racedOnce(() => setArchived(db, active, true, "2026-09-01"));
 
@@ -522,6 +579,7 @@ describe("creating the category", () => {
 			id: active,
 			archived: 0,
 		});
+
 		for (const n of ids.slice(0, 2))
 			expect(await row(n)).toMatchObject({
 				category_id: active,
@@ -532,13 +590,16 @@ describe("creating the category", () => {
 
 	it("saves a note written for an unticked transaction and asks Jev about it again right away, after the page has answered, telling it the note", async () => {
 		const { id, ids } = await petCare();
+
 		const bodies: {
-			state: Record<string, unknown>;
-			questions: { category: { criteria: Record<string, unknown> } };
+			state: object;
+			questions: { category: { criteria: object } };
 		}[] = [];
+
 		const jev = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 			if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
 			bodies.push(JSON.parse(String(init?.body)));
+
 			return Response.json({
 				answers: {
 					category: { type: "choice", choice: "Household", confidence: 0.91 },
@@ -548,7 +609,9 @@ describe("creating the category", () => {
 				},
 			});
 		});
+
 		vi.stubGlobal("fetch", jev);
+
 		const { res } = await post(
 			`/settings/suggestions/${id}/create`,
 			[
@@ -558,8 +621,9 @@ describe("creating the category", () => {
 			],
 			{ bindings: { JEV_API_KEY: "jev-key" } },
 		);
+
 		expect(res.status).toBe(200);
-		expect((await row(ids[3] as number))?.note).toBe("Birthday present");
+		expect((await row(itemAt(ids, 3)))?.note).toBe("Birthday present");
 		// The page answered before Jev was asked: the call is handed to waitUntil.
 		expect(jev).not.toHaveBeenCalled();
 		expect(waitUntil).toHaveBeenCalledTimes(1);
@@ -573,13 +637,14 @@ describe("creating the category", () => {
 		expect(Object.keys(bodies[0]?.questions.category.criteria ?? {})).toContain(
 			"Pet Care",
 		);
-		expect(await row(ids[3] as number)).toMatchObject({
+		expect(await row(itemAt(ids, 3))).toMatchObject({
 			category_source: "jev",
 		});
 	});
 
 	it("asks again about every unticked transaction, with or without a note", async () => {
 		const { id, ids } = await petCare();
+
 		const jev = vi.fn(async () =>
 			Response.json({
 				answers: {
@@ -594,6 +659,7 @@ describe("creating the category", () => {
 				},
 			}),
 		);
+
 		vi.stubGlobal("fetch", jev);
 		await post(
 			`/settings/suggestions/${id}/create`,
@@ -610,6 +676,7 @@ describe("creating the category", () => {
 	it("hands all 300 left-out transactions to one sorting instance, with no cap (decision 139)", async () => {
 		const { id, ids } = await bulkSuggestion("Large Batch", 301);
 		const counted = countingDb();
+
 		const jev = vi.fn(async () =>
 			Response.json({
 				answers: {
@@ -624,7 +691,9 @@ describe("creating the category", () => {
 				},
 			}),
 		);
+
 		vi.stubGlobal("fetch", jev);
+
 		const { res } = await post(
 			`/settings/suggestions/${id}/create`,
 			[
@@ -633,6 +702,7 @@ describe("creating the category", () => {
 			],
 			{ bindings: { DB: counted.db, DEMO: "false", JEV_API_KEY: "jev-key" } },
 		);
+
 		expect(res.status).toBe(200);
 		expect(waitUntil).toHaveBeenCalledTimes(1);
 		await background();
@@ -647,11 +717,13 @@ describe("creating the category", () => {
 		expect(params?.ids).toHaveLength(300);
 		expect(jev).toHaveBeenCalledTimes(40);
 		expect(counted.statements()).toBeLessThan(1000);
+
 		const rows = await db
 			.prepare(
 				"SELECT category_confidence FROM transactions WHERE raw_name LIKE 'Large Batch %'",
 			)
 			.all<{ category_confidence: number | null }>();
+
 		expect(
 			rows.results.filter((row) => row.category_confidence === 0.5),
 		).toHaveLength(40);
@@ -683,14 +755,16 @@ describe("creating the category", () => {
 		);
 		await background();
 		expect(jev).not.toHaveBeenCalled();
-		expect((await row(ids[3] as number))?.category_id).toBeNull();
+		expect((await row(itemAt(ids, 3)))?.category_id).toBeNull();
 	});
 
 	it("asks for a tick, keeping what was typed, and creates nothing", async () => {
 		const { id, ids } = await petCare();
+
 		const { res, html } = await create(id, [], ids, {
-			[ids[0] as number]: "Dog food",
+			[itemAt(ids, 0)]: "Dog food",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(
 			/role="alert"[^>]*>[^<]*Tick at least one transaction, or say No to this suggestion\./,
@@ -725,14 +799,17 @@ describe("creating the category", () => {
 		expect(textOf(again.html)).toContain(
 			"That suggestion was changed somewhere else. Here's the current list.",
 		);
+
 		const rows = await db
 			.prepare("SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'")
 			.first<{ n: number }>();
+
 		expect(rows?.n).toBe(1);
 	});
 
 	it("without JavaScript, posts and goes back to Settings at Categories", async () => {
 		const { id, ids } = await petCare();
+
 		const { res } = await post(
 			`/settings/suggestions/${id}/create`,
 			[
@@ -741,6 +818,7 @@ describe("creating the category", () => {
 			],
 			{ htmx: false },
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/categories");
 		expect(await categoryNamed("Pet Care")).not.toBeNull();
@@ -748,9 +826,11 @@ describe("creating the category", () => {
 
 	it("never says Jev in what it tells a person", async () => {
 		const { id, ids } = await petCare();
+
 		const { res, html } = await create(id, ids.slice(0, 2), ids, {
-			[ids[2] as number]: "x",
+			[itemAt(ids, 2)]: "x",
 		});
+
 		expect(JSON.stringify(trigger(res))).not.toMatch(/\bJev\b/);
 		expect(html).not.toMatch(/\bJev\b/);
 	});
@@ -767,9 +847,11 @@ describe("Never suggest lines in the card (decision 101)", () => {
 		const a1 = await addTx("CHEWY.COM", 6412);
 		const a2 = await addTx("CHEWY.COM", 4100);
 		const b = await addTx("PETSMART 0412", 2399);
-		const id = (await saveSuggestion(db, "Pet Care", [a1, a2, b])) as number;
+		const id = present(await saveSuggestion(db, "Pet Care", [a1, a2, b]));
+
 		return { id, a: [a1, a2], b };
 	}
+
 	const neverLine = (merchantKey: string) =>
 		db
 			.prepare(
@@ -786,6 +868,7 @@ describe("Never suggest lines in the card (decision 101)", () => {
 		expect(kept).toHaveLength(2);
 		expect(kept).toEqual(expect.arrayContaining(a));
 		const { html } = await get();
+
 		for (const id of a) expect(html).toContain(`name="shown" value="${id}"`);
 		expect(html).not.toContain(`name="shown" value="${b}"`);
 	});
@@ -811,12 +894,13 @@ describe("Never suggest lines in the card (decision 101)", () => {
 		await neverLine("PETSMART 0412");
 		const { res } = await create(id, ids, ids);
 		expect(res.status).toBe(200);
-		const [chewy, , petsmart] = ids;
-		expect(await row(petsmart as number)).toMatchObject({
+		const chewy = itemAt(ids, 0);
+		const petsmart = itemAt(ids, 2);
+		expect(await row(petsmart)).toMatchObject({
 			category_id: null,
 			category_source: null,
 		});
-		expect(await row(chewy as number)).toMatchObject({
+		expect(await row(chewy)).toMatchObject({
 			category_source: "user",
 		});
 	});
@@ -830,6 +914,7 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 			)
 			.bind(merchantKey, kind, decidedOn)
 			.run();
+
 	const lineId = async (merchantKey: string) =>
 		(
 			await db
@@ -839,6 +924,7 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 				.bind(merchantKey)
 				.first<{ id: number }>()
 		)?.id ?? 0;
+
 	/** The Never suggest line whose Remove takes focus after a swap: the one drawn with autofocus. */
 	const focusedLine = (html: string) =>
 		html
@@ -847,6 +933,7 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 				(item) =>
 					item.includes("autofocus") && item.includes("never-suggest/remove"),
 			) ?? "";
+
 	/** A charge whose bank text is `raw` and whose Plaid name is Venmo: the link a pair of lines goes by (decision 101). */
 	const charge = (raw: string) =>
 		db
@@ -855,6 +942,7 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 			)
 			.bind(`plaid-${crypto.randomUUID()}`, raw)
 			.run();
+
 	const linked = async () => {
 		await charge("VENMO 123");
 		await neverLine("VENMO 123", "income", "2026-10-04");
@@ -879,11 +967,13 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await linked();
 		await neverLine("Chewy", "income", "2026-10-05");
 		await neverLine("Petco", "income", "2026-09-01");
+
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
 			["merchant_key", "Venmo"],
 			["kind", "income"],
 		]);
+
 		expect(focusedLine(html)).toContain("for Petco");
 	});
 
@@ -894,16 +984,19 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await neverLine("VENMO 123", "income", "2026-10-04");
 		await neverLine("Chewy", "income", "2026-10-03");
 		await neverLine("Petco", "income", "2026-10-02");
+
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("VENMO 123"))],
 			["merchant_key", "VENMO 123"],
 			["kind", "income"],
 		]);
+
 		const stored = await db
 			.prepare(
 				"SELECT merchant_key AS key FROM never_suggest_rules ORDER BY key",
 			)
 			.all<{ key: string }>();
+
 		expect(stored.results.map((line) => line.key)).toEqual(["Chewy", "Petco"]);
 		expect(focusedLine(html)).toContain("for Chewy");
 	});
@@ -911,11 +1004,13 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 	it("with a line of another store left, lists only that line and focuses its Remove", async () => {
 		await linked();
 		await neverLine("Chewy", "income", "2026-09-01");
+
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
 			["merchant_key", "Venmo"],
 			["kind", "income"],
 		]);
+
 		expect(
 			html
 				.split("<li ")
@@ -926,11 +1021,13 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 
 	it("with no other line left, focuses the heading and says Tally hasn't been told No yet", async () => {
 		await linked();
+
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
 			["merchant_key", "Venmo"],
 			["kind", "income"],
 		]);
+
 		// With no line left, focus goes to the one muted line that says so.
 		expect(html).toMatch(/<p[^>]*tabindex="-1"[^>]*autofocus[^>]*>/);
 		expect(textOf(html)).toContain("Tally hasn't been told No yet.");
@@ -939,11 +1036,13 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 	it("the toast and announcement name the line clicked, though other lines went with it", async () => {
 		await linked();
 		await neverLine("Chewy", "income", "2026-09-01");
+
 		const { res } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
 			["merchant_key", "Venmo"],
 			["kind", "income"],
 		]);
+
 		expect(trigger(res).toast?.message).toBe(
 			"Removed. Tally can suggest that again.",
 		);
@@ -954,11 +1053,13 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 
 	it("a Remove with a live id but another kind changes nothing, and answers as stale", async () => {
 		await linked();
+
 		const { res, html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
 			["merchant_key", "Venmo"],
 			["kind", "transfer"],
 		]);
+
 		expect(trigger(res).toast).toBeUndefined();
 		expect(trigger(res).announce).toBe("Tally's rules list updated.");
 		expect(textOf(html)).toContain("Never suggest income for Venmo");
@@ -973,9 +1074,11 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 describe("dismissing the suggestion", () => {
 	it("turns it down, creates nothing, moves nothing, and asks Don't suggest Pet Care again in the card's place", async () => {
 		const { id, ids } = await petCare();
+
 		const had = await db
 			.prepare("SELECT COUNT(*) AS n FROM categories")
 			.first<{ n: number }>();
+
 		const { res, html } = await post(`/settings/suggestions/${id}/dismiss`);
 		expect(res.status).toBe(200);
 		expect(await status(id)).toBe("dismissed");
@@ -986,6 +1089,7 @@ describe("dismissing the suggestion", () => {
 					.first<{ n: number }>()
 			)?.n,
 		).toBe(had?.n);
+
 		for (const n of ids) expect((await row(n))?.category_id).toBeNull();
 		// No retires the card and asks decision 101's question where it was, with focus on the question (decision 120).
 		expect(html).toContain("Don&#39;t suggest Pet Care again for");
@@ -1010,6 +1114,7 @@ describe("dismissing the suggestion", () => {
 
 	it("without JavaScript, No shows the same question on the page", async () => {
 		const { id } = await petCare();
+
 		const { res, html } = await post(
 			`/settings/suggestions/${id}/dismiss`,
 			[],
@@ -1017,6 +1122,7 @@ describe("dismissing the suggestion", () => {
 				htmx: false,
 			},
 		);
+
 		expect(res.status).toBe(200);
 		expect(html).toContain("Don&#39;t suggest Pet Care again for");
 		expect(html).toContain('value="ask_yes"');

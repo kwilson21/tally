@@ -7,8 +7,10 @@ export type ReconnectEmailInput = {
 function lastSync(lastSyncedAt: string | null, timeZone: string): string {
 	if (!lastSyncedAt) return "before Tally recorded the last sync time";
 	const date = new Date(`${lastSyncedAt.replace(" ", "T")}Z`);
+
 	if (Number.isNaN(date.getTime()))
 		return "before Tally recorded the last sync time";
+
 	return new Intl.DateTimeFormat("en-US", {
 		month: "short",
 		day: "numeric",
@@ -32,6 +34,11 @@ function AccountChip({ name, mask }: { name: string; mask: string | null }) {
 			</span>
 		</span>
 	);
+}
+
+/** True when a component rendered to text (a Promise from an async part would not be). */
+function isRenderedText(value: unknown): value is string {
+	return typeof value === "string";
 }
 
 export function ReconnectEmail({
@@ -82,11 +89,14 @@ export function renderReconnectEmail(
 ) {
 	const subject = `${input.bank} needs you to sign in again`;
 	const text = `${input.bank} needs you to sign in again\n\nTally hasn't been able to sync ${input.bank} since ${lastSync(input.lastSyncedAt, timeZone)}.\n\nNot syncing\n${input.accounts.map(({ name, mask }) => `${name}${mask ? `, ending in ${mask}` : ""}`).join("\n")}\n\nOpen Accounts: https://tally.thesuperhuman.us/accounts\n\nTurn off in Settings`;
+
 	// The component has no async parts, so its JSX node renders synchronously to a string.
 	const html = (
 		<ReconnectEmail input={input} timeZone={timeZone} />
 	).toString();
-	if (typeof html !== "string")
+
+	if (!isRenderedText(html))
 		throw new Error("The reconnect email must render without async parts");
+
 	return { subject, html, text };
 }

@@ -17,6 +17,7 @@ export const loadsPlaid = (c: Context) => {
 		c.env.DEMO !== "true" &&
 		Boolean(c.env.PLAID_CLIENT_ID && c.env.PLAID_SECRET) &&
 		isValidKey(c.env.TOKEN_ENCRYPTION_KEY);
+
 	return enabled && (onAccounts(c.req.path) || c.req.path === "/setup");
 };
 

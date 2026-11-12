@@ -135,6 +135,7 @@ describe("decide", () => {
 				0.8,
 				off,
 			);
+
 			expect(result.flags.transfer).toBe(false);
 			expect(result.flags.reimbursement).toBe(false);
 		});

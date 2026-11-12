@@ -36,20 +36,22 @@ type App = { Bindings: Env };
 export const resort = new Hono<App>();
 
 /** The pages a Create can land on, by their path: each one draws its own page again for the Undo answer. */
-const AGAIN: Record<
-	string,
-	(c: Context<App>, back: URL) => Response | Promise<Response>
-> = {
+const AGAIN = {
 	"/settings/suggestions": suggestionsAgain,
 	"/transactions/organize": organizeAgain,
 	"/settings/categories": categoriesAgain,
-};
+} satisfies Record<
+	string,
+	(c: Context<App>, back: URL) => Response | Promise<Response>
+>;
 
 /** A back address that stays on this site: one path that starts with a single slash, with no backslash (#842 review). */
 const SITE_BASE = "http://tally.invalid";
+
 function siteBack(back: string): URL | null {
 	if (!back.startsWith("/") || back.startsWith("//") || back.includes("\\"))
 		return null;
+
 	return new URL(back, SITE_BASE);
 }
 
@@ -59,11 +61,13 @@ resort.get("/resort/progress", async (c) => {
 	const runId = c.req.query("run") ?? "";
 	const now = Date.now();
 	const current = await readRun(db);
+
 	if (current && current.id === runId && isRunning(current, now)) {
 		const run = { id: current.id, done: current.done, total: current.total };
 		// The quarter the page holds (`m`): the hidden region is sent again only when a new quarter is crossed (#821).
 		const held = heldQuarter(c.req.query("m"));
 		const milestone = recheckMilestone(recheckDone(run), run.total);
+
 		return c.html(
 			<>
 				<RecheckSentence run={run} page={recheckPage(c.req.query("p"))} />
@@ -71,15 +75,18 @@ resort.get("/resort/progress", async (c) => {
 			</>,
 		);
 	}
+
 	// Finished, unknown or expired: the whole line leaves the page, on every such answer (#842 round 2). Its wrapper is
 	// the target, so the sentence, the milestone region and the wrapper's spacing all go with it.
 	c.header("HX-Retarget", "#recheck");
 	c.header("HX-Reswap", "delete");
+
 	// The first answer claims the toast; every later one, and an unknown id, says nothing.
 	if (runId === "" || !(await closeToastOnce(db, runId, now)))
 		return c.body(null);
 	const page = recheckPage(c.req.query("p"));
 	const record = await readMoved(db, runId);
+
 	const words = record
 		? closingToast({
 				moved: record.rows.length,
@@ -87,31 +94,28 @@ resort.get("/resort/progress", async (c) => {
 				byCategory: record.byCategory,
 			})
 		: null;
+
+	// A key whose value is undefined is left out of the JSON header, so the toast carries only the keys its words call for.
 	c.header(
 		"HX-Trigger",
 		hxTrigger({
-			...(words
+			toast: words
 				? {
-						toast: {
-							message: words.message,
-							type: words.type,
-							// A background poll's toast never takes focus (toast.js, #821 owner feedback).
-							passive: true,
-							...(words.undo
-								? {
-										undo: runId,
-										undoExpiresInMs: UNDO_MS,
-										undoAction: "/resort/undo",
-										// The page the line sat on is the one Undo redraws (#842 round 2); an unknown key gets the default.
-										...(page ? { undoTarget: RECHECK_PAGES[page] } : {}),
-									}
-								: {}),
-						},
+						message: words.message,
+						type: words.type,
+						// A background poll's toast never takes focus (toast.js, #821 owner feedback).
+						passive: true,
+						undo: words.undo ? runId : undefined,
+						undoExpiresInMs: words.undo ? UNDO_MS : undefined,
+						undoAction: words.undo ? "/resort/undo" : undefined,
+						// The page the line sat on is the one Undo redraws (#842 round 2); an unknown key gets the default.
+						undoTarget: words.undo && page ? RECHECK_PAGES[page] : undefined,
 					}
-				: {}),
+				: undefined,
 			announce: words?.message ?? FINISHED_ANNOUNCEMENT,
 		}),
 	);
+
 	return c.body(null);
 });
 
@@ -124,10 +128,13 @@ resort.post("/resort/undo", async (c) => {
 	// The page to draw, from its own address: only a known page on this site (#842 review), else the Suggestions page.
 	const target = siteBack(String(form.get("back") ?? ""));
 	const known = target !== null && Object.hasOwn(AGAIN, target.pathname);
+
 	const outcome = runId
 		? await undoRun(c.env.DB, { runId, now: Date.now() })
 		: { expired: true, restored: 0, changedSince: 0 };
+
 	const { message, type } = undoWords(outcome);
+
 	if (!c.req.header("HX-Request")) {
 		return c.redirect(
 			known && target
@@ -136,6 +143,7 @@ resort.post("/resort/undo", async (c) => {
 			303,
 		);
 	}
+
 	c.header(
 		"HX-Trigger",
 		hxTrigger({
@@ -143,7 +151,13 @@ resort.post("/resort/undo", async (c) => {
 			announce: message,
 		}),
 	);
+
 	const page =
 		known && target ? target : new URL("/settings/suggestions", SITE_BASE);
-	return (AGAIN[page.pathname] ?? suggestionsAgain)(c, page);
+
+	// SAFETY: a pathname that is not one of AGAIN's three keys reads undefined, and the ?? falls back to suggestionsAgain.
+	return (AGAIN[page.pathname as keyof typeof AGAIN] ?? suggestionsAgain)(
+		c,
+		page,
+	);
 });

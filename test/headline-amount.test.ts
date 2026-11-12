@@ -39,6 +39,7 @@ describe("headlineAmountClass", () => {
 		const role = TYPE_ROLES.find(
 			(r) => r.role === "Headline amount, 9 or more characters",
 		);
+
 		expect(role?.classes.split(" ")).toContain(RULE);
 		expect(role?.classes.split(" ")).toContain("text-6xl");
 		expect(headlineAmountClass(role?.sample ?? "")).toBe(RULE);
@@ -154,10 +155,13 @@ describe("AccountsTop Net worth", () => {
 		const up = String(
 			await AccountsTop({ netWorthCents: 100000000, history: noDays }),
 		);
+
 		expect(classOf(up, "$1,000,000")).toContain(RULE);
+
 		const down = String(
 			await AccountsTop({ netWorthCents: -100000000, history: noDays }),
 		);
+
 		expect(classOf(down, "-$1,000,000")).toContain(RULE);
 	});
 
@@ -165,6 +169,7 @@ describe("AccountsTop Net worth", () => {
 		const html = String(
 			await AccountsTop({ netWorthCents: 100000000, history: noDays }),
 		);
+
 		expect(classOf(html, "$1,000,000")).toContain("tabular-nums");
 	});
 
@@ -172,6 +177,7 @@ describe("AccountsTop Net worth", () => {
 		const html = String(
 			await AccountsTop({ netWorthCents: 99999900, history: noDays }),
 		);
+
 		expect(classOf(html, "$999,999")).not.toContain("max-sm");
 	});
 });
@@ -181,10 +187,13 @@ describe("TrendsTop Spent so far", () => {
 		const big = String(
 			await TrendsTop({ month: "October", spent: "$1,000,000" }),
 		);
+
 		expect(classOf(big, "$1,000,000")).toContain(RULE);
+
 		const small = String(
 			await TrendsTop({ month: "October", spent: "$999,999" }),
 		);
+
 		expect(classOf(small, "$999,999")).not.toContain("max-sm");
 	});
 
@@ -192,6 +201,7 @@ describe("TrendsTop Spent so far", () => {
 		const big = String(
 			await TrendsTop({ month: "October", spent: "$1,000,000" }),
 		);
+
 		expect(classOf(big, "$1,000,000")).toContain("tabular-nums");
 	});
 });

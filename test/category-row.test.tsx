@@ -10,6 +10,7 @@ const groceries = {
 	color: "cat-blue",
 	budgetCents: 70000,
 };
+
 const gas = { ...groceries, id: 3, name: "Gas", budgetCents: null };
 
 /** One row, as the Settings list draws it: the route passes first and last from the list's position. */
@@ -106,6 +107,7 @@ describe("CategoryRow, open", () => {
 			values: { name: "" },
 			errors: { name: "Give the category a name." },
 		});
+
 		expect(html).toMatch(
 			/<p\s[^>]*role="alert"[^>]*>Give the category a name\.<\/p>/,
 		);
@@ -119,6 +121,7 @@ describe("CategoryRow, open", () => {
 			values: { name: "Typed" },
 			errors: { name: "Give the category a name." },
 		});
+
 		expect(detailsTag(html)).not.toMatch(/\sopen(\s|>|=)/);
 		expect(html).not.toContain("Typed");
 		expect(html).not.toContain('role="alert"');
@@ -151,6 +154,7 @@ describe("AddCategoryRow", () => {
 				errors={{ name: "That name is taken." }}
 			/>,
 		);
+
 		expect(html).toMatch(/<details[^>]*\sopen(\s|>|=)/);
 		expect(html).toContain('id="new-category-form"');
 		expect(html).toContain('<label for="new-name"');
@@ -166,6 +170,7 @@ describe("AddCategoryRow", () => {
 		const html = renderToString(
 			<AddCategoryRow open={false} values={{ name: "Pets" }} />,
 		);
+
 		expect(html).not.toContain('value="Pets"');
 	});
 });

@@ -18,6 +18,35 @@ import { encryptToken } from "../src/plaid/token-crypto";
 const KEY = btoa("01234567890123456789012345678901");
 const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
 
+/** A JSON value, as a Plaid request or response carries one. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** A Plaid payload: an object of JSON values, such as a sync page or one transaction's overrides. */
+type JsonObject = { [key: string]: Json };
+
+/** A row of `SELECT *` or a column alias query: every value is a SQL string, number or null. */
+type SqlRow = Record<string, string | number | null>;
+
+/** A row of `SELECT *` from transactions: its id is a number, and the other columns are SQL values. */
+type TransactionRow = { id: number } & SqlRow;
+
+/** The row a query returned; fails the test when the query returned none. */
+function requireRow<Row>(row: Row | null | undefined): Row {
+	if (row === null || row === undefined)
+		throw new Error("expected the query to return a row");
+
+	return row;
+}
+
+/** The id at `index` of a list of ids; fails the test when there is no row there. */
+function idAt(ids: readonly number[], index: number): number {
+	const id = ids[index];
+
+	if (id === undefined) throw new Error(`no row at index ${index}`);
+
+	return id;
+}
+
 const account = {
 	account_id: "account-1",
 	name: "Everyday",
@@ -27,7 +56,7 @@ const account = {
 	balances: { current: 100 },
 };
 
-const page = (overrides: Record<string, unknown> = {}) => ({
+const page = (overrides: JsonObject = {}) => ({
 	added: [],
 	modified: [],
 	removed: [],
@@ -37,7 +66,7 @@ const page = (overrides: Record<string, unknown> = {}) => ({
 });
 
 /** A pending charge by default; `posted` turns it into the posted twin of "pending-1". */
-const pendingTx = (overrides: Record<string, unknown> = {}) => ({
+const pendingTx = (overrides: JsonObject = {}) => ({
 	transaction_id: "pending-1",
 	account_id: "account-1",
 	date: "2026-09-27",
@@ -49,7 +78,8 @@ const pendingTx = (overrides: Record<string, unknown> = {}) => ({
 	personal_finance_category: { primary: "GENERAL_MERCHANDISE" },
 	...overrides,
 });
-const postedTx = (overrides: Record<string, unknown> = {}) =>
+
+const postedTx = (overrides: JsonObject = {}) =>
 	pendingTx({
 		transaction_id: "posted-1",
 		pending: false,
@@ -58,39 +88,40 @@ const postedTx = (overrides: Record<string, unknown> = {}) =>
 		...overrides,
 	});
 
-const response = (body: unknown, status = 200) =>
+const response = (body: Json, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
 	});
 
 /** Plaid answers /accounts/get with its account and /transactions/sync with whatever `sync` returns. */
-const plaidFetch = (
-	sync: (body: Record<string, unknown>) => Response | Promise<Response>,
-) =>
+const plaidFetch = (sync: (body: JsonObject) => Response | Promise<Response>) =>
 	vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 		if (String(url).endsWith("/accounts/get"))
 			return response({ accounts: [account] });
+
 		return sync(JSON.parse(String(init?.body)));
 	});
 
-const onePage = (overrides: Record<string, unknown>) =>
+const onePage = (overrides: JsonObject) =>
 	plaidFetch(() => response(page(overrides)));
 
 async function addItem() {
 	const encrypted = await encryptToken("secret-access-token", KEY);
+
 	const result = await env.DB.prepare(
 		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Bank', 'person@example.com', ?) RETURNING id",
 	)
 		.bind(encrypted, crypto.randomUUID())
 		.first<{ id: number }>();
-	return result?.id as number;
+
+	return requireRow(result).id;
 }
 
 const row = (plaidId: string) =>
 	env.DB.prepare("SELECT * FROM transactions WHERE plaid_transaction_id = ?")
 		.bind(plaidId)
-		.first<Record<string, unknown>>();
+		.first<TransactionRow>();
 
 const count = async (sql: string, ...args: unknown[]) =>
 	(
@@ -102,7 +133,8 @@ const count = async (sql: string, ...args: unknown[]) =>
 /** Adds the pending charge and returns its row id. */
 async function syncPending(item: number, overrides = {}) {
 	await syncItem(opts, item, onePage({ added: [pendingTx(overrides)] }));
-	return (await row("pending-1"))?.id as number;
+
+	return requireRow(await row("pending-1")).id;
 }
 
 /** The bank posts "pending-1" as "posted-1" and drops the pending id, as Plaid documents. */
@@ -125,12 +157,15 @@ async function splitInto(parent: number, a: number, b: number) {
 	)
 		.bind(parent)
 		.run();
+
 	const parentRow = await env.DB.prepare(
 		"SELECT account_id, date, raw_name FROM transactions WHERE id = ?",
 	)
 		.bind(parent)
 		.first<{ account_id: number; date: string; raw_name: string }>();
+
 	const ids: number[] = [];
+
 	for (const [cents, category] of [
 		[a, 1],
 		[b, 2],
@@ -147,8 +182,10 @@ async function splitInto(parent: number, a: number, b: number) {
 				category,
 			)
 			.first<{ id: number }>();
-		ids.push(part?.id as number);
+
+		ids.push(requireRow(part).id);
 	}
+
 	return ids;
 }
 
@@ -159,7 +196,8 @@ async function addRefund(purchase: number, cents = -300) {
 	)
 		.bind(cents, purchase, purchase)
 		.first<{ id: number }>();
-	return result?.id as number;
+
+	return requireRow(result).id;
 }
 
 async function addBillLinkedTo(
@@ -192,6 +230,7 @@ beforeEach(async () => {
 describe("a pending transaction", () => {
 	it("is stored with pending = 1 and counted in Spent like any other", async () => {
 		const item = await addItem();
+
 		const summary = await syncItem(
 			opts,
 			item,
@@ -206,14 +245,17 @@ describe("a pending transaction", () => {
 				],
 			}),
 		);
+
 		expect(summary).toMatchObject({ added: 2, modified: 0, removed: 0 });
 		expect((await row("pending-1"))?.pending).toBe(1);
 		expect((await row("posted-other"))?.pending).toBe(0);
+
 		const month = summarizeMonth({
 			month: "2026-09",
 			...(await loadMonth(env.DB, "2026-09")),
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(month.totalSpentCents).toBe(1234 + 2000);
 	});
 
@@ -364,10 +406,10 @@ describe("when the bank posts a pending transaction", () => {
 				],
 			}),
 		);
-		const pendingPurchase = (await row("pending-1"))?.id as number;
-		const purchase = (await row("purchase"))?.id as number;
+		const pendingPurchase = requireRow(await row("pending-1")).id;
+		const purchase = requireRow(await row("purchase")).id;
 		const refundOfPending = await addRefund(pendingPurchase);
-		const pendingRefund = (await row("pending-refund"))?.id as number;
+		const pendingRefund = requireRow(await row("pending-refund")).id;
 		await env.DB.prepare(
 			"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 		)
@@ -423,9 +465,11 @@ describe("when the bank posts a pending transaction", () => {
 			amount_cents: 1234,
 			split_removed_from_cents: null,
 		});
+
 		const { results } = await env.DB.prepare(
 			"SELECT id, parent_id, amount_cents, date, category_id FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
 		).all();
+
 		expect(results).toEqual([
 			{
 				id: parts[0],
@@ -454,7 +498,7 @@ describe("when the bank posts a pending transaction", () => {
 		)
 			.bind(id)
 			.run();
-		const refundOfPart = await addRefund(parts[0] as number, -100);
+		const refundOfPart = await addRefund(idAt(parts, 0), -100);
 
 		await post(item, { amount: 15 });
 
@@ -582,7 +626,7 @@ describe("a pending transaction the bank drops", () => {
 		await addBillLinkedTo(id);
 		const parts = await splitInto(id, 600, 634);
 		const refundOfPending = await addRefund(id);
-		const refundOfPart = await addRefund(parts[1] as number, -50);
+		const refundOfPart = await addRefund(idAt(parts, 1), -50);
 
 		expect(
 			await syncItem(
@@ -602,10 +646,12 @@ describe("a pending transaction the bank drops", () => {
 				"SELECT COUNT(*) AS n FROM transactions WHERE parent_id IS NOT NULL",
 			),
 		).toBe(0);
+
 		// Only the two refunds remain, and neither points at a row that's gone.
 		const { results } = await env.DB.prepare(
 			"SELECT id, refund_of_id FROM transactions ORDER BY id",
 		).all();
+
 		expect(results).toEqual([
 			{ id: refundOfPending, refund_of_id: null },
 			{ id: refundOfPart, refund_of_id: null },
@@ -632,6 +678,7 @@ describe("a pending transaction and its posted twin on different pages", () => {
 						}),
 					),
 		);
+
 	const postedPage = () =>
 		response(
 			page({
@@ -779,7 +826,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				added: [postedTx({ pending_transaction_id: null, ...posted })],
 			}),
 		);
-		return { pending: id, posted: (await row("posted-1"))?.id as number };
+
+		return { pending: id, posted: requireRow(await row("posted-1")).id };
 	}
 
 	const refundOf = async (id: number) =>
@@ -847,9 +895,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		await env.DB.prepare(
 			"INSERT INTO transactions(account_id,date,amount_cents,raw_name,details_asked,note_worth_writing,note_state) SELECT account_id,'2026-09-01',-1000,'NEVER FAILED',1,1,'queued' FROM transactions WHERE plaid_transaction_id = 'posted-1'",
 		).run();
+
 		const older = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = 'NEVER FAILED'",
 		).first<{ id: number }>();
+
 		expect(
 			(await transactionsNeedingNoteGuess(env.DB, 10)).map((tx) => tx.id),
 		).toEqual([older?.id, (await row("posted-1"))?.id]);
@@ -1289,11 +1339,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		it("moves a mixed-trip answer with its category, so the posted row keeps its split line (#233)", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item);
+
 			const [pick, other] = (
 				await env.DB.prepare(
 					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 				).all<{ id: number }>()
 			).results.map((row) => row.id);
+
 			await env.DB.prepare(
 				"UPDATE transactions SET category_confidence = 0.95, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
 			)
@@ -1326,11 +1378,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 					).all<{ id: number }>()
 				).results.map((row) => row.id);
+
 				await env.DB.prepare(
 					"UPDATE transactions SET category_confidence = 0.95, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
 				)
 					.bind(pick, other, pendingId)
 					.run();
+
 				return { pick, other };
 			}
 
@@ -1357,11 +1411,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			it("moves the answer onto a posted row with a person's pick, which keeps its category", async () => {
 				const item = await addItem();
 				const ids = await bothStored(item);
+
 				const [pick, other] = (
 					await env.DB.prepare(
 						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
 					).all<{ id: number }>()
 				).results.map((row) => row.id);
+
 				await env.DB.prepare(
 					"UPDATE transactions SET category_id = 3, category_source = 'user', category_confidence = NULL, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
 				)
@@ -1630,7 +1686,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
 				.bind(plaidId)
-				.first<Record<string, unknown>>();
+				.first<SqlRow>();
 
 		it("moves the pending row's name and its Tally answer, replacing the posted row's Jev answer for the old name", async () => {
 			const item = await addItem();
@@ -1819,12 +1875,14 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
 		const ids = await bothStored(item, loan);
 		await addBillLinkedTo(ids.pending);
+
 		const spent = async () =>
 			summarizeMonth({
 				month: "2026-09",
 				...(await loadMonth(env.DB, "2026-09")),
 				unpaidDueBillsCents: 0,
 			}).totalSpentCents;
+
 		await post(item, loan);
 
 		// The bill is paid by the posted row, which Plaid excluded as a card payment; the link counts it,
@@ -1873,7 +1931,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		)
 			.bind(name, transactionId)
 			.first<{ id: number }>();
-		return row?.id as number;
+
+		return requireRow(row).id;
 	}
 
 	const planPayer = async (planId: number) =>
@@ -1972,7 +2031,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			item,
 			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
 		);
-		const payment = (await row("posted-1"))?.id as number;
+		const payment = requireRow(await row("posted-1")).id;
+
 		return { payment, plan: await planPaidBy(payment) };
 	}
 
@@ -2035,11 +2095,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			item,
 			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
 		);
+
 		const [part] = await splitInto(
-			(await row("posted-1"))?.id as number,
+			requireRow(await row("posted-1")).id,
 			600,
 			634,
 		);
+
 		const plan = await planPaidBy(part ?? 0);
 		await syncItem(
 			opts,
@@ -2061,7 +2123,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			item,
 			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
 		);
-		const whole = (await row("posted-1"))?.id as number;
+		const whole = requireRow(await row("posted-1")).id;
 		const plan = await planPaidBy(whole);
 		await splitInto(whole, 600, 634);
 		await syncItem(
@@ -2174,7 +2236,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const purchase = (await row("purchase"))?.id as number;
+		const purchase = requireRow(await row("purchase")).id;
 		await env.DB.prepare(
 			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
 		)
@@ -2211,8 +2273,8 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const a = (await row("purchase-a"))?.id as number;
-		const b = (await row("purchase-b"))?.id as number;
+		const a = requireRow(await row("purchase-a")).id;
+		const b = requireRow(await row("purchase-b")).id;
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
@@ -2447,7 +2509,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item);
 		const parts = await splitInto(ids.pending, 600, 634);
-		const refundOfPart = await addRefund(parts[0] as number, -100);
+		const refundOfPart = await addRefund(idAt(parts, 0), -100);
 
 		await post(item, { amount: 15 });
 
@@ -2543,11 +2605,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item, {}, { amount: 15 });
 		await splitInto(ids.pending, 600, 634);
-		const suggestion = (
+
+		const suggestion = requireRow(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = 0.4, jev_category_id = 3, category_suggestion_id = ?, jev_none_fit = 1 WHERE id = ?",
 		)
@@ -2599,11 +2663,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item, {}, { amount: 15 });
 		await splitInto(ids.pending, 600, 634);
-		const suggestion = (
+
+		const suggestion = requireRow(
 			await env.DB.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Garden Supplies', 'pending') RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET category_id = 3, category_source = 'jev', category_confidence = 0.4 WHERE id = ?",
@@ -2661,7 +2727,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const purchase = (await row("purchase-a"))?.id as number;
+		const purchase = requireRow(await row("purchase-a")).id;
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
@@ -2695,7 +2761,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				],
 			}),
 		);
-		const purchase = (await row("purchase-a"))?.id as number;
+		const purchase = requireRow(await row("purchase-a")).id;
 		await env.DB.batch([
 			env.DB.prepare(
 				"UPDATE transactions SET refund_unlinked_purchase_date = '2026-09-10' WHERE id = ?",
@@ -2717,13 +2783,15 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const TRANSFER_IN = {
 			personal_finance_category: { primary: "TRANSFER_IN" },
 		};
+
 		const answer = (plaidId: string) =>
 			env.DB.prepare(
 				`SELECT own_name, excluded, excluded_source, flag_income, category_id, category_source, category_confidence, jev_category_id
 				 FROM transactions WHERE plaid_transaction_id = ?`,
 			)
 				.bind(plaidId)
-				.first<Record<string, unknown>>();
+				.first<SqlRow>();
+
 		/** Jev's answer on the posted row, made for the name it had before the pending row's name came. */
 		const jevAnswer = (id: number) =>
 			env.DB.prepare(
@@ -2731,6 +2799,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			)
 				.bind(id)
 				.run();
+
 		const keptAnswer = {
 			category_id: 3,
 			category_source: "jev",
@@ -2740,11 +2809,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 		it("keeps the posted row's Jev answer when Plaid excluded it as a transfer, and still takes the name", async () => {
 			const item = await addItem();
+
 			const ids = await bothStored(
 				item,
 				{ amount: -42 },
 				{ amount: -42, ...TRANSFER_IN },
 			);
+
 			expect(await row("posted-1")).toMatchObject({
 				excluded: 1,
 				excluded_source: "plaid",
@@ -2916,6 +2987,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 					"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ? OR parent_id = ?",
 				).bind(ids.pending, ids.pending),
 			]);
+
 			return { ...ids, parts };
 		}
 
@@ -2934,6 +3006,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			const { results } = await env.DB.prepare(
 				"SELECT id, parent_id, excluded, excluded_source FROM transactions WHERE parent_id IS NOT NULL ORDER BY id",
 			).all();
+
 			expect(results).toEqual(
 				ids.parts.map((id) => ({
 					id,
@@ -3008,11 +3081,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 			await post(item);
 
-			expect(await partState(parts[0] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 0))).toMatchObject({
 				excluded: 0,
 				excluded_source: "user",
 			});
-			expect(await partState(parts[1] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 1))).toMatchObject({
 				excluded: 1,
 				excluded_source: "user",
 			});
@@ -3041,11 +3114,11 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 			await post(item, { amount: -42 });
 
-			expect(await partState(parts[0] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 0))).toMatchObject({
 				credit_reviewed: 1,
 				credit_reviewed_by: "user",
 			});
-			expect(await partState(parts[1] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 1))).toMatchObject({
 				credit_reviewed: 0,
 				credit_reviewed_by: null,
 			});
@@ -3078,12 +3151,14 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				credit_reviewed: 1,
 				credit_reviewed_by: "user",
 			});
+
 			for (const id of parts) {
 				expect(await partState(id)).toMatchObject({
 					credit_reviewed: 1,
 					credit_reviewed_by: "user",
 				});
 			}
+
 			expect(await spent()).toBe(-4200);
 		});
 
@@ -3106,7 +3181,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 
 			await post(item);
 
-			expect(await partState(parts[0] as number)).toMatchObject({
+			expect(await partState(idAt(parts, 0))).toMatchObject({
 				excluded: 0,
 				excluded_source: "user",
 			});
@@ -3408,6 +3483,7 @@ describe("when the posted transaction is already stored as the link arrives", ()
 describe("Plaid's transfer exclusion and a pending transaction's posting", () => {
 	const TRANSFER = { personal_finance_category: { primary: "TRANSFER_OUT" } };
 	const TRANSFER_IN = { personal_finance_category: { primary: "TRANSFER_IN" } };
+
 	const SHOP = {
 		personal_finance_category: { primary: "GENERAL_MERCHANDISE" },
 	};
@@ -3429,6 +3505,7 @@ describe("Plaid's transfer exclusion and a pending transaction's posting", () =>
 				added: [postedTx({ pending_transaction_id: null, ...posted })],
 			}),
 		);
+
 		return id;
 	}
 
@@ -3504,9 +3581,11 @@ describe("Plaid's transfer exclusion and a pending transaction's posting", () =>
 			excluded_source: "jev",
 		});
 		await notATransferAnymore(item);
+
 		const parts = await env.DB.prepare(
 			"SELECT excluded, excluded_source FROM transactions WHERE parent_id IS NOT NULL",
 		).all();
+
 		expect(parts.results).toEqual([
 			{ excluded: 1, excluded_source: "jev" },
 			{ excluded: 1, excluded_source: "jev" },
@@ -3539,9 +3618,11 @@ describe("Plaid's transfer exclusion and a pending transaction's posting", () =>
 				env.DB.prepare("DELETE FROM plaid_items"),
 			]);
 			const item = await addItem();
+
 			const pending = late
 				? await postedFirst(item, TRANSFER, TRANSFER)
 				: await syncPending(item, TRANSFER);
+
 			expect(await row("pending-1")).toMatchObject({
 				excluded: 1,
 				excluded_source: "plaid",
@@ -3565,7 +3646,7 @@ describe("Plaid's transfer exclusion and a pending transaction's posting", () =>
 	it("keeps a credit a person reviewed counted when the posted row is a transfer stored first (decision 70)", async () => {
 		const item = await addItem();
 		const credit = { ...TRANSFER_IN, amount: -42 };
-		const pending = await postedFirst(item, credit as typeof SHOP, credit);
+		const pending = await postedFirst(item, credit, credit);
 		expect(await row("posted-1")).toMatchObject({
 			excluded: 1,
 			excluded_source: "plaid",

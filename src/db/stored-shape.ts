@@ -1,3 +1,4 @@
+import type { Json } from "../json";
 // Checks for JSON that was stored as text and is read back as a type. A cast (`JSON.parse(text) as Run`) claims the
 // shape without looking; these look, so a stored value of the wrong shape fails where it is read and not later, as a
 // property of undefined somewhere else. The checks name what the code reads and ignore keys it does not, because SQL
@@ -8,12 +9,14 @@ export type Guard<T> = (value: unknown) => value is T;
 
 export const isNumber: Guard<number> = (value): value is number =>
 	typeof value === "number" && Number.isFinite(value);
+
 export const isString: Guard<string> = (value): value is string =>
 	typeof value === "string";
+
 export const isBoolean: Guard<boolean> = (value): value is boolean =>
 	typeof value === "boolean";
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+const isObject = (value: unknown): value is { [key: string]: Json } =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The value is null, or passes `guard`. */
@@ -43,21 +46,23 @@ export const isRecordOf =
  * An object with a check for every key of T. Naming T means a key added to the type without a check is a compile error,
  * so the type and the check cannot drift apart. Keys the shape does not name are allowed.
  */
-export const isShape =
-	<T extends object>(shape: { [K in keyof T]-?: Guard<T[K]> }): Guard<T> =>
+export const hasStoredFields =
+	<T extends object>(fields: { [K in keyof T]-?: Guard<T[K]> }): Guard<T> =>
 	(value): value is T =>
 		isObject(value) &&
-		Object.entries(shape).every(([key, guard]) =>
-			(guard as Guard<unknown>)(value[key]),
+		Object.entries<Guard<unknown>>(fields).every(([key, guard]) =>
+			guard(value[key]),
 		);
 
 /** The stored text as a T, or null when it is not JSON or is not shaped like T. The caller decides what null means. */
 export function readStored<T>(text: string, guard: Guard<T>): T | null {
 	let value: unknown;
+
 	try {
 		value = JSON.parse(text);
 	} catch {
 		return null;
 	}
+
 	return guard(value) ? value : null;
 }

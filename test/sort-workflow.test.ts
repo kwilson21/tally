@@ -9,6 +9,9 @@ import { resetDemo } from "../src/demo/reset";
 // step's answer returns to run() and the write saves it.
 
 const db = env.DB;
+
+// The Jev key is a secret the Env type does not list; tests set and clear it on the same binding object.
+const secrets: Env & { JEV_API_KEY?: string } = env;
 const TODAY = "2026-09-22";
 
 /**
@@ -21,6 +24,7 @@ async function finished(
 ) {
 	for (const watched of await introspector.get())
 		await watched.waitForStatus("complete");
+
 	return instance.status();
 }
 
@@ -49,7 +53,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-	delete (env as { JEV_API_KEY?: string }).JEV_API_KEY;
+	delete secrets.JEV_API_KEY;
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -62,19 +66,23 @@ describe("SortWorkflow", () => {
 			)
 			.bind(TODAY)
 			.first<{ id: number }>();
+
 		const id = Number(row?.id);
-		(env as { JEV_API_KEY?: string }).JEV_API_KEY = "test-key";
+		secrets.JEV_API_KEY = "test-key";
 		const fetchJev = vi.fn(async () => jevReply());
 		vi.stubGlobal("fetch", fetchJev);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const introspector = await introspectWorkflow(env.SORT);
+
 		try {
 			await introspector.modifyAll(async (m) => {
 				await m.disableRetryDelays();
 			});
+
 			const instance = await env.SORT.create({
 				params: { ids: [id], bySync: false, rulesApplied: false },
 			});
+
 			const status = await finished(introspector, instance);
 			expect({ status: status.status, error: status.error?.name }).toEqual({
 				status: "complete",
@@ -83,13 +91,16 @@ describe("SortWorkflow", () => {
 		} finally {
 			await introspector.dispose();
 		}
+
 		expect(fetchJev).toHaveBeenCalledTimes(1);
+
 		const sorted = await db
 			.prepare(
 				"SELECT category_source AS source FROM transactions WHERE id = ?",
 			)
 			.bind(id)
 			.first<{ source: string | null }>();
+
 		expect(sorted?.source).toBe("jev");
 		expect(errors).not.toHaveBeenCalledWith(
 			expect.stringMatching(/^sorting: stopped/),
@@ -99,13 +110,16 @@ describe("SortWorkflow", () => {
 	it("runs the night's instance to completion with no Jev key, and logs no stop or failure", async () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const introspector = await introspectWorkflow(env.SORT);
+
 		try {
 			await introspector.modifyAll(async (m) => {
 				await m.disableRetryDelays();
 			});
+
 			const instance = await env.SORT.create({
 				params: { bySync: false, rulesApplied: false, night: TODAY },
 			});
+
 			const status = await finished(introspector, instance);
 			expect({ status: status.status, error: status.error?.name }).toEqual({
 				status: "complete",
@@ -114,6 +128,7 @@ describe("SortWorkflow", () => {
 		} finally {
 			await introspector.dispose();
 		}
+
 		expect(errors).not.toHaveBeenCalledWith(
 			expect.stringMatching(/stopped|failed/),
 		);
@@ -126,26 +141,33 @@ describe("SortWorkflow", () => {
 			)
 			.bind(TODAY)
 			.first<{ id: number }>();
+
 		const id = Number(row?.id);
-		(env as { JEV_API_KEY?: string }).JEV_API_KEY = "test-key";
+		secrets.JEV_API_KEY = "test-key";
 		let call = 0;
+
 		const fetchJev = vi.fn(async () => {
 			call += 1;
+
 			return call === 1
 				? new Response("{}", { status: 429, headers: { "retry-after": "5" } })
 				: jevReply();
 		});
+
 		vi.stubGlobal("fetch", fetchJev);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const introspector = await introspectWorkflow(env.SORT);
+
 		try {
 			await introspector.modifyAll(async (m) => {
 				await m.disableRetryDelays();
 				await m.disableSleeps();
 			});
+
 			const instance = await env.SORT.create({
 				params: { ids: [id], bySync: false, rulesApplied: false },
 			});
+
 			const status = await finished(introspector, instance);
 			expect({ status: status.status, error: status.error?.name }).toEqual({
 				status: "complete",
@@ -154,13 +176,16 @@ describe("SortWorkflow", () => {
 		} finally {
 			await introspector.dispose();
 		}
+
 		expect(fetchJev).toHaveBeenCalledTimes(2);
+
 		const sorted = await db
 			.prepare(
 				"SELECT category_source AS source FROM transactions WHERE id = ?",
 			)
 			.bind(id)
 			.first<{ source: string | null }>();
+
 		expect(sorted?.source).toBe("jev");
 		expect(errors).not.toHaveBeenCalledWith(
 			expect.stringMatching(/^sorting: stopped/),

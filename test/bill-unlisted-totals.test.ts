@@ -37,6 +37,7 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 				occurrence(8, "2026-10-30", "upcoming", 24000),
 			],
 		});
+
 		expect(totals.groups.paidCents).toBe(48000);
 		expect(totals.groups.upcomingCents).toBe(48000);
 		expect(totals.groups.dueCents).toBe(24000);
@@ -54,24 +55,28 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 
 	it("names no occurrence when every one a heading counts is a row", () => {
 		const paid = occurrence(3, "2026-10-15", "paid", 299);
+
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(3, 299)],
 			displayedOccurrences: [paid],
 			thisMonthOccurrences: [paid],
 		});
+
 		expect(totals.groups.paidCents).toBe(299);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
 
 	it("counts a paid occurrence once when it is both the shown row and this month's list", () => {
 		const paid = occurrence(8, "2026-10-09", "paid", 24000);
+
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(8, 24000, "weekly")],
 			displayedOccurrences: [paid],
 			thisMonthOccurrences: [paid],
 		});
+
 		expect(totals.groups.paidCents).toBe(24000);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
@@ -83,6 +88,7 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 			displayedOccurrences: [occurrence(8, "2026-10-16", "due", 24000)],
 			thisMonthOccurrences: [occurrence(8, "2026-11-06", "paid", 24000)],
 		});
+
 		expect(totals.groups.paidCents).toBe(0);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
@@ -97,6 +103,7 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 				occurrence(8, "2026-10-09", "paid", 24000),
 			],
 		});
+
 		expect(totals.groups.paidCents).toBe(48000);
 		expect(totals.unlisted.paid).toEqual([
 			{ billId: 8, dueDate: "2026-10-02" },
@@ -106,12 +113,14 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 
 	it("counts a listed paid row at its full amount, so the row and the total agree (decision 127)", () => {
 		const paid = occurrence(10, "2026-10-01", "paid", 10000);
+
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(10, 10000)],
 			displayedOccurrences: [paid],
 			thisMonthOccurrences: [paid],
 		});
+
 		expect(totals.groups.paidCents).toBe(10000);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
@@ -123,6 +132,7 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 			displayedOccurrences: [occurrence(10, "2026-11-01", "paid", 10000)],
 			thisMonthOccurrences: [],
 		});
+
 		expect(totals.groups.paidCents).toBe(10000);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
@@ -134,6 +144,7 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 			displayedOccurrences: [occurrence(10, "2026-11-01", "upcoming", 10000)],
 			thisMonthOccurrences: [occurrence(10, "2026-10-01", "paid", 10000)],
 		});
+
 		expect(totals.groups.paidCents).toBe(10000);
 		expect(totals.unlisted.paid).toEqual([
 			{ billId: 10, dueDate: "2026-10-01" },
@@ -151,6 +162,7 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 				occurrence(8, "2026-10-16", "due", 24000),
 			],
 		});
+
 		expect(totals.groups.overdueCents).toBe(24000);
 		expect(totals.unlisted.overdue).toEqual([
 			{ billId: 8, dueDate: "2026-10-09" },
@@ -190,6 +202,7 @@ describe("a monthly bill's handed-off unpaid occurrence stays in Overdue until t
 			...occurrence(10, "2026-10-01", "overdue", 120000),
 			paidCents: 60000,
 		};
+
 		const totals = rent([partPaid]);
 		expect(totals.groups.overdueCents).toBe(60000);
 		expect(totals.unlisted.overdue).toEqual([
@@ -202,6 +215,7 @@ describe("a monthly bill's handed-off unpaid occurrence stays in Overdue until t
 			[occurrence(10, "2026-10-28", "upcoming", 120000)],
 			"upcoming",
 		);
+
 		expect(totals.groups.upcomingCents).toBe(120000);
 		expect(totals.unlisted.upcoming).toEqual([
 			{ billId: 10, dueDate: "2026-10-28" },

@@ -41,11 +41,13 @@ export function BudgetSheet({
 	closeAttrs: Record<string, string>;
 }) {
 	const month = monthName(monthPeriod);
+
 	const transactionsHref = `/transactions?${new URLSearchParams({
 		category: String(category.id),
 		month: monthPeriod,
 		show: "spending",
 	})}`;
+
 	return (
 		<>
 			<div class="flex items-center gap-3">

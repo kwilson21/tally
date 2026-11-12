@@ -20,6 +20,7 @@ export function NotBudgetedRow({
 	autofocus?: boolean;
 }) {
 	const amount = categoryRowAmount(spentCents);
+
 	const content = (
 		<>
 			<CategoryIcon icon={icon} color={color} />
@@ -39,8 +40,10 @@ export function NotBudgetedRow({
 			{href && <span class="shrink-0 text-accent">Add a budget</span>}
 		</>
 	);
+
 	const className =
 		"flex min-h-11 items-center gap-4 py-2 text-ink no-underline";
+
 	return (
 		<li>
 			{href ? (

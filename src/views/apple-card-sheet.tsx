@@ -47,6 +47,7 @@ export function AppleCardSheet({
 		balanceOn === null
 			? "Optional. For a credit, type a minus first."
 			: `Optional. Left blank, ${shortDay(balanceOn, today)}'s balance stays. For a credit, type a minus first.`;
+
 	return (
 		<>
 			<div class="flex items-center gap-3">

@@ -9,40 +9,53 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { getTransaction, saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { isMethod, present } from "./helpers/present";
 
 const BASE = "http://tally.test";
+
 type TestApp = { Bindings: Env; Variables: { actor: string } };
+
+/** A row the tests read back by column name. */
+type Row = Record<string, string | number | null>;
+
 const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
 async function post(path: string, fields: Record<string, string>, htmx = true) {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
 let bakery: number;
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	await saveAiSwitches(env.DB, { details: false });
-	bakery = (
-		await env.DB.prepare(
-			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
-		).first<{ id: number }>()
-	)?.id as number;
+
+	const bakeryRow = await env.DB.prepare(
+		"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+	).first<{ id: number }>();
+
+	bakery = present(bakeryRow).id;
 });
 
 describe("a bank change's bill names end when a person sets the category (decision 99)", () => {
@@ -72,9 +85,11 @@ describe("a bank change's bill names end when a person sets the category (decisi
 					.bind(bakery)
 					.first(),
 			).toEqual({ split_removed_from_cents: null, split_removed_bills: null });
-			const data = (await (
+
+			const data: { transactions: Row[] } = await (
 				await exports.default.fetch(`${BASE}/settings/export/tally.json`)
-			).json()) as { transactions: Record<string, unknown>[] };
+			).json();
+
 			expect(data.transactions.find((row) => row.id === bakery)).toMatchObject({
 				split_removed_bills: null,
 			});
@@ -128,9 +143,11 @@ describe("GET /transactions/:id", () => {
 			.bind(bakery)
 			.run();
 		const { html } = await get(`/transactions/${bakery}`);
+
 		const describedBy = html.match(
 			/<input type="checkbox" role="switch" id="edit-income" name="income" value="1"[^>]*aria-describedby="([^"]+)"/,
 		)?.[1];
+
 		expect(describedBy).toBe(`income-suggestion-confidence-${bakery}`);
 		expect(html).toMatch(
 			new RegExp(
@@ -164,6 +181,7 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const { html } = await post(`/transactions/${bakery}`, {
 			merchant: "Local Bakery",
 			note: "",
@@ -173,14 +191,17 @@ describe("GET /transactions/:id", () => {
 			creditReviewedVisible: "1",
 			creditReviewed: "0",
 		});
+
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toMatch(
 			/<input type="checkbox" role="switch" id="edit-income" name="income" value="1" checked/,
 		);
 		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
+
 		const incomeLabel = sheet.match(
 			/<label class="([^"]+)"[^>]*><input type="checkbox" role="switch" id="edit-income" name="income"/,
 		);
+
 		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
 
@@ -193,6 +214,7 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const { html } = await post(`/transactions/${bakery}`, {
 			merchant: "Local Bakery",
 			note: "",
@@ -201,6 +223,7 @@ describe("GET /transactions/:id", () => {
 			creditReviewedVisible: "1",
 			creditReviewed: "0",
 		});
+
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
 		expect(sheet).not.toContain('id="income-suggestion-confidence-');
@@ -215,6 +238,7 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const { html } = await post(`/transactions/${bakery}`, {
 			merchant: "Local Bakery",
 			note: "",
@@ -223,11 +247,14 @@ describe("GET /transactions/:id", () => {
 			creditReviewedVisible: "1",
 			creditReviewed: "0",
 		});
+
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toContain("Tally&#39;s guess · 50% sure");
+
 		const incomeLabel = sheet.match(
 			/<label class="([^"]+)"[^>]*><input type="checkbox" role="switch" id="edit-income" name="income"/,
 		);
+
 		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
 
@@ -250,6 +277,7 @@ describe("GET /transactions/:id", () => {
 				).first<{ id: number }>()
 			)?.id,
 		);
+
 		await categorizePending({ DB: env.DB, JEV_API_KEY: "jev" }, async () =>
 			Response.json({
 				answers: {
@@ -264,25 +292,31 @@ describe("GET /transactions/:id", () => {
 				},
 			}),
 		);
+
 		const saved = await env.DB.prepare(
 			"SELECT flag_income, income_confidence, credit_reviewed FROM transactions WHERE id=?",
 		)
 			.bind(id)
 			.first();
+
 		expect(saved).toEqual({
 			flag_income: 0,
 			income_confidence: 0.71,
 			credit_reviewed: 0,
 		});
+
 		const { html: list } = await get(
 			"/transactions?show=all&month=all&q=PAYROLL",
 		);
+
 		const row = list.slice(list.indexOf(`data-transaction="${id}"`));
 		expect(row.slice(0, row.indexOf("</li>"))).toContain("Maybe income");
 		expect(row.slice(0, row.indexOf("</li>"))).not.toContain("Review credit");
+
 		const { html: spending } = await get(
 			"/transactions?show=spending&month=all&q=PAYROLL",
 		);
+
 		expect(spending).not.toContain(`data-transaction="${id}"`);
 		const { html: panel } = await get(`/transactions/${id}`);
 		const sheet = panel.slice(panel.indexOf('role="dialog"'));
@@ -299,6 +333,7 @@ describe("GET /transactions/:id", () => {
 		expect(sheet).toMatch(
 			/<p id="income-suggestion-confidence-\d+" class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization" aria-label="Why\? income" class="inline-flex min-h-11 min-w-11/,
 		);
+
 		const savedAsRefund = await post(`/transactions/${id}`, {
 			merchant: "PAYROLL CREDIT",
 			note: "",
@@ -307,13 +342,17 @@ describe("GET /transactions/:id", () => {
 			creditReviewedVisible: "1",
 			creditReviewed: "1",
 		});
+
 		expect(savedAsRefund.res.status).toBe(200);
+
 		const { html: reviewedList } = await get(
 			"/transactions?show=all&month=all&q=PAYROLL",
 		);
+
 		const reviewedRow = reviewedList.slice(
 			reviewedList.indexOf(`data-transaction="${id}"`),
 		);
+
 		expect(reviewedRow.slice(0, reviewedRow.indexOf("</li>"))).not.toContain(
 			"Maybe income",
 		);
@@ -335,18 +374,22 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const { html: list } = await get(
 			"/transactions?show=all&month=all&q=BAKERY",
 		);
+
 		const row = list.slice(list.indexOf(`data-transaction="${bakery}"`));
 		expect(row.slice(0, row.indexOf("</li>"))).toContain("Maybe income");
 		expect(row.slice(0, row.indexOf("</li>"))).not.toContain("Review credit");
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toContain("Tally&#39;s guess · 50% sure");
+
 		const incomeLabel = sheet.match(
 			/<label class="([^"]+)"[^>]*><input type="checkbox" role="switch" id="edit-income" name="income"/,
 		);
+
 		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
 
@@ -360,6 +403,7 @@ describe("GET /transactions/:id", () => {
 					).first<{ id: number }>()
 				)?.id,
 			);
+
 			const decision = decide(
 				{
 					category: { label: NONE_FIT, confidence: 0.5 },
@@ -368,12 +412,15 @@ describe("GET /transactions/:id", () => {
 				[{ id: 1, name: "Groceries" }],
 				JEV_THRESHOLD,
 			);
+
 			await saveJevResult(env.DB, id, decision, { switches: { income: true } });
+
 			const stored = await env.DB.prepare(
 				"SELECT flag_income, income_confidence, credit_reviewed FROM transactions WHERE id=?",
 			)
 				.bind(id)
 				.first();
+
 			expect(stored).toEqual({
 				flag_income: score >= 0.8 ? 1 : 0,
 				income_confidence: score >= 0.8 ? null : score,
@@ -390,6 +437,7 @@ describe("GET /transactions/:id", () => {
 				).first<{ id: number }>()
 			)?.id,
 		);
+
 		const panel = async (fields: Record<string, string>) => {
 			const { res, html } = await post(`/transactions/${id}`, {
 				category: "99",
@@ -400,9 +448,12 @@ describe("GET /transactions/:id", () => {
 				creditReviewedVisible: "1",
 				...fields,
 			});
+
 			expect(res.status).toBe(422);
+
 			return html.includes("Tally&#39;s guess · 71% sure");
 		};
+
 		const { html: firstRender } = await get(`/transactions/${id}`);
 		expect(firstRender).toContain("Tally&#39;s guess · 71% sure");
 		expect(await panel({ creditReviewed: "1" })).toBe(false);
@@ -421,6 +472,7 @@ describe("GET /transactions/:id", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('ai_income', 'off') ON CONFLICT(key) DO UPDATE SET value = 'off'",
 		).run();
+
 		const id = Number(
 			(
 				await env.DB.prepare(
@@ -428,6 +480,7 @@ describe("GET /transactions/:id", () => {
 				).first<{ id: number }>()
 			)?.id,
 		);
+
 		await categorizePending({ DB: env.DB, JEV_API_KEY: "jev" }, async () =>
 			Response.json({
 				answers: {
@@ -442,15 +495,19 @@ describe("GET /transactions/:id", () => {
 				},
 			}),
 		);
+
 		const saved = await env.DB.prepare(
 			"SELECT flag_income, income_confidence FROM transactions WHERE id=?",
 		)
 			.bind(id)
 			.first();
+
 		expect(saved).toEqual({ flag_income: 0, income_confidence: null });
+
 		const { html: list } = await get(
 			"/transactions?show=all&month=all&q=OFF%20PAYCHECK",
 		);
+
 		expect(list).not.toContain("Maybe income");
 		const { html: panel } = await get(`/transactions/${id}`);
 		expect(panel).not.toContain("Tally&#39;s guess · 95% sure");
@@ -460,20 +517,23 @@ describe("GET /transactions/:id", () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE REFUND SHOP', 1)",
 		).run();
+
 		const purchase = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (1,'2026-09-10',1000,'RULE REFUND SHOP','RULE REFUND SHOP',1,'merchant_rule') RETURNING id",
 		).first<{ id: number }>();
+
 		const refund = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source,credit_reviewed,refund_of_id) VALUES (1,'2026-09-11',-200,'RULE REFUND SHOP','RULE REFUND SHOP',1,'merchant_rule',1,?) RETURNING id",
 		)
 			.bind(purchase?.id)
 			.first<{ id: number }>();
+
 		expect(
 			await env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id=?")
 				.bind(refund?.id)
 				.first(),
 		).toEqual({ refund_of_id: purchase?.id });
-		expect(await getTransaction(env.DB, refund?.id as number)).toMatchObject({
+		expect(await getTransaction(env.DB, present(refund).id)).toMatchObject({
 			refundOfId: purchase?.id,
 			merchantRuleCategoryId: 1,
 			followsPurchase: true,
@@ -504,6 +564,7 @@ describe("GET /transactions/:id", () => {
 				).first<{ id: number }>()
 			)?.id,
 		);
+
 		await categorizePending({ DB: env.DB, JEV_API_KEY: "jev" }, async () =>
 			Response.json({
 				answers: {
@@ -518,6 +579,7 @@ describe("GET /transactions/:id", () => {
 				},
 			}),
 		);
+
 		const saved = await env.DB.prepare(
 			"SELECT category_id, category_source, jev_category_id FROM transactions WHERE id=?",
 		)
@@ -527,6 +589,7 @@ describe("GET /transactions/:id", () => {
 				category_source: string | null;
 				jev_category_id: number | null;
 			}>();
+
 		expect(saved).toMatchObject({
 			category_id: null,
 			category_source: null,
@@ -538,9 +601,11 @@ describe("GET /transactions/:id", () => {
 			/<span class="relative inline-flex rounded-full border border-dashed border-ink">[\s\S]*?<input type="radio" name="category" value="1"/,
 		);
 		expect(sheet.indexOf('value="1"')).toBeLessThan(sheet.indexOf('value="2"'));
+
 		const describedBy = sheet.match(
 			/<input type="radio" name="category" value="1"[^>]*aria-describedby="([^"]+)"/,
 		)?.[1];
+
 		expect(describedBy).toBeTruthy();
 		expect(sheet).toMatch(
 			new RegExp(
@@ -557,9 +622,11 @@ describe("GET /transactions/:id", () => {
 				).first<{ id: number }>()
 			)?.id,
 		);
+
 		const suggestion = await env.DB.prepare(
 			"INSERT INTO category_suggestions (name,status) VALUES ('Pet Care','pending') RETURNING id",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_suggestion_id=? WHERE id=?",
 		)
@@ -568,9 +635,11 @@ describe("GET /transactions/:id", () => {
 		const { html: sheetHtml } = await get(`/transactions/${id}`);
 		const sheet = sheetHtml.slice(sheetHtml.indexOf('role="dialog"'));
 		expect(sheet).not.toContain("Suggested");
+
 		const { html } = await get(
 			"/transactions?month=all&q=PENDING%20NEW%20CATEGORY",
 		);
+
 		expect(html).toContain("Maybe new: Pet Care");
 		expect(html).toContain("PENDING NEW CATEGORY");
 	});
@@ -583,6 +652,7 @@ describe("GET /transactions/:id", () => {
 				).first<{ id: number }>()
 			)?.id,
 		);
+
 		await env.DB.prepare(
 			"UPDATE transactions SET jev_category_id=1,category_confidence=? WHERE id=?",
 		)
@@ -640,6 +710,7 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 		)
@@ -653,15 +724,18 @@ describe("GET /transactions/:id", () => {
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toMatch(/name="always" value="1" checked/);
+
 		const savedName = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
 				name: string;
 			}>()
 		)?.name;
+
 		expect(sheet).toContain(
 			`Local Bakery is always ${savedName}. Untick it and save to remove the rule.`,
 		);
 		expect(sheet).not.toContain("remove it in Settings first");
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "2",
 			merchant: "Local Bakery",
@@ -672,6 +746,7 @@ describe("GET /transactions/:id", () => {
 			always_was: "1",
 			rule_category_was: "2",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -695,6 +770,7 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 		)
@@ -705,11 +781,13 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(merchantKey)
 			.run();
+
 		const archivedName = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
 				name: string;
 			}>()
 		)?.name;
+
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 2",
 		).run();
@@ -731,6 +809,7 @@ describe("GET /transactions/:id", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		expect(res.status).toBe(422);
 		expect(refused).toMatch(/name="always" value="1" checked/);
 		expect(refused).toContain(hint);
@@ -744,6 +823,7 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 		)
@@ -754,6 +834,7 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(merchantKey)
 			.run();
+
 		const { res, html } = await post(`/transactions/${bakery}`, {
 			category: "2",
 			always: "1",
@@ -765,11 +846,13 @@ describe("GET /transactions/:id", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		const savedName = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
 				name: string;
 			}>()
 		)?.name;
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Keep the note under 500 characters.");
 		expect(html).toMatch(/name="always" value="1" checked/);
@@ -786,6 +869,7 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 		)
@@ -802,12 +886,14 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(merchantKey)
 			.run();
+
 		const categoryName = async (id: number) =>
 			(
 				await env.DB.prepare("SELECT name FROM categories WHERE id = ?")
 					.bind(id)
 					.first<{ name: string }>()
 			)?.name;
+
 		const postedName = await categoryName(2);
 		const otherTabName = await categoryName(3);
 		expect(postedName).not.toBe(otherTabName);
@@ -823,6 +909,7 @@ describe("GET /transactions/:id", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toContain(
 			`Local Bakery is always ${postedName}. Untick it and save to remove the rule.`,
@@ -840,6 +927,7 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 		)
@@ -850,6 +938,7 @@ describe("GET /transactions/:id", () => {
 		)
 			.bind(merchantKey)
 			.run();
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "3",
 			always: "1",
@@ -861,6 +950,7 @@ describe("GET /transactions/:id", () => {
 			always_was: "1",
 			rule_category_was: "2",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -884,6 +974,7 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
 		)
@@ -900,6 +991,7 @@ describe("GET /transactions/:id", () => {
 		// The rule is for another category, so it doesn't match this transaction and the hint says nothing of it (#353).
 		expect(sheet).toContain("Leave it unticked to change just this one.");
 		expect(sheet).not.toContain("Untick it and save to remove the rule.");
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "2",
 			always: "1",
@@ -910,6 +1002,7 @@ describe("GET /transactions/:id", () => {
 			creditReviewed: "0",
 			merchant_rule_was: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -928,12 +1021,14 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first<{ key: string }>()
 		)?.key;
+
 		const rule = () =>
 			env.DB.prepare(
 				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 			)
 				.bind(merchantKey)
 				.first<{ default_category_id: number | null }>();
+
 		const fields = {
 			category: "2",
 			merchant: "Local Bakery",
@@ -942,29 +1037,34 @@ describe("GET /transactions/:id", () => {
 			income: "0",
 			creditReviewed: "0",
 		};
+
 		await post(`/transactions/${bakery}`, fields);
 		expect((await rule())?.default_category_id ?? null).toBeNull();
+
 		const ticked = await post(`/transactions/${bakery}`, {
 			...fields,
 			always: "1",
 		});
+
 		expect(ticked.res.status).toBe(200);
 		expect((await rule())?.default_category_id).toBe(2);
 	});
 
 	it("names the store in the rule tick and its hint, never a transaction's own name (#353)", async () => {
-		const merchantKey = (
-			await env.DB.prepare(
-				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
-			)
-				.bind(bakery)
-				.first<{ key: string }>()
-		)?.key as string;
+		const merchantRow = await env.DB.prepare(
+			"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+		)
+			.bind(bakery)
+			.first<{ key: string }>();
+
+		const merchantKey = present(merchantRow).key;
+
 		const savedName = (
 			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
 				name: string;
 			}>()
 		)?.name;
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Amazon') ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
@@ -973,11 +1073,14 @@ describe("GET /transactions/:id", () => {
 				"UPDATE transactions SET own_name = 'Dog bed', is_split = 1 WHERE id = ?",
 			).bind(bakery),
 		]);
-		const part = (await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, '2026-10-02', 300, 'SQ *LOCAL BAKERY 4432', ?) RETURNING id",
-		)
-			.bind(bakery)
-			.first<{ id: number }>()) as { id: number };
+
+		const part = present(
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, '2026-10-02', 300, 'SQ *LOCAL BAKERY 4432', ?) RETURNING id",
+			)
+				.bind(bakery)
+				.first<{ id: number }>(),
+		);
 
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
@@ -1015,6 +1118,7 @@ describe("GET /transactions/:id", () => {
 			income: "0",
 			creditReviewed: "0",
 		});
+
 		expect(res.status).toBe(422);
 		expect(refused).toContain("Use this category for Amazon from now on");
 		expect(refused).not.toContain("Use this category for Dog bed");
@@ -1026,6 +1130,7 @@ describe("GET /transactions/:id", () => {
 				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
 			).first<{ id: number }>()
 		)?.id;
+
 		const { html } = await get(`/transactions/${paypal}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toMatch(/<h2 id="edit-title"[^>]*>Xyzshop<\/h2>/);
@@ -1035,6 +1140,7 @@ describe("GET /transactions/:id", () => {
 
 	it("keeps an unbroken merchant name inside the edit-sheet heading", async () => {
 		const longName = "x".repeat(48);
+
 		const id = Number(
 			(
 				await env.DB.prepare(
@@ -1044,6 +1150,7 @@ describe("GET /transactions/:id", () => {
 					.first<{ id: number }>()
 			)?.id,
 		);
+
 		const { html } = await get(`/transactions/${id}`);
 		const heading = html.match(/<h2 id="edit-title"[^>]*>/)?.[0] ?? "";
 		expect(heading).toMatch(/class="[^"]*\bmin-w-0\b[^"]*\bwrap-anywhere\b/);
@@ -1063,11 +1170,13 @@ describe("GET /transactions/:id", () => {
 		const split = await get("/transactions/999999/split");
 		expect(split.res.status).toBe(404);
 		expect(split.html).toContain("This page isn&#39;t here.");
+
 		const gone = await post(
 			"/transactions/999999/delete",
 			{ back: "/transactions" },
 			false,
 		);
+
 		expect(gone.res.status).toBe(404);
 		expect(gone.html).toContain("This page isn&#39;t here.");
 	});
@@ -1094,9 +1203,11 @@ describe("POST /transactions/:id", () => {
 			const personA = await env.DB.prepare(
 				"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
 			).first<{ id: number }>();
+
 			const personB = await env.DB.prepare(
 				"INSERT INTO household_people(name) VALUES ('Person B') RETURNING id",
 			).first<{ id: number }>();
+
 			const personAId = String(personA?.id);
 			const personBId = String(personB?.id);
 			await env.DB.prepare(
@@ -1104,6 +1215,7 @@ describe("POST /transactions/:id", () => {
 			)
 				.bind(personA?.id, bakery)
 				.run();
+
 			const fields = {
 				...save,
 				category: "invalid",
@@ -1115,8 +1227,10 @@ describe("POST /transactions/:id", () => {
 				for_person_id: field === "for_person_id" ? personBId : personAId,
 				for_person_id_was: personAId,
 			};
+
 			const error = await post(`/transactions/${bakery}`, fields);
 			expect(error.res.status).toBe(422);
+
 			for (const [name, value] of [
 				["note_was", "Old guess"],
 				["kind_was", "bill"],
@@ -1126,25 +1240,32 @@ describe("POST /transactions/:id", () => {
 					error.html.match(new RegExp(`name="${name}" value="${value}"`, "g")),
 				).toHaveLength(2);
 			expect(error.html).toContain('name="details_visible" value="0"');
+
 			if (field === "note")
 				expect(error.html).toContain(">New note</textarea>");
+
 			if (field === "kind")
 				expect(error.html).toMatch(/name="kind" value="one_off" checked/);
+
 			if (field === "for_person_id")
 				expect(error.html).toContain(
 					`name="for_person_id" value="${personBId}" checked`,
 				);
 
 			await post(`/transactions/${bakery}`, { ...fields, category: "2" });
+
 			const saved = await env.DB.prepare(
 				"SELECT note,note_guessed,kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
 			)
 				.bind(bakery)
-				.first<Record<string, unknown>>();
+				.first<Row>();
+
 			if (field === "note")
 				expect(saved).toMatchObject({ note: "New note", note_guessed: 0 });
+
 			if (field === "kind")
 				expect(saved).toMatchObject({ kind: "one_off", kind_guessed: 0 });
+
 			if (field === "for_person_id")
 				expect(saved).toMatchObject({
 					for_person_id: personB?.id,
@@ -1157,6 +1278,7 @@ describe("POST /transactions/:id", () => {
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET note='Old guess', note_guessed=1, note_state = 'guessed', kind='bill', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
 		)
@@ -1183,9 +1305,11 @@ describe("POST /transactions/:id", () => {
 			for_person_id: person?.id,
 			for_person_guessed: 1,
 		});
+
 		const another = await env.DB.prepare(
 			"INSERT INTO household_people(name) VALUES ('Person B') RETURNING id",
 		).first<{ id: number }>();
+
 		await post(`/transactions/${bakery}`, {
 			...save,
 			details_visible: "0",
@@ -1216,6 +1340,7 @@ describe("POST /transactions/:id", () => {
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET note='', note_guessed=0, kind='subscription', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
 		)
@@ -1255,6 +1380,7 @@ describe("POST /transactions/:id", () => {
 		const sheet = await get(`/transactions/${bakery}`);
 		expect(sheet.html).toContain('name="creditReviewedVisible"');
 		expect(sheet.html).toContain('name="creditReviewed"');
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			merchant: "Synthetic Payroll",
 			note: "Synthetic note",
@@ -1262,6 +1388,7 @@ describe("POST /transactions/:id", () => {
 			income: "1",
 			creditReviewedVisible: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -1529,16 +1656,20 @@ describe("POST /transactions/:id", () => {
 			)
 				.bind(bakery)
 				.run();
-			await post(`/transactions/${bakery}`, {
-				merchant: "Local Bakery",
-				note: "matrix",
-				back: "/transactions",
-				income_was: String(baseIncome),
-				...(nextIncome ? { income: "1" } : {}),
-				creditReviewed_was: String(baseReview),
-				...(choice ? { creditReviewed: "1" } : {}),
-				creditReviewedVisible: "1",
-			});
+
+			const fields = new Map([
+				["merchant", "Local Bakery"],
+				["note", "matrix"],
+				["back", "/transactions"],
+				["income_was", String(baseIncome)],
+				["creditReviewed_was", String(baseReview)],
+				["creditReviewedVisible", "1"],
+			]);
+
+			if (nextIncome) fields.set("income", "1");
+
+			if (choice) fields.set("creditReviewed", "1");
+			await post(`/transactions/${bakery}`, Object.fromEntries(fields));
 			expect(
 				await env.DB.prepare(
 					"SELECT flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE id=?",
@@ -1567,6 +1698,7 @@ describe("POST /transactions/:id", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			merchant: "Local Bakery",
 			note: "",
@@ -1574,6 +1706,7 @@ describe("POST /transactions/:id", () => {
 			income: "0",
 			creditReviewedVisible: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -1621,6 +1754,7 @@ describe("POST /transactions/:id", () => {
 			creditReviewedVisible: "1",
 			creditReviewed: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -1648,6 +1782,7 @@ describe("POST /transactions/:id", () => {
 		)
 			.bind(bakery)
 			.run();
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			merchant: "Local Bakery",
 			note: "",
@@ -1658,6 +1793,7 @@ describe("POST /transactions/:id", () => {
 			creditReviewed: "1",
 			creditReviewed_was: "0",
 		});
+
 		expect(sheet.html).toContain("Count as income");
 		expect(res.status).toBe(200);
 		expect(
@@ -1697,11 +1833,13 @@ describe("POST /transactions/:id", () => {
 				"SELECT id FROM transactions WHERE raw_name = 'PAYPAL *XYZSHOP'",
 			).first<{ id: number }>()
 		)?.id;
+
 		const { res } = await post(`/transactions/${paypal}`, {
 			...save,
 			name_pick: "",
 			merchant: "",
 		});
+
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
 			toast: { message: "Saved Xyzshop", type: "success" },
 			announce: "Saved. Xyzshop is now Eating Out.",
@@ -1712,6 +1850,7 @@ describe("POST /transactions/:id", () => {
 		const { html: sheet } = await get(
 			`/transactions/${bakery}?uncategorized=1`,
 		);
+
 		expect(sheet).toMatch(
 			/<form method="post"[^>]*hx-select-oob="#needs-count:innerHTML"/,
 		);
@@ -1726,6 +1865,7 @@ describe("POST /transactions/:id", () => {
 			...save,
 			income: "1",
 		});
+
 		expect(res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -1741,6 +1881,7 @@ describe("POST /transactions/:id", () => {
 			...save,
 			back: "/transactions",
 		});
+
 		expect(html).toMatch(
 			new RegExp(`<a href="/transactions/${bakery}"[^>]*autofocus`),
 		);
@@ -1758,6 +1899,7 @@ describe("POST /transactions/:id", () => {
 			{ ...save, back: "https://evil.example" },
 			false,
 		);
+
 		expect(res.headers.get("Location")).toBe("/transactions");
 	});
 
@@ -1767,6 +1909,7 @@ describe("POST /transactions/:id", () => {
 			category: "99",
 			note: "keep me",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/role="alert"[^>]*>Pick a category from the list\./);
 		expect(html).toContain("keep me");
@@ -1839,9 +1982,11 @@ describe("who picked the category", () => {
 			back: "/transactions",
 			always: "1",
 		});
+
 		const rows = await env.DB.prepare(
 			"SELECT id,category_id AS categoryId,category_source AS categorySource FROM transactions WHERE id IN (9800,9801) ORDER BY id",
 		).all();
+
 		expect(rows.results).toEqual([
 			{ id: 9800, categoryId: 2, categorySource: "merchant_rule" },
 			{ id: 9801, categoryId: 4, categorySource: "user" },
@@ -1850,12 +1995,14 @@ describe("who picked the category", () => {
 
 	it("goes away once a person chooses the category", async () => {
 		await setSource("jev", 0.9);
+
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "1",
 			merchant: "Local Bakery",
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(res.status).toBe(200);
 		expect((await get(`/transactions/${bakery}`)).html).not.toContain(
 			"Picked by Tally",
@@ -1865,11 +2012,12 @@ describe("who picked the category", () => {
 
 describe("excluding a transaction (spec §6, #27)", () => {
 	const transferId = async () =>
-		(
+		present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'ONLINE TRANSFER TO SAV ...5678' ORDER BY date DESC",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
+
 	// The edit form's box, not anything in the list's filters.
 	const checkbox =
 		/<form method="post"[\s\S]*<input type="checkbox" role="switch" id="edit-exclude" name="excluded" value="1"([^>]*)>/;
@@ -1879,8 +2027,10 @@ describe("excluding a transaction (spec §6, #27)", () => {
 		expect(bakerySheet).toMatch(checkbox);
 		expect(bakerySheet.match(checkbox)?.[1]).not.toContain("checked");
 		expect(bakerySheet).toContain("Exclude from budget");
+
 		const transferSheet = (await get(`/transactions/${await transferId()}`))
 			.html;
+
 		expect(transferSheet.match(checkbox)?.[1]).toContain("checked");
 	});
 
@@ -1890,6 +2040,7 @@ describe("excluding a transaction (spec §6, #27)", () => {
 			excluded: "1",
 			back: "/transactions?uncategorized=1",
 		});
+
 		expect(rowCount(html)).toBe(9);
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
 			"Saved Local Bakery. It's excluded from the budget.",
@@ -1901,19 +2052,23 @@ describe("excluding a transaction (spec §6, #27)", () => {
 
 	it("includes an excluded transaction again when the box is cleared, and says so", async () => {
 		const id = await transferId();
+
 		const { res } = await post(`/transactions/${id}`, {
 			merchant: "",
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce).toMatch(
 			/It counts in the budget again\.$/,
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT excluded FROM transactions WHERE id = ?",
 		)
 			.bind(id)
 			.first<{ excluded: number }>();
+
 		expect(row?.excluded).toBe(0);
 	});
 
@@ -1925,21 +2080,23 @@ describe("excluding a transaction (spec §6, #27)", () => {
 			excluded: "1",
 			back: "/transactions",
 		});
+
 		expect(html.match(checkbox)?.[1]).toContain("checked");
 	});
 });
 
 describe("the edit panel's layout (owner's pick C, #27)", () => {
 	const reimbursement = async () =>
-		(
+		present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name = 'DR MARTIN FAMILY PRACTICE REFUND'",
-			).first<{ id: number }>()
-		)?.id as number;
+			).first<{ id: number }>(),
+		).id;
 
 	it("keeps each transaction detail in its own closed row", async () => {
 		const { html } = await get(`/transactions/${bakery}`);
 		expect(html).not.toMatch(/<details[^>]*\bopen/);
+
 		for (const row of [
 			"detail-name",
 			"detail-note",
@@ -1968,6 +2125,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(/<details id="detail-name"[^>]*\bopen/);
 		expect(html).toMatch(/name="merchant"[^>]*value="Corner Bakery"/);
@@ -2015,6 +2173,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 			excluded: "1",
 			back: "/transactions",
 		});
+
 		expect(saved.res.status).toBe(200);
 		expect(
 			await env.DB.prepare(
@@ -2029,10 +2188,12 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 	// Decision 118: a sheet's foot has no keys' details, so the keys are only ever drawn on the page behind it.
 	it("draws no Keyboard shortcuts disclosure in the edit sheet's foot", async () => {
 		const html = (await get(`/transactions/${bakery}`)).html;
+
 		const sheet = html.slice(
 			html.indexOf('id="edit-title"'),
 			html.indexOf("</section>", html.indexOf('id="edit-title"')),
 		);
+
 		expect(sheet).not.toContain("Keyboard shortcuts");
 	});
 });
@@ -2042,18 +2203,24 @@ describe("a For person removed while the panel is saving", () => {
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people (name) VALUES ('Sam')",
 		).run();
+
 		const personId = Number(person.meta.last_row_id);
+
 		const before = await env.DB.prepare(
 			"SELECT note, for_person_id FROM transactions WHERE id = ?",
 		)
 			.bind(bakery)
 			.first();
+
 		// The panel's list still holds Sam when the save starts; Sam is removed just before the save's
 		// batch writes, the way settings removes a person between this page's load and its write.
 		let removed = false;
-		const removingDb = new Proxy(env.DB, {
+
+		const removingDb: D1Database = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				// SAFETY: the code under test reads only D1 member names (batch, prepare, ...), each a key of D1Database.
+				const value: unknown = target[property as keyof D1Database];
+
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						if (!removed) {
@@ -2067,17 +2234,20 @@ describe("a For person removed while the panel is saving", () => {
 								).bind(personId),
 							]);
 						}
+
 						return target.batch(statements);
 					};
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
+
 		const editRoute = new Hono<TestApp>();
 		editRoute.use("*", async (c, next) => {
 			c.set("actor", "demo");
 			await next();
 		});
-		editRoute.route("/", transactions as unknown as Hono<TestApp>);
+		editRoute.route("/", transactions);
 
 		const res = await editRoute.request(
 			`/transactions/${bakery}`,
@@ -2097,6 +2267,7 @@ describe("a For person removed while the panel is saving", () => {
 			},
 			{ ...env, DB: removingDb },
 		);
+
 		const html = await res.text();
 
 		expect(removed).toBe(true);
@@ -2118,22 +2289,27 @@ describe("a For person removed while the panel is saving", () => {
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people (name) VALUES ('Sam')",
 		).run();
+
 		const personId = Number(person.meta.last_row_id);
 		await env.DB.prepare(
 			"UPDATE transactions SET for_person_id = ?, for_person_guessed = 0 WHERE id = ?",
 		)
 			.bind(personId, bakery)
 			.run();
+
 		const before = await env.DB.prepare(
 			"SELECT note FROM transactions WHERE id = ?",
 		)
 			.bind(bakery)
 			.first();
+
 		await get(`/transactions/${bakery}`);
+
 		const removed = await post("/settings/people", {
 			action: "remove",
 			person_id: String(personId),
 		});
+
 		expect(removed.res.status).toBe(200);
 
 		const { res, html } = await post(`/transactions/${bakery}`, {
@@ -2167,16 +2343,19 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 		)
 			.bind(STORE, rule)
 			.run();
+
 		const purchase = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (1,'2026-09-10',1000,?,?,?,'user') RETURNING id",
 		)
 			.bind(STORE, STORE, RULE)
 			.first<{ id: number }>();
+
 		const refund = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (1,'2026-09-11',-200,?,?,?,'user') RETURNING id",
 		)
 			.bind(STORE, STORE, RULE)
 			.first<{ id: number }>();
+
 		return { purchase: Number(purchase?.id), refund: Number(refund?.id) };
 	}
 
@@ -2194,6 +2373,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 
 	it("keeps the store's rule when Always was ticked and stays ticked in the save that links a refund", async () => {
 		const { purchase, refund } = await linkFixture(RULE);
+
 		const { res } = await post(`/transactions/${refund}`, {
 			back: "/transactions",
 			category: String(RULE),
@@ -2204,6 +2384,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 			merchant_was: STORE,
 			refund_of: String(purchase),
 		});
+
 		expect(res.status).toBe(200);
 		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
 		expect(await ruleOf()).toEqual({ default_category_id: RULE });
@@ -2211,6 +2392,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 
 	it("clears the store's rule when Always is unticked in the save that links a refund", async () => {
 		const { purchase, refund } = await linkFixture(RULE);
+
 		const { res } = await post(`/transactions/${refund}`, {
 			back: "/transactions",
 			category: String(RULE),
@@ -2220,6 +2402,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 			merchant_was: STORE,
 			refund_of: String(purchase),
 		});
+
 		expect(res.status).toBe(200);
 		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
 		expect(await ruleOf()).toEqual({ default_category_id: null });
@@ -2227,6 +2410,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 
 	it("creates no rule when a refund is linked and Always was never ticked", async () => {
 		const { purchase, refund } = await linkFixture(null);
+
 		const { res } = await post(`/transactions/${refund}`, {
 			back: "/transactions",
 			always_was: "0",
@@ -2235,6 +2419,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 			merchant_was: STORE,
 			refund_of: String(purchase),
 		});
+
 		expect(res.status).toBe(200);
 		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
 		expect(await ruleOf()).toEqual({ default_category_id: null });
@@ -2242,6 +2427,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 
 	it("creates no rule when Always is newly ticked in the save that links a refund", async () => {
 		const { purchase, refund } = await linkFixture(null);
+
 		const { res } = await post(`/transactions/${refund}`, {
 			back: "/transactions",
 			category: String(RULE),
@@ -2252,6 +2438,7 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 			merchant_was: STORE,
 			refund_of: String(purchase),
 		});
+
 		expect(res.status).toBe(200);
 		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
 		expect(await ruleOf()).toEqual({ default_category_id: null });
@@ -2273,11 +2460,13 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		)
 			.bind(CHECKING, STORE, STORE, GROCERIES)
 			.first<{ id: number }>();
+
 		const refund = await env.DB.prepare(
 			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (?,'2026-09-11',-200,?,?,?,'user') RETURNING id",
 		)
 			.bind(refundAccount, STORE, STORE, EATING_OUT)
 			.first<{ id: number }>();
+
 		return { purchase: Number(purchase?.id), refund: Number(refund?.id) };
 	}
 
@@ -2285,7 +2474,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 	const linkingSave = (
 		purchase: number,
 		fields: Record<string, string> = {},
-	): Record<string, string> => ({
+	) => ({
 		back: "/transactions",
 		category: "new",
 		new_category_name: NEW_NAME,
@@ -2310,10 +2499,12 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 
 	it("keeps the typed new category name when a 501-character note sends the panel back, saving nothing", async () => {
 		const { purchase, refund } = await linkFixture();
+
 		const { res, html } = await post(
 			`/transactions/${refund}`,
 			linkingSave(purchase, { note: "x".repeat(501) }),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Keep the note under 500 characters.");
 		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
@@ -2330,6 +2521,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		)
 			.bind(STORE, EATING_OUT)
 			.run();
+
 		const { res, html } = await post(
 			`/transactions/${refund}`,
 			linkingSave(purchase, {
@@ -2339,6 +2531,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 				rule_category_was: String(EATING_OUT),
 			}),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Keep the note under 500 characters.");
 		expect(html).toMatch(/<input[^>]*name="category" value="1"[^>]*checked/);
@@ -2354,10 +2547,12 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 
 	it("keeps the typed new category name when a cash refund's amount is not a sum of money", async () => {
 		const { purchase, refund } = await linkFixture(CASH);
+
 		const { res, html } = await post(
 			`/transactions/${refund}`,
 			linkingSave(purchase, { date: "2026-09-11", amount: "abc" }),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Enter an amount in dollars and cents.");
 		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
@@ -2375,10 +2570,12 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		)
 			.bind(CHECKING, STORE, STORE, EATING_OUT, purchase)
 			.run();
+
 		const { res, html } = await post(
 			`/transactions/${refund}`,
 			linkingSave(purchase),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("more than what");
 		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
@@ -2390,15 +2587,20 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 
 	it("keeps the typed new category name when the For person is removed during the save", async () => {
 		const { purchase, refund } = await linkFixture();
+
 		const person = await env.DB.prepare(
 			"INSERT INTO household_people (name) VALUES ('Sam')",
 		).run();
+
 		const personId = Number(person.meta.last_row_id);
 		// Sam is removed just before the save's batch writes, as settings removes a person mid-save.
 		let removed = false;
-		const removingDb = new Proxy(env.DB, {
+
+		const removingDb: D1Database = new Proxy(env.DB, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
+				// SAFETY: the code under test reads only D1 member names (batch, prepare, ...), each a key of D1Database.
+				const value: unknown = target[property as keyof D1Database];
+
 				if (property === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						if (!removed) {
@@ -2412,17 +2614,20 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 								).bind(personId),
 							]);
 						}
+
 						return target.batch(statements);
 					};
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as D1Database;
+		});
+
 		const editRoute = new Hono<TestApp>();
 		editRoute.use("*", async (c, next) => {
 			c.set("actor", "demo");
 			await next();
 		});
-		editRoute.route("/", transactions as unknown as Hono<TestApp>);
+		editRoute.route("/", transactions);
 
 		const res = await editRoute.request(
 			`/transactions/${refund}`,
@@ -2442,6 +2647,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 			},
 			{ ...env, DB: removingDb },
 		);
+
 		const html = await res.text();
 
 		expect(removed).toBe(true);
@@ -2461,10 +2667,12 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		)
 			.bind(purchase, refund)
 			.run();
+
 		const { res, html } = await post(
 			`/transactions/${refund}`,
 			linkingSave(purchase, { note: "x".repeat(501) }),
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain("Keep the note under 500 characters.");
 		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
@@ -2476,10 +2684,12 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 
 	it("draws the category as the purchase's, locked, which is what the refund counts in", async () => {
 		const { purchase, refund } = await linkFixture();
+
 		const { html } = await post(
 			`/transactions/${refund}`,
 			linkingSave(purchase, { note: "x".repeat(501) }),
 		);
+
 		expect(html).toMatch(/<fieldset[^>]*disabled/);
 		expect(html).toMatch(/<input[^>]*name="category" value="1"[^>]*checked/);
 		expect(html).not.toMatch(

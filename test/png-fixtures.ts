@@ -24,8 +24,10 @@ function pixels(
 	at: (x: number, y: number) => number[],
 ): number[] {
 	const out: number[] = [];
+
 	for (let y = 0; y < height; y++)
 		for (let x = 0; x < width; x++) out.push(...at(x, y));
+
 	return out;
 }
 

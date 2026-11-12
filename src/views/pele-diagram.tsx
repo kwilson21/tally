@@ -28,6 +28,7 @@ export function peleSvg(
 		idPrefix: id,
 		fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
 	});
+
 	return svg
 		.replace(/\sstyle="[^"]*"/g, "")
 		.replace(/\saria-roledescription="[^"]*"/, "")

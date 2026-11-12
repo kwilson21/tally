@@ -70,6 +70,7 @@ async function txn(
 			options.splitRemoved ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -119,17 +120,26 @@ const reply = () =>
 		},
 	});
 
+/** The state Jev is sent for a bank line: the fields the tests read. */
+type JevState = {
+	bank_description: string;
+	learned_category?: { category: string; rule: boolean };
+};
+
 /** A fake Jev that records each request's body, so a test can read what Jev was told. */
 function fakeJev() {
-	const sent: { description: string; state: Record<string, unknown> }[] = [];
+	const sent: { description: string; state: JevState }[] = [];
+
 	const fetchImpl = async (_url: string, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body));
 		sent.push({
 			description: body.state.bank_description,
 			state: body.state,
 		});
+
 		return reply();
 	};
+
 	return { sent, fetchImpl };
 }
 
@@ -200,19 +210,25 @@ describe("applyBankTextRules", () => {
 		const user = await txn(RAW_A, { category: groceries, source: "user" });
 		const jev = await txn(RAW_B, { category: groceries, source: "jev" });
 		const parent = await txn(RAW_A, { isSplit: 1 });
+
 		const removed = await txn(RAW_A, {
 			category: groceries,
 			splitRemoved: 500,
 		});
+
 		const other = await txn(OTHER, { category: groceries, source: "user" });
 		const unsorted = await txn(OTHER);
+
 		const before = await Promise.all(
 			[user, jev, parent, removed, other, unsorted].map(stateOf),
 		);
+
 		await applyBankTextRules(db);
+
 		const after = await Promise.all(
 			[user, jev, parent, removed, other, unsorted].map(stateOf),
 		);
+
 		expect(after).toEqual(before);
 		expect(after[0]).toMatchObject({ categoryId: groceries, source: "user" });
 		expect(after[1]).toMatchObject({ categoryId: groceries, source: "jev" });
@@ -257,27 +273,33 @@ describe("applyBankTextRules", () => {
 		await addRule(CLEANED, books);
 		// 250 different raw names (each with its own reference number) under one cleaned text: more than one chunk.
 		const ids: number[] = [];
+
 		for (let i = 0; i < 250; i++) {
 			ids.push(await txn(`SQ *LOCAL BAKERY ${1000 + i}`));
 		}
+
 		await applyBankTextRules(db);
+
 		const filled = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE category_source = 'merchant_rule' AND category_id = ?",
 			)
 			.bind(books)
 			.first<{ n: number }>();
+
 		expect(filled?.n).toBe(250);
 		// Marked with an old time: a row the second pass rewrote would show it.
 		await db
 			.prepare("UPDATE transactions SET updated_at = '2000-01-01 00:00:00'")
 			.run();
 		await applyBankTextRules(db);
+
 		const touched = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE updated_at != '2000-01-01 00:00:00'",
 			)
 			.first<{ n: number }>();
+
 		expect(touched?.n).toBe(0);
 		expect(ids).toHaveLength(250);
 	});
@@ -347,6 +369,7 @@ describe("the sync and the sort step", () => {
 		const books = await categoryId("Books & audio");
 		const eating = await categoryId("Eating Out");
 		await addRule(CLEANED, books);
+
 		for (const day of ["2026-10-01", "2026-10-02"]) {
 			await db
 				.prepare(
@@ -355,6 +378,7 @@ describe("the sync and the sort step", () => {
 				.bind(`plaid-${crypto.randomUUID()}`, day, RAW_A, eating)
 				.run();
 		}
+
 		await txn(RAW_B, { amount: -1499 });
 		const jev = fakeJev();
 		await runSortInstance(
@@ -378,9 +402,11 @@ describe("the learned lines", () => {
 		await txn(RAW_A);
 		await txn(RAW_B);
 		await applyBankTextRules(db);
+
 		const line = (await loadLearnedLines(db)).find(
 			(l) => l.cleanedText === CLEANED,
 		);
+
 		expect(line).toMatchObject({
 			categoryName: "Books & audio",
 			answers: 2,
@@ -422,16 +448,20 @@ describe("Forget and its Undo with a rule", () => {
 		const id = await forgetText(db, CLEANED);
 		expect(await ruleCount()).toBe(0);
 		expect(await undoForget(db, id)).toBe("undone");
+
 		const back = await db
 			.prepare(
 				"SELECT category_id AS categoryId FROM bank_text_rules WHERE cleaned_text = ?",
 			)
 			.bind(CLEANED)
 			.first<{ categoryId: number }>();
+
 		expect(back?.categoryId).toBe(books);
+
 		const forgotten = await db
 			.prepare("SELECT rule_category_id AS r FROM forgotten_texts")
 			.first<{ r: number | null }>();
+
 		expect(forgotten).toBeNull();
 	});
 
@@ -442,12 +472,14 @@ describe("Forget and its Undo with a rule", () => {
 		const id = await forgetText(db, CLEANED);
 		await addRule(CLEANED, eating);
 		expect(await undoForget(db, id)).toBe("undone");
+
 		const rule = await db
 			.prepare(
 				"SELECT category_id AS categoryId FROM bank_text_rules WHERE cleaned_text = ?",
 			)
 			.bind(CLEANED)
 			.first<{ categoryId: number }>();
+
 		expect(rule?.categoryId).toBe(eating);
 	});
 
@@ -469,12 +501,14 @@ describe("saving a rule", () => {
 		await saveBankTextRule(db, CLEANED, books);
 		await saveBankTextRule(db, CLEANED, eating);
 		expect(await ruleCount()).toBe(1);
+
 		const row = await db
 			.prepare(
 				"SELECT category_id AS categoryId FROM bank_text_rules WHERE cleaned_text = ?",
 			)
 			.bind(CLEANED)
 			.first<{ categoryId: number }>();
+
 		expect(row?.categoryId).toBe(eating);
 	});
 });
@@ -487,6 +521,7 @@ describe("a Change is one atomic batch, and its apply is guarded (review of #838
 				"CREATE TRIGGER fail_bank_apply BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'apply nope'); END",
 			)
 			.run();
+
 	afterEach(async () => {
 		await db.prepare("DROP TRIGGER IF EXISTS fail_bank_apply").run();
 	});
@@ -536,9 +571,11 @@ describe("a Change is one atomic batch, and its apply is guarded (review of #838
 		const books = await categoryId("Books & audio");
 		await addRule(CLEANED, books);
 		const a = await txn(RAW_A);
+
 		const statements = await bankTextRuleStatements(db, [
 			{ cleanedText: CLEANED, categoryId: books },
 		]);
+
 		await db.prepare("DELETE FROM bank_text_rules").run();
 		await db.batch(statements);
 		expect(await stateOf(a)).toMatchObject({ categoryId: null, source: null });
@@ -549,9 +586,11 @@ describe("a Change is one atomic batch, and its apply is guarded (review of #838
 		const eating = await categoryId("Eating Out");
 		await addRule(CLEANED, books);
 		const a = await txn(RAW_A);
+
 		const statements = await bankTextRuleStatements(db, [
 			{ cleanedText: CLEANED, categoryId: books },
 		]);
+
 		await db
 			.prepare(
 				"UPDATE bank_text_rules SET category_id = ? WHERE cleaned_text = ?",
@@ -586,12 +625,14 @@ describe("a Change to a category archived before its batch (review of #838, roun
 			.bind(books)
 			.run();
 		expect(await changeBankTextRule(db, CLEANED, books)).toBe(false);
+
 		const rule = await db
 			.prepare(
 				"SELECT category_id AS categoryId FROM bank_text_rules WHERE cleaned_text = ?",
 			)
 			.bind(CLEANED)
 			.first<{ categoryId: number }>();
+
 		expect(rule?.categoryId).toBe(eating);
 		expect(await stateOf(a)).toMatchObject({ categoryId: null, source: null });
 	});
@@ -614,6 +655,7 @@ describe("withBankTextRules (pure)", () => {
 		answers: 3,
 		vague: false,
 	};
+
 	const rule = {
 		cleanedText: "netflix.com",
 		categoryId: 40,
@@ -669,6 +711,7 @@ describe("schema", () => {
 				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Temporary', 'temporary', 'books', 'cat-plum', 99) RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		const tempId = temp?.id ?? 0;
 		await addRule("temp text", tempId);
 		await db
@@ -679,11 +722,13 @@ describe("schema", () => {
 			.run();
 		await db.prepare("DELETE FROM categories WHERE id = ?").bind(tempId).run();
 		expect(await ruleCount("temp text")).toBe(0);
+
 		const forgotten = await db
 			.prepare(
 				"SELECT rule_category_id AS r FROM forgotten_texts WHERE cleaned_text = 'old text'",
 			)
 			.first<{ r: number | null }>();
+
 		expect(forgotten?.r).toBeNull();
 	});
 

@@ -13,12 +13,14 @@ function Arrow({
 }) {
 	const name = direction === "previous" ? "Previous" : "Next";
 	const label = `${name} month, ${monthLabel(target ?? currentMonth, currentMonth)}`;
+
 	const icon = (
 		<Icon
 			name="chevron-right"
 			class={`size-6 ${direction === "previous" ? "rotate-180" : ""}`}
 		/>
 	);
+
 	return target ? (
 		<a
 			href={`/?month=${target}`}
@@ -45,7 +47,9 @@ export type MonthMark = "under" | "over" | "empty" | "current";
 /** A month's mark from its result (null for a month with no budgets); the current month, still going, has none. */
 export function monthMark(result: number | null, current: boolean): MonthMark {
 	if (current) return "current";
+
 	if (result === null) return "empty";
+
 	return result < 0 ? "over" : "under";
 }
 
@@ -59,8 +63,10 @@ export function monthResultWords(
 	current: boolean,
 ): string {
 	if (current) return `${label}, so far`;
+
 	if (result === null) return `${label}, no budgets`;
 	const amount = wholeUnlessTiny(Math.abs(result));
+
 	return `${label}, ended ${amount} ${result < 0 ? "over" : "under"}`;
 }
 
@@ -72,18 +78,22 @@ export function monthResultWords(
 function stripWindow(month: string, firstMonth: string, currentMonth: string) {
 	const first =
 		firstMonth > monthsBefore(month, 35) ? firstMonth : monthsBefore(month, 35);
+
 	const last =
 		currentMonth < monthsBefore(first, -35)
 			? currentMonth
 			: monthsBefore(first, -35);
+
 	const count =
 		(Number(last.slice(0, 4)) - Number(first.slice(0, 4))) * 12 +
 		Number(last.slice(5, 7)) -
 		Number(first.slice(5, 7));
+
 	const months = Array.from(
 		{ length: Math.min(36, Math.max(0, count) + 1) },
 		(_, index) => monthsBefore(last, count - index),
 	);
+
 	return { first, last, months };
 }
 
@@ -109,6 +119,7 @@ export function MonthDot({ mark, shown }: { mark: MonthMark; shown: boolean }) {
 			: shown
 				? "ring-2 ring-ink ring-offset-2 ring-offset-paper"
 				: "";
+
 	return (
 		<span
 			aria-hidden="true"
@@ -159,6 +170,7 @@ export function MonthNavigation({
 	const strip = stripWindow(month, firstMonth, currentMonth);
 	const previous = month > firstMonth ? monthsBefore(month, 1) : undefined;
 	const next = month < currentMonth ? monthsBefore(month, -1) : undefined;
+
 	return (
 		<div>
 			<div class="flex items-center gap-3">
@@ -179,6 +191,7 @@ export function MonthNavigation({
 						const selected = item === month;
 						const label = monthLabel(item, currentMonth);
 						const mark = monthMark(results[item] ?? null, current);
+
 						return (
 							<li>
 								<a

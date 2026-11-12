@@ -4,6 +4,7 @@ import migration from "../migrations/0021_plaid_income_backfill.sql?raw";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const db = env.DB;
 const MONTH = "2026-09";
@@ -198,13 +199,14 @@ const income = async () =>
 
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
+
 	for (const row of rows) await insert(row);
 });
 
 describe("migration 0021: mark stored INCOME transactions as income", () => {
 	it("marks only what nobody has decided, and leaves who set the flag empty", async () => {
 		expect(backfill).toBeDefined();
-		await db.prepare(backfill as string).run();
+		await db.prepare(present(backfill)).run();
 
 		expect(await state()).toEqual(
 			rows.map((row) => ({
@@ -218,12 +220,12 @@ describe("migration 0021: mark stored INCOME transactions as income", () => {
 
 	it("brings a stored paycheck into Income, and running it again changes nothing", async () => {
 		const before = await income();
-		await db.prepare(backfill as string).run();
+		await db.prepare(present(backfill)).run();
 		// The plain paycheck and the one Jev was unsure about now count, $3,000 each; the split parent never does.
 		expect((await income()) - before).toBe(2 * 300000);
 
 		const once = await state();
-		await db.prepare(backfill as string).run();
+		await db.prepare(present(backfill)).run();
 		expect(await state()).toEqual(once);
 	});
 });

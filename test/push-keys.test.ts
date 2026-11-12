@@ -7,22 +7,32 @@ import { vapidKeys } from "../src/push/keys";
 
 /** A real P-256 pair, in the two forms the secrets take: the public point and the private scalar `d`. */
 async function generatedPair() {
-	const pair = (await crypto.subtle.generateKey(
+	const generated = await crypto.subtle.generateKey(
 		{ name: "ECDSA", namedCurve: "P-256" },
 		true,
 		["sign", "verify"],
-	)) as CryptoKeyPair;
-	const publicRaw = new Uint8Array(
-		(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
 	);
-	const jwk = (await crypto.subtle.exportKey(
-		"jwk",
-		pair.privateKey,
-	)) as JsonWebKey;
+
+	if (!("publicKey" in generated)) throw new Error("expected a key pair");
+	const pair = generated;
+
+	const exportedPublic = await crypto.subtle.exportKey("raw", pair.publicKey);
+
+	if (!(exportedPublic instanceof ArrayBuffer))
+		throw new Error("expected the raw public point");
+	const publicRaw = new Uint8Array(exportedPublic);
+
+	const exportedPrivate = await crypto.subtle.exportKey("jwk", pair.privateKey);
+
+	if (exportedPrivate instanceof ArrayBuffer) throw new Error("expected a JWK");
+	const jwk = exportedPrivate;
+
 	if (!jwk.d) throw new Error("no private scalar");
+
 	const privateScalar = Uint8Array.from(atob(toPadded(jwk.d)), (c) =>
 		c.charCodeAt(0),
 	);
+
 	return {
 		publicKey: toBase64Url(publicRaw),
 		privateKey: toBase64Url(privateScalar),
@@ -32,11 +42,13 @@ async function generatedPair() {
 /** base64url without padding back to base64 with padding, for atob. */
 function toPadded(text: string) {
 	const base = text.replaceAll("-", "+").replaceAll("_", "/");
+
 	return base.padEnd(base.length + ((4 - (base.length % 4)) % 4), "=");
 }
 
 const bytesOf = (text: string) => {
 	const padded = toPadded(text);
+
 	return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
 };
 
@@ -57,6 +69,7 @@ describe("vapidKeys", () => {
 		const notUncompressed = new Uint8Array(65);
 		notUncompressed.set(bytesOf(pair.publicKey));
 		notUncompressed[0] = 0x03;
+
 		for (const publicKey of [
 			compressed,
 			toBase64Url(notUncompressed),
@@ -73,6 +86,7 @@ describe("vapidKeys", () => {
 
 	it("returns null for a private key that is not 32 bytes", async () => {
 		const pair = await generatedPair();
+
 		for (const privateKey of [
 			toBase64Url(bytesOf(pair.privateKey).slice(0, 31)),
 			toBase64Url(new Uint8Array(33).fill(1)),
@@ -99,20 +113,26 @@ describe("vapidKeys", () => {
 
 	it("returns the public key and a signing key for the pair, which signs for that public key", async () => {
 		const pair = await generatedPair();
+
 		const keys = await vapidKeys({
 			VAPID_PUBLIC_KEY: pair.publicKey,
 			VAPID_PRIVATE_KEY: pair.privateKey,
 			DEMO: "false",
 		});
+
 		expect(keys?.publicKey).toBe(pair.publicKey);
+
 		if (!keys) throw new Error("expected keys");
 		const message = new TextEncoder().encode("signed by the server");
+
 		const signature = await crypto.subtle.sign(
 			{ name: "ECDSA", hash: "SHA-256" },
 			keys.signingKey,
 			message,
 		);
+
 		expect(signature.byteLength).toBe(64);
+
 		const verifying = await crypto.subtle.importKey(
 			"raw",
 			bytesOf(pair.publicKey),
@@ -120,6 +140,7 @@ describe("vapidKeys", () => {
 			false,
 			["verify"],
 		);
+
 		expect(
 			await crypto.subtle.verify(
 				{ name: "ECDSA", hash: "SHA-256" },

@@ -62,6 +62,7 @@ export function SuggestedCategoryChip({
 	checked?: boolean;
 }) {
 	const confidenceId = `category-suggestion-confidence-${transactionId}-${value}`;
+
 	return (
 		<span class="relative inline-flex rounded-full border border-dashed border-ink">
 			<Chip

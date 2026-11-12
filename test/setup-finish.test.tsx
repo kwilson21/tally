@@ -1,4 +1,6 @@
 /** @jsxImportSource hono/jsx */
+
+import type { JSX } from "hono/jsx";
 import { describe, expect, it } from "vitest";
 import {
 	finishBillsLine,
@@ -14,11 +16,12 @@ import { SetupFinish } from "../src/views/setup-finish";
 // what each step set up as ruled rows, and Go to Home at the foot. Drawn from the same words as the finish's own lines.
 
 // Hono writes an apostrophe as &#39; and a negative Safe to spend with U+2212, so the markup is asserted as it is written.
-const html = (node: unknown) => String(node);
+const html = (node: JSX.Element) => String(node);
 
 /** The h1's opening tag, its text and whether it takes focus. */
 const headingOf = (markup: string) => {
 	const tag = markup.match(/<h1\b[^>]*>/)?.[0] ?? "";
+
 	return {
 		text: markup.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? "",
 		focused: /\sautofocus/.test(tag),
@@ -26,14 +29,17 @@ const headingOf = (markup: string) => {
 		classes: tag.match(/\sclass="([^"]*)"/)?.[1] ?? "",
 	};
 };
+
 /** Every id the markup draws. */
 const idsOf = (markup: string) =>
 	[...markup.matchAll(/\sid="([^"]*)"/g)].map((match) => match[1] ?? "");
+
 /** Each row of the What you set up list: its label and its values, in order. */
 const rowsOf = (markup: string) =>
 	[...markup.matchAll(/<div class="grid[^"]*">([\s\S]*?)<\/div>/g)].map(
 		(match) => {
 			const row = match[1] ?? "";
+
 			return {
 				label: row.match(/<dt\b[^>]*>([\s\S]*?)<\/dt>/)?.[1] ?? "",
 				values: [...row.matchAll(/<dd\b[^>]*>([\s\S]*?)<\/dd>/g)].map(
@@ -42,12 +48,15 @@ const rowsOf = (markup: string) =>
 			};
 		},
 	);
+
 /** The h2 of the list, if drawn. */
 const listHeadingOf = (markup: string) =>
 	markup.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/)?.[1] ?? null;
+
 /** The Safe to spend number's <p>: its classes and its text. */
 const amountOf = (markup: string) => {
 	const match = markup.match(/<p class="([^"]*text-6xl[^"]*)">([^<]*)<\/p>/);
+
 	return { classes: match?.[1] ?? "", text: match?.[2] ?? "" };
 };
 
@@ -60,10 +69,12 @@ const EVERY_OTHER_FRIDAY = [
 	"2026-09-25",
 	"2026-10-09",
 ].map((date) => ({ date, cents: 245000 }));
+
 const ACME = finishPayLine({
 	name: "ACME Corp",
 	deposits: EVERY_OTHER_FRIDAY,
 });
+
 const RIVERSIDE = finishPayLine({
 	name: "Riverside Clinic",
 	deposits: EVERY_OTHER_FRIDAY,
@@ -180,6 +191,7 @@ describe("SetupFinish", () => {
 				savings: null,
 			},
 		});
+
 		expect(rowsOf(markup).map((row) => row.label)).toEqual(["Pay", "Budgets"]);
 		expect(markup).not.toContain('<dt class="col-start-1">Bills</dt>');
 		expect(markup).not.toContain('<dt class="col-start-1">Savings</dt>');
@@ -194,6 +206,7 @@ describe("SetupFinish", () => {
 				savings: null,
 			},
 		});
+
 		expect(rowsOf(markup)).toEqual([
 			{ label: "Pay", values: [ACME, RIVERSIDE] },
 		]);
@@ -204,6 +217,7 @@ describe("SetupFinish", () => {
 		const markup = finish({
 			rows: { pay: [], bills: null, budgets: null, savings: null },
 		});
+
 		expect(listHeadingOf(markup)).toBeNull();
 		expect(markup).not.toContain("<dl");
 		expect(markup).not.toContain("What you set up");
@@ -236,6 +250,7 @@ describe("SetupFinish", () => {
 				savings: null,
 			},
 		});
+
 		expect(markup).toContain("wrap-break-word");
 		expect(markup).not.toContain("wrap-anywhere");
 	});

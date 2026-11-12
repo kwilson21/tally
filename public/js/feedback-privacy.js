@@ -1,23 +1,31 @@
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const URL_PATTERN = /\b(?:https?:\/\/|www\.)[^\s<>]+/gi;
 const RELATIVE_URL = /(?:^|\s)\/[A-Za-z0-9._~/-]*[?#][^\s<>]*/g;
+
 const CREDENTIAL =
 	/\b(?:password|passcode|token|api[-_ ]?key|authorization|authentication|auth|secret)\s*[:=]\s*(?:bearer\s+)?(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi;
+
 const PHONE =
 	/(?<!\d)(?:\+?1[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]?\d{3}[ .-]?\d{4}(?!\d)/g;
+
 const STREET_ADDRESS =
 	/\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s+){1,5}(?:Street|St|Road|Rd|Avenue|Ave|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way)\b\.?/gi;
+
 const ACCOUNT_VALUE =
 	/\b(?:account|acct|routing|iban|card(?:\s+number)?|account\s+number)\s*(?:no\.?|number|#|:)?\s*(?:(?=[A-Z0-9-]{6,30}\b)(?=[A-Z0-9-]*\d)[A-Z0-9-]{6,30}|(?:\d[ -]?){7,19}\d)\b/gi;
+
 const LONG_NUMBER = /(?<!\d)(?:\d[ -]?){7,19}(?!\d)/g;
+
 const CURRENCY_AMOUNT =
 	/(?:[$€£]\s?\d[\d,]*(?:\.\d{2})?|\b\d[\d,]*\.\d{2}\s?(?:USD|EUR|GBP)\b)/gi;
+
 const SSN = /\b\d{3}-\d{2}-\d{4}\b/g;
 const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 
 /** Pattern-based only: arbitrary names and sensitive prose cannot be inferred reliably. */
 export function sanitizeFeedbackMessage(value) {
 	if (typeof value !== "string") return "";
+
 	return value
 		.replace(/\r\n?/g, "\n")
 		.replace(URL_PATTERN, "[link removed]")
@@ -54,10 +62,14 @@ const ROUTES = new Set([
 
 export function sanitizeFeedbackRoute(value) {
 	if (typeof value !== "string") return "/other";
+
 	try {
 		const pathname = new URL(value, "https://tally.invalid").pathname;
+
 		if (ROUTES.has(pathname)) return pathname;
+
 		if (/^\/transactions\/[^/]+\/?$/.test(pathname)) return "/transactions";
+
 		// Settings' subpages report as Settings: the page the person was on, not a route the set doesn't list (#606).
 		if (
 			/^\/settings\/(?:categories|rules|household|people|ai|data)\/?$/.test(
@@ -65,9 +77,12 @@ export function sanitizeFeedbackRoute(value) {
 			)
 		)
 			return "/settings";
+
 		if (/^\/accounts\/[^/]+(?:\/disconnect)?\/?$/.test(pathname))
 			return "/accounts";
+
 		if (/^\/budget(?:\/[^/]+)?\/?$/.test(pathname)) return "/budget";
+
 		return "/other";
 	} catch {
 		return "/other";
@@ -77,14 +92,17 @@ export function sanitizeFeedbackRoute(value) {
 /** Keep same-origin return navigation, preserving its query while dropping fragments. */
 export function safeFeedbackReturnPath(value) {
 	if (typeof value !== "string") return "/";
+
 	try {
 		const url = new URL(value, "https://tally.invalid");
+
 		if (
 			url.origin !== "https://tally.invalid" ||
 			!value.startsWith("/") ||
 			value.startsWith("//")
 		)
 			return "/";
+
 		return `${url.pathname}${url.search}`;
 	} catch {
 		return "/";
@@ -93,9 +111,12 @@ export function safeFeedbackReturnPath(value) {
 
 export function coarseDeviceCategory(userAgent) {
 	if (typeof userAgent !== "string") return "Unknown";
+
 	if (/iPad|Tablet|Android(?!.*Mobile)/i.test(userAgent))
 		return "Tablet browser";
+
 	if (/iPhone|Android|Mobile/i.test(userAgent)) return "Mobile browser";
+
 	return "Desktop browser";
 }
 
@@ -148,6 +169,7 @@ const BLOCKED_TAGS = new Set([
 	"SCRIPT",
 	"STYLE",
 ]);
+
 const SAFE_STYLE_PROPERTIES = new Set([
 	"display",
 	"position",
@@ -187,9 +209,11 @@ const SAFE_STYLE_PROPERTIES = new Set([
 
 function safeStyles(styles = {}) {
 	const result = {};
+
 	for (const [name, raw] of Object.entries(styles)) {
 		if (!SAFE_STYLE_PROPERTIES.has(name) || typeof raw !== "string") continue;
 		const value = raw.trim();
+
 		if (
 			value.length > 128 ||
 			/\b(?:url|var|attr|expression|image-set)\s*\(/i.test(value) ||
@@ -199,12 +223,14 @@ function safeStyles(styles = {}) {
 			continue;
 		result[name] = value;
 	}
+
 	return result;
 }
 
 function safeRect(rect) {
 	if (!rect) return undefined;
 	const { x, y, width, height } = rect;
+
 	if (
 		![x, y, width, height].every(Number.isFinite) ||
 		Math.abs(x) > 8192 ||
@@ -215,6 +241,7 @@ function safeRect(rect) {
 		height > 8192
 	)
 		throw new Error("Unsafe screenshot geometry");
+
 	return {
 		x: Math.round(x),
 		y: Math.round(y),
@@ -227,6 +254,7 @@ function sanitizeCaptureNode(node) {
 	const tag = String(node.tagName ?? "").toUpperCase();
 	const attrs = node.attributes ?? {};
 	const classNames = (attrs.class ?? "").split(/\s+/);
+
 	if (
 		BLOCKED_TAGS.has(tag) ||
 		"data-feedback-private" in attrs ||
@@ -236,12 +264,16 @@ function sanitizeCaptureNode(node) {
 		return null;
 
 	const copyId = attrs["data-feedback-capture-copy"];
+
 	if (copyId !== undefined) {
 		const safeText = SAFE_COPY[copyId];
+
 		if (!safeText || !["SPAN", "P", "A"].includes(tag))
 			throw new Error("Unknown screenshot copy marker");
+
 		if ((node.children?.length ?? 0) > 0 || node.textContent !== safeText)
 			throw new Error("Screenshot static-copy marker does not match source");
+
 		return {
 			tagName: tag,
 			text: safeText,
@@ -252,9 +284,12 @@ function sanitizeCaptureNode(node) {
 	}
 
 	const layoutId = attrs["data-feedback-capture-layout"];
+
 	if (layoutId === undefined) return null;
+
 	if (LAYOUT_TAGS[layoutId] !== tag)
 		throw new Error("Unknown screenshot layout marker");
+
 	return {
 		tagName: tag,
 		styles: safeStyles(node.styles),
@@ -268,6 +303,7 @@ function sanitizeCaptureNode(node) {
 /** Only reviewed markers survive; dynamic descendants and all non-allowlisted attrs are dropped. */
 export function buildSafeScreenshotTree(root) {
 	const safe = sanitizeCaptureNode(root);
+
 	return safe ? [safe] : [];
 }
 
@@ -276,19 +312,24 @@ const REPLAY_KINDS = new Set(["snapshot", "click", "scroll"]);
 /** Projection fixture only; no PostHog SDK or recorder calls this helper. */
 export function sanitizeReplayFixture(input) {
 	const route = sanitizeFeedbackRoute(input.url);
+
 	const kind =
 		typeof input.kind === "string" && REPLAY_KINDS.has(input.kind)
 			? input.kind
 			: "snapshot";
+
 	const target =
 		typeof input.target === "string" && input.target in SAFE_COPY
 			? input.target
 			: undefined;
+
 	const nodes = (Array.isArray(input.nodes) ? input.nodes : [])
 		.map((raw) => {
 			if (!raw || typeof raw !== "object") return null;
 			const item = raw;
+
 			if (typeof item.copyId !== "string") return null;
+
 			return sanitizeCaptureNode({
 				tagName: typeof item.tagName === "string" ? item.tagName : "",
 				textContent: typeof item.text === "string" ? item.text : "",
@@ -296,11 +337,19 @@ export function sanitizeReplayFixture(input) {
 			});
 		})
 		.filter((node) => node !== null);
-	return { route, kind, ...(target ? { target } : {}), nodes };
+
+	const fixture = { route, kind };
+
+	if (target) fixture.target = target;
+
+	fixture.nodes = nodes;
+
+	return fixture;
 }
 
 export function installFeedbackMessageReview(doc = document) {
 	const form = doc.querySelector('form[action="/feedback"]');
+
 	if (!form) return;
 	const message = form.querySelector('[name="message"]');
 	const reviewedMarker = form.querySelector('[name="message_reviewed"]');
@@ -309,14 +358,19 @@ export function installFeedbackMessageReview(doc = document) {
 	const category = form.querySelector('[name="device_category"]');
 	const categoryMarker = form.querySelector("[data-feedback-device-category]");
 	const review = doc.querySelector("#feedback-redaction-review");
+
 	if (category && categoryMarker && typeof navigator !== "undefined")
 		category.value = coarseDeviceCategory(navigator.userAgent);
+
 	if (confirmReview) confirmReview.required = false;
+
 	if (!message || !review) return;
 	let reviewed = false;
 	message.addEventListener("input", () => {
 		reviewed = false;
+
 		if (reviewedMarker) reviewedMarker.value = "";
+
 		if (confirmReview) {
 			confirmReview.checked = false;
 			confirmReview.required = false;
@@ -324,15 +378,20 @@ export function installFeedbackMessageReview(doc = document) {
 	});
 	form.addEventListener("submit", (event) => {
 		const cleaned = sanitizeFeedbackMessage(message.value).trim();
+
 		if (!reviewed || message.value !== cleaned) {
 			event.preventDefault();
 			message.value = cleaned;
+
 			if (reviewedMarker) reviewedMarker.value = cleaned;
+
 			if (confirmLabel) confirmLabel.hidden = false;
+
 			if (confirmReview) {
 				confirmReview.checked = false;
 				confirmReview.required = true;
 			}
+
 			review.replaceChildren();
 			const heading = doc.createElement("strong");
 			heading.textContent = "Review the cleaned message before sending";
@@ -342,8 +401,10 @@ export function installFeedbackMessageReview(doc = document) {
 			review.hidden = false;
 			reviewed = true;
 			message.focus();
+
 			return;
 		}
+
 		if (confirmReview && !confirmReview.checked) {
 			event.preventDefault();
 			confirmReview.focus();

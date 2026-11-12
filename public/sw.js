@@ -28,8 +28,10 @@ self.addEventListener("push", (event) => {
 	event.waitUntil(
 		(async () => {
 			let payload = FALLBACK;
+
 			try {
 				const read = event.data?.json();
+
 				if (
 					read &&
 					typeof read.title === "string" &&
@@ -39,6 +41,7 @@ self.addEventListener("push", (event) => {
 			} catch {
 				payload = FALLBACK;
 			}
+
 			await self.registration.showNotification(payload.title, {
 				body: payload.body,
 				data: { url: sitePath(payload.url) },
@@ -63,15 +66,18 @@ async function openTally(url) {
 		type: "window",
 		includeUncontrolled: true,
 	});
+
 	if (first) {
 		try {
 			await first.focus();
 			await first.navigate(url);
+
 			return;
 		} catch {
 			// navigate rejects for a window this worker doesn't control: a new window opens below.
 		}
 	}
+
 	await self.clients.openWindow(url);
 }
 

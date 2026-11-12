@@ -21,6 +21,7 @@ import {
 	saveOrganizeGroup,
 } from "../src/transactions/organize";
 import { tidyName } from "../src/transactions/tidy-name";
+import { present } from "./helpers/present";
 
 // A transaction's merchant key is Plaid's merchant_name when there is one, otherwise its raw_name
 // (spec §6.1 rule 1, decision 67), so "TARGET 1234" and "TARGET 5678" are one merchant.
@@ -63,13 +64,20 @@ const insert = (...rows: Tx[]) =>
 		),
 	);
 
+type TxRow = {
+	category_id: number | null;
+	category_source: string | null;
+	merchant_name: string | null;
+	raw_name: string;
+};
+
 const row = (id: number) =>
 	db
 		.prepare(
 			"SELECT category_id, category_source, merchant_name, raw_name FROM transactions WHERE id = ?",
 		)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<TxRow>();
 
 const edit = (over: Partial<Parameters<typeof saveEdit>[2]> = {}) => ({
 	categoryId: null,
@@ -316,6 +324,7 @@ describe("merchant rules", () => {
 		const group = (await organizeGroups(db)).find((g) =>
 			g.merchantKeys.includes("Target"),
 		);
+
 		expect(group).toMatchObject({
 			name: "Target",
 			count: 2,
@@ -368,6 +377,7 @@ describe("merchant rules", () => {
 				"SELECT raw_name, merchant_name FROM transactions WHERE parent_id = 8001",
 			)
 			.all();
+
 		expect(results).toEqual([
 			{ raw_name: "TARGET 1234", merchant_name: "Target" },
 			{ raw_name: "TARGET 1234", merchant_name: "Target" },
@@ -383,6 +393,7 @@ describe("bill matching", () => {
 			)
 			.bind(id, `Bill ${id}`, cents, due, key)
 			.run();
+
 	const paid = async (id: number) =>
 		(
 			await db
@@ -476,8 +487,10 @@ describe("bill matching", () => {
 		const res = await exports.default.fetch(
 			`${BASE}/bills/8004/occurrences/2026-09/link`,
 		);
+
 		const html = await res.text();
 		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
+
 		const at = (id: number) =>
 			picker.indexOf(`name="transaction_id" value="${id}"`);
 
@@ -502,6 +515,7 @@ describe("bill matching", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/8005/occurrences/2026-09/link`)
 		).text();
+
 		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
 
 		expect(picker.indexOf('value="8212"')).toBeLessThan(
@@ -544,10 +558,7 @@ describe("refunds", () => {
 		);
 		const refund = await getTransaction(db, 8301);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8302]);
 	});
@@ -578,10 +589,7 @@ describe("refunds", () => {
 		);
 		const refund = await getTransaction(db, 8311);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8312]);
 	});
@@ -605,6 +613,7 @@ describe("finding bills", () => {
 				merchant: "Target",
 			},
 		);
+
 	const found = async (pattern: RegExp) =>
 		(await loadBillSuggestions(db, TODAY)).filter((s) =>
 			pattern.test(s.rawName),
@@ -689,6 +698,10 @@ describe("finding bills", () => {
 // text that shares a key shares one row. An old row saved under a bank text becomes its merchant's key row
 // when Plaid first names the merchant, as a copy made by sync (test/plaid-sync.test.ts).
 describe("one merchants row per key, whatever the bank text", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	const merchantRows = async () =>
 		(
 			await db
@@ -736,6 +749,7 @@ describe("one merchants row per key, whatever the bank text", () => {
 			});
 			expect((await getTransaction(db, id))?.displayName).toBe("Comcast Cable");
 		}
+
 		const { rows } = await listTransactions(
 			db,
 			parseFilters(
@@ -743,6 +757,7 @@ describe("one merchants row per key, whatever the bank text", () => {
 				TODAY.slice(0, 7),
 			),
 		);
+
 		expect(rows.map((r) => r.id).sort()).toEqual([8601, 8602]);
 		expect(await transactionsCsv(db)).toMatch(/COMCAST CABLE 2,Comcast Cable,/);
 	});
@@ -867,6 +882,10 @@ describe("one merchants row per key, whatever the bank text", () => {
 	});
 
 	it("marks the key as Not a bill for the charges of every bank text", async () => {
+		// The route reads the real clock and looks back three months; the charges are from August and September.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
+
 		const res = await exports.default.fetch(
 			`${BASE}/bills/find/${encodeURIComponent("Comcast")}/dismiss`,
 			{
@@ -902,6 +921,7 @@ describe("bills saved under the bank's raw text", () => {
 			)
 			.bind(id, `Bill ${id}`, cents, due, text, legacy ? 1 : 0)
 			.run();
+
 	const paid = async (id: number) =>
 		(
 			await db
@@ -933,9 +953,11 @@ describe("bills saved under the bank's raw text", () => {
 		]);
 
 		await db.prepare("DELETE FROM bill_payments").run();
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/8701/occurrences/2026-09/link`)
 		).text();
+
 		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
 		expect(picker.indexOf('value="8701"')).toBeGreaterThan(-1);
 		expect(picker.indexOf('value="8701"')).toBeLessThan(
@@ -966,9 +988,11 @@ describe("bills saved under the bank's raw text", () => {
 		await matchBillPayments(db, TODAY);
 
 		expect(await paid(8702)).toEqual([{ transaction_id: 8712 }]);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/8702/occurrences/2026-09/link`)
 		).text();
+
 		// September is Paid by 8712, so it takes no picker (#205) and the page says so instead.
 		expect(html).toContain("bill is already paid.");
 		expect(html).not.toContain('id="payment-picker"');
@@ -1053,10 +1077,12 @@ describe("bills saved under the bank's raw text", () => {
 				merchant: "Comcast",
 			},
 		);
+
 		const found = async () =>
 			(await loadBillSuggestions(db, TODAY)).filter((s) =>
 				/comcast/i.test(s.rawName),
 			);
+
 		expect(await found()).toMatchObject([{ rawName: "Comcast" }]);
 
 		await db
@@ -1082,6 +1108,7 @@ describe("bills saved under the bank's raw text", () => {
 			categoryId: 5,
 			merchantRawName: "COMCAST CABLE",
 		};
+
 		const flagOf = async (id: number) =>
 			await db
 				.prepare(
@@ -1089,12 +1116,17 @@ describe("bills saved under the bank's raw text", () => {
 				)
 				.bind(id)
 				.first();
+
 		await insertBill(db, fields);
-		const id = (
-			await db.prepare("SELECT id FROM bills WHERE name = 'Internet'").first<{
-				id: number;
-			}>()
-		)?.id as number;
+
+		const id = present(
+			(
+				await db.prepare("SELECT id FROM bills WHERE name = 'Internet'").first<{
+					id: number;
+				}>()
+			)?.id,
+		);
+
 		expect(await flagOf(id)).toEqual({ text: "COMCAST CABLE", flag: 0 });
 
 		// A bill from before Phase 3.5 keeps its flag while its text stays.
@@ -1168,10 +1200,7 @@ describe("refunds across bank texts", () => {
 		);
 		const refund = await getTransaction(db, 8771);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8773]);
 	});
@@ -1189,10 +1218,7 @@ describe("refunds across bank texts", () => {
 		);
 		const refund = await getTransaction(db, 8781);
 
-		const offered = await refundPurchases(
-			db,
-			refund as NonNullable<typeof refund>,
-		);
+		const offered = await refundPurchases(db, present(refund));
 
 		expect(offered.map((p) => p.id)).toEqual([8782]);
 	});

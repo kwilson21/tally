@@ -26,6 +26,7 @@ describe("two creates of names that differ only in accented capitals, at the sam
 			makeCategory(db, { name: "Café" }),
 			makeCategory(db, { name: "CAFÉ" }),
 		]);
+
 		expect(outcomes.filter((o) => o.ok)).toHaveLength(1);
 		expect(outcomes).toContainEqual({
 			ok: false,
@@ -38,16 +39,22 @@ describe("two creates of names that differ only in accented capitals, at the sam
 describe("a rename and a create of names that differ only in accented capitals, at the same moment", () => {
 	it("files one and refuses the other", async () => {
 		const pet = await makeCategory(db, { name: "Pet" });
+
 		if (!pet.ok) throw new Error("Could not make the test category");
+
 		const outcomes = await Promise.allSettled([
 			saveCategory(db, pet.id, { name: "CAFÉ" }),
 			makeCategory(db, { name: "Café" }),
 		]);
+
 		const [renamed, created] = outcomes;
 		const renameFiled = renamed.status === "fulfilled";
+
 		const createFiled =
 			created.status === "fulfilled" && created.value.ok === true;
+
 		expect(renameFiled !== createFiled).toBe(true);
+
 		if (renamed.status === "rejected")
 			expect(String(renamed.reason)).toMatch(/UNIQUE/);
 		expect(await rowsWithKey("café")).toHaveLength(1);
@@ -59,6 +66,7 @@ describe("demo reset", () => {
 		const { results } = await db
 			.prepare("SELECT name, name_key FROM categories WHERE name = 'Groceries'")
 			.all<{ name: string; name_key: string }>();
+
 		expect(results).toEqual([{ name: "Groceries", name_key: "groceries" }]);
 	});
 });

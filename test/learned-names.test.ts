@@ -32,6 +32,7 @@ describe("displayName: a line's name for people", () => {
 				color: "cat-blue",
 			},
 		]);
+
 		expect(line?.name).toBe("Museum of the Bible Washington");
 	});
 });

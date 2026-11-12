@@ -68,6 +68,7 @@ describe("startHereRows (spec §8.8)", () => {
 			env.DB,
 			thisMonth,
 		);
+
 		expect(paycheck?.rawName).toBe("ACME CORP PAYROLL");
 		expect(paycheck?.displayName).toBe("Paycheck, Acme Corp");
 		expect(transfer?.rawName).toBe("ONLINE TRANSFER TO SAV ...5678");
@@ -81,10 +82,12 @@ describe("startHereRows (spec §8.8)", () => {
 		)
 			.bind(thisMonth)
 			.run();
+
 		const { transfer, paycheck, bakery } = await startHereRows(
 			env.DB,
 			thisMonth,
 		);
+
 		expect(transfer).toBeNull();
 		expect(paycheck?.id).toBe(await latestId("flag_income", thisMonth));
 		expect(bakery?.id).toBe(110);

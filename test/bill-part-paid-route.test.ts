@@ -7,23 +7,26 @@ import { loadBillRows } from "../src/bills/rows";
 
 const BASE = "http://tally.test";
 const RENT = 9500;
+
 // Pinned to a mid-month day: from about the 25th, Bills counts next month's rent as due within 7 days.
 const TODAY = "2026-10-15";
 const today = TODAY;
 const PERIOD = today.slice(0, 7);
 const DUE = `${PERIOD}-01`;
 
-const post = (path: string, body?: Record<string, string>) =>
-	exports.default.fetch(`${BASE}${path}`, {
+const post = (path: string, body?: Record<string, string>) => {
+	const headers = new Headers({ Origin: BASE, "HX-Request": "true" });
+
+	if (body) headers.set("content-type", "application/x-www-form-urlencoded");
+
+	return exports.default.fetch(`${BASE}${path}`, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"HX-Request": "true",
-			...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
-		},
+		headers,
 		body: body ? new URLSearchParams(body) : undefined,
 	});
+};
+
 const get = async (path: string) =>
 	(await exports.default.fetch(`${BASE}${path}`)).text();
 
@@ -35,6 +38,7 @@ const linkedIds = async () =>
 			.bind(RENT, PERIOD)
 			.all<{ id: number }>()
 	).results.map(({ id }) => id);
+
 const dismissedIds = async () =>
 	(
 		await env.DB.prepare(
@@ -107,9 +111,11 @@ describe("a part-paid rent on its page and in its picker", () => {
 			.bind(RENT, PERIOD)
 			.run();
 		expect(await linkedIds()).toEqual([9520, 9521]);
+
 		const res = await post(`/bills/${RENT}/occurrences/${PERIOD}/unlink`, {
 			transaction_id: "9521",
 		});
+
 		expect(res.status).toBe(200);
 		expect(await linkedIds()).toEqual([9520]);
 		expect(await dismissedIds()).toEqual([9521]);
@@ -148,11 +154,13 @@ describe("a part-paid rent on its page and in its picker", () => {
 		)
 			.bind(RENT, PERIOD)
 			.run();
+
 		const res = await post(`/bills/${RENT}/link`, {
 			transaction_id: "9521",
 			period: PERIOD,
 			opened_period: PERIOD,
 		});
+
 		expect(await res.text()).toContain("is already paid");
 		expect(await linkedIds()).toEqual([9520, 9522]);
 	});
@@ -163,6 +171,7 @@ describe("a part-paid rent on its page and in its picker", () => {
 			period: PERIOD,
 			opened_period: PERIOD,
 		});
+
 		expect(await res.text()).toContain("That payment is already linked.");
 		expect(await linkedIds()).toEqual([9520]);
 	});
@@ -186,6 +195,7 @@ const monthWords = (period: string) =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
 		new Date(`${period}-01T00:00:00Z`),
 	);
+
 /** The HTML with its apostrophes read as written, so a sentence is matched as the person sees it. */
 const readable = (html: string) => html.replaceAll("&#39;", "'");
 const PAID_BY_SHOP_B = `INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9522,'user','linked')`;
@@ -193,9 +203,11 @@ const PAID_BY_SHOP_B = `INSERT INTO bill_payments(bill_id,period,transaction_id,
 describe("a month that is already Paid takes no picker (decision 101, #205)", () => {
 	it("a plain request for a Paid month says it is paid, with no picker and no candidates", async () => {
 		await env.DB.prepare(PAID_BY_SHOP_B).bind(RENT, PERIOD).run();
+
 		const html = readable(
 			await get(`/bills/${RENT}/occurrences/${PERIOD}/link`),
 		);
+
 		expect(html).toMatch(
 			new RegExp(
 				`role="alert"[^>]*>${monthWords(PERIOD)}'s bill is already paid\\.`,
@@ -208,10 +220,12 @@ describe("a month that is already Paid takes no picker (decision 101, #205)", ()
 
 	it("a month chip's request for a Paid month swaps the whole page, with the same refusal", async () => {
 		await env.DB.prepare(PAID_BY_SHOP_B).bind(RENT, PERIOD).run();
+
 		const res = await exports.default.fetch(
 			`${BASE}/bills/${RENT}/occurrences/${PERIOD}/link`,
 			{ headers: { "HX-Request": "true" } },
 		);
+
 		expect(res.headers.get("HX-Retarget")).toBe("body");
 		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
 		expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -239,9 +253,11 @@ describe("a month that is already Paid takes no picker (decision 101, #205)", ()
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9530,'user','linked')",
 			).bind(RENT, previous),
 		]);
+
 		const html = readable(
 			await get(`/bills/${RENT}/occurrences/${PERIOD}/link`),
 		);
+
 		expect(html).toContain(`To ${monthWords(PERIOD)}'s Rent,`);
 		expect(html).not.toContain(`name="period" value="${previous}"`);
 		expect(html).toMatch(
@@ -260,9 +276,11 @@ describe("each Not this one names the payment it unlinks (#205)", () => {
 			.bind(RENT, PERIOD)
 			.run();
 		const html = readable(await get(`/bills/${RENT}`));
+
 		const names = [...html.matchAll(/aria-label="(Not this one: [^"]*)"/g)].map(
 			(match) => match[1],
 		);
+
 		expect(names).toHaveLength(2);
 		expect(
 			names.filter((name) =>
@@ -289,6 +307,7 @@ describe("two links at once cannot overpay a month (decision 101, #205)", () => 
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9525,1,?,60000,'SHOP E')",
 			).bind(DUE),
 		]);
+
 		const answers = await Promise.all(
 			[9524, 9525].map((transaction) =>
 				post(`/bills/${RENT}/link`, {
@@ -298,9 +317,11 @@ describe("two links at once cannot overpay a month (decision 101, #205)", () => 
 				}),
 			),
 		);
+
 		const texts = await Promise.all(
 			answers.map(async (answer) => readable(await answer.text())),
 		);
+
 		expect(
 			texts.filter((text) =>
 				text.includes(`${monthWords(PERIOD)}'s bill is already paid.`),
@@ -336,6 +357,7 @@ describe("a linked payment a bank corrected into a credit counts $0 (decision 10
 
 	it("the Bills row and the bill's page read Part paid: $600 of $1,200, not $500 or a negative", async () => {
 		await creditCorrection();
+
 		for (const path of ["/bills", `/bills/${RENT}`]) {
 			const html = await get(path);
 			expect(html).toContain("Part paid: $600 of $1,200");
@@ -348,9 +370,11 @@ describe("a linked payment a bank corrected into a credit counts $0 (decision 10
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents=-10000 WHERE id=9520",
 		).run();
+
 		for (const path of ["/bills", `/bills/${RENT}`]) {
 			expect(await get(path)).not.toContain("Part paid");
 		}
+
 		const html = await get(`/bills/${RENT}`);
 		// Unpaid reads: the month offers Link a payment (not Link another payment), and the credit stays listed with
 		// its own Not this one, so it can still be unlinked.
@@ -397,11 +421,13 @@ describe("a linked payment a bank corrected into a credit counts $0 (decision 10
 		expect(
 			(await loadBillRows(env.DB, today)).rows.find((row) => row.id === RENT),
 		).toMatchObject({ status: "paid" });
+
 		const answer = await post(`/bills/${RENT}/link`, {
 			transaction_id: "9521",
 			period: PERIOD,
 			opened_period: PERIOD,
 		});
+
 		expect(readable(await answer.text())).toContain(
 			`${monthWords(PERIOD)}'s bill is already paid.`,
 		);

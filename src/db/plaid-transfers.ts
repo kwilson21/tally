@@ -33,6 +33,7 @@ const personDecided = (amount: string) =>
  */
 export const plaidTransferRuleSql = (category: string, amount: string) => {
 	const excludes = `(${isPlaidTransferSql(category)} AND NOT ${personDecided(amount)})`;
+
 	return `excluded = CASE
 	WHEN transactions.excluded_source = 'user' THEN transactions.excluded
 	WHEN ${excludes} THEN 1

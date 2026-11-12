@@ -39,6 +39,7 @@ describe("NewCategoryRow: a refused name is named by its field", () => {
 			name: "Books and audio",
 			error: "Keep the name to 40 characters.",
 		});
+
 		expect(html).toMatch(/<details[^>]*\bopen/);
 		expect(html).toContain('value="Books and audio"');
 	});

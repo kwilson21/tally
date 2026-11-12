@@ -49,6 +49,7 @@ describe("MonthEnd cause line", () => {
 				/>
 			</>,
 		);
+
 		expect(html).toMatch(
 			/<a href="#sep-cause-not-budgeted"[^>]*>Most of it had no budget: Childcare \$960 and Rent \$1,200\.<\/a>/,
 		);
@@ -67,6 +68,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={0}
 			/>,
 		);
+
 		expect(html).toMatch(
 			/<a href="#sep-bars-bars"[^>]*>Most of it was over budget: Eating Out \$180 and Kids \$40\.<\/a>/,
 		);
@@ -84,6 +86,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={0}
 			/>,
 		);
+
 		expect(html).not.toContain("Most of it");
 		expect(html).not.toContain("Part of it");
 		expect(html).not.toContain('href="#may-');
@@ -100,6 +103,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={0}
 			/>,
 		);
+
 		expect(html).not.toContain("Most of it");
 		expect(html).not.toContain("Part of it");
 		expect(html).not.toContain(">Over<");
@@ -116,6 +120,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={0}
 			/>,
 		);
+
 		expect(html).toMatch(
 			/<p class="mt-2 text-muted">Most of it: <a href="#X-bars"[^>]*>Eating Out \$180 over<\/a> and <a href="#X-not-budgeted"[^>]*>Rent \$1,200 with no budget<\/a>\.<\/p>/,
 		);
@@ -132,6 +137,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={27700}
 			/>,
 		);
+
 		expect(html).toMatch(
 			/<p class="mt-2 text-muted">Most of it had no budget: <a href="#X-not-budgeted"[^>]*>Rent \$1,200<\/a> and <a href="#X-needs-category"[^>]*>Needs a category \$277<\/a>\.<\/p>/,
 		);
@@ -148,6 +154,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={27700}
 			/>,
 		);
+
 		expect(html).toMatch(
 			/<p class="mt-2 text-muted"><a href="#X-needs-category"[^>]*>Most of it still needs a category: \$277\.<\/a><\/p>/,
 		);
@@ -165,6 +172,7 @@ describe("MonthEnd cause line", () => {
 				needsCategoryCents={0}
 			/>,
 		);
+
 		expect(
 			html.match(/<p class="mt-2 text-muted"><a href="#X-bars"/g),
 		).toHaveLength(1);
@@ -180,6 +188,7 @@ describe("PastNotBudgeted with a chart id", () => {
 				needsCategory={{ spentCents: 27700, count: 1 }}
 			/>,
 		);
+
 		expect(html).toContain('<h3 id="X-not-budgeted"');
 		expect(html).toMatch(/<li id="X-needs-category" class="[^"]*">/);
 	});

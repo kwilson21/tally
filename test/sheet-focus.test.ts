@@ -12,6 +12,7 @@ const BASE = "http://tally.test";
 
 async function get(path: string, headers: Record<string, string> = {}) {
 	const res = await exports.default.fetch(BASE + path, { headers });
+
 	return res.text();
 }
 
@@ -25,6 +26,7 @@ async function post(path: string, fields: URLSearchParams) {
 		},
 		body: fields,
 	});
+
 	return res.text();
 }
 
@@ -34,14 +36,17 @@ async function postResponse(
 	fields: URLSearchParams,
 	htmx = true,
 ) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+		Origin: BASE,
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	return exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-			Origin: BASE,
-		},
+		headers,
 		body: fields,
 	});
 }
@@ -65,6 +70,7 @@ function backdropHref(html: string) {
 		html.match(
 			/<a href="([^"]*)" aria-label="Close"[^>]*data-sheet-close/,
 		)?.[1] ?? "";
+
 	return href.replaceAll("&amp;", "&");
 }
 
@@ -73,12 +79,14 @@ async function firstBillId() {
 	const list = await get("/bills");
 	const id = list.match(/href="\/bills\/(\d+)"/)?.[1] ?? "";
 	expect(id).not.toBe("");
+
 	return id;
 }
 
 /** The opening tag of the Add link for a possible bill, found by the finding it carries. */
 function addLinkFor(html: string, rawName: string) {
 	const finding = new URLSearchParams({ finding: rawName }).toString();
+
 	return (
 		(html.match(/<a [^>]*>/g) ?? []).find(
 			(tag) => tag.includes("/bills/new?") && tag.includes(finding),
@@ -119,9 +127,11 @@ describe("Split: its close returns focus to the transaction's row", () => {
 describe("Set category in Select mode: its close returns focus to Set category", () => {
 	it("closes, and Cancels, with the ticks and ?focus=set-category-back", async () => {
 		const list = await get("/transactions?month=all&select=1");
+
 		const [a, b] = [...list.matchAll(/name="ids" value="(\d+)"/g)]
 			.slice(0, 2)
 			.map((m) => Number(m[1]));
+
 		const body = new URLSearchParams({ back: "/transactions?month=all" });
 		body.append("ids", String(a));
 		body.append("ids", String(b));
@@ -133,12 +143,15 @@ describe("Set category in Select mode: its close returns focus to Set category",
 
 	it("puts focus on Set category when the list is drawn with that focus and ticks", async () => {
 		const list = await get("/transactions?month=all&select=1");
+
 		const [a, b] = [...list.matchAll(/name="ids" value="(\d+)"/g)]
 			.slice(0, 2)
 			.map((m) => Number(m[1]));
+
 		const html = await get(
 			`/transactions?month=all&select=1&ids=${a},${b}&focus=set-category-back`,
 		);
+
 		expect(tagWithId(html, "set-category-selection")).toContain("autofocus");
 	});
 });
@@ -183,9 +196,11 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 	it("closes a new bill added from a possible bill to that finding on the Possible bills page", async () => {
 		// A raw name with a space and a % (which encodeURIComponent must escape) and no database rows needed.
 		const finding = "SHOP BANK 50%";
+
 		const html = await get(
 			`/bills/new?${new URLSearchParams({ name: "Shop bank", merchant_raw_name: finding, finding })}`,
 		);
+
 		const closeTo = `/bills/find?focus=${encodeURIComponent(finding)}`;
 		expect(backdropHref(html)).toBe(closeTo);
 		expect(html.split(`href="${closeTo}"`).length - 1).toBe(2);
@@ -196,10 +211,12 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 
 	it("keeps that close when the new bill is drawn again with a field's error", async () => {
 		const finding = "SHOP BANK 50%";
+
 		const html = await post(
 			"/bills",
 			new URLSearchParams({ name: "Shop bank", finding }),
 		);
+
 		expect(html).toContain("Enter an amount");
 		expect(backdropHref(html)).toBe(
 			`/bills/find?focus=${encodeURIComponent(finding)}`,
@@ -211,6 +228,7 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 			env.DB,
 			todayIn(DEFAULT_TIME_ZONE),
 		);
+
 		expect(suggestion).toBeDefined();
 		const rawName = suggestion?.rawName ?? "";
 		const drawn = await get(`/bills/find?focus=${encodeURIComponent(rawName)}`);
@@ -221,10 +239,12 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 
 	it("saving an edit with htmx lands on the bill's page, with focus on Edit bill and no sheet", async () => {
 		const id = await firstBillId();
+
 		const res = await postResponse(
 			`/bills/${id}`,
 			billFields("Sheet focus bill"),
 		);
+
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Push-Url")).toBe(`/bills/${id}`);
 		expect(res.headers.get("HX-Trigger")).toContain('"announce":"Bill saved"');
@@ -235,11 +255,13 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 
 	it("saving an edit without JavaScript redirects to the bill's page, with focus on Edit bill", async () => {
 		const id = await firstBillId();
+
 		const res = await postResponse(
 			`/bills/${id}`,
 			billFields("Sheet focus bill plain"),
 			false,
 		);
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe(`/bills/${id}?focus=edit-bill`);
 	});
@@ -248,11 +270,13 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 		const htmx = await postResponse("/bills", billFields("Sheet focus gym"));
 		expect(htmx.status).toBe(200);
 		expect(htmx.headers.get("HX-Push-Url")).toBe("/bills");
+
 		const plain = await postResponse(
 			"/bills",
 			billFields("Sheet focus pool"),
 			false,
 		);
+
 		expect(plain.status).toBe(303);
 		expect(plain.headers.get("location")).toBe("/bills");
 	});
@@ -287,6 +311,7 @@ describe("Budget: its close returns focus to the category's row on Home", () => 
 			"/budget/1",
 			new URLSearchParams({ budget: "abc" }),
 		);
+
 		expect(backdropHref(html)).toBe("/?focus=1");
 		expect(html.split('href="/?focus=1"').length - 1).toBe(2);
 	});
@@ -304,6 +329,7 @@ describe("Savings goal: its close returns focus to the Savings row on Home", () 
 			"/savings-goal",
 			new URLSearchParams({ goal: "abc" }),
 		);
+
 		expect(backdropHref(html)).toBe("/?focus=savings-goal");
 		expect(html.split('href="/?focus=savings-goal"').length - 1).toBe(2);
 	});
@@ -312,6 +338,7 @@ describe("Savings goal: its close returns focus to the Savings row on Home", () 
 		const drawn = await get("/?focus=savings-goal");
 		const rows = drawn.match(/<a [^>]*href="\/savings-goal"[^>]*>/g) ?? [];
 		expect(rows.length).toBeGreaterThan(0);
+
 		for (const row of rows) expect(row).toContain("autofocus");
 	});
 });
@@ -331,6 +358,7 @@ describe("Plans: a plan's sheet closes to what opened it, with focus back there"
 		)
 			.bind(thisMonth)
 			.first<{ id: number }>();
+
 		return row?.id ?? 0;
 	}
 
@@ -408,10 +436,12 @@ describe("Plans: a plan's sheet closes to what opened it, with focus back there"
 
 	it("keeps the plan's own close when its Unlink redraws the sheet", async () => {
 		const id = await planId();
+
 		const html = await post(
 			`/plans/${id}/unlink`,
 			new URLSearchParams({ opener: "plan" }),
 		);
+
 		expect(html).toContain('id="plan-sheet-title"');
 		expect(backdropHref(html)).toBe(`/plans/${id}?focus=edit-plan`);
 	});

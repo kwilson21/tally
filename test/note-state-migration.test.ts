@@ -3,9 +3,11 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { NoteState } from "../src/db/note-state";
 
 const db = env.DB;
+
 const migration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0068_note_state"),
 );
+
 // The migration runs once at deploy. These tests replay its two data statements (the contradiction fix and the
 // backfill) against seeded rows, so every real flag combination is checked the way production will backfill it.
 const FIX = (migration?.queries ?? []).find((query) =>
@@ -13,6 +15,7 @@ const FIX = (migration?.queries ?? []).find((query) =>
 		"note_guessed = 0 WHERE note_guessed = 1 AND note_dismissed = 1",
 	),
 );
+
 const BACKFILL = (migration?.queries ?? []).find((query) =>
 	query.includes("UPDATE transactions SET note_state"),
 );
@@ -295,6 +298,7 @@ async function stateRows() {
 			updatedBy: string | null;
 			updatedAt: string | null;
 		}>();
+
 	return results;
 }
 
@@ -332,11 +336,13 @@ describe("migration 0068 note_state backfill", () => {
 			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
 		await db.prepare(BACKFILL).run();
+
 		const bad = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE note_guessed = 1 AND note_dismissed = 1",
 			)
 			.first<{ n: number }>();
+
 		expect(bad?.n).toBe(0);
 	});
 
@@ -345,6 +351,7 @@ describe("migration 0068 note_state backfill", () => {
 			throw new Error("Migration 0068 statements are missing");
 		await db.prepare(FIX).run();
 		await db.prepare(BACKFILL).run();
+
 		for (const row of await stateRows()) {
 			expect(row.updatedBy).toBe("user");
 			expect(row.updatedAt).toBe(UPDATED);
@@ -375,10 +382,12 @@ describe("migration 0068 note_state backfill", () => {
 			)
 			.bind(LAST + 1, ACCOUNT)
 			.run();
+
 		const row = await db
 			.prepare("SELECT note_state AS state FROM transactions WHERE id = ?")
 			.bind(LAST + 1)
 			.first<{ state: string }>();
+
 		expect(row?.state).toBe("unasked");
 		await db
 			.prepare("DELETE FROM transactions WHERE id = ?")

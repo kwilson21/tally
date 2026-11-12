@@ -69,6 +69,7 @@ export function BillStatusHeading({
 	includes?: string;
 }) {
 	const look = STATUS_HEADING[status];
+
 	const heading = (
 		<div class="flex items-center gap-2 text-sm text-muted">
 			<h2 class="flex min-w-0 items-center gap-2">
@@ -85,7 +86,9 @@ export function BillStatusHeading({
 			)}
 		</div>
 	);
+
 	if (!includes) return heading;
+
 	return (
 		<>
 			{heading}
@@ -112,28 +115,34 @@ export function includesLine(bills: UnlistedBill[]) {
 	if (!bills.length) return undefined;
 	const named = bills.slice(0, 2).map(unlistedBillWords);
 	const more = bills.length - named.length;
+
 	return `Includes ${named.join(", ")}${more ? `, and ${more} more` : ""}`;
 }
 
 function unlistedBillWords({ name, frequency, dueDates }: UnlistedBill) {
 	const dates = [...dueDates].sort();
+
 	// A date in the month before the one named is written with its month again: "Oct 30 and Nov 6".
 	const days = dates.map((date, i) =>
 		i > 0 && date.slice(0, 7) === dates[i - 1]?.slice(0, 7)
 			? String(Number(date.slice(8, 10)))
 			: monthDay(Number(date.slice(5, 7)), Number(date.slice(8, 10))),
 	);
+
 	const list =
 		days.length > 1
 			? `${days.slice(0, -1).join(", ")} and ${days[days.length - 1]}`
 			: days[0];
+
 	if (frequency === "weekly" || frequency === "biweekly") {
 		const weekday = new Intl.DateTimeFormat("en-US", {
 			weekday: "long",
 			timeZone: "UTC",
 		}).format(new Date(`${dates[0]}T00:00:00Z`));
+
 		return `${name}'s ${weekday}${dates.length > 1 ? "s" : ""} on ${list}`;
 	}
+
 	return `${name} on ${list}`;
 }
 
@@ -154,6 +163,7 @@ export function BillMonthlyTotal({
 			Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1),
 		),
 	);
+
 	return (
 		<p class="text-sm text-muted">
 			{formatCents(monthlyCents, { wholeDollars: true })} a month in bills,{" "}
@@ -167,16 +177,20 @@ export function billStatusLine(bill: BillRowData, today: string) {
 	// dayLabel starts a line ("Today, Oct 5"); here it follows "Paid" or "Due", so it reads "today".
 	const day = (date: string) =>
 		dayLabel(date, today).replace(/^Today/, "today");
+
 	if (bill.status === "paid" && bill.paidDate) {
 		const late = Math.max(
 			0,
 			dayNumber(bill.paidDate) - dayNumber(bill.dueDate),
 		);
+
 		return `Paid ${day(bill.paidDate)}${late ? `, ${late} ${late === 1 ? "day" : "days"} late` : ""}`;
 	}
+
 	// A part-paid occurrence keeps its date's status heading and says what has been paid (decision 101).
 	if (bill.status !== "paid" && (bill.paidCents ?? 0) > 0)
 		return partPaidSentence(bill.paidCents ?? 0, bill.amountCents);
+
 	return `${bill.status === "overdue" ? "Was due" : "Due"} ${day(bill.dueDate)}`;
 }
 
@@ -191,6 +205,7 @@ function secondLine(bill: BillRowData, today: string) {
 			dueDay: bill.dueDay ?? 1,
 			anchorMonth: bill.anchorMonth,
 		});
+
 	return `${billStatusLine(bill, today)}${
 		bill.frequency && ["weekly", "biweekly"].includes(bill.frequency)
 			? ` · ${billCadenceLabel({ frequency: bill.frequency, dueDay: bill.dueDay ?? 1 })}`
@@ -214,6 +229,7 @@ export function BillRow({
 	href?: string;
 }) {
 	const offer = bill.priceOffer;
+
 	const content = (
 		<>
 			<CategoryIcon icon={bill.icon} color={bill.color} />
@@ -237,7 +253,9 @@ export function BillRow({
 			</span>
 		</>
 	);
+
 	const look = `flex min-h-16 items-center gap-4${offer ? " py-2" : ""}`;
+
 	return (
 		<li>
 			{href ? (

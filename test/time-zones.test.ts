@@ -51,6 +51,7 @@ describe("the zones Settings offers", () => {
 		const all = [...US_ZONES, ...OTHER_ZONES];
 		expect(new Set(all.map(([zone]) => zone)).size).toBe(all.length);
 		expect(new Set(all.map(([, label]) => label)).size).toBe(all.length);
+
 		for (const [zone] of all)
 			expect(
 				() => new Intl.DateTimeFormat("en-CA", { timeZone: zone }),
@@ -100,7 +101,9 @@ describe("isSupportedZone", () => {
 describe("parseTimeZone", () => {
 	const form = (fields: Record<string, string>) => {
 		const data = new FormData();
+
 		for (const [key, value] of Object.entries(fields)) data.set(key, value);
+
 		return data;
 	};
 
@@ -135,9 +138,11 @@ describe("saveTimeZone and householdTimeZone", () => {
 		expect(await householdTimeZone(env.DB)).toBe("America/Chicago");
 		await saveTimeZone(env.DB, "Pacific/Honolulu");
 		expect(await householdTimeZone(env.DB)).toBe("Pacific/Honolulu");
+
 		const rows = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM household_settings WHERE key = 'time_zone'",
 		).first<{ n: number }>();
+
 		expect(rows?.n).toBe(1);
 	});
 
@@ -146,9 +151,11 @@ describe("saveTimeZone and householdTimeZone", () => {
 			"INSERT INTO household_settings (key, value) VALUES ('ai_income', 'off') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 		).run();
 		await saveTimeZone(env.DB, "America/Denver");
+
 		const other = await env.DB.prepare(
 			"SELECT key, value FROM household_settings WHERE key = 'ai_income'",
 		).first();
+
 		expect(other).toEqual({ key: "ai_income", value: "off" });
 		await env.DB.prepare(
 			"DELETE FROM household_settings WHERE key = 'ai_income'",

@@ -49,6 +49,7 @@ export function appleCardSample(anchor: string): string {
 				quote,
 			),
 		].join(",");
+
 	const rows = [
 		row(
 			20,
@@ -169,5 +170,6 @@ export function appleCardSample(anchor: string): string {
 			"24.00",
 		),
 	];
+
 	return [HEADER.join(","), ...rows].join("\n");
 }
