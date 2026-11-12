@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
@@ -19,6 +20,7 @@ import {
 	moveCategoryStatements,
 	renameCategoryStatements,
 	restoreCategoryStatements,
+	saveNamedCategory,
 } from "../db/category-saves";
 import {
 	createFromSuggestion,
@@ -26,6 +28,7 @@ import {
 	type PendingSuggestion,
 	pendingSuggestionPage,
 } from "../db/category-suggestions";
+import { Database } from "../db/database";
 import { isUniqueViolation } from "../db/errors";
 import { waitsForRunStatement } from "../db/first-tally";
 import {
@@ -52,6 +55,7 @@ import { runningRecheck, startResortFor } from "../db/resort-start";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
 import { waitingForJevSql } from "../db/transactions";
+import { readAtEdge } from "../edge";
 import { hxTrigger } from "../htmx";
 import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
 import { reconnectRecipients } from "../reconnect/reminders";
@@ -64,7 +68,6 @@ import {
 	renameCategory,
 	restoreCategory,
 } from "../rules/categories";
-import { handle } from "../rules/rule";
 import {
 	type CategoryErrors,
 	CategoryId,
@@ -1742,58 +1745,52 @@ settings.post("/settings/time-zone", async (c) => {
 	);
 });
 
-/** The typed name, read at the edge (decision 191): the tidied name, or the sentence to show under the field. */
-function typedName(form: FormData) {
-	const read = CategoryName.safeParse(String(form.get("name") ?? ""));
+/** Runs a category rule's program for this request: its database is the request's own (decision 206). */
+const run = (
+	c: Context<App>,
+	program: Effect.Effect<Response | Promise<Response>, never, Database>,
+) => Effect.runPromise(program.pipe(Effect.provideService(Database, c.env.DB)));
 
-	return read.success
-		? { ok: true as const, name: read.data }
-		: { ok: false as const, errors: { name: read.error.issues[0]?.message } };
-}
-
-const CHANGED = "CategoryChanged";
+/** The typed name, read at the edge (decision 206): the tidied name, or the sentence to show under the field. */
+const typedName = (form: FormData) =>
+	readAtEdge(CategoryName, String(form.get("name") ?? ""));
 
 settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();
 	const typed = typedName(form);
 
-	if (!typed.ok) return retry(c, "new", form, typed.errors);
-	let answer: Awaited<ReturnType<typeof added>>;
+	if (!typed.ok) return retry(c, "new", form, { name: typed.say });
 
-	try {
-		answer = await added(c.env.DB, typed.name);
-	} catch (error) {
-		// The unique name indexes settle two saves at once (migrations 0005 and 0052).
-		if (nameTaken(error))
-			return retry(c, "new", form, { name: "That name is taken." });
-		throw error;
-	}
+	return run(
+		c,
+		decideCategory(
+			addCategory,
+			{ name: typed.value },
+			addCategoryStatements,
+			saveNamedCategory,
+		).pipe(
+			Effect.map(({ saved }) => {
+				const id = Number(saved?.[1]?.meta.last_row_id);
 
-	return handle(answer.outcome, {
-		write: (save) => {
-			const id = Number(answer.saved?.[1]?.meta.last_row_id);
-
-			return done(
-				c,
-				`Added ${save.name}`,
-				`Added ${save.name}. Set its budget on Home.`,
-				{ page: "categories", focus: id, saved: { kind: "category", id } },
-			);
-		},
-		nothingToDo: () => {
-			throw new Error("Adding a category always has something to do.");
-		},
-		refuse: (_type, say) => retry(c, "new", form, { name: say }),
-	});
+				return done(
+					c,
+					`Added ${typed.value}`,
+					`Added ${typed.value}. Set its budget on Home.`,
+					{ page: "categories", focus: id, saved: { kind: "category", id } },
+				);
+			}),
+			// Every refusal of an add is about the name, and is shown under it with the form kept open.
+			Effect.catch((refusal) =>
+				Effect.succeed(retry(c, "new", form, { name: refusal.say })),
+			),
+		),
+	);
 });
 
-const added = (db: D1Database, name: string) =>
-	decideCategory(db, addCategory, { name }, addCategoryStatements);
-
 settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
-	const id = CategoryId.safeParse(c.req.param("id"));
+	const id = readAtEdge(CategoryId, c.req.param("id"));
 
-	if (!id.success) return gone(c);
+	if (!id.ok) return gone(c);
 	const form = await c.req.formData();
 	const typed = typedName(form);
 
@@ -1802,148 +1799,146 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 		const { category } = await find(c);
 
 		return category && !category.archived
-			? retry(c, id.data, form, typed.errors)
+			? retry(c, id.value, form, { name: typed.say })
 			: gone(c);
 	}
 
-	let answer: Awaited<ReturnType<typeof renamed>>;
-
-	try {
-		answer = await renamed(c.env.DB, id.data, typed.name);
-	} catch (error) {
-		if (nameTaken(error))
-			return retry(c, id.data, form, { name: "That name is taken." });
-		throw error;
-	}
-
-	// A rename marks its own row (P119 A, #71); Archive and Move take the row out of its place, so they mark nothing.
-	const saved = () =>
-		done(c, `Saved ${typed.name}`, `Saved ${typed.name}.`, {
-			page: "categories",
-			focus: id.data,
-			saved: { kind: "category", id: id.data },
-		});
-
-	return handle(answer.outcome, {
-		write: saved,
-		nothingToDo: saved,
-		refuse: (type, say) =>
-			type === CHANGED ? gone(c) : retry(c, id.data, form, { name: say }),
-	});
+	return run(
+		c,
+		decideCategory(
+			renameCategory,
+			{ id: id.value, name: typed.value },
+			renameCategoryStatements,
+			saveNamedCategory,
+		).pipe(
+			// A rename marks its own row (P119 A, #71); Archive and Move take the row out of its place, so they mark
+			// nothing. A rename to the name it has saves nothing and gets the same answer (decision 194).
+			Effect.map(() =>
+				done(c, `Saved ${typed.value}`, `Saved ${typed.value}.`, {
+					page: "categories",
+					focus: id.value,
+					saved: { kind: "category", id: id.value },
+				}),
+			),
+			Effect.catchTag("CategoryChanged", () => Effect.succeed(gone(c))),
+			Effect.catch((refusal) =>
+				Effect.succeed(retry(c, id.value, form, { name: refusal.say })),
+			),
+		),
+	);
 });
-
-const renamed = (db: D1Database, id: number, name: string) =>
-	decideCategory(db, renameCategory, { id, name }, renameCategoryStatements);
 
 /** The name of the category a rule was asked about, from the list it decided on. */
 const nameIn = (facts: CategoryFacts, id: number) =>
 	facts.categories.find((x) => x.id === id)?.name ?? "";
 
 settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
-	const id = CategoryId.safeParse(c.req.param("id"));
+	const id = readAtEdge(CategoryId, c.req.param("id"));
 
-	if (!id.success) return gone(c);
+	if (!id.ok) return gone(c);
+	const today = await householdToday(c.env.DB);
 
-	const { outcome, facts } = await decideCategory(
-		c.env.DB,
-		archiveCategory,
-		{ id: id.data, today: await householdToday(c.env.DB) },
-		archiveCategoryStatements,
+	return run(
+		c,
+		decideCategory(
+			archiveCategory,
+			{ id: id.value, today },
+			archiveCategoryStatements,
+		).pipe(
+			// A second press finds it archived already and gets the first press's answer (decision 194).
+			Effect.map(({ facts }) => {
+				const name = nameIn(facts, id.value);
+
+				return done(
+					c,
+					`Archived ${name}`,
+					`Archived ${name}. Its transactions keep their category.`,
+					// Its row is gone, so focus goes to the Archived list it moved to.
+					{ page: "categories", focus: "archived" },
+				);
+			}),
+			Effect.catchTag("CategoryChanged", () => Effect.succeed(gone(c))),
+		),
 	);
-
-	const name = nameIn(facts, id.data);
-
-	// A second press finds it archived already and gets the first press's answer (decision 194).
-	const archived = () =>
-		done(
-			c,
-			`Archived ${name}`,
-			`Archived ${name}. Its transactions keep their category.`,
-			// Its row is gone, so focus goes to the Archived list it moved to.
-			{ page: "categories", focus: "archived" },
-		);
-
-	return handle(outcome, {
-		write: archived,
-		nothingToDo: archived,
-		refuse: () => gone(c),
-	});
 });
 
 settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
-	const id = CategoryId.safeParse(c.req.param("id"));
+	const id = readAtEdge(CategoryId, c.req.param("id"));
 
-	if (!id.success) return gone(c);
+	if (!id.ok) return gone(c);
+	const today = await householdToday(c.env.DB);
 
-	const { outcome, facts } = await decideCategory(
-		c.env.DB,
-		restoreCategory,
-		{ id: id.data, today: await householdToday(c.env.DB) },
-		restoreCategoryStatements,
+	return run(
+		c,
+		decideCategory(
+			restoreCategory,
+			{ id: id.value, today },
+			restoreCategoryStatements,
+		).pipe(
+			// A second press finds it back already and gets the first press's answer (decision 194).
+			Effect.map(({ facts }) => {
+				const name = nameIn(facts, id.value);
+
+				return done(c, `Restored ${name}`, `Restored ${name}.`, {
+					page: "categories",
+					focus: id.value,
+				});
+			}),
+			Effect.catchTags({
+				CategoryChanged: () => Effect.succeed(gone(c)),
+				ListFull: (refusal) =>
+					Effect.succeed(
+						renderPage(c, "categories", {
+							restoreError: refusal.say,
+							status: 422,
+						}),
+					),
+			}),
+		),
 	);
-
-	const name = nameIn(facts, id.data);
-
-	// A second press finds it back already and gets the first press's answer (decision 194).
-	const restored = () =>
-		done(c, `Restored ${name}`, `Restored ${name}.`, {
-			page: "categories",
-			focus: id.data,
-		});
-
-	return handle(outcome, {
-		write: restored,
-		nothingToDo: restored,
-		refuse: (type, say) =>
-			type === CHANGED
-				? gone(c)
-				: renderPage(c, "categories", { restoreError: say, status: 422 }),
-	});
 });
 
 // The direction is in the address, so every way of pressing the button sends it.
 settings.post(
 	"/settings/categories/:id{[0-9]+}/move/:direction{up|down}",
 	async (c) => {
-		const id = CategoryId.safeParse(c.req.param("id"));
-		const direction = MoveDirection.safeParse(c.req.param("direction"));
+		const id = readAtEdge(CategoryId, c.req.param("id"));
+		const direction = readAtEdge(MoveDirection, c.req.param("direction"));
 
-		if (!id.success || !direction.success) return gone(c);
+		if (!id.ok || !direction.ok) return gone(c);
 
-		const { outcome, facts } = await decideCategory(
-			c.env.DB,
-			moveCategory,
-			{ id: id.data, direction: direction.data },
-			moveCategoryStatements,
-		);
-
-		// At the end of the list there is nowhere to go, and the answer says where it is, as a move does.
-		const moved = async () => {
-			const name = nameIn(facts, id.data);
+		// At the end of the list there is nowhere to go, and the answer says where the category is, as a move does.
+		const moved = async (name: string) => {
 			const timeZone = await householdTimeZone(c.env.DB);
 			const today = todayIn(timeZone);
 			const { active } = await settingsCategories(c.env.DB, today.slice(0, 7));
-			const position = active.findIndex((x) => x.id === id.data) + 1;
+			const position = active.findIndex((x) => x.id === id.value) + 1;
 
 			return done(
 				c,
 				`Moved ${name}`,
-				`Moved ${name} ${direction.data}. It's now ${position} of ${active.length}.`,
+				`Moved ${name} ${direction.value}. It's now ${position} of ${active.length}.`,
 				// Stay open, so the same button can be pressed again.
 				{
 					page: "categories",
-					open: id.data,
-					focus: id.data,
+					open: id.value,
+					focus: id.value,
 					today,
 					timeZone,
 				},
 			);
 		};
 
-		return handle(outcome, {
-			write: moved,
-			nothingToDo: moved,
-			refuse: () => gone(c),
-		});
+		return run(
+			c,
+			decideCategory(
+				moveCategory,
+				{ id: id.value, direction: direction.value },
+				moveCategoryStatements,
+			).pipe(
+				Effect.map(({ facts }) => moved(nameIn(facts, id.value))),
+				Effect.catchTag("CategoryChanged", () => Effect.succeed(gone(c))),
+			),
+		);
 	},
 );

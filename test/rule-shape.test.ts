@@ -1,5 +1,6 @@
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
-import * as z from "zod";
 import {
 	defineRule2,
 	handle,
@@ -47,13 +48,13 @@ const setCounter = defineRule2({
 });
 
 /** What every outcome looks like, whatever the rule: exactly one of three kinds, with only that kind's fields. */
-const AnyOutcome = z.discriminatedUnion("kind", [
-	z.strictObject({ kind: z.literal("write"), write: z.unknown() }),
-	z.strictObject({ kind: z.literal("nothingToDo") }),
-	z.strictObject({
-		kind: z.literal("refuse"),
-		type: z.string().min(1),
-		say: z.string().min(1),
+const AnyOutcome = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("write"), write: Schema.Unknown }),
+	Schema.Struct({ kind: Schema.Literal("nothingToDo") }),
+	Schema.Struct({
+		kind: Schema.Literal("refuse"),
+		type: Schema.NonEmptyString,
+		say: Schema.NonEmptyString,
 	}),
 ]);
 
@@ -113,7 +114,13 @@ describe("the rule shape (decision 192)", () => {
 		]);
 
 		for (const outcome of outcomes)
-			expect(AnyOutcome.safeParse(outcome).success).toBe(true);
+			expect(
+				Result.isSuccess(
+					Schema.decodeUnknownResult(AnyOutcome, { onExcessProperty: "error" })(
+						outcome,
+					),
+				),
+			).toBe(true);
 	});
 
 	it("hands each kind to its own branch, and only that one", () => {

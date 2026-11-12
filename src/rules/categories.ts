@@ -1,6 +1,9 @@
-// The categories area's rules (decisions 187 and 192): add, rename, archive, restore and move a category. Each takes a
-// typed request and the stored list and answers what to save. The date is an input (decision 195), and nothing here
-// parses, reads a clock or touches the database. The save's guard is in src/db/category-saves.ts (decision 190).
+// The categories area's rules (decisions 187 and 206): add, rename, archive, restore and move a category. Each takes a
+// typed request and the stored list, and is written as a list of its parts (`rule`, in ./terms). Its `decide` answers
+// what to save, or nothing when what was asked is already true, or fails with a named refusal. The date is an input
+// (decision 195), and nothing here parses, reads a clock or touches the database. The save's guard is in
+// src/db/category-saves.ts (decision 190).
+import * as Data from "effect/Data";
 import { NONE_FIT } from "../ai/decide";
 import {
 	COLORS,
@@ -9,7 +12,7 @@ import {
 	nameKey,
 	sameName,
 } from "../settings/category-form";
-import { defineRule2, type Term, term, unless } from "./rule";
+import { rule, term, unless } from "./terms";
 
 export type StoredCategory = {
 	id: number;
@@ -59,6 +62,33 @@ export type MoveCategoryWrite = {
 	expectedVersion: string;
 };
 
+// The refusals: one class each, with the sentence a person reads.
+
+export class CategoryChanged extends Data.TaggedError("CategoryChanged") {
+	readonly say =
+		"That category was changed somewhere else. Here's the current list.";
+}
+
+export class NameReserved extends Data.TaggedError("NameReserved") {
+	readonly say = "That name is reserved for Tally. Pick another.";
+}
+
+export class NameArchived extends Data.TaggedError("NameArchived") {
+	readonly say = "An archived category has that name. Restore it instead.";
+}
+
+export class NameTaken extends Data.TaggedError("NameTaken") {
+	readonly say = "That name is taken.";
+}
+
+export class ListFull extends Data.TaggedError("ListFull")<{
+	readonly action: "add" | "restore";
+}> {
+	get say() {
+		return fullMessage(this.action);
+	}
+}
+
 const active = (facts: CategoryFacts) =>
 	facts.categories.filter((c) => !c.archived);
 
@@ -66,6 +96,9 @@ const lastPlace = (categories: StoredCategory[]) =>
 	categories.reduce((last, c) => Math.max(last, c.sortOrder), 0);
 
 const hasRoom = (facts: CategoryFacts) => active(facts).length < MAX_ACTIVE;
+
+const find = (facts: CategoryFacts, id: number) =>
+	facts.categories.find((c) => c.id === id);
 
 /** What a typed name runs into: Tally's own name, and another category with the same name (an active one first). */
 const nameChecks = (
@@ -86,12 +119,13 @@ const nameChecks = (
 
 type NameChecks = ReturnType<typeof nameChecks>;
 
-const never = <G>(text: string): Term<G> => term<G>(text, () => false);
+type Found = { category: StoredCategory | undefined };
+
+// The terms, shared between the rules.
 
 const nameIsNotReserved = unless(
 	term<NameChecks>("the name is not Tally's own", (g) => !g.reserved),
-	"NameReserved",
-	"That name is reserved for Tally. Pick another.",
+	() => new NameReserved(),
 );
 
 const noArchivedCategoryHasTheName = unless(
@@ -99,8 +133,7 @@ const noArchivedCategoryHasTheName = unless(
 		"no archived category has the name",
 		(g) => !g.archivedHasName,
 	),
-	"NameArchived",
-	"An archived category has that name. Restore it instead.",
+	() => new NameArchived(),
 );
 
 const noOtherCategoryHasTheName = unless(
@@ -108,29 +141,20 @@ const noOtherCategoryHasTheName = unless(
 		"no other active category has the name",
 		(g) => !g.activeHasName,
 	),
-	"NameTaken",
-	"That name is taken.",
+	() => new NameTaken(),
 );
 
-const CHANGED =
-	"That category was changed somewhere else. Here's the current list.";
-
 const categoryIsActive = unless(
-	term<{ category: StoredCategory | undefined }>(
+	term<Found>(
 		"the category is in the active list",
 		(g) => g.category?.archived === false,
 	),
-	"CategoryChanged",
-	CHANGED,
+	() => new CategoryChanged(),
 );
 
 const categoryExists = unless(
-	term<{ category: StoredCategory | undefined }>(
-		"the category exists",
-		(g) => g.category !== undefined,
-	),
-	"CategoryChanged",
-	CHANGED,
+	term<Found>("the category exists", (g) => g.category !== undefined),
+	() => new CategoryChanged(),
 );
 
 const listHasRoom = (action: "add" | "restore") =>
@@ -139,49 +163,12 @@ const listHasRoom = (action: "add" | "restore") =>
 			`fewer than ${MAX_ACTIVE} categories are active`,
 			(g) => g.room,
 		),
-		"ListFull",
-		fullMessage(action),
+		() => new ListFull({ action }),
 	);
 
-type AddGiven = NameChecks & {
-	name: string;
-	room: boolean;
-	color: string;
-	sortOrder: number;
-	version: string;
-};
-
-type RenameGiven = NameChecks & {
-	id: number;
-	name: string;
-	category: StoredCategory | undefined;
-	version: string;
-};
-
-type ArchiveGiven = {
-	id: number;
-	today: string;
-	category: StoredCategory | undefined;
-	version: string;
-};
-
-type RestoreGiven = ArchiveGiven & { room: boolean; sortOrder: number };
-
-type MoveGiven = {
-	category: StoredCategory | undefined;
-	/** The active ids in the order they are in now. */
-	order: number[];
-	from: number;
-	to: number;
-	version: string;
-};
-
-const find = (facts: CategoryFacts, id: number) =>
-	facts.categories.find((c) => c.id === id);
-
-export const addCategory = defineRule2({
+export const addCategory = rule({
 	name: "Add a category",
-	given: (request: { name: string }, facts: CategoryFacts): AddGiven => ({
+	given: (request: { name: string }, facts: CategoryFacts) => ({
 		...nameChecks(request.name, facts, null),
 		name: request.name,
 		room: hasRoom(facts),
@@ -190,9 +177,6 @@ export const addCategory = defineRule2({
 		sortOrder: lastPlace(facts.categories) + 1,
 		version: facts.version,
 	}),
-	nothingToDoIf: never<AddGiven>(
-		"never: adding always makes a new category, and a name that exists is refused",
-	),
 	refusals: [
 		nameIsNotReserved,
 		noArchivedCategoryHasTheName,
@@ -210,18 +194,15 @@ export const addCategory = defineRule2({
 		"Adds the category at the end of the list, with the tag icon and the next colour in turn.",
 });
 
-export const renameCategory = defineRule2({
+export const renameCategory = rule({
 	name: "Rename a category",
-	given: (
-		request: { id: number; name: string },
-		facts: CategoryFacts,
-	): RenameGiven => ({
+	given: (request: { id: number; name: string }, facts: CategoryFacts) => ({
 		...nameChecks(request.name, facts, request.id),
 		...request,
 		category: find(facts, request.id),
 		version: facts.version,
 	}),
-	nothingToDoIf: term<RenameGiven>(
+	nothingToDoIf: term<Found & { name: string }>(
 		"the category is in the active list and already has exactly that name",
 		(g) => g.category?.archived === false && g.category.name === g.name,
 	),
@@ -240,17 +221,14 @@ export const renameCategory = defineRule2({
 	writesText: "Sets the category's name.",
 });
 
-export const archiveCategory = defineRule2({
+export const archiveCategory = rule({
 	name: "Archive a category",
-	given: (
-		request: { id: number; today: string },
-		facts: CategoryFacts,
-	): ArchiveGiven => ({
+	given: (request: { id: number; today: string }, facts: CategoryFacts) => ({
 		...request,
 		category: find(facts, request.id),
 		version: facts.version,
 	}),
-	nothingToDoIf: term<ArchiveGiven>(
+	nothingToDoIf: term<Found>(
 		"the category is already archived",
 		(g) => g.category?.archived === true,
 	),
@@ -264,19 +242,16 @@ export const archiveCategory = defineRule2({
 		"Archives the category from today and opens its archive period. Nothing is deleted.",
 });
 
-export const restoreCategory = defineRule2({
+export const restoreCategory = rule({
 	name: "Restore a category",
-	given: (
-		request: { id: number; today: string },
-		facts: CategoryFacts,
-	): RestoreGiven => ({
+	given: (request: { id: number; today: string }, facts: CategoryFacts) => ({
 		...request,
 		category: find(facts, request.id),
 		room: hasRoom(facts),
 		sortOrder: lastPlace(active(facts)) + 1,
 		version: facts.version,
 	}),
-	nothingToDoIf: term<RestoreGiven>(
+	nothingToDoIf: term<Found>(
 		"the category is already in the active list",
 		(g) => g.category?.archived === false,
 	),
@@ -291,12 +266,15 @@ export const restoreCategory = defineRule2({
 		"Puts the category back at the end of the active list and closes its archive period today.",
 });
 
-export const moveCategory = defineRule2({
+/** Where a move starts and ends in the active list, as places in `order`. `from` is -1 for a category not in it. */
+type Places = { order: number[]; from: number; to: number };
+
+export const moveCategory = rule({
 	name: "Move a category",
 	given: (
 		request: { id: number; direction: "up" | "down" },
 		facts: CategoryFacts,
-	): MoveGiven => {
+	) => {
 		const order = active(facts).map((c) => c.id);
 		const from = order.indexOf(request.id);
 
@@ -308,7 +286,7 @@ export const moveCategory = defineRule2({
 			version: facts.version,
 		};
 	},
-	nothingToDoIf: term<MoveGiven>(
+	nothingToDoIf: term<Places>(
 		"the category is in the active list and already at that end of it",
 		(g) => g.from !== -1 && (g.to < 0 || g.to >= g.order.length),
 	),

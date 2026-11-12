@@ -1,17 +1,23 @@
 // How the categories area's rules (src/rules/categories.ts) read their facts and save what they decide (decision 190).
 // The rule decides in TypeScript; the database only checks that the list the rule read has not changed since, and
 // raises an error when it has, so nothing is saved on a stale list.
-import type {
-	AddCategoryWrite,
-	ArchiveCategoryWrite,
-	CategoryFacts,
-	MoveCategoryWrite,
-	RenameCategoryWrite,
-	RestoreCategoryWrite,
-	StoredCategory,
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import {
+	type AddCategoryWrite,
+	type ArchiveCategoryWrite,
+	type CategoryFacts,
+	type MoveCategoryWrite,
+	NameTaken,
+	type RenameCategoryWrite,
+	type RestoreCategoryWrite,
+	type StoredCategory,
 } from "../rules/categories";
-import type { Outcome } from "../rules/rule";
-import { decideAndSaveWith } from "./guarded-save";
+import type { Refusal } from "../rules/terms";
+import { Database } from "./database";
+import { isUniqueViolation } from "./errors";
 
 /**
  * The whole list as one text, as SQL: every category's id, whether it is archived, its place and its name. Two reads
@@ -22,24 +28,30 @@ const LIST_VERSION = `(SELECT COALESCE(group_concat(id || ':' || archived || ':'
 	FROM (SELECT id, archived, sort_order, name FROM categories ORDER BY id))`;
 
 /** What the category rules read: every category, active ones first in the order the list shows, and the list's version. */
-export async function categoryFacts(db: D1Database): Promise<CategoryFacts> {
+export const categoryFacts = Effect.gen(function* () {
+	const db = yield* Database;
+
 	// SAFETY: the batch below lists exactly two statements, so its results are the two D1Results typed here. A batch
 	// is one transaction, so the version is of the very list read beside it.
-	const [list, version] = (await db.batch([
-		db.prepare(
-			"SELECT id, name, archived, sort_order AS sortOrder FROM categories ORDER BY archived, sort_order, name, id",
-		),
-		db.prepare(`SELECT ${LIST_VERSION} AS version`),
-	])) as [
+	const [list, version] = (yield* Effect.promise(() =>
+		db.batch([
+			db.prepare(
+				"SELECT id, name, archived, sort_order AS sortOrder FROM categories ORDER BY archived, sort_order, name, id",
+			),
+			db.prepare(`SELECT ${LIST_VERSION} AS version`),
+		]),
+	)) as [
 		D1Result<Omit<StoredCategory, "archived"> & { archived: number }>,
 		D1Result<{ version: string }>,
 	];
 
-	return {
+	const facts: CategoryFacts = {
 		categories: list.results.map((c) => ({ ...c, archived: c.archived === 1 })),
 		version: version.results[0]?.version ?? "",
 	};
-}
+
+	return facts;
+});
 
 /**
  * The guard, first in every save's batch: it adds nothing while the list is still the one the rule read, and tries to
@@ -124,41 +136,90 @@ export const moveCategoryStatements = (
 	),
 ];
 
+/** The save found the list changed since the rule read it. Never shown to a person: the rule is asked again. */
+export class ListChangedSinceRead extends Data.TaggedError(
+	"ListChangedSinceRead",
+) {}
+
 /** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a NULL name. */
 const GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
 
-/** Whether a save failed because the list the rule read had changed, and not for any other reason. */
-export function categoriesChangedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
-}
+/** Runs a save's batch, and says what its failure was. `whenNameTaken` makes the refusal for a save that sets a name. */
+const runBatch = <E = never>(
+	statements: D1PreparedStatement[],
+	whenNameTaken?: () => E,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
 
-/**
- * Reads the list, asks a category rule and saves what it decides in one batch, asking again on a fresh list when the
- * guard raises (decideAndSaveWith). Answers with the outcome, the list it was decided on, and the batch's results for
- * a write.
- */
-export async function decideCategory<Request, W>(
-	db: D1Database,
-	rule: { decide: (request: Request, facts: CategoryFacts) => Outcome<W> },
-	request: Request,
-	statements: (db: D1Database, save: W) => D1PreparedStatement[],
-): Promise<{
-	outcome: Outcome<W>;
-	facts: CategoryFacts;
-	saved?: D1Result[];
-}> {
-	let facts: CategoryFacts = { categories: [], version: "" };
+		return yield* Effect.tryPromise({
+			try: () => db.batch(statements),
+			catch: (cause) => cause,
+		}).pipe(
+			Effect.catch((cause): Effect.Effect<never, ListChangedSinceRead | E> => {
+				if (cause instanceof Error && GUARD_RAISED.test(cause.message))
+					return Effect.fail(new ListChangedSinceRead());
 
-	const answer = await decideAndSaveWith({
-		decide: async () => {
-			facts = await categoryFacts(db);
-
-			return rule.decide(request, facts);
-		},
-		save: (what: W) => db.batch(statements(db, what)),
-		changedSinceRead: categoriesChangedSinceRead,
-		gaveUp: "The categories kept changing while one was being saved.",
+				// Anything else is a defect: it is not caught, and the request fails as it would have.
+				return whenNameTaken && isUniqueViolation(cause)
+					? Effect.fail(whenNameTaken())
+					: Effect.die(cause);
+			}),
+		);
 	});
 
-	return { ...answer, facts };
-}
+/** Runs a save's batch. The guard's failure becomes ListChangedSinceRead; anything else is a defect. */
+export const saveCategories = (statements: D1PreparedStatement[]) =>
+	runBatch(statements);
+
+/**
+ * Runs a batch that sets a name (an add or a rename). The unique name indexes settle two saves at once (migrations 0005
+ * and 0052), and their failure becomes the NameTaken refusal.
+ */
+export const saveNamedCategory = (statements: D1PreparedStatement[]) =>
+	runBatch(statements, () => new NameTaken());
+
+/**
+ * Reads the list, asks a category rule and saves what it decides in one batch. When the guard raises, it reads and
+ * decides again on the fresh list, three times in all, so two saves at once both count; it then gives up with an error.
+ * Answers with the list it decided on, what the rule decided (nothing, when what was asked is already true), and the
+ * batch's results for a save. `save` is saveNamedCategory for a rule that sets a name.
+ */
+export const decideCategory = <Request, W, E extends Refusal, E2 = never>(
+	rule: {
+		decide: (
+			request: Request,
+			facts: CategoryFacts,
+		) => Effect.Effect<Option.Option<W>, E>;
+	},
+	request: Request,
+	statements: (db: D1Database, save: W) => D1PreparedStatement[],
+	save: (
+		statements: D1PreparedStatement[],
+	) => Effect.Effect<
+		D1Result[],
+		ListChangedSinceRead | E2,
+		Database
+	> = saveCategories,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+		const facts = yield* categoryFacts;
+		const decided = yield* rule.decide(request, facts);
+
+		const saved = Option.isSome(decided)
+			? yield* save(statements(db, decided.value))
+			: undefined;
+
+		return { facts, decided, saved };
+	}).pipe(
+		Effect.retry({
+			times: 2,
+			while: Predicate.isTagged("ListChangedSinceRead"),
+		}),
+		Effect.catchTag("ListChangedSinceRead", () =>
+			Effect.die(
+				new Error("The categories kept changing while one was being saved."),
+			),
+		),
+	);
