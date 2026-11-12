@@ -66,6 +66,8 @@ Checked in this order; the first that applies wins:
    - its text starts with a payment app's name, from a short list in code (Venmo, Zelle, Cash App, PayPal, Apple Cash, and the like). This is the net for rows with no Plaid category: Apple Card CSV rows and any other import store none (`src/plaid/sync.ts` is the only writer of `plaid_category`);
    - it has only cash, hand-entered or Apple Card CSV transactions. The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it (my call, the cautious one: Apple Card rows carry no Plaid category to check);
    - the redacted text is empty.
+
+   **Not a store** is skipped the same way: a text whose transactions carry Plaid's bank-fees category (`BANK_FEES`: fees and interest charges). A web search has nothing to say about these (the owner's pick, 2026-11-12, after a read of production found 12 of its 30 candidate texts were bank fees).
 2. **Already settled:** the merchant has a merchant rule or a bank-text rule. Left as `none`; it is searched later only if the rule is removed. A rule only stops the search: a line found before the rule was made is kept and still shown.
 3. **Already looked up:** `found`, `nothing_found` or `skipped`.
 4. **Cap reached:** left as `none` for the next run.
