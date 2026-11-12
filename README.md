@@ -11,7 +11,7 @@ One small TypeScript server on Cloudflare builds each page, stores data in a SQL
 
 ## Run locally
 
-Node 26 or newer (`.nvmrc`; `nvm use` picks it up) and [pnpm](https://pnpm.io/installation); `package.json` names the pnpm version.
+Node 26 or newer (`.nvmrc`; `nvm use` picks it up) and [pnpm](https://pnpm.io/installation) at exactly the version `package.json` names in `packageManager` (another version stops with an error, decision 204).
 
     pnpm install
     cp .dev.vars.example .dev.vars   # fill in values; never commit this file
