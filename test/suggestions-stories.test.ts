@@ -3,6 +3,7 @@ import {
 	acceptCategoryGuess,
 	answerMoneyMaybe,
 	chooseCategory,
+	dismissNewCategory,
 	type MaybeFacts,
 	neverSuggestStores,
 } from "../src/rules/suggestions";
@@ -181,5 +182,39 @@ describe("Say Yes to never suggesting this for a store", () => {
 		["refuses when the question is no longer asked", ["petco"], [], ANSWERED],
 	])("%s", (_story, stores, asked, answer) => {
 		expect(ask(stores, asked)).toEqual(answer);
+	});
+});
+
+describe("Say No to a suggested new category", () => {
+	const ask = (status: string | null) =>
+		answerOf(
+			dismissNewCategory.decide(
+				{ suggestionId: 5 },
+				{ status, name: "Pet Care" },
+			),
+		);
+
+	const CHANGED = refuse(
+		"SuggestionChanged",
+		"That suggestion was changed somewhere else. Here's the current list.",
+	);
+
+	it("dismisses a waiting suggestion", () => {
+		expect(ask("pending")).toEqual(
+			write({
+				suggestionId: 5,
+				status: "dismissed",
+				expectedStatus: "pending",
+			}),
+		);
+	});
+
+	it.each([
+		["one already made", "created"],
+		["one already dismissed", "dismissed"],
+		["one that is gone", "none"],
+		["one that does not exist", null],
+	])("refuses %s", (_story, status) => {
+		expect(ask(status)).toEqual(CHANGED);
 	});
 });

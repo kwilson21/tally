@@ -4,6 +4,8 @@
 // database. Whether the review still asks a question is the queue's own check (src/db/suggestions-queue.ts), read as a
 // fact, so the page and the rule cannot disagree. The saves' guards are in src/db/suggestion-saves.ts (decision 190).
 import * as Data from "effect/Data";
+import { categorySuggestionMachine } from "../machines/category-suggestion";
+import { next } from "../machines/next";
 import { rule, term, unless } from "./terms";
 
 /** What a Maybe's rule reads about its transaction. */
@@ -218,4 +220,61 @@ export const neverSuggestStores = rule({
 	}),
 	writesText:
 		"Keeps one Never suggest line for each of the question's stores, dated today.",
+});
+
+// A suggested new category's No. Its states and moves are the category suggestion machine's (decision 206, style 1):
+// the rule asks the machine whether a dismiss is allowed, and saves the state the machine names.
+
+export type SuggestionState = {
+	/** The suggestion's stored status, or null when there is no such suggestion. */
+	status: string | null;
+	name: string;
+};
+
+/** What the rule saves: the state the machine moved to, landing only while the suggestion still has the status read. */
+export type DismissWrite = {
+	suggestionId: number;
+	status: string;
+	expectedStatus: string;
+};
+
+export class SuggestionChanged extends Data.TaggedError("SuggestionChanged") {
+	readonly say =
+		"That suggestion was changed somewhere else. Here's the current list.";
+}
+
+type Move = { from: string | null; to: string | null };
+
+const move = (facts: SuggestionState, event: string): Move => ({
+	from: facts.status,
+	to:
+		facts.status === null
+			? null
+			: next(categorySuggestionMachine, facts.status, event),
+});
+
+export const dismissNewCategory = rule({
+	name: "Say No to a suggested new category",
+	given: (request: { suggestionId: number }, facts: SuggestionState) => ({
+		...request,
+		...move(facts, "DISMISS"),
+	}),
+	refusals: [
+		unless(
+			term<Move>(
+				"the suggestion is waiting, so the machine allows a dismiss",
+				(g) => g.to !== null,
+			),
+			() => new SuggestionChanged(),
+		),
+	],
+	writes: (g): DismissWrite => ({
+		suggestionId: g.suggestionId,
+		// SAFETY: the refusal above answered a null `to`, and a null `from` gives a null `to`, so both are states here.
+		status: g.to as string,
+		// SAFETY: as above.
+		expectedStatus: g.from as string,
+	}),
+	writesText:
+		"Marks the suggestion dismissed, so the name is never suggested again.",
 });

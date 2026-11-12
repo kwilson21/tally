@@ -1,8 +1,15 @@
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { householdToday } from "../dates";
 import { NOTE_MAX } from "../limits";
+import {
+	type DismissWrite,
+	dismissNewCategory,
+	type SuggestionState,
+} from "../rules/suggestions";
 import {
 	fullMessage,
 	MAX_ACTIVE,
@@ -12,7 +19,9 @@ import {
 } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { categoryNames } from "./categories";
+import { Database, runWith } from "./database";
 import { isUniqueViolation } from "./errors";
+import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
@@ -649,17 +658,71 @@ export async function createFromSuggestion(
 	};
 }
 
-export async function dismissSuggestion(
+/** What the No's rule reads: the suggestion's status and name. */
+export async function suggestionState(
 	db: D1Database,
 	id: number,
-): Promise<{ name: string } | null> {
-	// A compare-and-set: only a pending row changes, so a second dismiss finds nothing and returns null.
-	const result = await drizzle(db)
-		.update(categorySuggestions)
-		.set({ status: "dismissed", decidedAt: sql`datetime('now')` })
-		.where(and(eq(categorySuggestions.id, id), pendingSuggestion))
-		.returning({ name: categorySuggestions.name })
+): Promise<SuggestionState> {
+	const row = await drizzle(db)
+		.select({
+			status: categorySuggestions.status,
+			name: categorySuggestions.name,
+		})
+		.from(categorySuggestions)
+		.where(eq(categorySuggestions.id, id))
 		.get();
 
-	return result ?? null;
+	return { status: row?.status ?? null, name: row?.name ?? "" };
 }
+
+/**
+ * Reads the suggestion's state, asks the rule and saves the move it decides. The save is one statement that lands only
+ * while the suggestion still has the status the rule read (its guard, decision 190); when it does not, the rule is
+ * asked again on the fresh state (decideAndSave), which then refuses. Answers with the suggestion's name.
+ */
+export const decideDismiss = <E>(
+	dismissRule: {
+		decide: (
+			request: { suggestionId: number },
+			facts: SuggestionState,
+		) => Effect.Effect<Option.Option<DismissWrite>, E>;
+	},
+	request: { suggestionId: number },
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const { facts } = yield* decideAndSave({
+			facts: Effect.promise(() => suggestionState(db, request.suggestionId)),
+			decide: (facts) => dismissRule.decide(request, facts),
+			save: (write) =>
+				Effect.promise(() =>
+					db
+						.prepare(
+							"UPDATE category_suggestions SET status = ?1, decided_at = datetime('now') WHERE id = ?2 AND status = ?3",
+						)
+						.bind(write.status, write.suggestionId, write.expectedStatus)
+						.run(),
+				).pipe(
+					Effect.filterOrFail(
+						(result) => result.meta.changes > 0,
+						() => new ChangedSinceRead(),
+					),
+				),
+			gaveUp: "A suggestion kept changing while its No was being saved.",
+		});
+
+		return { name: facts.name };
+	});
+
+/** The No on a suggested new category, as the rule decides it: the suggestion's name, or null when the rule refuses. */
+export const dismissSuggestion = (
+	db: D1Database,
+	id: number,
+): Promise<{ name: string } | null> =>
+	runWith(
+		db,
+		decideDismiss(dismissNewCategory, { suggestionId: id }).pipe(
+			Effect.catchTag("SuggestionChanged", () => Effect.succeed(null)),
+		),
+	);
