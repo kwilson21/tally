@@ -1,10 +1,24 @@
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { householdToday } from "../dates";
 import { KEPT_NAMES_LOG_SQL } from "../db/ai-log";
+import { LIST, LIST_VERSION } from "../db/category-saves";
 import { COUNTED_JOINS, INCLUDED_ROW } from "../db/counted-month";
+import { Database } from "../db/database";
+import { decideAndSave, guardedSave } from "../db/guarded-save";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
 import { jevSaysMixedAmong } from "../db/mixed-trip";
 import { applyMerchantRuleSql, NEEDS_CATEGORY } from "../db/transactions";
+import { NameTaken, type StoredCategory } from "../rules/categories";
+import type {
+	FileGroupFacts,
+	FileGroupRequest,
+	FileGroupWrite,
+	StoreRuleFacts,
+	StoreRuleRequest,
+	StoreRuleWrite,
+} from "../rules/organize";
 import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
@@ -152,6 +166,83 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	);
 }
 
+/** The ids the update statements filed. */
+function filedIds(updates: D1Result[]): number[] {
+	// SAFETY: each update statement ends in RETURNING id, so every row these results hold has an id.
+	const rows = updates.flatMap((result) => result.results as { id: number }[]);
+
+	return rows.map((row) => row.id);
+}
+
+/** Where a group's charges go: a category the family has, by its id, or the one the same batch makes, by its name's key. */
+type GroupCategory = { id: number } | { nameKey: string };
+
+/**
+ * The statements that name a group's merchants (`settles`) and file its charges (`updates`), for one batch. The charges
+ * have no cap, so SQL files them (decision 209), 90 merchant keys a statement to stay under D1's 100 bound values.
+ * `kept` is the keys for which `displayName` is Tally's guess kept by a person; `today` is the day that is logged on.
+ */
+function groupStatements(
+	db: D1Database,
+	names: string[],
+	category: GroupCategory,
+	displayName: string | null,
+	kept: string[],
+	today: string | null,
+	updatedBy: string,
+) {
+	const categoryId = "id" in category ? category.id : null;
+	const nameKey = "id" in category ? null : category.nameKey;
+	const updates: D1PreparedStatement[] = [];
+
+	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
+		const chunk = names.slice(offset, offset + CHUNK_SIZE);
+		const marks = chunk.map(() => "?").join(", ");
+		updates.push(
+			db
+				.prepare(
+					`UPDATE transactions SET category_id = COALESCE(?, (SELECT id FROM categories WHERE name_key = ? AND archived = 0)), category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
+						updated_by = ?, updated_at = datetime('now')
+					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})
+					RETURNING id`,
+				)
+				.bind(categoryId, nameKey, updatedBy, ...chunk),
+		);
+	}
+
+	// A merchant's row is written only while one of its charges still needs a category when this batch starts, so a
+	// group another save filed first keeps its name. The checks run ahead of the updates that file the charges.
+	// The guessed names a person keeps are logged in this batch, in one statement ahead of every merchant's settling
+	// upsert (spec §8.6). The log reads each merchant as its upsert finds it, so it must come first. It has the
+	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
+	const settles: D1PreparedStatement[] = [];
+
+	if (kept.length > 0)
+		settles.push(
+			db
+				.prepare(
+					`${KEPT_NAMES_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = m.raw_name)`,
+				)
+				.bind(today, JSON.stringify(kept), displayName),
+		);
+
+	for (const merchantKey of names) {
+		settles.push(
+			db
+				.prepare(
+					`INSERT INTO merchants (raw_name, display_name)
+					SELECT ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
+					ON CONFLICT(raw_name) DO UPDATE SET
+						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
+						${SETTLE_SUGGESTION_SQL}`,
+				)
+				.bind(merchantKey, displayName, merchantKey, displayName),
+		);
+	}
+
+	return { settles, updates };
+}
+
 /**
  * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
  * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
@@ -187,70 +278,195 @@ export async function saveOrganizeGroup(
 	// A stale form files nothing after another request categorized the group.
 	if (saved === 0) return [];
 
-	const updates: D1PreparedStatement[] = [];
-
-	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
-		const chunk = names.slice(offset, offset + CHUNK_SIZE);
-		const marks = chunk.map(() => "?").join(", ");
-		updates.push(
-			db
-				.prepare(
-					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
-						updated_by = ?, updated_at = datetime('now')
-					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})
-					RETURNING id`,
+	const { settles, updates } = groupStatements(
+		db,
+		names,
+		{ id: categoryId },
+		displayName,
+		displayName
+			? names.filter(
+					(merchantKey) => nameSource([displayName], merchantKey) === "tally",
 				)
-				.bind(categoryId, updatedBy, ...chunk),
-		);
-	}
-
-	// A merchant's row is written only while one of its charges still needs a category when this batch starts, so a
-	// group another save filed first keeps its name. The checks run ahead of the updates that file the charges.
-	// The guessed names a person keeps are logged in this batch, in one statement ahead of every merchant's settling
-	// upsert (spec §8.6). The log reads each merchant as its upsert finds it, so it must come first. It has the
-	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
-	const today = displayName ? await householdToday(db) : null;
-	const settles: D1PreparedStatement[] = [];
-
-	const kept = displayName
-		? names.filter(
-				(merchantKey) => nameSource([displayName], merchantKey) === "tally",
-			)
-		: [];
-
-	if (kept.length > 0)
-		settles.push(
-			db
-				.prepare(
-					`${KEPT_NAMES_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = m.raw_name)`,
-				)
-				.bind(today, JSON.stringify(kept), displayName),
-		);
-
-	for (const merchantKey of names) {
-		settles.push(
-			db
-				.prepare(
-					`INSERT INTO merchants (raw_name, display_name)
-					SELECT ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
-					ON CONFLICT(raw_name) DO UPDATE SET
-						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
-						${SETTLE_SUGGESTION_SQL}`,
-				)
-				.bind(merchantKey, displayName, merchantKey, displayName),
-		);
-	}
+			: [],
+		displayName ? await householdToday(db) : null,
+		updatedBy,
+	);
 
 	const results = await db.batch([...settles, ...updates]);
 
 	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
-	// SAFETY: each update statement ends in RETURNING id, so every row these results hold has an id.
-	return results
-		.slice(settles.length)
-		.flatMap((result) =>
-			(result.results as { id: number }[]).map((row) => row.id),
-		);
+	return filedIds(results.slice(settles.length));
 }
+
+/** How many charges of the merchant keys ?1 (a JSON list) still need a category, as SQL. */
+const WAITING_COUNT = `(SELECT COUNT(*) FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND ${KEY} IN (SELECT value FROM json_each(?1)))`;
+
+/** Everything the filing rule reads as one text, as SQL: the whole category list and that count. */
+const GROUP_VERSION = `(${LIST_VERSION} || '/' || ${WAITING_COUNT})`;
+
+/** What the filing rule reads: the family's categories and how many of the store's charges wait, with their version, in one batch. */
+export async function fileGroupFacts(
+	db: D1Database,
+	merchantKeys: string[],
+): Promise<FileGroupFacts> {
+	const keys = JSON.stringify(merchantKeys);
+
+	// SAFETY: the batch below lists exactly two statements, so its results are the two D1Results typed here. A batch is
+	// one transaction, so the version is of the very rows read beside it.
+	const [list, state] = (await db.batch([
+		db.prepare(LIST),
+		db
+			.prepare(
+				`SELECT ${WAITING_COUNT} AS waiting, ${GROUP_VERSION} AS version`,
+			)
+			.bind(keys),
+	])) as [
+		D1Result<Omit<StoredCategory, "archived"> & { archived: number }>,
+		D1Result<{ waiting: number; version: string }>,
+	];
+
+	return {
+		categories: list.results.map((c) => ({ ...c, archived: c.archived === 1 })),
+		waiting: state.results[0]?.waiting ?? 0,
+		version: state.results[0]?.version ?? "",
+	};
+}
+
+/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a category with no name. */
+const GROUP_GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
+
+/**
+ * Reads the filing's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the
+ * guard raises (decideAndSave). The batch is the guard (it tries to add a category with no name when the list or the
+ * store's waiting charges changed since the read, which fails the batch), the new category when the rule makes one,
+ * and the statements that name the store and file its charges. The category and the filing land together or not at
+ * all. Answers with the category's name and the ids of the charges filed.
+ */
+export const decideFileGroup = <E>(
+	groupRule: {
+		decide: (
+			request: FileGroupRequest,
+			facts: FileGroupFacts,
+		) => Effect.Effect<Option.Option<FileGroupWrite>, E>;
+	},
+	request: FileGroupRequest,
+	today: string,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const { decided, saved } = yield* decideAndSave({
+			facts: Effect.promise(() => fileGroupFacts(db, request.merchantKeys)),
+			decide: (facts) => groupRule.decide(request, facts),
+			save: (write) => {
+				const { settles, updates } = groupStatements(
+					db,
+					write.merchantKeys,
+					// The rule names an existing category's id whenever it makes none, so the 0 is never used.
+					write.create
+						? { nameKey: write.create.nameKey }
+						: { id: write.categoryId ?? 0 },
+					write.displayName,
+					write.keptGuessFor,
+					today,
+					write.who,
+				);
+
+				const before = [
+					db
+						.prepare(
+							`INSERT INTO categories (name, icon, color) SELECT NULL, 'tag', 'cat-blue' WHERE ${GROUP_VERSION} IS NOT ?2`,
+						)
+						.bind(JSON.stringify(write.merchantKeys), write.expectedVersion),
+					...(write.create
+						? [
+								db
+									.prepare(
+										"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', ?, ?)",
+									)
+									.bind(
+										write.create.name,
+										write.create.nameKey,
+										write.create.color,
+										write.create.sortOrder,
+									),
+							]
+						: []),
+					...settles,
+				];
+
+				return guardedSave(
+					() => db.batch([...before, ...updates]),
+					(error) => GROUP_GUARD_RAISED.test(error.message),
+					() => new NameTaken(),
+				).pipe(Effect.map((results) => filedIds(results.slice(before.length))));
+			},
+			gaveUp: "A store's charges kept changing while they were being filed.",
+		});
+
+		const write = Option.getOrThrow(decided);
+
+		// A category made in the batch has its number only once the batch has run.
+		const made = write.create
+			? yield* Effect.promise(() =>
+					db
+						.prepare("SELECT id FROM categories WHERE name_key = ?")
+						.bind(write.create?.nameKey ?? "")
+						.first<{ id: number }>(),
+				)
+			: null;
+
+		return {
+			categoryId: write.categoryId ?? made?.id ?? 0,
+			categoryName: write.categoryName,
+			filed: saved ?? [],
+		};
+	});
+
+/**
+ * Rebuilds Organize's question for the store and category the form posted, asks the rule and, on a Yes, writes the
+ * rule (setOrganizeRule, whose SQL carries its own guards: decision 209, the store's charges have no cap). Answers with
+ * the question and the merchant keys whose rule was written; none when the rule had nothing to do or the Yes was stale.
+ */
+export const decideStoreRule = <E>(
+	storeRule: {
+		decide: (
+			request: StoreRuleRequest,
+			facts: StoreRuleFacts,
+		) => Effect.Effect<Option.Option<StoreRuleWrite>, E>;
+	},
+	request: StoreRuleRequest,
+	store: number,
+	categoryId: number,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		const offer = yield* Effect.promise(() =>
+			storeOffer(db, store, categoryId),
+		);
+
+		const mixed = offer
+			? yield* Effect.promise(() => jevSaysMixedAmong(db, offer.savedIds))
+			: false;
+
+		const decided = yield* storeRule.decide(request, { offer, mixed });
+
+		if (Option.isNone(decided)) return { offer: null, written: [] };
+		const write = decided.value;
+
+		const written = yield* Effect.promise(() =>
+			setOrganizeRule(
+				db,
+				write.categoryId,
+				JSON.stringify(write.savedIds),
+				write.merchant,
+				write.who,
+			),
+		);
+
+		return { offer: write, written };
+	});
 
 /**
  * Whether every merchant key of a group already has `categoryId` as its rule, so Organize has no question to

@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 56,
+	"legacyBaseline": 53,
 	"handlers": [
 		{
 			"method": "POST",
@@ -185,21 +185,30 @@
 			"path": "/transactions/organize",
 			"file": "organize.tsx",
 			"area": "organize",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/organize.ts",
+			"stories": "test/organize-stories.test.ts",
+			"reason": "A store's charges have no cap, so SQL files them, 90 merchant keys a statement (decision 209). The rule decides the category, the store's name and whether anything is filed."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/organize/rule",
 			"file": "organize.tsx",
 			"area": "organize",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/organize.ts",
+			"stories": "test/organize-stories.test.ts",
+			"reason": "The rule decides whether a rule is made. The SQL that writes it and applies it to the store's other charges keeps its own guards, because those charges have no cap (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/organize/suggestion",
 			"file": "organize.tsx",
 			"area": "organize",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/suggestions.ts",
+			"stories": "test/suggestions-stories.test.ts",
+			"reason": "The same rule as Settings' Create; it releases the suggestion's other purchases with SQL, because their number has no cap (decision 209)."
 		},
 		{
 			"method": "POST",

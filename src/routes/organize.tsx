@@ -1,23 +1,28 @@
+import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
-import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { createFromSuggestion } from "../db/category-suggestions";
+import { householdToday } from "../dates";
+import { decideCreate } from "../db/category-suggestions";
+import { runWith } from "../db/database";
 import { runningRecheck, startResortFor } from "../db/resort-start";
 import {
 	type NewCategorySuggestion,
 	newCategoryItem,
 } from "../db/suggestions-queue";
+import { readAtEdge } from "../edge";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX } from "../limits";
 import { formatCents } from "../money";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
-import { nameForm, parseCategory } from "../settings/category-form";
+import { fileGroup, makeStoreRule } from "../rules/organize";
+import { createFromSuggestion } from "../rules/suggestions";
+import { CategoryName } from "../settings/category-form";
 import {
+	decideFileGroup,
+	decideStoreRule,
 	type OrganizeGroup,
 	organizeGroups,
-	saveOrganizeGroup,
-	setOrganizeRule,
 	storeOffer,
 	storeRowOf,
 } from "../transactions/organize";
@@ -426,20 +431,41 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	if (shown.size !== ids.length || !ids.every((id) => shown.has(id)))
 		return changed();
 
-	const result = await createFromSuggestion(
+	// Organize ticks every purchase the card showed and files them whole, so a refusal for nothing ticked means another tab
+	// changed one of them: the same answer as a suggestion answered elsewhere.
+	const answered = await runWith(
 		c.env.DB,
-		suggestionId,
-		{ ticked: ids, shown: ids, notes: {}, whole: true },
-		actor(c),
+		decideCreate(createFromSuggestion, {
+			suggestionId,
+			ticked: ids,
+			shown: ids,
+			notes: {},
+			whole: true,
+			today: await householdToday(c.env.DB),
+			who: actor(c),
+		}).pipe(
+			Effect.map((saved) => ({ saved })),
+			Effect.catchTags({
+				SuggestionChanged: () => Effect.succeed({ refused: changed }),
+				NothingTicked: () => Effect.succeed({ refused: changed }),
+			}),
+			Effect.catch((refusal) =>
+				Effect.succeed({ refused: () => refused(refusal.say) }),
+			),
+		),
 	);
 
-	// Organize ticks every purchase the card showed and files them whole, so "empty" means another tab changed one of them:
-	// the same answer as "gone".
-	if (!result.ok) {
-		if (result.reason === "gone" || result.reason === "empty") return changed();
+	if ("refused" in answered) return answered.refused();
+	const { saved } = answered;
 
-		return refused(result.error ?? "That category couldn't be made.");
-	}
+	const result = {
+		name: saved.category.name,
+		moved: saved.file.length,
+		filed: saved.file,
+		leftOut: saved.leftOut,
+		attached: saved.category.kind === "attach",
+		restored: saved.category.kind === "restore",
+	};
 
 	await askAgainLeftOut(c.env, result.leftOut, (work) =>
 		c.executionCtx.waitUntil(work),
@@ -484,15 +510,6 @@ organize.post("/transactions/organize", async (c) => {
 	const groups = await organizeGroups(c.env.DB);
 	const group = groups.find((item) => item.name === groupName);
 
-	const category =
-		Number.isInteger(categoryId) && categoryId > 0
-			? await c.env.DB.prepare(
-					"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
-				)
-					.bind(categoryId)
-					.first<{ id: number; name: string }>()
-			: null;
-
 	const url = new URL(c.req.url);
 	const next = url.pathname + url.search;
 
@@ -510,16 +527,12 @@ organize.post("/transactions/organize", async (c) => {
 	};
 
 	if (!group) return alreadyCategorized();
-	// "New category" (decision 101) is the choice when it's chosen: its name is checked first, and the
-	// category is made only once the rest passes, so a taken name saves nothing.
+	// "New category" (decision 101) is the choice when it's chosen: its name is read at the edge, as the category form
+	// reads it, and the rule checks it against the family's list.
 	const choseNew = form.get("category") === "new";
 
-	const named = choseNew
-		? parseCategory(
-				nameForm(form.get("new_category_name")),
-				await categoryNames(c.env.DB),
-				null,
-			)
+	const typedNew = choseNew
+		? readAtEdge(CategoryName, String(form.get("new_category_name") ?? ""))
 		: null;
 
 	const values: Values = {
@@ -530,8 +543,8 @@ organize.post("/transactions/organize", async (c) => {
 		newCategoryName: String(form.get("new_category_name") ?? ""),
 	};
 
-	if (named && !named.ok) values.newCategoryError = named.errors.name;
-	else if (!choseNew && !category)
+	if (typedNew && !typedNew.ok) values.newCategoryError = typedNew.say;
+	else if (!choseNew && !(Number.isInteger(categoryId) && categoryId > 0))
 		values.categoryError = "Pick a category from the list.";
 
 	if (name.length > DISPLAY_NAME_MAX)
@@ -540,41 +553,51 @@ organize.post("/transactions/organize", async (c) => {
 	if (values.categoryError || values.newCategoryError || values.nameError)
 		return renderOrganize(c, values, 422);
 
-	let chosen = category;
-	let madeId: number | null = null;
-
-	if (named?.ok) {
-		const made = await makeCategory(c.env.DB, named.value);
-
-		if (!made.ok)
-			return renderOrganize(
-				c,
-				{ ...values, newCategoryError: made.error },
-				422,
-			);
-		chosen = { id: made.id, name: named.value.name };
-		madeId = made.id;
-	}
-
-	if (!chosen) return renderOrganize(c, values, 422);
-
-	const currentGroup = group;
-
-	const filed = await saveOrganizeGroup(
+	// The rule decides, and one batch makes the category (for a new name), names the store and files its charges, so a
+	// refusal leaves no category behind.
+	const result = await runWith(
 		c.env.DB,
-		currentGroup.merchantKeys,
-		chosen.id,
-		name && name !== currentGroup.name ? name : null,
-		actor(c),
+		decideFileGroup(
+			fileGroup,
+			{
+				merchantKeys: [...new Set(group.merchantKeys)],
+				groupName: group.name,
+				target: typedNew?.ok ? { name: typedNew.value } : { categoryId },
+				displayName: name,
+				who: actor(c),
+			},
+			await householdToday(c.env.DB),
+		).pipe(
+			Effect.map((saved) => ({ saved })),
+			Effect.catchTags({
+				GroupAlreadyFiled: () =>
+					Effect.succeed({ refused: alreadyCategorized }),
+				CategoryNotListed: (refusal) =>
+					Effect.succeed({
+						refused: () =>
+							renderOrganize(c, { ...values, categoryError: refusal.say }, 422),
+					}),
+			}),
+			Effect.catch((refusal) =>
+				Effect.succeed({
+					refused: () =>
+						renderOrganize(
+							c,
+							{ ...values, newCategoryError: refusal.say },
+							422,
+						),
+				}),
+			),
+		),
 	);
 
-	if (filed.length === 0) {
-		// Another request categorized this group after it was read, so nothing was filed: a category made
-		// here goes too, and the answer is the one for a merchant that already has a category.
-		if (madeId !== null) await unmakeCategory(c.env.DB, madeId);
+	if ("refused" in result) return result.refused();
+	const { filed } = result.saved;
 
-		return alreadyCategorized();
-	}
+	const chosen = {
+		id: result.saved.categoryId,
+		name: result.saved.categoryName,
+	};
 
 	const count = filed.length;
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
@@ -618,24 +641,18 @@ organize.post("/transactions/organize/rule", async (c) => {
 
 	const next = `/transactions/organize${skips.size ? `?${skips}` : ""}`;
 
-	const offer =
-		form.get("answer") === "yes"
-			? await storeOffer(
-					c.env.DB,
-					Number(form.get("store")),
-					Number(form.get("category")),
-				)
-			: null;
-
-	const written = offer
-		? await setOrganizeRule(
-				c.env.DB,
-				offer.categoryId,
-				JSON.stringify(offer.savedIds),
-				offer.merchant,
-				actor(c),
-			)
-		: [];
+	const { offer, written } = await runWith(
+		c.env.DB,
+		decideStoreRule(
+			makeStoreRule,
+			{
+				answer: form.get("answer") === "yes" ? "yes" : "not_now",
+				who: actor(c),
+			},
+			Number(form.get("store")),
+			Number(form.get("category")),
+		),
+	);
 
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	// Named only when a rule was written: a store whose charges were filed elsewhere meanwhile makes none.
