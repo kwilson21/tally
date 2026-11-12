@@ -1,10 +1,12 @@
+import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
+import { runWith } from "../db/database";
 import {
 	closeToastOnce,
+	decideUndo,
 	readMoved,
 	readRun,
 	UNDO_MS,
-	undoRun,
 } from "../db/resort-run";
 import { isRunning } from "../db/resort-start";
 import { hxTrigger } from "../htmx";
@@ -13,6 +15,7 @@ import {
 	FINISHED_ANNOUNCEMENT,
 	undoWords,
 } from "../resort-toast";
+import { undoResort } from "../rules/sorting";
 import {
 	heldQuarter,
 	RECHECK_PAGES,
@@ -129,11 +132,16 @@ resort.post("/resort/undo", async (c) => {
 	const target = siteBack(String(form.get("back") ?? ""));
 	const known = target !== null && Object.hasOwn(AGAIN, target.pathname);
 
-	const outcome = runId
-		? await undoRun(c.env.DB, { runId, now: Date.now() })
-		: { expired: true, restored: 0, changedSince: 0 };
-
-	const { message, type } = undoWords(outcome);
+	// An empty token names no run, so the rule finds no record and refuses as it does for an Undo that has closed.
+	const { message, type } = await runWith(
+		c.env.DB,
+		decideUndo(undoResort, { runId, now: Date.now() }).pipe(
+			Effect.map((put) => undoWords({ ...put, expired: false })),
+			Effect.catchTag("UndoExpired", (refusal) =>
+				Effect.succeed({ message: refusal.say, type: "error" as const }),
+			),
+		),
+	);
 
 	if (!c.req.header("HX-Request")) {
 		return c.redirect(

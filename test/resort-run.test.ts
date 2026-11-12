@@ -1,5 +1,8 @@
 import { env } from "cloudflare:workers";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { runWith } from "../src/db/database";
 import {
 	RESORT_CANDIDATE_MAX,
 	type ResortCandidate,
@@ -8,6 +11,7 @@ import {
 import {
 	bumpDoneStatement,
 	closeToastOnce,
+	decideUndo,
 	finishRun,
 	movedKey,
 	readMoved,
@@ -15,11 +19,14 @@ import {
 	STALE_MS,
 	startOrJoinRun,
 	UNDO_MS,
-	undoRun,
+	undoChangedSinceRead,
+	undoFacts,
+	undoSaveStatements,
 } from "../src/db/resort-run";
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { categoryAskedSql } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
+import { type UndoFacts, undoResort } from "../src/rules/sorting";
 import { isMethod } from "./helpers/present";
 
 // The re-sort's run state (decision 160): the run and its progress in household_settings (`resort_run`), the rows it
@@ -30,6 +37,22 @@ const db = env.DB;
 const HINT = "Shops";
 const T0 = 1_000_000_000_000;
 const HOUR = 3_600_000;
+
+/** An Undo as the route runs it (decision 209): the rule decides and one batch saves. A refusal reads as expired. */
+const undoRun = (
+	database: D1Database,
+	request: { runId: string; now: number },
+	rule: Pick<typeof undoResort, "decide"> = undoResort,
+) =>
+	runWith(
+		database,
+		decideUndo(rule, request).pipe(
+			Effect.match({
+				onFailure: () => ({ restored: 0, changedSince: 0, expired: true }),
+				onSuccess: (put) => ({ ...put, expired: false }),
+			}),
+		),
+	);
 
 /** The run a start made. These tests start runs with candidates, so a null here is a broken test, not a result. */
 function runIdOf(started: { runId: string | null }): string {
@@ -1425,6 +1448,151 @@ describe("undoRun", () => {
 		const { runId } = await finishedRunWithTwoMoved();
 		await undoRun(db, { runId, now: T0 + 6000 });
 		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("the Undo's guard (decisions 190 and 209)", () => {
+	async function finishedRunWithOneMoved() {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+
+		await clear([a]);
+		await answer(a, groceries);
+		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+		await closeToastOnce(db, runIdOf(started), T0 + 5000);
+
+		return { a, runId: runIdOf(started) };
+	}
+
+	const refile = (id: number) =>
+		db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(eatingOut, id)
+			.run();
+
+	/** The write the rule decides on these facts. These tests give it an open Undo, so a refusal or none throws. */
+	const decided = (facts: UndoFacts, runId: string) =>
+		Option.getOrThrow(
+			Effect.runSync(undoResort.decide({ runId, now: T0 + 6000 }, facts)),
+		);
+
+	it.each([
+		["a moved row is filed by hand", ({ a }: { a: number }) => refile(a)],
+		[
+			"the record is removed",
+			({ runId }: { runId: string }) =>
+				db
+					.prepare("DELETE FROM household_settings WHERE key = ?")
+					.bind(movedKey(runId))
+					.run(),
+		],
+	])("has a new version once %s", async (_what, change) => {
+		const run = await finishedRunWithOneMoved();
+		const before = (await undoFacts(db, run.runId)).version;
+
+		await change(run);
+		expect((await undoFacts(db, run.runId)).version).not.toBe(before);
+	});
+
+	it("raises the guard's error, and puts nothing back, when a row was filed by hand after the read", async () => {
+		const { a, runId } = await finishedRunWithOneMoved();
+		const write = decided(await undoFacts(db, runId), runId);
+
+		await refile(a);
+
+		let error: Error | null = null;
+
+		try {
+			await db.batch(undoSaveStatements(db, write));
+		} catch (caught) {
+			error = caught instanceof Error ? caught : new Error(String(caught));
+		}
+
+		expect(error !== null && undoChangedSinceRead(error)).toBe(true);
+		expect(await state(a)).toMatchObject({
+			categoryId: eatingOut,
+			categorySource: "user",
+		});
+		expect(await readMoved(db, runId)).not.toBeNull();
+	});
+
+	it("does not take another failure for the guard's", () => {
+		expect(
+			undoChangedSinceRead(
+				new Error("NOT NULL constraint failed: household_settings.key"),
+			),
+		).toBe(false);
+	});
+
+	it("asks the rule again on fresh rows when a row changed between the read and the save, and leaves that row", async () => {
+		const { a, runId } = await finishedRunWithOneMoved();
+		const stale = await undoFacts(db, runId);
+		let asked = 0;
+
+		await refile(a);
+
+		const result = await undoRun(
+			db,
+			{ runId, now: T0 + 6000 },
+			{
+				decide: (request, facts) => {
+					asked++;
+
+					return undoResort.decide(request, asked === 1 ? stale : facts);
+				},
+			},
+		);
+
+		expect(asked).toBe(2);
+		expect(result).toEqual({ restored: 0, changedSince: 1, expired: false });
+		expect(await state(a)).toMatchObject({
+			categoryId: eatingOut,
+			categorySource: "user",
+		});
+		expect(await readMoved(db, runId)).toBeNull();
+	});
+
+	it("puts back the most rows a run can move in one batch", async () => {
+		const ids: number[] = [];
+
+		for (let i = 0; i < RESORT_CANDIDATE_MAX; i++)
+			ids.push(await tx({ plaidCategory: HINT, confidence: 0.3 }));
+
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => ids.includes(c.id)),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+
+		await clear(ids);
+		await db.batch(
+			ids.map((id) =>
+				db
+					.prepare(
+						"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
+					)
+					.bind(groceries, id),
+			),
+		);
+		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+		await closeToastOnce(db, runIdOf(started), T0 + 5000);
+
+		expect(
+			await undoRun(db, { runId: runIdOf(started), now: T0 + 6000 }),
+		).toEqual({
+			restored: RESORT_CANDIDATE_MAX,
+			changedSince: 0,
+			expired: false,
+		});
 	});
 });
 
