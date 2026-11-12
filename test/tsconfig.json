@@ -5,7 +5,7 @@
 		"allowJs": true,
 		"types": [
 			"@cloudflare/vitest-plugin/types",
-			"../worker-configuration.d.ts",
+			"../.cloudflare/types/index.d.ts",
 			"vite/client"
 		]
 	},

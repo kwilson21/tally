@@ -5,7 +5,11 @@
 # Run it from the repo root on your own machine, logged in to wrangler: bash scripts/production-setup.sh
 set -euo pipefail
 
-ENV=production
+MODE=production
+# The Worker and database that cloudflare.config.ts names for this mode. Wrangler does not read that file, so its
+# commands are given the Worker by name; cf's database commands take the database ID.
+WORKER=tally-production
+DATABASE=97a4d15e-58a4-4067-b74e-6101195c6493
 HOST=tally.thesuperhuman.us
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
@@ -27,7 +31,7 @@ step() {
 }
 
 # A setting with a fixed value: piped in, so there's nothing to type.
-put_value() { printf '%s' "$2" | pnpm exec wrangler secret put "$1" --env "$ENV"; }
+put_value() { printf '%s' "$2" | pnpm exec wrangler secret put "$1" --name "$WORKER"; }
 
 bold "Tally production setup: $HOST"
 echo "Cloudflare Access for $HOST must already exist (Claude sets it up and sends you the team domain and AUD tag)."
@@ -39,11 +43,11 @@ step "1. Check you're logged in" \
 
 step "2. Plaid client ID" \
 	"Paste your PRODUCTION Plaid client ID at the prompt. If wrangler asks to create the Worker tally-production, answer yes." \
-	pnpm exec wrangler secret put PLAID_CLIENT_ID --env "$ENV"
+	pnpm exec wrangler secret put PLAID_CLIENT_ID --name "$WORKER"
 
 step "3. Plaid secret" \
 	"Paste your PRODUCTION Plaid secret (not the Sandbox one) at the prompt." \
-	pnpm exec wrangler secret put PLAID_SECRET --env "$ENV"
+	pnpm exec wrangler secret put PLAID_SECRET --name "$WORKER"
 
 bold "Before step 4: make the encryption key"
 echo "Run this in another terminal and save what it prints in your password manager as \"Tally token encryption key\":"
@@ -54,11 +58,11 @@ echo "Keep that copy. If the key is ever lost, every bank has to be linked again
 
 step "4. Token encryption key" \
 	"Paste the key you just saved at the prompt. It encrypts each bank's access token in the database." \
-	pnpm exec wrangler secret put TOKEN_ENCRYPTION_KEY --env "$ENV"
+	pnpm exec wrangler secret put TOKEN_ENCRYPTION_KEY --name "$WORKER"
 
 step "5. Jev API key" \
 	"Paste your Jev API key at the prompt. It suggests categories for new transactions." \
-	pnpm exec wrangler secret put JEV_API_KEY --env "$ENV"
+	pnpm exec wrangler secret put JEV_API_KEY --name "$WORKER"
 
 step "6. Plaid environment" \
 	"Sets PLAID_ENV to \"production\". Anything else means Plaid Sandbox (decision 53). Nothing to type." \
@@ -70,19 +74,19 @@ step "7. Plaid webhook address" \
 
 step "8. Feedback GitHub token" \
 	"Paste the fine-grained token for filing Issues in kwilson21/tally-feedback." \
-	pnpm exec wrangler secret put FEEDBACK_GITHUB_TOKEN --env "$ENV"
+	pnpm exec wrangler secret put FEEDBACK_GITHUB_TOKEN --name "$WORKER"
 
 step "9. Access team domain" \
 	"Paste the team domain Claude sent you (it looks like yourname.cloudflareaccess.com)." \
-	pnpm exec wrangler secret put ACCESS_TEAM_DOMAIN --env "$ENV"
+	pnpm exec wrangler secret put ACCESS_TEAM_DOMAIN --name "$WORKER"
 
 step "10. Access AUD tag" \
 	"Paste the AUD tag Claude sent you: the long string that identifies Tally's Access application." \
-	pnpm exec wrangler secret put ACCESS_AUD --env "$ENV"
+	pnpm exec wrangler secret put ACCESS_AUD --name "$WORKER"
 
 step "11. Build the database tables" \
 	"Creates Tally's tables in the empty tally-production database. Safe to repeat: finished migrations are skipped." \
-	pnpm exec wrangler d1 migrations apply DB --env "$ENV" --remote
+	pnpm exec cf d1 migrations apply "$DATABASE"
 
 # Optional (decision 149): the keys for notifications on a device. Not required to deploy: until they are set, nothing is drawn or sent.
 # Each value goes straight to put_value, so the private key is never printed. json_field reads $keys (set by push_keys) on stdin:
@@ -113,7 +117,7 @@ deploy_when_ready() {
 		echo "Not deploying: check out origin/main with no changes first (git switch --detach origin/main). Then run this step again."
 		return 1
 	fi
-	secrets=$(pnpm exec wrangler secret list --env "$ENV" --format json) || return 1
+	secrets=$(pnpm exec wrangler secret list --name "$WORKER" --format json) || return 1
 	for name in $REQUIRED; do
 		grep -q "\"$name\"" <<<"$secrets" || missing="$missing $name"
 	done
@@ -121,8 +125,9 @@ deploy_when_ready() {
 		echo "Not deploying: these settings aren't set yet:$missing. Run their steps first."
 		return 1
 	fi
-	migrations=$(pnpm exec wrangler d1 migrations list DB --env "$ENV" --remote) || return 1
-	if ! grep -q "No migrations to apply" <<<"$migrations"; then
+	# cf prints the migrations still to apply as a JSON list, so an empty list means the tables are built.
+	migrations=$(pnpm exec cf d1 migrations list "$DATABASE") || return 1
+	if [ "$(tr -d '[:space:]' <<<"$migrations")" != "[]" ]; then
 		echo "Not deploying: the database tables aren't built yet. Run step 11 first."
 		return 1
 	fi
@@ -135,7 +140,7 @@ deploy_when_ready() {
 		n=$((n + 1))
 	done
 	echo "This deploy is release $release. Afterwards, tag and publish it as README's Versions and releases section says."
-	pnpm exec wrangler deploy --env "$ENV" --message "$release $sha" --var "APP_VERSION:$release $sha"
+	APP_VERSION="$release $sha" pnpm exec cf deploy --mode "$MODE" --message "$release $sha"
 }
 
 step "13. Deploy" \

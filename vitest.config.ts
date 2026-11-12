@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	plugins: [
 		cloudflareTest(async () => ({
-			wrangler: { configPath: "./wrangler.jsonc" },
+			config: "./cloudflare.config.ts",
 			miniflare: {
 				// Test-only binding so test/apply-migrations.ts can build the schema.
 				bindings: {

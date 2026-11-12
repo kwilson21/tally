@@ -29,7 +29,7 @@ const SWITCH_CHECK_BATCH = 5;
 
 type NamesEnv = {
 	DB: D1Database;
-	/** Workers AI. Production and the demo have it (wrangler.jsonc); local development and tests don't, so no name is asked for there. */
+	/** Workers AI. Production and the demo have it (cloudflare.config.ts); local development and tests don't, so no name is asked for there. */
 	AI?: Ai;
 };
 
