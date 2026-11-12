@@ -126,7 +126,9 @@ function firstMail(sent: Sent[]): Mail {
 }
 
 /** The production environment: Resend on, Cloudflare's email off unless a test gives it. */
-const production = (extra: Partial<Env & DeliveryEnv> = {}) =>
+// Env's EMAIL is Cloudflare's whole send_email binding (production has one); the tests give the smaller one
+// DeliveryEnv describes.
+const production = (extra: Partial<Omit<Env, "EMAIL"> & DeliveryEnv> = {}) =>
 	envWith(env, {
 		DEMO: "false",
 		RESEND_API_KEY: "test-key",

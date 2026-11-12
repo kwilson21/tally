@@ -1,42 +1,21 @@
 import { describe, expect, it } from "vitest";
-import raw from "../wrangler.jsonc?raw";
+import config from "../cloudflare.config";
+import { present } from "./helpers/present";
 
-/** Removes line and block comments outside strings, turning JSONC into JSON. */
-function stripJsoncComments(text: string): string {
-	let out = "";
-	let inString = false;
+// cloudflare.config.ts returns one whole configuration for each mode (decision 205). These read what it returns for
+// the demo, for production and for no mode (local development and the tests).
+const demo = config({ mode: "demo", isPreview: false }).worker;
+const production = config({ mode: "production", isPreview: false }).worker;
+const local = config({ mode: undefined, isPreview: false }).worker;
 
-	for (let i = 0; i < text.length; i++) {
-		const c = text[i];
-
-		if (inString) {
-			out += c;
-
-			if (c === "\\") out += text[++i];
-			else if (c === '"') inString = false;
-		} else if (c === '"') {
-			inString = true;
-			out += c;
-		} else if (c === "/" && text[i + 1] === "/") {
-			while (i < text.length && text[i] !== "\n") i++;
-			out += "\n";
-		} else if (c === "/" && text[i + 1] === "*") {
-			i = text.indexOf("*/", i + 2) + 1;
-		} else {
-			out += c;
-		}
-	}
-
-	return out;
-}
-
-const config = JSON.parse(stripJsoncComments(raw));
-const demo = config.env.demo;
-const production = config.env.production;
+const crons = (triggers: readonly { type: string; schedule?: string }[]) =>
+	triggers.flatMap((trigger) =>
+		trigger.type === "scheduled" ? [trigger.schedule] : [],
+	);
 
 describe("demo environment config", () => {
 	it("runs as the demo", () => {
-		expect(demo.vars).toEqual({ DEMO: "true" });
+		expect(demo.env.DEMO).toEqual({ type: "text", value: "true" });
 	});
 
 	it("never mentions Plaid, so it can't hold Plaid settings", () => {
@@ -44,70 +23,79 @@ describe("demo environment config", () => {
 	});
 
 	it("binds only the demo database", () => {
-		expect(demo.d1_databases).toHaveLength(1);
-		expect(demo.d1_databases[0]).toMatchObject({
-			binding: "DB",
-			database_name: "tally-demo",
-			database_id: "ce0d954f-0f85-46bf-9a25-0890c589e383",
+		const databases = Object.values(demo.env).filter(
+			(binding) => binding?.type === "d1",
+		);
+
+		expect(databases).toHaveLength(1);
+		expect(demo.env.DB).toEqual({
+			type: "d1",
+			name: "tally-demo",
+			id: "ce0d954f-0f85-46bf-9a25-0890c589e383",
 		});
 	});
 
 	it("is served only at its custom domain", () => {
-		expect(demo.routes).toEqual([
-			{ pattern: "tally-demo.thesuperhuman.us", custom_domain: true },
-		]);
-		expect(demo.workers_dev).toBe(false);
-		expect(demo.preview_urls).toBe(false);
+		expect(demo.domains).toEqual(["tally-demo.thesuperhuman.us"]);
+		expect(crons(present(demo.triggers))).toHaveLength(
+			present(demo.triggers).length,
+		);
+		expect(demo.workersDev).toBe(false);
+		expect(demo.previewUrls).toBe(false);
 	});
 
 	it("resets, sorts and names in one run nightly at 09:00 UTC", () => {
-		expect(demo.triggers).toEqual({ crons: ["0 9 * * *"] });
+		expect(crons(present(demo.triggers))).toEqual(["0 9 * * *"]);
 	});
 
 	it("keeps crons out of local dev and other environments", () => {
-		expect(config.triggers).toBeUndefined();
+		expect("triggers" in local).toBe(false);
 	});
 });
 
 describe("production environment config (#23)", () => {
 	it("is not the demo, so the nightly reset can never run here", () => {
-		expect(production.vars).toEqual({ DEMO: "false" });
+		expect(production.env.DEMO).toEqual({ type: "text", value: "false" });
 	});
 
 	it("binds its own database, never the demo's", () => {
-		expect(production.d1_databases).toHaveLength(1);
-		expect(production.d1_databases[0]).toMatchObject({
-			binding: "DB",
-			database_name: "tally-production",
-			database_id: "97a4d15e-58a4-4067-b74e-6101195c6493",
-			migrations_dir: "migrations",
-		});
-		expect(production.d1_databases[0].database_id).not.toBe(
-			demo.d1_databases[0].database_id,
+		const databases = Object.values(production.env).filter(
+			(binding) => binding?.type === "d1",
 		);
+
+		expect(databases).toHaveLength(1);
+		expect(production.env.DB).toEqual({
+			type: "d1",
+			name: "tally-production",
+			id: "97a4d15e-58a4-4067-b74e-6101195c6493",
+		});
+		expect(production.env.DB.id).not.toBe(demo.env.DB.id);
 	});
 
 	it("is served only at tally.thesuperhuman.us, never finance.*", () => {
-		expect(production.routes).toEqual([
-			{ pattern: "tally.thesuperhuman.us", custom_domain: true },
-		]);
-		expect(production.workers_dev).toBe(false);
-		expect(production.preview_urls).toBe(false);
+		expect(production.domains).toEqual(["tally.thesuperhuman.us"]);
+		expect(crons(present(production.triggers))).toHaveLength(
+			present(production.triggers).length,
+		);
+		expect(production.workersDev).toBe(false);
+		expect(production.previewUrls).toBe(false);
 		expect(JSON.stringify(production)).not.toContain("finance.");
 	});
 
 	// Decision 139: the night is one Workflow that the 09:00 run starts; reconnect reminders have a dedicated invocation.
 	it("runs the sync and the night's Workflow at 09:00 UTC, then reconnect reminders at 10:00, with no sort runs between them (decision 139)", () => {
 		// Plus the minute's ready email alone, which starts no sort (decision 146).
-		expect(production.triggers).toEqual({
-			crons: ["0 9 * * *", "0 10 * * *", "* * * * *"],
-		});
+		expect(crons(present(production.triggers))).toEqual([
+			"0 9 * * *",
+			"0 10 * * *",
+			"* * * * *",
+		]);
 	});
 
 	it("binds Workers AI for merchant names (#33) in production and the demo, not in local development", () => {
-		expect(production.ai).toEqual({ binding: "AI" });
-		expect(demo.ai).toEqual({ binding: "AI" });
-		expect(config.ai).toBeUndefined();
+		expect(production.env.AI).toEqual({ type: "ai" });
+		expect(demo.env.AI).toEqual({ type: "ai" });
+		expect("AI" in local.env).toBe(false);
 	});
 
 	it("holds no secrets or Plaid settings; those go in with wrangler secret put", () => {
@@ -117,14 +105,17 @@ describe("production environment config (#23)", () => {
 	});
 });
 
-describe("stripJsoncComments", () => {
-	it("keeps // and /* inside strings, and drops real comments anywhere", () => {
-		const text =
-			'{ "url": "https://a/*b*/", // trailing\n /* block */ "n": 1 }';
+describe("each mode is its own Worker", () => {
+	it("names a different Worker, database and Workflow in each mode, so one can never deploy over another", () => {
+		const modes = [local, demo, production];
 
-		expect(JSON.parse(stripJsoncComments(text))).toEqual({
-			url: "https://a/*b*/",
-			n: 1,
-		});
+		expect(new Set(modes.map((worker) => worker.name)).size).toBe(3);
+		expect(new Set(modes.map((worker) => worker.env.DB.id)).size).toBe(3);
+		expect(new Set(modes.map((worker) => worker.env.SORT.name)).size).toBe(3);
+	});
+
+	it("points each Workflow binding at its own Worker", () => {
+		for (const worker of [local, demo, production])
+			expect(worker.env.SORT.worker).toBe(worker.name);
 	});
 });

@@ -8,7 +8,7 @@ export default defineConfig({
 		".wrangler/**",
 		"public/vendor/**",
 		"public/assets/**",
-		"worker-configuration.d.ts",
+		".cloudflare/**",
 		"tools/oxlint/anti-slop/**",
 	],
 	jsPlugins: [

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import catalog from "../.cloudflare/types/index.d.ts?raw";
 import {
 	askNames,
 	bankTexts,
@@ -10,7 +11,6 @@ import {
 } from "../scripts/compare-names/names";
 import { INSTRUCTIONS, NAME_MODEL } from "../src/ai/suggest-name";
 import { buildSeed } from "../src/demo/seed";
-import catalog from "../worker-configuration.d.ts?raw";
 import { fakeAi as aiDouble } from "./helpers/doubles";
 import { present } from "./helpers/present";
 

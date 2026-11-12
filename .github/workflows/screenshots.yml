@@ -43,7 +43,7 @@ jobs:
       - run: pnpm run db:migrate:local
       - name: Start the app and seed the demo
         run: |
-          pnpm exec wrangler dev --port 8787 > wrangler.log 2>&1 &
+          pnpm exec cf dev --port 8787 > wrangler.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 2; done
           pnpm run db:seed:local
       # The same pages on the base branch, so the PR description can show what changed (#60).
@@ -68,9 +68,11 @@ jobs:
               npm ci
               run="npm run" exec="npx"
             fi
+            # A base from before cloudflare.config.ts (decision 205) is run by Wrangler from its wrangler.jsonc.
+            if [ -f cloudflare.config.ts ]; then dev="$exec cf dev"; else dev="$exec wrangler dev"; fi
             $run build
             $run db:migrate:local
-            $exec wrangler dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
+            $dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
             for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 2; done
             curl -fsS http://127.0.0.1:8788/cdn-cgi/handler/scheduled
           )

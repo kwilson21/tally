@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 
-// The real SortWorkflow class, run by the Workflows binding from wrangler.jsonc (the step behaviour is in
+// The real SortWorkflow class, run by the Workflows binding from cloudflare.config.ts (the step behaviour is in
 // sort-groups.test.ts). The instance gets a Jev key and a stubbed Jev, so its saved steps really run: the ask
 // step's answer returns to run() and the write saves it.
 
