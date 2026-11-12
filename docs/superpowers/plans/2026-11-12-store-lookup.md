@@ -209,7 +209,7 @@ With a stubbed `ai.run`: hits are sent and a clean line comes back; a thrown cal
 - [ ] **Step 4:** Run `pnpm test`, `pnpm run typecheck`, `pnpm run lint`, both `cf deploy --dry-run` runs; expect PASS, and the demo's dry run shows no `TAVILY_API_KEY`.
 - [ ] **Step 5:** Commit `feat: look stores up before sorting`, then the deepening commit or "no deepening needed".
 
-The secret is **not** set after PR 1. With no key the run does nothing, so nothing leaves the app until the measurement has reported (Task 6) and the Settings switch exists (PR 3). After PR 3 merges, and once Tavily's retention terms are recorded in the decision entry, the owner sets it: `wrangler secret put BRAVE_SEARCH_API_KEY --name <production worker>`.
+The secret is **not** set after PR 1. With no key the run does nothing, so nothing leaves the app until the measurement has reported (Task 6) and the Settings switch exists (PR 3). After PR 3 merges, and once the owner has turned off Tavily's "Allow Use of Query Data" account setting (decision 210), the owner sets it: `wrangler secret put BRAVE_SEARCH_API_KEY --name <production worker>`.
 
 ### Task 6b: Measure the real lines (after PR 1 merges, before PR 2's brief)
 
