@@ -99,7 +99,7 @@ app.onError(serverErrorPage);
  * The demo has the one 09:00 run: it resets, then starts the same Workflow (with no counts) and retries feedback.
  *
  * The crons stay in this module, not exported: workerd refuses an entry module whose named exports aren't functions
- * (test/entry-exports.test.ts). Any other cron, like the local test endpoint's (scripts/e2e.mjs, `npm run
+ * (test/entry-exports.test.ts). Any other cron, like the local test endpoint's (scripts/e2e.mjs, `pnpm run
  * db:seed:local`), runs the 09:00 work.
  */
 const RECONNECT_EMAIL_CRON = "0 10 * * *";

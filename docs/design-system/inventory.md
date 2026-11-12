@@ -118,7 +118,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | `hx-disable` on visual tiers | htmx 4 renamed it `hx-ignore` (checked in `node_modules/htmx.org/dist/htmx.js`); `hx-disable` now disables elements during a request | Adapt: `hx-ignore`, plus a catalog-only CSP `form-action 'none'` so no form can submit without JavaScript either |
 | `ds-sandbox.js` (intercepts requests) | `ds.js` runs catalog controls only (decision 44); nothing intercepts or fakes requests | Adapt |
 | `{% include %}` of the real partial | Import of the real Hono JSX component | Keep: it's the only way the catalog can render a component |
-| `mock_data.py` factories plus `check_ds_contracts` | Typed mock data: TypeScript checks every prop at `npm run typecheck` | Keep the mock data; the contract check isn't needed |
+| `mock_data.py` factories plus `check_ds_contracts` | Typed mock data: TypeScript checks every prop at `pnpm run typecheck` | Keep the mock data; the contract check isn't needed |
 | Flow steps in the session | `?step=N` in the URL; server-rendered, no session | Adapt |
 | DEBUG-only gate | Mounted only when `DEMO` is `"true"` (demo and dev); production returns 404 | Adapt |
 | `/interface-design:audit` against `system.md` | Audit against DESIGN.md (checklist in the PR) | Adapt |

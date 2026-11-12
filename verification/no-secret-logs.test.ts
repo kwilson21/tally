@@ -11,7 +11,7 @@ import { itemAt } from "../test/helpers/present";
 // not its quoted words, so "the token has expired" may be said and a token may not be passed.
 //
 // It runs here, under plain Node, because the parser (the one Vite uses, from vitest/node) needs a Node host; the Worker
-// test runtime has no file system. `npm run test:feedback-integration` runs it in CI.
+// test runtime has no file system. `pnpm run test:feedback-integration` runs it in CI.
 
 const ROOT = path.join(import.meta.dirname, "..");
 

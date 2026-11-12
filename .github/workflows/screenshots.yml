@@ -21,11 +21,12 @@ jobs:
       WRANGLER_SEND_METRICS: "false"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       # GitHub's Ubuntu 24.04 image ships Google Chrome, newer than Playwright's own Chromium, so use it when it launches (ubuntu-latest moves to 26.04 in November 2026).
       # scripts/e2e.mjs and scripts/feedback-preview-test.mjs read CHROMIUM_PATH too, so they use the same browser.
       - name: Use the runner's Chrome, or install Playwright's
@@ -36,15 +37,15 @@ jobs:
             echo "Using the runner's Chrome at $chrome."
           else
             echo "No Chrome that launches (${chrome:-none found}), so installing Playwright's."
-            npx playwright install --with-deps chromium
+            pnpm exec playwright install --with-deps chromium
           fi
-      - run: npm run test:feedback-preview
-      - run: npm run db:migrate:local
+      - run: pnpm run test:feedback-preview
+      - run: pnpm run db:migrate:local
       - name: Start the app and seed the demo
         run: |
-          npx wrangler dev --port 8787 > wrangler.log 2>&1 &
+          pnpm exec wrangler dev --port 8787 > wrangler.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 2; done
-          npm run db:seed:local
+          pnpm run db:seed:local
       # The same pages on the base branch, so the PR description can show what changed (#60).
       - name: Start the base branch's app and seed the demo
         env:
@@ -54,10 +55,22 @@ jobs:
           git worktree add --detach ../base "$BASE_SHA"
           (
             cd ../base
-            npm ci
-            npm run build
-            npm run db:migrate:local
-            npx wrangler dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
+            # A base from before the switch to pnpm (decision 204) has only npm's lockfile, so npm installs and runs it:
+            # pnpm would install it afresh without a lockfile and pick newer versions than the base was built with.
+            if [ -f pnpm-lock.yaml ]; then
+              # The base may pin an older pnpm than this PR's (the one installed here), and pmOnFail: error would stop
+              # it. The base is already-merged code, so it runs with this PR's pnpm; the override lasts for this
+              # subshell only and reaches the pnpm that wrangler's build command starts.
+              export PNPM_CONFIG_PM_ON_FAIL=ignore
+              pnpm install --frozen-lockfile
+              run="pnpm run" exec="pnpm exec"
+            else
+              npm ci
+              run="npm run" exec="npx"
+            fi
+            $run build
+            $run db:migrate:local
+            $exec wrangler dev --port 8788 --inspector-port 9230 > "$GITHUB_WORKSPACE/base-wrangler.log" 2>&1 &
             for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 2; done
             curl -fsS http://127.0.0.1:8788/cdn-cgi/handler/scheduled
           )
@@ -65,10 +78,10 @@ jobs:
       # A base that isn't running fails the job, as does any console error on the PR.
       - name: Screenshot the PR and the base branch, and compare them
         run: |
-          BEFORE_URL=http://127.0.0.1:8788 npm run screenshots
+          BEFORE_URL=http://127.0.0.1:8788 pnpm run screenshots
           node scripts/changed-shots.mjs
       # After the screenshots: the E2E changes the demo data.
-      - run: npm run e2e
+      - run: pnpm run e2e
       - name: Publish images to the screenshots branch
         id: publish
         env:
