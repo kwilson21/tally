@@ -25,6 +25,7 @@ async function runMigrationOnScratch(): Promise<void> {
 			/\bmerchant_suggested_names\b/g,
 			"pre0071_merchant_suggested_names",
 		);
+
 	for (const statement of sql
 		.split(";")
 		.map((s) => s.trim())
@@ -78,6 +79,7 @@ Carriage' || char(13), 'pending'),
 			"SELECT raw_name, suggestion_status, names_asked FROM pre0071_merchants ORDER BY raw_name",
 		)
 		.all();
+
 	expect(merchants).toEqual([
 		{
 			raw_name: "accepted with a name",
@@ -139,6 +141,7 @@ Carriage' || char(13), 'pending'),
 			"SELECT merchant_key, position, name FROM pre0071_merchant_suggested_names ORDER BY merchant_key, position",
 		)
 		.all();
+
 	expect(names).toEqual([
 		{ merchant_key: "accepted with a name", position: 0, name: "Zed Cafe" },
 		{ merchant_key: "pending blank lines between", position: 0, name: "Foo" },
@@ -162,9 +165,11 @@ it("migration 0071 drops suggested_name and adds names_asked, defaulting to 0", 
 		)
 		.run();
 	await runMigrationOnScratch();
+
 	const { results } = await db
 		.prepare("SELECT name FROM pragma_table_info('pre0071_merchants')")
 		.all<{ name: string }>();
+
 	expect(results.map((column) => column.name)).toEqual([
 		"raw_name",
 		"suggestion_status",

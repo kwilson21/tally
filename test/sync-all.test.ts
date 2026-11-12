@@ -2,8 +2,33 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syncAllItems } from "../src/plaid/sync-all";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { isMethod, present } from "./helpers/present";
+
+/** A JSON value, as a Plaid or test response body can be. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** True when `prop` is a member of `target`, so a Proxy can read it with a typed key. */
+function isMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
+
+/** A Proxy's read of `target`'s member `prop`: a method is bound to `target`, anything else is returned as it is. */
+function forwardMember<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): Target[keyof Target] | ((...args: never[]) => object) | undefined {
+	if (!isMember(target, prop)) return undefined;
+
+	const value = target[prop];
+
+	return isMethod(value) ? value.bind(target) : value;
+}
 
 const KEY = btoa("01234567890123456789012345678901");
+
 const enabledEnv = {
 	...env,
 	DEMO: "false",
@@ -12,7 +37,7 @@ const enabledEnv = {
 	TOKEN_ENCRYPTION_KEY: KEY,
 };
 
-const response = (body: unknown, status = 200) =>
+const response = (body: Json, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
@@ -20,6 +45,7 @@ const response = (body: unknown, status = 200) =>
 
 async function addItem(status: "ok" | "needs_attention" = "ok") {
 	const token = await encryptToken(`token-${crypto.randomUUID()}`, KEY);
+
 	const row = await env.DB.prepare(
 		`INSERT INTO plaid_items
 			(access_token_encrypted, institution_name, linked_by, plaid_item_id, status, attention_login)
@@ -32,20 +58,21 @@ async function addItem(status: "ok" | "needs_attention" = "ok") {
 			status === "needs_attention" ? 1 : 0,
 		)
 		.first<{ id: number }>();
-	return row?.id as number;
+
+	return present(row).id;
 }
 
 function fakePlaid(failToken?: string) {
 	return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-		const body = JSON.parse(String(init?.body)) as {
-			access_token: string;
-		};
+		const body: { access_token: string } = JSON.parse(String(init?.body));
+
 		if (body.access_token === failToken) {
 			return response(
 				{ error_type: "API_ERROR", request_id: "request-safe" },
 				500,
 			);
 		}
+
 		if (String(url).endsWith("/accounts/get")) {
 			return response({
 				accounts: [
@@ -58,6 +85,7 @@ function fakePlaid(failToken?: string) {
 				],
 			});
 		}
+
 		return response({
 			added: [
 				{
@@ -100,10 +128,13 @@ describe("syncAllItems", () => {
 	])("does nothing in %s", async (_name, disabledEnv) => {
 		const fetchImpl = fakePlaid();
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
 		const withoutDb = {
 			...disabledEnv,
-			DB: undefined as unknown as D1Database,
+			// SAFETY: a disabled sync returns before it reads any binding, so the absent DB is never used.
+			DB: undefined as never,
 		};
+
 		expect(await syncAllItems(withoutDb, fetchImpl)).toEqual({
 			added: 0,
 			modified: 0,
@@ -142,9 +173,11 @@ describe("syncAllItems", () => {
 			failedBanks: [],
 		});
 		expect(fetchImpl).toHaveBeenCalledTimes(6);
+
 		const { results } = await env.DB.prepare(
 			"SELECT plaid_item_id FROM accounts ORDER BY plaid_item_id",
 		).all<{ plaid_item_id: number }>();
+
 		expect(results.map((row) => row.plaid_item_id)).toEqual([
 			first,
 			second,
@@ -185,15 +218,18 @@ describe("syncAllItems", () => {
 		)
 			.bind(id)
 			.run();
+
 		const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
 			if (String(url).endsWith("/accounts/get")) {
 				return response({ accounts: [] });
 			}
+
 			return response(
 				{ error_type: "API_ERROR", request_id: "request-safe" },
 				500,
 			);
 		});
+
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -212,10 +248,12 @@ describe("syncAllItems", () => {
 			status: "needs_attention",
 			reconnect_emailed_at: "2026-10-06 04:00:00",
 		});
+
 		// Only Plaid is called: no reminder or email service is reached from the sync.
 		for (const [url] of fetchImpl.mock.calls) {
 			expect(String(url)).toMatch(/plaid|sandbox|production/);
 		}
+
 		error.mockRestore();
 	});
 
@@ -291,9 +329,11 @@ describe("syncAllItems", () => {
 		await addItem();
 		await addItem();
 		const result = await syncAllItems(enabledEnv, fakePlaid());
+
 		const { results } = await env.DB.prepare(
 			"SELECT id FROM transactions ORDER BY id",
 		).all<{ id: number }>();
+
 		expect(results).toHaveLength(2);
 		expect([...result.changedIds].sort((a, b) => a - b)).toEqual(
 			results.map((row) => row.id),
@@ -306,7 +346,8 @@ describe("syncAllItems", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const fetchImpl = fakePlaid();
 		fetchImpl.mockImplementation(async (url, init) => {
-			const body = JSON.parse(String(init?.body)) as { access_token: string };
+			const body: { access_token: string } = JSON.parse(String(init?.body));
+
 			if (String(url).endsWith("/accounts/get"))
 				return response({
 					accounts: [
@@ -318,6 +359,7 @@ describe("syncAllItems", () => {
 						},
 					],
 				});
+
 			const transaction = (id: string) => ({
 				transaction_id: id,
 				account_id: `account-${body.access_token}`,
@@ -326,6 +368,7 @@ describe("syncAllItems", () => {
 				name: "SHOP",
 				pending: false,
 			});
+
 			return response({
 				added: [],
 				modified: [transaction("a"), transaction("b")],
@@ -345,13 +388,15 @@ describe("syncAllItems", () => {
 		const fetchImpl = fakePlaid();
 		let accountsCalls = 0;
 		fetchImpl.mockImplementation(async (url, init) => {
-			const body = JSON.parse(String(init?.body)) as { access_token: string };
+			const body: { access_token: string } = JSON.parse(String(init?.body));
+
 			if (String(url).endsWith("/accounts/get") && accountsCalls++ === 0) {
 				return response(
 					{ error_type: "API_ERROR", request_id: "request-safe" },
 					500,
 				);
 			}
+
 			if (String(url).endsWith("/accounts/get"))
 				return response({
 					accounts: [
@@ -363,6 +408,7 @@ describe("syncAllItems", () => {
 						},
 					],
 				});
+
 			return response({
 				added: [],
 				modified: [],
@@ -397,30 +443,35 @@ describe("syncAllItems", () => {
 		expect(
 			await syncAllItems(enabledEnv, fetchImpl, Date.now, true),
 		).toMatchObject({ synced: 1, skipped: 1, busy: 1 });
+
 		const staleAttempt = await env.DB.prepare(
 			"SELECT last_sync_attempt_at FROM plaid_items WHERE id = ?",
 		)
 			.bind(stale)
 			.first<{ last_sync_attempt_at: string | null }>();
+
 		expect(staleAttempt?.last_sync_attempt_at).not.toBeNull();
 	});
 
 	it("lets only one of two overlapping manual syncs claim a bank", async () => {
 		await addItem();
 		let statusChecks = 0;
+
 		const db = new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop === "prepare") {
 					return (sql: string) => {
 						if (sql.startsWith("SELECT status FROM plaid_items"))
 							statusChecks += 1;
+
 						return target.prepare(sql);
 					};
 				}
-				const value = Reflect.get(target, prop);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return forwardMember(target, prop);
 			},
 		});
+
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const both = { ...enabledEnv, DB: db };
 		const fetchImpl = fakePlaid();
@@ -485,6 +536,7 @@ describe("syncAllItems", () => {
 		let calls = 0;
 		fetchImpl.mockImplementation(async (url, init) => {
 			calls += 1;
+
 			if (calls === 2) {
 				await env.DB.prepare(
 					"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
@@ -492,6 +544,7 @@ describe("syncAllItems", () => {
 					.bind(second)
 					.run();
 			}
+
 			return fakePlaid()(url, init);
 		});
 
@@ -544,6 +597,7 @@ describe("syncAllItems", () => {
 		const fetchImpl = fakePlaid();
 		fetchImpl.mockImplementation(async () => {
 			calls += 1;
+
 			return response(
 				{ error_type: "API_ERROR", request_id: `request-${calls}` },
 				500,
@@ -575,6 +629,7 @@ describe("syncAllItems", () => {
 		const first = await addItem();
 		await addItem();
 		let statusChecks = 0;
+
 		// A DB whose first per-Item status read throws; every other query is real.
 		const db = new Proxy(env.DB, {
 			get(target, prop) {
@@ -586,13 +641,15 @@ describe("syncAllItems", () => {
 						) {
 							throw new Error("D1 unavailable");
 						}
+
 						return target.prepare(sql);
 					};
 				}
-				const value = Reflect.get(target, prop);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return forwardMember(target, prop);
 			},
 		});
+
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -625,37 +682,47 @@ describe("syncAllItems and a completion that loses its lease", () => {
 	// The database the daily run sees, where a newer run takes the lease just ahead of the bank's completion write.
 	function stealLeaseAtCompletion(id: number): D1Database {
 		let fired = false;
+
 		return new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop !== "prepare") {
-					const value = Reflect.get(target, prop);
-					return typeof value === "function" ? value.bind(target) : value;
+					return forwardMember(target, prop);
 				}
+
 				return (sql: string) => {
 					const statement = target.prepare(sql);
+
 					if (
 						fired ||
 						!sql.startsWith("UPDATE plaid_items SET connection_revision")
 					) {
 						return statement;
 					}
-					return {
-						bind: (...values: unknown[]) => {
-							const bound = statement.bind(...values);
-							return {
-								run: async () => {
-									fired = true;
-									await target
-										.prepare(
-											"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
-										)
-										.bind(id)
-										.run();
-									return bound.run();
-								},
+
+					// A Proxy keeps the statement's type and changes only bind, so the newer run's lease write goes first.
+					return new Proxy(statement, {
+						get(inner, innerProp) {
+							if (innerProp !== "bind") return forwardMember(inner, innerProp);
+
+							return (...values: unknown[]) => {
+								const bound = inner.bind(...values);
+
+								return {
+									run: async () => {
+										fired = true;
+										await target
+											.prepare(
+												"UPDATE plaid_items SET sync_lock_id = 'newer-run' WHERE id = ?",
+											)
+											.bind(id)
+											.run();
+
+										return bound.run();
+									},
+								};
 							};
 						},
-					} as unknown as D1PreparedStatement;
+					});
 				};
 			},
 		});

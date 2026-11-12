@@ -19,7 +19,9 @@ const DATES = [
 async function demoPage(today: string) {
 	await resetDemo(env.DB, today);
 	const page = buildTrends(await loadTrends(env.DB, today));
+
 	if (page.kind !== "full") throw new Error(`expected full, got ${page.kind}`);
+
 	return page;
 }
 
@@ -73,11 +75,13 @@ describe("Trends with the demo seed", () => {
 			// Rent adds $100 in the household's favour: last month's $700 was paid by this time and this month's $600 has been.
 			// Its $500 was paid late, this month, so it isn't in last month's days (the seed dates it this month's 1st).
 			expect(dollars).toBeLessThan(400);
+
 			// Last month's first two days come to $1,202 and its first five to $1,478 (spending is paced, #322), so Oct 1, 2 and 5
 			// compare with over $1,000; every other date with over $1,500.
 			const firstDays = ["2026-10-01", "2026-10-02", "2026-10-05"].includes(
 				today,
 			);
+
 			expect(page.sameDaysCents.last).toBeGreaterThan(
 				firstDays ? 100000 : 150000,
 			);
@@ -98,8 +102,10 @@ describe("Trends with the demo seed", () => {
 
 	it("keeps Eating Out creeping up in the changes too, with groceries down", async () => {
 		const page = await demoPage("2026-10-05");
+
 		const words = (name: string) =>
 			page.changes.find((c) => c.name === name)?.direction;
+
 		expect(words("Eating Out")).toBe("up");
 		expect(words("Groceries")).toBe("down");
 	});

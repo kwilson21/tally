@@ -42,6 +42,7 @@ const MORE_KEYS: NavKey[] = ["accounts", "settings", "more", "how", "feedback"];
 function isCurrent(item: NavItem, active?: NavKey) {
 	if (item.key === "more")
 		return active !== undefined && MORE_KEYS.includes(active);
+
 	return item.key === active;
 }
 

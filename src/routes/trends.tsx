@@ -14,6 +14,7 @@ export const trends = new Hono<{ Bindings: Env }>();
 trends.get("/trends", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const page = buildTrends(await loadTrends(c.env.DB, today));
+
 	return c.html(
 		<Layout
 			title="Trends · Tally"

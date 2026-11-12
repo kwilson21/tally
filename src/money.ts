@@ -7,11 +7,13 @@ const DOLLARS = /^-?\$?(\d{1,3}(,\d{3})+|\d+)(\.\d{1,2})?$/;
 /** Parses a typed dollar amount ("$1,284.50") into integer cents. Throws on anything else. */
 export function toCents(input: string): number {
 	const trimmed = input.trim();
+
 	if (!DOLLARS.test(trimmed)) throw new Error(`Not a dollar amount: ${input}`);
 	const cleaned = trimmed.replace(/[$,]/g, "");
 	const negative = cleaned.startsWith("-");
 	const [whole = "0", fraction = ""] = cleaned.replace("-", "").split(".");
 	const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+
 	return negative ? -cents : cents;
 }
 
@@ -27,14 +29,18 @@ export function plaidAmountToCents(amount: number): number {
 	if (!Number.isFinite(amount) || Math.abs(amount) >= 1e13) {
 		throw new Error(`Not a Plaid amount: ${amount}`);
 	}
+
 	const abs = Math.abs(amount);
+
 	if (abs < 0.005) return 0;
 	const [whole = "0", fraction = ""] = abs.toPrecision(15).split(".");
 	const digits = fraction.padEnd(3, "0");
+
 	const cents =
 		Number(whole) * 100 +
 		Number(digits.slice(0, 2)) +
 		(Number(digits[2]) >= 5 ? 1 : 0);
+
 	return amount < 0 ? -cents : cents;
 }
 
@@ -49,6 +55,7 @@ const dollars = new Intl.NumberFormat("en-US", {
 	style: "currency",
 	currency: "USD",
 });
+
 const wholeDollars = new Intl.NumberFormat("en-US", {
 	style: "currency",
 	currency: "USD",
@@ -59,6 +66,7 @@ const wholeDollars = new Intl.NumberFormat("en-US", {
 export function centsToAmount(cents: number): string {
 	if (!Number.isSafeInteger(cents) || cents < 0)
 		throw new Error(`Not an amount in cents: ${cents}`);
+
 	return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
@@ -79,6 +87,8 @@ export function formatCents(
 ): string {
 	const formatter = options.wholeDollars ? wholeDollars : dollars;
 	const text = formatter.format(Math.abs(cents) / 100);
+
 	if (options.signed) return cents < 0 ? `+${text}` : text;
+
 	return cents < 0 ? `-${text}` : text;
 }

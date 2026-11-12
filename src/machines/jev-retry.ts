@@ -23,14 +23,16 @@ export type JevRetryContext = {
 	answered: boolean;
 };
 
+const initialContext: JevRetryContext = {
+	attempts: 0,
+	categorized: false,
+	answered: false,
+};
+
 export const jevRetry = setup({}).createMachine({
 	id: "jevRetry",
 	initial: "waiting",
-	context: {
-		attempts: 0,
-		categorized: false,
-		answered: false,
-	} as JevRetryContext,
+	context: initialContext,
 	states: {
 		waiting: {
 			on: {
@@ -94,8 +96,11 @@ export function retryStateOf(row: {
 	confidence: number | null;
 }): JevRetryState {
 	if (row.categoryId !== null) return "filed";
+
 	if (row.attempts >= JEV_ATTEMPT_CAP) return "gave_up";
+
 	if (row.confidence !== null) return "unsure";
+
 	return "waiting";
 }
 

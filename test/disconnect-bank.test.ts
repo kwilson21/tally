@@ -4,45 +4,48 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import {
-	answerPay,
-	type PayMerchant,
-	payMerchants,
-} from "../src/first-tally/first-page";
+import { answerPay, payMerchants } from "../src/first-tally/first-page";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
+import { envWith } from "./helpers/doubles";
+import { present } from "./helpers/present";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-const bindings = {
-	...env,
+
+const bindings = envWith(env, {
 	DEMO: "false",
 	PLAID_CLIENT_ID: "client",
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: KEY,
-} as unknown as Env;
+});
 
 async function itemId() {
 	const row = await env.DB.prepare(
 		"SELECT id FROM plaid_items WHERE institution_name = 'First Harbor Bank'",
 	).first<{ id: number }>();
+
 	if (!row) throw new Error("missing seed item");
 	await env.DB.prepare(
 		"UPDATE plaid_items SET access_token_encrypted = ? WHERE id = ?",
 	)
 		.bind(await encryptToken("secret-access-token", KEY), row.id)
 		.run();
+
 	return row.id;
 }
 
 async function post(id: number | string, body = "", htmx = false) {
+	const headers = new Headers({
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	return accounts.request(
 		`/accounts/${id}/disconnect`,
 		{
 			method: "POST",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				...(htmx ? { "HX-Request": "true" } : {}),
-			},
+			headers,
 			body,
 		},
 		bindings,
@@ -56,16 +59,20 @@ async function bankWith(accountCount: number, transactionCount: number) {
 	)
 		.bind(await encryptToken("count-access-token", KEY))
 		.first<{ id: number }>();
+
 	if (!item) throw new Error("no item");
 	const accountIds: number[] = [];
+
 	for (let i = 0; i < accountCount; i++) {
 		const account = await env.DB.prepare(
 			"INSERT INTO accounts (plaid_item_id, name, type) VALUES (?, 'Checking', 'depository') RETURNING id",
 		)
 			.bind(item.id)
 			.first<{ id: number }>();
+
 		if (account) accountIds.push(account.id);
 	}
+
 	for (let i = 0; i < transactionCount; i++) {
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (?, '2026-09-01', 100, 'COFFEE')",
@@ -73,6 +80,7 @@ async function bankWith(accountCount: number, transactionCount: number) {
 			.bind(accountIds[0])
 			.run();
 	}
+
 	return item.id;
 }
 
@@ -90,16 +98,20 @@ async function answerPayFrom(id: number) {
 	)
 		.bind(id)
 		.first<{ id: number }>();
+
 	const deposit = await env.DB.prepare(
 		"INSERT INTO transactions (account_id, date, amount_cents, raw_name, flag_income) VALUES (?, '2026-10-01', -245000, 'NORTHWIND PAYROLL', 1) RETURNING id",
 	)
 		.bind(account?.id)
 		.first<{ id: number }>();
-	const merchant = (await payMerchants(env.DB)).find(
-		(m) => m.key === "NORTHWIND PAYROLL",
-	) as PayMerchant;
+
+	const merchant = present(
+		(await payMerchants(env.DB)).find((m) => m.key === "NORTHWIND PAYROLL"),
+	);
+
 	await answerPay(env.DB, merchant, "yes", "person@example.com");
-	return deposit?.id as number;
+
+	return present(deposit).id;
 }
 
 const countFor = async (id: number) =>
@@ -119,11 +131,13 @@ describe("disconnect bank", () => {
 
 	it("shows the confirmation, but hides Manage and returns 404 in the demo", async () => {
 		const id = await itemId();
+
 		const response = await accounts.request(
 			`/accounts/${id}/disconnect`,
 			{},
 			bindings,
 		);
+
 		const html = await response.text();
 		expect(html).toContain("Disconnect First Harbor Bank?");
 		expect(html).toContain("Also delete its accounts and transactions");
@@ -162,6 +176,7 @@ describe("disconnect bank", () => {
 				bindings,
 			)
 		).text();
+
 		expect(html).toMatch(/aria-describedby="delete-hint"/);
 		expect(html).toMatch(/id="delete-hint"[^>]*>This deletes them for good\./);
 	});
@@ -182,6 +197,7 @@ describe("disconnect bank", () => {
 				bindings,
 			)
 		).text();
+
 		expect(html).toMatch(/<form[^>]*method="post"/);
 		expect(html).toMatch(/<form[^>]*hx-post="\/accounts\/\d+\/disconnect"/);
 		expect(html).toMatch(/<form[^>]*hx-target="#main"/);
@@ -267,6 +283,7 @@ describe("disconnect bank", () => {
 				)
 					.bind(id)
 					.run();
+
 				return Response.json({});
 			}),
 		);
@@ -288,9 +305,11 @@ describe("disconnect bank", () => {
 		const id = await itemId();
 		const plaid = vi.fn(async () => Response.json({}));
 		vi.stubGlobal("fetch", plaid);
+
 		const batch = vi
 			.spyOn(env.DB, "batch")
 			.mockRejectedValueOnce(new Error("D1 unavailable"));
+
 		const failed = await post(id, "delete=yes", true);
 		expect(failed.status).toBe(502);
 		const html = await failed.text();
@@ -328,11 +347,13 @@ describe("disconnect bank", () => {
 		expect(response.headers.get("location")).toBe("/accounts");
 		// A plain browser follows the redirect; htmx gets the toast (tested above).
 		expect(response.headers.get("HX-Trigger")).toBeNull();
+
 		const row = await env.DB.prepare(
 			"SELECT status, length(access_token_encrypted) token_length FROM plaid_items WHERE id = ?",
 		)
 			.bind(id)
 			.first();
+
 		expect(row).toMatchObject({ status: "ok", token_length: 0 });
 		expect(
 			await env.DB.prepare(
@@ -357,14 +378,17 @@ describe("disconnect bank", () => {
 			vi.fn(async () => Response.json({})),
 		);
 		expect((await post(id, "delete=yes")).status).toBe(303);
+
 		for (const table of ["transactions", "balance_history", "accounts"]) {
 			const row = await env.DB.prepare(
 				`SELECT COUNT(*) count FROM ${table} WHERE ${table === "accounts" ? "plaid_item_id" : "account_id"} IN (${table === "accounts" ? "?" : "SELECT id FROM accounts WHERE plaid_item_id = ?"})`,
 			)
 				.bind(id)
 				.first<{ count: number }>();
+
 			expect(row?.count).toBe(0);
 		}
+
 		const pay = (await readFirstTally(env.DB))?.pay ?? {};
 		expect(JSON.stringify(pay)).not.toContain(`"${deposit}"`);
 		expect(Object.keys(pay)).toEqual([]);

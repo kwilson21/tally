@@ -64,6 +64,7 @@ export function refundPartIndex(
 ): number | null {
 	if (answer === undefined || !/^\d+$/.test(answer)) return null;
 	const index = Number(answer);
+
 	return index < partCount ? index : null;
 }
 
@@ -89,6 +90,7 @@ export function refundPartRoomMessage(
 		count === 1
 			? `The refund is ${formatCents(totalCents)}`
 			: `The refunds come to ${formatCents(totalCents)}`;
+
 	return `${refunds}, and ${partName} is only ${formatCents(partCents)}.`;
 }
 
@@ -110,16 +112,21 @@ export function refundAnswersError(
 			answers[refund.id] !== "none" &&
 			refundPartIndex(answers[refund.id], parts.length) === null,
 	);
+
 	if (open) return refundPickMessage(open.date, today);
+
 	for (const [index, part] of parts.entries()) {
 		const chosen = refunds.filter(
 			(refund) => refundPartIndex(answers[refund.id], parts.length) === index,
 		);
+
 		const totalCents = chosen.reduce(
 			(sum, refund) => sum + Math.abs(refund.amountCents),
 			0,
 		);
+
 		const partCents = Math.abs(part.amountCents);
+
 		if (totalCents > partCents)
 			return refundPartRoomMessage(
 				chosen.length,
@@ -128,5 +135,6 @@ export function refundAnswersError(
 				partCents,
 			);
 	}
+
 	return null;
 }

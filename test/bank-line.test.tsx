@@ -31,6 +31,7 @@ describe("BankBehind", () => {
 				],
 			}),
 		);
+
 		expect(multiple).toContain('<ul class="min-w-0 flex-1 list-none');
 		expect(multiple).toContain("<li>Chase stopped updating Sep 20</li>");
 		expect(multiple).toContain("<li>Capital One needs signing in</li>");
@@ -63,6 +64,7 @@ describe("HomeTop with a bank behind", () => {
 				"Capital One needs signing in",
 			],
 		});
+
 		const at = (text: string) => html.indexOf(text);
 		expect(at("as of Oct 2")).toBeLessThan(at("Chase stopped updating Oct 2"));
 		expect(at("Chase stopped updating Oct 2")).toBeLessThan(at("forecast"));

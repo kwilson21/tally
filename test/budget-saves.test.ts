@@ -16,6 +16,7 @@ import { nudgeBudget, saveSavingsGoal } from "../src/rules/budgets";
 
 const db = env.DB;
 const MONTH = "2026-09";
+
 const budgetRows = async (categoryId = 1) =>
 	(
 		await db
@@ -25,6 +26,7 @@ const budgetRows = async (categoryId = 1) =>
 			.bind(categoryId)
 			.all<{ month: string; cents: number; type: string }>()
 	).results;
+
 const goalRows = async () =>
 	(
 		await db
@@ -33,14 +35,21 @@ const goalRows = async () =>
 			)
 			.all<{ month: string; cents: number; type: string }>()
 	).results;
+
+/** The error a statement fails with, or null when it runs. */
 const raised = async (statement: D1PreparedStatement) => {
 	try {
 		await statement.run();
 	} catch (error) {
-		return error;
+		return error instanceof Error ? error : new Error(String(error));
 	}
+
 	return null;
 };
+
+/** Whether a failure is the guard's: what the rule read had changed. */
+const guardRaised = (error: Error | null) =>
+	error !== null && changedSinceRead(error);
 
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
@@ -108,10 +117,12 @@ describe("budgetSaveStatement", () => {
 
 	it("raises, and saves nothing, when the budget is no longer the one the rule read", async () => {
 		await save(65000, null).run();
+
 		for (const stale of [null, 64000]) {
 			const error = await raised(save(70000, stale));
-			expect(changedSinceRead(error)).toBe(true);
+			expect(guardRaised(error)).toBe(true);
 		}
+
 		expect(await budgetRows()).toEqual([
 			{ month: MONTH, cents: 65000, type: "integer" },
 		]);
@@ -119,20 +130,23 @@ describe("budgetSaveStatement", () => {
 
 	it("raises, and saves nothing, when the category was archived or removed after the rule read it", async () => {
 		await db.prepare("UPDATE categories SET archived = 1 WHERE id = 1").run();
-		expect(changedSinceRead(await raised(save(65000, null)))).toBe(true);
+		expect(guardRaised(await raised(save(65000, null)))).toBe(true);
 		expect(await budgetRows()).toEqual([]);
+
 		const gone = budgetSaveStatement(db, {
 			categoryId: 999999,
 			month: MONTH,
 			cents: 65000,
 			expectedBudgetCents: null,
 		});
-		expect(changedSinceRead(await raised(gone))).toBe(true);
+
+		expect(guardRaised(await raised(gone))).toBe(true);
 		expect(await budgetRows(999999)).toEqual([]);
 	});
 
 	it("rolls a whole batch back when the guard raises", async () => {
 		await save(65000, null).run();
+
 		const error = await (async () => {
 			try {
 				await db.batch([
@@ -140,11 +154,13 @@ describe("budgetSaveStatement", () => {
 					save(70000, 1),
 				]);
 			} catch (caught) {
-				return caught;
+				return caught instanceof Error ? caught : new Error(String(caught));
 			}
+
 			return null;
 		})();
-		expect(changedSinceRead(error)).toBe(true);
+
+		expect(guardRaised(error)).toBe(true);
 		expect(
 			await db
 				.prepare("SELECT name FROM categories WHERE id = 1")
@@ -174,8 +190,9 @@ describe("savingsGoalSaveStatement", () => {
 
 	it("raises, and saves nothing, when the goal is no longer the one the rule read", async () => {
 		await save(20000, null).run();
+
 		for (const stale of [null, 10000])
-			expect(changedSinceRead(await raised(save(30000, stale)))).toBe(true);
+			expect(guardRaised(await raised(save(30000, stale)))).toBe(true);
 		expect(await goalRows()).toEqual([
 			{ month: MONTH, cents: 20000, type: "integer" },
 		]);
@@ -184,10 +201,8 @@ describe("savingsGoalSaveStatement", () => {
 
 describe("changedSinceRead", () => {
 	it("is false for any other failure, so it is never swallowed", async () => {
-		expect(changedSinceRead(new Error("D1_ERROR: no such table: x"))).toBe(
-			false,
-		);
-		expect(changedSinceRead(null)).toBe(false);
+		expect(guardRaised(new Error("D1_ERROR: no such table: x"))).toBe(false);
+
 		// A negative amount fails the table's own CHECK, which is not the guard.
 		const error = await raised(
 			budgetSaveStatement(db, {
@@ -197,19 +212,22 @@ describe("changedSinceRead", () => {
 				expectedBudgetCents: null,
 			}),
 		);
+
 		expect(error).not.toBeNull();
-		expect(changedSinceRead(error)).toBe(false);
+		expect(guardRaised(error)).toBe(false);
 	});
 });
 
 describe("decideAndSave", () => {
 	const nudgeUp = (stale?: number) => {
 		let reads = 0;
+
 		return {
 			reads: () => reads,
 			decide: async () => {
 				reads += 1;
 				const facts = await budgetFacts(db, 1, MONTH);
+
 				// The first read is made to see an old amount, as a tap that lost a race would.
 				return nudgeBudget.decide(
 					{ categoryId: 1, direction: "up", month: MONTH },
@@ -220,6 +238,7 @@ describe("decideAndSave", () => {
 			},
 		};
 	};
+
 	const seed = (cents: number) =>
 		db
 			.prepare(
@@ -231,9 +250,11 @@ describe("decideAndSave", () => {
 	it("saves what the rule decided and hands the answer back", async () => {
 		await seed(71240);
 		const tap = nudgeUp();
+
 		const answer = await decideAndSave(tap.decide, (w) =>
 			budgetSaveStatement(db, w),
 		);
+
 		expect(answer.kind).toBe("write");
 		expect(tap.reads()).toBe(1);
 		expect((await budgetRows())[0]?.cents).toBe(72000);
@@ -242,9 +263,11 @@ describe("decideAndSave", () => {
 	it("reads and decides again when the facts changed under it, so a tap that lost a race still counts", async () => {
 		await seed(72000);
 		const tap = nudgeUp(71240);
+
 		const answer = await decideAndSave(tap.decide, (w) =>
 			budgetSaveStatement(db, w),
 		);
+
 		expect(answer).toMatchObject({ kind: "write", write: { cents: 73000 } });
 		expect(tap.reads()).toBe(2);
 		expect((await budgetRows())[0]?.cents).toBe(73000);
@@ -253,9 +276,11 @@ describe("decideAndSave", () => {
 	it("saves nothing for nothing to do or a refusal, and reads once", async () => {
 		await seed(20000);
 		let reads = 0;
+
 		const answer = await decideAndSave(
 			async () => {
 				reads += 1;
+
 				return saveSavingsGoal.decide(
 					{ cents: 0, month: MONTH },
 					await savingsGoalFacts(db, MONTH),
@@ -263,6 +288,7 @@ describe("decideAndSave", () => {
 			},
 			(w) => savingsGoalSaveStatement(db, w),
 		);
+
 		expect(answer.kind).toBe("nothingToDo");
 		expect(reads).toBe(1);
 		expect(await goalRows()).toEqual([]);
@@ -275,6 +301,7 @@ describe("decideAndSave", () => {
 			decideAndSave(
 				async () => {
 					reads += 1;
+
 					return nudgeBudget.decide(
 						{ categoryId: 1, direction: "up", month: MONTH },
 						{ category: { archived: false }, budgetCents: 100 },
@@ -293,6 +320,7 @@ describe("decideAndSave", () => {
 			decideAndSave(
 				async () => {
 					reads += 1;
+
 					return nudgeBudget.decide(
 						{ categoryId: 1, direction: "up", month: MONTH },
 						{ category: { archived: false }, budgetCents: 100 },

@@ -110,9 +110,13 @@ type Answer = "sent" | "gone" | "permanent" | "transient";
 
 function answerOf(status: number | null): Answer {
 	if (status === null) return "transient";
+
 	if (status >= 200 && status < 300) return "sent";
+
 	if (status === 404 || status === 410) return "gone";
+
 	if (status === 429 || status >= 500) return "transient";
+
 	return "permanent";
 }
 
@@ -141,31 +145,38 @@ export async function runReadyPush(
 	} = {},
 ) {
 	const keys = await vapidKeys(env);
+
 	if (!keys) return;
+
 	if (!(await gateOpen(env.DB))) return;
 	// The one read of the devices, before any claim: a failure here throws, and no one is claimed.
 	const { results } = await env.DB.prepare(DEVICES_SQL).all<Device>();
 	const byPerson = new Map<string, Device[]>();
+
 	for (const device of results) {
 		const list = byPerson.get(device.email) ?? [];
 		list.push(device);
 		byPerson.set(device.email, list);
 	}
+
 	const nowMs = (options.now ?? Date.now)();
 	let claimedCount = 0;
 	let sentCount = 0;
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
+
 	for (const [email, devices] of byPerson) {
 		// The gate, read again before this person's claim: a bank linked or a question answered since the last person ends the run.
 		if (!(await gateOpen(env.DB))) break;
 		const hash = await addressHashOf(email);
 		const claim = await env.DB.prepare(PUSH_CLAIM_SQL).bind(email, hash).run();
+
 		// No row changed: already pushed (an earlier run, or one still going), emailed, removed, or still on a first-week page.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
 		let delivered = 0;
 		let transient = false;
+
 		for (const device of devices) {
 			// A device stored on another host is never fetched. It is a permanent failure, so the claim is kept and no later run sends.
 			if (!isPushServiceEndpoint(device.endpoint)) {
@@ -173,6 +184,7 @@ export async function runReadyPush(
 				failureKinds.add("push endpoint refused");
 				continue;
 			}
+
 			try {
 				const { status } = await sendPush(
 					{
@@ -188,7 +200,9 @@ export async function runReadyPush(
 						nowSec: Math.floor(nowMs / 1000),
 					},
 				);
+
 				const answer = answerOf(status);
+
 				// A device that is gone is deleted by the id and endpoint read before the claims. Ids are not AUTOINCREMENT, so a freed
 				// id can be given to another device before this DELETE lands: the endpoint keeps that device (and a subscription made since).
 				if (answer === "gone")
@@ -197,13 +211,16 @@ export async function runReadyPush(
 					)
 						.bind(device.id, device.endpoint)
 						.run();
+
 				if (answer === "sent") {
 					sentCount += 1;
 					delivered += 1;
 					continue;
 				}
+
 				failedCount += 1;
 				failureKinds.add(status === null ? "push no answer" : `push ${status}`);
+
 				if (answer === "transient") transient = true;
 			} catch {
 				// A throw (a database error, say) is a failed device, and transient, so the claim is not left stuck.
@@ -212,6 +229,7 @@ export async function runReadyPush(
 				transient = true;
 			}
 		}
+
 		if (delivered > 0) {
 			// The email waits EMAIL_AFTER_PUSH_MS from this delivery (decision 149). If the time can't be stored, that is counted, and
 			// the stamp the claim wrote stands, so the email waits from the claim instead.
@@ -235,6 +253,7 @@ export async function runReadyPush(
 			}
 		}
 	}
+
 	if (claimedCount > 0)
 		logDeliveries("ready push", sentCount, failedCount, failureKinds);
 }

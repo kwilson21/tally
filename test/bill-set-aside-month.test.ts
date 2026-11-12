@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows } from "../src/bills/totals";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 // Decision 123 (#631): Safe to spend sets aside only this month's bills that are due or overdue and not paid. A bill
 // due in the next month is not set aside until its month, though it still shows as due soon on Bills and on Home.
@@ -31,25 +32,29 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 		)
 			.bind(id, date, cents)
 			.run();
+
 	const link = (bill: number, transaction: number, period: string) =>
 		env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','linked')",
 		)
 			.bind(bill, period, transaction)
 			.run();
+
 	const rowOn = async (today: string, id: number) =>
 		(await loadBillRows(env.DB, today)).rows.find((row) => row.id === id);
 
 	it("keeps October's unpaid part of the rent set aside on the 24th, 25th and 31st, while November's rent is due soon", async () => {
 		await addPayment(9801, "2026-10-01", 60000);
 		await link(RENT, 9801, MONTH);
+
 		for (const today of ["2026-10-24", "2026-10-25", "2026-10-31"]) {
 			const row = await rowOn(today, RENT);
 			expect(row).toBeDefined();
-			const totals = billTotalsForRows(MONTH, [row as NonNullable<typeof row>]);
+			const totals = billTotalsForRows(MONTH, [present(row)]);
 			expect(totals.setAsideCents).toBe(60000);
 			expect(totals.soonCount).toBe(1);
 		}
+
 		// The 25th is the handoff day: November's rent is the shown occurrence, and October's is no longer shown.
 		const onThe25th = await rowOn("2026-10-25", RENT);
 		expect(onThe25th?.dueDate).toBe("2026-11-01");
@@ -59,10 +64,10 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 			amountCents: 120000,
 			paidCents: 60000,
 		});
+
 		// November's rent is not set aside in October, though Bills counts it as due soon (soonCents, as today).
-		const totals = billTotalsForRows(MONTH, [
-			onThe25th as NonNullable<typeof onThe25th>,
-		]);
+		const totals = billTotalsForRows(MONTH, [present(onThe25th)]);
+
 		expect(totals.soonCents).toBe(120000);
 	});
 
@@ -70,17 +75,14 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 		await addPayment(9801, "2026-10-01", 60000);
 		await link(RENT, 9801, MONTH);
 		const onThe31st = await rowOn("2026-10-31", RENT);
-		expect(
-			billTotalsForRows(MONTH, [onThe31st as NonNullable<typeof onThe31st>])
-				.setAsideCents,
-		).toBe(60000);
+		expect(billTotalsForRows(MONTH, [present(onThe31st)]).setAsideCents).toBe(
+			60000,
+		);
 		// On the 1st of November, October's rent is no longer set aside, and November's own rent is.
 		const onNovemberFirst = await rowOn("2026-11-01", RENT);
 		expect(onNovemberFirst?.dueDate).toBe("2026-11-01");
 		expect(
-			billTotalsForRows("2026-11", [
-				onNovemberFirst as NonNullable<typeof onNovemberFirst>,
-			]).setAsideCents,
+			billTotalsForRows("2026-11", [present(onNovemberFirst)]).setAsideCents,
 		).toBe(120000);
 	});
 
@@ -94,7 +96,7 @@ describe("Safe to spend sets aside this month's bills only (decision 123, #631)"
 		// within the week, but it is in November: it counts as due soon, and is not set aside.
 		const row = await rowOn("2026-10-31", DAYCARE);
 		expect(row?.nextOccurrence?.dueDate).toBe("2026-11-06");
-		const totals = billTotalsForRows(MONTH, [row as NonNullable<typeof row>]);
+		const totals = billTotalsForRows(MONTH, [present(row)]);
 		expect(totals.setAsideCents).toBe(5 * 24000);
 		expect(totals.soonCents - totals.setAsideCents).toBe(24000);
 		expect(totals.soonCount).toBe(1);

@@ -24,10 +24,12 @@ describe("planImport", () => {
 	it("numbers twins: identical rows get 1 and 2, and a third identical row later in the file gets 3", () => {
 		const twin = row();
 		const other = row({ description: "OTHER SHOP", merchant: "Other Shop" });
+
 		const plan = planImport(
 			[twin, { ...twin, line: 3 }, other, { ...twin, line: 4 }],
 			"2026-07-21",
 		);
+
 		expect(plan.add.map((item) => item.twin)).toEqual([1, 2, 1, 3]);
 		expect(plan.add[0]?.key).toBe(plan.add[1]?.key);
 		expect(plan.add[0]?.key).toBe(plan.add[3]?.key);
@@ -39,6 +41,7 @@ describe("planImport", () => {
 			[row({ clearingDate: null }), row({ line: 3 })],
 			"2026-07-21",
 		);
+
 		expect(plan.notCleared).toBe(1);
 		expect(plan.add).toHaveLength(1);
 		expect(plan.add[0]?.row.line).toBe(3);
@@ -52,6 +55,7 @@ describe("planImport", () => {
 			],
 			"2026-07-21",
 		);
+
 		expect(plan.beforeHistory).toBe(1);
 		expect(plan.add.map((item) => item.row.clearingDate)).toEqual([
 			"2026-07-21",
@@ -67,6 +71,7 @@ describe("planImport", () => {
 			],
 			"2026-07-21",
 		);
+
 		expect(plan.notCleared).toBe(1);
 		expect(plan.beforeHistory).toBe(1);
 		expect(
@@ -82,6 +87,7 @@ describe("planImport", () => {
 			],
 			"2026-07-21",
 		);
+
 		expect(plan.add.map((item) => item.excluded)).toEqual([true, false]);
 	});
 });

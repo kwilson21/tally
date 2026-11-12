@@ -15,25 +15,31 @@ type Entry = {
 	rule?: string;
 	stories?: string;
 };
+
 type List = { legacyBaseline: number; handlers: Entry[] };
 
-const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
+const LIST: List = handlers;
+
+const SOURCES = import.meta.glob<string>("../src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
-const TESTS = import.meta.glob("./**/*.test.{ts,tsx}", {
+});
+
+const TESTS = import.meta.glob<string>("./**/*.test.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
-const ROADMAP = import.meta.glob("../ROADMAP.md", {
+});
+
+const ROADMAP = import.meta.glob<string>("../ROADMAP.md", {
 	query: "?raw",
 	import: "default",
 	eager: true,
-}) as Record<string, string>;
+});
 
 const WRITES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 // The middleware the app registers for every method. Any other ALL route could take a write without being listed.
 const KNOWN_MIDDLEWARE = new Set(["/*", "/design-system/*"]);
 const key = (e: { method: string; path: string }) => `${e.method} ${e.path}`;
@@ -42,6 +48,7 @@ const key = (e: { method: string; path: string }) => `${e.method} ${e.path}`;
 function registeredWrites(routes: { method: string; path: string }[]) {
 	const found = new Set<string>();
 	const problems: string[] = [];
+
 	for (const r of routes) {
 		if (WRITES.has(r.method)) {
 			// Two registrations of one route (an old handler left beside a new one) would count as one.
@@ -53,19 +60,23 @@ function registeredWrites(routes: { method: string; path: string }[]) {
 				`${key(r)} takes every method; register each method on its own`,
 			);
 	}
+
 	return { found, problems };
 }
 
 /** True when the text really imports the module (a "from" or import() specifier), not a comment or a longer sibling name. */
 function importsModule(text: string, name: string) {
 	const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
 	for (const m of code.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)) {
 		const spec = (m[1] ?? "")
 			.replace(/^(\.{1,2}\/)+/, "")
 			.replace(/^src\//, "")
 			.replace(/\.tsx?$/, "");
+
 		if (spec === name) return true;
 	}
+
 	return false;
 }
 
@@ -78,21 +89,29 @@ function ratchetProblems(
 ) {
 	const problems: string[] = [];
 	const listed = new Set<string>();
+
 	for (const e of list.handlers) {
 		const k = key(e);
+
 		if (listed.has(k)) problems.push(`${k} is listed twice`);
 		listed.add(k);
+
 		if (!["legacy", "converted", "exempt"].includes(e.status))
 			problems.push(`${k} has status "${e.status}"`);
+
 		if (!registered.has(k))
 			problems.push(`${k} is listed but no handler has it`);
+
 		if (e.status === "exempt" && !e.reason?.trim())
 			problems.push(`${k} is exempt without a reason`);
+
 		if (e.status === "converted") {
 			const hasRule = e.rule !== undefined && `../${e.rule}` in sources;
+
 			const stories = e.stories
 				? tests[`./${e.stories.replace(/^test\//, "")}`]
 				: undefined;
+
 			if (!hasRule)
 				problems.push(
 					`${k} is converted but its rule module ${e.rule} is not in src/`,
@@ -101,15 +120,19 @@ function ratchetProblems(
 				const name = (e.rule ?? "")
 					.replace(/^src\//, "")
 					.replace(/\.tsx?$/, "");
+
 				const handlerFile = sources[`../src/routes/${e.file}`] ?? "";
+
 				if (!handlerFile.includes(e.path))
 					problems.push(
 						`${k} is converted but ${e.file} does not contain the path ${e.path}`,
 					);
+
 				if (!importsModule(handlerFile, name))
 					problems.push(
 						`${k} is converted but ${e.file} does not import ${name}`,
 					);
+
 				if (stories === undefined)
 					problems.push(
 						`${k} is converted but its stories test ${e.stories} is not in test/`,
@@ -121,16 +144,19 @@ function ratchetProblems(
 			}
 		}
 	}
+
 	for (const k of registered)
 		if (!listed.has(k))
 			problems.push(`${k} is a write handler that is not on the list`);
 	const legacy = list.handlers.filter((e) => e.status === "legacy").length;
+
 	if (legacy !== list.legacyBaseline)
 		problems.push(
 			legacy > list.legacyBaseline
 				? `${legacy} legacy handlers is more than the baseline ${list.legacyBaseline}`
 				: `${legacy} legacy handlers is fewer than the baseline ${list.legacyBaseline}; lower the baseline in this pull request`,
 		);
+
 	return problems;
 }
 
@@ -142,19 +168,18 @@ const entry = (over: Partial<Entry> = {}): Entry => ({
 	status: "legacy",
 	...over,
 });
+
 const one = (e: Entry, baseline = 1): List => ({
 	legacyBaseline: baseline,
 	handlers: [e],
 });
 
 describe("the write-handler ratchet", () => {
-	const { found, problems: shapes } = registeredWrites(app.routes);
+	const { found, problems: malformed } = registeredWrites(app.routes);
 
 	it("holds for the real app: every write route is listed, every listed route exists", () => {
-		expect(shapes).toEqual([]);
-		expect(ratchetProblems(found, handlers as List, SOURCES, TESTS)).toEqual(
-			[],
-		);
+		expect(malformed).toEqual([]);
+		expect(ratchetProblems(found, LIST, SOURCES, TESTS)).toEqual([]);
 	});
 
 	it("fails when a write handler is not on the list", () => {
@@ -164,6 +189,7 @@ describe("the write-handler ratchet", () => {
 			SOURCES,
 			TESTS,
 		);
+
 		expect(p).toEqual(["POST /new is a write handler that is not on the list"]);
 	});
 
@@ -189,20 +215,24 @@ describe("the write-handler ratchet", () => {
 
 	it("fails when a converted entry has no rule module, no stories test, or neither imports the rule", () => {
 		const reg = new Set(["POST /x"]);
+
 		const converted = entry({
 			status: "converted",
 			rule: "src/rules/x.ts",
 			stories: "test/x-stories.test.ts",
 		});
+
 		const list = one(converted, 0);
 		expect(ratchetProblems(reg, list, {}, {})[0]).toMatch(
 			/rule module src\/rules\/x.ts is not in src\//,
 		);
+
 		const src = {
 			"../src/rules/x.ts": "",
 			"../src/routes/x.tsx":
 				'import { go } from "../rules/x"; app.post("/x", go);',
 		};
+
 		expect(ratchetProblems(reg, list, src, {})[0]).toMatch(
 			/stories test test\/x-stories.test.ts is not in test\//,
 		);
@@ -222,12 +252,14 @@ describe("the write-handler ratchet", () => {
 				{ "./x-stories.test.ts": 'from "../src/rules/x"' },
 			)[0],
 		).toMatch(/x.tsx does not contain the path \/x/);
+
 		const pay = entry({
 			path: "/pay",
 			status: "converted",
 			rule: "src/rules/x.ts",
 			stories: "test/x-stories.test.ts",
 		});
+
 		const stories = { "./x-stories.test.ts": 'from "../src/rules/x"' };
 		expect(
 			ratchetProblems(new Set(["POST /pay"]), one(pay, 0), src, stories),
@@ -241,6 +273,7 @@ describe("the write-handler ratchet", () => {
 			{ method: "POST", path: "/x" },
 			{ method: "POST", path: "/x" },
 		];
+
 		expect(registeredWrites(twice).problems).toEqual([
 			"POST /x is registered more than once",
 		]);
@@ -277,25 +310,30 @@ describe("the write-handler ratchet", () => {
 
 	it("shows the same countdown in ROADMAP.md as the list gives", () => {
 		const text = ROADMAP["../ROADMAP.md"] ?? "";
-		const todo = (handlers as List).handlers.filter(
-			(e) => e.status !== "exempt",
-		);
-		const exempt = (handlers as List).handlers.length - todo.length;
+
+		const todo = LIST.handlers.filter((e) => e.status !== "exempt");
+
+		const exempt = LIST.handlers.length - todo.length;
 		expect(text).toContain(`Exempt routes (${exempt}) are not counted`);
 		const left = todo.filter((e) => e.status === "legacy").length;
 		expect(text).toContain(
 			`Back-end cutover: ${left} of ${todo.length} handlers remain`,
 		);
+
 		// The section's whole table, so a row left behind for a finished area fails too.
 		const section =
 			text.split("## Back-end cutover")[1]?.split("\n## ")[0] ?? "";
+
 		const shown = [
 			...section.matchAll(/^\| (\S+) \| (\d+) \| (\d+) \|$/gm),
 		].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
+
 		const expected = [...new Set(todo.map((e) => e.area))].map((area) => {
 			const mine = todo.filter((e) => e.area === area);
+
 			return `${area} ${mine.filter((e) => e.status === "legacy").length} ${mine.length}`;
 		});
+
 		expect(shown.sort()).toEqual(expected.sort());
 	});
 });

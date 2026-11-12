@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EXPORT_COLUMNS, OWN_STATEMENTS } from "../src/settings/export";
 
 // A live column the JSON export leaves out on purpose: table -> column -> one-line reason.
-const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
+const NAMED_OMISSIONS = {
 	transactions: {
 		entry_key:
 			"The Add cash form's one-time key, so a double submit records one entry (migration 0019); not family data.",
@@ -66,10 +66,10 @@ const NAMED_OMISSIONS: Record<string, Record<string, string>> = {
 		claim:
 			"A random token that lets one request finish the row (migration 0063, decision 161); not family data (decision 185).",
 	},
-};
+} satisfies Record<string, Record<string, string>>;
 
 // An app table the JSON export leaves out on purpose: table -> one-line reason.
-const NOT_EXPORTED: Record<string, string> = {
+const NOT_EXPORTED = {
 	push_subscriptions:
 		"Each device's push endpoint and keys are device tokens, like the access token (export.ts comment, spec §5, decision 149).",
 	cash_delete_holds:
@@ -78,7 +78,7 @@ const NOT_EXPORTED: Record<string, string> = {
 		"A ten-second undo snapshot for a deleted plan, removed by each later delete (spec §5, decision 101).",
 	feedback:
 		"Left out of the download by the owner's choice (decision 185); the in-app feedback form has its own privacy handling (decision 61).",
-};
+} satisfies Record<string, string>;
 
 type Lists = {
 	namedOmissions: Record<string, Record<string, string>>;
@@ -113,14 +113,17 @@ function exportProblems(
 				);
 			continue;
 		}
+
 		const exported = new Set(exportedColumns[table]);
 		const named = lists.namedOmissions[table] ?? {};
+
 		for (const column of columns) {
 			if (!exported.has(column) && !(column in named))
 				problems.push(
 					`${table}.${column}: column is neither exported nor in NAMED_OMISSIONS`,
 				);
 		}
+
 		for (const column of Object.keys(named)) {
 			if (exported.has(column))
 				problems.push(
@@ -139,16 +142,19 @@ function exportProblems(
 		else if (table in exportedColumns)
 			problems.push(`${table}: in NOT_EXPORTED but also in EXPORT_COLUMNS`);
 	}
+
 	for (const table of lists.ownStatement) {
 		if (!(table in liveSchema))
 			problems.push(
 				`${table}: listed as its own statement but not an app table`,
 			);
 	}
+
 	for (const table of Object.keys(lists.namedOmissions)) {
 		if (!exportedTables.includes(table))
 			problems.push(`${table}: in NAMED_OMISSIONS but not in EXPORT_COLUMNS`);
 	}
+
 	return problems;
 }
 
@@ -156,6 +162,7 @@ async function appTables(): Promise<string[]> {
 	const { results } = await env.DB.prepare(
 		"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
 	).all<{ name: string }>();
+
 	return results.map((row) => row.name);
 }
 
@@ -163,6 +170,7 @@ async function liveColumns(table: string): Promise<string[]> {
 	const { results } = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{
 		name: string;
 	}>();
+
 	return results.map((row) => row.name);
 }
 
@@ -172,6 +180,7 @@ async function exportedNames(select: string): Promise<string[]> {
 	const [names] = await env.DB.prepare(`SELECT * FROM (${select}) LIMIT 0`).raw<
 		string[]
 	>({ columnNames: true });
+
 	return names;
 }
 
@@ -180,8 +189,9 @@ describe("JSON export column guard", () => {
 		const tables = await appTables();
 		const liveSchema: Record<string, string[]> = {};
 		const exportedColumns: Record<string, string[]> = {};
+
 		// Every table the download reads, whether from EXPORT_COLUMNS or its own statement, is held to the same rule.
-		const selects: Record<string, string> = {
+		const selects = {
 			...Object.fromEntries(
 				Object.entries(EXPORT_COLUMNS).map(([table, columns]) => [
 					table,
@@ -190,31 +200,38 @@ describe("JSON export column guard", () => {
 			),
 			...OWN_STATEMENTS,
 		};
+
 		for (const [table, select] of Object.entries(selects)) {
 			if (!tables.includes(table)) continue;
 			liveSchema[table] = await liveColumns(table);
 			exportedColumns[table] = await exportedNames(select);
 		}
+
 		const problems = exportProblems(liveSchema, exportedColumns, {
 			namedOmissions: NAMED_OMISSIONS,
 			notExported: {},
 			ownStatement: [],
 		});
+
 		expect(problems).toEqual([]);
 	});
 
 	it("lists every app table as exported, read by its own statement, or not exported", async () => {
 		// Only table names matter here, so every live table is given no columns.
 		const liveSchema: Record<string, string[]> = {};
+
 		for (const table of await appTables()) liveSchema[table] = [];
 		const exportedColumns: Record<string, string[]> = {};
+
 		for (const table of Object.keys(EXPORT_COLUMNS))
 			exportedColumns[table] = [];
+
 		const problems = exportProblems(liveSchema, exportedColumns, {
 			namedOmissions: {},
 			notExported: NOT_EXPORTED,
 			ownStatement: Object.keys(OWN_STATEMENTS),
 		});
+
 		expect(problems).toEqual([]);
 	});
 
@@ -223,7 +240,9 @@ describe("JSON export column guard", () => {
 			categories: ["id", "name", "secret"],
 			hidden: ["id"],
 		};
+
 		const exported = { categories: ["id", "name"] };
+
 		const lists: Lists = {
 			namedOmissions: {},
 			notExported: {},

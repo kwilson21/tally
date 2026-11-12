@@ -91,6 +91,7 @@ describe("contentsPlaces", () => {
 				accounts: [account(4, "Old checking"), account(5, "Old savings")],
 			}),
 		];
+
 		expect(accountsPlace(banks)).toBe("3 accounts");
 	});
 
@@ -103,6 +104,7 @@ describe("contentsPlaces", () => {
 			bank({ needsAttention: true }),
 			bank({ id: 2, name: "Northline", accounts: [account(3, "Card")] }),
 		];
+
 		expect(places({ banks })[0]?.folio).toEqual({
 			text: "Needs attention",
 			tone: "attention",
@@ -201,6 +203,7 @@ describe("ContentsList", () => {
 				folio: { text: "Needs attention", tone: "attention" },
 			},
 		]);
+
 		expect(out).toContain('data-icon="alert"');
 		expect(out).toMatch(/text-over[^>]*>\s*<svg[\s\S]*Needs attention/);
 	});
@@ -217,6 +220,7 @@ describe("Colophon", () => {
 		const out = String(
 			Colophon({ demo: false, version: "v2026.10.12 9e5e14d" }),
 		);
+
 		expect(out).toContain("Tally v2026.10.12 · 9e5e14d");
 	});
 

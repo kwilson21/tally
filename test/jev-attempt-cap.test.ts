@@ -20,6 +20,7 @@ import { next } from "../src/machines/next";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
+import { present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 // A row Jev can never answer stops being asked after JEV_ATTEMPT_CAP failures (decision 182). Only a person's
@@ -30,6 +31,7 @@ const TODAY = "2026-09-22";
 const CAP = JEV_ATTEMPT_CAP;
 const withKey = { DB: db, JEV_API_KEY: "test-key" };
 const create = recordSorting();
+
 // The category Eating Out, as the demo seed names it.
 const EATING_OUT = 2;
 
@@ -80,6 +82,7 @@ async function addRow(raw: string): Promise<number> {
 		)
 		.bind(TODAY, raw)
 		.first<{ id: number }>();
+
 	return Number(row?.id);
 }
 
@@ -105,7 +108,9 @@ async function snapshot(id: number): Promise<Snapshot> {
 			categorySource: string | null;
 			confidence: number | null;
 		}>();
+
 	const categoryId = row?.categoryId ?? null;
+
 	return {
 		attempts: Number(row?.attempts),
 		failed: row?.failedAt != null,
@@ -139,6 +144,7 @@ async function sortRun(ids: number[], fetch: Fetch = fetchImpl) {
 
 async function isPending(id: number): Promise<boolean> {
 	const rows = await pendingForJev(db, 500);
+
 	return rows.some((row) => row.id === id);
 }
 
@@ -274,6 +280,7 @@ describe("the Jev retry machine", () => {
 describe("a failed ask stamps a row that is still asked and counts only a waiting or unsure one", () => {
 	async function stampedAfterFailure(id: number): Promise<boolean> {
 		await markJevFailedStatement(db, id).run();
+
 		return (await snapshot(id)).failed;
 	}
 
@@ -289,9 +296,11 @@ describe("a failed ask stamps a row that is still asked and counts only a waitin
 			.run();
 		expect(await stampedAfterFailure(id)).toBe(true);
 		expect((await snapshot(id)).attempts).toBe(1);
+
 		for (let failure = 2; failure <= CAP; failure++) {
 			await markJevFailedStatement(db, id).run();
 		}
+
 		expect((await snapshot(id)).attempts).toBe(CAP);
 		expect(await isPending(id)).toBe(false);
 	});
@@ -337,6 +346,7 @@ describe("every writer agrees with the machine, state by state", () => {
 		{ kind: "filed by a person", state: "filed" },
 		{ kind: "filed by a merchant rule", state: "filed" },
 	];
+
 	const EVENTS = [
 		{ name: "JEV_FAILED", categorized: false },
 		{ name: "JEV_ANSWERED", categorized: true },
@@ -348,12 +358,14 @@ describe("every writer agrees with the machine, state by state", () => {
 	/** A row built in the state: the columns the writers and the machine both read. */
 	async function rowIn(kind: RowKind): Promise<number> {
 		const id = await addRow("GRID BANK TEXT");
+
 		if (kind === "gave_up" || kind === "gave up after an unsure answer") {
 			await db
 				.prepare("UPDATE transactions SET jev_attempts = ? WHERE id = ?")
 				.bind(CAP, id)
 				.run();
 		}
+
 		if (kind === "unsure" || kind === "gave up after an unsure answer") {
 			// Jev's answer was unsure: its confidence is stored, and no category is filed.
 			await db
@@ -363,6 +375,7 @@ describe("every writer agrees with the machine, state by state", () => {
 				.bind(id)
 				.run();
 		}
+
 		if (kind === "filed by Jev") {
 			// Jev's answer filed the row in a category.
 			await db
@@ -372,6 +385,7 @@ describe("every writer agrees with the machine, state by state", () => {
 				.bind(EATING_OUT, id)
 				.run();
 		}
+
 		if (kind === "filed by a person") {
 			// A person chose the category; Jev has not answered this row.
 			await db
@@ -381,6 +395,7 @@ describe("every writer agrees with the machine, state by state", () => {
 				.bind(EATING_OUT, id)
 				.run();
 		}
+
 		if (kind === "filed by a merchant rule") {
 			await db
 				.prepare(
@@ -389,6 +404,7 @@ describe("every writer agrees with the machine, state by state", () => {
 				.bind(EATING_OUT, id)
 				.run();
 		}
+
 		return id;
 	}
 
@@ -421,13 +437,16 @@ describe("every writer agrees with the machine, state by state", () => {
 				const id = await rowIn(kind);
 				const before = await snapshot(id);
 				expect(stateOf(before)).toBe(state);
+
 				const expected = next(jevRetry, state, event.name, {
 					attempts: before.attempts,
 					categorized: event.categorized,
 					answered: before.confidence !== null,
 				});
+
 				await fire(event, id);
 				const after = await snapshot(id);
+
 				if (expected === null) {
 					// A filed row that is still asked is stamped by a failed ask, so it goes behind the rows that have
 					// not failed. The machine decides the count and the state, so only the stamp is left out of the
@@ -446,13 +465,15 @@ describe("every writer agrees with the machine, state by state", () => {
 
 // The answer writer refuses a row that has given up, so the machine holds even where the sorting run never asks.
 describe("the answer writer refuses a row that has given up", () => {
-	const decision = (categoryId: number | null, confidence: number) =>
-		({
-			categoryId,
-			suggestedCategoryId: categoryId,
-			confidence,
-			flags: { transfer: false, reimbursement: false, income: false },
-		}) as Decision;
+	const decision = (
+		categoryId: number | null,
+		confidence: number,
+	): Decision => ({
+		categoryId,
+		suggestedCategoryId: categoryId,
+		confidence,
+		flags: { transfer: false, reimbursement: false, income: false },
+	});
 
 	it("leaves a gave-up row exactly as it was", async () => {
 		const id = await addRow("GIVEN UP");
@@ -552,10 +573,13 @@ describe("a row Jev answers", () => {
 	it("a success after earlier failures sets its count back to 0", async () => {
 		const id = await addRow("FLAKY BANK TEXT");
 		let calls = 0;
+
 		const flaky = vi.fn(async () => {
 			calls += 1;
+
 			return calls <= 2 ? new Response("{}", { status: 400 }) : replyAt(0.9)();
 		});
+
 		await sortRun([id], flaky);
 		await sortRun([id], flaky);
 		expect(await attempts(id)).toBe(2);
@@ -582,6 +606,7 @@ describe("an unsure row whose income question keeps failing", () => {
 			.prepare("UPDATE transactions SET category_confidence = 0.5 WHERE id = ?")
 			.bind(unsure)
 			.run();
+
 		for (let run = 0; run < CAP; run++) await sortRun([unsure]);
 		expect(callsFor("HOPELESS UNSURE")).toBe(CAP);
 		expect(await attempts(unsure)).toBe(CAP);
@@ -596,13 +621,15 @@ describe("an unsure row whose income question keeps failing", () => {
 });
 
 // What the answer writer does to the retry columns of a row with no category, and to a row a person filed.
-const answerWith = (categoryId: number | null, confidence: number) =>
-	({
-		categoryId,
-		suggestedCategoryId: categoryId,
-		confidence,
-		flags: { transfer: false, reimbursement: false, income: false },
-	}) as Decision;
+const answerWith = (
+	categoryId: number | null,
+	confidence: number,
+): Decision => ({
+	categoryId,
+	suggestedCategoryId: categoryId,
+	confidence,
+	flags: { transfer: false, reimbursement: false, income: false },
+});
 
 describe("the answer writer and the failure columns", () => {
 	it("pins what it writes to a person-filed row: the person's category stays, and Jev's confidence is stored", async () => {
@@ -705,15 +732,20 @@ describe("the pending-to-posted merge and the failure count", () => {
 	): Promise<Snapshot> {
 		lock += 1;
 		const key = `merge-${lock}`;
-		const item = (
-			await db
-				.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const item = present(
+			(
+				await db
+					.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await db
 			.prepare("UPDATE plaid_items SET sync_lock_id = ? WHERE id = ?")
 			.bind(`lock-${key}`, item)
 			.run();
+
 		const insert = (
 			plaidId: string,
 			isPending: number,
@@ -737,7 +769,9 @@ describe("the pending-to-posted merge and the failure count", () => {
 					categoryId === null ? null : "user",
 				)
 				.first<{ id: number }>();
+
 		await insert(`pend-${key}`, 1, "CORNER COFFEE", pending.attempts, null);
+
 		const postedRow = await insert(
 			`post-${key}`,
 			0,
@@ -745,6 +779,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 			0,
 			posted.categoryId ?? null,
 		);
+
 		await db.batch(
 			mergePendingIntoPosted(db, item, `lock-${key}`, `pend-${key}`, {
 				id: `post-${key}`,
@@ -755,6 +790,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 				plaidCategory: null,
 			}),
 		);
+
 		return snapshot(Number(postedRow?.id));
 	}
 
@@ -763,6 +799,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 			{ attempts: CAP },
 			{ name: "CORNER COFFEE" },
 		);
+
 		expect(merged.attempts).toBe(CAP);
 		// The stamp goes with the count, so a row nothing will ask again is not still counted as waiting.
 		expect(merged.failed).toBe(true);
@@ -773,6 +810,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 			{ attempts: CAP },
 			{ name: "CORNER COFFEE #12" },
 		);
+
 		expect(merged.attempts).toBe(0);
 		expect(merged.failed).toBe(false);
 	});
@@ -782,6 +820,7 @@ describe("the pending-to-posted merge and the failure count", () => {
 			{ attempts: CAP },
 			{ name: "CORNER COFFEE", categoryId: EATING_OUT },
 		);
+
 		expect(merged.attempts).toBe(0);
 		expect(merged.failed).toBe(false);
 	});

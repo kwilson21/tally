@@ -22,10 +22,19 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { jevCallLimit } from "../src/sort-groups";
 import { seedMerchant } from "./helpers/merchants";
+import { isMethod, itemAt, present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
 const MONTH = "2026-09";
+
+/** True when `prop` is a member of `target`, so reading it is a typed read. */
+function isMemberOf<Target extends object>(
+	target: Target,
+	prop: PropertyKey,
+): prop is keyof Target {
+	return prop in target;
+}
 
 /** A Jev reply: Eating Out at the given confidence, no flags. */
 const reply = (confidence: number) =>
@@ -44,16 +53,25 @@ const reply = (confidence: number) =>
 /** A fake Jev answering each call in turn; later calls reuse the last answer. */
 function fakeJev(...responses: (() => Response)[]) {
 	let calls = 0;
+
 	const fetchImpl = async () => {
-		const respond = responses[Math.min(calls, responses.length - 1)];
+		const respond = itemAt(responses, Math.min(calls, responses.length - 1));
 		calls += 1;
-		return (respond as () => Response)();
+
+		return respond();
 	};
+
 	return { fetchImpl, calls: () => calls };
 }
 
 const withKey = { DB: db, JEV_API_KEY: "test-key" };
-type SentRequest = { state: Record<string, unknown> };
+
+/** A JSON value, as a request body or a stored row holds it. */
+type Json = string | number | boolean | null | Json[] | JsonObject;
+
+type JsonObject = { [key: string]: Json };
+
+type SentRequest = { state: JsonObject };
 
 const countWhere = async (where: string) =>
 	(
@@ -100,21 +118,26 @@ function saveDuringFirstAnswer(
 	jev: { calls: () => number },
 ): D1Database {
 	let saved = false;
+
 	return new Proxy(db, {
 		get(target, property) {
-			const value = Reflect.get(target, property);
+			const value = isMemberOf(target, property) ? target[property] : undefined;
+
 			if (property === "batch")
 				return async (statements: D1PreparedStatement[]) => {
 					const results = await target.batch(statements);
+
 					if (!saved && jev.calls() >= 1) {
 						saved = true;
 						await saveAiSwitches(target, off);
 					}
+
 					return results;
 				};
-			return typeof value === "function" ? value.bind(target) : value;
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 beforeEach(async () => {
@@ -134,6 +157,7 @@ describe("categorizePending", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await db.prepare("UPDATE categories SET archived=1").run();
 		await switchTo({ categories: true, income: true });
+
 		// A credit: with no active categories it is asked for its income answer (an outgoing purchase is asked once for its transfer flag, below).
 		const id = Number(
 			(
@@ -145,6 +169,7 @@ describe("categorizePending", () => {
 					.first<{ id: number }>()
 			)?.id,
 		);
+
 		// Only the transfer, reimbursement and income answers come back: no category question was asked.
 		expect(
 			await categorizePending(
@@ -188,6 +213,7 @@ describe("categorizePending", () => {
 		await switchTo({ categories: true, income: true });
 		// The demo's pending rows have a category answer, so only the rows this test adds are asked about.
 		await db.prepare("UPDATE transactions SET category_confidence = 0.5").run();
+
 		for (const [date, amount, rawName] of [
 			[`${MONTH}-21`, 50000, "CARD PAYMENT"],
 			[`${MONTH}-20`, 700, "NEWER PURCHASE"],
@@ -200,9 +226,11 @@ describe("categorizePending", () => {
 				.bind(date, amount, rawName)
 				.run();
 		const sent: string[] = [];
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			const body = String(init?.body);
 			sent.push(body);
+
 			return Response.json({
 				answers: {
 					transfer: { noul: body.includes("CARD PAYMENT") ? 0.99 : 0.01 },
@@ -211,6 +239,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		const spentBefore = await spentIn(MONTH);
 
 		// Night one asks each of the three once, and the credit first.
@@ -222,6 +251,7 @@ describe("categorizePending", () => {
 		).toEqual({ asked: 3, applied: 0 });
 		expect(sent).toHaveLength(3);
 		expect(sent[0]).toContain("OLDER CREDIT");
+
 		for (const rawName of ["CARD PAYMENT", "NEWER PURCHASE", "OLDER CREDIT"])
 			expect(sent.filter((body) => body.includes(rawName))).toHaveLength(1);
 		expect(
@@ -263,9 +293,11 @@ describe("categorizePending", () => {
 
 		// Once a category is active, the purchase is pending for its category; the excluded payment is not.
 		await db.prepare("UPDATE categories SET archived=0").run();
+
 		const pending = (await pendingForJev(db, 10, { categoryAsked: true })).map(
 			(row) => row.rawName,
 		);
+
 		expect(pending).toContain("NEWER PURCHASE");
 		expect(pending).toContain("OLDER CREDIT");
 		expect(pending).not.toContain("CARD PAYMENT");
@@ -276,6 +308,7 @@ describe("categorizePending", () => {
 		await db.prepare("UPDATE categories SET archived=1").run();
 		await switchTo({ categories: true, income: true });
 		await db.prepare("UPDATE transactions SET category_confidence = 0.5").run();
+
 		for (const [date, amount, rawName] of [
 			[`${MONTH}-21`, 500, "NEWER PURCHASE A"],
 			[`${MONTH}-20`, 700, "NEWER PURCHASE B"],
@@ -289,8 +322,10 @@ describe("categorizePending", () => {
 				.bind(date, amount, rawName)
 				.run();
 		const sent: string[] = [];
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			sent.push(String(init?.body));
+
 			return Response.json({
 				answers: {
 					transfer: { noul: 0.01 },
@@ -299,6 +334,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		// Two calls a night: the credit comes first, then the newest purchase, then the next two purchases.
 		expect(
 			await categorizePending(withKey, fetchImpl, {
@@ -334,6 +370,7 @@ describe("categorizePending", () => {
 		await db.prepare("UPDATE categories SET archived=1").run();
 		await switchTo({ categories: true, income: true });
 		await db.prepare("UPDATE transactions SET category_confidence = 0.5").run();
+
 		for (const [date, amount, rawName] of [
 			[`${MONTH}-22`, 0, "ZERO AMOUNT"],
 			[`${MONTH}-21`, 500, "NEWER PURCHASE"],
@@ -347,10 +384,12 @@ describe("categorizePending", () => {
 				.bind(date, amount, rawName)
 				.run();
 		const sent: string[] = [];
+
 		// The newer credit is not income (a low answer); the older one is (flag_income drops it from the queue).
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			const body = String(init?.body);
 			sent.push(body);
+
 			return Response.json({
 				answers: {
 					transfer: { noul: 0.01 },
@@ -359,6 +398,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		// One call a run: a credit answered as not income must not keep the run on it night after night.
 		expect(
 			await categorizePending(withKey, fetchImpl, {
@@ -403,6 +443,7 @@ describe("categorizePending", () => {
 		await db.prepare("UPDATE categories SET archived=1").run();
 		await switchTo({ categories: false, income: true });
 		await db.prepare("UPDATE transactions SET category_confidence = 0.5").run();
+
 		for (const [date, amount, rawName] of [
 			[`${MONTH}-21`, 700, "OUTGOING PURCHASE"],
 			[`${MONTH}-05`, -2000, "OLDER CREDIT"],
@@ -414,8 +455,10 @@ describe("categorizePending", () => {
 				.bind(date, amount, rawName)
 				.run();
 		const sent: string[] = [];
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			sent.push(String(init?.body));
+
 			return Response.json({
 				answers: {
 					transfer: { noul: 0.01 },
@@ -424,6 +467,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		// Only the credit is asked; the purchase is never sent, so it isn't sent again the next night either.
 		expect(
 			await categorizePending(withKey, fetchImpl, {
@@ -482,8 +526,10 @@ describe("categorizePending", () => {
 			.bind(`${MONTH}-21`)
 			.run();
 		const sent: string[] = [];
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			sent.push(String(init?.body));
+
 			return Response.json({
 				answers: {
 					transfer: { noul: 0.99 },
@@ -495,6 +541,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		expect(
 			await categorizePending(withKey, fetchImpl, { rulesApplied: true }),
 		).toEqual({ asked: 1, applied: 0 });
@@ -522,6 +569,7 @@ describe("categorizePending", () => {
 				"UPDATE transactions SET category_confidence = 0.5, details_asked = 1",
 			)
 			.run();
+
 		for (const [date, amount, rawName] of [
 			[`${MONTH}-21`, 700, "DETAILS ASKED PURCHASE"],
 			[`${MONTH}-05`, -2000, "OLDER CREDIT"],
@@ -533,8 +581,10 @@ describe("categorizePending", () => {
 				.bind(date, amount, rawName)
 				.run();
 		const sent: string[] = [];
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			sent.push(String(init?.body));
+
 			return Response.json({
 				answers: {
 					transfer: { noul: 0.99 },
@@ -543,6 +593,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		// Only the purchase is asked: the income switch is off, so the credit is never sent.
 		expect(
 			await categorizePending(withKey, fetchImpl, { rulesApplied: true }),
@@ -569,6 +620,7 @@ describe("categorizePending", () => {
 		await switchTo({ categories: true, income: false });
 		// The demo's pending rows have a category answer, so only the rows this test adds are asked about.
 		await db.prepare("UPDATE transactions SET category_confidence = 0.5").run();
+
 		for (const [date, amount, rawName] of [
 			[`${MONTH}-21`, 50000, "CARD PAYMENT"],
 			[`${MONTH}-05`, -2000, "OLDER CREDIT"],
@@ -580,8 +632,10 @@ describe("categorizePending", () => {
 				.bind(date, amount, rawName)
 				.run();
 		const sent: string[] = [];
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			sent.push(String(init?.body));
+
 			return Response.json({
 				answers: {
 					transfer: { noul: 0.99 },
@@ -590,6 +644,7 @@ describe("categorizePending", () => {
 				},
 			});
 		};
+
 		const spentBefore = await spentIn(MONTH);
 
 		// Night one asks only the purchase: the income switch is off, so the credit is never sent.
@@ -653,6 +708,7 @@ describe("categorizePending", () => {
 		async function askRows(rawNames: string[]) {
 			vi.spyOn(console, "log").mockImplementation(() => {});
 			const ids: number[] = [];
+
 			for (const rawName of rawNames) {
 				const row = await db
 					.prepare(
@@ -660,20 +716,29 @@ describe("categorizePending", () => {
 					)
 					.bind(`${MONTH}-20`, rawName)
 					.first<{ id: number }>();
+
 				ids.push(Number(row?.id));
 			}
+
 			let loads = 0;
+
 			const counted = new Proxy(db, {
 				get(target, property) {
-					const value = Reflect.get(target, property);
+					const value = isMemberOf(target, property)
+						? target[property]
+						: undefined;
+
 					if (property === "prepare")
 						return (sql: string) => {
 							if (sql.includes("FROM forgotten_texts")) loads += 1;
+
 							return target.prepare(sql);
 						};
-					return typeof value === "function" ? value.bind(target) : value;
+
+					return isMethod(value) ? value.bind(target) : value;
 				},
-			}) as D1Database;
+			});
+
 			const sent: SentRequest[] = [];
 			let calls = 0;
 			await categorizePending(
@@ -681,10 +746,12 @@ describe("categorizePending", () => {
 				async (_url, init) => {
 					calls += 1;
 					sent.push(JSON.parse(String(init?.body)));
+
 					return reply(0.5);
 				},
 				{ rulesApplied: true, onlyIds: ids },
 			);
+
 			return { sent, loads, calls };
 		}
 
@@ -746,10 +813,12 @@ describe("categorizePending", () => {
 		it("sends no line for a vague text such as APPLE.COM/BILL", async () => {
 			for (const day of [1, 2, 3])
 				await answer("APPLE.COM/BILL", "Eating Out", day);
+
 			// The line exists and is marked vague: the send is what is left out, not the line.
 			const line = (await loadLearnedLines(db)).find(
 				(l) => l.cleanedText === "apple.com/bill",
 			);
+
 			expect(line?.vague).toBe(true);
 			const { sent } = await askRows(["APPLE.COM/BILL"]);
 			expect(sent[0]?.state).not.toHaveProperty("learned_category");
@@ -768,11 +837,13 @@ describe("categorizePending", () => {
 		it("loads the lines once for a group of rows, and still asks once per transaction", async () => {
 			for (const day of [1, 2])
 				await answer("GROUP LINE SHOP", "Eating Out", day);
+
 			const { sent, loads, calls } = await askRows([
 				"GROUP LINE SHOP",
 				"OTHER SHOP 5",
 				"THIRD SHOP 6",
 			]);
+
 			expect(loads).toBe(1);
 			expect(calls).toBe(3);
 			expect(sentFor(sent, "GROUP LINE SHOP")?.state.learned_category).toEqual({
@@ -802,7 +873,9 @@ describe("categorizePending", () => {
 				"tostring",
 				"hasownproperty",
 			]);
+
 			expect(calls).toBe(4);
+
 			for (const request of sent)
 				expect(request.state).not.toHaveProperty("learned_category");
 		});
@@ -822,10 +895,12 @@ describe("categorizePending", () => {
 		it("gives the line to every raw name that cleans to its text", async () => {
 			for (const day of [1, 2])
 				await answer("AUDIBLE*QQ11W2 WA 05/26", "Eating Out", day);
+
 			const { sent } = await askRows([
 				"AUDIBLE*TE3E10I7 WA 07/26",
 				"AUDIBLE*ZZ99X1 WA 08/04",
 			]);
+
 			for (const rawName of [
 				"AUDIBLE*TE3E10I7 WA 07/26",
 				"AUDIBLE*ZZ99X1 WA 08/04",
@@ -844,21 +919,25 @@ describe("categorizePending", () => {
 			merchantName: string | null,
 		) => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
+
 			const target = await db
 				.prepare(
 					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 1200, ?, ?) RETURNING id",
 				)
 				.bind(`${MONTH}-20`, rawName, merchantName)
 				.first<{ id: number }>();
+
 			let sent: SentRequest | undefined;
 			await categorizePending(
 				withKey,
 				async (_url, init) => {
 					sent = JSON.parse(String(init?.body));
+
 					return reply(0.5);
 				},
-				{ rulesApplied: true, onlyIds: [target?.id as number] },
+				{ rulesApplied: true, onlyIds: [present(target).id] },
 			);
+
 			return sent?.state.merchant;
 		};
 
@@ -924,20 +1003,23 @@ describe("categorizePending", () => {
 
 	it("sends a transaction with no merchant history exactly as it did before", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		const target = await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'ONE-OFF SHOP') RETURNING id",
 			)
 			.bind(`${MONTH}-20`)
 			.first<{ id: number }>();
-		let sent: Record<string, unknown> | undefined;
+
+		let sent: JsonObject | undefined;
 		await categorizePending(
 			withKey,
 			async (_url, init) => {
 				sent = JSON.parse(String(init?.body));
+
 				return reply(0.5);
 			},
-			{ rulesApplied: true, onlyIds: [target?.id as number] },
+			{ rulesApplied: true, onlyIds: [present(target).id] },
 		);
 		expect(sent?.state).toEqual({
 			bank_description: "ONE-OFF SHOP",
@@ -968,6 +1050,7 @@ describe("categorizePending", () => {
 					)
 					.bind(id),
 			]);
+
 			const jev = fakeJev(
 				() =>
 					new Response(
@@ -1024,7 +1107,9 @@ describe("categorizePending", () => {
 				)
 				.bind(`${MONTH}-20`)
 				.first<{ id: number }>();
-			const id = inserted?.id as number;
+
+			const id = present(inserted).id;
+
 			const answer = new Response(
 				JSON.stringify({
 					answers: {
@@ -1036,22 +1121,26 @@ describe("categorizePending", () => {
 				}),
 				{ status: 200 },
 			);
+
 			await categorizePending(withKey, async () => answer.clone(), {
 				rulesApplied: true,
 				onlyIds: [id],
 			});
+
 			const saved = await db
 				.prepare(
 					"SELECT flag_income, income_confidence, credit_reviewed, category_confidence FROM transactions WHERE id = ?",
 				)
 				.bind(id)
 				.first();
+
 			expect(saved).toEqual({
 				flag_income: incomeConfidence >= 0.8 ? 1 : 0,
 				income_confidence: incomeConfidence >= 0.8 ? null : incomeConfidence,
 				credit_reviewed: reviewed ? 1 : 0,
 				category_confidence: 0.9,
 			});
+
 			if (incomeConfidence === 0.2) {
 				const retry = fakeJev(() => reply(0.95));
 				expect(
@@ -1081,7 +1170,9 @@ describe("categorizePending", () => {
 				)
 				.bind(`${MONTH}-20`)
 				.first<{ id: number }>();
-			const id = inserted?.id as number;
+
+			const id = present(inserted).id;
+
 			const answer = new Response(
 				JSON.stringify({
 					answers: {
@@ -1097,16 +1188,19 @@ describe("categorizePending", () => {
 				}),
 				{ status: 200 },
 			);
+
 			await categorizePending(withKey, async () => answer.clone(), {
 				rulesApplied: true,
 				onlyIds: [id],
 			});
+
 			const saved = await db
 				.prepare(
 					"SELECT category_id, category_confidence, income_confidence, credit_reviewed FROM transactions WHERE id = ?",
 				)
 				.bind(id)
 				.first();
+
 			expect(saved).toEqual({
 				category_id: categoryConfidence >= 0.8 ? 1 : null,
 				category_confidence: categoryConfidence,
@@ -1143,6 +1237,7 @@ describe("categorizePending", () => {
 		expect(pending).toContainEqual(
 			expect.objectContaining({ id, categoryOnly: true }),
 		);
+
 		const jev = fakeJev(
 			() =>
 				new Response(
@@ -1161,14 +1256,17 @@ describe("categorizePending", () => {
 					{ status: 200 },
 				),
 		);
+
 		expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
 			asked: 1,
 			applied: 1,
 		});
 		expect(jev.calls()).toBe(1);
+
 		const category = await db
 			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
 			.first<{ id: number }>();
+
 		expect(
 			await db
 				.prepare(
@@ -1210,6 +1308,7 @@ describe("categorizePending", () => {
 
 	it("applies confident answers and stores the confidence of unsure ones", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		// First 4 calls confident, the rest unsure.
 		const jev = fakeJev(
 			() => reply(0.95),
@@ -1241,13 +1340,15 @@ describe("categorizePending", () => {
 				)
 				.run();
 			const heldBefore = (await monthCounts(db, MONTH)).heldForReview;
+
 			const inserted = await db
 				.prepare(
 					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_income, income_source, credit_reviewed, credit_reviewed_by) VALUES (1, ?, -777, 'SYNTHETIC UNCERTAIN CREDIT', 1, ?, NULL, 0, NULL, 0, NULL) RETURNING id",
 				)
 				.bind(`${MONTH}-20`, categorySource)
 				.first<{ id: number }>();
-			const id = inserted?.id as number;
+
+			const id = present(inserted).id;
 			const jev = fakeJev(() => reply(0.5));
 			expect(await categorizePending(withKey, jev.fetchImpl)).toEqual({
 				asked: 1,
@@ -1313,6 +1414,7 @@ describe("categorizePending", () => {
 	it("stops the run on a failure and retries the rest the next night", async () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		const jev = fakeJev(
 			() => reply(0.95),
 			() => reply(0.95),
@@ -1341,8 +1443,10 @@ describe("categorizePending", () => {
 	it("counts only categories it actually wrote, not ones a person chose mid-run", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		let calls = 0;
+
 		const fetchImpl = async () => {
 			calls += 1;
+
 			// While Jev is answering the first call, a person categorizes every pending row.
 			if (calls === 1) {
 				await db
@@ -1351,8 +1455,10 @@ describe("categorizePending", () => {
 					)
 					.run();
 			}
+
 			return reply(0.95);
 		};
+
 		const result = await categorizePending(withKey, fetchImpl);
 		expect(result.applied).toBe(0);
 	});
@@ -1397,6 +1503,7 @@ describe("categorizePending", () => {
 
 	it("stops the demo's run at its cap", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		// Make 50 more transactions that need a category.
 		for (let i = 0; i < 50; i++) {
 			await db
@@ -1406,6 +1513,7 @@ describe("categorizePending", () => {
 				.bind(`${MONTH}-01`, `EXTRA ${i}`)
 				.run();
 		}
+
 		const jev = fakeJev(() => reply(0.5));
 		await categorizePending({ ...withKey, DEMO: "true" }, jev.fetchImpl);
 		expect(jev.calls()).toBe(40);
@@ -1413,6 +1521,7 @@ describe("categorizePending", () => {
 
 	it("goes past the demo's cap in production, so a new bank's backfill isn't held to 40 a day", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
+
 		for (let i = 0; i < 50; i++) {
 			await db
 				.prepare(
@@ -1421,6 +1530,7 @@ describe("categorizePending", () => {
 				.bind(`${MONTH}-01`, `EXTRA ${i}`)
 				.run();
 		}
+
 		const jev = fakeJev(() => reply(0.5));
 		await categorizePending({ ...withKey, DEMO: "false" }, jev.fetchImpl);
 		expect(jev.calls()).toBeGreaterThan(50);
@@ -1442,6 +1552,7 @@ describe("categorizePending", () => {
 					.run();
 			}
 		}
+
 		/** Counts n calls against today's cap, as earlier runs the same day would have. */
 		async function spend(n: number, cap = 40) {
 			await reserveJevCalls(
@@ -1452,6 +1563,7 @@ describe("categorizePending", () => {
 				crypto.randomUUID(),
 			);
 		}
+
 		const quiet = () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
 			vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1530,14 +1642,17 @@ describe("categorizePending", () => {
 		it("never goes over the cap when runs go at the same moment", async () => {
 			quiet();
 			await addExtras();
+
 			const runs = await Promise.all(
 				[1, 2, 3].map(() => {
 					const jev = fakeJev(() => reply(0.5));
+
 					return categorizePending(withKey, jev.fetchImpl).then(() =>
 						jev.calls(),
 					);
 				}),
 			);
+
 			expect(runs.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(40);
 			expect(await callsUsed()).toBe(40);
 		});
@@ -1546,24 +1661,32 @@ describe("categorizePending", () => {
 	describe("the calls it reserves for the day (spec §8.6)", () => {
 		const quiet = () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
+
 			return vi.spyOn(console, "error").mockImplementation(() => {});
 		};
 
 		/** A DB that counts every statement a run prepares, for D1's 1,000 queries per invocation. */
 		function countingDb() {
 			let statements = 0;
+
 			const counted = new Proxy(db, {
 				get(target, property) {
-					const value = Reflect.get(target, property);
+					const value = isMemberOf(target, property)
+						? target[property]
+						: undefined;
+
 					if (property === "prepare")
 						return (sql: string) => {
 							statements += 1;
+
 							return target.prepare(sql);
 						};
-					return typeof value === "function" ? value.bind(target) : value;
+
+					return isMethod(value) ? value.bind(target) : value;
 				},
 			});
-			return { db: counted as D1Database, statements: () => statements };
+
+			return { db: counted, statements: () => statements };
 		}
 
 		it("costs at most three queries a call, none of them for the cap", async () => {
@@ -1604,10 +1727,13 @@ describe("categorizePending", () => {
 		it("starts no new call once its deadline has passed, and gives back what it didn't ask", async () => {
 			quiet();
 			let now = 0;
+
 			const jev = fakeJev(() => {
 				now += 1_000;
+
 				return reply(0.95);
 			});
+
 			// Calls start at 0, 1,000 and 2,000; the next would start at 3,000, past the deadline.
 			expect(
 				await categorizePending(withKey, jev.fetchImpl, {
@@ -1639,6 +1765,7 @@ describe("categorizePending", () => {
 					 WHEN OLD.key GLOB 'jev_calls_*' BEGIN SELECT RAISE(ABORT, 'nope'); END`,
 				)
 				.run();
+
 			try {
 				const jev = fakeJev(() => new Response("{}", { status: 503 }));
 				// The save fails (in-process, a step runs once): the run ends and logs the error's name alone.
@@ -1664,12 +1791,16 @@ describe("categorizePending", () => {
 				vi.useFakeTimers({ toFake: ["Date"] });
 				vi.setSystemTime(new Date(BEFORE_MIDNIGHT));
 				let calls = 0;
+
 				const asked = async () => {
 					calls += 1;
+
 					// Midnight passes while the second call is on its way.
 					if (calls === 2) vi.setSystemTime(new Date(AFTER_MIDNIGHT));
+
 					return reply(0.95);
 				};
+
 				const result = await categorizePending(withKey, asked);
 				// The second call was already made; the third is never sent.
 				expect(calls).toBe(2);
@@ -1686,7 +1817,9 @@ describe("categorizePending", () => {
 				let calls = 0;
 				await categorizePending(withKey, async () => {
 					calls += 1;
+
 					if (calls === 2) vi.setSystemTime(new Date(AFTER_MIDNIGHT));
+
 					return reply(0.95);
 				});
 				const next = fakeJev(() => reply(0.95));
@@ -1706,11 +1839,15 @@ describe("categorizePending", () => {
 					.run();
 				vi.setSystemTime(new Date("2026-10-06T14:59:55Z"));
 				let calls = 0;
+
 				const result = await categorizePending(withKey, async () => {
 					calls += 1;
+
 					if (calls === 1) vi.setSystemTime(new Date("2026-10-06T15:00:05Z"));
+
 					return reply(0.95);
 				});
+
 				expect(result.asked).toBe(1);
 				expect(await callsUsed("2026-10-06")).toBe(1);
 			});
@@ -1722,15 +1859,20 @@ describe("categorizePending", () => {
 				// Eastern, the demo's zone: 03:59:50 UTC on the 1st is 23:59:50 on the 31st, and the answer
 				// comes back at 04:00:05 UTC, 00:00:05 on the 1st, before the zone's clocks change that day.
 				vi.setSystemTime(new Date("2026-11-01T03:59:50Z"));
+
 				const jev = fakeJev(() => {
 					vi.setSystemTime(new Date("2026-11-01T04:00:05Z"));
+
 					return reply(0.95);
 				});
+
 				await categorizePending(withKey, jev.fetchImpl);
 				expect(jev.calls()).toBe(1);
+
 				const logged = await db
 					.prepare("SELECT kind, household_day FROM ai_log")
 					.all<{ kind: string; household_day: string }>();
+
 				expect([
 					...new Set(logged.results.map((row) => row.household_day)),
 				]).toEqual(["2026-11-01"]);
@@ -1751,9 +1893,11 @@ describe("categorizePending", () => {
 					{ ...withKey, DB: zoneReads.db },
 					fakeJev(() => reply(0.95)).fetchImpl,
 				);
+
 				const reads = spy.mock.calls.filter(([sql]) =>
 					String(sql).includes("key = 'time_zone'"),
 				);
+
 				// One group: its read, then its save (which dates the log rows in the zone as it is now, decision 143).
 				expect(reads).toHaveLength(2);
 			});
@@ -1763,19 +1907,23 @@ describe("categorizePending", () => {
 	describe("asking only about the rows it's given", () => {
 		const quiet = () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
+
 			return vi.spyOn(console, "error").mockImplementation(() => {});
 		};
+
 		const waitingIds = async () =>
 			(await pendingForJev(db, 100)).map((t) => t.id);
 
 		it("asks about those and leaves older waiting ones for the night", async () => {
 			quiet();
-			const [a, b, c] = await waitingIds();
+			const ids = await waitingIds();
 			const jev = fakeJev(() => reply(0.95));
+
 			const result = await categorizePending(withKey, jev.fetchImpl, {
 				rulesApplied: true,
-				onlyIds: [a as number, b as number, c as number],
+				onlyIds: [itemAt(ids, 0), itemAt(ids, 1), itemAt(ids, 2)],
 			});
+
 			expect(jev.calls()).toBe(3);
 			expect(result.asked).toBe(3);
 			// The nine older ones are still waiting, and the night's run takes them.
@@ -1787,10 +1935,10 @@ describe("categorizePending", () => {
 
 		it("counts only the calls it makes against the day", async () => {
 			quiet();
-			const [a, b] = await waitingIds();
+			const ids = await waitingIds();
 			await categorizePending(withKey, fakeJev(() => reply(0.95)).fetchImpl, {
 				rulesApplied: true,
-				onlyIds: [a as number, b as number],
+				onlyIds: [itemAt(ids, 0), itemAt(ids, 1)],
 			});
 			expect(await callsUsed()).toBe(2);
 		});
@@ -1804,7 +1952,8 @@ describe("categorizePending", () => {
 
 		it("skips a listed row that was already looked at, or already has a category", async () => {
 			quiet();
-			const [a, b, c] = (await waitingIds()) as [number, number, number];
+			const ids = await waitingIds();
+			const [a, b, c] = [itemAt(ids, 0), itemAt(ids, 1), itemAt(ids, 2)];
 			await db.batch([
 				db
 					.prepare(
@@ -1834,9 +1983,11 @@ describe("categorizePending", () => {
 				.run();
 			const ids = await waitingIds();
 			const jev = fakeJev(() => reply(0.95));
+
 			const result = await categorizePending(withKey, jev.fetchImpl, {
 				onlyIds: ids,
 			});
+
 			expect(result.asked).toBe(9);
 			expect(
 				await db
@@ -1856,9 +2007,11 @@ describe("categorizePending", () => {
 					 SELECT 1, '2026-09-01', 100, 'EXTRA ' || i FROM n`,
 				)
 				.run();
+
 			const { results } = await db
 				.prepare("SELECT id FROM transactions WHERE raw_name LIKE 'EXTRA %'")
 				.all<{ id: number }>();
+
 			const ids = results.map((r) => r.id);
 			expect(ids).toHaveLength(250);
 			const jev = fakeJev(() => reply(0.95));
@@ -1878,19 +2031,23 @@ describe("categorizePending", () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
 			vi.spyOn(console, "error").mockImplementation(() => {});
 		};
+
 		const bySync = async () => ({
 			rulesApplied: true,
 			bySync: true,
 			onlyIds: (await pendingForJev(db, 100)).map((t) => t.id),
 		});
+
 		/** A Jev that runs `during` as its nth answer is on its way back, then answers. */
 		function jevWith(during: (call: number) => Promise<void>) {
 			let calls = 0;
+
 			return {
 				calls: () => calls,
 				fetchImpl: async () => {
 					calls += 1;
 					await during(calls);
+
 					return reply(0.95);
 				},
 			};
@@ -1906,14 +2063,17 @@ describe("categorizePending", () => {
 
 		it("finishes the group under way once the switch is turned off mid-run, and applies none of it", async () => {
 			quiet();
+
 			const jev = jevWith(async (call) => {
 				if (call === 2) await switchTo({ sortOnArrival: false });
 			});
+
 			const result = await categorizePending(
 				withKey,
 				jev.fetchImpl,
 				await bySync(),
 			);
+
 			// The group under way was read with the switch on, so all ten are asked; its save applies none of them.
 			expect(jev.calls()).toBe(10);
 			expect(result).toEqual({ asked: 10, applied: 0 });
@@ -1924,6 +2084,7 @@ describe("categorizePending", () => {
 		it("keeps its group's answers when the switch goes off while they are saved, and starts nothing after", async () => {
 			quiet();
 			const jev = fakeJev(() => reply(0.95));
+
 			const result = await categorizePending(
 				{
 					...withKey,
@@ -1932,6 +2093,7 @@ describe("categorizePending", () => {
 				jev.fetchImpl,
 				await bySync(),
 			);
+
 			// The group was saved in one batch before the switch went off, so all ten answers are kept.
 			expect(jev.calls()).toBe(10);
 			expect(result).toEqual({ asked: 10, applied: 10 });
@@ -1940,9 +2102,11 @@ describe("categorizePending", () => {
 
 		it("is not what stops the nightly run, which has no such switch", async () => {
 			quiet();
+
 			const jev = jevWith(async (call) => {
 				if (call === 2) await switchTo({ sortOnArrival: false });
 			});
+
 			const result = await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(10);
 			expect(result.asked).toBe(10);
@@ -1950,15 +2114,19 @@ describe("categorizePending", () => {
 
 		it("asks the group under way, and applies none of it, once the Jev switches are off", async () => {
 			quiet();
+
 			const jev = jevWith(async (call) => {
 				if (call === 1) await switchTo({ categories: false, income: false });
 			});
+
 			const waiting = await needsCategoryCount(db, MONTH);
+
 			const result = await categorizePending(
 				withKey,
 				jev.fetchImpl,
 				await bySync(),
 			);
+
 			expect(jev.calls()).toBe(10);
 			expect(result.applied).toBe(0);
 			expect(await needsCategoryCount(db, MONTH)).toBe(waiting);
@@ -1970,8 +2138,10 @@ describe("categorizePending", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		// The first (newest) transaction always gets an answer that isn't one of the options.
 		let calls = 0;
+
 		const fetchImpl = async () => {
 			calls += 1;
+
 			if (calls === 1) {
 				return new Response(
 					JSON.stringify({
@@ -1989,6 +2159,7 @@ describe("categorizePending", () => {
 					{ status: 200, headers: { "x-typesafe-request-id": "req_bad" } },
 				);
 			}
+
 			return reply(0.95);
 		};
 
@@ -2006,10 +2177,13 @@ describe("categorizePending", () => {
 			vi.spyOn(console, "error").mockImplementation(() => {});
 			vi.spyOn(console, "log").mockImplementation(() => {});
 			let calls = 0;
+
 			const fetchImpl = async () => {
 				calls += 1;
+
 				return calls === 1 ? new Response("{}", { status }) : reply(0.95);
 			};
+
 			await categorizePending(withKey, fetchImpl);
 			expect(calls).toBe(10);
 		},
@@ -2056,13 +2230,16 @@ describe("categorizePending", () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		let calls = 0;
+
 		// Two failures, a success, two failures, then successes: never three in a row.
 		const fetchImpl = async () => {
 			calls += 1;
+
 			return [1, 2, 4, 5].includes(calls)
 				? new Response("{}", { status: 422 })
 				: reply(0.95);
 		};
+
 		const result = await categorizePending(withKey, fetchImpl);
 		expect(calls).toBe(10);
 		expect(result.applied).toBe(6);
@@ -2073,12 +2250,15 @@ describe("categorizePending", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		// The three newest pending transactions always get an unusable answer.
 		const newest = (await pendingForJev(db, 3)).map((t) => t.id);
+
 		const fetchImpl = async (_url: string, init?: RequestInit) => {
 			const state = JSON.parse(String(init?.body)).state;
+
 			const bad = await db
 				.prepare("SELECT id FROM transactions WHERE raw_name = ?")
 				.bind(state.bank_description)
 				.first<{ id: number }>();
+
 			return newest.includes(bad?.id ?? -1)
 				? new Response("{}", { status: 422 })
 				: reply(0.95);
@@ -2200,6 +2380,7 @@ describe("the AI switches", () => {
 			const result = await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(10);
 			expect(result.applied).toBe(0);
+
 			// Neither applied nor kept as a suggestion to show; only that it was asked is kept.
 			const rows = await db
 				.prepare(
@@ -2207,7 +2388,9 @@ describe("the AI switches", () => {
 					FROM transactions WHERE id IN (${asked.join(",")})`,
 				)
 				.all();
+
 			expect(rows.results).toHaveLength(10);
+
 			for (const row of rows.results)
 				expect(row).toEqual({
 					category_id: null,
@@ -2220,12 +2403,15 @@ describe("the AI switches", () => {
 
 		it("lets Jev's transfer and reimbursement flags exclude nothing", async () => {
 			const excludedBefore = await countWhere("excluded = 1");
+
 			const flagsBefore = await countWhere(
 				"flag_transfer = 1 OR flag_reimbursement = 1",
 			);
+
 			const jev = fakeJev(() =>
 				flagged({ transfer: 0.99, reimbursement: 0.99 }),
 			);
+
 			await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(10);
 			expect(await countWhere("excluded = 1")).toBe(excludedBefore);
@@ -2362,11 +2548,13 @@ describe("the AI switches", () => {
 			response: () => Response,
 		) {
 			let calls = 0;
+
 			return {
 				calls: () => calls,
 				fetchImpl: async () => {
 					calls += 1;
 					await during(calls);
+
 					return response();
 				},
 			};
@@ -2374,6 +2562,7 @@ describe("the AI switches", () => {
 
 		it("finishes the group under way once both Jev switches are off, and saves nothing from it", async () => {
 			const before = await snapshot();
+
 			const jev = jevWith(
 				async (call) => {
 					if (call === 1)
@@ -2381,6 +2570,7 @@ describe("the AI switches", () => {
 				},
 				() => reply(0.95),
 			);
+
 			const result = await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(10);
 			expect(result.applied).toBe(0);
@@ -2390,6 +2580,7 @@ describe("the AI switches", () => {
 
 		it("keeps the group's answers when the switches go off while they are saved, and starts nothing after", async () => {
 			const jev = fakeJev(() => reply(0.95));
+
 			const result = await categorizePending(
 				{
 					...withKey,
@@ -2400,6 +2591,7 @@ describe("the AI switches", () => {
 				},
 				jev.fetchImpl,
 			);
+
 			// The group was saved in one batch under the switches it was read with, before they went off.
 			expect(jev.calls()).toBe(10);
 			expect(result).toEqual({ asked: 10, applied: 10 });
@@ -2414,6 +2606,7 @@ describe("the AI switches", () => {
 				},
 				() => reply(0.95),
 			);
+
 			const result = await categorizePending(withKey, jev.fetchImpl);
 			// The group under way was read with the switches on: all ten are asked, and its save applies none of them.
 			expect(jev.calls()).toBe(10);
@@ -2423,14 +2616,17 @@ describe("the AI switches", () => {
 
 		it("throws away the group's answers once categories went off, since they were asked under categories", async () => {
 			const asked = (await pendingForJev(db, 40)).map((t) => t.id);
+
 			const jev = jevWith(
 				async (call) => {
 					if (call === 2) await setSwitches({ categories: false });
 				},
 				() => reply(0.95),
 			);
+
 			await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(10);
+
 			const rows = (
 				await db
 					.prepare(
@@ -2438,6 +2634,7 @@ describe("the AI switches", () => {
 					)
 					.all()
 			).results;
+
 			// The group was asked under categories, so once they went off its save applies none of its answers.
 			expect(rows.filter((r) => r.category_id !== null)).toHaveLength(0);
 			expect(rows.filter((r) => r.jev_category_id !== null)).toHaveLength(0);
@@ -2451,12 +2648,14 @@ describe("the AI switches", () => {
 
 		it("throws away an income answer that arrives after income went off, so its transaction waits for the next run", async () => {
 			await onlyOneCreditPending();
+
 			const jev = jevWith(
 				async () => {
 					await setSwitches({ income: false });
 				},
 				() => flagged({ income: 0.99 }),
 			);
+
 			await categorizePending(withKey, jev.fetchImpl);
 			// The whole answer was asked under income, so none of it is kept, not even its category.
 			expect(
@@ -2471,17 +2670,19 @@ describe("the AI switches", () => {
 
 		describe("saving one answer whose switches went off", () => {
 			const eatingOutId = async () =>
-				(
+				present(
 					await db
 						.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
-						.first<{ id: number }>()
-				)?.id as number;
+						.first<{ id: number }>(),
+				).id;
+
 			const answerFor = (categoryId: number): Decision => ({
 				categoryId,
 				suggestedCategoryId: categoryId,
 				confidence: 0.95,
 				flags: { transfer: false, reimbursement: false, income: false },
 			});
+
 			const logRowsFor = async (id: number) =>
 				(
 					await db
@@ -2495,11 +2696,13 @@ describe("the AI switches", () => {
 			it("writes neither the answer nor its log row once categories went off, since it was asked under them", async () => {
 				await onlyOneCreditPending();
 				await db.prepare("DELETE FROM ai_log WHERE transaction_id = 1").run();
+
 				const options = {
 					categoryAsked: true,
 					switches: { income: true, categories: true },
 					log: { day: TODAY, category: true, income: false },
 				};
+
 				const answer = answerFor(await eatingOutId());
 				await setSwitches({ categories: false });
 				const before = await snapshot();
@@ -2519,12 +2722,14 @@ describe("the AI switches", () => {
 					)
 					.run();
 				await db.prepare("DELETE FROM ai_log WHERE transaction_id = 1").run();
+
 				const options = {
 					categoryOnly: true,
 					categoryAsked: true,
 					switches: { income: true, categories: true },
 					log: { day: TODAY, category: true, income: false },
 				};
+
 				const answer = answerFor(await eatingOutId());
 				await setSwitches({ categories: false });
 				const before = await snapshot();
@@ -2550,12 +2755,14 @@ describe("the AI switches", () => {
 				),
 			]);
 			expect((await pendingForJev(db, 40)).map((t) => t.id)).toEqual([1, 2]);
+
 			const jev = jevWith(
 				async (call) => {
 					if (call === 1) await setSwitches({ categories: false });
 				},
 				() => reply(0.97),
 			);
+
 			await categorizePending(withKey, jev.fetchImpl);
 			expect(jev.calls()).toBe(2);
 		});

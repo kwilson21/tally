@@ -8,9 +8,12 @@ import {
 
 const form = (fields: Record<string, string>) => {
 	const f = new FormData();
+
 	for (const [k, v] of Object.entries(fields)) f.set(k, v);
+
 	return f;
 };
+
 const existing = [
 	{ id: 1, name: "Groceries", archived: false },
 	{ id: 2, name: "Gas", archived: false },
@@ -88,6 +91,7 @@ describe("parseCategory", () => {
 			name: `C${i}`,
 			archived: false,
 		}));
+
 		expect(MAX_ACTIVE).toBe(50);
 		expect(parseCategory(form({ name: "One more" }), full, null)).toEqual({
 			ok: false,
@@ -125,6 +129,7 @@ describe("restoreProblem", () => {
 			name: `C${i}`,
 			archived: false,
 		}));
+
 		expect(restoreProblem(full)).toBe(
 			"Tally has room for 50 categories. Archive one to restore another.",
 		);

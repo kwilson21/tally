@@ -50,6 +50,7 @@ export function pickPriceOffer<P extends MatchCandidate>(
 ): P | undefined {
 	const due = dayNumber(dueDate);
 	const apart = (c: P) => Math.abs(dayNumber(c.date) - due);
+
 	return candidates
 		.filter(
 			(c) =>
@@ -99,6 +100,7 @@ type Row = {
 /** The same-merchant payments near an occurrence that nothing has claimed and nobody has turned away. */
 function candidates(db: D1Database, bill: OfferBill): D1PreparedStatement {
 	const window = billDateWindowDays(bill.frequency);
+
 	return db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
@@ -129,6 +131,7 @@ function offerFrom(rows: Row[], bill: OfferBill): PriceOffer | undefined {
 		bill.amountCents,
 		billDateWindowDays(bill.frequency),
 	);
+
 	return picked
 		? {
 				transactionId: picked.id,
@@ -155,6 +158,7 @@ export async function findPriceOffer(
 ): Promise<PriceOffer | undefined> {
 	if (!asks(bill)) return undefined;
 	const { results } = await candidates(db, bill).all<Row>();
+
 	return offerFrom(results, bill);
 }
 
@@ -165,14 +169,19 @@ export async function loadPriceOffers(
 ): Promise<Map<number, PriceOffer>> {
 	const offers = new Map<number, PriceOffer>();
 	const asked = bills.filter(asks);
+
 	if (!asked.length) return offers;
+
 	const answers = await db.batch<Row>(
 		asked.map((bill) => candidates(db, bill)),
 	);
+
 	asked.forEach((bill, i) => {
 		const offer = offerFrom(answers[i]?.results ?? [], bill);
+
 		if (offer) offers.set(bill.id, offer);
 	});
+
 	return offers;
 }
 
@@ -231,6 +240,7 @@ export async function acceptPriceOffer(
 		seenCurrentCents,
 		month ?? (await householdMonth(db)),
 	];
+
 	// D1 wants exactly the parameters a statement names, so the two that don't use ?8 get the first seven.
 	const results = await db.batch([
 		db
@@ -252,6 +262,7 @@ export async function acceptPriceOffer(
 			)
 			.bind(...binds.slice(0, 7)),
 	]);
+
 	return (results[2]?.meta.changes ?? 0) > 0;
 }
 

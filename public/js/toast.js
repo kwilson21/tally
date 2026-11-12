@@ -7,6 +7,7 @@
 	const SVG_NS = "http://www.w3.org/2000/svg";
 	const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 	const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
+
 	// The alert icon from src/views/icons.tsx (test/toast-js.test.ts checks they match).
 	const ALERT_PATHS = [
 		"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
@@ -27,12 +28,15 @@
 		svg.setAttribute("stroke-linecap", "round");
 		svg.setAttribute("stroke-linejoin", "round");
 		svg.setAttribute("aria-hidden", "true");
+
 		for (const d of ALERT_PATHS) {
 			const path = document.createElementNS(SVG_NS, "path");
 			path.setAttribute("d", d);
 			svg.append(path);
 		}
+
 		icon.append(svg);
+
 		return icon;
 	}
 
@@ -49,8 +53,10 @@
 	// measures again: calling observe() there would repeat its first notification every frame.
 	function measureSelectionBar() {
 		const region = document.getElementById("toasts");
+
 		if (!region) return;
 		const bar = document.getElementById("selection-bar");
+
 		if (bar)
 			region.style.setProperty(
 				"--selection-bar-height",
@@ -58,6 +64,7 @@
 			);
 		else region.style.removeProperty("--selection-bar-height");
 	}
+
 	// The bar wraps to more rows on a narrow phone, and rotating a phone changes its width.
 	const barSize =
 		typeof ResizeObserver === "function"
@@ -69,7 +76,9 @@
 	// It's removed when no toast shows, and the sheet keeps its floor.
 	function measureToasts() {
 		const region = document.getElementById("toasts");
+
 		if (!region) return;
+
 		if (region.children.length)
 			document.documentElement.style.setProperty(
 				"--toasts-height",
@@ -77,6 +86,7 @@
 			);
 		else document.documentElement.style.removeProperty("--toasts-height");
 	}
+
 	// Toasts wrap to more lines when they're long, and rotating a phone changes their width. This is a
 	// second observer, not barSize, since barSize is disconnected on every toast. Each observer follows
 	// the node on the page now: a body swap or a history restore replaces #toasts, and a list change can
@@ -96,20 +106,24 @@
 		const sheet = [...document.querySelectorAll("section[data-sheet]")].find(
 			(node) => !node.closest("[inert]"),
 		);
+
 		const heading =
 			(sheet &&
 				document.getElementById(sheet.getAttribute("aria-labelledby"))) ??
 			document.getElementById("transactions-title") ??
 			document.getElementById("page-title");
+
 		if (heading) {
 			if (!heading.hasAttribute("tabindex"))
 				heading.setAttribute("tabindex", "-1");
 			heading.focus();
 		}
 	}
+
 	// Focus is on nothing: a disabled Undo button drops it to the body.
 	function focusLost() {
 		const active = document.activeElement;
+
 		return !active || active === document.body;
 	}
 
@@ -149,12 +163,15 @@
 	const replyMarks = new WeakMap();
 	const drawnMarks = new WeakSet();
 	let turnToast = null;
+
 	// Ends the marks a toast owns when it goes. The owner check matters: a replaced toast's late timer must not strip a
 	// row a newer toast has claimed.
 	function endMarks(toast) {
 		const rows = toastMarks.get(toast);
+
 		if (!rows) return;
 		toastMarks.delete(toast);
+
 		for (const row of rows) {
 			if (markOwner.get(row) !== toast) continue;
 			row.classList.remove("row-saved", "row-saved-undo");
@@ -162,20 +179,26 @@
 			endedMarks.add(row);
 		}
 	}
+
 	document.addEventListener("htmx:before:swap", (event) => {
 		const { ctx, tasks = [] } = event.detail ?? {};
+
 		for (const task of tasks) taskReply.set(task, ctx);
 	});
 	document.addEventListener("htmx:before:settle", (event) => {
 		const ctx = taskReply.get(event.detail?.task);
+
 		if (!ctx) return;
 		const rows = replyMarks.get(ctx) ?? [];
 		replyMarks.set(ctx, rows);
+
 		// A text node has no marks. An element's own mark, and every mark inside it, is drawn by this reply.
 		for (const node of event.detail.newContent ?? []) {
 			if (node.nodeType !== 1) continue;
 			const marked = [...node.querySelectorAll(SAVED_ROWS)];
+
 			if (node.matches(SAVED_ROWS)) marked.unshift(node);
+
 			for (const row of marked) {
 				rows.push(row);
 				drawnMarks.add(row);
@@ -187,24 +210,29 @@
 		// The reply's marks go to the toast its trigger made, when its run made one. A reply with no toast hands over none.
 		const rows = replyMarks.get(ctx);
 		replyMarks.delete(ctx);
+
 		if (rows && turnToast)
 			for (const row of rows) {
 				markOwner.set(row, turnToast);
 				endedMarks.delete(row);
 				toastMarks.get(turnToast)?.push(row);
 			}
+
 		for (const row of savedRows())
 			if (endedMarks.has(row))
 				row.classList.remove("row-saved", "row-saved-undo");
 	});
+
 	// An Undo's back address: this page's own, without keys. A toast made while the keys sheet is open has ?keys in its
 	// address, and an Undo pressed after the sheet closed would push that address with no sheet open (#704).
 	function backAddress() {
 		const query = new URLSearchParams(location.search);
 		query.delete("keys");
 		const search = query.toString();
+
 		return location.pathname + (search ? `?${search}` : "");
 	}
+
 	// Both events are heard on document. htmx sends each HX-Trigger event from its request's element, or from
 	// document once that element has left the page: an Undo form whose toast ends during the restore's own
 	// triggers (#397). plaid-link.js sends announce from the body, and it bubbles up to document.
@@ -222,7 +250,9 @@
 			// The element the Undo's answer redraws: #page unless the toast names the page it was shown on (#842 round 2).
 			undoTarget = "#page",
 		} = event.detail ?? {};
+
 		if (!message) return;
+
 		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
 		lastToast = toast;
@@ -233,17 +263,20 @@
 		// Marks no reply drew and no toast owns are taken here, such as a mark on the page as it loaded. A mark a reply drew
 		// waits for that reply's own toast, which takes it in the finally listener above.
 		const rows = [];
+
 		for (const row of savedRows()) {
 			if (markOwner.has(row) || drawnMarks.has(row)) continue;
 			markOwner.set(row, toast);
 			endedMarks.delete(row);
 			rows.push(row);
 		}
+
 		toastMarks.set(toast, rows);
 		// An Undo toast's button, focused once the toast is on the page (see the undo block below).
 		let undoButton = null;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
 		toast.setAttribute("role", type === "error" ? "alert" : "status");
+
 		if (type === "error") {
 			toast.className += " flex items-start gap-2";
 			const words = document.createElement("span");
@@ -264,6 +297,7 @@
 			form.setAttribute("hx-target", undoTarget);
 			form.setAttribute("hx-select", undoTarget);
 			form.setAttribute("hx-swap", "outerHTML");
+
 			for (const [name, value] of Object.entries({
 				token: undo,
 				back: backAddress(),
@@ -274,6 +308,7 @@
 				input.value = value;
 				form.append(input);
 			}
+
 			const button = document.createElement("button");
 			button.type = "submit";
 			button.className =
@@ -291,9 +326,11 @@
 		} else {
 			toast.textContent = message;
 		}
+
 		// Only the newest plain or error toast shows: it takes the place of the ones before it. An Undo
 		// toast is never removed early, so a newer toast leaves it to run its own time.
 		const region = document.getElementById("toasts");
+
 		if (!undo)
 			for (const old of [...(region?.children ?? [])]) {
 				if (!undoToasts.has(old)) {
@@ -301,6 +338,7 @@
 					old.remove();
 				}
 			}
+
 		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
 		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a refusal ends its toast too, a
 		// cash entry's (#444) or a bill's (#340). The other Undo toasts run their own time. If the Undo toast's time
@@ -309,20 +347,25 @@
 			const ended = [...(region?.children ?? [])].filter(
 				(old) => undoToasts.get(old) === undoDone,
 			);
+
 			if (ended.length) for (const old of ended) takeOffPage(old, true);
 			else if (focusLost()) focusHeading();
 		}
+
 		measureSelectionBar();
 		region?.append(toast);
 		// Measured after the append, so the older toasts just replaced are gone and this one is in.
 		measureToasts();
 		// Follow the #toasts on the page now, since a body swap can have replaced it.
 		toastsSize?.disconnect();
+
 		if (region) toastsSize?.observe(region);
 		// Follow the bar that is on the page now, since a list change can have swapped it in.
 		barSize?.disconnect();
 		const bar = document.getElementById("selection-bar");
+
 		if (bar) barSize?.observe(bar);
+
 		if (undo) {
 			undoToasts.set(toast, undo);
 			window.htmx?.process(toast);
@@ -331,27 +374,32 @@
 				"--duration-undo-toast",
 				`${Math.min(10_000, undoExpiresInMs)}ms`,
 			);
+
 			// The swap that removed the delete's sheet left focus nowhere, so focus moves to Undo and a keyboard
 			// user can press it at once. The HX-Trigger runs after the swap (htmx's finally), so this wins over
 			// any autofocus the swap set.
 			if (!passive) undoButton?.focus();
 		}
+
 		setTimeout(
 			() => takeOffPage(toast),
 			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
 		);
 	};
+
 	document.addEventListener("toast", onToast);
 
 	const onAnnounce = (event) => {
 		const region = document.getElementById("announcer");
 		const message = event.detail?.value;
+
 		if (!region || !message) return;
 		region.textContent = "";
 		requestAnimationFrame(() => {
 			region.textContent = message;
 		});
 	};
+
 	document.addEventListener("announce", onAnnounce);
 
 	// A failed request shows an error toast, and the page is left as it is, so an open sheet keeps
@@ -376,6 +424,7 @@
 	let lastFailure = null;
 	// The guarded button each failed request sent, keyed by the request's ctx.
 	const guardedButtons = new WeakMap();
+
 	function failed(ctx) {
 		// A request from an element that is data-quiet says nothing when it fails: the Your banks list polls every 5 seconds
 		// while a bank is read, and its next tick tries again (P140 A). Every other failed load still says so.
@@ -384,7 +433,9 @@
 		// data-switches-revert, and reset() puts each control back to its drawn (default) state. Other forms keep what
 		// was typed (decision 72). The request's form is set by htmx; a switch's closest form covers a request without one.
 		const form = ctx?.request?.form ?? ctx?.sourceElement?.closest?.("form");
+
 		if (form?.hasAttribute?.("data-switches-revert")) form.reset();
+
 		if (
 			ctx?.sourceElement?.hasAttribute?.("hx-disable") &&
 			ctx.request?.submitter
@@ -393,8 +444,10 @@
 		// An Undo request that failed turns its button back on while its toast is still up: the error toast
 		// says to try again. The request's source element is the Undo form (htmx 4's ctx.sourceElement).
 		const undo = undoButtons.get(ctx?.sourceElement);
+
 		if (undo && document.getElementById("toasts")?.contains(undo.toast)) {
 			undo.button.disabled = false;
+
 			// Focus was on Undo when it was pressed, and a disabled button dropped it, so it comes back to Undo (#397).
 			// Not when the person has moved it somewhere else during the request.
 			if (focusLost() || undo.toast.contains(document.activeElement))
@@ -403,12 +456,15 @@
 			// The toast's time ran out while this Undo was being answered (#444): focus left on nothing goes to the heading.
 			focusHeading();
 		}
+
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
 				? COULDNT_LOAD
 				: COULDNT_SAVE;
+
 		// The page's own clock, not the device's: a clock moved back must not silence later failures.
 		const now = performance.now();
+
 		if (
 			lastFailure?.message === message &&
 			now - lastFailure.at < BURST_MS &&
@@ -420,6 +476,7 @@
 		);
 		lastFailure = { message, at: now, toast: lastToast };
 	}
+
 	// htmx 4 aborts a request that timed out exactly as it aborts one that was replaced (hx-sync) or
 	// cancelled (htmx:abort): ctx.request.abort(), an AbortError with no reason and no timeout event
 	// of its own. So Layout turns htmx's own timeout off (defaultTimeout: 0) and the 60 seconds are
@@ -430,6 +487,7 @@
 	const timedOut = new WeakSet();
 	document.addEventListener("htmx:before:request", (event) => {
 		const ctx = event.detail?.ctx;
+
 		if (!ctx) return;
 		clearTimeout(timers.get(ctx));
 		timers.set(
@@ -442,10 +500,12 @@
 	});
 	document.addEventListener("htmx:finally:request", (event) => {
 		const ctx = event.detail?.ctx;
+
 		if (!ctx) return;
 		clearTimeout(timers.get(ctx));
 		timers.delete(ctx);
 		const button = guardedButtons.get(ctx);
+
 		if (button) {
 			guardedButtons.delete(ctx);
 			// htmx turns the guarded buttons back on right after this event, in the same turn, so the focus waits
@@ -454,6 +514,7 @@
 			// person has moved focus away from.
 			queueMicrotask(() => {
 				const active = document.activeElement;
+
 				if (
 					button.isConnected &&
 					!button.disabled &&
@@ -469,6 +530,7 @@
 	// a person who moved to a filter during the load stays there.
 	document.addEventListener("htmx:finally:request", (event) => {
 		const ctx = event.detail?.ctx;
+
 		if (
 			ctx?.status !== "swapped" ||
 			ctx.swap === "none" ||
@@ -490,30 +552,36 @@
 	const selectAllSwaps = new WeakSet();
 	document.addEventListener("htmx:before:swap", (event) => {
 		const ctx = event.detail?.ctx;
+
 		if (ctx && document.activeElement?.id === "select-all-link")
 			selectAllSwaps.add(ctx);
 	});
 	document.addEventListener("htmx:after:swap", (event) => {
 		const ctx = event.detail?.ctx;
+
 		if (!ctx || !selectAllSwaps.has(ctx) || !focusLost()) return;
 		document.getElementById("select-all-link")?.focus({ preventScroll: true });
 	});
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};
+
 		// Only a request has a ctx; htmx also reports a bug in someone's hx-on handler this way.
 		if (!ctx) return;
+
 		// A request replaced by a newer one, or cancelled, is not a failure; a timeout is.
 		if (error?.name === "AbortError" && !timedOut.has(ctx)) return;
 		failed(ctx);
 	});
 	document.addEventListener("htmx:response:error", (event) => {
 		const { ctx } = event.detail ?? {};
+
 		if (ctx?.response?.status === 500) failed(ctx);
 	});
 
 	// A normal form redirect carries the same feedback as an HTMX response.
 	const query = new URLSearchParams(location.search);
 	const sent = query.get("sent");
+
 	if (sent === "feedback") {
 		const message = "Thanks. Sent.";
 		document.dispatchEvent(new CustomEvent("toast", { detail: { message } }));

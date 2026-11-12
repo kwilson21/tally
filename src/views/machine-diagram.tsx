@@ -17,27 +17,35 @@ export function machineSource(
 	const { initial, nodes, edges } = machineGraph(machine);
 	const label = (key: string) => labels[key] ?? key;
 	const lines = ["stateDiagram-v2", "  direction TB"];
+
 	for (const node of nodes)
 		lines.push(`  state "${text(label(node.key))}" as ${node.key}`);
 	lines.push(`  [*] --> ${initial}`);
+
 	const pairs = new Map<
 		string,
 		{ from: string; to: string; events: string[] }
 	>();
+
 	for (const edge of edges) {
 		const key = `${edge.from}>${edge.to}`;
+
 		const pair = pairs.get(key) ?? {
 			from: edge.from,
 			to: edge.to,
 			events: [],
 		};
+
 		pair.events.push(shown(edge.event));
 		pairs.set(key, pair);
 	}
+
 	for (const pair of pairs.values())
 		lines.push(`  ${pair.from} --> ${pair.to}: ${pair.events.join(", ")}`);
 	const finals = nodes.filter((n) => n.final).map((n) => n.key);
+
 	if (finals.length > 0) lines.push(`  class ${finals.join(",")} done`);
+
 	return lines.join("\n");
 }
 
@@ -54,6 +62,7 @@ export function MachineDiagram({
 }) {
 	const { initial, edges } = machineGraph(machine);
 	const label = (key: string) => labels[key] ?? key;
+
 	const desc = `${label(initial)} is where it starts. ${edges
 		.map((e) => `${label(e.from)} goes to ${label(e.to)} on ${shown(e.event)}.`)
 		.join(" ")}`;

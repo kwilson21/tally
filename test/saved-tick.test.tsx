@@ -194,6 +194,7 @@ describe("HouseholdPeople that a save just changed", () => {
 		{ id: 2, name: "Kids" },
 		{ id: 3, name: "Morgan" },
 	];
+
 	const list = (saved?: { id: number; mark: "toast" | "held" }) =>
 		HouseholdPeople({ people, saved }).toString();
 
@@ -201,6 +202,7 @@ describe("HouseholdPeople that a save just changed", () => {
 	const detailsOf = (html: string, marker: string) => {
 		const at = html.indexOf(marker);
 		const start = at < 0 ? -1 : html.lastIndexOf("<details", at);
+
 		return start < 0 ? "" : html.slice(start, html.indexOf(">", start) + 1);
 	};
 
@@ -243,6 +245,7 @@ describe("SavingsGoalRow", () => {
 			href: "/savings-goal",
 			saved: "toast",
 		}).toString();
+
 		expect(html).toMatch(/<a href="\/savings-goal" class="[^"]*\brow-saved\b/);
 		expect(html).toContain("saved-tick");
 	});
@@ -253,6 +256,7 @@ describe("SavingsGoalRow", () => {
 			href: "/savings-goal",
 			saved: "toast",
 		}).toString();
+
 		expect(html).not.toContain("row-saved");
 	});
 });

@@ -7,6 +7,7 @@ import { resetDemo } from "../src/demo/reset";
 // what is stored: a request for what is already true saves nothing, and two taps at once still both count.
 
 const BASE = "http://tally.test";
+
 async function post(path: string, fields: Record<string, string> = {}) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
@@ -18,17 +19,23 @@ async function post(path: string, fields: Record<string, string> = {}) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	await res.text();
+
 	return res;
 }
+
 const toast = (res: Response) =>
+	// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast key below when a route sends one.
 	(
 		JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 			toast?: { message: string; type: string };
 		}
 	).toast;
+
 const THIS_MONTH = () => todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 const LAST_MONTH = () => monthsBefore(THIS_MONTH(), 1);
+
 const budgetRows = async (categoryId = 1) =>
 	(
 		await env.DB.prepare(
@@ -37,12 +44,14 @@ const budgetRows = async (categoryId = 1) =>
 			.bind(categoryId)
 			.all<{ month: string; cents: number }>()
 	).results;
+
 const goalRows = async () =>
 	(
 		await env.DB.prepare(
 			"SELECT effective_month AS month, amount_cents AS cents FROM savings_goal_amounts ORDER BY effective_month",
 		).all<{ month: string; cents: number }>()
 	).results;
+
 /** Groceries (category 1) with one budget, set last month. */
 const budgetFromLastMonth = (cents: number) =>
 	env.DB.batch([
@@ -101,10 +110,12 @@ describe("POST /budget/:id", () => {
 describe("POST /budget/:id/nudge/:direction", () => {
 	it("counts both of two taps made at once", async () => {
 		await budgetFromLastMonth(71240);
+
 		const [a, b] = await Promise.all([
 			post("/budget/1/nudge/up"),
 			post("/budget/1/nudge/up"),
 		]);
+
 		expect([a.status, b.status]).toEqual([200, 200]);
 		expect(await budgetRows()).toEqual([
 			{ month: LAST_MONTH(), cents: 71240 },

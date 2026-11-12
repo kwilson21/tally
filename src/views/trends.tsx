@@ -131,6 +131,7 @@ export function MiniBars({
 		months.map((m) => m.cents),
 		months.findIndex((m) => m.part !== undefined),
 	);
+
 	return (
 		<svg
 			viewBox="0 0 96 32"
@@ -255,6 +256,7 @@ export function MonthBars({
 	const { width, height, top, bottom, rules } = MONTH_BARS;
 	const bars = monthBars(months);
 	const stripes = `${id}-part`;
+
 	return (
 		<svg
 			viewBox={`0 0 ${width} ${height}`}
@@ -265,10 +267,12 @@ export function MonthBars({
 			{bars.some((b) => b.part) && <PartStripes id={id} />}
 			{Array.from({ length: rules }, (_, i) => {
 				const y = Number((top + ((bottom - top) / (rules - 1)) * i).toFixed(1));
+
 				return <line x1="0" x2={width} y1={y} y2={y} class="stroke-rule" />;
 			})}
 			{bars.map((b) => {
 				const centre = Number((b.x + b.width / 2).toFixed(1));
+
 				return (
 					<>
 						<rect

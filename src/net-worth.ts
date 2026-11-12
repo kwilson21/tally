@@ -41,6 +41,7 @@ export type NetWorthView =
 export function chartStart(today: string): string {
 	const index = Number(today.slice(0, 4)) * 12 + Number(today.slice(5, 7)) - 6;
 	const year = Math.floor(index / 12);
+
 	return `${year}-${String((index % 12) + 1).padStart(2, "0")}-01`;
 }
 
@@ -59,21 +60,28 @@ export function netWorthSeries(
 	accountIds: number[],
 ): NetWorthPoint[] {
 	const accounts = new Set(accountIds);
+
 	const sorted = rows
 		.filter((r) => accounts.has(r.accountId))
 		.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
 	// Each account's latest balance so far, debt negative.
 	const latest = new Map<number, number>();
 	const points: NetWorthPoint[] = [];
+
 	for (const [i, r] of sorted.entries()) {
 		latest.set(r.accountId, r.isLiability ? -r.balanceCents : r.balanceCents);
+
 		// A day is finished once the next row is on a later day.
 		if (sorted[i + 1]?.date === r.date) continue;
+
 		if (r.date < from) continue;
 		let cents = 0;
+
 		for (const balance of latest.values()) cents += balance;
 		points.push({ date: r.date, cents });
 	}
+
 	return points;
 }
 
@@ -102,16 +110,20 @@ export function accountsAdded(
 	firstDate: string,
 ): AccountAdded[] {
 	const added: AccountAdded[] = [];
+
 	for (const source of sources) {
 		const ids = new Set(source.accountIds);
 		let first: string | null = null;
+
 		for (const r of rows) {
 			if (ids.has(r.accountId) && (first === null || r.date < first))
 				first = r.date;
 		}
+
 		if (first !== null && first > firstDate)
 			added.push({ name: source.name, verb: source.verb, date: first });
 	}
+
 	return added.sort(
 		(a, b) =>
 			(a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
@@ -144,7 +156,9 @@ function changeSentence(
 ) {
 	const since = sinceLabel(first.date, today);
 	const change = last.cents - first.cents;
+
 	if (Math.abs(change) < 50) return `No change since ${since}.`;
+
 	return `${change > 0 ? "Up" : "Down"} ${whole(Math.abs(change))} since ${since}.`;
 }
 
@@ -160,10 +174,12 @@ function addedClause(
 ): string {
 	if (added.length > 2)
 		return `You added ${added.length} accounts since ${sinceLabel(first.date, today)}.`;
+
 	const named = added.map(
 		(a) =>
 			`${a.verb} ${a.name} ${a.date === today ? "today" : `on ${shortDay(a.date, today)}`}`,
 	);
+
 	return `You ${named.join(" and ")}.`;
 }
 
@@ -180,8 +196,10 @@ export function netWorthView(
 ): NetWorthView {
 	const first = points[0];
 	const last = points.at(-1);
+
 	if (!first || !last)
 		return { kind: "early", sentence: null, note: NEXT_SYNC };
+
 	if (first === last) {
 		return first.date === today
 			? {
@@ -199,21 +217,26 @@ export function netWorthView(
 	const span = dayNumber(last.date) - dayNumber(first.date);
 	const lowest = Math.min(...points.map((p) => p.cents));
 	const highest = Math.max(...points.map((p) => p.cents));
+
 	const y = (cents: number) =>
 		highest === lowest
 			? 50
 			: tenth(
 					BOTTOM - ((cents - lowest) / (highest - lowest)) * (BOTTOM - TOP),
 				);
+
 	const coordinates = points.map((p) => ({
 		x: tenth(((dayNumber(p.date) - dayNumber(first.date)) / span) * 100),
 		y: y(p.cents),
 	}));
 
 	const change = changeSentence(first, last, today);
+
 	const sentence =
 		added.length > 0 ? `${change} ${addedClause(added, first, today)}` : change;
+
 	const isToday = last.date === today;
+
 	return {
 		kind: "line",
 		sentence,
@@ -221,6 +244,7 @@ export function netWorthView(
 		endLabel: isToday ? "Today" : shortDay(last.date, today),
 		description: `Net worth over time. ${sentence} It was ${whole(first.cents)} on ${shortDay(first.date, today)} and ${isToday ? "is" : "was"} ${whole(last.cents)} ${isToday ? "today" : `on ${shortDay(last.date, today)}`}.`,
 		points: coordinates.map((c) => `${c.x},${c.y}`).join(" "),
+		// SAFETY: `last` is points.at(-1) and is defined above, and coordinates has one entry per point, so its last entry exists.
 		end: coordinates.at(-1) as { x: number; y: number },
 	};
 }

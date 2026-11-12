@@ -40,6 +40,7 @@ describe("DueRow", () => {
 		const html = renderToString(
 			<DueRow frequency="biweekly" dueDay={1} anchorDate="2026-10-03" />,
 		);
+
 		expect(html).toContain('<span class="due-lead-on">Due on</span>');
 		expect(html).toMatch(
 			/<input type="date" name="anchor_date" value="2026-10-03" aria-label="One date it's due"|<input type="date" name="anchor_date"[^>]*value="2026-10-03"[^>]*aria-label="One date it(?:'|&#39;)s due"/,
@@ -53,6 +54,7 @@ describe("DueRow", () => {
 		const html = renderToString(
 			<DueRow frequency="quarterly" dueDay={15} anchorMonth={1} />,
 		);
+
 		expect(html).toContain('<span class="due-quarter-word">starting in</span>');
 		expect(html).toContain('<option value="15" selected="">15th</option>');
 		expect(selectOf(html, "anchor_month")).toContain(
@@ -67,6 +69,7 @@ describe("DueRow", () => {
 		const html = renderToString(
 			<DueRow frequency="yearly" dueDay={14} anchorMonth={3} />,
 		);
+
 		expect(html).toContain('<span class="due-year-word">in</span>');
 		expect(html).toContain('<option value="14" selected="">14th</option>');
 		expect(selectOf(html, "anchor_month")).toContain(
@@ -81,6 +84,7 @@ describe("DueRow", () => {
 		const html = renderToString(
 			<DueRow frequency="monthly" dueDay={1} anchorMonth={1} />,
 		);
+
 		for (const name of [
 			"due_day",
 			"weekly_day",
@@ -90,6 +94,7 @@ describe("DueRow", () => {
 		]) {
 			expect(html).toContain(`name="${name}"`);
 		}
+
 		const frequency = selectOf(html, "frequency");
 		expect(
 			[...frequency.matchAll(/<option value="([a-z]+)"/g)].map((m) => m[1]),
@@ -101,6 +106,7 @@ describe("DueRow", () => {
 		expect(billsSource).toContain(
 			'raw("frequency") === "weekly" ? "weekly_day" : "due_day"',
 		);
+
 		for (const name of ["anchor_month", "anchor_date", "frequency"]) {
 			expect(billsSource).toContain(`name="${name}"`);
 		}
@@ -114,6 +120,7 @@ describe("DueRow", () => {
 		const selects = [...html.matchAll(/<select [^>]*>/g)].map((m) => m[0]);
 		// The weekday, the day of the month, the frequency and the month.
 		expect(selects).toHaveLength(4);
+
 		for (const tag of selects) {
 			expect(tag).toMatch(/aria-label="[^"]+"/);
 			expect(tag).toContain("min-h-11");
@@ -124,6 +131,7 @@ describe("DueRow", () => {
 		const html = renderToString(
 			<DueRow frequency="monthly" dueDay={1} error="Choose a day." />,
 		);
+
 		expect(html).toContain(
 			'<p role="alert" class="text-sm text-over">Choose a day.</p>',
 		);
@@ -135,9 +143,11 @@ describe("DueRow", () => {
 			.replace(/\s+/g, " ")
 			.replace(/\(\s/g, "(")
 			.replace(/\s\)/g, ")");
+
 		expect(flat).toContain(
 			".due-row :is(.due-lead-the, .due-lead-on, .due-weekly, .due-biweekly, .due-day, .due-month, .due-quarter-word, .due-year-word) {",
 		);
+
 		for (const [frequency, shown] of [
 			["weekly", ".due-lead-on, .due-weekly"],
 			["biweekly", ".due-lead-on, .due-biweekly"],
@@ -149,6 +159,7 @@ describe("DueRow", () => {
 				`.due-row:has(select[name="frequency"] option[value="${frequency}"]:checked) :is(${shown})`,
 			);
 		}
+
 		// The month line (starting in, in) shows for a quarterly or yearly bill only.
 		for (const frequency of ["quarterly", "yearly"]) {
 			expect(flat).toContain(

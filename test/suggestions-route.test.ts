@@ -7,6 +7,7 @@ import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
+import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { recordSorting } from "./record-sorting";
 
@@ -16,15 +17,26 @@ import { recordSorting } from "./record-sorting";
 // line is kept; Something else only answers this one; Skip moves on and comes back at the end.
 
 const db = env.DB;
+
 recordSorting({ sort: true });
+
 const BASE = "http://tally.test";
 const VENMO = "VENMO PAYMENT";
 const CHASE = "CHASE CARD PAYMENT";
 const LUPITA = "SQ *LUPITAS TAQ 2210";
 const BLUE = "BLUE BOTTLE COF";
 
+/** The value a query found, or a throw when it found no row, so the test fails at its own setup. */
+function present<T>(value: T | null | undefined): T {
+	if (value === null || value === undefined)
+		throw new Error("the test's setup found no row");
+
+	return value;
+}
+
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -34,22 +46,29 @@ async function post(
 	htmx = false,
 ) {
 	const body = new URLSearchParams();
+
 	for (const [key, value] of Object.entries(fields))
 		for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
+
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			"content-type": "application/x-www-form-urlencoded",
-			...(htmx ? { "HX-Request": "true" } : {}),
-		},
+		headers,
 		body: body.toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
 const trigger = (res: Response) =>
+	// SAFETY: src/htmx.ts writes HX-Trigger as JSON with only the toast and announce keys, and "{}" when neither is set.
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
 		announce?: string;
@@ -68,6 +87,7 @@ async function categoryId(name: string) {
 		.prepare("SELECT id FROM categories WHERE name = ?")
 		.bind(name)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -101,24 +121,28 @@ async function insertTx(fields: {
 			fields.suggestionId ?? null,
 		)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
 /** One of each kind, as the review screen asks them. Returns the ids the tests need. */
 async function oneOfEach() {
 	const eatingOut = await categoryId("Eating Out");
+
 	const income = await insertTx({
 		raw: VENMO,
 		amount: -250000,
 		incomeConfidence: 0.5,
 		date: "2026-10-02",
 	});
+
 	const transfer = await insertTx({
 		raw: CHASE,
 		amount: 20000,
 		transferConfidence: 0.5,
 		date: "2026-10-02",
 	});
+
 	const category = await insertTx({
 		raw: LUPITA,
 		amount: 2300,
@@ -126,6 +150,7 @@ async function oneOfEach() {
 		categoryConfidence: 0.5,
 		date: "2026-10-02",
 	});
+
 	await db
 		.prepare(
 			`INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Venmo'), (?, 'Chase card payment'),
@@ -133,11 +158,13 @@ async function oneOfEach() {
 		)
 		.bind(VENMO, CHASE, LUPITA)
 		.run();
+
 	const suggestion = await db
 		.prepare(
 			"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 		)
 		.first<{ id: number }>();
+
 	const pets = [
 		await insertTx({
 			raw: "CHEWY.COM 1",
@@ -155,12 +182,14 @@ async function oneOfEach() {
 			suggestionId: suggestion?.id,
 		}),
 	];
+
 	await seedMerchant(db, {
 		key: BLUE,
 		status: "pending",
 		names: ["Blue Bottle Coffee"],
 	});
 	const named = await insertTx({ raw: BLUE, amount: 600 });
+
 	return {
 		income,
 		transfer,
@@ -172,14 +201,20 @@ async function oneOfEach() {
 	};
 }
 
+/** One column's value as D1 returns it: the column types these tests read, and null for an empty one. */
+type Cell = number | string | null;
+
+/** A row the tests read by column name. */
+type Line = Record<string, Cell>;
+
 const row = (sql: string, ...binds: unknown[]) =>
 	db
 		.prepare(sql)
 		.bind(...binds)
-		.first<Record<string, unknown>>();
+		.first<Line>();
 
 /** The fields a Never suggest Remove form posts for one line: its id, store and kind (decision 101). */
-const removal = (line: Record<string, unknown> | null) => ({
+const removal = (line: Line | null) => ({
 	id: String(line?.id),
 	merchant_key: String(line?.merchant_key),
 	kind: String(line?.kind),
@@ -252,29 +287,35 @@ describe("GET /settings/suggestions", () => {
 
 	it("moves past skipped items", async () => {
 		const ids = await oneOfEach();
+
 		const skipped = await get(
 			`/settings/suggestions?skip=income-${ids.income}`,
 		);
+
 		expect(textOf(skipped.html)).toContain("Suggestions · 2 of 5");
 		expect(textOf(skipped.html)).toContain("Leave it out of the budget?");
 	});
 
 	it("shows the place of the item in the queue, not the number of skips", async () => {
 		const ids = await oneOfEach();
+
 		// The transfer is set aside, so the income is first in the queue: "1 of 5", not "2 of 5".
 		const { html } = await get(
 			`/settings/suggestions?skip=transfer-${ids.transfer}`,
 		);
+
 		expect(textOf(html)).toContain("Suggestions · 1 of 5");
 		expect(textOf(html)).toContain("Count it as income, not spending?");
 	});
 
 	it("brings a skipped item back at the end once the others are answered", async () => {
 		const ids = await oneOfEach();
+
 		const name = await row(
 			"SELECT rowid AS id FROM merchants WHERE raw_name = ?",
 			BLUE,
 		);
+
 		const pets = ids.pets.map(String);
 		const skipUrl = `/settings/suggestions?skip=income-${ids.income}`;
 		await post(
@@ -292,11 +333,13 @@ describe("GET /settings/suggestions", () => {
 			{ id: `new-${ids.suggestion}`, answer: "yes", shown: pets, ticked: pets },
 			true,
 		);
+
 		const { res, html } = await post(
 			skipUrl,
 			{ id: `name-${name?.id}`, answer: "yes" },
 			true,
 		);
+
 		expect(textOf(html)).toContain("Suggestions · 1 of 1");
 		expect(textOf(html)).toContain("Count it as income, not spending?");
 		expect(html).toContain(`value="income-${ids.income}"`);
@@ -305,10 +348,12 @@ describe("GET /settings/suggestions", () => {
 
 	it("sets a returned item aside on a second Skip, and says so once all are set aside", async () => {
 		const ids = await oneOfEach();
+
 		const name = await row(
 			"SELECT rowid AS id FROM merchants WHERE raw_name = ?",
 			BLUE,
 		);
+
 		const all = [
 			`income-${ids.income}`,
 			`transfer-${ids.transfer}`,
@@ -316,15 +361,18 @@ describe("GET /settings/suggestions", () => {
 			`new-${ids.suggestion}`,
 			`name-${name?.id}`,
 		];
+
 		const skips = all.map((id) => `skip=${id}`).join("&");
 		// Every item is skipped once, so the first comes back, in queue order, and its Skip is a second one.
 		const back = await get(`/settings/suggestions?${skips}`);
 		expect(textOf(back.html)).toContain("Suggestions · 1 of 5");
 		expect(textOf(back.html)).toContain("Count it as income, not spending?");
 		expect(back.html).toContain(`again=income-${ids.income}`);
+
 		const second = await get(
 			`/settings/suggestions?${skips}&again=income-${ids.income}`,
 		);
+
 		expect(textOf(second.html)).toContain("Suggestions · 2 of 5");
 		expect(textOf(second.html)).toContain("Leave it out of the budget?");
 		const agains = all.map((id) => `again=${id}`).join("&");
@@ -344,6 +392,7 @@ describe("GET /settings/suggestions", () => {
 		const res = await exports.default.fetch(`${BASE}/settings/names`, {
 			redirect: "manual",
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/suggestions");
 	});
@@ -352,16 +401,20 @@ describe("GET /settings/suggestions", () => {
 describe("income", () => {
 	it("Yes makes the income the person's choice, announces it and moves on", async () => {
 		const ids = await oneOfEach();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: `income-${ids.income}`, answer: "yes" },
 			true,
 		);
+
 		expect(res.status).toBe(200);
+
 		const tx = await row(
 			"SELECT flag_income, income_source FROM transactions WHERE id = ?",
 			ids.income,
 		);
+
 		expect(tx).toMatchObject({ flag_income: 1, income_source: "user" });
 		expect(trigger(res).toast?.message).toBe("Counted Venmo as income.");
 		expect(trigger(res).announce).toContain("left to check");
@@ -373,11 +426,13 @@ describe("income", () => {
 		const before = await moneyState(ids.income);
 		const homeBefore = await homeText();
 		expect(await listText()).toContain("Maybe income");
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		const text = textOf(html);
 		expect(text).toContain("Not counted as income");
@@ -421,11 +476,13 @@ describe("income", () => {
 			amount: -250000,
 			incomeConfidence: 0.5,
 		});
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id: `income-${id}`, answer: "no" },
 			true,
 		);
+
 		expect(textOf(html)).toContain("Don't suggest income again for");
 		expect(textOf(html)).not.toMatch(/Suggestions · \d|\b0 left\b/);
 	});
@@ -437,6 +494,7 @@ describe("income", () => {
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -447,6 +505,7 @@ describe("income", () => {
 			},
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
@@ -460,6 +519,7 @@ describe("income", () => {
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -470,6 +530,7 @@ describe("income", () => {
 			},
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
@@ -483,6 +544,7 @@ describe("income", () => {
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -493,6 +555,7 @@ describe("income", () => {
 			},
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe(
 			"Got it. Tally won't suggest income for Venmo again. Change it in Settings.",
 		);
@@ -519,6 +582,7 @@ describe("income", () => {
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{
@@ -529,6 +593,7 @@ describe("income", () => {
 			},
 			true,
 		);
+
 		expect(textOf(html)).toContain("Suggestions · 1 of 4");
 		expect(trigger(res).announce).toBe(
 			"Got it. Tally won't suggest income for Venmo again. Change it in Settings. 4 left to check.",
@@ -539,11 +604,13 @@ describe("income", () => {
 describe("transfers", () => {
 	it("Yes leaves the transaction out of the budget as the person's choice", async () => {
 		const ids = await oneOfEach();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${ids.transfer}`, answer: "yes" },
 			true,
 		);
+
 		expect(
 			await row(
 				"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
@@ -559,11 +626,13 @@ describe("transfers", () => {
 		const ids = await oneOfEach();
 		const before = await moneyState(ids.transfer);
 		const homeBefore = await homeText();
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${ids.transfer}`, answer: "no" },
 			true,
 		);
+
 		expect(textOf(html)).toContain("Kept in the budget");
 		expect(textOf(html)).toContain(
 			"Don't suggest a transfer again for Chase card payment?",
@@ -596,10 +665,12 @@ describe("transfers", () => {
 
 	it("doesn't ask a transfer about a payment linked to a bill, and a stale Yes for it leaves it as it was", async () => {
 		const ids = await oneOfEach();
+
 		const bill = await row(
 			"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 20000, 1, 'monthly', ?) RETURNING id",
 			CHASE,
 		);
+
 		await db
 			.prepare(
 				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
@@ -611,15 +682,18 @@ describe("transfers", () => {
 		expect(textOf((await get("/settings")).html)).toContain(
 			"4 suggestions to check",
 		);
+
 		const before = await row(
 			"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
 			ids.transfer,
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${ids.transfer}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(
 			await row(
@@ -635,11 +709,13 @@ describe("transfers", () => {
 			.prepare("UPDATE transactions SET excluded_source = 'user' WHERE id = ?")
 			.bind(ids.transfer)
 			.run();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${ids.transfer}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(
 			await row(
@@ -655,11 +731,13 @@ describe("transfers", () => {
 			amount: -20000,
 			transferConfidence: 0.5,
 		});
+
 		const reviewed = await insertTx({
 			raw: "REVIEWED TRANSFER CREDIT",
 			amount: -20000,
 			transferConfidence: 0.5,
 		});
+
 		await db
 			.prepare(
 				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
@@ -670,19 +748,23 @@ describe("transfers", () => {
 		expect(html).not.toContain(`value="transfer-${held}"`);
 		expect(html).toContain(`value="transfer-${reviewed}"`);
 		const before = await moneyState(held);
+
 		const yes = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${held}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(yes.res).toast?.message).toBe(
 			"That one was already answered.",
 		);
+
 		const no = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${held}`, answer: "no" },
 			true,
 		);
+
 		expect(trigger(no.res).toast?.message).toBe(
 			"That one was already answered.",
 		);
@@ -697,11 +779,13 @@ describe("transfers", () => {
 			excluded_source: null,
 		});
 		expect(await moneyState(held)).toEqual(before);
+
 		const kept = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${reviewed}`, answer: "no" },
 			true,
 		);
+
 		expect(textOf(kept.html)).toContain("Kept in the budget");
 	});
 });
@@ -709,11 +793,13 @@ describe("transfers", () => {
 describe("categories", () => {
 	it("Yes sets Jev's guess as the person's category", async () => {
 		const ids = await oneOfEach();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id: `category-${ids.category}`, answer: "yes" },
 			true,
 		);
+
 		expect(
 			await row(
 				"SELECT category_id, category_source FROM transactions WHERE id = ?",
@@ -816,11 +902,13 @@ describe("categories", () => {
 			)
 			.bind(purchase, ids.transfer)
 			.run();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${ids.transfer}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(
 			await row("SELECT excluded FROM transactions WHERE id = ?", ids.transfer),
@@ -829,11 +917,13 @@ describe("categories", () => {
 
 	it("Something else with no chip asks for one", async () => {
 		const ids = await oneOfEach();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: `category-${ids.category}`, answer: "else" },
 			true,
 		);
+
 		expect(res.status).toBe(422);
 		expect(textOf(html)).toContain("Pick a category.");
 		// The error points at the chips, so Something else is open with them in it.
@@ -842,19 +932,23 @@ describe("categories", () => {
 
 	it("Yes on an excluded bill payment's category sets it as the person's", async () => {
 		const eatingOut = await categoryId("Eating Out");
+
 		const paying = await insertTx({
 			raw: "GYM MEMBERSHIP",
 			amount: 2300,
 			jevCategoryId: eatingOut,
 			categoryConfidence: 0.5,
 		});
+
 		await db
 			.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
 			.bind(paying)
 			.run();
+
 		const bill = await row(
 			"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Gym', 2300, 1, 'monthly', 'GYM MEMBERSHIP') RETURNING id",
 		);
+
 		await db
 			.prepare(
 				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
@@ -888,30 +982,36 @@ describe("a held credit's category answer waits until the credit is reviewed (de
 	it("is in the queue once reviewed, and a stale answer to it sets no category until it is", async () => {
 		const eatingOut = await categoryId("Eating Out");
 		const groceries = await categoryId("Groceries");
+
 		const credit = await insertTx({
 			raw: "ZELLE PAYMENT",
 			amount: -2500,
 			jevCategoryId: eatingOut,
 			categoryConfidence: 0.5,
 		});
+
 		const setReview = (reviewed: number) =>
 			db
 				.prepare("UPDATE transactions SET credit_reviewed = ? WHERE id = ?")
 				.bind(reviewed, credit)
 				.run();
+
 		await setReview(1);
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="category-${credit}"`,
 		);
 		await setReview(0);
+
 		const yes = await post(
 			"/settings/suggestions",
 			{ id: `category-${credit}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(yes.res).toast?.message).toBe(
 			"That one was already answered.",
 		);
+
 		const picked = await post(
 			"/settings/suggestions",
 			{
@@ -921,6 +1021,7 @@ describe("a held credit's category answer waits until the credit is reviewed (de
 			},
 			true,
 		);
+
 		expect(trigger(picked.res).toast?.message).toBe(
 			"That one was already answered.",
 		);
@@ -945,6 +1046,7 @@ describe("a held credit's category answer waits until the credit is reviewed (de
 describe("new categories", () => {
 	it("Yes creates the category with its ticked purchases", async () => {
 		const ids = await oneOfEach();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -955,6 +1057,7 @@ describe("new categories", () => {
 			},
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(
 			await row("SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'"),
@@ -966,11 +1069,13 @@ describe("new categories", () => {
 
 	it("No dismisses the suggestion and asks, naming each store, before one line per store", async () => {
 		const ids = await oneOfEach();
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id: `new-${ids.suggestion}`, answer: "no" },
 			true,
 		);
+
 		expect(textOf(html)).toContain(
 			"Don't suggest Pet Care again for Chewy, Petsmart and Banfield?",
 		);
@@ -1002,11 +1107,13 @@ describe("new categories", () => {
 			},
 			true,
 		);
+
 		const lines = await db
 			.prepare(
 				"SELECT merchant_key AS key FROM never_suggest_rules WHERE kind = 'new_category' ORDER BY key",
 			)
 			.all<{ key: string }>();
+
 		expect(lines.results.map((line) => line.key)).toEqual(["CHEWY.COM 1"]);
 	});
 
@@ -1016,6 +1123,7 @@ describe("new categories", () => {
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		for (const raw of ["CHEWY.COM 1", "PETSMART 22", "BANFIELD 5"])
 			await insertTx({ raw, amount: 4500, suggestionId: suggestion?.id });
 		const { html } = await get("/settings/suggestions");
@@ -1036,8 +1144,10 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 		fields: Record<string, string | string[]>,
 	): Promise<number> {
 		const prepare = vi.spyOn(db, "prepare");
+
 		try {
 			await post("/settings/suggestions", fields, true);
+
 			return prepare.mock.calls.length;
 		} finally {
 			prepare.mockRestore();
@@ -1069,9 +1179,11 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 		);
 		const one = await statementsFor(yesFor(ids.suggestion, CHEWY));
 		await db.prepare("DELETE FROM never_suggest_rules").run();
+
 		const copies = await statementsFor(
 			yesFor(ids.suggestion, Array(1200).fill(CHEWY)),
 		);
+
 		expect(copies).toBe(one);
 		expect(await lines()).toEqual([CHEWY]);
 	});
@@ -1085,32 +1197,38 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 		);
 		const one = await statementsFor(yesFor(ids.suggestion, CHEWY));
 		await db.prepare("DELETE FROM never_suggest_rules").run();
+
 		const two = await statementsFor(
 			yesFor(ids.suggestion, [CHEWY, PETSMART, CHEWY]),
 		);
+
 		expect(two).toBe(one);
 		expect(await lines()).toEqual([CHEWY, PETSMART]);
 	});
 
 	it("a Yes with no No before it writes no line, whatever stores it names", async () => {
 		const ids = await oneOfEach();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			yesFor(ids.suggestion, CHEWY),
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await lines()).toEqual([]);
 	});
 
 	it("a Yes on an income or transfer question writes its line once the No stands, and none before it", async () => {
 		const ids = await oneOfEach();
+
 		const answer = (id: string, kind: string, store: string) => ({
 			id,
 			answer: "ask_yes",
 			kind,
 			store,
 		});
+
 		await post(
 			"/settings/suggestions",
 			answer(`transfer-${ids.transfer}`, "transfer", CHASE),
@@ -1152,11 +1270,13 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 			)
 			.bind(ids.suggestion)
 			.run();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			yesFor(ids.suggestion, CHEWY),
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await lines()).toEqual([]);
 	});
@@ -1181,6 +1301,7 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 				ids.income,
 			),
 		).toMatchObject({ flag_income: 1 });
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -1191,6 +1312,7 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 			},
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await lines()).toEqual([]);
 	});
@@ -1213,6 +1335,7 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 				ids.transfer,
 			),
 		).toMatchObject({ excluded: 1, transfer_maybe_declined: 1 });
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -1223,6 +1346,7 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 			},
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await lines()).toEqual([]);
 	});
@@ -1248,11 +1372,13 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 			true,
 		);
 		await fileChewy(ids.pets[0] ?? 0);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			yesFor(ids.suggestion, [CHEWY, PETSMART]),
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe(
 			"Got it. Tally won't suggest a new category for Petsmart again. Change it in Settings.",
 		);
@@ -1267,11 +1393,13 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 			true,
 		);
 		await fileChewy(ids.pets[0] ?? 0);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			yesFor(ids.suggestion, CHEWY),
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await lines()).toEqual([]);
 	});
@@ -1283,12 +1411,14 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 			{ id: `income-${ids.income}`, answer: "no" },
 			true,
 		);
+
 		const yes = {
 			id: `income-${ids.income}`,
 			answer: "ask_yes",
 			kind: "income",
 			store: VENMO,
 		};
+
 		await post("/settings/suggestions", yes, true);
 		const { res } = await post("/settings/suggestions", yes, true);
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
@@ -1298,13 +1428,16 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 
 /** The purchases a new-category form ticks: the checkbox values that carry `checked`. */
 const checkedTicks = (html: string) =>
-	[...html.matchAll(/<input[^>]*name="ticked"[^>]*>/g)]
-		.filter((input) => /\schecked(=|\s|\/|>)/.test(input[0]))
-		.map((input) => Number(/value="(\d+)"/.exec(input[0])?.[1]));
+	[...html.matchAll(/<input[^>]*name="ticked"[^>]*>/g)].flatMap((input) =>
+		/\schecked(=|\s|\/|>)/.test(input[0])
+			? [Number(/value="(\d+)"/.exec(input[0])?.[1])]
+			: [],
+	);
 
 describe("new category answers that are refused keep the ticks", () => {
 	it("draws no tick after a refusal when none was ticked, rather than ticking them all again", async () => {
 		const ids = await oneOfEach();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{
@@ -1314,6 +1447,7 @@ describe("new category answers that are refused keep the ticks", () => {
 			},
 			true,
 		);
+
 		expect(res.status).toBe(422);
 		expect(checkedTicks(html)).toEqual([]);
 	});
@@ -1325,11 +1459,15 @@ describe("new category answers that are refused keep the ticks", () => {
 				"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES ('Pet Care', 'tag', 'cat-blue', 99, 1)",
 			)
 			.run();
-		const active = (
-			await db
-				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
-				.first<{ n: number }>()
-		)?.n as number;
+
+		const active = present(
+			(
+				await db
+					.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
+					.first<{ n: number }>()
+			)?.n,
+		);
+
 		for (let i = active; i < 50; i++)
 			await db
 				.prepare(
@@ -1337,6 +1475,7 @@ describe("new category answers that are refused keep the ticks", () => {
 				)
 				.bind(`Filler ${i}`, 200 + i)
 				.run();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{
@@ -1347,6 +1486,7 @@ describe("new category answers that are refused keep the ticks", () => {
 			},
 			true,
 		);
+
 		expect(res.status).toBe(422);
 		expect(textOf(html)).toContain(
 			"Tally has room for 50 categories. Archive one to restore another.",
@@ -1389,13 +1529,17 @@ describe("a new category the family already has is added to, and the button says
 
 	it("reads 'Restore' with the family's name for an archived category (decision 110)", async () => {
 		const ids = await oneOfEach();
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await setArchived(db, archived, true, "2026-07-15");
 		const { html } = await newCategoryPage(ids);
 		expect(textOf(html)).toContain("A new category: Pet Care");
@@ -1410,14 +1554,18 @@ describe("a new category the family already has is added to, and the button says
 			.prepare("UPDATE category_suggestions SET name = 'École' WHERE id = ?")
 			.bind(ids.suggestion)
 			.run();
+
 		// The archived 'École' has the lower id, as the 0052 backfill left it, and the active 'école' is the one to add to.
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 99) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 99) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await setArchived(db, archived, true, "2026-07-15");
 		await db
 			.prepare(
@@ -1433,14 +1581,19 @@ describe("a new category the family already has is added to, and the button says
 describe("Yes on an archived category restores it, with the ticked purchases (decision 110)", () => {
 	it("brings it back with the ticked purchases in it, and says how many", async () => {
 		const ids = await oneOfEach();
-		const archived = (
-			await db
-				.prepare(
-					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const archived = present(
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
 		await setArchived(db, archived, true, "2026-07-15");
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -1451,6 +1604,7 @@ describe("Yes on an archived category restores it, with the ticked purchases (de
 			},
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(trigger(res).toast?.message).toBe(
 			"Restored pet care with 3 transactions.",
@@ -1476,6 +1630,7 @@ describe("a Yes files only the rows its question still shows (decision 101)", ()
 				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('PETSMART 22', 'new_category', '2026-10-03')",
 			)
 			.run();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -1486,6 +1641,7 @@ describe("a Yes files only the rows its question still shows (decision 101)", ()
 			},
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(
 			await row("SELECT category_source FROM transactions WHERE id = ?", chewy),
@@ -1533,10 +1689,14 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 			"fetch",
 			vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
 				if (String(url) !== JEV_URL) throw new Error(`unexpected fetch ${url}`);
+
+				// SAFETY: categorize.ts sends Jev a JSON body whose state carries bank_description, the only field this fake reads.
 				const body = JSON.parse(String(init?.body)) as {
 					state: { bank_description: string };
 				};
+
 				asked.push(body.state.bank_description);
+
 				return Response.json({
 					answers: {
 						category: {
@@ -1551,17 +1711,20 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 				});
 			}),
 		);
+
 		return asked;
 	}
 
 	async function answerYes(
 		fields: Record<string, string | string[]>,
-		bindings: Record<string, unknown>,
+		bindings: Partial<Env> & { JEV_API_KEY?: string },
 	) {
 		const body = new URLSearchParams();
+
 		for (const [key, value] of Object.entries(fields))
 			for (const v of Array.isArray(value) ? value : [value])
 				body.append(key, v);
+
 		const res = await app.request(
 			"/settings/suggestions",
 			{
@@ -1576,6 +1739,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 			{ ...env, ...bindings },
 			ctx(),
 		);
+
 		return { res, html: await res.text() };
 	}
 
@@ -1583,6 +1747,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 		const ids = await oneOfEach();
 		const asked = fakeJev();
 		const [first, second] = ids.pets;
+
 		const { res } = await answerYes(
 			{
 				id: `new-${ids.suggestion}`,
@@ -1592,6 +1757,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 			},
 			{ JEV_API_KEY: "jev-key" },
 		);
+
 		expect(res.status).toBe(200);
 		expect(waitUntil).toHaveBeenCalledTimes(1);
 		await background();
@@ -1610,6 +1776,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('BANFIELD 5', 'new_category', '2026-10-03')",
 			)
 			.run();
+
 		const { res } = await answerYes(
 			{
 				id: `new-${ids.suggestion}`,
@@ -1619,6 +1786,7 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 			},
 			{ JEV_API_KEY: "jev-key" },
 		);
+
 		expect(res.status).toBe(200);
 		await background();
 		expect(asked).toEqual(["PETSMART 22"]);
@@ -1656,17 +1824,19 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 	 * The DB, with `rival` run just before the first `run()` of a statement whose SQL starts with `prefix`:
 	 * the change lands between the route's queue read and its write.
 	 */
-	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+	function racing(prefix: string, rival: () => Promise<D1Result>): D1Database {
 		let raced = false;
 		// The statements a batch runs are the real ones, and a batch that holds a racing write fires the rival first.
 		const real = new WeakMap<object, D1PreparedStatement>();
 		const racingWrites = new WeakSet<object>();
+
 		const fire = async () => {
 			if (!raced) {
 				raced = true;
 				await rival();
 			}
 		};
+
 		const guard = (
 			statement: D1PreparedStatement,
 			hit: boolean,
@@ -1675,31 +1845,43 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				get(target, prop) {
 					if (prop === "bind")
 						return (...values: unknown[]) => guard(target.bind(...values), hit);
+
 					if (prop === "run" || prop === "all")
 						return async () => {
 							if (hit) await fire();
+
 							return prop === "run" ? target.run() : target.all();
 						};
-					const value = Reflect.get(target, prop);
-					return typeof value === "function" ? value.bind(target) : value;
+
+					if (prop === "first") return target.first.bind(target);
+
+					if (prop === "raw") return target.raw.bind(target);
+
+					return undefined;
 				},
 			});
+
 			real.set(proxy, statement);
+
 			if (hit) racingWrites.add(proxy);
+
 			return proxy;
 		};
+
 		return new Proxy(db, {
 			get(target, prop) {
 				if (prop === "prepare")
 					return (sql: string) =>
 						guard(target.prepare(sql), sql.startsWith(prefix));
+
 				if (prop === "batch")
 					return async (statements: D1PreparedStatement[]) => {
 						if (statements.some((s) => racingWrites.has(s))) await fire();
+
 						return target.batch(statements.map((s) => real.get(s) ?? s));
 					};
-				const value = Reflect.get(target, prop);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				return undefined;
 			},
 		});
 	}
@@ -1709,6 +1891,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		DB: D1Database,
 	): Promise<Response> {
 		const body = new URLSearchParams(fields);
+
 		return app.request(
 			"/settings/suggestions",
 			{
@@ -1741,15 +1924,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			amount: -250000,
 			incomeConfidence: 0.6,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="income-${credit}"`,
 		);
+
 		const res = await answer(
 			{ id: `income-${credit}`, answer: "yes" },
 			racing("UPDATE transactions SET flag_income = ?", () =>
 				reviewAsNotIncome(credit),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row(
@@ -1765,15 +1951,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			amount: -250000,
 			incomeConfidence: 0.6,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="income-${credit}"`,
 		);
+
 		const res = await answer(
 			{ id: `income-${credit}`, answer: "no" },
 			racing("UPDATE transactions SET income_maybe_declined = 1", () =>
 				reviewAsNotIncome(credit),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row(
@@ -1789,9 +1978,11 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			amount: -250000,
 			incomeConfidence: 0.6,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="income-${credit}"`,
 		);
+
 		const res = await answer(
 			{ id: `income-${credit}`, answer: "yes" },
 			racing("UPDATE transactions SET flag_income = ?", () =>
@@ -1803,6 +1994,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 					.run(),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row("SELECT flag_income FROM transactions WHERE id = ?", credit),
@@ -1812,15 +2004,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 	it("a category Jev changed after the queue was read is not set to the new category by a Yes", async () => {
 		const eatingOut = await categoryId("Eating Out");
 		const groceries = await categoryId("Groceries");
+
 		const spent = await insertTx({
 			raw: LUPITA,
 			amount: 2300,
 			jevCategoryId: eatingOut,
 			categoryConfidence: 0.5,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="category-${spent}"`,
 		);
+
 		const res = await answer(
 			{ id: `category-${spent}`, answer: "yes" },
 			racing("UPDATE transactions SET category_id", () =>
@@ -1830,6 +2025,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 					.run(),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row("SELECT category_id FROM transactions WHERE id = ?", spent),
@@ -1839,12 +2035,14 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 	it("a reviewed credit held again after the queue was read gets no category from a Something else", async () => {
 		const eatingOut = await categoryId("Eating Out");
 		const groceries = await categoryId("Groceries");
+
 		const credit = await insertTx({
 			raw: "ZELLE PAYMENT",
 			amount: -2500,
 			jevCategoryId: eatingOut,
 			categoryConfidence: 0.5,
 		});
+
 		await db
 			.prepare("UPDATE transactions SET credit_reviewed = 1 WHERE id = ?")
 			.bind(credit)
@@ -1852,6 +2050,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="category-${credit}"`,
 		);
+
 		const res = await answer(
 			{
 				id: `category-${credit}`,
@@ -1865,6 +2064,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 					.run(),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row("SELECT category_id FROM transactions WHERE id = ?", credit),
@@ -1874,15 +2074,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 	it("a Something else whose category was archived after the queue was read sets no category", async () => {
 		const eatingOut = await categoryId("Eating Out");
 		const groceries = await categoryId("Groceries");
+
 		const spent = await insertTx({
 			raw: LUPITA,
 			amount: 2300,
 			jevCategoryId: eatingOut,
 			categoryConfidence: 0.5,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="category-${spent}"`,
 		);
+
 		const res = await answer(
 			{
 				id: `category-${spent}`,
@@ -1896,6 +2099,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 					.run(),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row(
@@ -1920,15 +2124,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			amount: 20000,
 			transferConfidence: 0.5,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="transfer-${transfer}"`,
 		);
+
 		const res = await answer(
 			{ id: `transfer-${transfer}`, answer: "yes" },
 			racing("UPDATE transactions SET excluded = 1", () =>
 				neverTransfer(CHASE),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row(
@@ -1944,15 +2151,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			amount: 20000,
 			transferConfidence: 0.5,
 		});
+
 		expect((await get("/settings/suggestions")).html).toContain(
 			`value="transfer-${transfer}"`,
 		);
+
 		const res = await answer(
 			{ id: `transfer-${transfer}`, answer: "no" },
 			racing("UPDATE transactions SET transfer_maybe_declined = 1", () =>
 				neverTransfer(CHASE),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row(
@@ -1987,15 +2197,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				amount: -250000,
 				incomeConfidence: 0.6,
 			});
+
 			expect((await get("/settings/suggestions")).html).toContain(
 				`value="income-${credit}"`,
 			);
+
 			const res = await answer(
 				{ id: `income-${credit}`, answer: "yes" },
 				racing("UPDATE transactions SET flag_income = ?", () =>
 					moveGuess("income_confidence", credit, confidence),
 				),
 			);
+
 			expect(trigger(res).toast?.message).toBe(STALE);
 			expect(
 				await row(
@@ -2018,15 +2231,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				amount: -250000,
 				incomeConfidence: 0.6,
 			});
+
 			expect((await get("/settings/suggestions")).html).toContain(
 				`value="income-${credit}"`,
 			);
+
 			const res = await answer(
 				{ id: `income-${credit}`, answer: "no" },
 				racing("UPDATE transactions SET income_maybe_declined = 1", () =>
 					moveGuess("income_confidence", credit, confidence),
 				),
 			);
+
 			expect(trigger(res).toast?.message).toBe(STALE);
 			expect(
 				await row(
@@ -2048,15 +2264,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				amount: 20000,
 				transferConfidence: 0.6,
 			});
+
 			expect((await get("/settings/suggestions")).html).toContain(
 				`value="transfer-${transfer}"`,
 			);
+
 			const res = await answer(
 				{ id: `transfer-${transfer}`, answer: "yes" },
 				racing("UPDATE transactions SET excluded = 1", () =>
 					moveGuess("transfer_confidence", transfer, confidence),
 				),
 			);
+
 			expect(trigger(res).toast?.message).toBe(STALE);
 			expect(
 				await row(
@@ -2079,15 +2298,18 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				amount: 20000,
 				transferConfidence: 0.6,
 			});
+
 			expect((await get("/settings/suggestions")).html).toContain(
 				`value="transfer-${transfer}"`,
 			);
+
 			const res = await answer(
 				{ id: `transfer-${transfer}`, answer: "no" },
 				racing("UPDATE transactions SET transfer_maybe_declined = 1", () =>
 					moveGuess("transfer_confidence", transfer, confidence),
 				),
 			);
+
 			expect(trigger(res).toast?.message).toBe(STALE);
 			expect(
 				await row(
@@ -2107,6 +2329,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			amount: -250000,
 			incomeConfidence: 0.6,
 		});
+
 		await answer({ id: `income-${credit}`, answer: "no" }, db);
 		expect(
 			await row(
@@ -2114,6 +2337,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				credit,
 			),
 		).toMatchObject({ income_maybe_declined: 1 });
+
 		const res = await answer(
 			{
 				id: `income-${credit}`,
@@ -2130,6 +2354,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 					.run(),
 			),
 		);
+
 		expect(trigger(res).toast?.message).toBe(STALE);
 		expect(
 			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
@@ -2163,11 +2388,13 @@ describe("a card calls a transaction by its own name, else by its store's (spec 
 
 	it("titles the card with the own name, not the store's", async () => {
 		await amazon();
+
 		const gift = await insertTx({
 			raw: "AMAZON",
 			amount: -250000,
 			incomeConfidence: 0.5,
 		});
+
 		await ownName(gift, "Birthday gift");
 		const { html } = await get("/settings/suggestions");
 		expect(titleOf(html)).toBe("Birthday gift");
@@ -2175,31 +2402,38 @@ describe("a card calls a transaction by its own name, else by its store's (spec 
 
 	it("says the own name in the Yes toasts of income and of a transfer", async () => {
 		await amazon();
+
 		const income = await insertTx({
 			raw: "AMAZON",
 			amount: -250000,
 			incomeConfidence: 0.5,
 		});
+
 		const transfer = await insertTx({
 			raw: "AMAZON",
 			amount: 20000,
 			transferConfidence: 0.5,
 		});
+
 		await ownName(income, "Birthday gift");
 		await ownName(transfer, "Birthday gift");
+
 		const counted = await post(
 			"/settings/suggestions",
 			{ id: `income-${income}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(counted.res).toast?.message).toBe(
 			"Counted Birthday gift as income.",
 		);
+
 		const left = await post(
 			"/settings/suggestions",
 			{ id: `transfer-${transfer}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(left.res).toast?.message).toBe(
 			"Left Birthday gift out of the budget.",
 		);
@@ -2212,6 +2446,7 @@ describe("a card calls a transaction by its own name, else by its store's (spec 
 		"asks a No on %s about the store, not the own name",
 		async (kind, question) => {
 			await amazon();
+
 			const id =
 				kind === "income"
 					? await insertTx({
@@ -2224,12 +2459,15 @@ describe("a card calls a transaction by its own name, else by its store's (spec 
 							amount: 20000,
 							transferConfidence: 0.5,
 						});
+
 			await ownName(id, "Birthday gift");
+
 			const { html } = await post(
 				"/settings/suggestions",
 				{ id: `${kind}-${id}`, answer: "no" },
 				true,
 			);
+
 			expect(titleOf(html)).toBe(question);
 			expect(textOf(html)).not.toContain("Birthday gift");
 		},
@@ -2238,9 +2476,11 @@ describe("a card calls a transaction by its own name, else by its store's (spec 
 	it("names one purchase of a new category by its own name, as typed, on its row", async () => {
 		const ids = await oneOfEach();
 		await ownName(ids.pets[0] ?? 0, "Pup's kibble");
+
 		const { html } = await get(
 			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}&skip=category-${ids.category}`,
 		);
+
 		expect(titleOf(html)).toBe("A new category: Pet Care");
 		expect(textOf(html)).toContain("Pup's kibble");
 		expect(textOf(html)).toContain("$45.00");
@@ -2256,15 +2496,18 @@ describe("the primary Yes sits on its own full-width row, No under it (P42 A)", 
 	function answerGroup(html: string): string {
 		const yes = html.indexOf('name="answer" value="yes"');
 		const no = html.indexOf('name="answer" value="no"', yes);
+
 		const start = Math.max(
 			html.lastIndexOf("<form", yes),
 			html.lastIndexOf("<div", yes),
 		);
+
 		const end = Math.min(
 			...[html.indexOf("</div>", no), html.indexOf("</form>", no)].filter(
 				(at) => at !== -1,
 			),
 		);
+
 		return html.slice(start, end);
 	}
 
@@ -2275,17 +2518,21 @@ describe("the primary Yes sits on its own full-width row, No under it (P42 A)", 
 		"draws the %s card's Yes first in a full-width column, with No under it",
 		async (_card, earlier) => {
 			const ids = await oneOfEach();
-			const keys: Record<string, number> = {
-				income: ids.income,
-				transfer: ids.transfer,
-				category: ids.category,
-			};
+
+			const keys = new Map([
+				["income", ids.income],
+				["transfer", ids.transfer],
+				["category", ids.category],
+			]);
+
 			const skip = earlier
-				.map((kind) => `skip=${kind}-${keys[kind]}`)
+				.map((kind) => `skip=${kind}-${keys.get(kind)}`)
 				.join("&");
+
 			const { html } = await get(
 				`/settings/suggestions${skip ? `?${skip}` : ""}`,
 			);
+
 			const group = answerGroup(html);
 			expect(group).toContain('value="yes"');
 			expect(group).toContain('value="no"');
@@ -2301,11 +2548,13 @@ describe("the primary Yes sits on its own full-width row, No under it (P42 A)", 
 describe("names", () => {
 	it("Yes names the merchant with its first suggested name", async () => {
 		const ids = await oneOfEach();
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id: await nameId(), answer: "yes" },
 			true,
 		);
+
 		expect(
 			await row(
 				"SELECT display_name, suggestion_status FROM merchants WHERE raw_name = ?",
@@ -2353,13 +2602,16 @@ describe("names", () => {
 
 	it("refuses a chip that isn't one of the names shown, and a name that is too long", async () => {
 		await oneOfEach();
+
 		const chip = await post(
 			"/settings/suggestions",
 			{ id: await nameId(), answer: "else", name_pick: "s:Somebody Else" },
 			true,
 		);
+
 		expect(chip.res.status).toBe(422);
 		expect(textOf(chip.html)).toContain("Pick one of the names shown.");
+
 		const long = await post(
 			"/settings/suggestions",
 			{
@@ -2370,6 +2622,7 @@ describe("names", () => {
 			},
 			true,
 		);
+
 		expect(long.res.status).toBe(422);
 		expect(textOf(long.html)).toContain("Keep the name under 80 characters.");
 		expect(
@@ -2379,11 +2632,13 @@ describe("names", () => {
 
 	it("Something else with no choice asks for one", async () => {
 		await oneOfEach();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: await nameId(), answer: "else" },
 			true,
 		);
+
 		expect(res.status).toBe(422);
 		expect(textOf(html)).toContain(
 			"Pick a name, keep the bank's, or type your own.",
@@ -2407,6 +2662,7 @@ describe("names", () => {
 			status: "pending",
 			names: ["Comcast"],
 		});
+
 		for (const names of [true, false]) {
 			await saveAiSwitches(db, { names });
 			const { html } = await get("/settings/suggestions");
@@ -2452,6 +2708,7 @@ describe("names: the toast counts only the transactions whose shown name changes
 			)
 			.bind(BLUE, count)
 			.all<{ id: number }>();
+
 		for (const { id } of results)
 			await db
 				.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
@@ -2465,10 +2722,12 @@ describe("names: the toast counts only the transactions whose shown name changes
 	it("leaves out a charge with its own name, so one of three is kept and two are renamed", async () => {
 		await blueCharges();
 		await ownNames(1);
+
 		const { res } = await answer({
 			answer: "else",
 			name_pick: "s:Blue Bottle",
 		});
+
 		expect(trigger(res)).toEqual({
 			toast: {
 				message: "Renamed 2 transactions to Blue Bottle",
@@ -2481,10 +2740,12 @@ describe("names: the toast counts only the transactions whose shown name changes
 	it("says one transaction, not transactions, when a single charge changes", async () => {
 		await blueCharges();
 		await ownNames(2);
+
 		const { res } = await answer({
 			answer: "else",
 			name_pick: "s:Blue Bottle",
 		});
+
 		expect(trigger(res).toast?.message).toBe(
 			"Renamed 1 transaction to Blue Bottle",
 		);
@@ -2502,10 +2763,12 @@ describe("names: the toast counts only the transactions whose shown name changes
 	it("says what was saved, with no count, when every charge keeps its own name", async () => {
 		await blueCharges();
 		await ownNames(3);
+
 		const { res } = await answer({
 			answer: "else",
 			name_pick: "s:Blue Bottle",
 		});
+
 		expect(trigger(res)).toEqual({
 			toast: {
 				message: "Saved Blue Bottle for the transactions that come later",
@@ -2527,10 +2790,12 @@ describe("names: the toast counts only the transactions whose shown name changes
 
 	it("does not count a split part's own name: its purchase is the charge that counts", async () => {
 		await blueCharges();
+
 		const purchase = await row(
 			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT 1",
 			BLUE,
 		);
+
 		await db
 			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
 			.bind(purchase?.id)
@@ -2541,10 +2806,12 @@ describe("names: the toast counts only the transactions whose shown name changes
 			)
 			.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id)
 			.run();
+
 		const { res } = await answer({
 			answer: "else",
 			name_pick: "s:Blue Bottle",
 		});
+
 		expect(trigger(res).toast?.message).toBe(
 			"Renamed 3 transactions to Blue Bottle",
 		);
@@ -2552,14 +2819,17 @@ describe("names: the toast counts only the transactions whose shown name changes
 
 	it("counts a split as renamed, even when every part has its own name", async () => {
 		await blueCharges(2);
+
 		const purchase = await row(
 			"SELECT id FROM transactions WHERE raw_name = ? AND parent_id IS NULL ORDER BY id LIMIT 1",
 			BLUE,
 		);
+
 		await db
 			.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
 			.bind(purchase?.id)
 			.run();
+
 		for (const part of ["Part A", "Part B"])
 			await db
 				.prepare(
@@ -2567,10 +2837,12 @@ describe("names: the toast counts only the transactions whose shown name changes
 				)
 				.bind(`part-${crypto.randomUUID()}`, BLUE, purchase?.id, part)
 				.run();
+
 		const { res } = await answer({
 			answer: "else",
 			name_pick: "s:Blue Bottle",
 		});
+
 		expect(trigger(res).toast?.message).toBe(
 			"Renamed 2 transactions to Blue Bottle",
 		);
@@ -2610,11 +2882,13 @@ describe("names: the toast counts only the transactions whose shown name changes
 
 	it("an empty typed name's error sits in the field under Type your own, which stays ticked", async () => {
 		await blueCharges();
+
 		const { res, html } = await answer({
 			answer: "else",
 			name_pick: "own",
 			merchant: "",
 		});
+
 		expect(res.status).toBe(422);
 		const id = (await nameId()).slice("name-".length);
 		expect(html).toMatch(
@@ -2637,17 +2911,20 @@ describe("the answered", () => {
 			)
 			.bind(ids.income)
 			.run();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id: `income-${ids.income}`, answer: "yes" },
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(textOf(html)).toContain("Suggestions · 1 of 4");
 	});
 
 	it("answering the last item shows Nothing left to check, and focus moves to it", async () => {
 		const ids = await oneOfEach();
+
 		const answers: [string, Record<string, string | string[]>][] = [
 			[`income-${ids.income}`, { answer: "yes" }],
 			[`transfer-${ids.transfer}`, { answer: "yes" }],
@@ -2661,13 +2938,16 @@ describe("the answered", () => {
 				},
 			],
 		];
+
 		for (const [id, fields] of answers)
 			await post("/settings/suggestions", { id, ...fields }, true);
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id: await nameId(), answer: "yes" },
 			true,
 		);
+
 		expect(textOf(html)).toContain("Nothing left to check.");
 		// The swapped-out Yes took focus with it, so the sentence takes it (as the question heading does).
 		expect(html).toMatch(
@@ -2677,21 +2957,25 @@ describe("the answered", () => {
 
 	it("when the last answer leaves only items set aside for good, You skipped the rest takes focus", async () => {
 		const ids = await oneOfEach();
+
 		const others = [
 			`income-${ids.income}`,
 			`transfer-${ids.transfer}`,
 			`category-${ids.category}`,
 			`new-${ids.suggestion}`,
 		];
+
 		const query = [
 			...others.map((id) => `skip=${id}`),
 			...others.map((id) => `again=${id}`),
 		].join("&");
+
 		const { html } = await post(
 			`/settings/suggestions?${query}`,
 			{ id: await nameId(), answer: "yes" },
 			true,
 		);
+
 		expect(textOf(html)).toContain("You skipped the rest.");
 		expect(html).toMatch(
 			/<div tabindex="-1" autofocus[^>]*>[\s\S]*You skipped the rest\./,
@@ -2700,10 +2984,12 @@ describe("the answered", () => {
 
 	it("a plain form post redirects back to the screen", async () => {
 		const ids = await oneOfEach();
+
 		const { res } = await post("/settings/suggestions", {
 			id: `income-${ids.income}`,
 			answer: "yes",
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toMatch(/^\/settings\/suggestions/);
 	});
@@ -2735,14 +3021,17 @@ describe("Settings' Never suggest list", () => {
 		const { html } = await get("/settings/rules");
 		expect(textOf(html)).toContain("Never suggest income for Venmo");
 		expect(textOf(html)).toMatch(/You said No on [A-Z][a-z]{2} \d{1,2}/);
+
 		const rule = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules",
 		);
+
 		const removed = await post(
 			"/settings/never-suggest/remove",
 			removal(rule),
 			true,
 		);
+
 		expect(trigger(removed.res).toast?.message).toBe(
 			"Removed. Tally can suggest that again.",
 		);
@@ -2765,6 +3054,7 @@ describe("Settings' Never suggest list", () => {
 
 	it("keeps the Always search through a Remove, both with and without script", async () => {
 		const eatingOut = await categoryId("Eating Out");
+
 		for (let i = 0; i < 21; i++)
 			await db
 				.prepare(
@@ -2778,18 +3068,22 @@ describe("Settings' Never suggest list", () => {
 			)
 			.bind(VENMO)
 			.run();
+
 		const rule = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules",
 		);
+
 		const search = await get("/settings/rules?rules_search=Match");
 		expect(search.html).toMatch(
 			/never-suggest\/remove"[\s\S]*?name="rules_search" value="Match"/,
 		);
+
 		const scripted = await post(
 			"/settings/never-suggest/remove",
 			{ ...removal(rule), rules_search: "Match" },
 			true,
 		);
+
 		expect(textOf(scripted.html)).toContain("merchants matching “Match”");
 		await db
 			.prepare(
@@ -2797,13 +3091,16 @@ describe("Settings' Never suggest list", () => {
 			)
 			.bind(VENMO)
 			.run();
+
 		const again = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules",
 		);
+
 		const plain = await post("/settings/never-suggest/remove", {
 			...removal(again),
 			rules_search: "Match",
 		});
+
 		expect(plain.res.status).toBe(303);
 		expect(plain.res.headers.get("location")).toBe(
 			"/settings/rules?rules_search=Match",
@@ -2814,6 +3111,7 @@ describe("Settings' Never suggest list", () => {
 		const { res } = await post("/settings/never-suggest/remove", {
 			id: "999999",
 		});
+
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/rules");
 	});
@@ -2827,26 +3125,32 @@ describe("Settings' Never suggest list", () => {
 				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('CHEWY.COM 1', 'new_category', '2026-10-09')",
 			),
 		]);
+
 		// Newest first: Chewy is the first line, so its Remove is the first; Venmo's comes after it.
 		const chewy = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM 1'",
 		);
+
 		const first = await post(
 			"/settings/never-suggest/remove",
 			removal(chewy),
 			true,
 		);
+
 		expect(focusedNeverLine(first.html)).toContain(
 			"Never suggest income for Venmo",
 		);
+
 		const venmo = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
 		);
+
 		const last = await post(
 			"/settings/never-suggest/remove",
 			removal(venmo),
 			true,
 		);
+
 		expect(last.html).toMatch(
 			/<p[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest: Tally/,
 		);
@@ -2858,25 +3162,31 @@ describe("Settings' Never suggest list", () => {
 				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', 'income', '2026-10-03')",
 			)
 			.run();
+
 		// The focused Remove was taken away by another tab, so this one asks again for a line that is gone.
 		const stale = await post(
 			"/settings/never-suggest/remove",
 			{ id: "999999" },
 			true,
 		);
+
 		expect(stale.res.status).toBe(200);
 		expect(focusedNeverLine(stale.html)).toContain(
 			"Never suggest income for Venmo",
 		);
+
 		const venmo = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
 		);
+
 		await post("/settings/never-suggest/remove", removal(venmo), true);
+
 		const empty = await post(
 			"/settings/never-suggest/remove",
 			{ id: "999999" },
 			true,
 		);
+
 		expect(empty.html).toMatch(
 			/<p[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest: Tally/,
 		);
@@ -2889,6 +3199,7 @@ async function nameId() {
 		"SELECT rowid AS id FROM merchants WHERE raw_name = ?",
 		BLUE,
 	);
+
 	return `name-${r?.id}`;
 }
 
@@ -2899,9 +3210,11 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 			.filter((item) => item.kind === "income")
 			.map((item) => item.id)
 			.sort();
+
 	/** How many "Never suggest" lines Settings draws: one Remove form per line. */
 	const neverLineForms = (html: string) =>
 		(html.match(/action="\/settings\/never-suggest\/remove"/g) ?? []).length;
+
 	/** The stored lines, as "key:kind", whatever Settings hides. */
 	const stored = async () =>
 		(
@@ -2919,12 +3232,14 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 			amount: -250000,
 			incomeConfidence: 0.5,
 		});
+
 		const older = await insertTx({
 			raw: VENMO,
 			amount: -2500,
 			date: "2026-09-01",
 			incomeConfidence: 0.5,
 		});
+
 		expect(await incomeAsked()).toEqual(
 			[`income-${named}`, `income-${older}`].sort(),
 		);
@@ -2933,6 +3248,7 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 			{ id: `income-${named}`, answer: "no" },
 			true,
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{
@@ -2943,6 +3259,7 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 			},
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe(
 			"Got it. Tally won't suggest income for Venmo again. Change it in Settings.",
 		);
@@ -2952,9 +3269,11 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 		const { html } = await get("/settings/rules");
 		expect(neverLineForms(html)).toBe(1);
 		expect(textOf(html)).toContain("Never suggest income for Venmo");
+
 		const line = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
 		);
+
 		await post("/settings/never-suggest/remove", removal(line), true);
 		expect(await stored()).toEqual([]);
 		// The No already took the named charge out of the queue, so only the bank text's charge comes back.
@@ -2964,12 +3283,14 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 	it("a Yes on a bank text's Maybe keeps one line under the bank text, and one Remove takes it", async () => {
 		// The store's own charge has no Maybe, so only the bank text's older charge is asked.
 		await insertTx({ raw: VENMO, merchantName: "Venmo", amount: -250000 });
+
 		const bank = await insertTx({
 			raw: VENMO,
 			amount: -2500,
 			date: "2026-09-01",
 			incomeConfidence: 0.5,
 		});
+
 		await post(
 			"/settings/suggestions",
 			{ id: `income-${bank}`, answer: "no" },
@@ -2988,10 +3309,12 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 		expect(await stored()).toEqual([`${VENMO}:income`]);
 		expect(await incomeAsked()).toEqual([]);
 		expect(neverLineForms((await get("/settings/rules")).html)).toBe(1);
+
 		const line = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = ?",
 			VENMO,
 		);
+
 		await post("/settings/never-suggest/remove", removal(line), true);
 		expect(await stored()).toEqual([]);
 	});
@@ -3000,36 +3323,44 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 // The Maybe card's three answers (decision 156): Yes, a suggested new category opened in place, and Something else's
 // one select. A create makes an active category with no budget and files the purchase in it, in one batch.
 describe("a Maybe card's new category answers (decision 156)", () => {
-	const countOf = async (sql: string) => (await row(sql))?.n as number;
+	const countOf = async (sql: string) =>
+		present((await db.prepare(sql).first<{ n: number }>())?.n);
 
 	/** The category card's purchase, with the two cards before it answered past (the first pass of the queue). */
 	async function categoryCard() {
 		const ids = await oneOfEach();
 		const address = `/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`;
+
 		return { ids, address, id: `category-${ids.category}` };
 	}
 
 	it("creates an active category with no budget and files the purchase in it", async () => {
 		const { ids, id } = await categoryCard();
+
 		const budgetsBefore = await countOf(
 			"SELECT COUNT(*) AS n FROM budget_amounts",
 		);
+
 		const amountBefore = await row(
 			"SELECT amount_cents FROM transactions WHERE id = ?",
 			ids.category,
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "Books & audio" },
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(trigger(res).toast?.message).toBe(
 			"Made Books & audio and set Lupita's Taqueria to it.",
 		);
+
 		const made = await row(
 			"SELECT id, archived FROM categories WHERE name = 'Books & audio'",
 		);
+
 		expect(made).toMatchObject({ archived: 0 });
 		expect(
 			await row(
@@ -3062,11 +3393,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		const { ids, id } = await categoryCard();
 		const groceries = await categoryId("Groceries");
 		const before = await countOf("SELECT COUNT(*) AS n FROM categories");
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "  groceries " },
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe(
 			"Added Lupita's Taqueria to Groceries.",
 		);
@@ -3081,11 +3414,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("an empty name is refused, and the card stays open with the name box", async () => {
 		const { ids, id } = await categoryCard();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "  " },
 			true,
 		);
+
 		expect(res.status).toBe(422);
 		expect(textOf(html)).toContain("Give the category a name.");
 		expect(html).toMatch(/<details[^>]*\bopen/);
@@ -3099,9 +3434,11 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("at 50 active categories the create is refused with the full message, and Something else stays open", async () => {
 		const { ids, id } = await categoryCard();
+
 		const active = await countOf(
 			"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
 		);
+
 		for (let i = active; i < 50; i++)
 			await db
 				.prepare(
@@ -3109,11 +3446,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 				)
 				.bind(`Extra ${i}`, `extra ${i}`, 100 + i)
 				.run();
+
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "Books & audio" },
 			true,
 		);
+
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
 		expect(textOf(html)).toContain(
@@ -3133,11 +3472,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("Something else shows the categories as one select with a real label, not chips", async () => {
 		const { id } = await categoryCard();
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "else" },
 			true,
 		);
+
 		expect(html).toContain("Choose a category</label>");
 		expect(html).toMatch(/<select[^>]*\bname="category"/);
 		expect(html).not.toContain('type="radio" name="category"');
@@ -3148,17 +3489,21 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		const { html } = await get(address);
 		expect(html).toContain('hx-trigger="load"');
 		expect(html).toContain(`/settings/suggestions/new-category?id=${id}`);
+
 		// The URL names the item only, never the store's text (a bank's text can carry a card or account number).
 		const loaderUrl =
 			html.match(/hx-get="([^"]*new-category[^"]*)"/)?.[1] ?? "";
+
 		expect(loaderUrl).not.toBe("");
 		expect(loaderUrl).not.toContain("store=");
 		expect(decodeURIComponent(loaderUrl)).not.toContain("LUPITA");
 		expect(html).not.toContain("Tally's suggestion");
+
 		// No AI binding in the tests, so no name is asked for and the row is never drawn.
 		const { res, html: fragment } = await get(
 			`/settings/suggestions/new-category?id=${id}`,
 		);
+
 		expect(res.status).toBe(200);
 		expect(fragment.trim()).toBe("");
 	});
@@ -3172,10 +3517,11 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 	it("the lazy name is asked once for a transaction, however often its row is drawn (decision 161)", async () => {
 		const { id } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		const run = vi.fn(async () => "Books & audio");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
+
 		try {
 			const first = await get(`/settings/suggestions/new-category?id=${id}`);
 			const second = await get(`/settings/suggestions/new-category?id=${id}`);
@@ -3190,15 +3536,17 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 	it("a lazy name that is an active category reads Existing category, Save and next, and is announced as one (decision 165)", async () => {
 		const { id, ids } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		// Workers AI answers in another capitalisation: the family's own spelling is what the row shows.
 		const run = vi.fn(async () => "groceries");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
+
 		try {
 			const { res, html } = await get(
 				`/settings/suggestions/new-category?id=${id}`,
 			);
+
 			expect(textOf(html)).toContain("Existing category: Groceries");
 			expect(textOf(html)).not.toContain("New category");
 			expect(html).toMatch(/>\s*Save and next\s*</);
@@ -3221,13 +3569,15 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 	it("a lazy name that is new keeps New category, Create and next, and says so in the announcer", async () => {
 		const { id } = await categoryCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
-		holder.AI = { run: vi.fn(async () => "Books & audio") } as unknown as Ai;
+		holder.AI = fakeAi(vi.fn(async () => "Books & audio"));
+
 		try {
 			const { res, html } = await get(
 				`/settings/suggestions/new-category?id=${id}`,
 			);
+
 			expect(textOf(html)).toContain("New category: Books & audio");
 			expect(html).toMatch(/>\s*Create and next\s*</);
 			expect(trigger(res).announce).toBe(
@@ -3240,11 +3590,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("a store with a Never suggest for a new category gets no row, pending or named, and no lazy name", async () => {
 		const { id, address } = await categoryCard();
+
 		const suggestion = await db
 			.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
@@ -3270,11 +3622,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("a refused name is named by its own field, with aria-invalid and a message it points at", async () => {
 		const { id } = await categoryCard();
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "  " },
 			true,
 		);
+
 		expect(html).toContain('aria-invalid="true"');
 		expect(html).toContain(`aria-describedby="new-category-name-${id}-error"`);
 		expect(html).toContain(`id="new-category-name-${id}-error"`);
@@ -3282,9 +3636,11 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("the name's loader carries this rollout's version, which the GET accepts and ignores", async () => {
 		const { id } = await categoryCard();
+
 		const versioned = await get(
 			`/settings/suggestions/new-category?id=${id}&v=${NAME_URL_VERSION}`,
 		);
+
 		expect(versioned.res.status).toBe(200);
 		expect(versioned.html.trim()).toBe("");
 	});
@@ -3295,6 +3651,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(page).toContain(
 			`hx-get="/settings/suggestions/new-category?id=${id}&amp;v=${NAME_URL_VERSION}"`,
 		);
+
 		// htmx sends the page's own address as HX-Current-URL, so the row's answer keeps the skips the page had.
 		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
 			method: "POST",
@@ -3311,6 +3668,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 				new_name: "",
 			}).toString(),
 		});
+
 		expect(res.status).toBe(422);
 		expect(await res.text()).toContain(`skip=income-${ids.income}`);
 	});
@@ -3324,14 +3682,17 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 			)
 			.bind(LUPITA)
 			.run();
+
 		const categoriesBefore = await countOf(
 			"SELECT COUNT(*) AS n FROM categories",
 		);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "Books & audio" },
 			true,
 		);
+
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(
 			categoriesBefore,
@@ -3356,6 +3717,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		"a create whose HX-Current-URL is %j is refused as usual, with no skips and no throw",
 		async (bad) => {
 			const { id } = await categoryCard();
+
 			const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
 				method: "POST",
 				redirect: "manual",
@@ -3371,6 +3733,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 					new_name: "",
 				}).toString(),
 			});
+
 			expect(res.status).toBe(422);
 			const html = await res.text();
 			expect(textOf(html)).toContain("Give the category a name.");
@@ -3382,17 +3745,20 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		const { res, html } = await get(
 			"/settings/suggestions/new-category?id=category-999999",
 		);
+
 		expect(html.trim()).toBe("");
 		expect(res.headers.get("Cache-Control")).toBe("no-store");
 	});
 
 	it("without JavaScript, a pending suggestion's name is drawn in the card, with no lazy request", async () => {
 		const { address } = await categoryCard();
+
 		const suggestion = await db
 			.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
@@ -3408,11 +3774,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("a store with a pending suggestion offers that name, announced, and makes no AI call", async () => {
 		const { id } = await categoryCard();
+
 		const suggestion = await db
 			.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
@@ -3420,9 +3788,11 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 			)
 			.bind(LUPITA, suggestion?.id ?? null)
 			.run();
+
 		const { res, html } = await get(
 			`/settings/suggestions/new-category?id=${id}`,
 		);
+
 		expect(textOf(html)).toContain(
 			"Tally's suggestion: New category: Books & audio",
 		);
@@ -3439,11 +3809,13 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("a name typed in the row shows again, open, when the answer is refused", async () => {
 		const { id } = await categoryCard();
+
 		const { html } = await post(
 			"/settings/suggestions",
 			{ id, answer: "create", new_name: "" },
 			true,
 		);
+
 		expect(html).toMatch(/<details[^>]*\bopen/);
 		expect(html).toContain('name="new_name"');
 	});
@@ -3456,16 +3828,19 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 	async function eatingOutCard() {
 		const ids = await oneOfEach();
 		const address = `/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`;
+
 		return { ids, address, id: `category-${ids.category}` };
 	}
 
 	it("the full page draws no row for a pending name that is the guess, in any case, and still draws Yes", async () => {
 		const { address } = await eatingOutCard();
+
 		const suggestion = await db
 			.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('eating OUT', 'pending') RETURNING id",
 			)
 			.first<{ id: number }>();
+
 		await db
 			.prepare(
 				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
@@ -3485,14 +3860,16 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 	it("the lazy request returns the no-name response for a name that is the guess, with no announcement", async () => {
 		const { id } = await eatingOutCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		const run = vi.fn(async () => "eating out");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
+
 		try {
 			const { res, html } = await get(
 				`/settings/suggestions/new-category?id=${id}`,
 			);
+
 			expect(res.status).toBe(200);
 			expect(html.trim()).toBe("");
 			expect(res.headers.get("HX-Trigger")).toBeNull();
@@ -3505,19 +3882,22 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 	it("the name is still asked once and kept as it was asked, and a later draw reads it with no call", async () => {
 		const { ids, id } = await eatingOutCard();
 		await saveAiSwitches(db, { categories: true });
-		const holder = env as unknown as { AI?: Ai };
+		const holder: Env & { AI?: Ai } = env;
 		const before = holder.AI;
 		const run = vi.fn(async () => "Eating Out");
-		holder.AI = { run } as unknown as Ai;
+		holder.AI = fakeAi(run);
+
 		try {
 			await get(`/settings/suggestions/new-category?id=${id}`);
 			const again = await get(`/settings/suggestions/new-category?id=${id}`);
 			expect(again.html.trim()).toBe("");
 			expect(run).toHaveBeenCalledTimes(1);
+
 			const kept = await row(
 				"SELECT name, categories_key FROM maybe_names WHERE transaction_id = ?",
 				ids.category,
 			);
+
 			expect(kept).toMatchObject({ name: "Eating Out" });
 			expect(kept?.categories_key).toMatch(/^[0-9a-f]{16}$/);
 		} finally {
@@ -3529,11 +3909,13 @@ describe("a suggested name that is the guess's own category is not drawn (decisi
 		const { ids, id, address } = await eatingOutCard();
 		const page = await get(address);
 		expect(page.html).toContain(`value="yes"`);
+
 		const { res } = await post(
 			"/settings/suggestions",
 			{ id, answer: "yes" },
 			true,
 		);
+
 		expect(res.status).toBe(200);
 		expect(
 			await row(

@@ -64,6 +64,7 @@ describe("settle (#321, #350)", () => {
 			[whole({ ticks: [5], held: [6], unticked: [6] }), new Set([6])],
 			[{ ...NO_SELECTION, ticks: [7], held: [8] }, new Set([8])],
 		];
+
 		for (const [selection, matched] of cases) {
 			const once = settle(selection, matched);
 			expect(settle(once, matched)).toEqual(once);
@@ -77,6 +78,7 @@ describe("setIds (#321)", () => {
 			whole({ ticks: [9], held: [2], unticked: [1] }),
 			new Set([1, 2, 3]),
 		);
+
 		expect(setIds(settled, [1, 2, 3])).toEqual([2, 3]);
 	});
 
@@ -92,6 +94,7 @@ describe("selectedIds", () => {
 			whole({ ticks: [9], held: [2], unticked: [1] }),
 			new Set([1, 2, 3]),
 		);
+
 		expect(selectedIds(settled, [1, 2, 3])).toEqual([2, 3, 9]);
 	});
 

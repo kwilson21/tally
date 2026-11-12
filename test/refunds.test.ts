@@ -29,6 +29,7 @@ import {
 	organizeGroups,
 	saveOrganizeGroup,
 } from "../src/transactions/organize";
+import { itemAt, present } from "./helpers/present";
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -73,6 +74,7 @@ beforeEach(async () => {
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -86,10 +88,13 @@ async function post(path: string, fields: [string, string][]) {
 		},
 		body: new URLSearchParams(fields),
 	});
+
+	// SAFETY: the app writes HX-Trigger as this toast and announce object, and a response without the header parses as null.
 	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "null") as {
 		toast: { message: string };
 		announce: string;
 	} | null;
+
 	return { res, html: await res.text(), trigger };
 }
 
@@ -117,6 +122,7 @@ function categoryFieldsetTag(html: string) {
 	const sheet = html.slice(html.indexOf('aria-labelledby="edit-title"'));
 	const legend = sheet.search(/<legend[^>]*>\s*Category\b/);
 	const start = sheet.lastIndexOf("<fieldset", legend);
+
 	return sheet.slice(start, sheet.indexOf(">", start) + 1);
 }
 
@@ -124,17 +130,22 @@ function categoryFieldsetTag(html: string) {
 function inputsOf(fragment: string): [string, string][] {
 	return (fragment.match(/<input\b[^>]*>/g) ?? []).flatMap((tag) => {
 		const name = /\sname="([^"]*)"/.exec(tag)?.[1];
+
 		if (!name) return [];
+
 		const value = (/\svalue="([^"]*)"/.exec(tag)?.[1] ?? "").replace(
 			/&amp;/g,
 			"&",
 		);
+
 		const type = /\stype="([^"]*)"/.exec(tag)?.[1];
+
 		const posted =
 			type === "checkbox" || type === "radio"
 				? /\schecked(=""|=|\s|\/|>)/.test(tag)
 				: true;
-		return posted ? [[name, value] as [string, string]] : [];
+
+		return posted ? [[name, value] satisfies [string, string]] : [];
 	});
 }
 
@@ -143,6 +154,7 @@ function panelForm(html: string, id: number) {
 	const start = html.indexOf(
 		`<form method="post" action="/transactions/${id}"`,
 	);
+
 	return html.slice(start, html.indexOf("</form>", start));
 }
 
@@ -161,9 +173,11 @@ function edited(
 	changes: Record<string, string | undefined>,
 ): [string, string][] {
 	const kept = drawn.filter(([name]) => !(name in changes));
+
 	const changed = Object.entries(changes).flatMap(([name, value]) =>
-		value === undefined ? [] : [[name, value] as [string, string]],
+		value === undefined ? [] : [[name, value] satisfies [string, string]],
 	);
+
 	return [...kept, ...changed];
 }
 
@@ -188,6 +202,7 @@ const ownCategory = async (id: number) =>
 /** Counted spending in a category for a month, as Home and Budget add it up. */
 async function spent(month: string, categoryId: number | null) {
 	const data = await loadMonth(db, month);
+
 	return data.transactions
 		.filter((t) => !t.income && t.categoryId === categoryId)
 		.reduce((sum, t) => sum + t.amountCents, 0);
@@ -196,7 +211,9 @@ async function spent(month: string, categoryId: number | null) {
 /** A transaction as the edit panel loads it. */
 async function detail(id: number) {
 	const tx = await getTransaction(db, id);
+
 	if (!tx) throw new Error(`No transaction ${id}`);
+
 	return tx;
 }
 
@@ -204,6 +221,7 @@ async function detail(id: number) {
 function rowHtml(html: string, id: number) {
 	const start = html.indexOf(`data-transaction="${id}"`);
 	expect(start).toBeGreaterThan(-1);
+
 	return html.slice(start, html.indexOf("</li>", start));
 }
 
@@ -219,18 +237,22 @@ describe("counted month and category (one shared expression)", () => {
 		excluded?: boolean;
 		reviewed?: boolean;
 	};
+
 	/** Evaluates the expressions over one transaction and the purchase it refunds (if any), no tables. */
 	async function counted(t: Side, purchase?: Side) {
 		const row = (side: Side | undefined, id: number | null) =>
 			side
 				? `SELECT ${id} AS id, '${side.date}' AS date, ${side.amount ?? -2000} AS amount_cents, ${side.category ?? "NULL"} AS category_id, ${side.income ? 1 : 0} AS flag_income, ${purchase && id === 1 ? 2 : "NULL"} AS refund_of_id, ${side.excluded ? 1 : 0} AS excluded, ${side.reviewed ? 1 : 0} AS credit_reviewed, ${side.reviewed ? "'user'" : "NULL"} AS credit_reviewed_by`
 				: "SELECT NULL AS id, NULL AS date, NULL AS amount_cents, NULL AS category_id, 0 AS flag_income, NULL AS refund_of_id, NULL AS excluded, 0 AS credit_reviewed, NULL AS credit_reviewed_by";
+
 		const pay = (side: Side | undefined) =>
 			side?.period
 				? `SELECT '${side.period}' AS period`
 				: "SELECT NULL AS period";
+
 		const bill = (side: Side | undefined) =>
 			`SELECT '${side?.frequency ?? "monthly"}' AS frequency, ${side?.anchor ?? "NULL"} AS anchor_month`;
+
 		return db
 			.prepare(
 				`SELECT ${countedMonthSql()} AS month, ${countedCategorySql()} AS category, ${FOLLOWS_PURCHASE} AS follows
@@ -433,6 +455,7 @@ describe("counted month and category (one shared expression)", () => {
 				frequency: schedule.frequency,
 				anchor: schedule.anchorMonth,
 			});
+
 			expect(sql?.month).toBe(month);
 			expect(billPaymentMonth(schedule, period, bankDate.slice(0, 7))).toBe(
 				sql?.month,
@@ -510,6 +533,7 @@ describe("linking a refund", () => {
 			)
 			.bind(PURCHASE, REFUND)
 			.run();
+
 		const { res } = await post(`/transactions/${REFUND}`, [
 			["merchant", "Refund Shop"],
 			["note", "Reviewed refund note"],
@@ -521,6 +545,7 @@ describe("linking a refund", () => {
 			["income_was", "0"],
 			["refund_of", String(PURCHASE)],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(
 			await db
@@ -544,6 +569,7 @@ describe("linking a refund", () => {
 			sepGroceries: await spent("2026-09", GROCERIES),
 			budgetKids: await lastMonthSpentCents(db, KIDS, "2026-09"),
 		};
+
 		const { res, trigger } = await link(REFUND, PURCHASE);
 		expect(res.status).toBe(200);
 		expect(
@@ -595,9 +621,11 @@ describe("linking a refund", () => {
 
 	it("lists the refund under the purchase's month and category filter", async () => {
 		await link(REFUND, PURCHASE);
+
 		const august = (
 			await get("/transactions?month=2026-08&category=4&q=refund")
 		).html;
+
 		expect(august).toContain(`data-transaction="${REFUND}"`);
 		const september = (await get("/transactions?month=2026-09&q=refund")).html;
 		expect(september).not.toContain(`data-transaction="${REFUND}"`);
@@ -670,12 +698,14 @@ describe("linking a refund", () => {
 			.run();
 		// Only the purchase needs one; categorizing it covers the refund too.
 		expect(await needsCategoryCount(db, "2026-08")).toBe(before + 1);
+
 		// Home's count agrees with the list.
 		const home = summarizeMonth({
 			...(await loadMonth(db, "2026-08")),
 			month: "2026-08",
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(home.uncategorized.count).toBe(before + 1);
 		const { html } = await get("/transactions?month=2026-08&uncategorized=1");
 		expect(rowHtml(html, PURCHASE)).toContain("Needs category");
@@ -719,11 +749,13 @@ describe("linking a refund", () => {
 			.run();
 		// Back in its own month (September), waiting for a category of its own.
 		expect(await needsCategoryCount(db, "2026-09")).toBe(before + 1);
+
 		const home = summarizeMonth({
 			...(await loadMonth(db, "2026-09")),
 			month: "2026-09",
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(home.uncategorized.count).toBe(before + 1);
 		const { html } = await get("/transactions?month=2026-09&q=refund");
 		expect(rowHtml(html, REFUND)).toContain("Needs category");
@@ -744,9 +776,11 @@ describe("linking a refund", () => {
 			.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
 			.bind(PURCHASE)
 			.run();
+
 		const offered = (await refundPurchases(db, await detail(REFUND))).map(
 			(p) => p.id,
 		);
+
 		expect(offered).not.toContain(PURCHASE);
 	});
 
@@ -761,14 +795,17 @@ describe("linking a refund", () => {
 		const pending = (await pendingForJev(db, 500)).map((row) => row.id);
 		expect(pending).toContain(PURCHASE);
 		expect(pending).not.toContain(REFUND);
+
 		const group = (await organizeGroups(db)).find((g) =>
 			g.merchantKeys.includes("REFUND SHOP"),
 		);
+
 		const uncategorized = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'REFUND SHOP' AND category_id IS NULL AND excluded = 0 AND is_split = 0 AND flag_income = 0",
 			)
 			.first<number>("n");
+
 		// Every uncategorized REFUND SHOP row but the linked refund.
 		expect(group?.count).toBe((uncategorized ?? 0) - 1);
 	});
@@ -809,6 +846,7 @@ describe("linking a refund", () => {
 			["refund_of", String(TOO_OLD)],
 			["note", "should not save"],
 		]);
+
 		expect(res.status).toBe(422);
 		expect(html).toMatch(
 			/<fieldset[^>]*aria-describedby="refund-error"[^>]*>\s*<legend class="sr-only">Purchase this refunds/,
@@ -816,10 +854,12 @@ describe("linking a refund", () => {
 		expect(html).toMatch(
 			/<p id="refund-error" role="alert"[^>]*>Pick a purchase from the list\.<\/p>/,
 		);
+
 		const row = await db
 			.prepare("SELECT refund_of_id, note FROM transactions WHERE id = ?")
 			.bind(REFUND)
 			.first();
+
 		expect(row).toEqual({ refund_of_id: null, note: null });
 	});
 
@@ -1045,6 +1085,7 @@ describe("linking a refund", () => {
 
 	it("the counting rule in TypeScript agrees with FOLLOWS_PURCHASE", async () => {
 		await link(REFUND, PURCHASE);
+
 		for (const amountCents of [-2000, 2000]) {
 			for (const flagIncome of [0, 1]) {
 				for (const creditReviewed of [0, 1]) {
@@ -1054,12 +1095,14 @@ describe("linking a refund", () => {
 						)
 						.bind(amountCents, flagIncome, creditReviewed, REFUND)
 						.run();
+
 					const row = await db
 						.prepare(
 							`SELECT ${FOLLOWS_PURCHASE} AS follows FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?`,
 						)
 						.bind(REFUND)
 						.first<{ follows: number }>();
+
 					expect(
 						Boolean(row?.follows),
 						`amount ${amountCents}, income ${flagIncome}, reviewed ${creditReviewed}`,
@@ -1132,6 +1175,7 @@ describe("a refund a bank change unlinked", () => {
 				)
 				.bind(id)
 				.first();
+
 		expect(await linkOf(REFUND)).toEqual({ r: PURCHASE, d: null });
 		expect(await linkOf(9011)).toEqual({ r: PURCHASE, d: null });
 		expect(await linkOf(9012)).toEqual({ r: OTHER_MERCHANT, d: null });
@@ -1161,7 +1205,9 @@ describe("a refund a bank change unlinked", () => {
 			)
 			.bind(REFUND)
 			.all<{ d: string | null }>();
+
 		expect(parts.results).toEqual([{ d: "2026-09-10" }, { d: "2026-09-10" }]);
+
 		// The list pages at 25 rows, so each part is found under its own category.
 		const listedUnder = async (category: number) =>
 			(
@@ -1175,6 +1221,7 @@ describe("a refund a bank change unlinked", () => {
 			).rows
 				.filter((row) => row.parentId === REFUND)
 				.map((row) => row.refundUnlinkedPurchaseDate);
+
 		expect(await listedUnder(KIDS)).toEqual(["2026-09-10"]);
 		expect(await listedUnder(GAS)).toEqual(["2026-09-10"]);
 	});
@@ -1196,6 +1243,7 @@ describe("a refund a bank change unlinked", () => {
 			)
 			.bind(REFUND)
 			.all<{ d: string | null }>();
+
 		expect(parts.results).toEqual([{ d: null }, { d: null }]);
 	});
 });
@@ -1224,9 +1272,11 @@ describe("captions on the linked pair", () => {
 describe("splits unlink their refunds", () => {
 	it("removing a split unlinks a refund of a part and says so", async () => {
 		await link(REFUND, PART_HOUSEHOLD);
+
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		expect(await refundOf(REFUND)).toBeNull();
 		expect(trigger?.toast.message).toBe(
 			"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
@@ -1252,9 +1302,11 @@ describe("splits unlink their refunds", () => {
 	it("counts several refunds in the toast", async () => {
 		await link(REFUND, PART_HOUSEHOLD);
 		await link(SECOND_REFUND, PART_KIDS);
+
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		expect(trigger?.toast.message).toBe(
 			"Removed split from Refund Shop. 2 refunds are no longer linked.",
 		);
@@ -1271,9 +1323,11 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		expect(await refundOf(REFUND)).toBeNull();
 		expect(trigger?.toast.message).toBe(
 			"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
@@ -1290,10 +1344,12 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const { results } = await db
 			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 			.bind(REFUND)
 			.all<{ id: number }>();
+
 		const [kids, gas] = results.map((row) => row.id);
 		// Only the Gas part still points at the Household part; the refund's own row and its Kids part do not.
 		await db.batch([
@@ -1306,9 +1362,11 @@ describe("splits unlink their refunds", () => {
 				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
 				.bind(PART_HOUSEHOLD, gas),
 		]);
+
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		expect(trigger?.toast.message).toBe(
 			"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
 		);
@@ -1324,6 +1382,7 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		// Splitting the purchase, with the split refund answered Not linked: its own row and each part are unlinked.
 		const { res, trigger } = await post(`/transactions/${PURCHASE}/split`, [
 			["part_category", String(KIDS)],
@@ -1333,6 +1392,7 @@ describe("splits unlink their refunds", () => {
 			[`refund_${REFUND}`, "none"],
 			["back", "/transactions"],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(await refundOf(REFUND)).toBeNull();
 		expect(trigger?.toast.message).toBe(
@@ -1350,6 +1410,7 @@ describe("splits unlink their refunds", () => {
 			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
 			.bind(OTHER_MERCHANT, PURCHASE)
 			.run();
+
 		const { res, trigger } = await post(`/transactions/${PURCHASE}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
@@ -1358,6 +1419,7 @@ describe("splits unlink their refunds", () => {
 			[`refund_${REFUND}`, "none"],
 			["back", "/transactions"],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(await refundOf(REFUND)).toBeNull();
 		expect(trigger?.toast.message).toBe(
@@ -1370,6 +1432,7 @@ describe("splits unlink their refunds", () => {
 
 	it("re-splitting replaces the parts and unlinks their refunds", async () => {
 		await link(REFUND, PART_HOUSEHOLD);
+
 		const { res, trigger } = await post(`/transactions/${SPLIT}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
@@ -1378,6 +1441,7 @@ describe("splits unlink their refunds", () => {
 			["refund_9002", "none"],
 			["back", "/transactions"],
 		]);
+
 		expect(res.status).toBe(200);
 		expect(await refundOf(REFUND)).toBeNull();
 		expect(trigger?.toast.message).toBe(
@@ -1393,6 +1457,7 @@ describe("splits unlink their refunds", () => {
 		const before = await spent("2026-08", KIDS);
 		const linkedRefund = await refundOf(REFUND);
 		expect(linkedRefund).toBe(PURCHASE);
+
 		const { trigger } = await post(`/transactions/${REFUND}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
@@ -1400,6 +1465,7 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		expect(await refundOf(PURCHASE)).toBeNull();
 		expect(
 			await db
@@ -1414,18 +1480,26 @@ describe("splits unlink their refunds", () => {
 			is_split: 1,
 			refund_of_id: PURCHASE,
 		});
+
 		const parts = await db
 			.prepare(
 				"SELECT id, refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
-			.all();
+			.all<{
+				refund_of_id: number | null;
+				credit_reviewed: number;
+				credit_reviewed_by: string | null;
+			}>();
+
 		expect(parts.results).toHaveLength(2);
-		for (const part of parts.results as Array<Record<string, unknown>>) {
+
+		for (const part of parts.results) {
 			expect(part.refund_of_id).toBe(linkedRefund);
 			expect(part.credit_reviewed).toBe(1);
 			expect(part.credit_reviewed_by).toBe("user");
 		}
+
 		expect(await refundOf(REFUND)).toBe(linkedRefund);
 		// The budget and the purchase caption count the two $10 parts, never the split parent too.
 		expect(await spent("2026-08", KIDS)).toBe(before);
@@ -1454,12 +1528,14 @@ describe("splits unlink their refunds", () => {
 		const { res } = await link(REFUND, "");
 		expect(res.status).toBe(200);
 		expect(await refundOf(REFUND)).toBeNull();
+
 		const parts = await db
 			.prepare(
 				"SELECT refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
 			.all();
+
 		expect(parts.results).toEqual([
 			{ refund_of_id: null, credit_reviewed: 1, credit_reviewed_by: "user" },
 			{ refund_of_id: null, credit_reviewed: 1, credit_reviewed_by: "user" },
@@ -1477,11 +1553,14 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const parts = await db
 			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 			.bind(REFUND)
 			.all<{ id: number }>();
+
 		const firstPart = parts.results[0];
+
 		if (!firstPart) throw new Error("Expected first refund part");
 		// A person linked this part to a different purchase of their own.
 		await db
@@ -1489,12 +1568,14 @@ describe("splits unlink their refunds", () => {
 			.bind(AFTER_REFUND, firstPart.id)
 			.run();
 		await link(REFUND, "");
+
 		const links = await db
 			.prepare(
 				"SELECT refund_of_id FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
 			.all();
+
 		expect(links.results).toEqual([
 			{ refund_of_id: AFTER_REFUND },
 			{ refund_of_id: null },
@@ -1510,12 +1591,15 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const parts = await db
 			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 			.bind(REFUND)
 			.all<{ id: number }>();
+
 		expect(parts.results).toHaveLength(2);
 		const firstPart = parts.results[0];
+
 		if (!firstPart) throw new Error("Expected first refund part");
 		const beforeKids = await spent("2026-09", KIDS);
 		const beforeGas = await spent("2026-09", GAS);
@@ -1525,12 +1609,14 @@ describe("splits unlink their refunds", () => {
 			["creditReviewed", "0"],
 		]);
 		await link(REFUND, "");
+
 		const review = await db
 			.prepare(
 				"SELECT refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
 			.all();
+
 		expect(review.results).toEqual([
 			{ refund_of_id: null, credit_reviewed: 0, credit_reviewed_by: null },
 			{ refund_of_id: null, credit_reviewed: 1, credit_reviewed_by: "user" },
@@ -1544,6 +1630,7 @@ describe("splits unlink their refunds", () => {
 		await link(REFUND, "");
 		const beforeKids = await spent("2026-09", KIDS);
 		const beforeGas = await spent("2026-09", GAS);
+
 		const { trigger } = await post(`/transactions/${REFUND}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
@@ -1551,12 +1638,14 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const parts = await db
 			.prepare(
 				"SELECT refund_of_id, category_id FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
 			.all();
+
 		expect(parts.results).toEqual([
 			{ refund_of_id: null, category_id: KIDS },
 			{ refund_of_id: null, category_id: GAS },
@@ -1582,12 +1671,14 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const parts = await db
 			.prepare(
 				"SELECT refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
 			.all();
+
 		expect(parts.results).toEqual([
 			{
 				refund_of_id: PURCHASE,
@@ -1619,12 +1710,14 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const parts = await db
 			.prepare(
 				"SELECT refund_of_id FROM transactions WHERE parent_id = ? ORDER BY id",
 			)
 			.bind(REFUND)
 			.all();
+
 		expect(parts.results).toEqual([
 			{ refund_of_id: PURCHASE },
 			{ refund_of_id: PURCHASE },
@@ -1651,6 +1744,7 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
+
 		const parts = await db
 			.prepare(
 				"SELECT id, refund_of_id, credit_reviewed FROM transactions WHERE parent_id = ? ORDER BY id",
@@ -1661,11 +1755,13 @@ describe("splits unlink their refunds", () => {
 				refund_of_id: number | null;
 				credit_reviewed: number;
 			}>();
+
 		expect(parts.results).toEqual([
 			{ id: expect.any(Number), refund_of_id: PURCHASE, credit_reviewed: 0 },
 			{ id: expect.any(Number), refund_of_id: PURCHASE, credit_reviewed: 0 },
 		]);
 		expect(await spent("2026-08", KIDS)).toBe(before);
+
 		for (const part of parts.results) {
 			await saveEdit(
 				db,
@@ -1682,6 +1778,7 @@ describe("splits unlink their refunds", () => {
 				"synthetic-person",
 			);
 		}
+
 		expect(await spent("2026-08", KIDS)).toBe(before - 2000);
 	});
 
@@ -1689,6 +1786,7 @@ describe("splits unlink their refunds", () => {
 		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
 			["back", "/transactions"],
 		]);
+
 		expect(trigger?.toast.message).toBe("Removed split from Refund Shop");
 	});
 
@@ -1722,6 +1820,7 @@ describe("splits unlink their refunds", () => {
 			const { trigger } = await post(`/transactions/${REFUND}/split/remove`, [
 				["back", "/transactions"],
 			]);
+
 			expect(await refundOf(REFUND)).toBeNull();
 			expect(await refundOf(ANOTHER)).toBe(PURCHASE);
 			expect(trigger?.toast.message).toBe(
@@ -1740,16 +1839,19 @@ describe("splits unlink their refunds", () => {
 				["part_amount", "15"],
 				["back", "/transactions"],
 			]);
+
 			expect(trigger?.toast.message).toBe(
 				"Split Refund Shop. The refund on Sep 10 is no longer linked.",
 			);
 			expect(await refundOf(REFUND)).toBeNull();
+
 			const linkedParts = await db
 				.prepare(
 					"SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ? AND refund_of_id IS NOT NULL",
 				)
 				.bind(REFUND)
 				.first<{ n: number }>();
+
 			expect(linkedParts?.n).toBe(0);
 		});
 	});
@@ -1765,6 +1867,7 @@ describe("refund guards", () => {
 
 	const TOO_BIG_50 =
 		"This refund is more than what's left of that purchase ($50.00 left).";
+
 	const tooBig = (left: string) =>
 		`This refund is more than what's left of that purchase (${left} left).`;
 
@@ -1817,6 +1920,7 @@ describe("refund guards", () => {
 				["refund_of", String(PURCHASE)],
 				["note", "should not save"],
 			]);
+
 			expect(res.status).toBe(422);
 			expect(refundAlert(html)).toBe(TOO_BIG_50);
 			// The panel is back, with the field and its error tied together and the section open.
@@ -1851,10 +1955,12 @@ describe("refund guards", () => {
 		it("refuses the second of two $30 refunds of a $50 purchase, saying $20.00 is left", async () => {
 			const first = await link(THIRTY_A, PURCHASE);
 			expect(first.res.status).toBe(200);
+
 			const { res, html } = await save(THIRTY_B, [
 				["refund_of", String(PURCHASE)],
 				["note", "second"],
 			]);
+
 			expect(res.status).toBe(422);
 			expect(refundAlert(html)).toBe(tooBig("$20.00"));
 			expect(await row(THIRTY_B)).toMatchObject({
@@ -2000,6 +2106,7 @@ describe("refund guards", () => {
 			["income", "0"],
 			["income_was", "0"],
 		];
+
 		const unreviewedCredit = () =>
 			db
 				.prepare(
@@ -2015,11 +2122,13 @@ describe("refund guards", () => {
 				.run();
 			expect((await link(BIG_REFUND, PURCHASE)).res.status).toBe(200);
 			await unreviewedCredit();
+
 			const { res, html, trigger } = await save(SIX, [
 				["refund_of", String(PURCHASE)],
 				...REVIEW_AS_NOT_INCOME,
 				["note", "should not save"],
 			]);
+
 			expect(res.status).toBe(422);
 			expect(refundAlert(html)).toBe(tooBig("$0.00"));
 			expect(trigger).toBeNull();
@@ -2033,10 +2142,12 @@ describe("refund guards", () => {
 		it("saves it when the purchase still has $20 left", async () => {
 			expect((await link(THIRTY_A, PURCHASE)).res.status).toBe(200);
 			await unreviewedCredit();
+
 			const { res, html } = await save(SIX, [
 				["refund_of", String(PURCHASE)],
 				...REVIEW_AS_NOT_INCOME,
 			]);
+
 			expect(res.status).toBe(200);
 			expect(refundAlert(html)).toBeUndefined();
 			expect(await row(SIX)).toMatchObject({
@@ -2052,10 +2163,12 @@ describe("refund guards", () => {
 				)
 				.bind(PURCHASE, BIG_REFUND, THIRTY_A)
 				.run();
+
 			const { res } = await save(THIRTY_A, [
 				["refund_of", String(PURCHASE)],
 				["note", "note only"],
 			]);
+
 			expect(res.status).toBe(200);
 			expect(await row(THIRTY_A)).toMatchObject({
 				refund_of_id: PURCHASE,
@@ -2067,20 +2180,24 @@ describe("refund guards", () => {
 			const PART_A = 9031;
 			const PART_B = 9032;
 			const OTHER_LABEL = "Sep 2 · $50.00 · Kids";
+
 			const otherPurchase = {
 				id: OTHER_PURCHASE,
 				date: "2026-09-02",
 				amountCents: 5000,
 				categoryName: "Kids",
 			};
+
 			type Split = {
 				parent: number | null;
 				partA: number | null;
 				partB: number | null;
 			};
+
 			// The alert when a part is refused for the purchase it is linked to (not the credit's own purchase).
 			const partTooBig = (left: string, label: string) =>
 				`Part of this refund is for the ${label} purchase and is more than what's left of it (${left} left).`;
+
 			// SIX becomes a $20 split credit in two $10 parts, never reviewed, so nothing counts yet. Each link is
 			// null for unlinked, or a purchase. An unreviewed part still takes up room on its purchase, so a
 			// purchase is filled before its parts are made (fillUp, linkRefunds).
@@ -2092,6 +2209,7 @@ describe("refund guards", () => {
 				} = {},
 			) => {
 				const { parent = PURCHASE, partA = PURCHASE, partB = PURCHASE } = links;
+
 				return db.batch([
 					db
 						.prepare(
@@ -2106,6 +2224,7 @@ describe("refund guards", () => {
 						.bind(partA, partB),
 				]);
 			};
+
 			/** Makes a purchase full: BIG_REFUND, the whole $50, is linked to it. */
 			const fillUp = async (purchase: number) => {
 				await db
@@ -2114,11 +2233,13 @@ describe("refund guards", () => {
 					.run();
 				expect((await link(BIG_REFUND, purchase)).res.status).toBe(200);
 			};
+
 			/** Links refunds to a purchase one at a time, each of which must fit. */
 			const linkRefunds = async (purchase: number, refunds: number[]) => {
 				for (const refund of refunds)
 					expect((await link(refund, purchase)).res.status).toBe(200);
 			};
+
 			const parts = async () =>
 				(
 					await db
@@ -2128,6 +2249,7 @@ describe("refund guards", () => {
 						.bind(SIX)
 						.all()
 				).results;
+
 			/** The parts as a row expects them: linked as `split` says, and reviewed or not. */
 			const partsAs = (split: Split, reviewed: boolean) => [
 				{
@@ -2143,6 +2265,7 @@ describe("refund guards", () => {
 					credit_reviewed_by: reviewed ? "user" : null,
 				},
 			];
+
 			/** Everything a save can change here: the credit, its parts, and Spent in both months. */
 			const snapshot = async () => ({
 				credit: await row(SIX),
@@ -2159,9 +2282,10 @@ describe("refund guards", () => {
 						reviewed: boolean;
 						dropped: { "2026-08": number; "2026-09": number };
 				  };
+
 			type Scenario = {
 				name: string;
-				arrange?: () => Promise<unknown>;
+				arrange?: () => Promise<void>;
 				split: Split;
 				/** The purchase the refund is linked to after the save; null unlinks it. */
 				linkTo: number | null;
@@ -2169,6 +2293,7 @@ describe("refund guards", () => {
 				review: boolean;
 				outcome: Outcome;
 			};
+
 			// A save that links the parent to a new purchase goes straight to saveEdit, as the panel offers a
 			// split parent only its current link; every other save goes through the route, which shows the alert.
 			const SCENARIOS: Scenario[] = [
@@ -2416,6 +2541,7 @@ describe("refund guards", () => {
 				await unreviewedSplitCredit(s.split);
 				const before = await snapshot();
 				const note = "links" in s.outcome ? null : "should not save";
+
 				if (s.linkTo !== null && s.linkTo !== s.split.parent) {
 					const result = await saveEdit(
 						db,
@@ -2429,6 +2555,7 @@ describe("refund guards", () => {
 						},
 						"test",
 					);
+
 					expect(result).toEqual(
 						"refused" in s.outcome ? s.outcome.refused : { saved: true },
 					);
@@ -2436,8 +2563,11 @@ describe("refund guards", () => {
 					const { res, html, trigger } = await save(SIX, [
 						["refund_of", s.linkTo === null ? "" : String(s.linkTo)],
 						...(s.review ? REVIEW_AS_NOT_INCOME : []),
-						...(note === null ? [] : [["note", note] as [string, string]]),
+						...(note === null
+							? []
+							: [["note", note] satisfies [string, string]]),
 					]);
+
 					if ("alert" in s.outcome) {
 						expect(res.status).toBe(422);
 						expect(refundAlert(html)).toBe(s.outcome.alert);
@@ -2447,6 +2577,7 @@ describe("refund guards", () => {
 						expect(refundAlert(html)).toBeUndefined();
 					}
 				}
+
 				if ("links" in s.outcome) {
 					expect(await refundOf(SIX)).toBe(s.outcome.links.parent);
 					expect(await parts()).toEqual(
@@ -2475,6 +2606,7 @@ describe("refund guards", () => {
 					partA: null,
 					partB: OTHER_PURCHASE,
 				});
+
 				const result = await saveEdit(
 					db,
 					SIX,
@@ -2487,6 +2619,7 @@ describe("refund guards", () => {
 					},
 					"demo",
 				);
+
 				expect(result).toEqual({
 					saved: false,
 					refundLeftCents: 0,
@@ -2539,11 +2672,13 @@ describe("refund guards", () => {
 		it("re-saving the same link passes, even when the purchase is fully refunded", async () => {
 			await link(THIRTY_A, PURCHASE);
 			await link(REFUND, PURCHASE);
+
 			// $50 of $50 is refunded; saving the $30's own link again isn't asking for more.
 			const { res, html } = await save(THIRTY_A, [
 				["refund_of", String(PURCHASE)],
 				["note", "same link"],
 			]);
+
 			expect(res.status).toBe(200);
 			expect(refundAlert(html)).toBeUndefined();
 			expect(await row(THIRTY_A)).toMatchObject({
@@ -2604,11 +2739,13 @@ describe("refund guards", () => {
 		it("an excluded refund counts once it's linked, as the person's choice", async () => {
 			await excludeAsJev();
 			const before = await spent("2026-08", KIDS);
+
 			// The panel posts the Exclude chip as it was drawn, checked.
 			const { res, trigger } = await save(REFUND, [
 				["refund_of", String(PURCHASE)],
 				["excluded", "1"],
 			]);
+
 			expect(res.status).toBe(200);
 			expect(await row(REFUND)).toMatchObject({
 				refund_of_id: PURCHASE,
@@ -2657,10 +2794,12 @@ describe("refund guards", () => {
 				)
 				.bind(BIG_REFUND)
 				.run();
+
 			const { res } = await save(BIG_REFUND, [
 				["refund_of", String(PURCHASE)],
 				["excluded", "1"],
 			]);
+
 			expect(res.status).toBe(422);
 			expect(await row(BIG_REFUND)).toMatchObject({
 				refund_of_id: null,
@@ -2698,10 +2837,12 @@ describe("refund guards", () => {
 				.bind(REFUND)
 				.run();
 			const before = await spent("2026-08", KIDS);
+
 			const { res } = await save(REFUND, [
 				["refund_of", String(PURCHASE)],
 				["creditReviewedVisible", "1"],
 			]);
+
 			expect(res.status).toBe(200);
 			expect(await row(REFUND)).toMatchObject({
 				refund_of_id: PURCHASE,
@@ -2725,6 +2866,7 @@ describe("refund guards", () => {
 				},
 				"test",
 			);
+
 			expect(result).toEqual({ saved: false, refundLeftCents: 5000 });
 			expect(await row(BIG_REFUND)).toMatchObject({
 				refund_of_id: null,
@@ -2750,10 +2892,12 @@ describe("refund guards", () => {
 					"test",
 				),
 			).toEqual({ saved: false, refundLeftCents: 5000 });
+
 			const { results } = await db
 				.prepare("SELECT refund_of_id FROM transactions WHERE parent_id = ?")
 				.bind(BIG_REFUND)
 				.all();
+
 			expect(results).toEqual([{ refund_of_id: null }, { refund_of_id: null }]);
 		});
 
@@ -2772,15 +2916,18 @@ describe("refund guards", () => {
 					"b",
 				),
 			]);
+
 			expect([a.saved, b.saved].sort()).toEqual([false, true]);
 			const refused = a.saved ? b : a;
 			expect(refused).toEqual({ saved: false, refundLeftCents: 2000 });
+
 			const { results } = await db
 				.prepare(
 					"SELECT id FROM transactions WHERE refund_of_id = ? ORDER BY id",
 				)
 				.bind(PURCHASE)
 				.all();
+
 			expect(results).toHaveLength(1);
 		});
 
@@ -2789,11 +2936,14 @@ describe("refund guards", () => {
 				link(THIRTY_A, PURCHASE),
 				link(THIRTY_B, PURCHASE),
 			]);
+
 			expect([a.res.status, b.res.status].sort()).toEqual([200, 422]);
+
 			const { results } = await db
 				.prepare("SELECT id FROM transactions WHERE refund_of_id = ?")
 				.bind(PURCHASE)
 				.all();
+
 			expect(results).toHaveLength(1);
 		});
 	});
@@ -2916,11 +3066,13 @@ describe("refund guards", () => {
 				["part_amount", "5"],
 				["back", "/transactions"],
 			]);
+
 			const { results: parts } = await db
 				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 				.bind(BIG_REFUND)
 				.all<{ id: number }>();
-			const big = parts[0]?.id as number;
+
+			const big = itemAt(parts, 0).id;
 			// The $55 part can't link to the $50 purchase, and excluding it must not reach its parent
 			// or its other part either.
 			expect(
@@ -2931,12 +3083,14 @@ describe("refund guards", () => {
 					"test",
 				),
 			).toEqual({ saved: false, refundLeftCents: 5000 });
+
 			const { results } = await db
 				.prepare(
 					"SELECT id, excluded, refund_of_id FROM transactions WHERE id = ?1 OR parent_id = ?1 ORDER BY id",
 				)
 				.bind(BIG_REFUND)
 				.all();
+
 			expect(results.map((r) => [r.excluded, r.refund_of_id])).toEqual([
 				[0, null],
 				[0, null],
@@ -3003,24 +3157,28 @@ describe("refund guards", () => {
 				)
 				.bind(BIG_REFUND)
 				.run();
+
 			const { results: parts } = await db
 				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 				.bind(BIG_REFUND)
 				.all<{ id: number }>();
+
 			expect(
 				await saveEdit(
 					db,
-					parts[0]?.id as number,
+					itemAt(parts, 0).id,
 					{ ...EDIT, excluded: true, refundOfId: PURCHASE },
 					"test",
 				),
 			).toEqual({ saved: true });
+
 			const { results } = await db
 				.prepare(
 					"SELECT excluded, excluded_source FROM transactions WHERE id = ?1 OR parent_id = ?1 ORDER BY id",
 				)
 				.bind(BIG_REFUND)
 				.all();
+
 			expect(results).toEqual([
 				{ excluded: 0, excluded_source: "user" },
 				{ excluded: 0, excluded_source: "user" },
@@ -3040,12 +3198,15 @@ describe("refund guards", () => {
 				["part_amount", "10"],
 				["back", "/transactions"],
 			]);
+
 			const { results } = await db
 				.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
 				.bind(REFUND)
 				.all<{ id: number }>();
+
 			return results.map((r) => r.id);
 		}
+
 		// A purchase of $15, nothing refunded yet, so $15 is left.
 		async function purchaseWith15Left() {
 			await db
@@ -3054,6 +3215,7 @@ describe("refund guards", () => {
 				)
 				.bind(KIDS, OTHER_PURCHASE)
 				.run();
+
 			return OTHER_PURCHASE;
 		}
 
@@ -3075,8 +3237,8 @@ describe("refund guards", () => {
 				),
 			).toEqual({ saved: true });
 			expect(await refundOf(REFUND)).toBe(target);
-			expect(await refundOf(second as number)).toBe(target);
-			expect(await refundOf(first as number)).toBe(AFTER_REFUND);
+			expect(await refundOf(present(second))).toBe(target);
+			expect(await refundOf(present(first))).toBe(AFTER_REFUND);
 		});
 
 		it("still refuses it, moving nothing, when the parts that move don't fit", async () => {
@@ -3092,10 +3254,12 @@ describe("refund guards", () => {
 				),
 			).toEqual({ saved: false, refundLeftCents: 1500 });
 			expect(await refundOf(REFUND)).toBe(PURCHASE);
+
 			const { results } = await db
 				.prepare("SELECT refund_of_id FROM transactions WHERE parent_id = ?")
 				.bind(REFUND)
 				.all();
+
 			expect(results).toEqual([
 				{ refund_of_id: PURCHASE },
 				{ refund_of_id: PURCHASE },
@@ -3144,9 +3308,11 @@ describe("refund guards", () => {
 				.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 				.bind(THIRTY_A)
 				.run();
+
 			const offered = (
 				await refundPurchases(db, await detail(SECOND_REFUND))
 			).map((p) => p.id);
+
 			expect(offered).toContain(PURCHASE);
 		});
 	});
@@ -3167,6 +3333,7 @@ describe("refund guards", () => {
 				.bind(PURCHASE, THIRTY_B)
 				.run();
 		}
+
 		const flags = (id: number) =>
 			db
 				.prepare(
@@ -3177,6 +3344,7 @@ describe("refund guards", () => {
 
 		it("refuses a $30 credit that would join $40 of refunds on a $50 purchase, saving nothing", async () => {
 			await incomeCreditOnFullishPurchase();
+
 			// The panel, with Count as income unticked and a note typed.
 			const { res, html } = await save(THIRTY_B, [
 				["refund_of", String(PURCHASE)],
@@ -3184,6 +3352,7 @@ describe("refund guards", () => {
 				["creditReviewedVisible", "1"],
 				["creditReviewed", "1"],
 			]);
+
 			expect(res.status).toBe(422);
 			expect(refundAlert(html)).toBe(tooBig("$10.00"));
 			expect(await flags(THIRTY_B)).toEqual({
@@ -3302,12 +3471,14 @@ describe("refund guards", () => {
 			// Nothing is offered for the second refund: the panel has no "This refunds…" section.
 			const empty = await get("/transactions/9103");
 			expect(empty.html).not.toContain("This refunds…");
+
 			// A save that still names the purchase (a panel opened before it was fully refunded).
 			const { res, html } = await post("/transactions/9103", [
 				["back", "/transactions"],
 				["merchant", "Lone Shop"],
 				["refund_of", "9101"],
 			]);
+
 			expect(res.status).toBe(422);
 			expect(refundAlert(html)).toBe("Pick a purchase from the list.");
 			expect(html).toMatch(
@@ -3333,11 +3504,14 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 				"",
 			),
 		);
+
 	/** The open panel's fields as a browser posts them, whether its category is locked or not. */
 	const panel = async (id: number) =>
 		browserFields(panelForm((await get(`/transactions/${id}`)).html, id));
+
 	const redraw = (id: number, fields: [string, string][]) =>
 		post(`/transactions/${id}/category/lock`, fields);
+
 	/** The panel's fields once a redraw's reply is in: the reply's posted fields replace the panel's category choice. */
 	const withReply = (fields: [string, string][], reply: string) => [
 		...fields.filter(
@@ -3345,6 +3519,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		),
 		...browserFields(reply),
 	];
+
 	/**
 	 * One redraw as the browser runs it: the form's fields with `changes` made are posted to the lock route, and
 	 * the form then holds the reply's fields (`form`), as the swap leaves them.
@@ -3356,10 +3531,13 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 	) => {
 		const fields = edited(form, changes);
 		const reply = await redraw(id, fields);
+
 		return { ...reply, form: withReply(fields, reply.html) };
 	};
+
 	const newCategoryName = (html: string) =>
 		/<input\b[^>]*\sid="new-category-name"[^>]*>/.exec(html)?.[0] ?? "";
+
 	/** The Category fieldset's opening tag in a redraw, which is the reply's only fieldset. */
 	const fieldsetTag = (html: string) =>
 		html.slice(
@@ -3369,10 +3547,12 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 
 	it("unlocks the category when Count as income is ticked on a linked credit, and says so", async () => {
 		await link(REFUND, PURCHASE);
+
 		const { res, html, trigger } = await redraw(
 			REFUND,
 			edited(await panel(REFUND), { income: "1" }),
 		);
+
 		expect(res.status).toBe(200);
 		expect(fieldsetTag(html)).not.toContain("disabled");
 		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
@@ -3386,12 +3566,14 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 
 	it("unlocks the category when Reviewed is unticked on a linked credit", async () => {
 		await link(REFUND, PURCHASE);
+
 		const { html, trigger } = await redraw(
 			REFUND,
 			edited(await panel(REFUND), {
 				creditReviewed: undefined,
 			}),
 		);
+
 		expect(fieldsetTag(html)).not.toContain("disabled");
 		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
 		expect(trigger?.announce).toBe("Pick a category.");
@@ -3405,6 +3587,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 			)
 			.bind(REFUND)
 			.run();
+
 		const { html, trigger } = await redraw(
 			REFUND,
 			edited(await panel(REFUND), {
@@ -3412,6 +3595,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 				category: String(GAS),
 			}),
 		);
+
 		expect(fieldsetTag(html)).toContain("disabled");
 		expect(html).toMatch(/name="category" value="4"[^>]*checked/);
 		expect(html).not.toMatch(/name="category" value="3"[^>]*checked/);
@@ -3421,13 +3605,16 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 
 	it("saves the category picked after the redraw unlocks it", async () => {
 		await link(REFUND, PURCHASE);
+
 		const { html } = await redraw(
 			REFUND,
 			edited(await panel(REFUND), {
 				creditReviewed: undefined,
 			}),
 		);
+
 		expect(fieldsetTag(html)).not.toContain("disabled");
+
 		const saved = await post(`/transactions/${REFUND}`, [
 			["back", "/transactions"],
 			["merchant", "Refund Shop"],
@@ -3436,6 +3623,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 				category: String(GAS),
 			}),
 		]);
+
 		expect(saved.res.status).toBe(200);
 		expect(await ownCategory(REFUND)).toBe(GAS);
 		expect(await refundOf(REFUND)).toBe(PURCHASE);
@@ -3445,11 +3633,13 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		await link(REFUND, PURCHASE);
 		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
 		expect(fieldsetTag(opened.html)).not.toContain("disabled");
+
 		// Gas is picked and Count as income is unticked: the choice locks on the purchase's Kids.
 		const locked = await step(REFUND, opened.form, {
 			category: String(GAS),
 			income: undefined,
 		});
+
 		expect(fieldsetTag(locked.html)).toContain("disabled");
 		expect(locked.html).toMatch(/name="category" value="4"[^>]*checked/);
 		expect(locked.html).toContain("Counts in Kids with the Aug 20 purchase.");
@@ -3465,11 +3655,13 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 	it("keeps a typed new category name when the lock comes and goes", async () => {
 		await link(REFUND, PURCHASE);
 		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+
 		const locked = await step(REFUND, opened.form, {
 			category: "new",
 			new_category_name: "Returns",
 			income: undefined,
 		});
+
 		expect(fieldsetTag(locked.html)).toContain("disabled");
 		const carried = locked.html.slice(locked.html.indexOf("</fieldset>"));
 		expect(carried).toContain(
@@ -3487,10 +3679,12 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 	it("a save while locked doesn't change the category", async () => {
 		await link(REFUND, PURCHASE);
 		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+
 		const locked = await step(REFUND, opened.form, {
 			category: String(GAS),
 			income: undefined,
 		});
+
 		expect(locked.html).toContain(
 			'<input type="hidden" name="category" value="3"',
 		);
@@ -3503,11 +3697,13 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 	it("a save while locked doesn't make a category from a typed name", async () => {
 		await link(REFUND, PURCHASE);
 		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+
 		const locked = await step(REFUND, opened.form, {
 			category: "new",
 			new_category_name: "Returns",
 			income: undefined,
 		});
+
 		expect(locked.html).toContain(
 			'<input type="hidden" name="new_category_name" value="Returns"',
 		);
@@ -3515,10 +3711,12 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		expect(saved.res.status).toBe(200);
 		expect(await ownCategory(REFUND)).toBe(GROCERIES);
 		expect(await refundOf(REFUND)).toBe(PURCHASE);
+
 		const made = await db
 			.prepare("SELECT COUNT(*) AS n FROM categories WHERE name = ?")
 			.bind("Returns")
 			.first<{ n: number }>();
+
 		expect(made?.n).toBe(0);
 	});
 
@@ -3557,12 +3755,15 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		await link(REFUND, PURCHASE);
 		const linked = (await get(`/transactions/${REFUND}`)).html;
 		const route = `hx-post="/transactions/${REFUND}/category/lock"`;
+
 		// Each toggle's attributes run from its route to hx-include; the swap sits between them.
 		const toggles = linked
 			.split(route)
 			.slice(1)
 			.map((rest) => rest.slice(0, rest.indexOf("hx-include")));
+
 		expect(toggles).toHaveLength(2);
+
 		for (const toggle of toggles)
 			expect(toggle).toContain('hx-swap="innerMorph"');
 	});

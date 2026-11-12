@@ -87,22 +87,28 @@ export const DAILY_RUN_UTC_HOUR = 9;
  */
 export function dailyRunTime(timeZone: string, nowMs: number): string {
 	const now = new Date(nowMs);
+
 	const todayRun = Date.UTC(
 		now.getUTCFullYear(),
 		now.getUTCMonth(),
 		now.getUTCDate(),
 		DAILY_RUN_UTC_HOUR,
 	);
+
 	const run = nowMs < todayRun ? todayRun : todayRun + DAY_MS;
+
 	const parts = new Intl.DateTimeFormat("en-US", {
 		timeZone,
 		hour: "numeric",
 		minute: "2-digit",
 	}).formatToParts(run);
+
 	const part = (type: Intl.DateTimeFormatPartTypes) =>
 		parts.find((p) => p.type === type)?.value ?? "";
+
 	const minute = part("minute");
 	const clock = minute === "00" ? part("hour") : `${part("hour")}:${minute}`;
+
 	return `${clock} ${part("dayPeriod")}`;
 }
 
@@ -113,19 +119,23 @@ export function dailyRunTime(timeZone: string, nowMs: number): string {
 export function storedTimeMs(value: string | null): number | null {
 	if (value === null) return null;
 	let iso: string | null = null;
+
 	if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value))
 		iso = `${value.replace(" ", "T")}Z`;
 	else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value))
 		iso = value;
 	else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) iso = `${value}T00:00:00Z`;
+
 	if (iso === null) return null;
 	const ms = Date.parse(iso);
+
 	return Number.isFinite(ms) ? ms : null;
 }
 
 /** The latest of some times, the nulls left out; null when none is known. */
 function newestMs(times: (number | null)[]): number | null {
 	const known = times.filter((time): time is number => time !== null);
+
 	return known.length === 0 ? null : Math.max(...known);
 }
 
@@ -163,6 +173,7 @@ export function setupView({
 	if (isSetUp(record)) return null;
 	const bankName = banks[0]?.name ?? null;
 	const historyIn = banksHistoryIn(banks);
+
 	const phase: SetupPhase =
 		banks.length === 0
 			? "before"
@@ -173,26 +184,33 @@ export function setupView({
 					})
 				? "ready"
 				: "reading";
+
 	const sorting = phase === "reading" && historyIn && waiting > 0;
+
 	// With Sort right away off, a sync's sort asks Jev nothing, so the import waits for the daily run (decision 150). The
 	// record's mark keeps that while the switch is on again, until the night's run finds nothing waiting.
 	const waitsForRun =
 		sorting && (!sortOnArrival || record?.waitsForRun === true);
+
 	const historyAt = newestMs(
 		banks.map((bank) => storedTimeMs(bank.historyCompleteAt)),
 	);
+
 	const slow =
 		sorting &&
 		!waitsForRun &&
 		historyAt !== null &&
 		nowMs - historyAt > HOUR_MS;
+
 	const linkedAt = newestMs(banks.map((bank) => storedTimeMs(bank.linkedAt)));
 	const recent = newestMs([linkedAt, historyAt]);
+
 	// Something is moving: once every history is in, the sort (not slow). While one is still coming in, a bank that nothing
 	// flags: a flagged one waits for a sign-in or a sync that isn't coming, as bankState's paused does. Each bank's flag is the
 	// caller's list's entry with its id (never its name), so two banks sharing a name never share a flag.
 	const isFlagged = (bank: GateBank) =>
 		flagged.some((flag) => flag.id === bank.id);
+
 	const moving =
 		phase === "reading" &&
 		!waitsForRun &&
@@ -201,7 +219,9 @@ export function setupView({
 			: banks.some(
 					(bank) => bank.historyCompleteAt === null && !isFlagged(bank),
 				));
+
 	const refreshes = moving && recent !== null && nowMs - recent <= HOUR_MS;
+
 	return {
 		phase,
 		bankName,
@@ -229,8 +249,10 @@ export async function readSetup(
 	{ today, flagged }: { today: string; flagged: FlaggedBank[] },
 ): Promise<SetupView | null> {
 	let record = await readFirstTally(db);
+
 	if (isSetUp(record)) return null;
 	const { banks, waiting, sortOnArrival } = await readGateInputs(db);
+
 	// A connected bank with no stroke one (linked before the first week shipped, in a household with no budgets, so
 	// migration 0057 didn't set it up) draws stroke one today, or the gate would never open. The write checks for a
 	// connected bank in the same statement (BANK_CONNECTED_SQL), so a last bank disconnected since the read above draws
@@ -239,6 +261,7 @@ export async function readSetup(
 		await markStroke(db, "bank", today, BANK_CONNECTED_SQL);
 		record = await readFirstTally(db);
 	}
+
 	const total =
 		(
 			await db
@@ -247,6 +270,7 @@ export async function readSetup(
 				)
 				.first<{ total: number }>()
 		)?.total ?? 0;
+
 	return setupView({
 		record,
 		banks,

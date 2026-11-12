@@ -13,19 +13,24 @@ import { nothingToDo, refuse, write } from "../src/rules/rule";
 // the rule answers. The month is an input (decision 195); nothing here touches a clock or a database.
 
 const MONTH = "2026-11";
+
 const live = (budgetCents: number | null): BudgetFacts => ({
 	category: { archived: false },
 	budgetCents,
 });
+
 const archived = (budgetCents: number | null): BudgetFacts => ({
 	category: { archived: true },
 	budgetCents,
 });
+
 const missing: BudgetFacts = { category: null, budgetCents: null };
+
 const NOT_ON_BUDGET = refuse(
 	"CategoryNotOnBudget",
 	"That category isn't on the budget.",
 );
+
 const NO_BUDGET = refuse(
 	"NoBudgetToAdjust",
 	"That category has no budget to adjust yet.",
@@ -34,6 +39,7 @@ const NO_BUDGET = refuse(
 describe("Save a budget", () => {
 	const ask = (cents: number, facts: BudgetFacts) =>
 		saveBudget.decide({ categoryId: 1, cents, month: MONTH }, facts);
+
 	const saves = (cents: number, expectedBudgetCents: number | null) =>
 		write({ categoryId: 1, month: MONTH, cents, expectedBudgetCents });
 
@@ -65,6 +71,7 @@ describe("Save a budget", () => {
 describe("Nudge a budget", () => {
 	const ask = (direction: "up" | "down", facts: BudgetFacts) =>
 		nudgeBudget.decide({ categoryId: 1, direction, month: MONTH }, facts);
+
 	const saves = (cents: number, expectedBudgetCents: number) =>
 		write({ categoryId: 1, month: MONTH, cents, expectedBudgetCents });
 
@@ -110,6 +117,7 @@ describe("Nudge a budget", () => {
 describe("Save the savings goal", () => {
 	const ask = (cents: number, goalCents: number | null) =>
 		saveSavingsGoal.decide({ cents, month: MONTH }, { goalCents });
+
 	const saves = (cents: number, expectedGoalCents: number | null) =>
 		write({ month: MONTH, cents, expectedGoalCents });
 
@@ -179,6 +187,7 @@ describe("the rules' sheet", () => {
 				say: z.string().min(1),
 			}),
 		]);
+
 		const answers = [
 			saveBudget.decide({ categoryId: 1, cents: 1, month: MONTH }, live(null)),
 			saveBudget.decide({ categoryId: 1, cents: 1, month: MONTH }, live(1)),
@@ -198,6 +207,7 @@ describe("the rules' sheet", () => {
 			saveSavingsGoal.decide({ cents: 1, month: MONTH }, { goalCents: null }),
 			saveSavingsGoal.decide({ cents: 1, month: MONTH }, { goalCents: 1 }),
 		];
+
 		for (const answer of answers)
 			expect(Answer.safeParse(answer).success).toBe(true);
 	});

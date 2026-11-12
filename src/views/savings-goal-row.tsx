@@ -20,6 +20,7 @@ export function SavingsGoalRow({
 	const goalSet = amountCents !== null && amountCents > 0;
 	// Only a set goal has an arrow for the tick to take (P119 A, #71).
 	const mark = goalSet ? saved : undefined;
+
 	const content = (
 		<>
 			<span class="shrink-0 text-ink">
@@ -45,6 +46,7 @@ export function SavingsGoalRow({
 			</div>
 		</>
 	);
+
 	return (
 		<li>
 			{href ? (

@@ -35,6 +35,7 @@ const CATS = {
 	kids: { name: "Kids", icon: "kids", color: "cat-ochre" },
 	household: { name: "Household", icon: "household", color: "cat-brown" },
 } as const;
+
 type Cat = (typeof CATS)[keyof typeof CATS];
 
 // ---------------------------------------------------------------------------------------------
@@ -74,6 +75,7 @@ const TRADER_JOES = tx(
 	6412,
 	CATS.groceries,
 );
+
 const LUPITAS = tx(
 	2,
 	"2026-10-04",
@@ -81,7 +83,9 @@ const LUPITAS = tx(
 	"TST* LUPITAS TAQ",
 	2240,
 );
+
 const SHELL = tx(3, "2026-10-04", "Shell", "SHELL OIL 57442", 4180, CATS.gas);
+
 const NETFLIX_TX = tx(
 	4,
 	"2026-10-03",
@@ -90,6 +94,7 @@ const NETFLIX_TX = tx(
 	1799,
 	CATS.household,
 );
+
 const TARGET = tx(
 	5,
 	"2026-10-03",
@@ -121,6 +126,7 @@ function PendingTag() {
 function PendingRow({ row, look }: { row: ListRow; look: "caption" | "tag" }) {
 	const { kind, caption, tag } = rowCaption(row);
 	const lead = look === "caption" && kind === "needs" ? null : caption;
+
 	return (
 		<li>
 			<div class="flex h-16 items-center gap-4 text-ink">
@@ -195,6 +201,7 @@ function DayGroup({
  */
 function transactions(look: PendingLook) {
 	const day = (date: string) => dayLabel(date, TODAY);
+
 	return (
 		<>
 			<Title>Transactions</Title>
@@ -237,6 +244,7 @@ function transactions(look: PendingLook) {
  */
 function pendingPanel(look: "caption" | "tag") {
 	const amount = formatCents(TRADER_JOES.amountCents, { signed: true });
+
 	return (
 		<Sheet behind={transactions(look)}>
 			<div>
@@ -289,6 +297,7 @@ const BUDGETS = {
 	kids: 30000,
 	household: 25000,
 };
+
 const BUDGET_TOTAL = Object.values(BUDGETS).reduce((n, cents) => n + cents, 0);
 
 /**
@@ -303,6 +312,7 @@ const SETTINGS_BUDGETS: [Cat, number][] = [
 // The Settings list's summary row and chevron (src/routes/settings.tsx), so a new row has the same shape.
 const summaryClass =
 	"flex min-h-11 list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden";
+
 const chevron = (
 	<span class="shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none">
 		<Icon name="chevron-right" class="size-5" />
@@ -349,6 +359,7 @@ const US_ZONES: [string, string][] = [
 	["America/Anchorage", "Alaska"],
 	["Pacific/Honolulu", "Hawaii"],
 ];
+
 const OTHER_ZONES: [string, string][] = [
 	["America/Phoenix", "Phoenix"],
 	["America/Puerto_Rico", "Puerto Rico"],
@@ -509,6 +520,7 @@ const NETFLIX_BILL: BillRowData = {
 	icon: "household",
 	color: "cat-brown",
 };
+
 /** The payment the matcher left alone: P34's Netflix charge, same merchant and in the date window, but 16% more. */
 const NEW_PRICE = { cents: NETFLIX_TX.amountCents, date: NETFLIX_TX.date };
 
@@ -532,6 +544,7 @@ const DUE: BillRowData[] = [
 		color: "cat-ochre",
 	},
 ];
+
 const UPCOMING: BillRowData[] = [
 	{
 		id: 4,
@@ -543,6 +556,7 @@ const UPCOMING: BillRowData[] = [
 		color: "cat-slate",
 	},
 ];
+
 const PAID: BillRowData[] = [
 	{
 		id: 5,
@@ -736,6 +750,7 @@ const SPENT = {
 	household: TARGET.amountCents + NETFLIX_TX.amountCents,
 	uncategorized: 9600,
 };
+
 /**
  * Safe to spend as §6 adds it up: the whole budget, less every counted dollar (uncategorized too),
  * less the bills that are due or overdue and unpaid (P36's three, $217.49): $934 here.
@@ -750,11 +765,13 @@ const HOME = {
 	safeToSpendCents: SAFE_TO_SPEND,
 	status: "Everything is on track.",
 };
+
 const NEEDS_BAND = {
 	href: "#p37-bank",
 	text: "4 transactions need a category",
 	detail: `${formatCents(SPENT.uncategorized, { wholeDollars: true })} of this month's spending`,
 };
+
 const HOME_ROWS = [
 	{ cat: CATS.groceries, spent: SPENT.groceries, budget: BUDGETS.groceries },
 	{ cat: CATS.eatingOut, spent: SPENT.eatingOut, budget: BUDGETS.eatingOut },

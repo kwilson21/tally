@@ -23,7 +23,9 @@ export type Place = {
 /** The sidebar's own item for a place, so its name, link and icon can't drift from the sidebar's. */
 function sidebarPlace(key: NavKey, desc: string, folio?: Folio): Place {
 	const item = SIDEBAR_ITEMS.find((entry) => entry.key === key);
+
 	if (!item) throw new Error(`No sidebar item for ${key}`);
+
 	return { name: item.label, href: item.href, icon: item.icon, desc, folio };
 }
 
@@ -41,12 +43,15 @@ function accountsFolio(
 		return { text: "Needs attention", tone: "attention" };
 	// The Apple Card counts from its first upload, balance or not, until it is removed (spec §8.10).
 	const card = appleCard && appleCard.removedAt === null ? 1 : 0;
+
 	if (banks.length === 0 && card === 0)
 		return { text: "None linked yet", tone: "muted" };
+
 	const count =
 		banks
 			.filter((bank) => !bank.disconnected)
 			.reduce((total, bank) => total + bank.accounts.length, 0) + card;
+
 	return {
 		text: count === 1 ? "1 account" : `${count} accounts`,
 		tone: "muted",
@@ -105,6 +110,7 @@ function FolioWords({ folio }: { folio: Folio }) {
 				{folio.text}
 			</span>
 		);
+
 	return (
 		<span
 			class={`text-right text-sm ${folio.tone === "ink" ? "text-ink" : "text-muted"}`}
@@ -181,10 +187,13 @@ export function Colophon({
 	version?: string;
 }) {
 	const release = version?.trim().split(/\s+/).join(" · ");
+
 	const words = demo
 		? "Tally demo · resets every night"
 		: release && `Tally ${release}`;
+
 	if (!words) return null;
+
 	return (
 		<p class="mt-10 flex items-center justify-center gap-2 text-sm text-muted">
 			<TallyMark class="size-4" />

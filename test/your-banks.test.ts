@@ -87,9 +87,11 @@ describe("readYourBanks", () => {
 		const account = await env.DB.prepare(
 			"SELECT id, plaid_item_id AS bank FROM accounts WHERE plaid_item_id IS NOT NULL ORDER BY id LIMIT 1",
 		).first<{ id: number; bank: number }>();
+
 		const before = (await readYourBanks(env.DB)).find(
 			(row) => row.id === account?.bank,
 		);
+
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id) VALUES (?, '2026-10-01', 500, 'SHOP', 'list-test-1')",
 		)
@@ -100,9 +102,11 @@ describe("readYourBanks", () => {
 		)
 			.bind(account?.id, account?.id)
 			.run();
+
 		const after = (await readYourBanks(env.DB)).find(
 			(row) => row.id === account?.bank,
 		);
+
 		expect(after?.count).toBe((before?.count ?? 0) + 1);
 	});
 
@@ -124,9 +128,11 @@ describe("readYourBanks", () => {
 		)
 			.bind(first?.id, second?.id)
 			.run();
+
 		const named = (await readYourBanks(env.DB)).filter(
 			(row) => row.name === "Chase",
 		);
+
 		expect(named.map((row) => row.id)).toEqual([first?.id, second?.id]);
 	});
 

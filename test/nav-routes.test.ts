@@ -38,6 +38,7 @@ describe("navigation destinations", () => {
 		for (const href of ["/accounts", "/settings"]) {
 			expect(html).toContain(`href="${href}"`);
 		}
+
 		expect(html).not.toContain('href="/documents"');
 		expect(html).not.toContain(">Documents<");
 	});
@@ -47,8 +48,10 @@ describe("navigation destinations", () => {
 			const html = await (
 				await exports.default.fetch(`http://tally.test${path}`)
 			).text();
+
 			expect(html, path).not.toContain('href="/documents"');
 		}
+
 		expect(SIDEBAR_ITEMS.map((item) => item.key)).not.toContain("documents");
 	});
 

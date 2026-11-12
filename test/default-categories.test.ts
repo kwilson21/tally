@@ -52,19 +52,23 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 		]);
 		expect(rows.map((c) => c.sortOrder)).toEqual(rows.map((_, i) => i + 1));
 		expect(rows.every((c) => c.archived === 0)).toBe(true);
+
 		for (const c of rows) {
 			expect(ICON_NAMES).toContain(c.icon);
 			expect(c.color).toMatch(/^cat-(blue|plum|slate|ochre|brown)$/);
 		}
+
 		const budgets = await db
 			.prepare("SELECT COUNT(*) AS n FROM budget_amounts")
 			.first<{ n: number }>();
+
 		expect(budgets?.n).toBe(0);
 	});
 
 	it("leaves a database that already has categories alone, like the demo's", async () => {
 		await resetDemo(db, "2026-09-22");
 		const before = await categories();
+
 		for (const sql of statements) await db.prepare(sql).run();
 		expect(await categories()).toEqual(before);
 	});
@@ -78,6 +82,7 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 				"INSERT INTO categories (id, name, icon, color) VALUES (8, 'gas', 'tag', 'cat-blue')",
 			)
 			.run();
+
 		for (const sql of statements) await db.prepare(sql).run();
 		const names = (await categories()).map((c) => c.name);
 		expect(names).toContain("Gas");
@@ -99,6 +104,7 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 				"INSERT INTO categories (id, name, icon, color) VALUES (8, 'gas', 'tag', 'cat-blue'), (9, 'gas (8)', 'tag', 'cat-blue')",
 			)
 			.run();
+
 		for (const sql of statements) await db.prepare(sql).run();
 		const names = (await categories()).map((c) => c.name);
 		expect(names).toContain("Gas");
@@ -117,6 +123,7 @@ describe("migration 0005: default categories (spec §7, decision 32)", () => {
 			)
 			.bind(long, long.toLowerCase())
 			.run();
+
 		for (const sql of statements) await db.prepare(sql).run();
 		const names = (await categories()).map((c) => c.name);
 		expect(names).toContain(long);

@@ -40,10 +40,16 @@ export const TIME_ZONE_ERROR = "Choose a time zone from the list.";
 
 type Parsed = { ok: true; zone: string } | { ok: false; error: string };
 
+/** True for a posted value that is text (a file part is not a zone). */
+function isText(value: ReturnType<FormData["get"]>): value is string {
+	return typeof value === "string";
+}
+
 /** The posted `time_zone`, if it is one the select offers. */
 export function parseTimeZone(form: FormData): Parsed {
 	const zone = form.get("time_zone");
-	return typeof zone === "string" && isSupportedZone(zone)
+
+	return isText(zone) && isSupportedZone(zone)
 		? { ok: true, zone }
 		: { ok: false, error: TIME_ZONE_ERROR };
 }

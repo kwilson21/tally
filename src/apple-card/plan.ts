@@ -28,6 +28,7 @@ export function rowKey(row: AppleRow): string {
  */
 export function leftOut(row: AppleRow): boolean {
 	if (row.type === PAYMENT_TYPE) return true;
+
 	return (
 		row.type === "Other" &&
 		row.amountCents > 0 &&
@@ -68,20 +69,25 @@ export function planImport(
 	const twins = new Map<string, number>();
 	let notCleared = 0;
 	let beforeHistory = 0;
+
 	for (const row of rows) {
 		if (row.clearingDate === null) {
 			notCleared++;
 			continue;
 		}
+
 		const key = rowKey(row);
 		const twin = (twins.get(key) ?? 0) + 1;
 		twins.set(key, twin);
+
 		if (row.clearingDate < historyStart && !held.get(key)?.has(twin)) {
 			beforeHistory++;
 			continue;
 		}
+
 		add.push({ row, key, twin, excluded: leftOut(row) });
 	}
+
 	return { add, notCleared, beforeHistory };
 }
 
@@ -101,8 +107,10 @@ export function importWords(
 ): string {
 	const { added, already, notCleared, beforeHistory } = counts;
 	const sentences: string[] = [];
+
 	if (added > 0) {
 		sentences.push(`Added ${added} from Apple Card.`);
+
 		if (already > 0)
 			sentences.push(
 				`${already} ${already === 1 ? "was" : "were"} already in Tally.`,
@@ -115,15 +123,18 @@ export function importWords(
 				: `All ${already} were already in Tally.`,
 		);
 	} else sentences.push("Nothing new.");
+
 	if (notCleared > 0)
 		sentences.push(
 			notCleared === 1
 				? "1 hasn't cleared yet."
 				: `${notCleared} haven't cleared yet.`,
 		);
+
 	if (beforeHistory > 0)
 		sentences.push(
 			`${beforeHistory} ${beforeHistory === 1 ? "was" : "were"} from before ${shortDay(historyStart, today)}, when Tally's history starts.`,
 		);
+
 	return sentences.join(" ");
 }

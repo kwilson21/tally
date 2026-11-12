@@ -73,6 +73,7 @@ export async function budgetCategory(
 	id: number,
 	month: string,
 ): Promise<BudgetCategory | null> {
+	// SAFETY: db.batch returns one result per statement in the order listed: the categories SELECT first, then the budget_amounts SELECT.
 	const [category, amounts] = (await db.batch([
 		db
 			.prepare(
@@ -90,8 +91,11 @@ export async function budgetCategory(
 		>,
 		D1Result<Parameters<typeof budgetForMonth>[0][number]>,
 	];
+
 	const row = category.results[0];
+
 	if (!row) return null;
+
 	return {
 		...row,
 		archived: row.archived === 1,
@@ -102,6 +106,7 @@ export async function budgetCategory(
 /** The month before 'YYYY-MM'. */
 export function previousMonth(month: string): string {
 	const [year = 0, m = 1] = month.split("-").map(Number);
+
 	return m === 1
 		? `${year - 1}-12`
 		: `${year}-${String(m - 1).padStart(2, "0")}`;
@@ -121,6 +126,7 @@ export async function lastMonthSpentCents(
 		)
 		.bind(categoryId, previousMonth(month))
 		.first<{ cents: number }>();
+
 	return row?.cents ?? 0;
 }
 
@@ -133,6 +139,7 @@ export async function threeMonthAverageSpentCents(
 	const months = [3, 2, 1].map((n) => monthsBefore(month, n));
 	const fromDate = `${monthsBefore(months[0] ?? month, 1)}-01`;
 	const throughDate = `${monthsBefore(months[2] ?? month, -2)}-01`;
+
 	const row = await db
 		.prepare(THREE_MONTH_AVERAGE_SQL)
 		.bind(months[0], months[1], months[2], fromDate, throughDate, categoryId)
@@ -142,7 +149,9 @@ export async function threeMonthAverageSpentCents(
 			second: number;
 			third: number;
 		}>();
+
 	if (!row?.firstDate || firstMonthIsPart(row.firstDate, months[0] ?? month))
 		return null;
+
 	return averageMonthlyCents([row.first, row.second, row.third]);
 }

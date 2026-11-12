@@ -6,10 +6,12 @@ import { READING_STEP, StepBar } from "../src/views/step-bar";
 // words that say where setup is. The segments are hidden from assistive technology.
 const bars = async (done: number, label = "Step done") => {
 	const html = String(await StepBar({ done, label }));
+
 	// Each segment is a span of its own class; the fill is the one background token it carries.
 	const fills = [
 		...html.matchAll(/<span class="h-1 rounded-full ([^"]*)"><\/span>/g),
 	].map((m) => m[1]);
+
 	return { html, fills };
 };
 

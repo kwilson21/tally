@@ -37,7 +37,12 @@ export function nextNoteState(
 	state: NoteState,
 	event: NoteEvent,
 ): NoteState | null {
-	return next(noteStateMachine, state, event) as NoteState | null;
+	const after = next(noteStateMachine, state, event);
+
+	if (after === null) return null;
+
+	// SAFETY: next() returns a top-level state of noteStateMachine, and every such state is a NoteState (NOTE_STATES lists them).
+	return after as NoteState;
 }
 
 /** The state after an event, where a refused event keeps the state. For the writers that always store a state. */

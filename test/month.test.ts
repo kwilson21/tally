@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 import { setArchived } from "../src/db/categories";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
+import { isMethod } from "./helpers/present";
 
 const db = env.DB;
 
@@ -62,9 +63,11 @@ describe("loadMonth", () => {
 		await setArchived(db, 45, true, "2026-08-31");
 		await setArchived(db, 45, false, "2026-10-05");
 		const data = await loadMonth(db, "2026-09");
+
 		const byId = new Map(
 			data.categories.map((category) => [category.id, category]),
 		);
+
 		expect(byId.has(41)).toBe(false);
 		expect(byId.get(42)).toMatchObject({ id: 42, archived: true });
 		expect(byId.has(43)).toBe(true);
@@ -88,9 +91,11 @@ describe("loadMonth", () => {
 
 	it("returns only counted transactions for the month", async () => {
 		const data = await loadMonth(db, "2026-09");
+
 		const amounts = data.transactions
 			.map((t) => t.amountCents)
 			.sort((a, b) => a - b);
+
 		// Excludes last/next month, the excluded transfer, and the split parent; keeps its children.
 		expect(amounts).toEqual([-245000, 1000, 1000, 1200, 2000, 4000]);
 		expect(
@@ -211,23 +216,31 @@ describe("firstCountedMonth query count", () => {
 	it("uses one indexed date lookup", async () => {
 		let statements = 0;
 		let lookup = "";
+
 		const counted = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
 				if (property === "prepare")
 					return (sql: string) => {
 						statements += 1;
 						lookup = sql;
+
 						return target.prepare(sql);
 					};
-				return typeof value === "function" ? value.bind(target) : value;
+
+				// SAFETY: firstCountedMonth reads only D1Database members; a name it never reads is looked up here and found undefined, as on D1.
+				const value: unknown = target[property as keyof D1Database];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
-		expect(await firstCountedMonth(counted as D1Database)).toBe("2026-08");
+
+		expect(await firstCountedMonth(counted)).toBe("2026-08");
 		expect(statements).toBe(1);
+
 		const plan = await db
 			.prepare(`EXPLAIN QUERY PLAN ${lookup}`)
 			.all<{ detail: string }>();
+
 		expect(plan.results.map((row) => row.detail).join(" ")).toContain(
 			"transactions_date",
 		);

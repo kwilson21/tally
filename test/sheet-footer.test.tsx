@@ -15,9 +15,11 @@ describe("SheetFooter", () => {
 				<SheetPrimary form="bill-form">Save</SheetPrimary>
 			</SheetFooter>,
 		);
+
 		expect(html.startsWith('<div class="grid grid-cols-2 gap-3">')).toBe(true);
 		const cancel = html.match(/<a [^>]*>/)?.[0] ?? "";
 		const primary = html.match(/<button [^>]*>/)?.[0] ?? "";
+
 		for (const tag of [cancel, primary]) {
 			expect(tag).toContain("min-h-11");
 			expect(tag).toContain("w-full");
@@ -34,6 +36,7 @@ describe("SheetFooter", () => {
 				<SheetPrimary form="bill-form">Save</SheetPrimary>
 			</SheetFooter>,
 		);
+
 		expect(html).toContain('<a href="/bills"');
 		expect(html).toContain('hx-get="/bills"');
 		expect(html).toContain('hx-target="#page"');
@@ -49,6 +52,7 @@ describe("SheetFooter", () => {
 				</SheetPrimary>
 			</SheetFooter>,
 		);
+
 		const primary = html.match(/<button [^>]*>/)?.[0] ?? "";
 		expect(primary).toContain('type="submit"');
 		expect(primary).toContain('form="bill-form"');

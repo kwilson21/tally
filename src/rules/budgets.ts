@@ -33,6 +33,7 @@ const categoryIsOnBudget = term<{ onBudget: boolean }>(
 	"the category is on the budget",
 	(g) => g.onBudget,
 );
+
 const notOnBudget = unless(
 	categoryIsOnBudget,
 	"CategoryNotOnBudget",
@@ -46,6 +47,7 @@ type SaveBudgetGiven = {
 	onBudget: boolean;
 	now: number | null;
 };
+
 type NudgeBudgetGiven = {
 	categoryId: number;
 	direction: "up" | "down";
@@ -55,6 +57,7 @@ type NudgeBudgetGiven = {
 	/** Where one tap takes the budget, or null when there is none to move. */
 	next: number | null;
 };
+
 type SavingsGoalGiven = { cents: number; month: string; now: number | null };
 
 export const saveBudget = defineRule2({
@@ -110,13 +113,17 @@ export const nudgeBudget = defineRule2({
 			"That category has no budget to adjust yet.",
 		),
 	],
-	writes: (g): BudgetWrite => ({
-		categoryId: g.categoryId,
-		month: g.month,
-		// The refusals above have already answered for a category with no budget.
-		cents: g.next as number,
-		expectedBudgetCents: g.now,
-	}),
+	writes: (g): BudgetWrite => {
+		// The refusals above have already answered for a category with no budget, so there is a next amount here.
+		if (g.next === null) throw new Error("A nudge with no budget to move.");
+
+		return {
+			categoryId: g.categoryId,
+			month: g.month,
+			cents: g.next,
+			expectedBudgetCents: g.now,
+		};
+	},
 	writesText:
 		"Sets the category's budget to the next round $10 that way, from this month on.",
 });

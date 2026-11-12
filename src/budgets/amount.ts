@@ -13,11 +13,13 @@ const NOT_DOLLARS = "Enter a dollar amount, like 250 or 250.50.";
  */
 export const BudgetAmount = z.string().transform((text, ctx) => {
 	let cents: number;
+
 	try {
 		cents = toCents(text.trim() === "" ? "x" : text);
 	} catch {
 		cents = -1;
 	}
+
 	if (cents >= 0 && cents <= MAX_BUDGET_CENTS) return cents;
 	ctx.issues.push({
 		code: "custom",
@@ -27,6 +29,7 @@ export const BudgetAmount = z.string().transform((text, ctx) => {
 				: "Keep the budget to $1,000,000 a month or less.",
 		input: text,
 	});
+
 	return z.NEVER;
 });
 
@@ -35,6 +38,7 @@ export function parseBudgetAmount(
 	text: string,
 ): { ok: true; cents: number } | { ok: false; error: string } {
 	const read = BudgetAmount.safeParse(text);
+
 	return read.success
 		? { ok: true, cents: read.data }
 		: { ok: false, error: read.error.issues[0]?.message ?? NOT_DOLLARS };

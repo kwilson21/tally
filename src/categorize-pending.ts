@@ -53,6 +53,7 @@ export async function categorizePending(
 ): Promise<{ asked: number; applied: number }> {
 	let done: { asked: number; applied: number };
 	const runId = crypto.randomUUID();
+
 	try {
 		done = await sortGroups(env, inProcess, fetchImpl, {
 			rulesApplied,
@@ -66,19 +67,24 @@ export async function categorizePending(
 	} finally {
 		// A re-sort's run finishes once its groups are done, even when they threw (decision 160). This sort's own id is
 		// its instance key, so the run finalizes once every instance it started has finished. finishRun is idempotent.
-		if (reask)
-			await finishRun(env.DB, {
-				runId: reask.runId,
-				now: Date.now(),
-				instanceKey: runId,
-			}).catch((error: unknown) =>
+		if (reask) {
+			try {
+				await finishRun(env.DB, {
+					runId: reask.runId,
+					now: Date.now(),
+					instanceKey: runId,
+				});
+			} catch (error) {
 				console.error(
 					`reask: finish failed ${error instanceof Error ? error.name : "unknown"}`,
-				),
-			);
+				);
+			}
+		}
 	}
+
 	if (done.asked > 0)
 		console.log(`jev: asked ${done.asked}, applied ${done.applied}`);
+
 	return done;
 }
 
@@ -107,6 +113,7 @@ export async function askAgainMany(
 	ids: number[],
 ): Promise<void> {
 	if (!env.JEV_API_KEY || !ids.length) return;
+
 	try {
 		// A person asking again starts these rows' failure count over, so one that reached the cap is asked (decision 182).
 		await env.DB.prepare(
@@ -139,6 +146,7 @@ export async function askAgainLeftOut(
 	waitUntil: (work: Promise<void>) => void,
 ): Promise<void> {
 	if (!ids.length || !env.JEV_API_KEY) return;
+
 	if (!(await readAiSwitches(env.DB)).categories) return;
 	// waitUntil starts a promise at once; yield this turn so the page can answer first.
 	waitUntil(

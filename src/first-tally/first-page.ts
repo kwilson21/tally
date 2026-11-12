@@ -178,7 +178,9 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 	const { results } = await db
 		.prepare(`${PAY_SQL} ORDER BY key, t.date`)
 		.all<PayRow>();
+
 	const byKey = new Map<string, PayMerchant>();
+
 	for (const row of results) {
 		const merchant = byKey.get(row.key) ?? {
 			key: row.key,
@@ -186,10 +188,12 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 			deposits: [],
 			ids: [],
 		};
+
 		merchant.deposits.push({ date: row.date, cents: row.cents });
 		merchant.ids.push(row.id);
 		byKey.set(row.key, merchant);
 	}
+
 	return [...byKey.values()];
 }
 
@@ -211,15 +215,22 @@ export async function answerPay(
 	who: string,
 ): Promise<number> {
 	const deposits = Object.fromEntries(
-		merchant.ids.map((id, i) => [id, merchant.deposits[i] as PayDeposit]),
+		merchant.ids.map((id, i) => [
+			id,
+			// SAFETY: payMerchants pushes one id and one deposit together for each row, so deposits[i] belongs to ids[i].
+			merchant.deposits[i] as PayDeposit,
+		]),
 	);
+
 	const shown = `[${shownPayValues(merchant).join(",")}]`;
+
 	const shownWhere = `${payAskedSql("transactions")}
 				AND transactions.id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
 				AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM transactions s
 					WHERE s.id = json_extract(j.value, '$.id') AND s.date = json_extract(j.value, '$.date')
 					AND -s.amount_cents = json_extract(j.value, '$.cents')
 					AND ${merchantKeySql("s")} = json_extract(j.value, '$.key') AND ${payAskedSql("s")}))`;
+
 	// The answer record goes first, so it reads each deposit's guess before the UPDATE clears it (decision 155). Only a
 	// deposit whose guess is in the income Maybe range is a Maybe, so a sure or too-low guess, or money marked income with
 	// no guess, records nothing. It has the same WHERE as the UPDATE, so a stale answer records nothing either.
@@ -238,6 +249,7 @@ export async function answerPay(
 			.bind(answer === "yes" ? 1 : 0, who, shown, shown),
 		payAnswerStatement(db, merchant.key, { [answer]: deposits }),
 	]);
+
 	return changed?.meta.changes ?? 0;
 }
 
@@ -255,11 +267,14 @@ async function yesMerchants(
 	const yeses = Object.entries(pay ?? {})
 		.filter(([, record]) => Object.keys(record.yes ?? {}).length > 0)
 		.sort(([, a], [, b]) => a.at - b.at);
+
 	if (yeses.length === 0) return [];
+
 	const names = await merchantDisplayNames(
 		db,
 		yeses.map(([key]) => key),
 	);
+
 	return yeses.map(([key, record]) => ({
 		key,
 		name: names.get(key) || tidyName(key),
@@ -300,7 +315,9 @@ function budgetsKept(
 	const kept = Object.values(budgets ?? {}).filter(
 		(answer) => answer.cents !== null,
 	);
+
 	if (kept.length === 0) return null;
+
 	return {
 		count: kept.length,
 		cents: kept.reduce((sum, answer) => sum + (answer.cents ?? 0), 0),
@@ -312,10 +329,16 @@ function budgetsLedger(
 	budgets: Record<string, BudgetAnswer> | undefined,
 ): { id: string; text: string } | null {
 	const kept = budgetsKept(budgets);
+
 	return kept
 		? { id: "budgets", text: budgetsLedgerLine(kept.count, kept.cents) }
 		: null;
 }
+
+/** True for a savings answer that is a goal's cents, not "skipped" (Not now) and not absent. */
+export const isSavedCents = (
+	savings: number | "skipped" | undefined,
+): savings is number => typeof savings === "number";
 
 /**
  * The ledger line of the savings answer, from its record (first_tally's `savings`): "Savings · $300 a month" for a goal kept,
@@ -324,7 +347,7 @@ function budgetsLedger(
 function savingsLedger(
 	savings: number | "skipped" | undefined,
 ): { id: string; text: string } | null {
-	return typeof savings === "number"
+	return isSavedCents(savings)
 		? { id: "savings", text: savingsLedgerLine(savings) }
 		: null;
 }
@@ -335,6 +358,7 @@ function savingsLedger(
  */
 export function budgetAppliesSql(alias: string, month: string): string {
 	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+
 	return `EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = ${alias}.id AND b.effective_month <= '${month}')`;
 }
 
@@ -395,6 +419,7 @@ export async function savingsOpen(db: D1Database): Promise<boolean> {
 			`SELECT EXISTS (SELECT 1 FROM household_settings WHERE key = 'first_tally' AND ${SAVINGS_RECORD_SQL}) AS open`,
 		)
 		.first<{ open: number }>();
+
 	return row?.open === 1;
 }
 
@@ -443,7 +468,9 @@ async function monthlySpent(
 ): Promise<{ categoryId: number | null; month: string; cents: number }[]> {
 	const first = months[0];
 	const last = months[months.length - 1];
+
 	if (first === undefined || last === undefined) return [];
+
 	const { results } = await db
 		.prepare(
 			`SELECT ${countedCategorySql()} AS categoryId, ${countedMonthSql()} AS month, SUM(t.amount_cents) AS cents
@@ -453,6 +480,7 @@ async function monthlySpent(
 		)
 		.bind(first, last)
 		.all<{ categoryId: number | null; month: string; cents: number }>();
+
 	return results;
 }
 
@@ -468,14 +496,18 @@ async function nothingAskedReason(
 	record: FirstTally | null,
 ): Promise<NothingAsked | null> {
 	if (Object.keys(record?.budgets ?? {}).length > 0) return null;
+
 	const counts = await db
 		.prepare(
 			`SELECT COUNT(*) AS active, COALESCE(SUM(CASE WHEN ${budgetAppliesSql("c", month)} THEN 1 ELSE 0 END), 0) AS budgeted
 			FROM categories c WHERE c.archived = 0`,
 		)
 		.first<{ active: number; budgeted: number }>();
+
 	if (!counts) return null;
+
 	if (counts.active === 0) return "no-categories";
+
 	return counts.budgeted === counts.active ? "every-category-budgeted" : null;
 }
 
@@ -495,13 +527,16 @@ async function budgetsStep(
 	oneAtATime: boolean,
 ): Promise<BudgetsStep> {
 	const month = today.slice(0, 7);
+
 	if (record?.strokes.budgets !== undefined) return { done: true };
+
 	const { results: categories } = await db
 		.prepare(
 			`SELECT c.id AS id, c.name AS name, c.icon AS icon, c.color AS color FROM categories c WHERE ${budgetAskedSql("c", month)}
 			ORDER BY c.sort_order, c.id`,
 		)
 		.all<{ id: number; name: string; icon: string; color: string }>();
+
 	if (categories.length === 0)
 		return {
 			done: false,
@@ -512,21 +547,27 @@ async function budgetsStep(
 			firstDate: null,
 			nothingAsked: await nothingAskedReason(db, month, record),
 		};
+
 	const first = await db
 		.prepare(HISTORY_FIRST_SQL)
 		.first<{ first: string | null }>();
+
 	const firstDate = first?.first ?? null;
 	const months = fullMonths(firstDate, today);
 	const spent = new Map<string, number>();
+
 	for (const row of await monthlySpent(db, months))
 		spent.set(`${row.categoryId}|${row.month}`, row.cents);
+
 	const monthsOf = (categoryId: number | null): MonthSpent[] =>
 		months.map((m) => ({
 			month: m,
 			spentCents: spent.get(`${categoryId}|${m}`) ?? 0,
 		}));
+
 	const asks: BudgetAsk[] = categories.map((category) => {
 		const monthsSpent = monthsOf(category.id);
+
 		return {
 			id: category.id,
 			name: category.name,
@@ -536,13 +577,17 @@ async function budgetsStep(
 			suggestion: firstBudgetSuggestion(monthsSpent),
 		};
 	});
+
 	const keepAllOpen =
 		!oneAtATime &&
 		Object.keys(record?.budgets ?? {}).length === 0 &&
 		asks.some((ask) => ask.suggestion !== null);
+
 	const count = await needsCategoryCount(db, "all");
+
 	const needs =
 		count > 0 ? { count, meanCents: monthlyMeanCents(monthsOf(null)) } : null;
+
 	// asks is never empty here (an empty step returned above), so the step asked something and has no reason to give.
 	return {
 		done: false,
@@ -572,8 +617,10 @@ function budgetWriteStatement(
 	firstDate: string | null,
 ): D1PreparedStatement {
 	const asked = `EXISTS (SELECT 1 FROM categories c WHERE c.id = ?1 AND ${budgetAskedSql("c", month)})`;
+
 	const upsert =
 		"ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents";
+
 	if (answer.kind === "another")
 		return db
 			.prepare(
@@ -582,8 +629,10 @@ function budgetWriteStatement(
 			)
 			.bind(ask.id, month, answer.cents);
 	const n = Math.trunc(ask.months.length);
+
 	const total = `SELECT COALESCE(SUM(t.amount_cents), 0) AS total FROM transactions t ${COUNTED_JOINS}
 		WHERE ${COUNTED_SPENDING} AND ${countedCategorySql()} = ?1 AND ${countedMonthSql()} BETWEEN ?4 AND ?5`;
+
 	return db
 		.prepare(
 			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) SELECT ?1, ?2, ?3 WHERE ${asked}
@@ -620,8 +669,10 @@ export async function keepBudgetAnswers(
 	const statements: D1PreparedStatement[] = [];
 	// Each answer's landing: the index of the statement whose changes say whether the answer landed.
 	const landings: { id: number; at: number }[] = [];
+
 	for (const { ask, answer } of answers) {
 		landings.push({ id: ask.id, at: statements.length });
+
 		if (answer.cents === null) {
 			statements.push(
 				keepBudgetStatement(
@@ -638,15 +689,17 @@ export async function keepBudgetAnswers(
 			);
 		}
 	}
+
 	// A current goal above $0 answers the savings question (decision 135): it is copied before the stroke, so its guard sees it.
 	statements.push(
 		savingsCopyStatement(db, month),
 		strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
 	);
 	const results = await db.batch(statements);
-	return landings
-		.filter(({ at }) => (results[at]?.meta.changes ?? 0) > 0)
-		.map(({ id }) => id);
+
+	return landings.flatMap(({ at, id }) =>
+		(results[at]?.meta.changes ?? 0) > 0 ? [id] : [],
+	);
 }
 
 /** The active bills' names, which a found charge can't share (spec §8.5). */
@@ -654,6 +707,7 @@ async function activeBillNames(db: D1Database): Promise<string[]> {
 	const { results } = await db
 		.prepare("SELECT name FROM bills WHERE active = 1")
 		.all<{ name: string }>();
+
 	return results.map((row) => row.name);
 }
 
@@ -663,13 +717,15 @@ async function activeBillNames(db: D1Database): Promise<string[]> {
  */
 async function payAndBills(db: D1Database, today: string) {
 	const pay = await payMerchants(db);
+
 	const split =
 		pay.length === 0
 			? splitKeepable(
 					await loadBillSuggestions(db, today),
 					await activeBillNames(db),
 				)
-			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
+			: { keep: [], waiting: [] };
+
 	return { pay, split, done: pay.length === 0 && split.keep.length === 0 };
 }
 
@@ -696,12 +752,14 @@ export async function readFinish(
 	today: string,
 ): Promise<FinishRead | null> {
 	const record = await readFirstTally(db);
+
 	if (record?.strokes.budgets === undefined) return null;
 	const month = today.slice(0, 7);
 	const { summary } = await readMonthSummary(db, today, month);
 	const bills = record.bills;
 	const budgets = budgetsKept(record.budgets);
 	const savings = record.savings;
+
 	return {
 		month,
 		safeCents: summary.safeToSpendCents,
@@ -715,7 +773,7 @@ export async function readFinish(
 					: null,
 			budgets: budgets ? finishBudgetsLine(budgets.count, budgets.cents) : null,
 			savings:
-				typeof savings === "number" && savings > 0
+				isSavedCents(savings) && savings > 0
 					? finishSavingsLine(savings)
 					: null,
 		},
@@ -734,8 +792,11 @@ export async function settleAndLoad(
 	{ oneAtATime = false }: { oneAtATime?: boolean } = {},
 ): Promise<FirstPageModel> {
 	const { pay, split, done } = await payAndBills(db, today);
+
 	if (pay.length === 0) await markStroke(db, "pay", today, NO_PAY_LEFT_SQL);
+
 	if (done) await markStroke(db, "bills", today, NO_PAY_LEFT_SQL);
+
 	// The budgets stroke waits for the bills stroke (budgetsStrokeGuard), and is drawn when no budget question is left and the
 	// savings question is answered, or a goal above $0 answers it. The goal's copy and the stroke are one batch, so the
 	// stroke's guard reads the copy and no other write lands between them (decision 135).
@@ -746,17 +807,20 @@ export async function settleAndLoad(
 			strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
 		]);
 	}
+
 	const record = await readFirstTally(db);
 	const payLines = await payLedger(db, record?.pay);
 	const billLine = billsLedger(record?.bills);
 	const budgetLine = budgetsLedger(record?.budgets);
 	const savingsLine = savingsLedger(record?.savings);
+
 	const ledger = [
 		...payLines,
 		...(billLine ? [billLine] : []),
 		...(budgetLine ? [budgetLine] : []),
 		...(savingsLine ? [savingsLine] : []),
 	];
+
 	return {
 		ledger,
 		payAnswered: Object.keys(record?.pay ?? {}).length > 0,
@@ -786,6 +850,7 @@ export async function keepBills(
 ): Promise<{ kept: number; cents: number }> {
 	let kept = 0;
 	let cents = 0;
+
 	for (const suggestion of keep) {
 		const [bill, amounts] = insertBillStatements(
 			db,
@@ -795,21 +860,26 @@ export async function keepBills(
 				dueDay: suggestion.dueDay,
 				frequency: "monthly",
 				anchorMonth: null,
+				// SAFETY: keepBills gets its charges from splitKeepable's `keep`, which holds only charges with a category.
 				categoryId: suggestion.categoryId as number,
 				merchantRawName: suggestion.rawName,
 			},
 			today,
 		);
+
 		const [added] = await db.batch([
 			bill,
 			keptBillStatement(db, suggestion.amountCents),
 			amounts,
 		]);
+
 		if ((added?.meta.changes ?? 0) > 0) {
 			kept += 1;
 			cents += suggestion.amountCents;
 		}
 	}
+
 	await matchBillPayments(db, today);
+
 	return { kept, cents };
 }

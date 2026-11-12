@@ -5,12 +5,31 @@ import {
 	matchBillPayments,
 	pickBillPayment,
 } from "../src/bills/match";
+import { isMethod } from "./helpers/present";
+
+/** env.DB with `count` run on every prepare; every other member is the real D1's. */
+function countingDb(count: () => void): D1Database {
+	return new Proxy(env.DB, {
+		get(target, property) {
+			if (property === "prepare")
+				return (sql: string) => {
+					count();
+
+					return target.prepare(sql);
+				};
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
+		},
+	});
+}
 
 /**
  * env.DB for one matcher run. `change` runs once the run has read its candidates and before it writes its links (the
  * statement that inserts them from json_each), so a test can change a payment between the two.
  */
-function changedBeforeWrite(change: () => Promise<unknown>): D1Database {
+function changedBeforeWrite(change: () => Promise<D1Result[]>): D1Database {
 	return new Proxy(env.DB, {
 		get(target, property) {
 			if (property === "prepare")
@@ -18,19 +37,23 @@ function changedBeforeWrite(change: () => Promise<unknown>): D1Database {
 					if (!sql.includes("INSERT OR IGNORE INTO bill_payments"))
 						return target.prepare(sql);
 					const write = target.prepare(sql);
+
 					return {
 						bind: (...values: unknown[]) => ({
 							run: async () => {
 								await change();
+
 								return write.bind(...values).run();
 							},
 						}),
 					};
 				};
-			const value = Reflect.get(target, property, target);
-			return typeof value === "function" ? value.bind(target) : value;
+
+			const value: unknown = Object(target)[property];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as D1Database;
+	});
 }
 
 describe("bill payment matching", () => {
@@ -42,6 +65,7 @@ describe("bill payment matching", () => {
 			{ id: 1, date: "2026-04-16", amountCents: 10000 },
 			{ id: 5, date: "2026-04-10", amountCents: 11001 },
 		];
+
 		expect(pickBillPayment(candidates, "2026-04-10", 10000)?.id).toBe(2);
 	});
 
@@ -88,9 +112,11 @@ describe("bill payment matching", () => {
 	it("fills old occurrences, respects dismissals, and is idempotent", async () => {
 		expect(await matchBillPayments(env.DB, "2026-04-03")).toBe(2);
 		expect(await matchBillPayments(env.DB, "2026-04-03")).toBe(0);
+
 		const rows = await env.DB.prepare(
 			"SELECT period,transaction_id FROM bill_payments WHERE status='linked' ORDER BY period",
 		).all();
+
 		expect(rows.results).toEqual([
 			{ period: "2026-03", transaction_id: 1 },
 			{ period: "2026-04", transaction_id: 3 },
@@ -200,6 +226,7 @@ describe("bill payment matching", () => {
 			const end = Date.UTC(2026, 0, 2);
 			const cutoff = end - years * 365 * 86_400_000;
 			const payments: D1PreparedStatement[] = [];
+
 			for (let day = start; day <= end; day += 7 * 86_400_000) {
 				if (day < cutoff) continue;
 				const date = new Date(day).toISOString().slice(0, 10);
@@ -209,24 +236,22 @@ describe("bill payment matching", () => {
 					).bind(date),
 				);
 			}
+
 			await env.DB.batch(payments);
 			let statements = 0;
-			const counted = new Proxy(env.DB, {
-				get(target, property) {
-					if (property === "prepare")
-						return (sql: string) => {
-							statements++;
-							return target.prepare(sql);
-						};
-					const value = Reflect.get(target, property, target);
-					return typeof value === "function" ? value.bind(target) : value;
-				},
-			}) as D1Database;
+
+			const counted = countingDb(() => {
+				statements++;
+			});
+
 			await matchBillPayments(counted, "2026-01-02");
+
 			const assignments = await env.DB.prepare(
 				"SELECT COUNT(*) AS total,COUNT(DISTINCT transaction_id) AS unique_transactions FROM bill_payments WHERE status='linked'",
 			).first<{ total: number; unique_transactions: number }>();
+
 			expect(assignments?.total).toBe(assignments?.unique_transactions);
+
 			if (years === 3) {
 				expect(assignments?.total).toBeGreaterThan(150);
 				expect(
@@ -235,8 +260,10 @@ describe("bill payment matching", () => {
 					).first(),
 				).toBeDefined();
 			}
+
 			return statements;
 		};
+
 		const oneYear = await countForYears(1);
 		const threeYears = await countForYears(3);
 		// One more than before bill_amounts (decision 101): every bill's amount rows are read in one statement.
@@ -263,20 +290,16 @@ describe("bill payment matching", () => {
 				),
 			);
 			let statements = 0;
-			const counted = new Proxy(env.DB, {
-				get(target, property) {
-					if (property === "prepare")
-						return (sql: string) => {
-							statements++;
-							return target.prepare(sql);
-						};
-					const value = Reflect.get(target, property, target);
-					return typeof value === "function" ? value.bind(target) : value;
-				},
-			}) as D1Database;
+
+			const counted = countingDb(() => {
+				statements++;
+			});
+
 			expect(await matchBillPayments(counted, "2026-04-20")).toBeGreaterThan(0);
+
 			return statements;
 		};
+
 		const quarter = await countForMonths(3);
 		const year = await countForMonths(12);
 		expect(year).toBe(quarter);
@@ -304,6 +327,7 @@ describe("bill payment matching", () => {
 		const rows = await env.DB.prepare(
 			"SELECT id,category_id AS categoryId,category_source AS categorySource,category_confidence AS categoryConfidence,jev_category_id AS jevCategoryId FROM transactions WHERE id IN (1,3,4,5) ORDER BY id",
 		).all();
+
 		expect(rows.results).toEqual([
 			{
 				id: 1,
@@ -368,18 +392,12 @@ describe("bill payment matching", () => {
 			),
 		);
 		let statements = 0;
-		const counted = new Proxy(env.DB, {
-			get(target, property) {
-				const value = Reflect.get(target, property);
-				if (property === "prepare")
-					return (sql: string) => {
-						statements += 1;
-						return target.prepare(sql);
-					};
-				return typeof value === "function" ? value.bind(target) : value;
-			},
+
+		const counted = countingDb(() => {
+			statements += 1;
 		});
-		await matchBillPayments(counted as D1Database, "2026-04-03");
+
+		await matchBillPayments(counted, "2026-04-03");
 		expect(statements).toBeLessThan(1000);
 	});
 
@@ -398,9 +416,11 @@ describe("bill payment matching", () => {
 			),
 		]);
 		expect(await matchBillPayments(env.DB, "2026-09-12")).toBe(1);
+
 		const links = await env.DB.prepare(
 			"SELECT period,transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked'",
 		).all();
+
 		expect(links.results).toEqual([]);
 	});
 
@@ -416,6 +436,7 @@ describe("bill payment matching", () => {
 				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(40,1,'2026-06-10',10000,'LANDLORD'),(41,1,'2026-07-10',10000,'LANDLORD')",
 			),
 		]);
+
 		const splitAndPlanPart = () =>
 			env.DB.batch([
 				env.DB.prepare(
@@ -426,15 +447,18 @@ describe("bill payment matching", () => {
 					"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Gift',6000,'2026-06',401,'demo')",
 				),
 			]);
+
 		expect(
 			await matchBillPayments(
 				changedBeforeWrite(splitAndPlanPart),
 				"2026-07-12",
 			),
 		).toBe(1);
+
 		const links = await env.DB.prepare(
 			"SELECT period,transaction_id FROM bill_payments WHERE status='linked' ORDER BY period",
 		).all();
+
 		expect(links.results).toEqual([{ period: "2026-07", transaction_id: 41 }]);
 	});
 
@@ -450,17 +474,21 @@ describe("bill payment matching", () => {
 			),
 		]);
 		expect(await matchBillPayments(env.DB, "2026-07-12")).toBe(3);
+
 		const links = await env.DB.prepare(
 			"SELECT period,transaction_id,matched_by FROM bill_payments WHERE status='linked' ORDER BY period",
 		).all();
+
 		expect(links.results).toEqual([
 			{ period: "2026-05", transaction_id: 30, matched_by: "auto" },
 			{ period: "2026-06", transaction_id: 31, matched_by: "auto" },
 			{ period: "2026-07", transaction_id: 32, matched_by: "auto" },
 		]);
+
 		const rows = await env.DB.prepare(
 			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
 		).all();
+
 		expect(rows.results).toEqual([
 			{ id: 30, excluded: 1, excluded_source: "jev" },
 			{ id: 31, excluded: 1, excluded_source: "plaid" },
@@ -510,13 +538,17 @@ describe("bill payment matching", () => {
 			),
 		]);
 		expect(await matchBillPayments(env.DB, "2026-07-12")).toBe(1);
+
 		const links = await env.DB.prepare(
 			"SELECT period,transaction_id FROM bill_payments WHERE status='linked'",
 		).all();
+
 		expect(links.results).toEqual([{ period: "2026-07", transaction_id: 62 }]);
+
 		const rows = await env.DB.prepare(
 			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
 		).all();
+
 		expect(rows.results).toEqual([
 			{ id: 60, excluded: 1, excluded_source: "user" },
 			{ id: 61, excluded: 0, excluded_source: null },
@@ -537,9 +569,11 @@ describe("bill payment matching", () => {
 			),
 		]);
 		expect(await matchBillPayments(env.DB, "2026-06-12")).toBe(0);
+
 		const rows = await env.DB.prepare(
 			"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
 		).all();
+
 		expect(rows.results).toEqual([
 			{ id: 40, excluded: 1, excluded_source: "jev" },
 			{ id: 41, excluded: 1, excluded_source: "jev" },
@@ -565,9 +599,11 @@ describe("bill payment matching", () => {
 			// The part that is the bill's payment is linked (it counts by its own link), unless a person
 			// excluded the split, which the matcher leaves alone. The split stays excluded as it was.
 			expect(await matchBillPayments(env.DB, "2026-05-12")).toBe(matched);
+
 			const rows = await env.DB.prepare(
 				"SELECT id,excluded,excluded_source FROM transactions ORDER BY id",
 			).all();
+
 			expect(rows.results).toEqual(
 				[50, 51, 52].map((id) => ({
 					id,
@@ -649,6 +685,7 @@ describe("assignPairs", () => {
 		period: "2026-10",
 		candidate: { id: candidate },
 	});
+
 	it("leaves no bill unpaid when a valid payment exists for each", () => {
 		// Payment 1 is closest to bill A, but bill B can only use payment 1; A can also use 2.
 		const result = assignPairs([pair(1, 1), pair(2, 1), pair(1, 2)]);

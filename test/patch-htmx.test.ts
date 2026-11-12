@@ -2,6 +2,7 @@ import htmxSource from "htmx.org/dist/htmx.min.js?raw";
 import htmxPackage from "htmx.org/package.json";
 import { describe, expect, it } from "vitest";
 import { patchHtmx } from "../scripts/patch-htmx.mjs";
+import { itemAt } from "./helpers/present";
 
 // Upstream code the patch replaces (decision 112, #471): each anchor occurs once in htmx 4.0.0's minified file.
 const ANCHORS = [
@@ -22,9 +23,11 @@ const count = (text: string, part: string) => text.split(part).length - 1;
 describe("patchHtmx", () => {
 	it("applies each replacement to the vendored htmx exactly once", () => {
 		const patched = patchHtmx(htmxSource);
+
 		for (const replacement of PATCHED) {
 			expect(count(patched, replacement)).toBe(1);
 		}
+
 		expect(patched).not.toContain("continue(){this.#e=null");
 	});
 
@@ -60,7 +63,7 @@ describe("the htmx the patch was written for", () => {
 
 	it("says in the error, when an anchor is gone, that the bug may be fixed upstream", () => {
 		expect(() =>
-			patchHtmx(htmxSource.replace(ANCHORS[0] as string, "moved")),
+			patchHtmx(htmxSource.replace(itemAt(ANCHORS, 0), "moved")),
 		).toThrow(/fixed|delete this script/i);
 	});
 });

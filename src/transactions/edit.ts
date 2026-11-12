@@ -77,16 +77,24 @@ export type Edit = {
 };
 
 /** The edit panel changes a merchant rule only when the person changes the tick, or saves a ticked row with another category. */
+/** What a save does to the merchant's rule: set it, clear it or keep it, and whether to refile the merchant's rows. */
+type MerchantRuleChange = {
+	action: "set" | "clear" | "keep";
+	recategorize: boolean;
+};
+
 export function merchantRuleChange(
 	alwaysWas: boolean,
 	alwaysNow: boolean,
 	ruleCategoryWas: number | null | undefined,
 	categoryId: number | null,
-): { action: "set" | "clear" | "keep"; recategorize: boolean } {
+): MerchantRuleChange {
 	if (!alwaysWas && alwaysNow)
 		return { action: "set", recategorize: categoryId !== null };
+
 	if (alwaysWas && !alwaysNow && ruleCategoryWas != null)
 		return { action: "clear", recategorize: false };
+
 	// A ticked row saved with another category changes the rule to it, as a new tick does (spec §7, decision 101).
 	if (
 		alwaysWas &&
@@ -96,6 +104,7 @@ export function merchantRuleChange(
 		categoryId !== ruleCategoryWas
 	)
 		return { action: "set", recategorize: true };
+
 	return { action: "keep", recategorize: false };
 }
 
@@ -187,19 +196,24 @@ export function followsPurchaseAfterSave(
 	>,
 ): boolean {
 	const linking =
-		typeof edit.refundOfId === "number" &&
+		isIdNumber(edit.refundOfId) &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
+
 	const incomeChanged = edit.income !== (edit.incomeWas ?? stored.income);
 	const reviewChanged = reviewWasChanged(stored, edit);
+
 	// A review ticked as not income turns income off whatever the panel drew (saveEdit's flag_income).
 	const reviewedAsNotIncome =
 		reviewChanged && edit.creditReviewed && !edit.income;
+
 	// Unticking income on a Jev credit, with the review unticked, leaves it unreviewed (saveEdit's credit_reviewed).
 	const unreviewedByIncome =
 		incomeChanged && !edit.creditReviewed && stored.incomeSource === "jev";
+
 	// saveEdit clears only a review a person made (credit_reviewed_by = 'user'); a review Jev holds stays.
 	const reviewCleared =
 		reviewChanged && !edit.creditReviewed && stored.creditReviewedByUser;
+
 	return followsPurchase({
 		amountCents: stored.amountCents,
 		income: incomeChanged || reviewedAsNotIncome ? edit.income : stored.income,
@@ -238,20 +252,33 @@ export function excludedAfterSave(
 	>,
 ): boolean {
 	const linking =
-		typeof edit.refundOfId === "number" &&
+		isIdNumber(edit.refundOfId) &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
+
 	if (linking || !edit.excluded) return false;
+
 	// The lift's two triggers, as saveEdit writes them: a review ticked as not income, or income turned on.
 	const reviewedAsNotIncome =
 		reviewWasChanged(stored, edit) && edit.creditReviewed && !edit.income;
+
 	const incomeTurnedOn = edit.income && !stored.income;
+
 	const lifted =
 		stored.excluded &&
 		stored.excludedSource === "plaid" &&
 		stored.amountCents < 0 &&
 		(reviewedAsNotIncome || incomeTurnedOn);
+
 	return !lifted;
 }
+
+/** True for a stored or posted id that is a number (not null or absent). */
+const isIdNumber = (value: number | null | undefined): value is number =>
+	typeof value === "number";
+
+/** True for an integer, as Number.isInteger reads it; a value that is not one (null included) is false. */
+const isWholeNumber = (value: number | null): value is number =>
+	Number.isInteger(value);
 
 /** Reads the edit form. Category ids must be live categories; lengths are limited. */
 export function parseEdit(
@@ -262,8 +289,10 @@ export function parseEdit(
 	const errors: EditErrors = {};
 	const rawCategory = text(form, "category");
 	const newCategory = rawCategory === "new";
+
 	const categoryId =
 		rawCategory === "" || newCategory ? null : Number(rawCategory);
+
 	const alwaysForMerchant = form.get("always") === "1";
 	const alwaysWas = form.get("always_was") === "1";
 	const ruleCategoryWas = Number(form.get("rule_category_was")) || null;
@@ -288,18 +317,22 @@ export function parseEdit(
 	const rawPerson = text(form, "for_person_id");
 	const forPersonId = rawPerson ? Number(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
+
 	// "Rename" (decision 101): this transaction alone, unless the scope says all the merchant's. A ticked name
 	// under "Looks right" takes this choice like Save does; with nothing ticked, savePanel names the store's
 	// guess for all (src/routes/transactions.tsx).
 	const nameScope: "one" | "all" =
 		form.get("name_scope") === "all" ? "all" : "one";
+
 	const nameChanged =
 		pick === "own"
 			? nameScope === "one" || fieldChanged
 			: pickedName !== "" || keepBankName;
+
 	const detailsVisible = form.has("details_visible")
 		? form.get("details_visible") !== "0"
 		: undefined;
+
 	const hiddenUntouched = detailsVisible === false;
 	const noteWas = text(form, "note_was");
 	const kindWas = text(form, "kind_was") || null;
@@ -318,68 +351,73 @@ export function parseEdit(
 	) {
 		errors.category = "Pick a category to use for this merchant.";
 	}
+
 	if (displayName.length > DISPLAY_NAME_MAX)
 		errors.merchant = `Keep the name under ${DISPLAY_NAME_MAX} characters.`;
 	else if (pick === "own" && displayName === "")
 		errors.merchant = "Type a name here, or pick one above.";
+
 	if (note.length > NOTE_MAX)
 		errors.note = `Keep the note under ${NOTE_MAX} characters.`;
+
 	if (rawKind && !isTransactionKind(rawKind))
 		errors.kind = "Pick a kind from the list.";
+
 	if (
 		rawPerson &&
-		(!Number.isInteger(forPersonId) ||
-			(peopleIds && !peopleIds.includes(forPersonId as number)))
+		(!isWholeNumber(forPersonId) ||
+			(peopleIds && !peopleIds.includes(forPersonId)))
 	)
 		errors.forPerson = FOR_PERSON_ERROR;
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
-	return {
-		ok: true,
-		value: {
-			categoryId,
-			...(newCategory ? { newCategory: true } : {}),
-			alwaysForMerchant,
-			alwaysWas,
-			merchantRuleWas: ruleCategoryWas,
-			displayName: displayName || null,
-			nameChanged,
-			nameScope,
-			keepBankName,
-			note: note || null,
-			...(form.has("details_visible")
-				? {
-						noteProvided: !(
-							hiddenUntouched &&
-							((!form.has("note_was") && note === "") ||
-								(form.has("note_was") && note === noteWas))
-						),
-						detailsFieldChanged:
-							hiddenUntouched &&
-							((form.has("kind_was") && kind !== kindWas) ||
-								(form.has("for_person_id_was") && forPersonId !== personWas)),
-					}
-				: {}),
-			excluded,
-			...credit,
-			kind:
-				form.has("kind") &&
-				(!hiddenUntouched ||
-					(form.has("kind_was") ? kind !== kindWas : kind !== null))
-					? kind
-					: undefined,
-			forPersonId:
-				form.has("for_person_id") &&
-				(!hiddenUntouched ||
-					(form.has("for_person_id_was")
-						? forPersonId !== personWas
-						: forPersonId !== null))
-					? forPersonId
-					: undefined,
-			keepDetails,
-			...(detailsVisible === undefined ? {} : { detailsVisible }),
-		},
+
+	const value: Edit = {
+		categoryId,
+		alwaysForMerchant,
+		alwaysWas,
+		merchantRuleWas: ruleCategoryWas,
+		displayName: displayName || null,
+		nameChanged,
+		nameScope,
+		keepBankName,
+		note: note || null,
+		excluded,
+		...credit,
+		kind:
+			form.has("kind") &&
+			(!hiddenUntouched ||
+				(form.has("kind_was") ? kind !== kindWas : kind !== null))
+				? kind
+				: undefined,
+		forPersonId:
+			form.has("for_person_id") &&
+			(!hiddenUntouched ||
+				(form.has("for_person_id_was")
+					? forPersonId !== personWas
+					: forPersonId !== null))
+				? forPersonId
+				: undefined,
+		keepDetails,
 	};
+
+	if (newCategory) value.newCategory = true;
+
+	if (form.has("details_visible")) {
+		value.noteProvided = !(
+			hiddenUntouched &&
+			((!form.has("note_was") && note === "") ||
+				(form.has("note_was") && note === noteWas))
+		);
+		value.detailsFieldChanged =
+			hiddenUntouched &&
+			((form.has("kind_was") && kind !== kindWas) ||
+				(form.has("for_person_id_was") && forPersonId !== personWas));
+	}
+
+	if (detailsVisible !== undefined) value.detailsVisible = detailsVisible;
+
+	return { ok: true, value };
 }
 
 const LIST_URL = /^\/transactions(\?[^#]*)?$/;

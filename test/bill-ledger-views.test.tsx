@@ -24,6 +24,7 @@ describe("LedgerMonth's words (decision 128)", () => {
 					words,
 				}),
 			);
+
 			expect(html).toContain(
 				`<span class="text-sm tabular-nums text-muted">${words}</span>`,
 			);
@@ -40,6 +41,7 @@ describe("LedgerMonth's words (decision 128)", () => {
 				wordsClass: "text-over",
 			}),
 		);
+
 		expect(html).toContain(
 			'<span class="text-sm tabular-nums text-over">Overdue Sep 15 · $2.99</span>',
 		);
@@ -54,6 +56,7 @@ describe("LedgerMonth's words (decision 128)", () => {
 				words: "Paid Oct 15 · $2.99",
 			}),
 		);
+
 		expect(html).toContain(
 			'<span class="block text-sm text-muted">Found: APPLE.COM/BILL on Oct 15</span>',
 		);
@@ -79,6 +82,7 @@ describe("LedgerDisclosure's words (decision 128)", () => {
 				sr: "5 months with no payment",
 			}),
 		);
+
 		expect(html).toContain(
 			'<span class="text-sm tabular-nums text-muted" aria-hidden="true">No payment</span>',
 		);

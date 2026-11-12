@@ -24,6 +24,7 @@ async function send(
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -38,8 +39,12 @@ function postPlain(path: string, fields: Record<string, string>) {
 }
 
 /** The screen reader's words for a reply, from its HX-Trigger header. */
-function announced(res: Response): string {
-	return JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce as string;
+function announced(res: Response): string | undefined {
+	const trigger: { announce?: string } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
+
+	return trigger.announce;
 }
 
 /** The hidden fields of the rule offer's own form, as the page posts them back. */
@@ -60,6 +65,7 @@ function offerFields(html: string): Record<string, string> {
 		)
 		.reduce<Record<string, string>>((fields, match) => {
 			fields[match[1] ?? ""] = match[2] ?? "";
+
 			return fields;
 		}, {});
 }
@@ -92,11 +98,13 @@ async function addPicks(name: string, count: number, category: number) {
 			]).flat(),
 		)
 		.run();
+
 	const rows = await env.DB.prepare(
 		"SELECT id FROM transactions WHERE merchant_name = ? ORDER BY id",
 	)
 		.bind(name)
 		.all<{ id: number }>();
+
 	return rows.results.map((row) => row.id);
 }
 
@@ -108,9 +116,11 @@ let ids: number[];
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	merchant = "rule-offer-store";
+
 	const categories = await env.DB.prepare(
 		"SELECT id, name FROM categories WHERE name IN ('Groceries', 'Household')",
 	).all<{ id: number; name: string }>();
+
 	groceries = categories.results.find((c) => c.name === "Groceries")?.id ?? 0;
 	household = categories.results.find((c) => c.name === "Household")?.id ?? 0;
 	await env.DB.prepare("INSERT INTO merchants (raw_name) VALUES (?)")
@@ -170,9 +180,11 @@ describe("merchant category rule offer", () => {
 		await post(`/transactions/${ids[0]}`, edit(groceries));
 		await post(`/transactions/${ids[1]}`, edit(groceries));
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+
 		const close = third.html.match(
 			/<a href="([^"]*)" aria-label="Close"[^>]*data-sheet-close/,
 		)?.[1];
+
 		expect(close?.replaceAll("&amp;", "&")).toContain(`focus=${ids[2]}`);
 	});
 
@@ -226,11 +238,13 @@ describe("merchant category rule offer", () => {
 			await env.DB.prepare(`UPDATE transactions SET ${mark} WHERE id = ?`)
 				.bind(ids[index])
 				.run();
+
 			// Two picks and this one: were the transfer counted, this would be the third and be asked.
 			const save = await post(`/transactions/${ids[index]}`, {
 				...edit(groceries),
 				excluded: "1",
 			});
+
 			expect(save.html).not.toContain(QUESTION);
 		},
 	);
@@ -279,16 +293,20 @@ describe("merchant category rule offer", () => {
 				todayIn(DEFAULT_TIME_ZONE),
 			)
 			.run();
+
 		const other = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE merchant_name = 'other' ORDER BY id",
 		).all<{ id: number }>();
+
 		const otherIds = other.results.map((row) => row.id);
 		await setCategory(otherIds.slice(0, 2), household, "user");
+
 		const selected = await post("/transactions/select/category/save", {
 			ids: `${ids[2]},${otherIds[2] ?? 0}`,
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(
 			selected.html.match(/Always use Groceries for rule-offer-store\?/g),
 		).toHaveLength(1);
@@ -304,6 +322,7 @@ describe("merchant category rule offer", () => {
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(selected.html).not.toContain(QUESTION);
 		expect(
 			JSON.parse(selected.res.headers.get("HX-Trigger") ?? "{}").announce,
@@ -317,15 +336,18 @@ describe("merchant category rule offer", () => {
 			"Saved. rule-offer-store is now Groceries. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 3 times.",
 		);
 		await setCategory([ids[2]], null, null);
+
 		const selected = await post("/transactions/select/category/save", {
 			ids: String(ids[2]),
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(announced(selected.res)).toBe(
 			"Set 1 transaction to Groceries. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 3 times.",
 		);
 		await setCategory([ids[3]], null, null);
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -334,6 +356,7 @@ describe("merchant category rule offer", () => {
 			note: "",
 			back: "/transactions",
 		});
+
 		// The cash entry is a fourth Groceries pick, so the count is four.
 		expect(announced(cash.res)).toBe(
 			"Added $10.00 cash spending at rule-offer-store. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 4 times.",
@@ -352,6 +375,7 @@ describe("merchant category rule offer", () => {
 
 	it("without JavaScript, a third cash save with an entry key shows the question", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const cash = await postPlain("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -361,6 +385,7 @@ describe("merchant category rule offer", () => {
 			back: "/transactions",
 			entry_key: "123e4567-e89b-42d3-a456-426614174001",
 		});
+
 		expect(cash.res.status).toBe(200);
 		expect(cash.html).toContain(QUESTION);
 	});
@@ -368,20 +393,24 @@ describe("merchant category rule offer", () => {
 	it("without JavaScript, Yes still makes the rule and redirects back", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+
 		const yes = await postPlain(
 			"/transactions/rule-offer",
 			offerFields(third.html),
 		);
+
 		expect(yes.res.status).toBe(303);
 		// The redirect returns focus to the saved row, as the question's backdrop does (#87).
 		expect(yes.res.headers.get("Location")).toBe(
 			`/transactions?focus=${ids[2]}`,
 		);
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id).toBe(groceries);
 	});
 
@@ -400,28 +429,34 @@ describe("merchant category rule offer", () => {
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE), merchant, merchant, household)
 			.run();
+
 		const guess = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE merchant_name = ? AND category_source = 'jev'",
 		)
 			.bind(merchant)
 			.first<{ id: number }>();
+
 		const refund = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE merchant_name = ? AND amount_cents < 0",
 		)
 			.bind(merchant)
 			.first<{ id: number }>();
+
 		const offer = await post(`/transactions/${ids[3]}`, edit(groceries));
 		const yes = await post("/transactions/rule-offer", offerFields(offer.html));
 		expect(yes.res.status).toBe(200);
 		expect(
 			JSON.parse(yes.res.headers.get("HX-Trigger") ?? "{}").toast.message,
 		).toBe(`Always use Groceries for ${merchant}.`);
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number }>();
+
 		expect(rule?.default_category_id).toBe(groceries);
+
 		const rows = await env.DB.prepare(
 			"SELECT id, category_id, category_source FROM transactions WHERE merchant_name = ? ORDER BY id",
 		)
@@ -431,7 +466,9 @@ describe("merchant category rule offer", () => {
 				category_id: number | null;
 				category_source: string | null;
 			}>();
+
 		const byId = new Map(rows.results.map((row) => [row.id, row]));
+
 		for (const id of ids)
 			expect(byId.get(id)).toMatchObject({
 				category_id: groceries,
@@ -450,6 +487,7 @@ describe("merchant category rule offer", () => {
 	it("the offer's two forms swap the whole main area, as the Set category sheet does", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+
 		for (const action of [
 			"/transactions/rule-offer/dismiss",
 			"/transactions/rule-offer",
@@ -458,6 +496,7 @@ describe("merchant category rule offer", () => {
 				third.html.match(
 					new RegExp(`<form[^>]*action="${action}"[^>]*>`),
 				)?.[0] ?? "";
+
 			expect(form).toContain('hx-target="#main"');
 			expect(form).toMatch(/hx-select="#main (>|&gt;) \*"/);
 			expect(form).toContain('hx-swap="innerHTML"');
@@ -467,14 +506,18 @@ describe("merchant category rule offer", () => {
 	it("Yes and Not now answer with the saved row focused, not the heading (#87)", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+
 		const row = new RegExp(
 			`<a href="/transactions/${ids[2]}(?:\\?[^"]*)?"[^>]*autofocus`,
 		);
+
 		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+
 		const dismissed = await post(
 			"/transactions/rule-offer/dismiss",
 			offerFields(third.html),
 		);
+
 		for (const reply of [yes.html, dismissed.html]) {
 			expect(reply).toMatch(row);
 			expect(reply).not.toMatch(/<h1[^>]*autofocus/);
@@ -483,19 +526,25 @@ describe("merchant category rule offer", () => {
 
 	it("from a filtered list, Yes and Not now focus the list's count, since the saved row has left it (#211, #87)", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			back: "/transactions?uncategorized=1",
 		});
+
 		expect(third.html).toContain(QUESTION);
+
 		const row = new RegExp(
 			`<a href="/transactions/${ids[2]}(?:\\?[^"]*)?"[^>]*autofocus`,
 		);
+
 		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+
 		const dismissed = await post(
 			"/transactions/rule-offer/dismiss",
 			offerFields(third.html),
 		);
+
 		for (const reply of [yes.html, dismissed.html]) {
 			expect(reply).toMatch(/<p id="result-count"[^>]*autofocus/);
 			expect(reply).not.toMatch(/<h1[^>]*autofocus/);
@@ -505,14 +554,17 @@ describe("merchant category rule offer", () => {
 
 	it("without JavaScript, Not now from a filtered list lands on that list's count (#87)", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			back: "/transactions?uncategorized=1",
 		});
+
 		const dismissed = await postPlain(
 			"/transactions/rule-offer/dismiss",
 			offerFields(third.html),
 		);
+
 		expect(dismissed.res.status).toBe(303);
 		const location = dismissed.res.headers.get("Location") ?? "";
 		expect(location).toBe(`/transactions?uncategorized=1&focus=${ids[2]}`);
@@ -522,16 +574,20 @@ describe("merchant category rule offer", () => {
 
 	it("a bulk save names no row, so its answers keep the transactions heading focused", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const bulk = await post("/transactions/select/category/save", {
 			ids: String(ids[2]),
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(bulk.html).toContain(QUESTION);
+
 		const dismissed = await post(
 			"/transactions/rule-offer/dismiss",
 			offerFields(bulk.html),
 		);
+
 		expect(dismissed.html).toMatch(
 			/<h1[^>]*id="transactions-title"[^>]*tabindex="-1"[^>]*autofocus/,
 		);
@@ -540,10 +596,12 @@ describe("merchant category rule offer", () => {
 	it("without JavaScript, Not now redirects to the saved row too, so focus returns to it (#87)", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+
 		const dismissed = await postPlain(
 			"/transactions/rule-offer/dismiss",
 			offerFields(third.html),
 		);
+
 		expect(dismissed.res.status).toBe(303);
 		expect(dismissed.res.headers.get("Location")).toBe(
 			`/transactions?focus=${ids[2]}`,
@@ -553,6 +611,7 @@ describe("merchant category rule offer", () => {
 	it("Yes refreshes the Needs category count, since the rule fills the merchant's uncategorized rows", async () => {
 		const needsCount = (html: string) =>
 			Number(html.match(/id="needs-count">(\d+)</)?.[1]);
+
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
 		const before = needsCount(third.html);
@@ -564,20 +623,24 @@ describe("merchant category rule offer", () => {
 		for (const id of ids.slice(0, 3))
 			await post(`/transactions/${id}`, edit(groceries));
 		const panel = await post(`/transactions/${ids[3]}`, edit(groceries));
+
 		const ignored = await post(
 			"/transactions/rule-offer/dismiss",
 			offerFields(panel.html),
 		);
+
 		expect(ignored.res.status).toBe(200);
 		expect(ignored.html).not.toContain(QUESTION);
 		expect(
 			JSON.parse(ignored.res.headers.get("HX-Trigger") ?? "{}").toast.message,
 		).toBe("Saved as Groceries.");
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id).toBeNull();
 		await setCategory([ids[0]], null, null);
 		const fifth = await post(`/transactions/${ids[0]}`, edit(groceries));
@@ -587,31 +650,38 @@ describe("merchant category rule offer", () => {
 	it("counts Organize and cash picks the same as panel picks", async () => {
 		// Only ids[0] needs a category, so Organize picks just that row.
 		await setCategory([ids[1], ids[2], ids[3]], household, "jev");
+
 		const organized = await post("/transactions/organize", {
 			category: String(groceries),
 			group: merchant,
 			name: merchant,
 		});
+
 		expect(organized.res.status).toBe(200);
 		// Organize asks its own question after the save (#353), and the save makes no rule.
 		expect(organized.html).toContain(QUESTION);
+
 		const picked = await env.DB.prepare(
 			"SELECT category_id, category_source FROM transactions WHERE id = ?",
 		)
 			.bind(ids[0])
 			.first<{ category_id: number; category_source: string }>();
+
 		expect(picked).toMatchObject({
 			category_id: groceries,
 			category_source: "user",
 		});
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id ?? null).toBeNull();
 		const panel = await post(`/transactions/${ids[1]}`, edit(groceries));
 		expect(panel.html).not.toContain(QUESTION);
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -621,6 +691,7 @@ describe("merchant category rule offer", () => {
 			back: "/transactions",
 			entry_key: "123e4567-e89b-42d3-a456-426614174000",
 		});
+
 		expect(cash.html).toContain(QUESTION);
 		expect(cash.html).toContain(
 			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
@@ -629,32 +700,40 @@ describe("merchant category rule offer", () => {
 
 	it("an Organize save that makes the third pick asks, and only Yes makes the rule, so a later save never asks", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		// ids[2] and ids[3] are uncategorized, so Organize lists the group. Its save files them and asks (#353).
 		const organized = await post("/transactions/organize", {
 			category: String(groceries),
 			group: merchant,
 			name: merchant,
 		});
+
 		expect(organized.res.status).toBe(200);
 		expect(organized.html).toContain(QUESTION);
+
 		const before = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(before?.default_category_id ?? null).toBeNull();
+
 		const yes = await post("/transactions/organize/rule", {
 			answer: "yes",
 			store: organized.html.match(/name="store" value="([^"]*)"/)?.[1] ?? "",
 			category:
 				organized.html.match(/name="category" value="([^"]*)"/)?.[1] ?? "",
 		});
+
 		expect(yes.res.status).toBe(200);
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id).toBe(groceries);
 		// The rule is there now, so a later save of this merchant never asks either.
 		await setCategory([ids[3]], null, null);
@@ -665,6 +744,7 @@ describe("merchant category rule offer", () => {
 	it("a split trip counts only as its whole purchase: neither its parent nor its parts count", async () => {
 		// The parent keeps its own Groceries pick, so only its split keeps it out of the count.
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const split = await saveSplit(
 			env.DB,
 			ids[1] ?? 0,
@@ -674,6 +754,7 @@ describe("merchant category rule offer", () => {
 			],
 			"test",
 		);
+
 		expect(split.saved).toBe(true);
 		// Counted: ids[0] and this save, 2. If the parent and its parts counted, it would be 5.
 		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
@@ -724,10 +805,12 @@ describe("merchant category rule offer", () => {
 		)
 			.bind(ids[3])
 			.run();
+
 		const save = await post(`/transactions/${ids[3]}`, {
 			...edit(groceries),
 			income: "1",
 		});
+
 		expect(save.html).not.toContain(QUESTION);
 		expect(announced(save.res)).not.toContain(QUESTION);
 		expect(announced(save.res)).toBe(
@@ -754,10 +837,12 @@ describe("merchant category rule offer", () => {
 		)
 			.bind(ids[3])
 			.run();
+
 		const save = await post(`/transactions/${ids[3]}`, {
 			...edit(groceries),
 			excluded: "1",
 		});
+
 		expect(save.html).not.toContain(QUESTION);
 		expect(announced(save.res)).not.toContain(QUESTION);
 	});
@@ -769,11 +854,13 @@ describe("merchant category rule offer", () => {
 		)
 			.bind(ids[3])
 			.run();
+
 		const selected = await post("/transactions/select/category/save", {
 			ids: String(ids[3]),
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(selected.html).not.toContain(QUESTION);
 		expect(announced(selected.res)).toBe("Set 1 transaction to Groceries.");
 	});
@@ -795,12 +882,14 @@ describe("merchant category rule offer", () => {
 
 	it("the Yes toast names the merchant as the save renamed it", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			name_pick: "own",
 			merchant: "Fresh Market",
 			name_scope: "all",
 		});
+
 		const yes = await post("/transactions/rule-offer", offerFields(third.html));
 		expect(
 			JSON.parse(yes.res.headers.get("HX-Trigger") ?? "{}").toast.message,
@@ -809,12 +898,14 @@ describe("merchant category rule offer", () => {
 
 	it("announces an exclusion with the question on a third save that excludes the transaction", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			excluded: "1",
 		});
-		const announce = JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}")
-			.announce as string;
+
+		const announce = announced(third.res);
+
 		// The save's words, the exclusion and then the question, in that order.
 		expect(announce).toBe(
 			"Saved. rule-offer-store is now Groceries. It's excluded from the budget. Always use Groceries for rule-offer-store? You've picked Groceries for rule-offer-store 3 times.",
@@ -823,6 +914,7 @@ describe("merchant category rule offer", () => {
 
 	it("asks after a cash entry saved without an entry key", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -831,6 +923,7 @@ describe("merchant category rule offer", () => {
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(cash.html).toContain(QUESTION);
 	});
 
@@ -841,6 +934,7 @@ describe("merchant category rule offer", () => {
 		)
 			.bind(merchant)
 			.run();
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -849,6 +943,7 @@ describe("merchant category rule offer", () => {
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(cash.html).toContain("Always use Groceries for Fresh Market?");
 		expect(cash.html).not.toContain("for rule-offer-store?");
 		expect(announced(cash.res)).toContain(
@@ -863,6 +958,7 @@ describe("merchant category rule offer", () => {
 
 	it("the cash question names a merchant the list tidies, not its raw bank text", async () => {
 		await addPicks("COSTCO", 2, groceries);
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -871,33 +967,40 @@ describe("merchant category rule offer", () => {
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(cash.html).toContain("Always use Groceries for Costco?");
 		expect(cash.html).not.toContain("for COSTCO?");
 	});
 
 	it("does not ask on a third save that also ticks Always for this merchant", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			always: "1",
 		});
+
 		expect(third.html).not.toContain(QUESTION);
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id).toBe(groceries);
 	});
 
 	it("names the merchant as the save renamed it on the third pick", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			name_pick: "own",
 			merchant: "Fresh Market",
 			name_scope: "all",
 		});
+
 		expect(third.html).toContain("Always use Groceries for Fresh Market?");
 		expect(
 			JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}").announce,
@@ -906,12 +1009,14 @@ describe("merchant category rule offer", () => {
 
 	it("names the store, not a name given to this one transaction, since a rule is for the whole store", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			name_pick: "own",
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		expect(third.html).toContain(`Always use Groceries for ${merchant}?`);
 		expect(third.html).not.toContain("Always use Groceries for Dog bed?");
 	});
@@ -924,12 +1029,14 @@ describe("merchant category rule offer", () => {
 		)
 			.bind(merchant)
 			.run();
+
 		// The stale panel is saved with its name field unchanged: that is not a rename.
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			merchant: "Corner Shop",
 			merchant_was: "Corner Shop",
 		});
+
 		expect(third.html).toContain("Always use Groceries for Fresh Market?");
 		expect(third.html).not.toContain("Corner Shop");
 		expect(offerFields(third.html).merchant).toBe("Fresh Market");
@@ -942,11 +1049,13 @@ describe("merchant category rule offer", () => {
 		expect(
 			JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}").toast.message,
 		).toBe("Saved Fresh Market");
+
 		const stored = await env.DB.prepare(
 			"SELECT display_name FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ display_name: string | null }>();
+
 		expect(stored?.display_name).toBe("Fresh Market");
 		const yes = await post("/transactions/rule-offer", offerFields(third.html));
 		expect(
@@ -965,17 +1074,21 @@ describe("merchant category rule offer", () => {
 				todayIn(DEFAULT_TIME_ZONE),
 			)
 			.run();
+
 		const otherIds = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE merchant_name = 'other' ORDER BY id",
 		)
 			.all<{ id: number }>()
 			.then((r) => r.results.map((row) => row.id));
+
 		await setCategory(otherIds.slice(0, 2), groceries, "user");
+
 		const selected = await post("/transactions/select/category/save", {
 			ids: `${ids[2]},${otherIds[2] ?? 0}`,
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(
 			selected.html.match(/Always use Groceries for [^?<]+\?/g),
 		).toHaveLength(1);
@@ -997,6 +1110,7 @@ describe("merchant category rule offer", () => {
 				groceries,
 			)
 			.run();
+
 		const cash = await post("/transactions/cash", {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -1005,15 +1119,20 @@ describe("merchant category rule offer", () => {
 			note: "",
 			back: "/transactions",
 		});
+
 		expect(cash.html).toContain("Always use Groceries for cash-only-store?");
+
 		const before = await env.DB.prepare(
 			"SELECT raw_name FROM merchants WHERE raw_name = 'cash-only-store'",
 		).first();
+
 		expect(before).toBeNull();
+
 		// The trip the question was asked about is the cash entry that was just saved, the newest row.
 		const saved = await env.DB.prepare(
 			"SELECT MAX(id) AS id FROM transactions",
 		).first<{ id: number }>();
+
 		const yes = await post("/transactions/rule-offer", {
 			merchant_key: "cash-only-store",
 			category: String(groceries),
@@ -1021,10 +1140,13 @@ describe("merchant category rule offer", () => {
 			back: "/transactions",
 			trip: String(saved?.id),
 		});
+
 		expect(yes.res.status).toBe(200);
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = 'cash-only-store'",
 		).first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id).toBe(groceries);
 	});
 });
@@ -1068,21 +1190,25 @@ describe("Yes checks the trip the question was asked about (decision 113)", () =
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
 		expect(third.html).toContain(`name="trip" value="${ids[2]}"`);
+
 		const reply = await post(
 			"/transactions/rule-offer",
 			offerFields(third.html),
 		);
+
 		expect((await ruleOfMerchant())?.default_category_id).toBe(groceries);
 		expect(announced(reply.res)).toContain("Always use Groceries");
 	});
 
 	it("makes no rule from an Organize question whose charges now include a trip that looks mixed", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const organized = await post("/transactions/organize", {
 			category: String(groceries),
 			group: merchant,
 			name: merchant,
 		});
+
 		expect(organized.html).toContain(QUESTION);
 		await markMixed(ids[2] ?? 0);
 		await post("/transactions/organize/rule", {
@@ -1119,12 +1245,14 @@ describe("firstRuleOfferAmong", () => {
 		const under = await addPicks("under-store", 2, groceries);
 		const first = await addPicks("first-store", 3, groceries);
 		const second = await addPicks("second-store", 3, groceries);
+
 		// The selection lists second-store first, but first-store's selected row has the lower id.
 		const offer = await firstRuleOfferAmong(
 			env.DB,
 			[second[0] ?? 0, first[0] ?? 0, under[0] ?? 0, ids[0] ?? 0],
 			groceries,
 		);
+
 		expect(offer).toEqual({
 			merchantKey: "first-store",
 			categoryId: groceries,
@@ -1151,11 +1279,13 @@ describe("firstRuleOfferAmong", () => {
 		)
 			.bind(ids[0])
 			.run();
+
 		const offer = await firstRuleOfferAmong(
 			env.DB,
 			[ids[0] ?? 0, ids[1] ?? 0],
 			groceries,
 		);
+
 		expect(offer).toMatchObject({
 			categoryId: groceries,
 			count: 3,
@@ -1165,11 +1295,13 @@ describe("firstRuleOfferAmong", () => {
 
 	it("returns null when no selected merchant reaches three picks", async () => {
 		const under = await addPicks("under-store", 2, groceries);
+
 		const offer = await firstRuleOfferAmong(
 			env.DB,
 			[under[0] ?? 0, ids[0] ?? 0],
 			groceries,
 		);
+
 		expect(offer).toBeNull();
 	});
 });
@@ -1182,11 +1314,13 @@ describe("the rule offer names the store, not a name a row has of its own (decis
 			merchant: "Dog bed",
 			name_scope: "one",
 		});
+
 		const selected = await post("/transactions/select/category/save", {
 			ids: `${ids[0]},${ids[1]},${ids[2]}`,
 			category: String(groceries),
 			back: "/transactions?select=1",
 		});
+
 		expect(selected.html).toContain(QUESTION);
 		expect(selected.html).not.toContain("Always use Groceries for Dog bed?");
 	});
@@ -1227,11 +1361,13 @@ describe("the rule offer after the store's own name is picked (decision 101)", (
 	it("This one only keeps the store's suggestion, so the offer names the suggestion, not the tidied bank text", async () => {
 		await suggest();
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			name_pick: "store",
 			name_scope: "one",
 		});
+
 		expect(third.html).toContain("Always use Groceries for Pet Supplies Co?");
 		expect(third.html).not.toContain(QUESTION);
 	});
@@ -1239,11 +1375,13 @@ describe("the rule offer after the store's own name is picked (decision 101)", (
 	it("All turns the suggestion down, so the offer names the bank's text tidied", async () => {
 		await suggest();
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
 			name_pick: "store",
 			name_scope: "all",
 		});
+
 		expect(third.html).toContain(QUESTION);
 		expect(third.html).not.toContain("Pet Supplies Co");
 	});
@@ -1294,6 +1432,7 @@ describe("rule offer edge cases (#372)", () => {
 
 	it("a reposted cash form with the same entry key asks nothing new", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		const cash = {
 			date: todayIn(DEFAULT_TIME_ZONE),
 			amount: "10.00",
@@ -1303,6 +1442,7 @@ describe("rule offer edge cases (#372)", () => {
 			back: "/transactions",
 			entry_key: "123e4567-e89b-42d3-a456-426614174002",
 		};
+
 		const first = await post("/transactions/cash", cash);
 		expect(first.html).toContain(QUESTION);
 		// The same form again (a lost reply) stores nothing new, so it doesn't ask again.
@@ -1312,6 +1452,7 @@ describe("rule offer edge cases (#372)", () => {
 
 	it("a stale sheet whose rule was removed elsewhere still asks, and its save doesn't recreate the rule", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
+
 		// The sheet was opened with Groceries as the store's rule; another tab removed it, so the store has none now.
 		const stale = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
@@ -1319,12 +1460,15 @@ describe("rule offer edge cases (#372)", () => {
 			always_was: "1",
 			rule_category_was: String(groceries),
 		});
+
 		expect(stale.html).toContain(QUESTION);
+
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
+
 		expect(rule?.default_category_id ?? null).toBeNull();
 	});
 
@@ -1343,11 +1487,13 @@ describe("rule offer edge cases (#372)", () => {
 		// A payment for a planned expense counts whatever its exclusion, so unticking Excluded adds no pick.
 		const included = await post(`/transactions/${ids[2]}`, edit(groceries));
 		expect(included.html).not.toContain(QUESTION);
+
 		const saved = await env.DB.prepare(
 			"SELECT excluded, category_id AS categoryId FROM transactions WHERE id = ?",
 		)
 			.bind(ids[2])
 			.first<{ excluded: number; categoryId: number }>();
+
 		expect(saved).toEqual({ excluded: 0, categoryId: groceries });
 	});
 });

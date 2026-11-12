@@ -37,24 +37,31 @@ const PAYCHECK = tx(2001, TODAY, "Paycheck", -245000, undefined, {
 	income: true,
 	rawName: "ACME CORP",
 });
+
 const FARMERS = tx(2002, TODAY, "Farmers market", 2000, GROCERIES);
+
 const DOORDASH = tx(2003, TODAY, "Doordash taco", 3107, undefined, {
 	rawName: "DD *DOORDASH TACO",
 });
+
 const WATER = tx(2004, TODAY, "City Water", 1399, HOUSEHOLD, {
 	paysBill: true,
 	billName: "Water",
 });
+
 const BAKERY = tx(2005, TODAY, "Local Bakery", 1200, undefined, {
 	rawName: "SQ *LOCAL BAKERY 4432",
 });
+
 const BANFIELD = tx(2006, TODAY, "Banfield Pet Hospital", 18900, undefined, {
 	rawName: "BANFIELD #1182",
 });
+
 /** Local Bakery once it is saved as Eating Out (P119). */
 const BAKERY_SAVED = tx(2005, TODAY, "Local Bakery", 1200, EATING_OUT, {
 	rawName: "SQ *LOCAL BAKERY 4432",
 });
+
 const SIX = [PAYCHECK, FARMERS, DOORDASH, WATER, BAKERY, BANFIELD];
 
 type Budget = {
@@ -64,6 +71,7 @@ type Budget = {
 	spentCents: number;
 	budgetCents: number;
 };
+
 /** October so far: Eating Out is over, and Gas is nearly spent (ProgressRow's own rules). */
 const GROCERIES_ROW: Budget = {
 	name: "Groceries",
@@ -72,6 +80,7 @@ const GROCERIES_ROW: Budget = {
 	spentCents: 39500,
 	budgetCents: 70000,
 };
+
 const EATING_ROW: Budget = {
 	name: "Eating Out",
 	icon: "eating-out",
@@ -79,6 +88,7 @@ const EATING_ROW: Budget = {
 	spentCents: 28600,
 	budgetCents: 25000,
 };
+
 const GAS_ROW: Budget = {
 	name: "Gas",
 	icon: "gas",
@@ -86,6 +96,7 @@ const GAS_ROW: Budget = {
 	spentCents: 18600,
 	budgetCents: 20000,
 };
+
 const KIDS_ROW: Budget = {
 	name: "Kids",
 	icon: "kids",
@@ -93,7 +104,9 @@ const KIDS_ROW: Budget = {
 	spentCents: 21000,
 	budgetCents: 30000,
 };
+
 const BUDGET = [GROCERIES_ROW, EATING_ROW, GAS_ROW, KIDS_ROW];
+
 /** Groceries once it is saved at $650 (P119's Home still). */
 const GROCERIES_SAVED: Budget = { ...GROCERIES_ROW, budgetCents: 65000 };
 
@@ -130,6 +143,7 @@ function TxRow({
 }) {
 	const { kind, caption, tag } = rowCaption(row);
 	const amount = formatCents(row.amountCents, { signed: true });
+
 	// Needs category is quiet words that are never cut off. The dot and its spaces are one run with the
 	// bank text, which is the only part that truncates; the non-breaking spaces keep one space each side.
 	const said =
@@ -143,6 +157,7 @@ function TxRow({
 		) : (
 			caption && <span class="min-w-0 truncate text-muted">{caption}</span>
 		);
+
 	const icon =
 		kind === "category" ? (
 			<CategoryIcon
@@ -157,6 +172,7 @@ function TxRow({
 				/>
 			</span>
 		);
+
 	return (
 		<li data-transaction={row.id} class={`relative ${li}`}>
 			<a
@@ -181,12 +197,15 @@ function TxRow({
 /** ProgressRow's 4px bar, still: the track, the fill, and brick, the near-limit colour or green. */
 function Bar({ row, class: cls }: { row: Budget; class: string }) {
 	const over = row.spentCents > row.budgetCents;
+
 	const nearLimit =
 		!over &&
 		row.budgetCents > 0 &&
 		row.spentCents >= 0 &&
 		row.spentCents * 5 >= row.budgetCents * 4;
+
 	const { fillPct } = barGeometry(row.spentCents, row.budgetCents);
+
 	return (
 		<svg class={cls} aria-hidden="true">
 			<rect width="100%" height="100%" rx="2" class="fill-rule" />
@@ -221,6 +240,7 @@ function BudgetRow({
 	const over = row.spentCents > row.budgetCents;
 	const overBy = row.spentCents - row.budgetCents;
 	const nearLimit = !over && row.spentCents * 5 >= row.budgetCents * 4;
+
 	return (
 		<li class={`relative ${li}`}>
 			<a href={href} class="flex items-start gap-4 py-3 text-ink no-underline">
@@ -530,12 +550,14 @@ const pressedToday = (
 		<TransactionRow row={BAKERY} href={transactionHref(BAKERY.id)} />
 	</ul>
 );
+
 const pressedQuiet = (
 	<ul class="divide-y divide-rule">
 		<TxRow row={WATER} look="quiet" />
 		<TxRow row={BAKERY} look="quiet" press />
 	</ul>
 );
+
 const pressedSelect = (
 	<ul class="divide-y divide-rule">
 		<SelectableTransactionRow row={WATER} today={TODAY} />
@@ -549,6 +571,7 @@ const pressedSelect = (
 // saved at $650, one second in. The effects are frozen with static classes, except the replay.
 
 type Option = "today" | "tick" | "let-go";
+
 type Moment = "0s" | "1s" | "end" | "replay" | "keyboard";
 
 const SAVED_TOAST = "Saved Local Bakery";
@@ -557,8 +580,10 @@ const SAVED_BUDGET_TOAST = "Saved the Groceries budget";
 /** The toast at each moment: drawn whole at 0 s and 1 s, gone at 4 s, and its replay. */
 function savedToast(moment: Moment, text: string) {
 	if (moment === "end") return undefined;
+
 	if (moment === "replay")
 		return <Toast class="proposal-saved-toast opacity-0">{text}</Toast>;
+
 	return <Toast>{text}</Toast>;
 }
 
@@ -568,18 +593,21 @@ function savedToast(moment: Moment, text: string) {
  */
 function tickSlot(moment: Moment, cls = "") {
 	if (moment === "end") return undefined;
+
 	if (moment === "0s")
 		return (
 			<TickSlot cls={cls}>
 				<Tick short />
 			</TickSlot>
 		);
+
 	if (moment === "1s")
 		return (
 			<TickSlot cls={cls}>
 				<Tick />
 			</TickSlot>
 		);
+
 	return (
 		<TickSlot cls={cls}>
 			<Icon
@@ -594,6 +622,7 @@ function tickSlot(moment: Moment, cls = "") {
 /** The let-go row's press at each moment (P119 B): pressed through 1 s, faded from the replay's 1.3 s hold. */
 function pressTint(moment: Moment) {
 	if (moment === "end") return "";
+
 	return moment === "replay" ? "proposal-saved-press" : "bg-press";
 }
 
@@ -601,9 +630,11 @@ function pressTint(moment: Moment) {
 function savedRow(option: Option, moment: Moment) {
 	if (option === "tick")
 		return <TxRow row={BAKERY_SAVED} look="quiet" end={tickSlot(moment)} />;
+
 	if (option === "let-go")
 		return <TxRow row={BAKERY_SAVED} look="quiet" li={pressTint(moment)} />;
 	const href = transactionHref(BAKERY_SAVED.id);
+
 	// Today: nothing on touch. The keyboard still draws the focus ring on the saved row.
 	if (moment === "keyboard")
 		return (
@@ -611,18 +642,21 @@ function savedRow(option: Option, moment: Moment) {
 				<TransactionRow row={BAKERY_SAVED} href={href} bare />
 			</li>
 		);
+
 	return <TransactionRow row={BAKERY_SAVED} href={href} />;
 }
 
 /** The Transactions crop after the save: the rows around the saved one, as the option draws them. */
 function savedCrop(option: Option, moment: Moment) {
 	const quiet = option !== "today";
+
 	const around = (r: ListRow) =>
 		quiet ? (
 			<TxRow row={r} look="quiet" />
 		) : (
 			<TransactionRow row={r} href={transactionHref(r.id)} />
 		);
+
 	return (
 		<Still
 			label={`${optionName(option)}, ${momentWords(moment)}`}
@@ -644,6 +678,7 @@ function savedHome(option: Option) {
 	const rows = (r: Budget, i: number) => {
 		const href = budgetHref(i);
 		const groceries = i === 0;
+
 		if (option === "tick")
 			return (
 				<BudgetRow
@@ -653,6 +688,7 @@ function savedHome(option: Option) {
 					end={groceries ? tickSlot("1s", "mt-0.5") : undefined}
 				/>
 			);
+
 		if (option === "let-go")
 			return (
 				<BudgetRow
@@ -662,8 +698,10 @@ function savedHome(option: Option) {
 					li={groceries ? pressTint("1s") : ""}
 				/>
 			);
+
 		return <ProgressRow {...r} href={href} />;
 	};
+
 	return (
 		<Still
 			label={`${optionName(option)}, Home at 1 second`}
@@ -691,7 +729,9 @@ const OPTION_NAMES: Record<Option, string> = {
 	tick: "A · Auditor's tick",
 	"let-go": "B · Let go",
 };
+
 const optionName = (option: Option) => OPTION_NAMES[option];
+
 const MOMENT_WORDS: Record<Moment, string> = {
 	"0s": "0 seconds",
 	"1s": "1 second",
@@ -699,11 +739,13 @@ const MOMENT_WORDS: Record<Moment, string> = {
 	replay: "replaying every 5 seconds",
 	keyboard: "1 second, keyboard focus",
 };
+
 const momentWords = (moment: Moment) => MOMENT_WORDS[moment];
 
 /** Under each option (Today excepted): how the keyboard, a filtered list and the desktop behave. */
 const FILTERED_LINE =
 	"If the row leaves a filtered list: the toast only; focus goes to the result count.";
+
 const DESKTOP_LINE = "Desktop: the same, beside the open edit panel.";
 
 /** One option of P119: its words, then its stills in a row and the Home still. */
@@ -764,6 +806,7 @@ function SavedOption({
 /** The four moments of one option: its stills, its replay or keyboard ring, and the Home still. */
 function savedPictures(option: Option) {
 	const fourth: Moment = option === "today" ? "keyboard" : "replay";
+
 	return [
 		{ caption: "At 0 seconds", still: savedCrop(option, "0s") },
 		{ caption: "At 1 second", still: savedCrop(option, "1s") },

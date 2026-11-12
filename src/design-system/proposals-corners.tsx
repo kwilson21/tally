@@ -54,6 +54,7 @@ type Look = "today" | "a" | "b";
  * sheet only.
  */
 const ROUND = "[&_*]:[corner-shape:round]";
+
 const LOOKS: Record<Look, string> = {
 	today: ROUND,
 	a: "[&_.rounded-control]:[corner-shape:squircle] [&_.rounded-t-sheet]:[corner-shape:squircle]",

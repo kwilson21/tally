@@ -12,6 +12,7 @@ import { type BudgetCategory, budgetCategory } from "./budgets";
 /** A category's budget in `month`, as SQL: the latest amount at or before it, or NULL when it has none yet. */
 const BUDGET_IN_MONTH =
 	"(SELECT amount_cents FROM budget_amounts WHERE category_id = ?1 AND effective_month <= ?2 ORDER BY effective_month DESC LIMIT 1)";
+
 /** The savings goal in `month`, as SQL: the latest amount at or before it, or NULL when there is none yet. */
 const GOAL_IN_MONTH =
 	"(SELECT amount_cents FROM savings_goal_amounts WHERE effective_month <= ?1 ORDER BY effective_month DESC LIMIT 1)";
@@ -44,6 +45,7 @@ export async function savingsGoalFacts(
 		.prepare(`SELECT ${GOAL_IN_MONTH} AS goalCents`)
 		.bind(month)
 		.first<{ goalCents: number | null }>();
+
 	return { goalCents: row?.goalCents ?? null };
 }
 
@@ -88,8 +90,8 @@ const GUARD_RAISED =
 	/NOT NULL constraint failed: (budget_amounts|savings_goal_amounts)\.amount_cents/;
 
 /** Whether a save failed because what the rule read had changed, and not for any other reason. */
-export function changedSinceRead(error: unknown): boolean {
-	return error instanceof Error && GUARD_RAISED.test(error.message);
+export function changedSinceRead(error: Error): boolean {
+	return GUARD_RAISED.test(error.message);
 }
 
 /**
@@ -103,13 +105,17 @@ export async function decideAndSave<W>(
 ): Promise<Outcome<W>> {
 	for (let attempt = 1; attempt <= 3; attempt++) {
 		const outcome = await decide();
+
 		if (outcome.kind !== "write") return outcome;
+
 		try {
 			await save(outcome.write).run();
+
 			return outcome;
 		} catch (error) {
-			if (!changedSinceRead(error)) throw error;
+			if (!(error instanceof Error && changedSinceRead(error))) throw error;
 		}
 	}
+
 	throw new Error("The budget kept changing while it was being saved.");
 }

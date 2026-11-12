@@ -41,8 +41,17 @@ export function keepShownBudgets(
 	values: string[],
 ): BudgetAsk[] {
 	const shown = new Set(values);
+
 	return current.filter((ask) => shown.has(shownBudgetValue(ask)));
 }
+
+/** True for a parsed JSON object (not null); its fields are checked where they are read. */
+const isParsedObject = <Fields extends object>(
+	value: unknown,
+): value is Fields => typeof value === "object" && value !== null;
+
+/** True for an integer. */
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
 
 /**
  * The category ids a keep-all form submitted, each once, read from the values shownBudgetValue wrote (the snapshot the
@@ -50,17 +59,23 @@ export function keepShownBudgets(
  */
 export function shownBudgetIds(values: string[]): number[] {
 	const ids = new Set<number>();
+
 	for (const value of values) {
 		let parsed: unknown;
+
 		try {
 			parsed = JSON.parse(value);
 		} catch {
 			continue;
 		}
-		if (typeof parsed !== "object" || parsed === null) continue;
-		const { id } = parsed as { id?: unknown };
-		if (Number.isInteger(id)) ids.add(id as number);
+
+		if (!isParsedObject<{ id?: unknown }>(parsed)) continue;
+
+		const { id } = parsed;
+
+		if (isInteger(id)) ids.add(id);
 	}
+
 	return [...ids];
 }
 
@@ -80,6 +95,7 @@ export function nothingAskedLine(reason: NothingAsked): string {
 /** A sentence's list of items: "A and B", "A, B and C" (a single item is itself). */
 export function andList(items: string[]): string {
 	if (items.length <= 1) return items[0] ?? "";
+
 	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
@@ -94,12 +110,15 @@ export function monthList(months: MonthSpent[]): string {
  */
 export function bankLine(ask: BudgetAsk): string {
 	const spent = ask.months.some((month) => month.spentCents !== 0);
+
 	if (!spent)
 		return `${ask.name} has no spending yet. Set a monthly budget, or skip it.`;
+
 	const parts = ask.months.map(
 		(month) =>
 			`${dollarsWords(month.spentCents)} in ${monthName(month.month.slice(0, 7))}`,
 	);
+
 	return `Your bank shows ${ask.name} spent ${andList(parts)}.`;
 }
 
@@ -132,8 +151,10 @@ export function keepAllLine(months: MonthSpent[]): string {
 export function keepAllLead(months: MonthSpent[]): string {
 	if (months.length === 0)
 		return "Each is a typical month, rounded up to the next $10.";
+
 	if (months.length === 1)
 		return `Each is what you spent in ${monthList(months)}, rounded up to the next $10.`;
+
 	return `Each is what you spent in ${monthList(months)}, on average, rounded up to the next $10.`;
 }
 
@@ -147,11 +168,11 @@ export function keepAllButton(count: number): string {
 	return count === 1 ? "Keep this budget" : `Keep all ${count}`;
 }
 
+/** A double-ruled total's two lines: the count and the amount. */
+type TotalLine = { label: string; amount: string };
+
 /** The setup card's double-ruled total: "12 budgets" and "$4,050 a month" (one budget in the singular). */
-export function budgetsTotalLine(
-	count: number,
-	cents: number,
-): { label: string; amount: string } {
+export function budgetsTotalLine(count: number, cents: number): TotalLine {
 	return {
 		label: count === 1 ? "1 budget" : `${count} budgets`,
 		amount: `${dollarsWords(cents)} a month`,
@@ -175,16 +196,21 @@ export function budgetsLedgerLine(count: number, cents: number): string {
 export function keptBudgetsWords(kept: number, changed: number): string {
 	if (kept === 0) {
 		if (changed === 0) return "Nothing kept.";
+
 		return changed === 1
 			? "Nothing saved. 1 suggestion changed since the page drew, so it's asked again below."
 			: `Nothing saved. ${changed} suggestions changed since the page drew, so they're asked again below.`;
 	}
+
 	const keptWords = kept === 1 ? "Kept 1 budget." : `Kept ${kept} budgets.`;
+
 	if (changed === 0) return keptWords;
+
 	const asked =
 		changed === 1
 			? "1 changed since the page drew, so it's asked again below."
 			: `${changed} changed since the page drew, so they're asked again below.`;
+
 	return `${keptWords} ${asked}`;
 }
 
@@ -222,10 +248,12 @@ export function budgetsMonthChangedWords(): string {
  */
 export function needsTail(count: number, meanCents: number | null): string {
 	const noun = count === 1 ? "transaction" : "transactions";
+
 	const about =
 		meanCents !== null && meanCents > 0
 			? ` · about ${formatCents(meanCents, { wholeDollars: true })} a month`
 			: "";
+
 	return ` · ${count} ${noun}${about}`;
 }
 

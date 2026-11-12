@@ -72,6 +72,7 @@ import { YourBanks } from "../views/your-banks";
 import { ReadingSwaps, readHomeSetup, redrawSetup } from "./setup";
 
 type App = { Bindings: Env };
+
 export const home = new Hono<App>();
 
 /** "$650" or "$650.25": a budget as a sentence says it. */
@@ -94,6 +95,7 @@ const openAttrs = (href: string) => ({
 // Where the savings goal sheet's close goes: Home, with focus on the Savings row. Its htmx close and its plain
 // link (Cancel and the backdrop without JavaScript) both use it.
 const SAVINGS_GOAL_CLOSE_HREF = "/?focus=savings-goal";
+
 const closeSavingsGoalAttrs = {
 	"hx-get": SAVINGS_GOAL_CLOSE_HREF,
 	"hx-target": "#page",
@@ -112,12 +114,14 @@ const inPlace = {
 	"hx-swap": "innerHTML",
 	"hx-sync": "body:queue all",
 };
+
 const adjustAttrs = (href: string) => ({
 	id: "adjust-link",
 	"hx-get": href,
 	"hx-push-url": "true",
 	...inPlace,
 });
+
 const nudgeAttrs = inPlace;
 
 type HomeOptions = {
@@ -173,9 +177,11 @@ async function renderHome(
 	const currentMonth = today.slice(0, 7);
 	const month = viewMonth ?? currentMonth;
 	const current = month === currentMonth;
+
 	// The month's numbers and Safe to spend, as readMonthSummary reads them (the setup finish reads it too).
 	const { data, billData, activeBills, billTotals, summary } =
 		await readMonthSummary(c.env.DB, today, month);
+
 	// The list is the bills due soon, judged by the same totals Bills uses. Safe to spend sets aside only this month's
 	// of them (decision 123), which billTotals.setAsideCents gives.
 	const dueBills = current
@@ -183,30 +189,40 @@ async function renderHome(
 				(bill) => billTotalsForRows(month, [bill]).soonCount > 0,
 			)
 		: [];
+
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
+
 	const storedFirstMonth =
 		firstMonthOption ?? (await firstCountedMonth(c.env.DB));
+
 	const firstMonth =
 		storedFirstMonth && storedFirstMonth < currentMonth
 			? storedFirstMonth
 			: currentMonth;
+
 	const budgeted = new Set(summary.categories.map((cat) => cat.id));
+
 	const notBudgeted = data.categories.filter((cat) => {
 		if (budgeted.has(cat.id)) return false;
+
 		const hasSpending = data.transactions.some(
 			(t) => t.categoryId === cat.id && !t.income,
 		);
+
 		return current ? !cat.archived || hasSpending : hasSpending;
 	});
+
 	// Focus goes to the row asked for; if it isn't a link any more (archived on another screen while
 	// its sheet was open), to the Budget heading, so focus is never lost.
 	const linked = new Set(
 		data.categories.filter((cat) => !cat.archived).map((cat) => cat.id),
 	);
+
 	const focusHeading = focusId !== undefined && !linked.has(focusId);
 	// Adjust is offered when there's a budget it can change: a budgeted category that isn't archived.
 	const canAdjust = summary.categories.some((cat) => linked.has(cat.id));
 	const { spentCents } = summary.uncategorized;
+
 	const needsCount = current
 		? await c.env.DB.prepare(
 				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${countedMonthSql()} = ? AND ${NEEDS_CATEGORY}`,
@@ -214,11 +230,15 @@ async function renderHome(
 				.bind(month)
 				.first<{ n: number }>()
 		: null;
+
 	const currentNeeds = needsCount?.n ?? 0;
+
 	const olderNeeds = current
 		? await olderNeedsCategoryCount(c.env.DB, `${month}-01`)
 		: 0;
+
 	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
+
 	const needs = (
 		<>
 			{currentNeeds}
@@ -229,40 +249,51 @@ async function renderHome(
 			{currentNeeds === 1 ? "needs" : "need"} a category
 		</>
 	);
+
 	const demo = c.env.DEMO === "true";
+
 	// The connected banks Home flags: one that stopped syncing, so Safe to spend may be too high (spec §8.5), or one that
 	// needs signing in. Read once, and that one list is both the bank line and the setup's input (readSetupForHome), so the
 	// two always agree. The demo has no real banks, so it never asks.
 	const flagged =
 		setupRead?.flagged ??
 		(demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today));
+
 	const bankNotice = homeBankNotice(flagged, today);
+
 	// Apple Card's line (decision 138): the current month only, never in the demo. It is not a flagged bank, so it never
 	// feeds `flagged` or setup, and its day joins the as-of tag below.
 	const appleNotice =
 		current && !demo
 			? appleCardNotice(await appleCardUpload(c.env.DB), today)
 			: null;
+
 	const day = Number(today.slice(8, 10));
+
 	const forecastDays = current
 		? await homeForecastDays(c.env.DB, month, today)
 		: [];
+
 	const forecastSpentCents = forecastDays.reduce(
 		(sum, row) => sum + row.spentCents,
 		0,
 	);
+
 	const billPaymentsCents = forecastDays.reduce(
 		(sum, row) => sum + row.billPaymentsCents,
 		0,
 	);
+
 	const refundsCents = forecastDays.reduce(
 		(sum, row) => sum + row.refundsCents,
 		0,
 	);
+
 	const everydayCents = forecastDays.reduce(
 		(sum, row) => sum + row.everydayCents,
 		0,
 	);
+
 	const forecast = forecastMonth({
 		day,
 		daysInMonth: daysInMonth(month),
@@ -273,33 +304,41 @@ async function renderHome(
 		refundsCents,
 		billsStillDueCents: billTotals?.stillToPayCents ?? 0,
 	});
+
 	// Bills Bills lists as overdue, said on the status line (decision 167); a finished month says nothing of bills.
 	const overdueBills = current ? (billTotals?.overdueCount ?? 0) : 0;
 	// Any budget this month, the same test statusSentence uses. With none, Home is never over budget (#519).
 	const hasBudgets = summary.categories.length > 0;
+
 	// With no budget the forecast would measure spending against $0 and draw it over budget, so it waits for one.
 	const showForecast =
 		current && hasBudgets && day >= FORECAST_START_DAY && forecast.visible;
+
 	const dailySpending = Array.from(
 		{ length: day },
 		(_, index) =>
 			forecastDays.find((item) => item.day === index + 1)?.spentCents ?? 0,
 	);
+
 	const dailyAmount =
 		current && day < FORECAST_START_DAY && summary.safeToSpendCents > 0
 			? `About ${formatCents(Math.floor(summary.safeToSpendCents / (daysInMonth(month) - day + 1)))} a day for ${daysInMonth(month) - day + 1} days left.`
 			: undefined;
+
 	// Counted spending by category, income left out, as Home counts it (spec §6).
 	const spent = (id: number) =>
 		data.transactions
 			.filter((t) => t.categoryId === id && !t.income)
 			.reduce((sum, t) => sum + t.amountCents, 0);
+
 	const transactionCount = (id: number) =>
 		data.transactions.filter((t) => t.categoryId === id && !t.income).length;
+
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
 		...cat,
 		spentCents: spent(cat.id),
 	}));
+
 	// Every month the strip links to gets its result in one query (MonthEnd's number, read the same way).
 	const results = await monthResults(
 		c.env.DB,
@@ -434,6 +473,7 @@ async function renderHome(
 											current && !looks.get(cat.id)?.archived
 												? `/budget/${cat.id}`
 												: undefined;
+
 										return (
 											<ProgressRow
 												name={cat.name}
@@ -554,6 +594,7 @@ async function renderHome(
 // Closing a budget sheet goes back to Home with focus on that category's row: its plain link (Cancel and the
 // backdrop without JavaScript) and its htmx swap, which announces the change.
 const budgetCloseHref = (categoryId: number) => `/?focus=${categoryId}`;
+
 const closeBudgetAttrs = (categoryId: number) => ({
 	"hx-get": budgetCloseHref(categoryId),
 	"hx-target": "#page",
@@ -568,10 +609,12 @@ const closeBudgetAttrs = (categoryId: number) => ({
  */
 async function activeCategory(c: Context<App>) {
 	const id = CategoryId.safeParse(c.req.param("id"));
+
 	if (!id.success) return null;
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
 	const category = await budgetCategory(c.env.DB, id.data, month);
+
 	return category && !category.archived ? { category, today, month } : null;
 }
 
@@ -585,9 +628,11 @@ function budgetFactsFrom(
 	month: string,
 ) {
 	let read: BudgetFacts | null = budgetFactsOf(category);
+
 	return async () => {
 		const facts = read ?? (await budgetFacts(db, category.id, month));
 		read = null;
+
 		return facts;
 	};
 }
@@ -598,11 +643,14 @@ home.get("/", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const currentMonth = today.slice(0, 7);
 	const storedFirstMonth = await firstCountedMonth(c.env.DB);
+
 	const firstMonth =
 		storedFirstMonth && storedFirstMonth < currentMonth
 			? storedFirstMonth
 			: currentMonth;
+
 	const requested = c.req.query("month");
+
 	const viewMonth =
 		requested &&
 		/^\d{4}-(0[1-9]|1[0-2])$/.test(requested) &&
@@ -610,23 +658,30 @@ home.get("/", async (c) => {
 		requested <= currentMonth
 			? requested
 			: currentMonth;
+
 	// Setup (P142 A, decision 148): until setup is done (the budgets stroke is drawn), this month's Home is setup's: before a
 	// bank, while the import is read, and once the questions are open, the family goes to /setup (a htmx request is sent with
 	// HX-Redirect). Once it is done, Home is plain Home.
 	// The read is handed to renderHome, so it isn't made twice. An earlier month is not sent.
 	const demo = c.env.DEMO === "true";
 	let setupRead: Awaited<ReturnType<typeof readSetupForHome>> | undefined;
+
 	if (!demo && viewMonth === currentMonth) {
 		setupRead = await readSetupForHome(c.env.DB, today);
+
 		if (setupDue(setupRead.setup)) {
 			if (c.req.header("HX-Request")) {
 				c.header("HX-Redirect", "/setup");
+
 				return c.body(null, 204);
 			}
+
 			return c.redirect("/setup", 303);
 		}
 	}
+
 	const focus = Number(c.req.query("focus"));
+
 	if (c.req.query("focus") === "savings-goal" && c.req.header("HX-Request")) {
 		const message = "Savings goal editing cancelled.";
 		c.header(
@@ -634,6 +689,7 @@ home.get("/", async (c) => {
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
 	}
+
 	return renderHome(c, today, {
 		viewMonth,
 		firstMonth,
@@ -647,6 +703,7 @@ home.get("/", async (c) => {
 /** The flagged banks Home's bank line and setup both read (flaggedBanks over the banks' syncs), with the setup they make. */
 async function readSetupForHome(db: D1Database, today: string) {
 	const flagged = flaggedBanks(await bankSyncs(db), today);
+
 	return { flagged, setup: await readSetup(db, { today, flagged }) };
 }
 
@@ -666,15 +723,20 @@ function setupDue(setup: SetupView | null): boolean {
  */
 async function setupFirst(c: Context<App>): Promise<Response | null> {
 	if (c.env.DEMO === "true") return null;
+
 	const { setup } = await readSetupForHome(
 		c.env.DB,
 		await householdToday(c.env.DB),
 	);
+
 	if (!setupDue(setup)) return null;
+
 	if (c.req.header("HX-Request")) {
 		c.header("HX-Redirect", "/setup");
+
 		return c.body(null, 204);
 	}
+
 	return c.redirect("/setup", 303);
 }
 
@@ -700,13 +762,16 @@ home.post("/home/seen", async (c) => {
 		.run();
 	const form = await c.req.parseBody();
 	const shown = SHOWN_STEPS.find((step) => step === form.step);
+
 	if (shown === undefined) return c.body(null, 204);
 	const read = await readHomeSetup(c.env.DB);
 	const { today, banks, flagged, setup } = read;
+
 	// The phase left reading (or there is no setup): the page moves on, or is redrawn, in place (redrawSetup).
 	if (setup?.phase !== "reading") return redrawSetup(c, read);
 	// Still reading, at the step the page shows: nothing changes.
 	const stepNow = readingStep(setup);
+
 	if (stepNow === shown) return c.body(null, 204);
 	// Still reading, and the step moved on: the status, the bar, the next line, the email line and the list change in place (the list names the
 	// step it shows, and polls while Tally refreshes, as the poll draws it), the check-in moves to the new step, and the new
@@ -716,6 +781,7 @@ home.post("/home/seen", async (c) => {
 		"HX-Trigger",
 		hxTrigger({ toast: { message, type: "info" }, announce: message }),
 	);
+
 	return c.html(
 		<>
 			<ReadingSwaps
@@ -737,17 +803,22 @@ home.post("/home/seen", async (c) => {
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.
 home.get("/budget/:id{[0-9]+}", async (c) => {
 	const toSetup = await setupFirst(c);
+
 	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
+
 	if (!active) return c.notFound();
 	const { category, today, month } = active;
 	const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
+
 	const average = await threeMonthAverageSpentCents(
 		c.env.DB,
 		category.id,
 		month,
 	);
+
 	const closeAttrs = closeBudgetAttrs(category.id);
+
 	return renderHome(c, today, {
 		sheet: (spent, _savingsGoal, transactionCount) => (
 			<BottomSheet
@@ -777,8 +848,10 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 
 home.get("/savings-goal", async (c) => {
 	const toSetup = await setupFirst(c);
+
 	if (toSetup) return toSetup;
 	const today = await householdToday(c.env.DB);
+
 	return renderHome(c, today, {
 		sheet: (_spent, amountCents) => (
 			<BottomSheet
@@ -803,11 +876,13 @@ home.get("/savings-goal", async (c) => {
 
 home.post("/savings-goal", async (c) => {
 	const toSetup = await setupFirst(c);
+
 	if (toSetup) return toSetup;
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
 	const typed = String((await c.req.formData()).get("goal") ?? "");
 	const parsed = parseBudgetAmount(typed);
+
 	if (!parsed.ok) {
 		if (c.req.header("HX-Request")) {
 			c.header(
@@ -818,6 +893,7 @@ home.post("/savings-goal", async (c) => {
 				}),
 			);
 		}
+
 		return renderHome(c, today, {
 			status: 422,
 			sheet: () => (
@@ -838,6 +914,7 @@ home.post("/savings-goal", async (c) => {
 			),
 		});
 	}
+
 	// The rule has no refusal, and a goal already at that amount is saved as far as the family can tell.
 	await decideAndSave(
 		async () =>
@@ -847,6 +924,7 @@ home.post("/savings-goal", async (c) => {
 			),
 		(save) => savingsGoalSaveStatement(c.env.DB, save),
 	);
+
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
 		"HX-Trigger",
@@ -856,6 +934,7 @@ home.post("/savings-goal", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", "/");
+
 	return renderHome(c, today, {
 		focusSavingsGoal: true,
 		saved: { savingsGoal: true },
@@ -865,20 +944,26 @@ home.post("/savings-goal", async (c) => {
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.
 home.post("/budget/:id{[0-9]+}", async (c) => {
 	const toSetup = await setupFirst(c);
+
 	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
+
 	if (!active) return c.notFound();
 	const { category, today, month } = active;
 	const typed = String((await c.req.formData()).get("budget") ?? "");
 	const parsed = parseBudgetAmount(typed);
+
 	if (!parsed.ok) {
 		const lastMonth = await lastMonthSpentCents(c.env.DB, category.id, month);
+
 		const average = await threeMonthAverageSpentCents(
 			c.env.DB,
 			category.id,
 			month,
 		);
+
 		const closeAttrs = closeBudgetAttrs(category.id);
+
 		// A refused amount draws the open sheet again, without its arrival.
 		return renderHome(c, today, {
 			status: 422,
@@ -905,7 +990,9 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 			),
 		});
 	}
+
 	const facts = budgetFactsFrom(c.env.DB, category, month);
+
 	const outcome = await decideAndSave(
 		async () =>
 			saveBudget.decide(
@@ -914,9 +1001,11 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 			),
 		(save) => budgetSaveStatement(c.env.DB, save),
 	);
+
 	// A category archived while its sheet was open is gone, as it is for a sheet opened afterwards. A budget already at
 	// that amount is saved as far as the family can tell, so it answers as a save does.
 	if (outcome.kind === "refuse") return c.notFound();
+
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
 		"HX-Trigger",
@@ -926,6 +1015,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", "/");
+
 	return renderHome(c, today, {
 		focusId: category.id,
 		saved: { categoryId: category.id },
@@ -936,14 +1026,17 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 // on, as the sheet saves it. htmx gets Home back in Adjust mode; plain browsers are redirected there.
 home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 	const toSetup = await setupFirst(c);
+
 	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
 	const way = NudgeDirection.safeParse(c.req.param("direction"));
+
 	if (!active || !way.success) return c.notFound();
 	const { category, today, month } = active;
 	const direction = way.data;
 	// Two taps at once (two phones) both count: the one that saves second finds the budget changed, and decides again.
 	const facts = budgetFactsFrom(c.env.DB, category, month);
+
 	const outcome = await decideAndSave(
 		async () =>
 			nudgeBudget.decide(
@@ -952,6 +1045,7 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 			),
 		(save) => budgetSaveStatement(c.env.DB, save),
 	);
+
 	// Only a budgeted category has buttons; one without a budget gets it from its sheet. The new amount, or null when the
 	// budget was already as far as it goes that way.
 	const cents = handle<BudgetWrite, number | null | undefined>(outcome, {
@@ -959,11 +1053,15 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 		nothingToDo: () => null,
 		refuse: () => undefined,
 	});
+
 	if (cents === undefined) return c.notFound();
+
 	if (!c.req.header("HX-Request")) return c.redirect("/?adjust=1", 303);
+
 	// At a limit nothing changes, and it still says so on screen and to screen readers.
 	const limit =
 		direction === "down" ? "already $0" : "already the largest budget";
+
 	c.header(
 		"HX-Trigger",
 		hxTrigger(
@@ -982,11 +1080,13 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 		),
 	);
 	c.header("HX-Push-Url", "/?adjust=1");
+
 	// Reaching a limit turns the tapped button off, so focus moves to the row's other one.
 	const atLimit =
 		cents === null ||
 		(direction === "down" && cents === 0) ||
 		(direction === "up" && cents === MAX_BUDGET_CENTS);
+
 	return renderHome(c, today, {
 		adjusting: true,
 		nudgeFocus: atLimit

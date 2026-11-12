@@ -67,9 +67,11 @@ describe("bankRow", () => {
 	it("says Needs category on every row, a credit too, with no caption of its own", () => {
 		const credit = rowCaption(bankRow(decided));
 		expect(credit).toEqual({ kind: "needs", caption: null, tag: true });
+
 		const spend = rowCaption(
 			bankRow({ ...decided, amountCents: 6418, income: false }),
 		);
+
 		expect(spend).toEqual({ kind: "needs", caption: null, tag: true });
 	});
 });

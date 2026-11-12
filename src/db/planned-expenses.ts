@@ -112,6 +112,7 @@ export async function plansSetAsideCents(
 		)
 		.bind(month)
 		.first<{ cents: number }>();
+
 	return row?.cents ?? 0;
 }
 
@@ -126,6 +127,7 @@ export async function loadPlans(db: D1Database): Promise<PlannedExpense[]> {
 				ORDER BY pe.month, pe.id`,
 		)
 		.all<PlannedExpense & { paidRawName: string | null }>();
+
 	return results.map(withPayerName);
 }
 
@@ -144,6 +146,7 @@ export async function loadPlan(
 		)
 		.bind(id)
 		.first<PlannedExpense & { paidRawName: string | null }>();
+
 	return row ? withPayerName(row) : null;
 }
 
@@ -168,6 +171,7 @@ export async function planPaymentCandidates(
 			rawName: string;
 			excluded: number;
 		}>();
+
 	return results.map((row) => ({
 		id: row.id,
 		date: row.date,
@@ -194,6 +198,7 @@ export async function linkPlanPayment(
 		)
 		.bind(transactionId, planId)
 		.run();
+
 	return result.meta.changes === 1;
 }
 
@@ -211,7 +216,9 @@ export async function paysBillOrPlan(
 		)
 		.bind(transactionId)
 		.first<{ bill: number; plan: number }>();
+
 	if (paid?.bill) return "bill";
+
 	return paid?.plan ? "plan" : null;
 }
 
@@ -226,6 +233,7 @@ export async function unlinkPlanPayment(
 		)
 		.bind(planId)
 		.run();
+
 	return result.meta.changes === 1;
 }
 
@@ -241,6 +249,7 @@ export async function movePlanToMonth(
 		)
 		.bind(month, planId)
 		.run();
+
 	return result.meta.changes === 1;
 }
 
@@ -258,6 +267,7 @@ export async function insertPlan(
 		)
 		.bind(fields.name, fields.amountCents, fields.month, createdBy)
 		.run();
+
 	return result.meta.last_row_id ?? null;
 }
 
@@ -289,8 +299,10 @@ export async function updatePlan(
 			)
 			.bind(fields.name, fields.amountCents, fields.month, planId),
 	]);
+
 	const before = current?.results[0]?.before ?? null;
 	const after = written?.results[0]?.after ?? null;
+
 	return {
 		saved: written?.meta.changes === 1,
 		unlinked: before !== null && after === null,
@@ -307,6 +319,7 @@ export async function holdPlanDelete(
 	now: number = Date.now(),
 ): Promise<string | null> {
 	const token = crypto.randomUUID();
+
 	// One batch, so the hold and the delete land together or not at all; the hold reads the plan before it goes.
 	const [, held] = await db.batch([
 		db
@@ -320,7 +333,9 @@ export async function holdPlanDelete(
 			.bind(token, now, planId),
 		db.prepare("DELETE FROM planned_expenses WHERE id = ?").bind(planId),
 	]);
+
 	if (!held?.meta.changes) return null;
+
 	return token;
 }
 
@@ -343,7 +358,9 @@ export async function restorePlanDelete(
 		)
 		.bind(token, now - PLAN_UNDO_MS)
 		.first<{ name: string; hadPayment: number }>();
+
 	if (!hold) return null;
+
 	const [inserted] = await db.batch([
 		db
 			.prepare(
@@ -357,13 +374,16 @@ export async function restorePlanDelete(
 			.bind(token, now - PLAN_UNDO_MS),
 		db.prepare("DELETE FROM planned_delete_holds WHERE token = ?").bind(token),
 	]);
+
 	if (!inserted?.meta.changes) return null;
+
 	const restored = await db
 		.prepare(
 			"SELECT transaction_id AS transactionId FROM planned_expenses WHERE id = ?",
 		)
 		.bind(inserted.meta.last_row_id)
 		.first<{ transactionId: number | null }>();
+
 	return {
 		name: hold.name,
 		unlinked: hold.hadPayment === 1 && restored?.transactionId === null,
