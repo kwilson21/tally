@@ -12,7 +12,7 @@ import {
 	seedMerchant,
 	setMerchantNames,
 } from "./helpers/merchants";
-import { isMethod, present } from "./helpers/present";
+import { isMemberOf, isMethod, present } from "./helpers/present";
 
 // Plaid's merchant name is the merchant's first suggested name (spec §8.6, decision 68, issue #194):
 // sync stores it, with no AI call, and a person still has to choose it.
@@ -115,14 +115,6 @@ const sync = (
 	id: number,
 	page: Omit<Page, "hasMore"> & { db?: D1Database } = {},
 ) => syncPages(id, [page], { db: page.db });
-
-/** True when `prop` is a member of `target`, so reading it is a typed read. */
-function isMemberOf<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): prop is keyof Target {
-	return prop in target;
-}
 
 /** The database, and how many statements the sync prepared on it (D1 allows 1,000 queries per invocation). */
 function counting(db: D1Database) {

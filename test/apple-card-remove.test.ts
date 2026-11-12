@@ -5,6 +5,7 @@ import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
 import { envWith } from "./helpers/doubles";
+import { forwardMember } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -123,36 +124,6 @@ async function post(
 	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
 }
 
-/** Whether `prop` is a member of the D1 binding, so a Proxy over it may read it. */
-function isD1Member(
-	target: D1Database,
-	prop: string | symbol,
-): prop is keyof D1Database {
-	return prop in target;
-}
-
-/** Whether a D1 member is a function, so a Proxy can bind it to the real database. */
-function isFunction<Value>(
-	value: Value,
-): value is Extract<Value, CallableFunction> {
-	return typeof value === "function";
-}
-
-/** A member of the D1 binding: each one is a method, bound to the real database by d1Member. */
-type D1Member = D1Database[keyof D1Database];
-
-/** The real D1 member `prop`, with a function bound to the real database; undefined when there is none. */
-function d1Member(
-	target: D1Database,
-	prop: string | symbol,
-): D1Member | undefined {
-	if (!isD1Member(target, prop)) return undefined;
-
-	const value = target[prop];
-
-	return isFunction(value) ? value.bind(target) : value;
-}
-
 /** A database whose batch first runs `before`, as another tab does between this request's read and its batch. */
 function racedDb(before: string): D1Database {
 	return new Proxy(env.DB, {
@@ -164,7 +135,7 @@ function racedDb(before: string): D1Database {
 					return target.batch(statements);
 				};
 
-			return d1Member(target, prop);
+			return forwardMember(target, prop);
 		},
 	});
 }
@@ -344,7 +315,7 @@ describe("Remove Apple Card (#766)", () => {
 						return target.batch(statements);
 					};
 
-				return d1Member(target, prop);
+				return forwardMember(target, prop);
 			},
 		});
 
@@ -460,7 +431,7 @@ describe("Remove Apple Card (#766)", () => {
 				if (prop === "batch")
 					return () => Promise.reject(new Error("D1 is down"));
 
-				return d1Member(target, prop);
+				return forwardMember(target, prop);
 			},
 		});
 
@@ -496,7 +467,7 @@ describe("Remove Apple Card (#766)", () => {
 						return target.prepare(sql);
 					};
 
-				return d1Member(target, prop);
+				return forwardMember(target, prop);
 			},
 		});
 

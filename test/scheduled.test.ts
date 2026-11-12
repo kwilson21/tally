@@ -18,6 +18,7 @@ import {
 import { fakeSteps } from "./fake-sort-steps";
 import { envWith, fakeAi, fakeFetch } from "./helpers/doubles";
 import { merchantNames } from "./helpers/merchants";
+import { isMethod } from "./helpers/present";
 import { recordSorting, sortInProcess } from "./record-sorting";
 
 // Every 09:00 request here starts its night's instance on a recorder, so no real Workflow starts (test/record-sorting.ts).
@@ -33,11 +34,6 @@ async function resetDemo(
 ) {
 	await resetDemoBase(db, today, options);
 	await saveAiSwitches(db, { details: false });
-}
-
-/** A member of the database that is a method: a proxy binds it to the real database, so its `this` is right. */
-function isMethod(value: unknown): value is (...args: never[]) => void {
-	return typeof value === "function";
 }
 
 // SAFETY: the Workers runtime supports scheduled() on the Worker's own export; the generated type only declares

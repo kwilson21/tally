@@ -24,6 +24,7 @@ import { WhyLink } from "../src/views/why-link";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
 import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
+import { present } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 // What AI did this month (spec §8.6, decisions 91 and 101): a small log of what Tally's AI applied,
@@ -50,14 +51,6 @@ type AiLogExportRow = {
 	merchant_raw_name: string | null;
 	transaction_id: number | null;
 };
-
-/** The value a query found, or a throw when it found no row, so the test fails at its own setup. */
-function present<T>(value: T | null | undefined): T {
-	if (value === null || value === undefined)
-		throw new Error("the test's setup found no row");
-
-	return value;
-}
 
 const reply = (categoryConfidence: number, incomeConfidence: number) =>
 	new Response(

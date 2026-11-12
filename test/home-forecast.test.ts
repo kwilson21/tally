@@ -5,15 +5,7 @@ import { homeForecastDays } from "../src/db/home-forecast";
 import { resetDemo } from "../src/demo/reset";
 import { FORECAST_START_DAY, forecastMonth } from "../src/home-forecast";
 import { HomeForecast } from "../src/views/home-forecast";
-import { isMethod } from "./helpers/present";
-
-/** True for a member the D1 binding has, so the Proxy above reads only members that exist. */
-function isDbKey(
-	target: D1Database,
-	property: string | symbol,
-): property is keyof D1Database {
-	return property in target;
-}
+import { isMemberOf, isMethod } from "./helpers/present";
 
 describe("forecastMonth", () => {
 	it("projects everyday money-out independently of signed spending", () => {
@@ -364,7 +356,9 @@ describe("homeForecastDays query budget", () => {
 						return target.prepare(sql);
 					};
 
-				const value = isDbKey(target, property) ? target[property] : undefined;
+				const value = isMemberOf(target, property)
+					? target[property]
+					: undefined;
 
 				return isMethod(value) ? value.bind(target) : value;
 			},
