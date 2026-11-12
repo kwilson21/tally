@@ -66,6 +66,7 @@ export function MerchantRules({
 			{" merchants, A to Z"}
 		</>
 	);
+
 	return (
 		<section id={id} aria-labelledby={`${id}-title`} class="lg:max-w-3xl">
 			{head}
@@ -135,6 +136,7 @@ export function MerchantRules({
 						<ul class="mt-2 divide-y divide-rule border-y border-rule">
 							{rules.map((rule, index) => {
 								const count = `${rule.transactions} ${rule.transactions === 1 ? "transaction" : "transactions"}`;
+
 								return (
 									<li class="flex min-h-16 items-center gap-4 py-2">
 										<CategoryIcon icon={rule.icon} color={rule.color} />
@@ -233,12 +235,14 @@ export function NeverSuggestList({
 				Never suggest: Tally hasn't been told No yet.
 			</p>
 		);
+
 	return (
 		<div class="mt-8">
 			<h2 class="font-serif text-2xl font-semibold">Never suggest</h2>
 			<ul class="mt-2 divide-y divide-rule border-y border-rule">
 				{rules.map((rule, index) => {
 					const line = neverSuggestRuleLine(rule);
+
 					return (
 						<li class="flex min-h-16 items-center gap-4 py-2">
 							<span class="min-w-0 flex-1">

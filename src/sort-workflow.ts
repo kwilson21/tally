@@ -26,6 +26,7 @@ export class SortWorkflow extends WorkflowEntrypoint<Env, SortParams> {
 			// A busy Jev's group waits here, as a saved step, before it asks again (decision 145).
 			sleep: (name, ms) => step.sleep(name, ms),
 		});
+
 		return null;
 	}
 }

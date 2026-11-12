@@ -7,6 +7,7 @@ import { Layout } from "../src/views/layout";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
+
 	return res.text();
 }
 
@@ -17,6 +18,7 @@ const decodeAttributes = (text: string) =>
 /** The classes on #toasts, the page's toast region. */
 async function toastRegion() {
 	const html = decodeAttributes(await home());
+
 	return html.match(/<div id="toasts" class="([^"]*)"/)?.[1] ?? "";
 }
 
@@ -109,8 +111,10 @@ describe("app shell", () => {
 
 	it("doesn't swap a server error's reply into the page, so a sheet keeps what was typed", async () => {
 		const html = await home();
+
 		const content =
 			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+
 		const config = JSON.parse(content.replaceAll("&quot;", '"'));
 		// htmx 4 swaps every reply but 204 and 304; a 500 joins them. A 4xx (a field's error) and a
 		// 502 (a bank that couldn't be reached, which Tally sends with its own message) still swap.
@@ -119,8 +123,10 @@ describe("app shell", () => {
 
 	it("turns htmx's own request timeout off, since toast.js keeps the 60 seconds itself", async () => {
 		const html = await home();
+
 		const content =
 			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+
 		// htmx 4 aborts a timed-out request the same way it aborts a replaced one, so it can't be told apart.
 		expect(JSON.parse(content.replaceAll("&quot;", '"')).defaultTimeout).toBe(
 			0,
@@ -129,8 +135,10 @@ describe("app shell", () => {
 
 	it("keeps a disclosure's open state through a morph swap, which htmx 4 would otherwise close", async () => {
 		const html = await home();
+
 		const content =
 			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+
 		// A morph copies each reply's attributes onto the page's element, and a reply that lacks `open` closes a
 		// <details> the person opened. Ignoring `open` keeps it (the category choice's folded row, #661).
 		expect(JSON.parse(content.replaceAll("&quot;", '"')).morphIgnore).toEqual(
@@ -217,6 +225,7 @@ describe("the Feedback pill in the top line", () => {
 		const html = decodeAttributes(
 			await (await exports.default.fetch("http://tally.test/feedback")).text(),
 		);
+
 		const line = topLine(html);
 		expect(line).toContain('aria-label="Tally home"');
 		expect(line).not.toContain('href="/feedback"');
@@ -224,10 +233,12 @@ describe("the Feedback pill in the top line", () => {
 
 	it("adds a second sidebar group under a rule: How Tally works with the tally mark, and Feedback", async () => {
 		const html = await home();
+
 		const group =
 			html.match(
 				/<ul class="mt-3 flex flex-col gap-1 border-t border-rule pt-3">([\s\S]*?)<\/ul>/,
 			)?.[1] ?? "";
+
 		expect(group).toContain('href="/how-it-works"');
 		expect(group).toContain("How Tally works");
 		expect(group).toContain('viewBox="0 0 28 28"');
@@ -241,6 +252,7 @@ describe("the Feedback pill in the top line", () => {
 				await exports.default.fetch("http://tally.test/how-it-works")
 			).text(),
 		);
+
 		expect(html).toMatch(/<a href="\/how-it-works" aria-current="page"/);
 		expect(html).toMatch(/<a href="\/more" aria-current="page"/);
 	});
@@ -249,6 +261,7 @@ describe("the Feedback pill in the top line", () => {
 		const html = decodeAttributes(
 			await (await exports.default.fetch("http://tally.test/feedback")).text(),
 		);
+
 		expect(html).toMatch(/<a href="\/feedback[^"]*" aria-current="page"/);
 		expect(html).toMatch(/<a href="\/more" aria-current="page"/);
 	});
@@ -288,6 +301,7 @@ describe("the setup frame (P142 A, decision 148)", () => {
 		decodeAttributes(
 			String(Layout({ demo: false, children: "body", ...props })),
 		);
+
 	/** The class tokens of the setup column: the div with max-w-md that holds the top line and the page's children. */
 	const column = (html: string) =>
 		(html.match(/<div class="([^"]*\bmax-w-md\b[^"]*)"/)?.[1] ?? "")

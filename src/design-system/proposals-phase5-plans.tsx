@@ -42,6 +42,7 @@ const GROCERIES: Row = {
 	spentCents: 19600,
 	budgetCents: 70000,
 };
+
 const EATING_OUT: Row = {
 	name: "Eating Out",
 	icon: "eating-out",
@@ -49,6 +50,7 @@ const EATING_OUT: Row = {
 	spentCents: 9200,
 	budgetCents: 25000,
 };
+
 const GAS: Row = {
 	name: "Gas",
 	icon: "gas",
@@ -56,6 +58,7 @@ const GAS: Row = {
 	spentCents: 4800,
 	budgetCents: 15000,
 };
+
 /** Its $60 is the Swim lessons bill, paid Oct 2 (below), so the paid bill is part of the spending. */
 const KIDS: Row = {
 	name: "Kids",
@@ -64,6 +67,7 @@ const KIDS: Row = {
 	spentCents: 6000,
 	budgetCents: 20000,
 };
+
 const CAR: Row = {
 	name: "Car & Transport",
 	icon: "car",
@@ -71,6 +75,7 @@ const CAR: Row = {
 	spentCents: 6400,
 	budgetCents: 10000,
 };
+
 const ROWS = [GROCERIES, EATING_OUT, GAS, KIDS, CAR];
 
 // $1,400 budgeted and $460 spent, so Safe to spend stays under $1,000 in every picture: HomeTop's
@@ -316,6 +321,8 @@ const BILLS: BillRowData[] = [
 		color: KIDS.color,
 	},
 ];
+
+// SAFETY: BILLS lists the three bills drawn here in this order (Electric, Internet, Swim lessons), so these are its first three rows.
 const [ELECTRIC, INTERNET, SWIM] = BILLS as [
 	BillRowData,
 	BillRowData,
@@ -323,6 +330,7 @@ const [ELECTRIC, INTERNET, SWIM] = BILLS as [
 ];
 
 type Plan = { name: string; cents: number; line: string };
+
 const PLANS: Plan[] = [
 	{
 		name: "Car registration",
@@ -505,6 +513,7 @@ const plannedHome = (
  * goes up until it's paid, which the picture shows honestly.
  */
 const SAFE_BUMP = SAFE_TODAY + PLANNED;
+
 const bumpHome = (
 	<>
 		<Top safe={SAFE_BUMP} />

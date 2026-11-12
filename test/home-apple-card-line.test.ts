@@ -4,24 +4,28 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { appleCardUpload } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { envWith } from "./helpers/doubles";
 
 // Home's Apple Card line (spec §8.10, decision 138): seven household days after its last upload, Home says so with an
 // Upload link to Accounts' upload sheet, and the as-of tag takes the earlier of that upload's day and a bank's sync day.
 // Only Date is faked, as in home-bank-line.test.ts. Noon Eastern on Oct 7.
 const NOW = "2026-10-07T16:00:00Z";
-const family = { ...env, DEMO: "false" } as unknown as Env;
-const demo = { ...env, DEMO: "true" } as unknown as Env;
+const family = envWith(env, { DEMO: "false" });
+const demo = envWith(env, { DEMO: "true" });
 
 async function page(path = "/", bindings: Env = family) {
 	const res = await home.request(path, {}, bindings);
+
 	return { res, html: await res.text() };
 }
+
 /** The page's text, without markup. */
 const textOf = (html: string) =>
 	html.replace(/<[^>]+>/g, " ").replaceAll("&#39;", "'");
 
 const FIRST = "First Harbor Bank";
 const LINE = "Apple Card hasn't been updated since";
+
 const setBank = (
 	name: string,
 	{ status, syncedAt }: { status?: string; syncedAt?: string | null },

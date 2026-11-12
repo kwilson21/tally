@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 
 const db = env.DB;
+
 const migration = env.TEST_MIGRATIONS.find((item) =>
 	item.name.startsWith("0035_bill_cadence"),
 );
@@ -12,6 +13,7 @@ const migration = env.TEST_MIGRATIONS.find((item) =>
 // real ones. `transactions` is not rebuilt by 0035, so a small table with the columns the payment triggers
 // write stands in for it.
 const P = "cr_";
+
 const scratch = (sql: string) =>
 	sql
 		.replaceAll(/\b(bills|bill_payments|transactions)(_\w+)?\b/g, `${P}$1$2`)
@@ -30,11 +32,13 @@ const withoutComments = (query: string) =>
 
 const BILL_SCHEMA =
 	/^(CREATE TABLE (bills|bill_payments|bill_payments_keep)\b|DROP TABLE bill_payments(_keep)?\b|INSERT INTO bill_payments\b|CREATE (UNIQUE )?INDEX bill_payments_|CREATE TRIGGER bill_payment_category(_on_repoint)?\b|ALTER TABLE bills\b|UPDATE bills\b)/;
+
 const before0035 = env.TEST_MIGRATIONS.filter((item) => item.name < "0035")
 	.flatMap((item) => item.queries)
 	.map(withoutComments)
 	.filter((query) => BILL_SCHEMA.test(query))
 	.map(scratch);
+
 const migrationStatements = (migration?.queries ?? [])
 	.map(withoutComments)
 	.map(scratch);
@@ -56,11 +60,13 @@ async function cleanup() {
 		db.prepare(`DROP TABLE IF EXISTS ${P}transactions`),
 	]);
 }
+
 afterEach(cleanup);
 
-type Row = Record<string, unknown>;
-const rows = async (sql: string) =>
-	((await db.prepare(sql).all<Row>()).results ?? []) as Row[];
+/** A row a migration test reads back: its columns are SQL values. */
+type Row = Record<string, string | number | null>;
+
+const rows = async (sql: string) => (await db.prepare(sql).all<Row>()).results;
 
 async function seedBeforeMigration() {
 	await db.batch(preSchema.map((sql) => db.prepare(sql)));

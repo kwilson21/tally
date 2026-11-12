@@ -93,4 +93,5 @@ export const CHECK_LISTS = {
 } as const;
 
 export type MerchantRow = typeof merchants.$inferSelect;
+
 export type CategorySuggestionRow = typeof categorySuggestions.$inferSelect;

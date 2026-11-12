@@ -24,19 +24,32 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
+import { isMethod, present } from "./helpers/present";
 
 const BASE = "http://tally.test";
-const post = (path: string, form: Record<string, string>, htmx = true) =>
-	exports.default.fetch(BASE + path, {
+
+const post = (path: string, form: Record<string, string>, htmx = true) => {
+	const headers = new Headers({
+		Origin: BASE,
+		"content-type": "application/x-www-form-urlencoded",
+	});
+
+	if (htmx) headers.set("HX-Request", "true");
+
+	return exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
-		headers: {
-			Origin: BASE,
-			...(htmx ? { "HX-Request": "true" } : {}),
-			"content-type": "application/x-www-form-urlencoded",
-		},
+		headers,
 		body: new URLSearchParams(form),
 	});
+};
+
+/** The HX-Trigger header of a response, read as the type the test names (the keys it checks). */
+const hxTriggerOf = <Trigger extends object>(res: Response): Trigger => {
+	const header: Trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+
+	return header;
+};
 
 // The month the tests plan in is the household's current month; the previous one is the month a plan ended in.
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -69,6 +82,7 @@ async function payment(
 	)
 		.bind(id, dateIn(month), amountCents, excluded)
 		.run();
+
 	return id;
 }
 
@@ -83,6 +97,7 @@ async function plan(
 	)
 		.bind(name, amountCents, month, transactionId)
 		.first<{ id: number }>();
+
 	return row?.id ?? 0;
 }
 
@@ -91,6 +106,7 @@ async function insertRepeatCharges() {
 	await env.DB.prepare(
 		"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES('GYM REPEAT FIXTURE','Gym',4,0)",
 	).run();
+
 	for (const days of [40, 10]) {
 		await env.DB.prepare(
 			"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id) SELECT id,?,1000,'GYM REPEAT FIXTURE',4 FROM accounts LIMIT 1",
@@ -127,6 +143,7 @@ describe("Safe to spend with planned expenses", () => {
 			unpaidDueBillsCents: 14200,
 			unpaidPlansCents: 18000,
 		});
+
 		expect(summary.safeToSpendCents).toBe(61800);
 	});
 
@@ -146,16 +163,20 @@ describe("planned payments in the budget", () => {
 	it("counts an excluded payment once it is linked to a plan, and not before", async () => {
 		await payment(9702, 18000, 1);
 		const before = await loadMonth(env.DB, MONTH);
+
 		const spentBefore = before.transactions.reduce(
 			(sum, t) => sum + t.amountCents,
 			0,
 		);
+
 		await plan("Car registration", 18000, MONTH, 9702);
 		const after = await loadMonth(env.DB, MONTH);
+
 		const spentAfter = after.transactions.reduce(
 			(sum, t) => sum + t.amountCents,
 			0,
 		);
+
 		expect(spentAfter - spentBefore).toBe(18000);
 	});
 
@@ -180,9 +201,11 @@ describe("planned payments in the budget", () => {
 		await payment(9705, 18000);
 		await plan("Car registration", 18000, MONTH, 9705);
 		await matchBillPayments(env.DB, TODAY);
+
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9705 AND status='linked'",
 		).first<{ n: number }>();
+
 		expect(linked?.n).toBe(0);
 	});
 
@@ -193,27 +216,63 @@ describe("planned payments in the budget", () => {
 		await payment(9707, 18000);
 		// A plan takes the payment between the matcher's read and its write: the write's guard leaves it out.
 		let raced = false;
-		const db = {
-			prepare: (query: string) => {
-				const statement = env.DB.prepare(query);
-				if (!query.startsWith("INSERT OR IGNORE INTO bill_payments"))
-					return statement;
-				return {
-					bind: (...values: unknown[]) => ({
-						run: async () => {
-							raced = true;
-							await plan("Car registration", 18000, MONTH, 9707);
-							return statement.bind(...values).run();
+
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop !== "prepare") {
+					const value: unknown = Object(target)[prop];
+
+					return isMethod(value) ? value.bind(target) : value;
+				}
+
+				return (query: string) => {
+					const statement = target.prepare(query);
+
+					if (!query.startsWith("INSERT OR IGNORE INTO bill_payments"))
+						return statement;
+
+					return new Proxy(statement, {
+						get(stmt, method) {
+							if (method !== "bind") {
+								const forwarded: unknown = Object(stmt)[method];
+
+								return isMethod(forwarded) ? forwarded.bind(stmt) : forwarded;
+							}
+
+							return (...values: unknown[]) => {
+								const bound = stmt.bind(...values);
+
+								return new Proxy(bound, {
+									get(boundStmt, name) {
+										if (name === "run")
+											return async () => {
+												raced = true;
+												await plan("Car registration", 18000, MONTH, 9707);
+
+												return boundStmt.run();
+											};
+
+										const forwarded: unknown = Object(boundStmt)[name];
+
+										return isMethod(forwarded)
+											? forwarded.bind(boundStmt)
+											: forwarded;
+									},
+								});
+							};
 						},
-					}),
-				} as unknown as D1PreparedStatement;
+					});
+				};
 			},
-		} as unknown as D1Database;
+		});
+
 		expect(await matchBillPayments(db, TODAY)).toBe(0);
 		expect(raced).toBe(true);
+
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9707 AND status='linked'",
 		).first<{ n: number }>();
+
 		expect(linked?.n).toBe(0);
 	});
 });
@@ -239,37 +298,47 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 		const moved = await post(`/plans/${id}/move`, {});
 		expect(moved.headers.get("HX-Trigger")).toContain("Moved Car registration");
+
 		const row = await env.DB.prepare(
 			"SELECT month FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ month: string }>();
+
 		expect(row?.month).toBe(MONTH);
 	});
 
 	it("drops a plan through the same ten-second Undo as a delete, and Undo writes it back", async () => {
 		const id = await plan("Car registration", 18000, LAST_MONTH);
 		const dropped = await post(`/plans/${id}/drop`, {});
-		const trigger = JSON.parse(dropped.headers.get("HX-Trigger") ?? "{}") as {
+
+		const trigger = hxTriggerOf<{
 			toast: { undo: string; undoExpiresInMs: number; message: string };
-		};
+		}>(dropped);
+
 		expect(trigger.toast.message).toBe("Dropped Car registration, $180.00.");
 		expect(trigger.toast.undoExpiresInMs).toBe(10000);
+
 		const gone = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ n: number }>();
+
 		expect(gone?.n).toBe(0);
+
 		const restored = await post("/plans/undo-delete", {
 			token: trigger.toast.undo,
 		});
+
 		expect(restored.headers.get("HX-Trigger")).toContain(
 			"Restored Car registration.",
 		);
+
 		const back = await env.DB.prepare(
 			"SELECT name FROM planned_expenses WHERE name='Car registration'",
 		).first();
+
 		expect(back).not.toBeNull();
 	});
 
@@ -281,22 +350,24 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(
 			await restorePlanDelete(env.DB, token ?? "", now + PLAN_UNDO_MS + 1),
 		).toBeNull();
+
 		const gone = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ n: number }>();
+
 		expect(gone?.n).toBe(0);
 	});
 
 	it("a second Undo restores nothing", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		const deleted = await post(`/plans/${id}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		await post("/plans/undo-delete", { token });
 		const again = await post("/plans/undo-delete", { token });
 		expect(again.headers.get("HX-Trigger")).toContain("Undo expired");
@@ -305,11 +376,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 	it("answers an Undo with the Bills page's #page root, where the toast's Undo swaps it in", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		const deleted = await post(`/plans/${id}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		const restored = await post("/plans/undo-delete", { token });
 		const body = await restored.text();
 		expect(body).toContain('id="page"');
@@ -331,6 +402,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			html.match(
 				/<section[^>]*aria-labelledby="plan-band-title"[\s\S]*?<\/section>/,
 			)?.[0] ?? "";
+
 		expect(band).toContain(`action="/plans/${id}/move"`);
 		expect(band).toContain(`Move to ${shortMonthName(MONTH)}`);
 		expect(band).toContain(`action="/plans/${id}/drop"`);
@@ -350,9 +422,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 	it("Cancel in the delete question goes back to the plan's sheet, not to its payment page", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/plans/${id}/delete`)
 		).text();
+
 		const cancel = html.match(/<a\b[^>]*>\s*Cancel\s*<\/a>/)?.[0] ?? "";
 		expect(cancel).toContain(`href="/plans/${id}/edit"`);
 		expect(cancel).toContain(`hx-get="/plans/${id}/edit"`);
@@ -361,9 +435,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 	it("names the edited plan in the sheet's heading for a screen reader, as Edit planned expense", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/plans/${id}/edit`)
 		).text();
+
 		expect(html).toMatch(
 			/id="plan-sheet-title"[^>]*>\s*<span class="sr-only">Edit planned expense: <\/span>Car registration/,
 		);
@@ -375,26 +451,33 @@ describe("Bills' Planned group, Band and sheet", () => {
 			amount: "20",
 			month: "2020-01",
 		});
+
 		expect(await past.text()).toContain("Choose a month.");
+
 		const old = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE name='Old'",
 		).first<{ n: number }>();
+
 		expect(old?.n).toBe(0);
 
 		const id = await plan("Car registration", 18000, LAST_MONTH);
+
 		const kept = await post(`/plans/${id}`, {
 			name: "Car registration",
 			amount: "180",
 			month: LAST_MONTH,
 		});
+
 		expect(kept.headers.get("HX-Trigger")).toContain("Saved Car registration.");
 	});
 
 	it("opens the plan's sheet from its own page with Edit planned expense, as a bill's page does", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/plans/${id}`)
 		).text();
+
 		expect(html).toContain('id="sheet"');
 		// Opened from the plan's page, so its sheet's close can name that page (opener=plan).
 		expect(html).toMatch(
@@ -406,17 +489,21 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 	it("the sheet's amount field shows the plan's cents, as the money input does", async () => {
 		const id = await plan("Car registration", 18050, MONTH);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/plans/${id}/edit`)
 		).text();
+
 		expect(html).toContain('value="180.50"');
 	});
 
 	it("asks Delete Car registration, $180.00? before the plan is deleted", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/plans/${id}/delete`)
 		).text();
+
 		expect(html).toContain("Delete Car registration, $180.00?");
 	});
 
@@ -427,29 +514,37 @@ describe("Bills' Planned group, Band and sheet", () => {
 			MONTH,
 			await payment(9750, 18000),
 		);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/plans/${id}/edit`)
 		).text();
+
 		const edit =
 			html.match(
 				new RegExp(`<form[^>]*action="/plans/${id}"[\\s\\S]*?</form>`),
 			)?.[0] ?? "";
+
 		expect(edit).not.toBe("");
+
 		const buttons = [
 			...edit.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g),
 		].map((match) => ({ attrs: match[1] ?? "", text: match[2] ?? "" }));
+
 		// Unlink belongs to its own form (its `form` attribute), so it isn't the edit form's default button.
 		const unlink = buttons.find((button) => button.text.includes("Unlink"));
 		expect(unlink?.attrs).toContain('form="plan-unlink"');
 		expect(unlink?.attrs).not.toContain("formaction");
+
 		const owned = buttons.filter(
 			(button) =>
 				/type="submit"/.test(button.attrs) && !/\sform="/.test(button.attrs),
 		);
+
 		expect(owned[0]?.text).toContain("Save");
 
 		const unlinkForm =
 			html.match(/<form[^>]*id="plan-unlink"[^>]*>/)?.[0] ?? "";
+
 		expect(unlinkForm).toContain(`action="/plans/${id}/unlink"`);
 		expect(unlinkForm).toContain(`hx-post="/plans/${id}/unlink"`);
 		// The unlink form comes after the edit form's close, not inside it.
@@ -465,6 +560,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			MONTH,
 			await payment(9756, 18000),
 		);
+
 		const sheet = await post(`/plans/${id}/unlink`, { opener: "plan" });
 		expect(sheet.headers.get("HX-Trigger")).toContain("Payment unlinked");
 		const html = await sheet.text();
@@ -478,17 +574,22 @@ describe("Bills' Planned group, Band and sheet", () => {
 	it("offers this month and the next eleven, plus only the plan's own earlier month, on a new plan's and an edit's Month", async () => {
 		const own = monthsBefore(MONTH, 6);
 		const id = await plan("Car registration", 18000, own);
+
 		const offeredBy = async (path: string) => {
 			const html = await (await exports.default.fetch(BASE + path)).text();
+
 			const select =
 				html.match(/<select id="plan-month"[\s\S]*?<\/select>/)?.[0] ?? "";
+
 			return [...select.matchAll(/<option value="([^"]*)"/g)].map(
 				(match) => match[1],
 			);
 		};
+
 		const thisAndNext = Array.from({ length: 12 }, (_, i) =>
 			monthsBefore(MONTH, -i),
 		);
+
 		expect(await offeredBy(`/plans/${id}/edit`)).toEqual([own, ...thisAndNext]);
 		expect(await offeredBy("/plans/new")).toEqual(thisAndNext);
 	});
@@ -496,28 +597,34 @@ describe("Bills' Planned group, Band and sheet", () => {
 	it("refuses a plan's month in the gap between its own month and this month's next eleven, and keeps the month", async () => {
 		const own = monthsBefore(MONTH, 6);
 		const id = await plan("Car registration", 18000, own);
+
 		const gap = await post(`/plans/${id}`, {
 			name: "Car registration",
 			amount: "180",
 			month: monthsBefore(MONTH, 3),
 		});
+
 		expect(await gap.text()).toContain("Choose a month.");
+
 		const row = await env.DB.prepare(
 			"SELECT month FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ month: string }>();
+
 		expect(row?.month).toBe(own);
 	});
 
 	it("saves a plan in its own earlier month", async () => {
 		const own = monthsBefore(MONTH, 6);
 		const id = await plan("Car registration", 18000, own);
+
 		const kept = await post(`/plans/${id}`, {
 			name: "Car registration",
 			amount: "180",
 			month: own,
 		});
+
 		expect(kept.headers.get("HX-Trigger")).toContain("Saved Car registration.");
 	});
 
@@ -527,31 +634,38 @@ describe("Bills' Planned group, Band and sheet", () => {
 			amount: "99999999999999999999",
 			month: MONTH,
 		});
+
 		expect(await huge.text()).toContain(
 			"Enter a smaller amount in dollars and cents.",
 		);
+
 		const created = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE name='Big plan'",
 		).first<{ n: number }>();
+
 		expect(created?.n).toBe(0);
 
 		const id = await plan("Car registration", 18000, MONTH);
+
 		for (const amount of ["99999999999999999999", `1${"0".repeat(400)}`]) {
 			const edited = await post(`/plans/${id}`, {
 				name: "Car registration",
 				amount,
 				month: MONTH,
 			});
+
 			expect(edited.status).toBe(200);
 			expect(await edited.text()).toContain(
 				"Enter a smaller amount in dollars and cents.",
 			);
 		}
+
 		const row = await env.DB.prepare(
 			"SELECT amount_cents AS a FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ a: number }>();
+
 		expect(row?.a).toBe(18000);
 	});
 
@@ -561,28 +675,35 @@ describe("Bills' Planned group, Band and sheet", () => {
 			amount: "180",
 			month: MONTH,
 		});
+
 		expect(await created.text()).toContain(
 			"Keep the name under 80 characters.",
 		);
+
 		const count = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE name=?",
 		)
 			.bind("N".repeat(81))
 			.first<{ n: number }>();
+
 		expect(count?.n).toBe(0);
 
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const edited = await post(`/plans/${id}`, {
 			name: "E".repeat(81),
 			amount: "180",
 			month: MONTH,
 		});
+
 		expect(await edited.text()).toContain("Keep the name under 80 characters.");
+
 		const row = await env.DB.prepare(
 			"SELECT name FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ name: string }>();
+
 		expect(row?.name).toBe("Car registration");
 	});
 
@@ -592,19 +713,24 @@ describe("Bills' Planned group, Band and sheet", () => {
 			amount: "180",
 			month: MONTH,
 		});
+
 		expect(created.headers.get("HX-Trigger")).toContain("Planned ");
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const edited = await post(`/plans/${id}`, {
 			name: "E".repeat(80),
 			amount: "180",
 			month: MONTH,
 		});
+
 		expect(edited.headers.get("HX-Trigger")).toContain("Saved ");
+
 		const row = await env.DB.prepare(
 			"SELECT name FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ name: string }>();
+
 		expect(row?.name).toBe("E".repeat(80));
 	});
 
@@ -612,30 +738,37 @@ describe("Bills' Planned group, Band and sheet", () => {
 		await plan("Car registration", 18000, MONTH, await payment(9740, 18000));
 		const html = await (await exports.default.fetch(`${BASE}/bills`)).text();
 		const billData = await loadBillRows(env.DB, TODAY);
+
 		const bills = billTotalsForRows(
 			MONTH,
 			billData.rows.filter((bill) => bill.active),
 		).groups.paidCents;
+
 		const total = html.match(
 			/>Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0 tabular-nums">([^<]*)<\/span>/,
 		)?.[1];
+
 		expect(total).toBe(formatCents(bills + 18000));
 	});
 
 	it("creates a plan from the sheet, and refuses an empty name with a field error", async () => {
 		const bad = await post("/plans", { name: "", amount: "180", month: MONTH });
 		expect(await bad.text()).toContain("Say what it");
+
 		const ok = await post("/plans", {
 			name: "Car registration",
 			amount: "$180.00",
 			month: MONTH,
 		});
+
 		expect(ok.headers.get("HX-Trigger")).toContain(
 			"Planned Car registration, $180.00.",
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT amount_cents AS a FROM planned_expenses WHERE name='Car registration'",
 		).first<{ a: number }>();
+
 		expect(row?.a).toBe(18000);
 	});
 
@@ -645,9 +778,10 @@ describe("Bills' Planned group, Band and sheet", () => {
 			amount: "$10.00",
 			month: MONTH,
 		});
+
 		const header = ok.headers.get("HX-Trigger") ?? "";
 		expect(header).not.toMatch(/[^\x20-\x7e]/);
-		const trigger = JSON.parse(header) as { toast: { message: string } };
+		const trigger: { toast: { message: string } } = JSON.parse(header);
 		expect(trigger.toast.message).toBe("Planned Mom’s car, $10.00.");
 	});
 
@@ -664,15 +798,19 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 		// 9706 now pays Car registration, so a second plan can't take it: the picker never lists it, and a forced link says why.
 		const other = await plan("Lawn service", 9000, MONTH);
+
 		const refused = await post(`/plans/${other}/link`, {
 			transaction_id: "9706",
 		});
+
 		expect(await refused.text()).toContain(
 			"That payment already pays a planned expense.",
 		);
+
 		const bill = await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9708,'Gym',9000,3,'monthly','GYM FIXTURE') RETURNING id",
 		).first();
+
 		expect(bill).not.toBeNull();
 		await payment(9707, 9000);
 		await env.DB.prepare(
@@ -680,9 +818,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		)
 			.bind(MONTH)
 			.run();
+
 		const billed = await post(`/plans/${other}/link`, {
 			transaction_id: "9707",
 		});
+
 		expect(await billed.text()).toContain("That payment already pays a bill.");
 	});
 
@@ -690,21 +830,25 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const other = await plan("Lawn service", 9000, MONTH);
 		await payment(9720, 9000);
 		await plan("Car registration", 9000, MONTH, 9720);
+
 		const refused = await post(
 			`/plans/${other}/link`,
 			{ transaction_id: "9720" },
 			false,
 		);
+
 		expect(refused.status).toBe(200);
 		expect(refused.headers.get("Location")).toBeNull();
 		expect(await refused.text()).toMatch(
 			/role="alert"[^>]*>That payment already pays a planned expense\./,
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id FROM planned_expenses WHERE id=?",
 		)
 			.bind(other)
 			.first<{ transaction_id: number | null }>();
+
 		expect(row?.transaction_id).toBeNull();
 	});
 
@@ -719,21 +863,25 @@ describe("Bills' Planned group, Band and sheet", () => {
 			.bind(MONTH)
 			.run();
 		const other = await plan("Lawn service", 9000, MONTH);
+
 		const refused = await post(
 			`/plans/${other}/link`,
 			{ transaction_id: "9722" },
 			false,
 		);
+
 		expect(refused.status).toBe(200);
 		expect(refused.headers.get("Location")).toBeNull();
 		expect(await refused.text()).toMatch(
 			/role="alert"[^>]*>That payment already pays a bill\./,
 		);
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id FROM planned_expenses WHERE id=?",
 		)
 			.bind(other)
 			.first<{ transaction_id: number | null }>();
+
 		expect(row?.transaction_id).toBeNull();
 	});
 
@@ -741,6 +889,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const paidBy = await payment(9724, 18000);
 		const id = await plan("Car registration", 18000, MONTH, paidBy);
 		await payment(9725, 18000);
+
 		// 9724 is the plan's own payment, a resubmitted form: it pays the plan, so the plan's sentence must come before the payment's.
 		for (const transaction of [paidBy, 9725]) {
 			for (const htmx of [true, false]) {
@@ -749,6 +898,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 					{ transaction_id: String(transaction) },
 					htmx,
 				);
+
 				expect(refused.status).toBe(200);
 				expect(refused.headers.get("Location")).toBeNull();
 				const html = await refused.text();
@@ -760,29 +910,35 @@ describe("Bills' Planned group, Band and sheet", () => {
 				expect(html).not.toContain("already pays a planned expense");
 			}
 		}
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ transaction_id: number | null }>();
+
 		expect(row?.transaction_id).toBe(paidBy);
 	});
 
 	it("without JavaScript, a link that is made redirects back to the plan's page and writes the link", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		await payment(9723, 18000);
+
 		const linked = await post(
 			`/plans/${id}/link`,
 			{ transaction_id: "9723" },
 			false,
 		);
+
 		expect(linked.status).toBe(303);
 		expect(linked.headers.get("Location")).toBe(`/plans/${id}`);
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id FROM planned_expenses WHERE id=?",
 		)
 			.bind(id)
 			.first<{ transaction_id: number | null }>();
+
 		expect(row?.transaction_id).toBe(9723);
 	});
 
@@ -793,6 +949,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			MONTH,
 			await payment(9753, 18000),
 		);
+
 		const page = await post(`/plans/${id}/unlink`, { from: "plan" });
 		expect(page.headers.get("HX-Trigger")).toContain("Payment unlinked");
 		const html = await page.text();
@@ -809,6 +966,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			},
 			body: new URLSearchParams({ from: "plan" }),
 		});
+
 		expect(plain.status).toBe(303);
 		expect(plain.headers.get("location")).toBe(`/plans/${id}`);
 	});
@@ -820,6 +978,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			MONTH,
 			await payment(9754, 18000),
 		);
+
 		const sheet = await post(`/plans/${id}/unlink`, {});
 		expect(sheet.headers.get("HX-Trigger")).toContain("Payment unlinked");
 		const html = await sheet.text();
@@ -837,6 +996,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			},
 			body: new URLSearchParams({}),
 		});
+
 		expect(plain.headers.get("location")).toBe("/bills");
 	});
 
@@ -847,9 +1007,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const pageHtml = await onPage.text();
 		expect(pageHtml).toContain('<h1 class="font-serif text-5xl');
 		expect(pageHtml).toContain("Link a payment");
+
 		// No toast and no announcement here, so the swapped page takes focus: on its Link a payment heading.
 		const linkHeading =
 			pageHtml.match(/<h2\b[^>]*id="plan-link-title"[^>]*>/)?.[0] ?? "";
+
 		expect(linkHeading).toContain('tabindex="-1"');
 		expect(linkHeading).toContain("autofocus");
 
@@ -877,9 +1039,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 			name: "Car registration",
 			unlinked: true,
 		});
+
 		const restored = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
 		).first<{ t: number | null }>();
+
 		expect(restored?.t).toBeNull();
 	});
 
@@ -898,11 +1062,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const tx = await payment(9770, 18000);
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9771, 'Club', 1800, 1, 'monthly', 1, 'CLUB')",
@@ -922,11 +1086,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const tx = await payment(9772, 18000);
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		const restored = await post("/plans/undo-delete", { token });
 		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
 		expect(trigger.toast.message).toBe("Restored Car registration.");
@@ -951,15 +1115,19 @@ describe("Bills' Planned group, Band and sheet", () => {
 			name: "Car registration",
 			unlinked: true,
 		});
+
 		const restored = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
 		).first<{ t: number | null }>();
+
 		expect(restored?.t).toBeNull();
+
 		const paying = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE transaction_id = ?",
 		)
 			.bind(tx)
 			.first<{ n: number }>();
+
 		expect(paying?.n).toBe(0);
 	});
 
@@ -967,11 +1135,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const tx = await payment(9781, 18000);
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
 			.bind(tx)
 			.run();
@@ -1020,21 +1188,25 @@ describe("Bills' Planned group, Band and sheet", () => {
 			const tx = await payment(paymentId, 18000);
 			const id = await plan("Car registration", 18000, MONTH, tx);
 			const deleted = await post(`/plans/${id}/delete`, {});
-			const token = (
-				JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-					toast: { undo: string };
-				}
-			).toast.undo;
+
+			const token = hxTriggerOf<{
+				toast: { undo: string };
+			}>(deleted).toast.undo;
+
 			await apply(tx);
 			const restored = await post("/plans/undo-delete", { token });
 			const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+
 			const words =
 				"Restored Car registration. Its payment is no longer linked.";
+
 			expect(trigger.toast.message).toBe(words);
 			expect(trigger.announce).toBe(words);
+
 			const row = await env.DB.prepare(
 				"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
 			).first<{ t: number | null }>();
+
 			expect(row?.t).toBeNull();
 			expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
 		},
@@ -1044,11 +1216,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const tx = await payment(9785, 18000);
 		const id = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${id}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		await saveSplit(
 			env.DB,
 			tx,
@@ -1062,9 +1234,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
 		expect(trigger.toast.message).toBe("Restored Car registration.");
 		expect(trigger.announce).toBe("Restored Car registration.");
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
 		).first<{ t: number | null }>();
+
 		expect(row?.t).toBe(tx);
 		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
 	});
@@ -1072,22 +1246,23 @@ describe("Bills' Planned group, Band and sheet", () => {
 
 describe("editing a paid plan's month keeps its payment only while the payment can still pay that month (#202)", () => {
 	const words = "Saved Car registration. Its payment is no longer linked.";
+
 	const edit = (
 		id: number,
 		month: string,
 		{ name = "Car registration", amount = "180", opener = false } = {},
-	) =>
-		post(`/plans/${id}`, {
-			name,
-			amount,
-			month,
-			...(opener ? { opener: "plan" } : {}),
-		});
+	) => {
+		const form = { name, amount, month };
+
+		return post(`/plans/${id}`, opener ? { ...form, opener: "plan" } : form);
+	};
+
 	const trigger = async (res: Response) =>
-		JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+		hxTriggerOf<{
 			toast: { message: string };
 			announce: string;
-		};
+		}>(res);
+
 	const linkOf = async (id: number) =>
 		(
 			await env.DB.prepare(
@@ -1125,18 +1300,21 @@ describe("editing a paid plan's month keeps its payment only while the payment c
 
 	it("moving a paid plan past its payment's month unlinks the payment and says so, on Bills and on the plan's page", async () => {
 		const far = monthsBefore(MONTH, -11);
+
 		const onBills = await plan(
 			"Car registration",
 			18000,
 			MONTH,
 			await payment(9962, 18000),
 		);
+
 		const onPage = await plan(
 			"Car registration",
 			18000,
 			MONTH,
 			await payment(9963, 18000),
 		);
+
 		const fromBills = await trigger(await edit(onBills, far));
 		expect(fromBills.toast.message).toBe(words);
 		expect(fromBills.announce).toBe(words);
@@ -1179,28 +1357,34 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			],
 			"demo",
 		);
+
 		const part = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1",
 		)
 			.bind(tx)
 			.first<{ id: number }>();
+
 		return part?.id ?? 0;
 	}
 
 	it("the picker lists a part of a split payment, and a link to one is kept", async () => {
 		const part = await splitUnclaimedPayment();
 		const planId = await plan("Lawn service", 12000, MONTH);
+
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
+
 		expect(picker).toContain(`value="${part}"`);
 
 		await post(`/plans/${planId}/link`, { transaction_id: String(part) });
+
 		const linked = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
 		)
 			.bind(planId)
 			.first<{ t: number | null }>();
+
 		expect(linked?.t).toBe(part);
 	});
 
@@ -1215,11 +1399,13 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			],
 			"demo",
 		);
+
 		const { results } = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
 		)
 			.bind(tx)
 			.all<{ id: number }>();
+
 		const [part1, part2] = results.map((row) => row.id);
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9822,'Water',12000,3,'monthly','WATER FIXTURE')",
@@ -1230,18 +1416,22 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			.bind(MONTH, part1)
 			.run();
 		const planId = await plan("Lawn service", 18000, MONTH);
+
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
+
 		expect(picker).toContain(`value="${part2}"`);
 		expect(picker).not.toContain(`value="${part1}"`);
 
 		await post(`/plans/${planId}/link`, { transaction_id: String(part2) });
+
 		const linked = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
 		)
 			.bind(planId)
 			.first<{ t: number | null }>();
+
 		expect(linked?.t).toBe(part2);
 	});
 
@@ -1266,11 +1456,13 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			],
 			"demo",
 		);
+
 		const kept = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
 		)
 			.bind(planId)
 			.first<{ t: number | null }>();
+
 		expect(kept?.t).toBe(tx);
 		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
 	});
@@ -1289,8 +1481,10 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 				],
 				"demo",
 			);
+
 			return { tx, planId };
 		}
+
 		const editPlan = (
 			planId: number,
 			fields: { name?: string; amount?: string },
@@ -1301,11 +1495,13 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 				month: MONTH,
 				...fields,
 			});
+
 		const planTrigger = async (res: Response) =>
-			JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			hxTriggerOf<{
 				toast: { message: string };
 				announce: string;
-			};
+			}>(res);
+
 		const linkOf = async (planId: number) =>
 			(
 				await env.DB.prepare(
@@ -1317,9 +1513,11 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 
 		it("a name-only edit of the plan keeps its link to the whole payment, and says nothing about the link", async () => {
 			const { tx, planId } = await splitPaidPlan(9840);
+
 			const renamed = await planTrigger(
 				await editPlan(planId, { name: "Car rego" }),
 			);
+
 			expect(renamed.toast.message).toBe("Saved Car rego.");
 			expect(renamed.announce).toBe("Saved Car rego.");
 			expect(await linkOf(planId)).toBe(tx);
@@ -1328,9 +1526,11 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 
 		it("an amount-only edit of the plan keeps its link to the whole payment, and says nothing about the link", async () => {
 			const { tx, planId } = await splitPaidPlan(9841);
+
 			const repriced = await planTrigger(
 				await editPlan(planId, { amount: "200" }),
 			);
+
 			expect(repriced.toast.message).toBe("Saved Car registration.");
 			expect(repriced.announce).toBe("Saved Car registration.");
 			expect(await linkOf(planId)).toBe(tx);
@@ -1340,19 +1540,22 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 		it("an Undo of the plan's delete brings it back on the whole payment, and the toast says only that it was restored", async () => {
 			const { tx, planId } = await splitPaidPlan(9842);
 			const deleted = await post(`/plans/${planId}/delete`, {});
-			const token = (
-				JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-					toast: { undo: string };
-				}
-			).toast.undo;
+
+			const token = hxTriggerOf<{
+				toast: { undo: string };
+			}>(deleted).toast.undo;
+
 			const restored = await planTrigger(
 				await post("/plans/undo-delete", { token }),
 			);
+
 			expect(restored.toast.message).toBe("Restored Car registration.");
 			expect(restored.announce).toBe("Restored Car registration.");
+
 			const row = await env.DB.prepare(
 				"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
 			).first<{ t: number | null }>();
+
 			expect(row?.t).toBe(tx);
 		});
 
@@ -1368,9 +1571,11 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 				"demo",
 			);
 			const planId = await plan("Lawn service", 30000, MONTH);
+
 			const refused = await post(`/plans/${planId}/link`, {
 				transaction_id: String(tx),
 			});
+
 			expect(await refused.text()).toContain(
 				"It may already pay a bill or a planned expense.",
 			);
@@ -1398,6 +1603,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		)
 			.bind(tx)
 			.all<{ id: number }>();
+
 		return results.map((row) => row.id);
 	}
 
@@ -1436,9 +1642,11 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 
 		await splitInTwo(tx, 12000, 18000);
 		const [newFirst, newSecond] = await partIds(tx);
+
 		const bill = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM bill_payments WHERE bill_id = 9801 AND status = 'linked'",
 		).first<{ t: number }>();
+
 		// The bill keeps the part that matches its amount and category; the plan takes the next free part.
 		expect(bill?.t).toBe(newFirst);
 		expect(await paidBy(planId)).toBe(newSecond);
@@ -1475,10 +1683,12 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		new Proxy(env.DB, {
 			get(target, prop) {
 				if (prop === "batch") return around;
-				const value = Reflect.get(target, prop);
-				return typeof value === "function" ? value.bind(target) : value;
+
+				const value: unknown = Object(target)[prop];
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
-		}) as unknown as D1Database;
+		});
 
 	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
 	const racingWith = (race: string, bind: (number | null)[]) =>
@@ -1486,6 +1696,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 			await env.DB.prepare(race)
 				.bind(...bind)
 				.run();
+
 			return env.DB.batch(statements);
 		});
 
@@ -1499,6 +1710,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		await splitInTwo(tx, 12000, 18000);
 		const [, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+
 		const racing = racingWith(
 			"UPDATE planned_expenses SET transaction_id = NULL WHERE id = ?",
 			[planId],
@@ -1516,6 +1728,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		await splitInTwo(tx, 12000, 18000);
 		const [, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+
 		const racing = racingWith(
 			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
 			[other, planId],
@@ -1532,6 +1745,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const [, second] = await partIds(tx);
 		const before = await partIds(tx);
 		const planId = await plan("Lawn service", 18000, MONTH);
+
 		const racing = racingWith(
 			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
 			[second ?? 0, planId],
@@ -1550,10 +1764,12 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		await splitInTwo(tx, 12000, 18000);
 		const [, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 18000, MONTH);
+
 		const racing = racingWith(
 			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
 			[second ?? 0, planId],
 		);
+
 		await saveSplit(racing, tx, KEEP_TWO, "demo");
 
 		const retry = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
@@ -1597,6 +1813,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const [first, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
 		const before = await partIds(tx);
+
 		const racing = racingWith(
 			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
 			[second ?? 0, planId],
@@ -1625,6 +1842,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const onSecond = await plan("Car registration", 18000, MONTH, second ?? 0);
 		const onFirst = await plan("Lawn service", 12000, MONTH, first ?? 0);
 		const before = await partIds(tx);
+
 		const racing = racingWith(
 			"UPDATE planned_expenses SET transaction_id = CASE id WHEN ?1 THEN ?2 ELSE NULL END WHERE id IN (?1, ?3)",
 			[onFirst, second ?? 0, onSecond],
@@ -1644,15 +1862,18 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const [first, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
 		const before = await partIds(tx);
+
 		const movePlan = (part: number) =>
 			env.DB.prepare(
 				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
 			)
 				.bind(part, planId)
 				.run();
+
 		// The plan moves after the read and the batch fails; the plan moves back before the save looks at the failure.
 		const racing = batchAround(async (statements) => {
 			await movePlan(second ?? 0);
+
 			try {
 				return await env.DB.batch(statements);
 			} catch (error) {
@@ -1674,6 +1895,7 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const [first, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
 		const failure = new Error("D1_ERROR: network connection lost");
+
 		const racing = batchAround(async () => {
 			await env.DB.prepare(
 				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
@@ -1723,11 +1945,11 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const tx = await payment(9810, 30000);
 		const planId = await plan("Car registration", 18000, MONTH, tx);
 		const deleted = await post(`/plans/${planId}/delete`, {});
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		await splitInTwo(tx, 12000, 18000);
 		const [first] = await partIds(tx);
 		await insertBill(9811, "Water", 12000);
@@ -1738,9 +1960,11 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(trigger.toast.message).toBe(
 			"Restored Car registration. Its payment is no longer linked.",
 		);
+
 		const back = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE name = 'Car registration'",
 		).first<{ t: number | null }>();
+
 		expect(back?.t).toBeNull();
 	});
 
@@ -1777,23 +2001,27 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 	it("a bill's link that loses a race to a plan's link is refused in its field, not as a failed request", async () => {
 		const tx = await payment(9820, 18000);
 		await insertBill(9821, "Registration fee", 18000);
+
 		// The plan's link lands after the link's check and before its batch, and the migration's trigger then refuses the
 		// bill's payment. The stand-in trigger raises the migration's own message, which the test reads from the schema, so
 		// the route's catch and the words it shows stay tied to the real trigger.
 		const live = await env.DB.prepare(
 			"SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'bill_payment_not_a_planned_expense'",
 		).first<{ sql: string }>();
+
 		const message = /RAISE\(ABORT, '([^']+)'\)/.exec(live?.sql ?? "")?.[1];
 		expect(message).toBe("That payment already pays a planned expense.");
 		await env.DB.prepare(
 			`CREATE TRIGGER race_plan_link BEFORE INSERT ON bill_payments WHEN NEW.transaction_id = 9820 BEGIN SELECT RAISE(ABORT, '${message}'); END`,
 		).run();
+
 		try {
 			const refused = await post("/bills/9821/link", {
 				transaction_id: String(tx),
 				period: MONTH,
 				opened_period: MONTH,
 			});
+
 			expect(refused.status).toBe(200);
 			expect(await refused.text()).toContain(
 				"That payment already pays a planned expense.",
@@ -1822,21 +2050,25 @@ describe("a bill can't take a payment a plan pays", () => {
 			],
 			"demo",
 		);
+
 		const parts = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
 		)
 			.bind(tx)
 			.all<{ id: number }>();
+
 		return { tx, planId, part: parts.results[0]?.id ?? 0 };
 	}
 
 	it("keeps the plan on the split payment, and refuses a bill's link to one of its parts", async () => {
 		const { tx, planId, part } = await splitPlanPayment();
+
 		const kept = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
 		)
 			.bind(planId)
 			.first<{ t: number }>();
+
 		expect(kept?.t).toBe(tx);
 
 		const refused = await post("/bills/9711/link", {
@@ -1844,12 +2076,15 @@ describe("a bill can't take a payment a plan pays", () => {
 			period: MONTH,
 			opened_period: MONTH,
 		});
+
 		expect(await refused.text()).toContain("already pays a planned expense");
+
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=?",
 		)
 			.bind(part)
 			.first<{ n: number }>();
+
 		expect(linked?.n).toBe(0);
 	});
 
@@ -1883,11 +2118,13 @@ describe("a bill can't take a payment a plan pays", () => {
 			],
 			"demo",
 		);
+
 		const part = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id DESC LIMIT 1",
 		)
 			.bind(tx)
 			.first<{ id: number }>();
+
 		// The bill is linked to the whole payment, which the split leaves on its parent (paysBillSql), so every part is paid.
 		await expect(
 			env.DB.prepare(
@@ -1917,41 +2154,53 @@ describe("a bill can't take a payment a plan pays", () => {
 			],
 			"demo",
 		);
+
 		const part = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1",
 		)
 			.bind(tx)
 			.first<{ id: number }>();
+
 		const planId = await plan("Lawn service", 9000, MONTH);
+
 		const refused = await post(`/plans/${planId}/link`, {
 			transaction_id: String(part?.id ?? 0),
 		});
+
 		expect(await refused.text()).toContain("That payment already pays a bill.");
+
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE transaction_id IS NOT NULL",
 		).first<{ n: number }>();
+
 		expect(linked?.n).toBe(0);
 	});
 
 	it("the bill matcher and the picker skip a part of a payment a plan pays", async () => {
 		const { part } = await splitPlanPayment();
 		await matchBillPayments(env.DB, TODAY);
+
 		const matched = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=?",
 		)
 			.bind(part)
 			.first<{ n: number }>();
+
 		expect(matched?.n).toBe(0);
 
 		// Another plan's picker never lists the part either, and linking it there is refused.
 		const other = await plan("Lawn service", 12000, MONTH);
+
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${other}`)
 		).text();
+
 		expect(picker).not.toContain(`value="${part}"`);
+
 		const refused = await post(`/plans/${other}/link`, {
 			transaction_id: String(part),
 		});
+
 		expect(await refused.text()).toContain(
 			"That payment already pays a planned expense.",
 		);
@@ -1963,15 +2212,19 @@ describe("a bill can't take a payment a plan pays", () => {
 		).run();
 		await payment(9710, 18000);
 		await plan("Car registration", 18000, MONTH, 9710);
+
 		const refused = await post("/bills/9709/link", {
 			transaction_id: "9710",
 			period: MONTH,
 			opened_period: MONTH,
 		});
+
 		expect(await refused.text()).toContain("already pays a planned expense");
+
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9710",
 		).first<{ n: number }>();
+
 		expect(linked?.n).toBe(0);
 	});
 });
@@ -1980,9 +2233,11 @@ describe("a payment that pays a planned expense, on its own page and in the list
 	it("says in the edit panel that an excluded payment counts while it pays a planned expense", async () => {
 		const tx = await payment(9760, 18000, 1);
 		await plan("Car registration", 18000, MONTH, tx);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${tx}`)
 		).text();
+
 		expect(html).toContain(
 			"It pays a planned expense, so it counts in the budget.",
 		);
@@ -1991,6 +2246,7 @@ describe("a payment that pays a planned expense, on its own page and in the list
 	it("says in the save toast that an excluded payment still counts while it pays a planned expense", async () => {
 		const tx = await payment(9765, 18000);
 		await plan("Car registration", 18000, MONTH, tx);
+
 		const saved = await exports.default.fetch(`${BASE}/transactions/${tx}`, {
 			method: "POST",
 			headers: {
@@ -2004,6 +2260,7 @@ describe("a payment that pays a planned expense, on its own page and in the list
 				back: "/transactions",
 			}),
 		});
+
 		const trigger = JSON.parse(saved.headers.get("HX-Trigger") ?? "{}");
 		expect(trigger.announce).toContain(
 			"It still counts while it pays a planned expense.",
@@ -2017,9 +2274,11 @@ describe("a payment that pays a planned expense, on its own page and in the list
 			.bind(TODAY, tx)
 			.run();
 		await plan("Car registration", 18000, MONTH, tx);
+
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions`)
 		).text();
+
 		expect(html).toContain("paid Car registration");
 	});
 
@@ -2027,10 +2286,13 @@ describe("a payment that pays a planned expense, on its own page and in the list
 		const before = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_delete_holds",
 		).first<{ n: number }>();
+
 		expect(await holdPlanDelete(env.DB, 987654)).toBeNull();
+
 		const after = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_delete_holds",
 		).first<{ n: number }>();
+
 		expect(after?.n).toBe(before?.n);
 	});
 });
@@ -2045,17 +2307,20 @@ describe("excluding a payment that a bill or a plan pays", () => {
 				"content-type": "application/x-www-form-urlencoded",
 			},
 			body: new URLSearchParams([
-				...ids.map((id) => ["ids", String(id)] as [string, string]),
+				...ids.map((id): [string, string] => ["ids", String(id)]),
 				["back", "/transactions"],
 			]),
 		});
 
 	const announced = async (ids: number[]) => {
-		const trigger = JSON.parse(
-			(await exclude(ids)).headers.get("HX-Trigger") ?? "{}",
-		);
+		const trigger = hxTriggerOf<{
+			toast: { message: string };
+			announce: string;
+		}>(await exclude(ids));
+
 		expect(trigger.toast.message).toBe(trigger.announce);
-		return trigger.announce as string;
+
+		return trigger.announce;
 	};
 
 	it("says a plan's payment still counts, and counts bills and plans together in one sentence", async () => {
@@ -2089,10 +2354,13 @@ describe("the plan picker lists every payment that can pay the plan", () => {
 	it("lists all 25 eligible payments in the plan's month, not only the first 20", async () => {
 		const planId = await plan("Car registration", 18000, MONTH);
 		const ids: number[] = [];
+
 		for (let i = 0; i < 25; i++) ids.push(await payment(9900 + i, 1000 + i));
+
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
+
 		for (const id of ids) expect(picker).toContain(`value="${id}"`);
 	});
 });
@@ -2102,21 +2370,27 @@ describe("a payer with no name of its own shows the bank's text, tidied, as bill
 		const tidied = tidyName("DMV FIXTURE");
 		const tx = await payment(9830, 18000);
 		const planId = await plan("Car registration", 18000, MONTH);
+
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
+
 		// The picker's row names the payment with its tidied bank text, then its date and amount.
 		expect(picker).toContain(`>${tidied}</span>`);
 		expect(picker).not.toContain("null");
 
 		await post(`/plans/${planId}/link`, { transaction_id: String(tx) });
+
 		const page = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
+
 		expect(page).toContain(`Paid by ${tidied}`);
+
 		const edit = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}/edit`)
 		).text();
+
 		expect(edit).toMatch(new RegExp(`Paid by</span>\\s*${tidied} · `));
 		expect(edit).not.toContain("null");
 	});
@@ -2129,23 +2403,26 @@ describe("a plan's answer names its address: Bills, or the plan's own page after
 			amount: "90",
 			month: MONTH,
 		});
+
 		expect(created.headers.get("HX-Push-Url")).toBe("/bills");
 
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const edited = await post(`/plans/${id}`, {
 			name: "Car registration",
 			amount: "180",
 			month: MONTH,
 		});
+
 		expect(edited.headers.get("HX-Push-Url")).toBe("/bills");
 
 		const deleted = await post(`/plans/${id}/delete`, {});
 		expect(deleted.headers.get("HX-Push-Url")).toBe("/bills");
-		const token = (
-			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
-				toast: { undo: string };
-			}
-		).toast.undo;
+
+		const token = hxTriggerOf<{
+			toast: { undo: string };
+		}>(deleted).toast.undo;
+
 		const undone = await post("/plans/undo-delete", { token });
 		expect(undone.headers.get("HX-Push-Url")).toBe("/bills");
 
@@ -2161,31 +2438,34 @@ describe("a plan's answer names its address: Bills, or the plan's own page after
 
 	it("answers with the plan's own address after an edit from its page, and with Bills' after an edit from Bills", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
+
 		const fromPage = await post(`/plans/${id}`, {
 			name: "Car registration",
 			amount: "180",
 			month: MONTH,
 			opener: "plan",
 		});
+
 		expect(fromPage.headers.get("HX-Push-Url")).toBe(`/plans/${id}`);
+
 		const fromBills = await post(`/plans/${id}`, {
 			name: "Car registration",
 			amount: "180",
 			month: MONTH,
 		});
+
 		expect(fromBills.headers.get("HX-Push-Url")).toBe("/bills");
 	});
 });
 
 describe("a save whose plan is deleted mid-save says it is gone, not saved (Codex 4278749957)", () => {
 	const gone = "That planned expense is already gone.";
-	const save = (id: number, opener: boolean) =>
-		post(`/plans/${id}`, {
-			name: "Car registration",
-			amount: "180",
-			month: MONTH,
-			...(opener ? { opener: "plan" } : {}),
-		});
+
+	const save = (id: number, opener: boolean) => {
+		const form = { name: "Car registration", amount: "180", month: MONTH };
+
+		return post(`/plans/${id}`, opener ? { ...form, opener: "plan" } : form);
+	};
 
 	it.each([
 		{ origin: "the plan's own page", opener: true },
@@ -2196,14 +2476,17 @@ describe("a save whose plan is deleted mid-save says it is gone, not saved (Code
 			const id = await plan("Car registration", 18000, MONTH);
 			// Another request deletes the plan after this save read it and before the save writes it.
 			const realBatch = env.DB.batch.bind(env.DB);
+
 			const spy = vi
 				.spyOn(env.DB, "batch")
 				.mockImplementationOnce(async (statements) => {
 					await env.DB.prepare("DELETE FROM planned_expenses WHERE id = ?")
 						.bind(id)
 						.run();
+
 					return realBatch(statements);
 				});
+
 			const answer = await save(id, opener).finally(() => spy.mockRestore());
 
 			expect(
@@ -2211,11 +2494,13 @@ describe("a save whose plan is deleted mid-save says it is gone, not saved (Code
 			).toEqual({ message: gone, type: "error" });
 			expect(answer.headers.get("HX-Trigger")).not.toContain("Saved");
 			expect(answer.headers.get("HX-Push-Url")).toBe("/bills");
+
 			const left = await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM planned_expenses WHERE id = ?",
 			)
 				.bind(id)
 				.first<{ n: number }>();
+
 			expect(left?.n).toBe(0);
 		},
 	);
@@ -2223,8 +2508,10 @@ describe("a save whose plan is deleted mid-save says it is gone, not saved (Code
 
 describe("a cash entry's date that takes its plan's payment out of the plan's month unlinks the plan (Codex 4279039333)", () => {
 	const CASH_NAME = "PLAN CASH FIXTURE";
+
 	const unlinkedWords = (name: string) =>
 		`Saved ${tidyName(name)}. Its payment is no longer linked.`;
+
 	const linkOf = async (planId: number) =>
 		(
 			await env.DB.prepare(
@@ -2233,13 +2520,16 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 				.bind(planId)
 				.first<{ t: number | null }>()
 		)?.t ?? null;
+
 	const editCash = (id: number, date: string, amount: string) =>
 		post(`/transactions/${id}`, { date, amount, back: "/transactions" });
+
 	const trigger = async (res: Promise<Response>) =>
-		JSON.parse((await res).headers.get("HX-Trigger") ?? "{}") as {
+		hxTriggerOf<{
 			toast: { message: string };
 			announce: string;
-		};
+		}>(await res);
+
 	/** A cash entry in the cash account, as Add cash stores one, dated `date`. */
 	async function cashEntry(amountCents: number, date: string) {
 		await env.DB.batch([
@@ -2251,13 +2541,16 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 				SELECT id,?,?,?,1,'user',0,'demo' FROM accounts WHERE type='cash'`,
 			).bind(date, amountCents, CASH_NAME),
 		]);
+
 		const row = await env.DB.prepare(
 			"SELECT id FROM transactions WHERE raw_name = ? ORDER BY id DESC LIMIT 1",
 		)
 			.bind(CASH_NAME)
 			.first<{ id: number }>();
+
 		return row?.id ?? 0;
 	}
+
 	const splitInTwo = (id: number) =>
 		saveSplit(
 			env.DB,
@@ -2268,6 +2561,7 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 			],
 			"demo",
 		);
+
 	/** A $50 refund from the bank account, linked to the cash entry `id` (the refund a cash amount can't drop below). */
 	const refundOf = (id: number, refundId: number) =>
 		env.DB.prepare(
@@ -2298,13 +2592,15 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 	it("moving a split cash entry out of the plan's month unlinks the plan on its part, because the parts' dates follow", async () => {
 		const id = await cashEntry(30000, dateIn(MONTH));
 		await splitInTwo(id);
-		const part = (
+
+		const part = present(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id DESC LIMIT 1",
 			)
 				.bind(id)
-				.first<{ id: number }>()
-		)?.id as number;
+				.first<{ id: number }>(),
+		).id;
+
 		const planId = await plan("Car registration", 18000, MONTH, part);
 		const moved = await trigger(editCash(id, dateIn(LAST_MONTH), "300"));
 		expect(moved.toast.message).toBe(unlinkedWords(CASH_NAME));
@@ -2337,6 +2633,7 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 		const id = await cashEntry(18000, dateIn(MONTH));
 		const planId = await plan("Car registration", 18000, MONTH, id);
 		await refundOf(id, 9851);
+
 		const result = await saveEdit(
 			env.DB,
 			id,
@@ -2353,6 +2650,7 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 			},
 			"demo",
 		);
+
 		expect(result).toEqual({
 			saved: false,
 			cashError: "refund",

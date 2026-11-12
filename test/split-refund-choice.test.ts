@@ -3,15 +3,18 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { loadMonth } from "../src/db/month";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 const db = env.DB;
 const GROCERIES = 1;
 const KIDS = 4;
 const HOUSEHOLD = 5;
 const PURCHASE = 9101;
+
 /** $45.00 on Sep 5, and $20.00 on Sep 6: both refund the purchase. */
 const FIRST = 9102;
 const SECOND = 9103;
+
 const PARTS = [
 	{ categoryId: KIDS, amountCents: 6000 },
 	{ categoryId: HOUSEHOLD, amountCents: 4000 },
@@ -58,6 +61,7 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 			[FIRST]: 0,
 			[SECOND]: null,
 		});
+
 		const [kids] = await partIds(PURCHASE);
 		expect(result).toEqual({
 			saved: true,
@@ -162,6 +166,7 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		const [kids, household] = await partIds(PURCHASE);
 		expect(result.unlinked).toEqual([]);
 		expect(result.moved).toEqual([
@@ -178,6 +183,7 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 			[FIRST]: 0,
 			[SECOND]: 0,
 		});
+
 		const [kids] = await partIds(PURCHASE);
 		expect(result.moved).toEqual([{ date: "2026-09-05", part: 0 }]);
 		expect(result.unlinked).toEqual(["2026-09-06"]);
@@ -191,6 +197,7 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 			[FIRST]: 1,
 			[SECOND]: null,
 		});
+
 		expect(result.moved).toEqual([]);
 		expect(result.unlinked).toEqual(["2026-09-05", "2026-09-06"]);
 		expect(await linkOf(FIRST)).toBeNull();
@@ -200,6 +207,7 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 		const result = await saveSplit(db, PURCHASE, PARTS, "test", {
 			[FIRST]: 5,
 		});
+
 		expect(result.moved).toEqual([]);
 		expect(await linkOf(FIRST)).toBeNull();
 	});
@@ -209,10 +217,12 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 			.prepare("UPDATE transactions SET amount_cents = 9000 WHERE id = ?")
 			.bind(PURCHASE)
 			.run();
+
 		const result = await saveSplit(db, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		expect(result).toEqual({
 			saved: false,
 			unlinked: [],
@@ -227,13 +237,16 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 		await saveSplit(db, PURCHASE, PARTS, "test", { [FIRST]: 0 });
 		const [oldKids] = await partIds(PURCHASE);
 		expect(await linkOf(FIRST)).toBe(oldKids);
+
 		const again = [
 			{ categoryId: HOUSEHOLD, amountCents: 5000 },
 			{ categoryId: KIDS, amountCents: 5000 },
 		];
+
 		const result = await saveSplit(db, PURCHASE, again, "test", {
 			[FIRST]: 1,
 		});
+
 		const [, newKids] = await partIds(PURCHASE);
 		expect(result.moved).toEqual([{ date: "2026-09-05", part: 1 }]);
 		expect(await linkOf(FIRST)).toBe(newKids);
@@ -241,13 +254,16 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 
 	it("re-splitting unlinks a refund from an old part when the new part is too small for it", async () => {
 		await saveSplit(db, PURCHASE, PARTS, "test", { [FIRST]: 0 });
+
 		const smaller = [
 			{ categoryId: KIDS, amountCents: 4000 },
 			{ categoryId: HOUSEHOLD, amountCents: 6000 },
 		];
+
 		const result = await saveSplit(db, PURCHASE, smaller, "test", {
 			[FIRST]: 0,
 		});
+
 		expect(result.moved).toEqual([]);
 		expect(result.unlinked).toEqual(["2026-09-05"]);
 		expect(await linkOf(FIRST)).toBeNull();
@@ -270,12 +286,16 @@ const racingWithAll = (races: [string, (number | null)[]][]) =>
 						await env.DB.prepare(race)
 							.bind(...bind)
 							.run();
+
 					return env.DB.batch(statements);
 				};
-			const value = Reflect.get(target, prop);
-			return typeof value === "function" ? value.bind(target) : value;
+
+			// SAFETY: the statements under test read only D1Database members, and a name they never read is undefined here, as on D1.
+			const value: unknown = target[prop as keyof D1Database];
+
+			return isMethod(value) ? value.bind(target) : value;
 		},
-	}) as unknown as D1Database;
+	});
 
 /** racingWithAll for one competing statement. */
 const racingWith = (race: string, bind: (number | null)[]) =>
@@ -295,10 +315,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
 			[OTHER, FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		const [, household] = await partIds(PURCHASE);
 		expect(result.saved).toBe(true);
 		expect(await linkOf(FIRST)).toBe(OTHER);
@@ -312,14 +334,17 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			[FIRST]: 0,
 			[SECOND]: null,
 		});
+
 		const racing = racingWith(
 			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
 			[OTHER, FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: null,
 		});
+
 		expect(result.saved).toBe(true);
 		expect(await linkOf(FIRST)).toBe(OTHER);
 		expect(result.moved).toEqual([]);
@@ -331,10 +356,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET refund_of_id = NULL WHERE id = ?",
 			[FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		expect(result.saved).toBe(true);
 		expect(await linkOf(FIRST)).toBeNull();
 		expect(result.moved).toEqual([{ date: "2026-09-06", part: 1 }]);
@@ -346,10 +373,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET flag_income = 1 WHERE id = ?",
 			[FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		const [, household] = await partIds(PURCHASE);
 		expect(result).toEqual({
 			saved: true,
@@ -366,10 +395,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET credit_reviewed = 0 WHERE id = ?",
 			[FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		const [, household] = await partIds(PURCHASE);
 		expect(result).toEqual({
 			saved: true,
@@ -386,10 +417,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET is_split = 1 WHERE id = ?",
 			[FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		const [, household] = await partIds(PURCHASE);
 		expect(result).toEqual({
 			saved: true,
@@ -406,10 +439,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET date = '2026-09-08' WHERE id = ?",
 			[FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		expect(result.saved).toBe(true);
 		expect(result.moved).toEqual([
 			{ date: "2026-09-08", part: 0 },
@@ -423,10 +458,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET excluded = 1 WHERE id = ?",
 			[PURCHASE],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		expect(result).toEqual({
 			saved: true,
 			unlinked: ["2026-09-05", "2026-09-06"],
@@ -439,13 +476,16 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 
 	it("unlinks and names a chosen refund on an old part that a competing save marked as income", async () => {
 		await saveSplit(db, PURCHASE, PARTS, "test", { [FIRST]: 0 });
+
 		const racing = racingWith(
 			"UPDATE transactions SET flag_income = 1 WHERE id = ?",
 			[FIRST],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 		});
+
 		expect(result).toEqual({
 			saved: true,
 			unlinked: ["2026-09-05"],
@@ -460,10 +500,12 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
 			[OTHER, SECOND],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: null,
 		});
+
 		expect(result).toEqual({
 			saved: true,
 			unlinked: [],
@@ -479,14 +521,17 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 			(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, credit_reviewed, credit_reviewed_by) VALUES
 			(9105, 3, '2026-09-07', -500, 'WAREHOUSE CLUB', ${GROCERIES}, 'user', 0, NULL, 1, 'user')`)
 			.run();
+
 		const racing = racingWith(
 			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
 			[PURCHASE, 9105],
 		);
+
 		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
 			[SECOND]: 1,
 		});
+
 		expect(result.unlinked).toEqual(["2026-09-07"]);
 		expect(await linkOf(9105)).toBeNull();
 	});
@@ -511,6 +556,7 @@ describe("a purchase with a dormant refund link of its own still names the refun
 			[FIRST]: null,
 			[SECOND]: null,
 		});
+
 		expect(result).toEqual({
 			saved: true,
 			unlinked: ["2026-09-05", "2026-09-06"],
@@ -526,6 +572,7 @@ describe("a purchase with a dormant refund link of its own still names the refun
 			[FIRST]: 0,
 			[SECOND]: null,
 		});
+
 		expect(result.moved).toEqual([{ date: "2026-09-05", part: 0 }]);
 		expect(result.unlinked).toEqual(["2026-09-06"]);
 		expect(await linkOf(SECOND)).toBeNull();
@@ -564,6 +611,7 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
 			[SPLIT_REFUND]: 0,
 		});
+
 		const [kids] = await partIds(SPLIT_PURCHASE);
 		expect(result).toEqual({
 			saved: true,
@@ -590,9 +638,11 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
 			.bind(ELSEWHERE, REFUND_HOUSEHOLD)
 			.run();
+
 		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
 			[SPLIT_REFUND]: 0,
 		});
+
 		const [kids] = await partIds(SPLIT_PURCHASE);
 		expect(result.moved).toEqual([{ date: "2026-09-05", part: 0 }]);
 		expect(await linkOf(SPLIT_REFUND)).toBe(kids);
@@ -611,6 +661,7 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 			"test",
 			{ [SPLIT_REFUND]: 0 },
 		);
+
 		expect(result.moved).toEqual([]);
 		expect(result.unlinked).toEqual(["2026-09-05"]);
 		expect(await linkOf(SPLIT_REFUND)).toBeNull();
@@ -622,6 +673,7 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
 			[SPLIT_REFUND]: null,
 		});
+
 		expect(result).toEqual({
 			saved: true,
 			unlinked: ["2026-09-05"],
@@ -635,14 +687,17 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 
 	it("re-splitting moves a split refund and its parts from an old part to the new part chosen for it", async () => {
 		await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", { [SPLIT_REFUND]: 0 });
+
 		// The purchase is split again with the Household part first, and the refund is chosen for the Kids part.
 		const again = [
 			{ categoryId: HOUSEHOLD, amountCents: 4000 },
 			{ categoryId: KIDS, amountCents: 6000 },
 		];
+
 		const result = await saveSplit(db, SPLIT_PURCHASE, again, "test", {
 			[SPLIT_REFUND]: 1,
 		});
+
 		const [, kids] = await partIds(SPLIT_PURCHASE);
 		expect(result).toEqual({
 			saved: true,
@@ -660,9 +715,11 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 			.prepare("UPDATE transactions SET refund_of_id = ? WHERE parent_id = ?")
 			.bind(ELSEWHERE, SPLIT_REFUND)
 			.run();
+
 		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
 			[SPLIT_REFUND]: 0,
 		});
+
 		expect(result).toEqual({
 			saved: true,
 			unlinked: ["2026-09-05"],
@@ -692,9 +749,11 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 				newPart(KIDS, -3000),
 				newPart(HOUSEHOLD, -2000),
 			]);
+
 			const result = await saveSplit(racing, SPLIT_PURCHASE, PARTS, "test", {
 				[SPLIT_REFUND]: 0,
 			});
+
 			expect(result).toEqual({
 				saved: true,
 				unlinked: ["2026-09-05"],
@@ -702,6 +761,7 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 				moved: [],
 			});
 			expect(await linkOf(SPLIT_REFUND)).toBeNull();
+
 			for (const part of await partIds(SPLIT_REFUND)) {
 				expect(await linkOf(part)).toBeNull();
 			}
@@ -712,9 +772,11 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 				["DELETE FROM transactions WHERE parent_id = ?", [SPLIT_REFUND]],
 				["UPDATE transactions SET is_split = 0 WHERE id = ?", [SPLIT_REFUND]],
 			]);
+
 			const result = await saveSplit(racing, SPLIT_PURCHASE, PARTS, "test", {
 				[SPLIT_REFUND]: 0,
 			});
+
 			expect(result).toEqual({
 				saved: true,
 				unlinked: ["2026-09-05"],
@@ -729,9 +791,11 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 				"UPDATE transactions SET refund_of_id = ? WHERE parent_id = ?",
 				[ELSEWHERE, SPLIT_REFUND],
 			);
+
 			const result = await saveSplit(racing, SPLIT_PURCHASE, PARTS, "test", {
 				[SPLIT_REFUND]: 0,
 			});
+
 			expect(result).toEqual({
 				saved: true,
 				unlinked: ["2026-09-05"],
@@ -748,9 +812,11 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 				"UPDATE transactions SET credit_reviewed = 0 WHERE id = ?",
 				[SPLIT_REFUND],
 			);
+
 			const result = await saveSplit(racing, SPLIT_PURCHASE, PARTS, "test", {
 				[SPLIT_REFUND]: 0,
 			});
+
 			expect(result).toEqual({
 				saved: true,
 				unlinked: ["2026-09-05"],

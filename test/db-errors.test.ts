@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isUniqueViolation } from "../src/db/errors";
 
 /** An error whose cause is `inner`, the way Drizzle wraps a driver error. */
-function wrap(message: string, inner: unknown): Error {
+function wrap(message: string, inner: Error): Error {
 	return new Error(message, { cause: inner });
 }
 
@@ -20,6 +20,7 @@ describe("isUniqueViolation", () => {
 			"Failed query: insert into category_suggestions values (?, ?)",
 			new Error("UNIQUE constraint failed: category_suggestions.name"),
 		);
+
 		expect(isUniqueViolation(error)).toBe(true);
 	});
 
@@ -48,12 +49,14 @@ describe("isUniqueViolation", () => {
 			"Failed query: outer",
 			wrap("Failed query: middle", new Error("UNIQUE constraint failed: x")),
 		);
+
 		expect(isUniqueViolation(error)).toBe(true);
 	});
 
 	it("stops after five levels of cause", () => {
 		// The error itself, then five causes: the fifth cause is searched, the sixth is not.
 		let deepest: Error = new Error("UNIQUE constraint failed: far");
+
 		for (let i = 0; i < 4; i++) deepest = wrap("Failed query", deepest);
 		const fifth = wrap("Failed query", deepest); // UNIQUE is 5 causes below this error
 		expect(isUniqueViolation(fifth)).toBe(true);
@@ -63,7 +66,7 @@ describe("isUniqueViolation", () => {
 
 	it("does not hang on an error whose cause is itself", () => {
 		const error = new Error("Failed query: loop");
-		(error as Error & { cause?: unknown }).cause = error;
+		error.cause = error;
 		expect(isUniqueViolation(error)).toBe(false);
 	});
 });

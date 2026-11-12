@@ -32,6 +32,7 @@ export function BankBehind({
 				))}
 			</ul>
 		);
+
 	return (
 		<div class="mt-3 flex items-center gap-3 rounded-control border border-over/20 bg-over/10 py-2 pr-2 pl-3">
 			<span class="shrink-0 text-over">

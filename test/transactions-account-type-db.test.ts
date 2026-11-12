@@ -10,6 +10,7 @@ import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
 
 const TODAY = "2026-09-22";
+
 const list = (qs: string) =>
 	listTransactions(env.DB, parseFilters(new URLSearchParams(qs), "2026-09"));
 
@@ -24,9 +25,11 @@ const ids = async (qs: string) =>
 async function listAll(qs: string) {
 	const first = await list(qs);
 	const rows = [...first.rows];
+
 	for (let page = 2; page <= first.pages; page++) {
 		rows.push(...(await list(`${qs}&page=${page}`)).rows);
 	}
+
 	return rows;
 }
 
@@ -39,20 +42,24 @@ describe("listTransactions by account", () => {
 		const month = "2026-09";
 		const whole = (await listAll(`month=${month}`)).length;
 		let sum = 0;
+
 		for (const account of [1, 2, 3, 4]) {
 			const rows = await listAll(`month=${month}&account=${account}`);
 			sum += rows.length;
+
 			const { results } = await env.DB.prepare(
 				`SELECT id FROM transactions WHERE account_id = ?`,
 			)
 				.bind(account)
 				.all<{ id: number }>();
+
 			const theirs = new Set(results.map((r) => r.id));
 			expect(
 				rows.every((r) => theirs.has(r.id)),
 				`account ${account}`,
 			).toBe(true);
 		}
+
 		expect(sum).toBe(whole);
 	});
 
@@ -82,6 +89,7 @@ describe("listTransactions by account", () => {
 		const groceriesInCash = await listAll(
 			`month=all&account=${CASH}&category=1`,
 		);
+
 		expect(groceriesInCash.map((r) => r.displayName)).toEqual([
 			"Farmers market",
 		]);
@@ -100,6 +108,7 @@ describe("listTransactions by type", () => {
 			env.DB.prepare(
 				`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,category_id,flag_income,flag_transfer,excluded,is_split,parent_id,refund_of_id,credit_reviewed) VALUES ${values}`,
 			);
+
 		await env.DB.batch([
 			// A paycheck flagged income.
 			row(
@@ -144,9 +153,11 @@ describe("listTransactions by type", () => {
 		expect(income.length).toBeGreaterThan(1);
 		expect(income.every((row) => row.income)).toBe(true);
 		expect(income.map((row) => row.id)).toContain(860);
+
 		const flagged = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE flag_income = 1 AND date LIKE '2026-09-%'",
 		).first<{ n: number }>();
+
 		expect(income).toHaveLength(flagged?.n ?? -1);
 	});
 
@@ -154,10 +165,12 @@ describe("listTransactions by type", () => {
 		const refunds = await ids("month=2026-09&show=refunds");
 		// The linked refund, the unlinked one, the unreviewed credit, and the split refund's parts.
 		expect(refunds).toEqual(expect.arrayContaining([862, 863, 864, 868, 869]));
+
 		// Not a paycheck flagged income, a transfer (left out or put back), a purchase, or a split parent.
 		for (const id of [860, 861, 865, 866, 867, 870]) {
 			expect(refunds, `row ${id}`).not.toContain(id);
 		}
+
 		const rows = await listAll("month=2026-09&show=refunds");
 		// A payment linked to a bill isn't excluded in effect (decision 83), so a linked credit may be here.
 		expect(
@@ -171,6 +184,7 @@ describe("listTransactions by type", () => {
 		const insert = env.DB.prepare(
 			`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,flag_income,flag_transfer,excluded,credit_reviewed) VALUES (?,?,'2026-09-13',-6000,?,?,?,0,1)`,
 		);
+
 		await env.DB.batch([
 			// A transfer credit a person put back in the budget, and a paycheck, each split in two.
 			insert.bind(880, CHECKING, "TRANSFER KEPT AND SPLIT", 0, 1),
@@ -178,6 +192,7 @@ describe("listTransactions by type", () => {
 			// An ordinary refund, split the same way.
 			insert.bind(882, CARD, "REFUND SPLIT", 0, 0),
 		]);
+
 		for (const id of [880, 881, 882]) {
 			await saveSplit(
 				env.DB,
@@ -189,14 +204,17 @@ describe("listTransactions by type", () => {
 				"person@example.com",
 			);
 		}
+
 		const partsOf = async (parent: number) =>
 			(
 				await env.DB.prepare("SELECT id FROM transactions WHERE parent_id = ?")
 					.bind(parent)
 					.all<{ id: number }>()
 			).results.map((r) => r.id);
+
 		const refunds = await ids("month=2026-09&show=refunds");
 		expect((await partsOf(880)).length).toBe(2);
+
 		for (const id of [
 			880,
 			881,
@@ -205,6 +223,7 @@ describe("listTransactions by type", () => {
 		]) {
 			expect(refunds, `row ${id}`).not.toContain(id);
 		}
+
 		// The ordinary split refund still shows by its parts.
 		expect(refunds).toEqual(expect.arrayContaining(await partsOf(882)));
 		// The same rule holds for the count the page shows.
@@ -218,34 +237,42 @@ describe("listTransactions by type", () => {
 		const refunds = (await listAll("month=2026-09&show=refunds")).map(
 			(r) => r.displayName,
 		);
+
 		expect(refunds).not.toContain("Reimbursement, doctor's office");
+
 		const excluded = (await listAll("month=2026-09&show=excluded")).map(
 			(r) => r.displayName,
 		);
+
 		expect(excluded).toContain("Reimbursement, doctor's office");
 	});
 
 	it("Show Spending is what Home counts", async () => {
 		const spending = await listAll("month=2026-09&show=spending");
 		const listed = new Set(spending.map((r) => r.id));
+
 		// A purchase, a refund that follows it, a reviewed credit and a split's parts count; the unreviewed
 		// credit, the paycheck, the transfer and a split's parent don't.
 		for (const id of [861, 862, 863, 868, 869, 870]) {
 			expect(listed.has(id), `row ${id}`).toBe(true);
 		}
+
 		for (const id of [860, 864, 865, 867]) {
 			expect(listed.has(id), `row ${id}`).toBe(false);
 		}
+
 		// A payment linked to a bill counts whatever its exclusion (decision 83).
 		expect(spending.some((r) => r.income || (r.excluded && !r.paysBill))).toBe(
 			false,
 		);
 		const data = await loadMonth(env.DB, "2026-09");
+
 		const home = summarizeMonth({
 			month: "2026-09",
 			...data,
 			unpaidDueBillsCents: 0,
 		});
+
 		expect(spending.reduce((sum, r) => sum + r.amountCents, 0)).toBe(
 			home.totalSpentCents,
 		);
@@ -253,10 +280,12 @@ describe("listTransactions by type", () => {
 
 	it("Show Excluded matches the old Excluded filter", async () => {
 		const shown = await listAll("month=all&show=excluded");
+
 		// A payment linked to a bill counts, so it isn't listed as excluded (spec §8.5).
 		const stored = await env.DB.prepare(
 			`SELECT id FROM transactions WHERE excluded = 1 AND NOT ${PAYS_A_BILL_OR_PLAN} ORDER BY date DESC, id DESC`,
 		).all<{ id: number }>();
+
 		expect(shown.map((r) => r.id)).toEqual(stored.results.map((r) => r.id));
 		expect(shown.map((r) => r.id)).toContain(865);
 		// A link made when Excluded was a chip still shows the same rows.
@@ -275,6 +304,7 @@ describe("listTransactions by type", () => {
 		const inChecking = await ids(
 			`month=2026-09&show=refunds&account=${CHECKING}`,
 		);
+
 		expect(inChecking).toContain(864);
 		expect(inChecking).not.toContain(862);
 		expect(
@@ -397,6 +427,7 @@ describe("unique account labels", () => {
 			account(1, "Cash", null, "Chase"),
 			account(2, "Wallet", null, null, "cash"),
 		]);
+
 		expect(labels).toEqual(["Cash (Chase)", "Cash"]);
 	});
 
@@ -406,6 +437,7 @@ describe("unique account labels", () => {
 			account(2, "Checking", "1234", "Chase"),
 			account(3, "Checking ••1234 (Chase, depository) (2)", null, null),
 		]);
+
 		expect(labels).toEqual([
 			"Checking ••1234 (Chase, depository)",
 			"Checking ••1234 (Chase, depository) (3)",

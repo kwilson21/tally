@@ -28,6 +28,7 @@ const GROCERIES = {
 	archived: false,
 	budgetCents: 60000,
 };
+
 const SPENT_CENTS = 41230;
 const LAST_MONTH_CENTS = 57180;
 const AVERAGE_CENTS = 60245;
@@ -38,8 +39,10 @@ const LABEL = "Budget from October on";
 // The money input's classes, as money-input.tsx has them, and the pressed chip's for A and B.
 const round =
 	"flex size-12 shrink-0 items-center justify-center rounded-full border border-rule bg-paper text-xl font-semibold leading-none text-muted select-none hover:text-ink disabled:opacity-40";
+
 const cent =
 	"flex w-11 flex-1 items-center justify-center text-muted hover:bg-band hover:text-ink disabled:opacity-40";
+
 /** A chip whose amount is in the box: its check shows and its words go ink, instead of fading to 50%. */
 const pressedChip =
 	"group inline-flex min-h-11 items-center gap-1 rounded-full bg-band px-3 text-sm font-medium text-muted tabular-nums hover:text-ink aria-pressed:text-ink";
@@ -47,6 +50,7 @@ const pressedChip =
 /** The typed text in cents, as money-input.tsx reads it: "" is 0, and text that isn't a dollar amount is null. */
 function centsOf(text: string): number | null {
 	if (text.trim() === "") return 0;
+
 	try {
 		return toCents(text);
 	} catch {
@@ -90,6 +94,7 @@ function ProposedMoney({
 	const cents = centsOf(value);
 	const unreadable = cents === null;
 	const atZero = cents === null || cents === 0;
+
 	const roundTo =
 		cents !== null && cents % 100 !== 0 ? (
 			<button type="button" class={moneyChip}>
@@ -97,6 +102,7 @@ function ProposedMoney({
 				{formatCents(Math.ceil(cents / 100) * 100, { wholeDollars: true })}
 			</button>
 		) : null;
+
 	return (
 		<div class="flex flex-col gap-2">
 			<label for={id} class="text-base text-ink">
@@ -324,6 +330,7 @@ function Desk({ label, children }: { label: string; children?: Child }) {
 // The five states, in the order the owner sees them. `id` makes each picture's ids its own; `desk` adds the two
 // states' 1280 pictures, the ones with cents and the one that matches a chip.
 const refusal = parseBudgetAmount("six hundred");
+
 const STATES = [
 	{ id: "empty", label: "Empty", tag: "empty", value: "", desk: false },
 	{

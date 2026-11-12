@@ -55,6 +55,7 @@ async function hkdf(
 	const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, [
 		"deriveBits",
 	]);
+
 	return new Uint8Array(
 		await crypto.subtle.deriveBits(
 			{ name: "HKDF", hash: "SHA-256", salt, info },
@@ -68,11 +69,14 @@ function concat(...parts: Uint8Array[]): Uint8Array {
 	const out = new Uint8Array(
 		parts.reduce((total, part) => total + part.byteLength, 0),
 	);
+
 	let offset = 0;
+
 	for (const part of parts) {
 		out.set(part, offset);
 		offset += part.byteLength;
 	}
+
 	return out;
 }
 
@@ -82,19 +86,25 @@ function concat(...parts: Uint8Array[]): Uint8Array {
  */
 async function senderKeys(sender: SenderJwk | undefined) {
 	if (!sender) {
+		// SAFETY: P256 is an EC key-pair algorithm, so generateKey resolves to a CryptoKeyPair rather than a single key.
 		const pair = (await crypto.subtle.generateKey(P256, true, [
 			"deriveBits",
 		])) as CryptoKeyPair;
+
 		return {
 			privateKey: pair.privateKey,
 			publicPoint: new Uint8Array(
+				// SAFETY: exporting an EC public key in "raw" format resolves to an ArrayBuffer, never a JSON Web Key.
 				(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
 			),
 		};
 	}
+
 	const x = fromBase64Url(sender.x);
 	const y = fromBase64Url(sender.y);
+
 	if (!x || !y) throw new Error("sender key is not base64url");
+
 	const privateKey = await crypto.subtle.importKey(
 		"jwk",
 		{ kty: "EC", crv: "P-256", d: sender.d, x: sender.x, y: sender.y },
@@ -102,6 +112,7 @@ async function senderKeys(sender: SenderJwk | undefined) {
 		false,
 		["deriveBits"],
 	);
+
 	return { privateKey, publicPoint: concat(new Uint8Array([0x04]), x, y) };
 }
 
@@ -118,9 +129,12 @@ export async function encrypt(
 ): Promise<Uint8Array> {
 	const receiverPoint = fromBase64Url(subscription.p256dh);
 	const auth = fromBase64Url(subscription.auth);
+
 	if (receiverPoint?.length !== 65 || receiverPoint[0] !== 0x04)
 		throw new Error("subscription key is not an uncompressed P-256 point");
+
 	if (auth?.length !== 16) throw new Error("subscription auth is not 16 bytes");
+
 	const receiverKey = await crypto.subtle.importKey(
 		"raw",
 		receiverPoint,
@@ -128,11 +142,14 @@ export async function encrypt(
 		false,
 		[],
 	);
+
 	const sender = await senderKeys(options.sender);
+
 	const shared = new Uint8Array(
 		await crypto.subtle.deriveBits(
 			// The peer key's member is `public` (the spec and MDN). The generated Workers types name it `$public`, a reserved-word
 			// escape; the runtime reads `public`, and the Appendix A test checks that it does.
+			// SAFETY: the object is the ECDH algorithm (name "ECDH") with the receiver's imported P-256 key as its peer, the shape deriveBits takes.
 			{
 				name: "ECDH",
 				public: receiverKey,
@@ -141,35 +158,44 @@ export async function encrypt(
 			256,
 		),
 	);
+
 	// The combined secret, from the auth secret and the two public points (RFC 8291 §3.4).
 	const keyInfo = concat(
 		encoder.encode("WebPush: info\0"),
 		receiverPoint,
 		sender.publicPoint,
 	);
+
 	const ikm = await hkdf(shared, auth, keyInfo, 32);
 	const salt = options.salt ?? crypto.getRandomValues(new Uint8Array(16));
+
 	const cek = await hkdf(
 		ikm,
 		salt,
 		encoder.encode("Content-Encoding: aes128gcm\0"),
 		16,
 	);
+
 	const nonce = await hkdf(
 		ikm,
 		salt,
 		encoder.encode("Content-Encoding: nonce\0"),
 		12,
 	);
+
 	const aesKey = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, [
 		"encrypt",
 	]);
+
 	const record = concat(plaintext, new Uint8Array([0x02]));
+
 	const sealed = new Uint8Array(
 		await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, record),
 	);
+
 	const recordSize = new Uint8Array(4);
 	new DataView(recordSize.buffer).setUint32(0, RECORD_SIZE);
+
 	return concat(
 		salt,
 		recordSize,
@@ -192,6 +218,7 @@ export async function vapidAuthorization(
 	const header = toBase64Url(
 		encoder.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })),
 	);
+
 	const claims = toBase64Url(
 		encoder.encode(
 			JSON.stringify({
@@ -201,7 +228,9 @@ export async function vapidAuthorization(
 			}),
 		),
 	);
+
 	const signingInput = `${header}.${claims}`;
+
 	const signature = new Uint8Array(
 		await crypto.subtle.sign(
 			{ name: "ECDSA", hash: "SHA-256" },
@@ -209,6 +238,7 @@ export async function vapidAuthorization(
 			encoder.encode(signingInput),
 		),
 	);
+
 	return `vapid t=${signingInput}.${toBase64Url(signature)}, k=${keys.publicKey}`;
 }
 
@@ -241,9 +271,11 @@ async function authorizationFor(
 ): Promise<string> {
 	const cacheKey = `${keys.publicKey} ${new URL(endpoint).origin}`;
 	const cached = vapidCache.get(cacheKey);
+
 	if (cached && cached.exp - nowSec > REUSE_WHILE_LEFT_S) return cached.header;
 	const header = await vapidAuthorization(endpoint, keys, nowSec);
 	vapidCache.set(cacheKey, { header, exp: nowSec + VAPID_LIFETIME_S });
+
 	return header;
 }
 
@@ -260,14 +292,18 @@ export async function sendPush(
 	options: SendOptions = {},
 ): Promise<{ status: number | null }> {
 	const fetchImpl = options.fetchImpl ?? fetch;
+
 	const timeoutSignal =
 		options.timeoutSignal ?? (() => AbortSignal.timeout(10_000));
+
 	const nowSec = options.nowSec ?? Math.floor(Date.now() / 1000);
+
 	try {
 		const body = await encrypt(
 			encoder.encode(JSON.stringify(payload)),
 			subscription,
 		);
+
 		const response = await fetchImpl(subscription.endpoint, {
 			method: "POST",
 			signal: timeoutSignal(),
@@ -284,6 +320,7 @@ export async function sendPush(
 			},
 			body,
 		});
+
 		return { status: response.status };
 	} catch {
 		return { status: null };

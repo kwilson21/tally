@@ -227,6 +227,7 @@ howItWorks.get("/how-it-works", async (c) => {
 	const monthLabel = monthName(month);
 	// Screens call the AI "Tally"; only the demo's page names Jev (decision 64).
 	const ai: "Jev" | "Tally" = demo ? "Jev" : "Tally";
+
 	const [
 		data,
 		counts,
@@ -246,24 +247,31 @@ howItWorks.get("/how-it-works", async (c) => {
 		namesToReview(c.env.DB),
 		readAiTally(c.env.DB, today),
 	]);
+
 	const trendsExampleText = trendsExample(buildTrends(trendsData));
+
 	const hasTransactions =
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
+
 	// The same totals Home and Bills show, so this page's set-aside amount is Safe to spend's (decision 123).
 	const unpaidDueBillsCents = billTotalsForRows(
 		month,
 		billData.rows,
 	).setAsideCents;
+
 	// Planned expenses are set aside in the current month only, as Home sets them (spec §8.4).
 	const unpaidPlansCents =
 		month === today.slice(0, 7) ? await plansSetAsideCents(c.env.DB, month) : 0;
+
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents,
 		unpaidPlansCents,
 	});
+
 	const budgeted = new Set(summary.categories.map((category) => category.id));
+
 	const unbudgetedCents = data.transactions
 		.filter(
 			(transaction) =>
@@ -272,13 +280,16 @@ howItWorks.get("/how-it-works", async (c) => {
 				!budgeted.has(transaction.categoryId),
 		)
 		.reduce((sum, transaction) => sum + transaction.amountCents, 0);
+
 	const netWorthText = netWorthExample(
 		countedAccounts(
 			await accountsByBank(c.env.DB),
 			await appleCardAccount(c.env.DB),
 		),
 	);
+
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
+
 	const paidBill = billData.rows.find(
 		(bill) =>
 			bill.active &&
@@ -286,10 +297,12 @@ howItWorks.get("/how-it-works", async (c) => {
 			bill.paidDate &&
 			(!demo || bill.name === "Water"),
 	);
+
 	const billExamples = billStatusExamples(billData.rows, today);
 	// Start here's bank lines (spec §8.8) exist only in the demo. Its lines come from the seed's month, so its
 	// "See every line" link names that month when it isn't today's (the list's count is the heading's N).
 	const startRows = demo ? await startHereRows(c.env.DB, month) : null;
+
 	const startRawHref =
 		startRows && startRows.month !== month
 			? `/transactions?raw=1&month=${startRows.month}`

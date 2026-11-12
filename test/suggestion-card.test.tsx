@@ -71,9 +71,11 @@ describe("NewCategoryCard: one card, one set of words", () => {
 
 	it("uses the given checkbox name, so Settings sends ids and the Suggestions page sends ticked", () => {
 		const settings = String(<NewCategoryCard {...SETTINGS} />);
+
 		const suggestions = String(
 			<NewCategoryCard {...SETTINGS} tickName="ticked" />,
 		);
+
 		expect(settings).toContain('name="ids"');
 		expect(settings).not.toContain('name="ticked"');
 		expect(suggestions).toContain('name="ticked"');
@@ -82,6 +84,7 @@ describe("NewCategoryCard: one card, one set of words", () => {
 
 	it("sends a hidden shown field for every row, so the route knows what was offered", () => {
 		const html = String(<NewCategoryCard {...SETTINGS} />);
+
 		for (const row of rows)
 			expect(html).toContain(`name="shown" value="${row.id}"`);
 	});
@@ -90,6 +93,7 @@ describe("NewCategoryCard: one card, one set of words", () => {
 		const html = String(
 			<NewCategoryCard {...SETTINGS} ticked={[7103, 7102]} />,
 		);
+
 		expect(html).toContain('name="note_7101"');
 		expect(html).toContain(esc("A note for Chewy (optional)"));
 		expect(html).toContain('name="note_7102"');
@@ -128,6 +132,7 @@ describe("NewCategoryCard: one card, one set of words", () => {
 		const html = String(
 			<NewCategoryCard {...SETTINGS} error="Tick at least one transaction." />,
 		);
+
 		expect(html).toContain('role="alert"');
 		expect(html).toContain("Tick at least one transaction.");
 	});
@@ -136,6 +141,7 @@ describe("NewCategoryCard: one card, one set of words", () => {
 		const html = String(
 			<NewCategoryCard {...SETTINGS} titleId="suggestion-title" focus />,
 		);
+
 		expect(html).toContain('id="suggestion-title"');
 		expect(html).toContain('tabindex="-1"');
 	});
@@ -176,6 +182,7 @@ describe("OrganizeNewCategoryCard: the short form above Organize's chips", () =>
 	it("posts the suggestion's id and one hidden shown per purchase, with no ticks or note fields", () => {
 		const html = String(<OrganizeNewCategoryCard {...ORGANIZE} />);
 		expect(html).toContain('name="suggestion" value="7001"');
+
 		for (const id of ORGANIZE.shown)
 			expect(html).toContain(`name="shown" value="${id}"`);
 		expect(html).not.toContain('type="checkbox"');
@@ -189,6 +196,7 @@ describe("OrganizeNewCategoryCard: the short form above Organize's chips", () =>
 				error="Tally has room for 50 categories. Archive one to add another."
 			/>,
 		);
+
 		expect(html).toContain(
 			'<p role="alert" class="text-sm text-over">Tally has room for 50 categories. Archive one to add another.</p>',
 		);
@@ -228,6 +236,7 @@ describe("AskFirst takes the form it answers to", () => {
 				{...ask}
 			/>,
 		);
+
 		expect(html).toContain('hx-target="#categories"');
 		expect(html).toContain('hx-select="#categories"');
 		expect(html).toContain('hx-disable="#categories button[type=submit]"');

@@ -121,12 +121,16 @@ export function connectionOf(row: Row): ConnectionState {
 	if (row.disconnected_at !== null) return "disconnected";
 	const login = row.attention_login === 1;
 	const held = row.attention_held === 1;
+
 	if (row.status === "ok") {
 		// Flags on an ok bank are a stray relink-needed flag, not a login problem: a good sync must not clear them.
 		return login || held ? "needs_relink" : "ok";
 	}
+
 	if (login && held) return "login_broken_and_needs_relink";
+
 	if (login) return "login_broken";
+
 	// The held flag, or a flagged bank with no flags at all (inconsistent): only a relink clears it.
 	return "needs_relink";
 }
@@ -145,6 +149,7 @@ export async function readSeen(
 	itemId: number,
 ): Promise<Seen | null> {
 	const current = await readCurrent(db, itemId);
+
 	return current ? { state: current.state, revision: current.revision } : null;
 }
 
@@ -159,7 +164,9 @@ async function readCurrent(
 		)
 		.bind(itemId)
 		.first<Row & { connection_revision: number }>();
+
 	if (!row) return null;
+
 	return {
 		state: connectionOf(row),
 		stored: {
@@ -176,6 +183,7 @@ function nextStateOf(
 	from: ConnectionState,
 	event: Event,
 ): ConnectionState | null {
+	// SAFETY: next returns a state name of plaidConnectionMachine or null, and ConnectionState lists exactly that machine's state names.
 	return next(plaidConnectionMachine, from, event) as ConnectionState | null;
 }
 
@@ -196,6 +204,7 @@ function stillAsRead(
 		"attention_held = ?",
 		"connection_revision = ?",
 	];
+
 	const values: unknown[] = [
 		itemId,
 		current.stored.status,
@@ -203,10 +212,12 @@ function stillAsRead(
 		current.stored.held,
 		current.revision,
 	];
+
 	if (lockId !== undefined) {
 		conditions.push("sync_lock_id = ?");
 		values.push(lockId);
 	}
+
 	return { where: conditions.join(" AND "), values };
 }
 
@@ -222,10 +233,12 @@ async function writeIfStillAsRead(
 	const landing = completes
 		? `${LANDING[to]}, ${COMPLETION_BUMP}`
 		: LANDING[to];
+
 	const result = await db
 		.prepare(`UPDATE plaid_items SET ${landing} WHERE ${guard.where}`)
 		.bind(...guard.values)
 		.run();
+
 	return result.meta.changes === 1 ? "changed" : "lost-race";
 }
 
@@ -238,6 +251,7 @@ async function bumpIfStillAsRead(
 		.prepare(`UPDATE plaid_items SET ${COMPLETION_BUMP} WHERE ${guard.where}`)
 		.bind(...guard.values)
 		.run();
+
 	return result.meta.changes === 1 ? "unchanged" : "lost-race";
 }
 
@@ -251,12 +265,14 @@ async function stillTrue(db: D1Database, guard: Guard): Promise<ItemResult> {
 		.prepare(`SELECT 1 AS holds FROM plaid_items WHERE ${guard.where}`)
 		.bind(...guard.values)
 		.first();
+
 	return row ? "unchanged" : "lost-race";
 }
 
 /** True when the stored values already are the ones the landing state is written as. */
 function alreadyAs(current: Current, to: LiveState): boolean {
 	const want = STORED[to];
+
 	return (
 		current.stored.status === want.status &&
 		current.stored.login === want.login &&
@@ -279,9 +295,12 @@ async function change(
 	options: ItemOptions = {},
 ): Promise<ItemResult> {
 	let result: ItemResult = "lost-race";
+
 	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
 		result = await attemptChange(db, itemId, event, options);
+
 		if (result !== "lost-race") break;
+
 		// Two kinds of lost race. A sync that has lost its lease is finished: another run owns the bank now, so
 		// nothing more is written. A sync that still holds its lease lost only to a change of state (a webhook, or a
 		// relink), so its completion is tried again against that state.
@@ -292,6 +311,7 @@ async function change(
 			break;
 		}
 	}
+
 	return result;
 }
 
@@ -307,6 +327,7 @@ async function leaseHeld(
 		)
 		.bind(itemId, lockId)
 		.first();
+
 	return row !== null;
 }
 
@@ -319,7 +340,9 @@ async function attemptChange(
 ): Promise<ItemResult> {
 	// Step 1: the row now. A caller's seen state and revision must still be the row's.
 	const current = await readCurrent(db, itemId);
+
 	if (current === null) return "refused";
+
 	if (
 		options.seen !== undefined &&
 		(options.seen.state !== current.state ||
@@ -327,16 +350,20 @@ async function attemptChange(
 	) {
 		return "lost-race";
 	}
+
 	// Step 2: the machine's answer. Only disconnectStatement moves a bank to disconnected, so no event here lands there.
 	const to = nextStateOf(current.state, event);
+
 	if (to === null || to === "disconnected") return "refused";
 	const guard = stillAsRead(itemId, current, options.lockId);
 	// A good sync and a relink are completions: they count even when the state does not change.
 	const completes = event === "SYNC_SUCCEEDED" || event === "RELINKED";
+
 	if (alreadyAs(current, to)) {
 		// Step 3, without a state change: a completion moves the revision; anything else is confirmed as read.
 		return completes ? bumpIfStillAsRead(db, guard) : stillTrue(db, guard);
 	}
+
 	// Steps 3 and 4: the guarded write, and what it did.
 	return writeIfStillAsRead(db, guard, to, completes);
 }
@@ -395,6 +422,7 @@ export function disconnectStatement(
 			throw new Error(`The connection machine refuses DISCONNECT from ${live}`);
 		}
 	}
+
 	return db
 		.prepare(
 			`UPDATE plaid_items SET ${DISCONNECTED_SET} WHERE id = ? AND disconnected_at IS NULL`,

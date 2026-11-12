@@ -13,6 +13,7 @@ import type { MonthSpend, TrendCategory, TrendsInput } from "../trends";
 // An unnamed merchant: nobody has chosen a display name for it yet, so the row shows tidyName's
 // output (spec §7), with the raw bank text underneath.
 const rawName = "DD *DOORDASH TACO";
+
 const row: ListRow = {
 	id: 1,
 	date: "2026-09-22",
@@ -366,6 +367,7 @@ export const HOME_TOP = {
 		detail: "$228 of this month's spending",
 	},
 };
+
 export const HOME_ROWS = [
 	{
 		name: "Groceries",
@@ -411,6 +413,7 @@ export const BAND = {
 };
 
 const BANK_TODAY = "2026-10-05";
+
 const chase = (overrides: Partial<BankSync>): BankSync => ({
 	id: 1,
 	name: "Chase",
@@ -418,6 +421,7 @@ const chase = (overrides: Partial<BankSync>): BankSync => ({
 	lastSyncedAt: "2026-09-28 09:00:00",
 	...overrides,
 });
+
 /** BankBehind's three wordings, from the same helper as Home. */
 export const BANK_LINES = {
 	stale:
@@ -513,21 +517,24 @@ export const BUDGET_EXAMPLE = {
 	totalSpentCents: 171600,
 	safeToSpendCents: 128400,
 };
+
 export const TRANSACTIONS_EXAMPLE = {
 	counted: 88,
 	excluded: 6,
 	heldForReview: 2,
 	needsCategory: 12,
 };
-export const EXCLUSIONS_EXAMPLE: {
-	counted: number;
-	heldForReview: number;
-	breakdown: ExcludedBreakdown;
-} = {
+
+export const EXCLUSIONS_EXAMPLE = {
 	counted: 88,
 	heldForReview: 2,
 	breakdown: { transfer: 3, reimbursement: 1, byPerson: 2 },
+} satisfies {
+	counted: number;
+	heldForReview: number;
+	breakdown: ExcludedBreakdown;
 };
+
 export const CATEGORIES_EXAMPLE = {
 	user: 14,
 	merchantRule: 22,
@@ -547,6 +554,7 @@ export const CHECKING = {
 	balanceCents: 390412,
 	isLiability: false,
 };
+
 export const CREDIT_CARD = {
 	id: 3,
 	name: "Credit card",
@@ -555,6 +563,7 @@ export const CREDIT_CARD = {
 	balanceCents: 212240,
 	isLiability: true,
 };
+
 export const BANKS = [
 	{
 		name: "First Harbor Bank",
@@ -577,6 +586,7 @@ export const BANKS = [
 		accounts: [CREDIT_CARD],
 	},
 ];
+
 export const NET_WORTH_CENTS = BANKS.flatMap((b) => b.accounts).reduce(
 	(sum, a) => sum + (a.isLiability ? -a.balanceCents : a.balanceCents),
 	0,
@@ -611,6 +621,7 @@ const TREND_CATEGORIES: TrendCategory[] = [
 		archived: false,
 	},
 ];
+
 const TREND_SERIES: [number, number[]][] = [
 	[1, [82000, 79000, 84500, 81000, 86000, 19600]],
 	[2, [21000, 24500, 28000, 31800, 36500, 9200]],
@@ -618,6 +629,7 @@ const TREND_SERIES: [number, number[]][] = [
 	[4, [18000, 17500, 19000, 17200, 18500, 4800]],
 	[5, [14000, 19000, 12000, 16000, 15000, 3000]],
 ];
+
 const TREND_MONTHS_MOCK = [
 	"2026-05",
 	"2026-06",
@@ -626,9 +638,11 @@ const TREND_MONTHS_MOCK = [
 	"2026-09",
 	"2026-10",
 ];
+
 const TREND_SPEND: MonthSpend[] = [
 	...TREND_SERIES.flatMap(([categoryId, cents]) =>
 		cents.map((c, i) => ({
+			// SAFETY: TREND_MONTHS_MOCK has six months and every TREND_SERIES row has six amounts, so index i is in range.
 			month: TREND_MONTHS_MOCK[i] as string,
 			categoryId,
 			cents: c,
@@ -689,10 +703,12 @@ export const TRENDS_EMPTY_INPUT: TrendsInput = {
 
 /** The net-worth chart's fake "today", so its words don't change with the calendar. */
 export const NET_WORTH_TODAY = "2026-10-05";
+
 // Weekly from May 1, climbing $3,600 to today's net worth with a small wobble in between.
 const WOBBLE = [
 	0, 9000, -6000, 14000, 3000, -12000, 8000, 16000, -4000, 5000, -9000,
 ];
+
 /** The climbing weeks, ending on `endCents` today (a headline the picture sits under). */
 const climbing = (endCents: number): NetWorthPoint[] => [
 	...Array.from({ length: 22 }, (_, week) => ({
@@ -705,10 +721,13 @@ const climbing = (endCents: number): NetWorthPoint[] => [
 	})),
 	{ date: NET_WORTH_TODAY, cents: endCents },
 ];
+
 const CLIMBING = climbing(NET_WORTH_CENTS);
+
 // The climb from its last weekly point (Sep 25) to today, a point a day from Sep 28 to Oct 4, so an account's step on
 // Oct 1 draws as a step rather than a slant across a week. The climb is straight from Sep 25 to today.
 const LAST_WEEKLY = CLIMBING[CLIMBING.length - 2]?.cents ?? NET_WORTH_CENTS;
+
 const DAILY_CLIMB: NetWorthPoint[] = Array.from({ length: 7 }, (_, i) => ({
 	date: daysBefore("2026-09-28", -i),
 	cents: Math.round(

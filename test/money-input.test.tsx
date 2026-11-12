@@ -19,6 +19,7 @@ describe("MoneyInput", () => {
 		const html = renderToString(
 			<MoneyInput id="amount" name="amount" label="Amount" value="" />,
 		);
+
 		// The disabled attribute (rendered as disabled=""), not the disabled: Tailwind class in each class list.
 		expect(html).toMatch(/data-nudge="-100"[^>]*\sdisabled(="")?[\s>]/);
 		expect(html).toMatch(/data-nudge="-1"[^>]*\sdisabled(="")?[\s>]/);
@@ -36,6 +37,7 @@ describe("MoneyInput", () => {
 				averageCents={65000}
 			/>,
 		);
+
 		expect(html).toMatch(/data-set="65000"[^>]*aria-pressed="true"/);
 		expect(html).toContain("3-month average: $650.00");
 		expect(html).toMatch(/data-set="65000"[^>]*class="[^"]*min-h-11/);
@@ -54,6 +56,7 @@ describe("MoneyInput", () => {
 	it("sets the typed amount and the Round to figure in tabular figures, and the chips' words in normal ones", () => {
 		expect(inputTag()).toMatch(/class="[^"]*\btabular-nums\b/);
 		expect(moneyChip.split(" ")).not.toContain("tabular-nums");
+
 		const html = renderToString(
 			<MoneyInput
 				id="amount"
@@ -64,15 +67,20 @@ describe("MoneyInput", () => {
 				averageCents={65000}
 			/>,
 		);
+
 		expect(html).toContain(
 			'<span data-roundup-label="true" class="tabular-nums">Round to $613</span>',
 		);
+
 		const average =
 			html.match(/<button[^>]*data-set="65000"[\s\S]*?<\/button>/)?.[0] ?? "";
+
 		expect(average).toContain("3-month average: $650.00");
 		expect(average).not.toContain("tabular-nums");
+
 		const lastMonth =
 			html.match(/<button[^>]*data-set="57200"[\s\S]*?<\/button>/)?.[0] ?? "";
+
 		expect(lastMonth).not.toContain("tabular-nums");
 	});
 
@@ -96,6 +104,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		const html = renderToString(
 			<MoneyInput id="amount" name="amount" label="Budget" value="" />,
 		);
+
 		expect(html).toMatch(/<input [^>]*placeholder="0\.00"[^>]*>/);
 		expect(html).toContain("placeholder:text-muted");
 		expect(html).toContain("placeholder:font-normal");
@@ -112,6 +121,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 				averageCents={60245}
 			/>,
 		);
+
 		const last = chipTag(html, 'data-set="57180"');
 		expect(last).toContain("group");
 		expect(last).toContain("aria-pressed:text-ink");
@@ -127,6 +137,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		const html = renderToString(
 			<MoneyInput id="amount" name="amount" label="Budget" value="612.45" />,
 		);
+
 		const round = chipTag(html, "data-roundup");
 		expect(round).toContain('aria-pressed="false"');
 		expect(html).toContain(
@@ -144,9 +155,11 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 				error="Enter a dollar amount, like 250 or 250.50."
 			/>,
 		);
+
 		for (const nudge of ["100", "1", "-1", "-100"]) {
 			expect(stepTag(html, nudge)).toMatch(/\sdisabled[\s>=]/);
 		}
+
 		expect(chipTag(html, "data-roundup")).toMatch(/\shidden[\s>=]/);
 	});
 
@@ -156,9 +169,11 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 			const html = renderToString(
 				<MoneyInput id="amount" name="amount" label="Budget" value={value} />,
 			);
+
 			for (const nudge of ["100", "1", "-1", "-100"]) {
 				expect(stepTag(html, nudge)).toMatch(/\sdisabled[\s>=]/);
 			}
+
 			expect(chipTag(html, "data-roundup")).toMatch(/\shidden[\s>=]/);
 		},
 	);
@@ -167,6 +182,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		const html = renderToString(
 			<MoneyInput id="amount" name="amount" label="Budget" value="612.40" />,
 		);
+
 		for (const nudge of ["100", "1", "-1", "-100"]) {
 			expect(stepTag(html, nudge)).not.toMatch(/\sdisabled[\s>=]/);
 		}
@@ -176,6 +192,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		const html = renderToString(
 			<MoneyInput id="amount" name="amount" label="Budget" value="" />,
 		);
+
 		expect(stepTag(html, "-100")).toMatch(/\sdisabled[\s>=]/);
 		expect(stepTag(html, "-1")).toMatch(/\sdisabled[\s>=]/);
 		expect(stepTag(html, "100")).not.toMatch(/\sdisabled[\s>=]/);
@@ -191,9 +208,11 @@ const draw = () =>
 describe("MoneyInput's corners (decision 85, Q61 A)", () => {
 	it("draws the box in the 12px control corner, like every input", () => {
 		const html = draw();
+
 		// The box that holds the $ and the amount, found by its fixed width and height.
 		const box =
 			html.match(/<div class="([^"]*min-h-\[90px\][^"]*)"/)?.[1] ?? "";
+
 		expect(box).toContain("rounded-control");
 		expect(box).not.toContain("rounded-lg");
 	});
@@ -220,6 +239,7 @@ describe("MoneyInput's credit balance, hint and no Round to (#766)", () => {
 				{...props}
 			/>,
 		);
+
 	const steps = (html: string) => ({
 		minus: html.match(/data-nudge="-100"[^>]*>/)?.[0] ?? "",
 		down: html.match(/data-nudge="-1"[^>]*>/)?.[0] ?? "",
@@ -263,6 +283,7 @@ describe("MoneyInput's credit balance, hint and no Round to (#766)", () => {
 			error:
 				"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
 		});
+
 		expect(html).toContain(
 			'<p id="balance-hint" class="text-sm text-muted">Optional. For a credit, type a minus first.</p>',
 		);

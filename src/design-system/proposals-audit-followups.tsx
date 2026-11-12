@@ -162,6 +162,7 @@ function Pictures({
 }) {
 	const caption = (size: number) =>
 		state ? `${state}, at ${size} px` : `At ${size} px`;
+
 	return (
 		<>
 			<Shot caption={caption(390)}>
@@ -241,6 +242,7 @@ const RULES: { name: string; words: string }[] = [
 
 /** The fold's summary for option A, and for option B, which names what the rules cover (the same words, one line). */
 const FOLD_A = "The exact rules";
+
 const FOLD_B =
 	"The exact rules: budget, spent, left, income, cash, Safe to spend, planned, daily amount";
 
@@ -476,6 +478,7 @@ function TodayPicker() {
 /** A: the closest five as rows, then Show all, folded shut or open. */
 function ClosestRows({ open }: { open: boolean }) {
 	const rest = CANDIDATES.slice(CLOSEST);
+
 	return (
 		<PlanPage>
 			<div class="mt-4 flex flex-col gap-3">
@@ -507,15 +510,18 @@ function ClosestRows({ open }: { open: boolean }) {
  */
 function SearchRows({ id, query }: { id: string; query: string }) {
 	const q = query.trim().toLowerCase();
+
 	const matches = q
 		? CANDIDATES.filter(
 				(c) =>
 					c.name.toLowerCase().includes(q) || formatCents(c.cents).includes(q),
 			)
 		: CANDIDATES.slice(0, CLOSEST);
+
 	const announced = q
 		? countSentence(matches.length)
 		: `Showing the closest ${CLOSEST} of ${CANDIDATES.length} charges`;
+
 	return (
 		<PlanPage>
 			<div class="mt-4 flex flex-col gap-3">
@@ -726,6 +732,7 @@ const SPLIT_CATEGORIES = [
 ];
 
 type SplitPart = { categoryId: number | null; amount: string };
+
 /** Today's select, A's folded row, or B's grid, for each part's category. */
 type PartMode = "select" | "folded" | "grid";
 
@@ -771,6 +778,7 @@ function SplitPartRow({
 	const n = index + 1;
 	const name = `${id}-part-${index}`;
 	const chosen = SPLIT_CATEGORIES.find((cat) => cat.id === part.categoryId);
+
 	const amount = (
 		<MoneyInput
 			id={`${id}-part-amount-${index}`}
@@ -779,6 +787,7 @@ function SplitPartRow({
 			value={part.amount}
 		/>
 	);
+
 	return (
 		<div
 			class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
@@ -1094,6 +1103,7 @@ function BanksToday() {
 
 /** A's two banks as the picture drew them: Chase in, American Express still being read. */
 const BANKS_TODAY = "2026-10-14";
+
 const BANKS_CHASE: YourBank = {
 	id: 3,
 	name: "Chase",
@@ -1103,6 +1113,7 @@ const BANKS_CHASE: YourBank = {
 	fresh: false,
 	count: 412,
 };
+
 const BANKS_AMEX: YourBank = {
 	id: 5,
 	name: "American Express",

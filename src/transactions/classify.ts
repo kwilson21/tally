@@ -153,28 +153,36 @@ export type Classified = {
 function structureOf(r: Row): Structure {
 	if (r.parent_id !== null) {
 		const parentId = r.parent_id;
+
 		return r.is_split === 1
 			? { kind: "split_part_also_marked_split", parentId }
 			: { kind: "split_part", parentId };
 	}
+
 	if (r.is_split === 1) return { kind: "split_parent" };
+
 	return { kind: "whole" };
 }
 
 function budgetOf(r: Row, ctx: Context): Budget {
 	if (r.excluded === 0) return { kind: "counted", because: "not_excluded" };
+
 	// A payment for a bill or a plan counts even when it is excluded, so the bill counts once.
 	if (ctx.paysBillOrPlan)
 		return { kind: "counted", because: "pays_bill_or_plan" };
+
 	return { kind: "left_out", by: r.excluded_source ?? "unknown" };
 }
 
 function incomeOf(r: Row): Income {
 	if (r.flag_income === 0) return { kind: "not_income" };
+
 	if (r.income_source !== null)
 		return { kind: "income", setBy: r.income_source };
+
 	// Plaid set the flag from its own INCOME category, and nobody has changed it since.
 	if (r.plaid_category === "INCOME") return { kind: "income", setBy: "plaid" };
+
 	return { kind: "income", setBy: "unknown" };
 }
 
@@ -186,17 +194,23 @@ function moneyOf(
 ): Money {
 	if (r.amount_cents >= 0) return { kind: "purchase" };
 	const reviewed = (r.credit_reviewed ?? 0) === 1;
+
 	if (!reviewed) {
 		if (income.kind === "income")
 			return { kind: "credit", state: { kind: "unreviewed_income" } };
+
 		if (counted && r.is_split === 0)
 			return { kind: "credit", state: { kind: "held_for_review" } };
+
 		return { kind: "credit", state: { kind: "unreviewed_not_held" } };
 	}
+
 	const purchaseCounts =
 		ctx.refundTarget !== null && !ctx.refundTarget.excluded;
+
 	if (purchaseCounts && income.kind === "not_income")
 		return { kind: "credit", state: { kind: "follows_purchase" } };
+
 	return {
 		kind: "credit",
 		state: {
@@ -211,14 +225,18 @@ function guessOf(r: Row): Guess {
 	if (r.category_confidence === null) return { kind: "none" };
 	const basisPoints = confidenceBasisPoints(r.category_confidence);
 	const { above, below } = askedBounds("category");
+
 	if (basisPoints >= below) return { kind: "sure" };
+
 	if (basisPoints > above) return { kind: "maybe" };
+
 	return { kind: "below_floor" };
 }
 
 function categoryOf(r: Row): Category {
 	if (r.category_id !== null)
 		return { kind: "set", id: r.category_id, source: r.category_source };
+
 	return { kind: "unset", source: r.category_source, guess: guessOf(r) };
 }
 
@@ -230,6 +248,7 @@ function inAskedRange(
 	if (confidence === null) return false;
 	const { above, below } = askedBounds(kind);
 	const basisPoints = confidenceBasisPoints(confidence);
+
 	return basisPoints > above && basisPoints < below;
 }
 
@@ -241,6 +260,7 @@ export function classify(r: Row, ctx: Context): Classified {
 	const income = incomeOf(r);
 	const money = moneyOf(r, ctx, income, budget.kind === "counted");
 	const category = categoryOf(r);
+
 	const questions = questionsOf(r, ctx, {
 		structure,
 		budget,
@@ -248,6 +268,7 @@ export function classify(r: Row, ctx: Context): Classified {
 		money,
 		category,
 	});
+
 	return { structure, budget, income, money, category, questions };
 }
 
@@ -264,8 +285,10 @@ function questionsOf(
 	const isCredit = r.amount_cents < 0;
 	const creditReviewed = (r.credit_reviewed ?? 0) === 1;
 	const pending = r.pending === 1;
+
 	const follows =
 		a.money.kind === "credit" && a.money.state.kind === "follows_purchase";
+
 	const heldCredit = isCredit && !creditReviewed;
 	const hasCategory = r.category_id !== null;
 	const hasCategorySource = r.category_source !== null;
@@ -278,14 +301,17 @@ function questionsOf(
 	// Someone chose the income or the credit's review, so Jev and the questions leave it alone.
 	const personChose =
 		r.income_source === "user" || r.credit_reviewed_by === "user";
+
 	// The income question is settled once a person chose, Jev answered, or Plaid set the flag.
 	const incomeSettled =
 		personChose ||
 		r.income_source === "jev" ||
 		(a.income.kind === "income" && a.income.setBy === "plaid");
+
 	// The income guess the queue reads: none once settled, or when a Never suggest rule hides it.
 	const incomeGuess =
 		incomeSettled || ctx.neverSuggestIncome ? null : r.income_confidence;
+
 	// The guess the first page reads: a Never suggest rule does not hide it, but a No does.
 	const storedIncomeGuess =
 		incomeSettled || r.income_maybe_declined === 1 ? null : r.income_confidence;
@@ -294,6 +320,7 @@ function questionsOf(
 	const categoryOnly =
 		(isCredit && creditReviewed && personChose) ||
 		(r.excluded === 1 && ctx.paysBillOrPlan);
+
 	const noCategoryYet = !hasCategory && !hasCategorySource;
 
 	const needsCategory =
@@ -324,6 +351,7 @@ function questionsOf(
 
 	// Jev's work for a row: a category or an income answer that is still missing.
 	const categoryAnswerMissing = r.category_confidence === null;
+
 	// With a category active, Jev can always be asked. With none, only an outgoing payment a person did not
 	// put back in the budget can be asked for its transfer answer, which is the category question's stand-in.
 	const categoryQuestionPossible =
@@ -332,11 +360,14 @@ function questionsOf(
 			r.amount_cents > 0 &&
 			r.transfer_confidence === null &&
 			r.excluded_source !== "user");
+
 	const categoryWork = categoryAnswerMissing && categoryQuestionPossible;
 	const incomeWork = !categoryOnly && isCredit && r.income_confidence === null;
+
 	// Imported from Plaid and not failed, and Jev has a question for it (with the same switches the count uses).
 	const importedAndNotFailed =
 		r.plaid_transaction_id !== null && r.jev_failed_at === null;
+
 	const waitingForJev =
 		importedAndNotFailed &&
 		!follows &&

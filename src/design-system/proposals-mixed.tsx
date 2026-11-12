@@ -205,6 +205,7 @@ const splitFilled = (
 // P117 (decision 89): Jev spots a mixed trip from this household's own transaction details.
 
 const SMALL_TRIP = tx(31, TODAY, "Costco", 8217);
+
 const smallBehind = (
 	<>
 		<TxHeader />

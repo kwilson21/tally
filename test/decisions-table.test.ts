@@ -12,6 +12,7 @@ describe("docs/decisions.md's table format", () => {
 	it("gives decision 146's row the table's four cells: number, date, decision and why (#762)", () => {
 		const row =
 			decisions.split("\n").find((line) => line.startsWith("| 146 | ")) ?? "";
+
 		const [number, date, decision = "", why = ""] = cellsOf(row);
 		expect(cellsOf(row)).toHaveLength(4);
 		expect(number).toBe("146");

@@ -4,8 +4,10 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
+
 const get = async (path: string) => {
 	const response = await exports.default.fetch(BASE + path);
+
 	return response.text();
 };
 
@@ -23,9 +25,11 @@ describe("htmx posting forms", () => {
 		expect(await get("/budget/1")).toMatch(
 			/<form[^>]*hx-indicator="#budget-save"[^>]*>[\s\S]*?<button[^>]*id="budget-save"/,
 		);
+
 		const transaction = await env.DB.prepare(
 			"SELECT id FROM transactions LIMIT 1",
 		).first<{ id: number }>();
+
 		expect(await get(`/transactions/${transaction?.id}`)).toMatch(
 			/<form[^>]*hx-indicator="#edit-save"[^>]*>[\s\S]*?<button[^>]*id="edit-save"/,
 		);
@@ -39,6 +43,7 @@ describe("htmx posting forms", () => {
 		expect(forms[0]).toContain("Saving…");
 
 		const adjust = await get("/?adjust=1");
+
 		for (const form of htmxForms(adjust)) {
 			expect(form).not.toContain("hx-disable");
 			expect(form).not.toContain("button-spinner");
@@ -61,6 +66,7 @@ describe("htmx posting forms", () => {
 		expect(html).toMatch(
 			/<form[^>]*hx-indicator="#cat-5-restore"[^>]*>[\s\S]*?<button[^>]*id="cat-5-restore"/,
 		);
+
 		for (const actionId of [
 			"cat-1-archive",
 			"cat-2-move-up",
@@ -72,9 +78,11 @@ describe("htmx posting forms", () => {
 				),
 			);
 		}
+
 		expect(html).not.toMatch(
 			/id="cat-(?:1-archive|2-move-(?:up|down))"[^>]*hx-indicator/,
 		);
+
 		for (const label of [
 			"Saving…",
 			"Adding…",
@@ -100,6 +108,7 @@ describe("htmx posting forms", () => {
 		const transaction = await env.DB.prepare(
 			"SELECT id FROM transactions LIMIT 1",
 		).first<{ id: number }>();
+
 		const html = await get(`/transactions/${transaction?.id}`);
 		const forms = htmxForms(html);
 		expect(forms).toHaveLength(1);

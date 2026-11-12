@@ -22,7 +22,9 @@ export function otherTransactionsLine(
 	{ part = false }: { part?: boolean } = {},
 ): string | null {
 	const others = part ? total : total - 1;
+
 	if (others <= 0) return null;
+
 	return others === 1
 		? "The other 1 stays as it is."
 		: `The other ${others} stay as they are.`;
@@ -61,6 +63,7 @@ export function allLabel({
 }): string {
 	if (count <= 1) return "This one and later ones";
 	const thisToo = thisOwn ? ", this one too" : "";
+
 	return count === 2
 		? `Both from ${merchant}${thisToo}`
 		: `All ${count} from ${merchant}${thisToo}`;
@@ -80,10 +83,12 @@ export function allNotes({
 	today: string;
 }): string[] {
 	const notes = thisOwn ? [`${thisOwn} is replaced.`] : [];
+
 	for (const row of owned)
 		notes.push(
 			`${row.name} (${shortDay(row.date, today)}) keeps its own name.`,
 		);
+
 	return notes;
 }
 
@@ -131,11 +136,16 @@ export function oneOffGuessesAgain({
 	row: JevRow;
 }): boolean {
 	if (edit.jevCategories !== true) return false;
+
 	if (!jevAsksAbout(row)) return false;
+
 	if (edit.nameChanged === false || edit.nameScope !== "one") return false;
+
 	if (postedCategory !== null && postedCategory !== current.categoryId)
 		return false;
+
 	if (edit.alwaysForMerchant === true) return false;
+
 	return (
 		current.categorySource === "jev" ||
 		(current.categoryId === null && current.categorySource === null)

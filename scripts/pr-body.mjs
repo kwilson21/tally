@@ -74,6 +74,7 @@ export const VIEWPORTS = [
  */
 export function shotNames(page, viewport, count) {
 	if (count === 1) return [`${page}-${viewport}.png`];
+
 	return Array.from(
 		{ length: count },
 		(_, i) => `${page}-${viewport}-${String(i + 1).padStart(2, "0")}.png`,
@@ -92,7 +93,9 @@ const SHOT = new RegExp(
  */
 function parseShot(file) {
 	const match = SHOT.exec(file);
+
 	if (!match) return null;
+
 	return {
 		page: match[1],
 		viewport: match[2],
@@ -113,9 +116,11 @@ export function withScreenshots(body, section) {
 	const text = body ?? "";
 	const start = text.indexOf(START);
 	const end = text.indexOf(END);
+
 	if (start !== -1 && end > start) {
 		return text.slice(0, start) + section + text.slice(end + END.length);
 	}
+
 	return text ? `${text}\n\n${section}` : section;
 }
 
@@ -127,13 +132,17 @@ export function withScreenshots(body, section) {
  */
 function groupShots(shots) {
 	const groups = new Map();
+
 	for (const { file, png } of shots) {
 		const shot = parseShot(file);
 		const key = shot ? `${shot.page} ${shot.viewport}` : file;
+
 		if (!groups.has(key)) groups.set(key, []);
 		groups.get(key).push({ file, png, part: shot?.part ?? 0 });
 	}
+
 	for (const parts of groups.values()) parts.sort((a, b) => a.part - b.part);
+
 	return groups;
 }
 
@@ -142,8 +151,10 @@ function groupShots(shots) {
 // than 2. Real changes always had a pixel that moved by at least 177; the smallest touched 44 pixels.
 /** A pixel whose largest channel difference is above this is a change on its own. */
 export const CLEAR_DIFFERENCE = 48;
+
 /** A difference up to this is rounding, and never counts. */
 export const FAINT_DIFFERENCE = 2;
+
 /** More pixels than this differing by more than FAINT_DIFFERENCE is a change, so a faint change over an area still counts. */
 export const FAINT_PIXELS = 100;
 
@@ -164,16 +175,22 @@ export function pixelsAlike(a, b) {
 	if (a.width !== b.width || a.height !== b.height || a.channels !== b.channels)
 		return false;
 	let faint = 0;
+
 	for (let p = 0; p < a.width * a.height; p++) {
 		let largest = 0;
+
 		for (let c = 0; c < a.channels; c++) {
 			const i = p * a.channels + c;
 			largest = Math.max(largest, Math.abs(a.data[i] - b.data[i]));
 		}
+
 		if (largest > CLEAR_DIFFERENCE) return false;
+
 		if (largest > FAINT_DIFFERENCE) faint++;
+
 		if (faint > FAINT_PIXELS) return false;
 	}
+
 	return true;
 }
 
@@ -187,6 +204,7 @@ export function pixelsAlike(a, b) {
  */
 export async function looksAlike(a, b) {
 	if (sameBytes(a, b)) return true;
+
 	try {
 		return pixelsAlike(await readPng(a), await readPng(b));
 	} catch (error) {
@@ -194,6 +212,7 @@ export async function looksAlike(a, b) {
 			console.warn(
 				`Could not decode a screenshot (${error.message}), so it is compared byte for byte.`,
 			);
+
 		return false;
 	}
 }
@@ -213,25 +232,32 @@ export async function looksAlike(a, b) {
 export async function changedShots({ after, before }) {
 	const beforeGroups = groupShots(before);
 	const rows = [];
+
 	for (const [key, parts] of groupShots(after)) {
 		const afterFiles = parts.map((part) => part.file);
 		const old = beforeGroups.get(key);
+
 		if (!old) {
 			rows.push({ before: [], after: afterFiles });
 			continue;
 		}
+
 		const beforeFiles = old.map((part) => part.file);
+
 		const sameFiles =
 			beforeFiles.length === afterFiles.length &&
 			beforeFiles.every((file, i) => file === afterFiles[i]);
+
 		if (!sameFiles) {
 			rows.push({ before: beforeFiles, after: afterFiles });
 			continue;
 		}
+
 		for (const [i, part] of parts.entries())
 			if (!(await looksAlike(part.png, old[i].png)))
 				rows.push({ before: [old[i].file], after: [part.file] });
 	}
+
 	return rows;
 }
 
@@ -259,12 +285,14 @@ export function shownFiles(changes) {
  */
 export function comparisonProblem(after, before) {
 	if (before === null) return "The screenshots of `main` didn't finish.";
+
 	const days = new Set([
 		after.started,
 		after.finished,
 		before.started,
 		before.finished,
 	]);
+
 	return days.size > 1
 		? "The two sets of screenshots were taken either side of midnight UTC, so the demo data differs. Re-run the Screenshots job to compare."
 		: null;
@@ -279,39 +307,51 @@ export function comparisonProblem(after, before) {
  */
 export function screenshotSection({ sha, raw, changes, unavailable = null }) {
 	const [desktop, phone] = VIEWPORTS;
+
 	const img = (path, alt, width) =>
 		`<img src="${raw}/${path}" width="${width}" alt="${alt}">`;
+
 	// A page and its size, such as `/settings` (phone). The part number follows only when asked for.
 	const label = (file, withPart = false) => {
 		const shot = parseShot(file);
 		const page = PAGES.find((p) => p.name === shot?.page);
+
 		if (!shot || !page) return file;
 		const part = withPart && shot.part !== null ? `, part ${shot.part}` : "";
+
 		return `\`${page.path}\` (${shot.viewport}${part})`;
 	};
+
 	const width = (file) =>
 		parseShot(file)?.viewport === phone.name ? 180 : 480;
+
 	const beforeCell = (files) =>
 		files.length === 0
 			? "New page"
 			: files
 					.map((file) => img(`before/${file}`, `${file}, before`, width(file)))
 					.join("<br>");
+
 	const afterCell = (files) =>
 		files.map((file) => img(file, `${file}, after`, width(file))).join("<br>");
+
 	const count = (n) => (n === 1 ? "whole" : `in ${n} parts`);
+
 	// One row of the before-and-after table. A page whose two sides are one same-named file is a
 	// single part (or a whole page), labelled with its part number. A page taken another way on
 	// `main` is labelled with what changed, and a new page with neither.
 	const changedRow = ({ before, after }) => {
 		const onePart =
 			before.length === 1 && after.length === 1 && before[0] === after[0];
+
 		const note =
 			before.length > 0 && !onePart
 				? `<br>Taken differently: ${count(before.length)} on \`main\`, ${count(after.length)} in this PR.`
 				: "";
+
 		return `| ${label(after[0], onePart)}${note} | ${beforeCell(before)} | ${afterCell(after)} |`;
 	};
+
 	const beforeAfter = unavailable
 		? [`No before-and-after this time: ${unavailable}`]
 		: changes.length === 0

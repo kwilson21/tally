@@ -26,6 +26,7 @@ const setZone = (value: string) =>
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
+
 	return { res, html: await res.text() };
 };
 
@@ -127,6 +128,7 @@ describe("a bill due Oct 5 at 22:00 Eastern on Oct 5", () => {
 			env.DB,
 			await householdToday(env.DB),
 		);
+
 		expect(today).toBe("2026-10-05");
 		expect(rows).toHaveLength(1);
 		expect(rows[0]).toMatchObject({ status: "due", dueDate: "2026-10-05" });
@@ -172,26 +174,32 @@ describe("jobs that decide today", () => {
 		]);
 		at("2026-11-01T03:30:00Z");
 		await matchBillPayments(env.DB);
+
 		const early = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 1 AND period = '2026-11'",
 		).first<{ n: number }>();
+
 		expect(early?.n).toBe(0);
 
 		at("2026-11-01T05:30:00Z");
 		await matchBillPayments(env.DB);
+
 		const later = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 1 AND period = '2026-11'",
 		).first<{ n: number }>();
+
 		expect(later?.n).toBe(1);
 	});
 
 	it("the nightly demo reset seeds the household's date", async () => {
 		at("2026-11-01T03:30:00Z");
 		await runScheduled({ ...env, DEMO: "true" });
+
 		const count = (where: string) =>
 			env.DB.prepare(
 				`SELECT COUNT(*) AS n FROM transactions WHERE ${where}`,
 			).first<{ n: number }>();
+
 		// Nothing is dated November: at 23:30 Eastern on Oct 31 it is still October.
 		expect((await count("date >= '2026-11-01'"))?.n).toBe(0);
 		expect((await count("date LIKE '2026-10-%'"))?.n).toBeGreaterThan(0);
@@ -200,9 +208,11 @@ describe("jobs that decide today", () => {
 	it("the demo reset puts the time zone back to Eastern", async () => {
 		await setZone("Asia/Tokyo");
 		await resetDemo(env.DB, "2026-09-22");
+
 		const row = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'time_zone'",
 		).first<{ value: string }>();
+
 		expect(row?.value).toBe(DEFAULT_TIME_ZONE);
 	});
 });
@@ -226,8 +236,10 @@ describe("one date for the whole request", () => {
 				reads += 1;
 				vi.setSystemTime(new Date(AFTER_MIDNIGHT));
 			}
+
 			return prepare(sql);
 		});
+
 		return () => reads;
 	}
 
@@ -311,10 +323,12 @@ describe("one date for the whole request", () => {
 
 	it("reads no saved zone when saving the time zone: the new one comes from the form", async () => {
 		const reads = watchSetting();
+
 		const res = await exports.default.fetch(
 			"http://tally.test/settings/time-zone",
 			form({ time_zone: "America/Chicago" }),
 		);
+
 		await res.text();
 		expect(res.status).toBeLessThan(500);
 		expect(reads()).toBe(0);
@@ -322,16 +336,20 @@ describe("one date for the whole request", () => {
 
 	it("keeps the budget month the same all through a save", async () => {
 		const reads = watchSetting();
+
 		const res = await exports.default.fetch(
 			"http://tally.test/budget/1",
 			form({ budget: "300" }),
 		);
+
 		const html = await res.text();
 		expect(reads()).toBe(1);
+
 		// Saved from October on, and Home answers for October.
 		const saved = await env.DB.prepare(
 			"SELECT MAX(effective_month) AS month FROM budget_amounts WHERE category_id = 1 AND amount_cents = 30000",
 		).first<{ month: string }>();
+
 		expect(saved?.month).toBe("2026-10");
 		expect(html).toContain("October");
 		expect(html).not.toContain("November");
@@ -339,9 +357,11 @@ describe("one date for the whole request", () => {
 
 	it("shows one month in a budget sheet", async () => {
 		watchSetting();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/budget/1")
 		).text();
+
 		expect(html).toContain("spent so far in October");
 		expect(html).toContain("Budget from October on");
 		expect(html).not.toContain("November");
@@ -352,9 +372,11 @@ describe("one date for the whole request", () => {
 			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (9001, 1, '2026-10-31', 1250, 'CORNER CAFE')",
 		).run();
 		watchSetting();
+
 		const html = await (
 			await exports.default.fetch("http://tally.test/transactions/9001")
 		).text();
+
 		// The panel and the list behind it both call Oct 31 today.
 		expect(html.match(/Today, Oct 31/g)?.length).toBeGreaterThanOrEqual(2);
 	});
@@ -434,12 +456,14 @@ describe("a time zone other than Eastern", () => {
 				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (9001, 1, '2026-11-08', 5000, 'PHONE CO')",
 			),
 		]);
+
 		const links = async () =>
 			(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 1 AND period = '2026-11'",
 				).first<{ n: number }>()
 			)?.n;
+
 		// Pacific is on Oct 31: Nov 8 is eight days off, so it waits (Eastern, on Nov 1, would match it).
 		await matchBillPayments(env.DB);
 		expect(await links()).toBe(0);
@@ -472,14 +496,17 @@ describe("a time zone other than Eastern", () => {
 					category: "1",
 				}),
 			});
+
 		const early = await post("2026-11-01");
 		expect(early.status).toBe(422);
 		expect(await early.text()).toContain("Choose today or an earlier date.");
 		const saved = await post("2026-10-31");
 		expect(saved.status).toBe(200);
+
 		const row = await env.DB.prepare(
 			"SELECT date FROM transactions WHERE raw_name = 'Corner cafe'",
 		).first<{ date: string }>();
+
 		expect(row?.date).toBe("2026-10-31");
 	});
 });

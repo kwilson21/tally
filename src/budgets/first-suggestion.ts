@@ -21,13 +21,18 @@ export function fullMonths(firstDate: string | null, today: string): string[] {
 	if (firstDate === null) return [];
 	const current = today.slice(0, 7);
 	const firstMonth = firstDate.slice(0, 7);
+
 	const earliest =
 		firstDate.slice(8) === "01" ? firstMonth : monthsBefore(firstMonth, -1);
+
 	const months: string[] = [];
+
 	for (let n = 3; n >= 1; n -= 1) {
 		const month = monthsBefore(current, n);
+
 		if (month >= earliest) months.push(month);
 	}
+
 	return months;
 }
 
@@ -48,9 +53,12 @@ export function firstBudgetSuggestion(
 ): FirstBudgetSuggestion | null {
 	if (months.length === 0) return null;
 	const total = months.reduce((sum, month) => sum + month.spentCents, 0);
+
 	if (total <= 0) return null;
 	const amountCents = Math.ceil(total / (months.length * 1000)) * 1000;
+
 	if (amountCents > MAX_BUDGET_CENTS) return null;
+
 	return { amountCents, months };
 }
 
@@ -61,5 +69,6 @@ export function firstBudgetSuggestion(
 export function monthlyMeanCents(months: MonthSpent[]): number | null {
 	if (months.length === 0) return null;
 	const total = months.reduce((sum, month) => sum + month.spentCents, 0);
+
 	return Math.floor(total / months.length);
 }

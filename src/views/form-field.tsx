@@ -9,11 +9,14 @@ type Props = {
 	hint?: string;
 	error?: string;
 	/** Renders the control, given the attributes that link it to its error. */
-	children: (a11y: {
-		"aria-describedby"?: string;
-		"aria-invalid"?: "true";
-		class?: "field-shake";
-	}) => Child;
+	children: (a11y: FieldA11y) => Child;
+};
+
+/** The attributes that link a control to its error; each is set only when it applies. */
+type FieldA11y = {
+	"aria-describedby"?: string;
+	"aria-invalid"?: "true";
+	class?: "field-shake";
 };
 
 /** A labeled form control, with its error shown and announced. */
@@ -28,16 +31,22 @@ export function FormField({
 	const describedBy = [hint && `${id}-hint`, error && `${id}-error`]
 		.filter(Boolean)
 		.join(" ");
+
+	const a11y: FieldA11y = {};
+
+	if (describedBy) a11y["aria-describedby"] = describedBy;
+
+	if (error) {
+		a11y["aria-invalid"] = "true";
+		a11y.class = "field-shake";
+	}
+
 	return (
 		<div class="flex flex-col gap-1">
 			<label for={id} class={hideLabel ? "sr-only" : "text-base text-ink"}>
 				{label}
 			</label>
-			{children({
-				...(describedBy ? { "aria-describedby": describedBy } : {}),
-				...(error ? { "aria-invalid": "true" as const } : {}),
-				...(error ? { class: "field-shake" as const } : {}),
-			})}
+			{children(a11y)}
 			{hint && (
 				<p id={`${id}-hint`} class="text-sm text-muted">
 					{hint}

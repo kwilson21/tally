@@ -11,8 +11,10 @@ import { jevSaysMixedSql } from "./mixed-trip";
 
 /** How many of a text's latest answers decide its line (decision 162). */
 export const LEARNED_WINDOW = 5;
+
 /** How long an Undo of a Forget works, on the server clock as on the toast (decision 162). */
 export const FORGET_UNDO_SECONDS = 10;
+
 /** Less than this much Undo left is no Undo at all: the toast says the Forget and offers nothing to press. */
 export const FORGET_UNDO_MIN_MS = 1000;
 
@@ -77,7 +79,9 @@ export function displayName(cleanedText: string): string {
 		.split(" ")
 		.map((word, index) => {
 			if (word === "") return word;
+
 			if (index > 0 && SMALL_WORDS.has(word)) return word;
+
 			return word.charAt(0).toUpperCase() + word.slice(1);
 		})
 		.join(" ");
@@ -96,37 +100,49 @@ export function learnedLines(
 	const forgottenAt = new Map(
 		forgotten.map((f) => [f.cleanedText, f.forgottenAt]),
 	);
+
 	const byText = new Map<string, AnswerRow[]>();
+
 	for (const row of rows) {
 		const cleanedText = cleanBankText(row.rawName);
+
 		if (cleanedText === "") continue;
 		const since = forgottenAt.get(cleanedText);
+
 		if (since !== undefined && row.updatedAt <= since) continue;
 		const list = byText.get(cleanedText);
+
 		if (list) list.push(row);
 		else byText.set(cleanedText, [row]);
 	}
 
 	const vague = new Set(VAGUE_TEXTS);
 	const lines: LearnedLine[] = [];
+
 	for (const [cleanedText, answers] of byText) {
 		// Newest first: by date, then by id, so a later row on the same day counts as later.
 		const newestFirst = [...answers].sort(
 			(a, b) => b.date.localeCompare(a.date) || b.id - a.id,
 		);
+
 		const latest = newestFirst.slice(0, LEARNED_WINDOW);
 		// Insertion order is newest first, so the first category to reach a count is the latest answered: with `>`
 		// a tie keeps it.
 		const tally = new Map<number, { count: number; row: AnswerRow }>();
+
 		for (const row of latest) {
 			const seen = tally.get(row.categoryId);
+
 			if (seen) seen.count += 1;
 			else tally.set(row.categoryId, { count: 1, row });
 		}
+
 		let best: { count: number; row: AnswerRow } | undefined;
+
 		for (const entry of tally.values()) {
 			if (!best || entry.count > best.count) best = entry;
 		}
+
 		if (!best) continue;
 		lines.push({
 			cleanedText,
@@ -139,6 +155,7 @@ export function learnedLines(
 			vague: isVague(cleanedText, vague),
 		});
 	}
+
 	return lines.sort((a, b) => a.cleanedText.localeCompare(b.cleanedText));
 }
 
@@ -168,10 +185,13 @@ export function withBankTextRules(
 ): LearnedLine[] {
 	const ruleFor = new Map(rules.map((rule) => [rule.cleanedText, rule]));
 	const shown = new Set<string>();
+
 	const out: LearnedLine[] = lines.map((line) => {
 		shown.add(line.cleanedText);
 		const rule = line.vague ? undefined : ruleFor.get(line.cleanedText);
+
 		if (!rule) return line;
+
 		return {
 			...line,
 			categoryId: rule.categoryId,
@@ -181,7 +201,9 @@ export function withBankTextRules(
 			rule: true,
 		};
 	});
+
 	const vague = new Set(VAGUE_TEXTS);
+
 	for (const rule of rules) {
 		if (shown.has(rule.cleanedText) || isVague(rule.cleanedText, vague))
 			continue;
@@ -197,17 +219,20 @@ export function withBankTextRules(
 			rule: true,
 		});
 	}
+
 	return out.sort((a, b) => a.cleanedText.localeCompare(b.cleanedText));
 }
 
 /** The learned lines as the database has them now, with the person's rules on top (decision 163). */
 export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 	const { results: rows } = await db.prepare(ANSWERS_SQL).all<AnswerRow>();
+
 	const { results: forgotten } = await db
 		.prepare(
 			"SELECT cleaned_text AS cleanedText, forgotten_at AS forgottenAt FROM forgotten_texts",
 		)
 		.all<Forgotten>();
+
 	return withBankTextRules(
 		learnedLines(rows, forgotten),
 		await activeBankTextRules(db),
@@ -223,6 +248,7 @@ export async function learnedCategoryChoices(
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		)
 		.all<{ id: number; name: string }>();
+
 	return results;
 }
 
@@ -253,6 +279,7 @@ export async function forgetText(
 			.prepare("DELETE FROM bank_text_rules WHERE cleaned_text = ?")
 			.bind(cleanedText),
 	]);
+
 	return forgot?.results[0]?.id ?? 0;
 }
 
@@ -270,6 +297,7 @@ export async function undoRemainingMs(
 		)
 		.bind(FORGET_UNDO_SECONDS * 1000, FORGET_UNDO_SECONDS, id)
 		.first<{ ms: number }>();
+
 	return row?.ms ?? 0;
 }
 
@@ -290,8 +318,11 @@ export async function undoForget(
 		)
 		.bind(FORGET_UNDO_SECONDS, id)
 		.first<{ fresh: number; previous: string | null }>();
+
 	if (!row) return "gone";
+
 	if (!row.fresh) return "expired";
+
 	// One batch: the rule the Forget removed comes back, unless the text has a newer rule (ON CONFLICT keeps that one),
 	// and the forgotten row goes back to its earlier state, or goes.
 	const restore =
@@ -302,6 +333,7 @@ export async function undoForget(
 					)
 					.bind(id)
 			: db.prepare("DELETE FROM forgotten_texts WHERE id = ?").bind(id);
+
 	await db.batch([
 		db
 			.prepare(
@@ -313,5 +345,6 @@ export async function undoForget(
 			.bind(id),
 		restore,
 	]);
+
 	return "undone";
 }

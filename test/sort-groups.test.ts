@@ -10,6 +10,7 @@ import { resetDemo } from "../src/demo/reset";
 import {
 	type AskResult,
 	nextWait,
+	type SortOptions,
 	type StepRunner,
 	sortGroups,
 } from "../src/sort-groups";
@@ -54,6 +55,7 @@ const withKey = { DB: db, JEV_API_KEY: "test-key" };
 /** Inserts `n` unsorted purchases and returns their ids, oldest first. */
 async function addWaiting(n: number): Promise<number[]> {
 	const ids: number[] = [];
+
 	for (let i = 0; i < n; i++) {
 		const row = await db
 			.prepare(
@@ -61,9 +63,20 @@ async function addWaiting(n: number): Promise<number[]> {
 			)
 			.bind(TODAY, -500 - i, `SORT STEP ${i}`)
 			.first<{ id: number }>();
+
 		ids.push(Number(row?.id));
 	}
+
 	return ids;
+}
+
+/** The id of the `index`th row a test inserted. The row exists, so a missing one is a broken test. */
+function idAt(ids: readonly number[], index: number): number {
+	const id = ids[index];
+
+	if (id === undefined) throw new Error(`no inserted row at index ${index}`);
+
+	return id;
 }
 
 const categoryOf = async (id: number) =>
@@ -110,21 +123,25 @@ const ASK = {
 	timeout: "1 minute",
 	sensitive: "output",
 };
+
 const READ = {
 	retries: { limit: 50, delay: "20 seconds", backoff: "constant" },
 	timeout: "1 minute",
 	sensitive: "output",
 };
+
 const RULES = {
 	retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 	timeout: "1 minute",
 	sensitive: "output",
 };
+
 const WRITE = {
 	retries: { limit: 960, delay: "1 minute", backoff: "constant" },
 	timeout: "30 seconds",
 	sensitive: "output",
 };
+
 const RESERVE = {
 	retries: { limit: 0, delay: 0 },
 	timeout: "1 minute",
@@ -150,8 +167,10 @@ describe("sortGroups with a fake step runner", () => {
 			`group-1-ask-${ids[0]}`,
 			"group-1-write",
 		]);
+
 		const config = (name: string) =>
 			fake.steps.find((step) => step.name === name)?.config;
+
 		expect(config("rules")).toEqual(RULES);
 		expect(config("group-1-read")).toEqual(READ);
 		expect(config("group-1-reserve")).toEqual(RESERVE);
@@ -163,19 +182,22 @@ describe("sortGroups with a fake step runner", () => {
 	it("an ask step never throws: a failing call ends the group's asking with no retry", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
+
 		const fetchImpl = vi.fn(async () => {
 			throw new TypeError("network down");
 		});
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-15",
 		});
+
 		const asks = fake.steps.filter((step) => step.name.includes("-ask-"));
 		expect(asks).toHaveLength(1);
 		expect(asks[0]?.attempts).toBe(1);
 		expect(done.asked).toBe(1);
-		expect(await categoryOf(ids[0] as number)).toBeNull();
+		expect(await categoryOf(idAt(ids, 0))).toBeNull();
 	});
 
 	it("an ask step at attempt 2 makes no Jev call and gives the row no failure mark", async () => {
@@ -183,39 +205,47 @@ describe("sortGroups with a fake step runner", () => {
 		const second = `group-1-ask-${ids[1]}`;
 		const fake = fakeSteps({ throws: { [second]: 1 } });
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-16",
 		});
+
 		// The lost row counts as asked and stops this group's asking: the third row gets no step.
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		expect(fake.steps.find((step) => step.name === second)?.attempts).toBe(2);
 		expect(fake.names()).not.toContain(`group-1-ask-${ids[0]}`);
 		expect(done.asked).toBe(2);
+
 		const failed = await db
 			.prepare("SELECT jev_failed_at AS f FROM transactions WHERE id = ?")
 			.bind(ids[1])
 			.first<{ f: string | null }>();
+
 		expect(failed?.f).toBeNull();
-		expect(await categoryOf(ids[1] as number)).toBeNull();
+		expect(await categoryOf(idAt(ids, 1))).toBeNull();
 	});
 
 	it("replaying the same step results makes no Jev call and writes nothing again", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const first = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-17",
 		});
+
 		const before = fake.steps.length;
+
 		const again = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-17",
 		});
+
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(again).toEqual(first);
 		const replayed = fake.steps.slice(before);
@@ -227,6 +257,7 @@ describe("sortGroups with a fake step runner", () => {
 
 	it("a demo reset in the middle of a group makes the write change nothing", async () => {
 		const ids = await addWaiting(3);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
@@ -237,19 +268,23 @@ describe("sortGroups with a fake step runner", () => {
 						.run();
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-18",
 		});
-		for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+
+		for (const id of ids) expect(await categoryOf(id)).toBeNull();
+
 		const logged = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM ai_log WHERE transaction_id IN (SELECT value FROM json_each(?))",
 			)
 			.bind(JSON.stringify(ids))
 			.first<{ n: number }>();
+
 		expect(logged?.n).toBe(0);
 	});
 
@@ -261,6 +296,7 @@ describe("sortGroups with a fake step runner", () => {
 			)
 			.bind(JSON.stringify({ id: "someone-else", until: Date.now() + 60_000 }))
 			.run();
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-read" && attempt === 2)
@@ -271,6 +307,7 @@ describe("sortGroups with a fake step runner", () => {
 						.run();
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
@@ -288,45 +325,56 @@ describe("sortGroups with a fake step runner", () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(25);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				if (name.startsWith("group-1-ask-"))
 					vi.setSystemTime(Date.now() + 3 * 60_000);
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-budget-first",
 		});
+
 		expect(done).toEqual({ asked: 0, applied: 0 });
 		expect(fetchImpl).not.toHaveBeenCalled();
 		// The group stops the run, so the same rows aren't read again by a second group in this run.
 		expect(fake.names()).not.toContain("group-2-read");
+
 		const turn = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM household_settings WHERE key = 'sorting_turn'",
 			)
 			.first<{ n: number }>();
+
 		expect(turn?.n).toBe(0);
+
 		const used = await db
 			.prepare(
 				"SELECT value FROM household_settings WHERE key = 'jev_calls_2026-09-22'",
 			)
 			.first<{ value: string }>();
+
 		expect(Number(used?.value ?? 0)).toBe(0);
 	});
 
 	it("failures carry across groups: two at the end of one group and one at the start of the next stop the run", async () => {
 		const ids = await addWaiting(50);
 		let calls = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			calls += 1;
+
 			return calls >= 24 && calls <= 26
 				? new Response("{}", { status: 400 })
 				: reply(0.9);
 		});
+
 		const fake = fakeSteps();
 		await sortGroups(
 			{ DB: db, JEV_API_KEY: "test-key", DEMO: "false" },
@@ -344,11 +392,15 @@ describe("sortGroups with a fake step runner", () => {
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(50);
 		let calls = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			calls += 1;
+
 			return calls === 1 ? reply(0.9) : new Response("{}", { status: 400 });
 		});
+
 		let asks = 0;
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				// The fourth ask of group 1 finds its 2-minute budget spent: it makes no call.
@@ -356,6 +408,7 @@ describe("sortGroups with a fake step runner", () => {
 					vi.setSystemTime(Date.now() + 3 * 60_000);
 			},
 		});
+
 		await sortGroups(
 			{ DB: db, JEV_API_KEY: "test-key", DEMO: "false" },
 			fake.runStep,
@@ -373,12 +426,14 @@ describe("sortGroups with a fake step runner", () => {
 		// The read's callback runs once more after it succeeded, as when Workflows loses its result: that run takes the
 		// same turn and must not reserve the day's calls a second time.
 		const fake = fakeSteps({ replayAfter: ["group-1-read"] });
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
 			vi.fn(async () => reply(0.9)),
 			{ rulesApplied: true, onlyIds: ids, runId: "run-read-replay" },
 		);
+
 		expect(done.asked).toBe(3);
 		expect(await callsUsed()).toBe(3);
 	});
@@ -398,18 +453,22 @@ describe("sortGroups with a fake step runner", () => {
 
 	it("a reserve step that rejects grants nothing: the write releases the turn and the run stops", async () => {
 		const ids = await addWaiting(3);
+
 		// A step that rejects fails with no retry (its config's limit is 0), so its callback never runs.
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				if (name === "group-1-reserve") throw new Error("timeout");
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-reserve-reject",
 		});
+
 		expect(done).toEqual({ asked: 0, applied: 0 });
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(fake.names()).toContain("group-1-write");
@@ -422,22 +481,26 @@ describe("sortGroups with a fake step runner", () => {
 		const ids = await addWaiting(3);
 		// Rows are asked newest first: the first ask answers ids[2], and the second one rejects (its timeout).
 		const second = `group-1-ask-${ids[1]}`;
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				if (name === second) throw new Error("timeout");
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-ask-reject",
 		});
+
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		expect(done.asked).toBe(2);
-		expect(await categoryOf(ids[2] as number)).not.toBeNull();
-		expect(await categoryOf(ids[1] as number)).toBeNull();
-		expect(await categoryOf(ids[0] as number)).toBeNull();
+		expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+		expect(await categoryOf(idAt(ids, 1))).toBeNull();
+		expect(await categoryOf(idAt(ids, 0))).toBeNull();
 		// Three calls were reserved and two were used (one answer, one lost), so one is given back.
 		expect(await callsUsed()).toBe(2);
 		expect(await turnRow()).toBeNull();
@@ -451,6 +514,7 @@ describe("sortGroups with a fake step runner", () => {
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(10);
 		let asks = 0;
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				// The fifth ask of group 1 finds its 2-minute budget spent.
@@ -458,12 +522,15 @@ describe("sortGroups with a fake step runner", () => {
 					vi.setSystemTime(Date.now() + 3 * 60_000);
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-short-budget",
 		});
+
 		expect(
 			fake.names().filter((name) => name.startsWith("group-2-ask-")),
 		).toHaveLength(6);
@@ -476,18 +543,22 @@ describe("sortGroups with a fake step runner", () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(10);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				if (name.startsWith("group-1-ask-"))
 					vi.setSystemTime(Date.now() + 3 * 60_000);
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-short-budget-first",
 		});
+
 		expect(done).toEqual({ asked: 0, applied: 0 });
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(fake.names()).not.toContain("group-2-read");
@@ -536,10 +607,12 @@ describe("the household's day", () => {
 			},
 		);
 		const day = await householdToday(db);
+
 		const used = await db
 			.prepare("SELECT value FROM household_settings WHERE key = ?")
 			.bind(`jev_calls_${day}`)
 			.first<{ value: string }>();
+
 		expect(Number(used?.value)).toBe(2);
 	});
 });
@@ -596,19 +669,25 @@ describe("an uploaded Apple Card row is sorted with Apple's category as the hint
 			"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By",
 			'09/21/2026,09/22/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","45.25","Pat Rivera"',
 		].join("\n");
+
 		const parsed = parseAppleCsv(text);
+
 		if (!parsed.ok) throw new Error(parsed.error);
+
 		const imported = await importAppleCard(db, parsed.rows, {
 			by: "pat@example.test",
 			today: TODAY,
 			balanceCents: null,
 		});
+
 		if (!imported.ok) throw new Error(imported.error);
 		const [id] = imported.addedIds;
 		const fake = fakeSteps();
+
 		const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
 			reply(0.9),
 		);
+
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: false,
 			onlyIds: [Number(id)],
@@ -661,15 +740,18 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps({ throws: { "group-1-write": 2 } });
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-again",
 		});
+
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(attemptsOf(fake, "group-1-write")).toBe(3);
-		for (const id of ids) expect(await categoryOf(id as number)).not.toBeNull();
+
+		for (const id of ids) expect(await categoryOf(id)).not.toBeNull();
 		expect(await logged(ids)).toBe(3);
 		expect(await callsUsed()).toBe(3);
 		expect(await recordOf("run-again:1")).toBeNull();
@@ -680,11 +762,13 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps({ throws: { "group-1-write": 4 } });
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-many-tries",
 		});
+
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(attemptsOf(fake, "group-1-write")).toBe(5);
@@ -696,11 +780,13 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const ids = await addWaiting(3);
 		let turnAsRead: string | null = null;
+
 		const fake = fakeSteps({
 			// Three tries stand for the save's 960. Each one is a real batch that fails, so each is rolled back.
 			limits: { "group-1-write": 2 },
 			beforeAttempt: async (name, attempt) => {
 				if (name !== "group-1-write") return;
+
 				if (attempt === 1) {
 					turnAsRead = await turnValue();
 					await db
@@ -711,7 +797,9 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				}
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
+
 		try {
 			const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 				rulesApplied: true,
@@ -719,6 +807,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				runId: "run-never-saved",
 				waitForTurn: true,
 			});
+
 			expect(attemptsOf(fake, "group-1-write")).toBe(3);
 			expect(
 				fake.steps.find((step) => step.name === "group-1-write")?.config,
@@ -729,7 +818,8 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			]);
 			expect(fake.names()).not.toContain("group-2-read");
 			expect(await logged(ids)).toBe(0);
-			for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+
+			for (const id of ids) expect(await categoryOf(id)).toBeNull();
 			// The save never gave the calls back, so they stay counted for the day (decision 143).
 			expect(await callsUsed()).toBe(3);
 			// Each failed batch rolled its take back, so the turn is as the read left it.
@@ -773,6 +863,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			await saveAiSwitches(db, { details: true });
 			const ids = await addWaiting(3);
 			let afterFirstSave: Awaited<ReturnType<typeof detailsOf>> | undefined;
+
 			const fake = fakeSteps({
 				...replay,
 				// The second row's ask times out, so two calls are used and one is given back.
@@ -780,14 +871,18 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 					if (name === `group-1-ask-${ids[1]}`) throw new Error("timeout");
 				},
 			});
-			const runStep = (async (name, config, fn) =>
+
+			const runStep: StepRunner = async (name, config, fn) =>
 				fake.runStep(name, config, async (ctx) => {
 					const result = await fn(ctx);
+
 					// Read as the first save returns, before any replay of it runs.
 					if (name === "group-1-write" && afterFirstSave === undefined)
 						afterFirstSave = await detailsOf(ids);
+
 					return result;
-				})) as StepRunner;
+				});
+
 			await sortGroups(
 				withKey,
 				runStep,
@@ -816,8 +911,10 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 	it("a replay after another group took the turn returns without throwing and saves nothing", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
-		const runStep = (async (name, config, fn) => {
+
+		const runStep: StepRunner = async (name, config, fn) => {
 			const result = await fake.runStep(name, config, fn);
+
 			if (name === "group-1-write") {
 				// Another group takes the turn once this save has committed; the replay must leave it alone.
 				await db
@@ -828,8 +925,10 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 					.run();
 				await fn({ attempt: 2 });
 			}
+
 			return result;
-		}) as StepRunner;
+		};
+
 		await expect(
 			sortGroups(
 				withKey,
@@ -848,9 +947,11 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 
 	it("a save that finds another group holding the turn waits, then takes the turn back and saves", async () => {
 		const ids = await addWaiting(3);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name !== "group-1-write") return;
+
 				if (attempt === 1)
 					await db
 						.prepare(
@@ -858,6 +959,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 						)
 						.bind(JSON.stringify({ id: "other:1", until: Date.now() + 60_000 }))
 						.run();
+
 				if (attempt === 2)
 					await db
 						.prepare(
@@ -866,6 +968,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 						.run();
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -876,6 +979,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				runId: "run-turn-wait",
 			},
 		);
+
 		expect(attemptsOf(fake, "group-1-write")).toBe(2);
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(await logged(ids)).toBe(3);
@@ -885,6 +989,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 	it("a save batch that fails rolls its take back, so the turn is left as the group had it", async () => {
 		const ids = await addWaiting(3);
 		const expired = JSON.stringify({ id: "run-rollback:1", until: 0 });
+
 		const fake = fakeSteps({
 			limits: { "group-1-write": 2 },
 			beforeAttempt: async (name, attempt) => {
@@ -902,6 +1007,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				}
 			},
 		});
+
 		try {
 			await sortGroups(
 				withKey,
@@ -918,7 +1024,8 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			expect(await turnValue()).toBe(expired);
 			expect(await takeSortingTurn(db, "other:1")).toBe(true);
 			expect(await logged(ids)).toBe(0);
-			for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+
+			for (const id of ids) expect(await categoryOf(id)).toBeNull();
 		} finally {
 			await db.prepare("DROP TRIGGER fail_log").run();
 		}
@@ -926,13 +1033,17 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 
 	it("a person's category set between a failed save and its next try wins", async () => {
 		const ids = await addWaiting(3);
-		const personal = (
-			await db
-				.prepare(
-					"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order DESC LIMIT 1",
-				)
-				.first<{ id: number }>()
-		)?.id as number;
+
+		const personalRow = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order DESC LIMIT 1",
+			)
+			.first<{ id: number }>();
+
+		if (!personalRow) throw new Error("the household has no active category");
+
+		const personal = personalRow.id;
+
 		const fake = fakeSteps({
 			throws: { "group-1-write": 1 },
 			beforeAttempt: async (name, attempt) => {
@@ -944,6 +1055,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 					);
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -954,8 +1066,9 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				runId: "run-person",
 			},
 		);
-		expect(await categoryOf(ids[1] as number)).toBe(personal);
-		expect(await logged([ids[1] as number])).toBe(0);
+
+		expect(await categoryOf(idAt(ids, 1))).toBe(personal);
+		expect(await logged([idAt(ids, 1)])).toBe(0);
 		expect(done.asked).toBe(3);
 	});
 
@@ -963,6 +1076,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(2);
+
 		const fake = fakeSteps({
 			throws: { "group-1-write": 1 },
 			beforeAttempt: async (name, attempt) => {
@@ -970,6 +1084,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 					vi.setSystemTime(new Date("2026-09-23T15:00:00Z"));
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -980,13 +1095,16 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				runId: "run-next-day",
 			},
 		);
+
 		expect(done).toEqual({ asked: 2, applied: 2 });
+
 		const days = await db
 			.prepare(
 				"SELECT DISTINCT household_day AS d FROM ai_log WHERE transaction_id IN (SELECT value FROM json_each(?))",
 			)
 			.bind(JSON.stringify(ids))
 			.all<{ d: string }>();
+
 		expect(days.results.map((row) => row.d)).toEqual(["2026-09-23"]);
 		expect(await countText("2026-09-22")).toBe("2");
 		expect(await countText("2026-09-23")).toBeNull();
@@ -997,6 +1115,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		// 15:00 UTC is still the 22nd in New York (the read's zone) and already the 23rd in Kiritimati (UTC+14).
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(2);
+
 		const fake = fakeSteps({
 			throws: { "group-1-write": 1 },
 			beforeAttempt: async (name, attempt) => {
@@ -1006,6 +1125,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 					);
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1016,13 +1136,16 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 				runId: "run-zone-changed",
 			},
 		);
+
 		expect(done).toEqual({ asked: 2, applied: 2 });
+
 		const days = await db
 			.prepare(
 				"SELECT DISTINCT household_day AS d FROM ai_log WHERE transaction_id IN (SELECT value FROM json_each(?))",
 			)
 			.bind(JSON.stringify(ids))
 			.all<{ d: string }>();
+
 		expect(days.results.map((row) => row.d)).toEqual(["2026-09-23"]);
 		// The calls were reserved on the read's day, and that is still the day they are given back to.
 		expect(await countText("2026-09-22")).toBe("2");
@@ -1096,8 +1219,10 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		"a row whose %s changed after the read keeps no answer, and the rest of the group is saved",
 		async (_label, sql, before) => {
 			const ids = await addWaiting(3);
-			const target = ids[1] as number;
+			const target = idAt(ids, 1);
+
 			if (before) await changeRow(before, target);
+
 			const fake = fakeSteps({
 				beforeAttempt: async (name, attempt) => {
 					if (name === "group-1-write" && attempt === 1)
@@ -1107,17 +1232,20 @@ describe("a changed row keeps no answer (decision 143)", () => {
 						);
 				},
 			});
+
 			const fetchImpl = vi.fn(async () => reply(0.9));
+
 			const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 				rulesApplied: true,
 				onlyIds: ids,
 				runId: "run-changed",
 			});
+
 			expect(fetchImpl).toHaveBeenCalledTimes(3);
 			expect(await categoryOf(target)).toBeNull();
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(ids[0] as number)).not.toBeNull();
-			expect(await categoryOf(ids[2] as number)).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
 			expect(done).toEqual({ asked: 3, applied: 2 });
 			expect(await callsUsed()).toBe(3);
 		},
@@ -1125,11 +1253,12 @@ describe("a changed row keeps no answer (decision 143)", () => {
 
 	it("a credit a person reviewed, asked only for its category, keeps no answer once its note changed", async () => {
 		const ids = await addWaiting(3);
-		const credit = ids[2] as number;
+		const credit = idAt(ids, 2);
 		await changeRow(
 			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 			credit,
 		);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
@@ -1139,6 +1268,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					);
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1149,24 +1279,31 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				runId: "run-credit",
 			},
 		);
+
 		expect(await categoryOf(credit)).toBeNull();
 		expect(await logged([credit])).toBe(0);
 		expect(done).toEqual({ asked: 3, applied: 2 });
 	});
 
 	it("a split part keeps no answer once its parent's own name changed", async () => {
-		const parent = (await db
+		const parent = await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, is_split, own_name) VALUES (1, ?, -1000, 'SPLIT STEP PARENT', 1, 'Parent name') RETURNING id",
 			)
 			.bind(TODAY)
-			.first<{ id: number }>()) as { id: number };
-		const part = (await db
+			.first<{ id: number }>();
+
+		if (!parent) throw new Error("the parent insert returned no row");
+
+		const part = await db
 			.prepare(
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, ?, -400, 'SPLIT STEP PARENT', ?) RETURNING id",
 			)
 			.bind(TODAY, parent.id)
-			.first<{ id: number }>()) as { id: number };
+			.first<{ id: number }>();
+
+		if (!part) throw new Error("the part insert returned no row");
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
@@ -1176,6 +1313,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					);
 			},
 		});
+
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
@@ -1190,7 +1328,8 @@ describe("a changed row keeps no answer (decision 143)", () => {
 	it("a row whose kind changed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = ids[1] as number;
+		const target = idAt(ids, 1);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
@@ -1200,6 +1339,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					);
 			},
 		});
+
 		await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1210,6 +1350,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				runId: "run-details",
 			},
 		);
+
 		const detailsAsked = async (id: number) =>
 			(
 				await db
@@ -1217,19 +1358,21 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					.bind(id)
 					.first<{ d: number }>()
 			)?.d;
+
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a row whose person was renamed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = ids[1] as number;
+		const target = idAt(ids, 1);
 		await changeRow(
 			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
 			target,
 		);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
@@ -1238,6 +1381,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					);
 			},
 		});
+
 		await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1248,6 +1392,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				runId: "run-person-details",
 			},
 		);
+
 		const detailsAsked = async (id: number) =>
 			(
 				await db
@@ -1255,25 +1400,28 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					.bind(id)
 					.first<{ d: number }>()
 			)?.d;
+
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a row whose account type changed keeps its details waiting too", async () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
-		const target = ids[1] as number;
+		const target = idAt(ids, 1);
 		await changeRow(
 			"UPDATE transactions SET account_id = 2 WHERE id = ?",
 			target,
 		);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
 					await changeRow("UPDATE accounts SET type = 'credit' WHERE id = 2");
 			},
 		});
+
 		await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1284,6 +1432,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				runId: "run-account-type-details",
 			},
 		);
+
 		const detailsAsked = async (id: number) =>
 			(
 				await db
@@ -1291,25 +1440,30 @@ describe("a changed row keeps no answer (decision 143)", () => {
 					.bind(id)
 					.first<{ d: number }>()
 			)?.d;
+
 		expect(await detailsAsked(target)).toBe(0);
-		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await detailsAsked(idAt(ids, 0))).toBe(1);
 		expect(await categoryOf(target)).toBeNull();
 	});
 
 	it("a plan cached before this deploy, with no seen fields, saves as it always did", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
-		const runStep = (async (name, config, fn) =>
+
+		const runStep: StepRunner = async (name, config, fn) =>
 			fake.runStep(name, config, async (ctx) => {
 				const result = await fn(ctx);
-				const read = result as unknown as {
-					kind?: string;
-					plan?: { rows: { seen?: unknown }[] };
-				};
-				if (name === "group-1-read" && read.kind === "group")
-					for (const row of read.plan?.rows ?? []) delete row.seen;
+
+				if (
+					name === "group-1-read" &&
+					isGroupRead(result) &&
+					result.kind === "group"
+				)
+					for (const row of result.plan?.rows ?? []) delete row.seen;
+
 				return result;
-			})) as StepRunner;
+			});
+
 		const done = await sortGroups(
 			withKey,
 			runStep,
@@ -1320,6 +1474,7 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				runId: "run-no-seen",
 			},
 		);
+
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(await logged(ids)).toBe(3);
 	});
@@ -1328,17 +1483,21 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		await saveAiSwitches(db, { details: true });
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
-		const runStep = (async (name, config, fn) =>
+
+		const runStep: StepRunner = async (name, config, fn) =>
 			fake.runStep(name, config, async (ctx) => {
 				const result = await fn(ctx);
-				const read = result as unknown as {
-					kind?: string;
-					plan?: { rows: { seen?: unknown }[] };
-				};
-				if (name === "group-1-read" && read.kind === "group")
-					for (const row of read.plan?.rows ?? []) delete row.seen;
+
+				if (
+					name === "group-1-read" &&
+					isGroupRead(result) &&
+					result.kind === "group"
+				)
+					for (const row of result.plan?.rows ?? []) delete row.seen;
+
 				return result;
-			})) as StepRunner;
+			});
+
 		await sortGroups(
 			withKey,
 			runStep,
@@ -1349,28 +1508,34 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				runId: "run-no-seen-details",
 			},
 		);
+
 		const asked = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM transactions WHERE id IN (SELECT value FROM json_each(?)) AND details_asked = 1",
 			)
 			.bind(JSON.stringify(ids))
 			.first<{ n: number }>();
+
 		expect(asked?.n).toBe(3);
 	});
 
 	it("Jev's request carries only what it was always told, never the seen fields", async () => {
 		const ids = await addWaiting(2);
 		const bodies: string[] = [];
+
 		const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
 			bodies.push(String(init?.body));
+
 			return reply(0.9);
 		});
+
 		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
 			rulesApplied: true,
 			onlyIds: ids,
 			runId: "run-body",
 		});
 		expect(bodies).toHaveLength(2);
+
 		for (const body of bodies) {
 			expect(body).not.toContain("seen");
 			expect(body).not.toContain("merchantKey");
@@ -1378,35 +1543,47 @@ describe("a changed row keeps no answer (decision 143)", () => {
 	});
 });
 
+/** A group read's result, as the tests look at it: its kind, and the plan's rows whose seen fields a test drops. */
+type GroupRead = { kind?: string; plan?: { rows: { seen?: unknown }[] } };
+
+/** Whether a step's result is an object, so the test can read its fields. */
+function isGroupRead(value: unknown): value is GroupRead {
+	return typeof value === "object" && value !== null;
+}
+
 type Answer = { choice: string; confidence: number; also?: string };
 
 /** A Jev reply with a category answer, and the other category it names when `also` is given (the mixed trip, #233). */
-const answerReply = ({ choice, confidence, also }: Answer) =>
-	new Response(
-		JSON.stringify({
-			answers: {
-				category: { type: "choice", choice, confidence },
-				...(also
-					? {
-							mixed: { type: "noul", noul: 0.9 },
-							also_category: { type: "choice", choice: also, confidence: 0.9 },
-						}
-					: {}),
-				transfer: { type: "noul", noul: 0.01 },
-				reimbursement: { type: "noul", noul: 0.01 },
-				income: { type: "noul", noul: 0.01 },
-			},
-		}),
-		{ status: 200 },
-	);
+const answerReply = ({ choice, confidence, also }: Answer) => {
+	const category = { type: "choice", choice, confidence };
+
+	const flags = {
+		transfer: { type: "noul", noul: 0.01 },
+		reimbursement: { type: "noul", noul: 0.01 },
+		income: { type: "noul", noul: 0.01 },
+	};
+
+	const answers = also
+		? {
+				category,
+				mixed: { type: "noul", noul: 0.9 },
+				also_category: { type: "choice", choice: also, confidence: 0.9 },
+				...flags,
+			}
+		: { category, ...flags };
+
+	return new Response(JSON.stringify({ answers }), { status: 200 });
+};
 
 describe("a category archived or removed since the read keeps no answer (decision 143)", () => {
 	/** Jev's answer for the row whose bank text is `bank`, and `others` for every other row. */
 	const perRow = (bank: string, answer: Answer, others: Answer) =>
 		vi.fn(async (_url: string, init?: RequestInit) => {
+			// SAFETY: sortGroups sends Jev each row's state as JSON, and that state always carries bank_description.
 			const sent = JSON.parse(String(init?.body)) as {
 				state: { bank_description: string };
 			};
+
 			return answerReply(
 				sent.state.bank_description === bank ? answer : others,
 			);
@@ -1422,6 +1599,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 			.first<{ suggested: number | null; confidence: number | null }>();
 
 	const GROCERIES: Answer = { choice: "Groceries", confidence: 0.9 };
+
 	// The row whose answer names the archived category is the second one (bank text "SORT STEP 1"); the others name
 	// Groceries, which stays active.
 	const CASES: [string, Answer, string][] = [
@@ -1446,7 +1624,8 @@ describe("a category archived or removed since the read keeps no answer (decisio
 		"a row whose answer names %s, archived between the read and the save, keeps no answer and no log row, and the rest of the group is saved",
 		async (_label, answer, archived) => {
 			const ids = await addWaiting(3);
-			const target = ids[1] as number;
+			const target = idAt(ids, 1);
+
 			const fake = fakeSteps({
 				beforeAttempt: async (name, attempt) => {
 					if (name === "group-1-write" && attempt === 1)
@@ -1456,12 +1635,14 @@ describe("a category archived or removed since the read keeps no answer (decisio
 						);
 				},
 			});
+
 			const done = await sortGroups(
 				withKey,
 				fake.runStep,
 				perRow("SORT STEP 1", answer, GROCERIES),
 				{ rulesApplied: true, onlyIds: ids, runId: "run-archived" },
 			);
+
 			expect(done).toEqual({ asked: 3, applied: 2 });
 			expect(await categoryOf(target)).toBeNull();
 			expect(await storedAnswer(target)).toEqual({
@@ -1469,15 +1650,16 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				confidence: null,
 			});
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(ids[0] as number)).not.toBeNull();
-			expect(await categoryOf(ids[2] as number)).not.toBeNull();
-			expect(await logged([ids[0] as number, ids[2] as number])).toBe(2);
+			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+			expect(await logged([idAt(ids, 0), idAt(ids, 2)])).toBe(2);
 			expect(await callsUsed()).toBe(3);
 		},
 	);
 
 	// A category made for one test and used by nothing, so removing it is what unmakeCategory does to an unused one.
 	const PROBE = "Probe";
+
 	const REMOVED: [string, Answer][] = [
 		["Jev's chosen category", { choice: PROBE, confidence: 0.9 }],
 		["Jev's suggestion", { choice: PROBE, confidence: 0.3 }],
@@ -1492,7 +1674,8 @@ describe("a category archived or removed since the read keeps no answer (decisio
 		async (_label, answer) => {
 			expect((await makeCategory(db, { name: PROBE })).ok).toBe(true);
 			const ids = await addWaiting(3);
-			const target = ids[1] as number;
+			const target = idAt(ids, 1);
+
 			// Two tries at most: before the fix the batch fails on the removed category's foreign key every time.
 			const fake = fakeSteps({
 				limits: { "group-1-write": 2 },
@@ -1501,12 +1684,14 @@ describe("a category archived or removed since the read keeps no answer (decisio
 						await changeRow("DELETE FROM categories WHERE name = ?", PROBE);
 				},
 			});
+
 			const done = await sortGroups(
 				withKey,
 				fake.runStep,
 				perRow("SORT STEP 1", answer, GROCERIES),
 				{ rulesApplied: true, onlyIds: ids, runId: "run-removed" },
 			);
+
 			// The save went through on its first try: the removed category's answer was left out, not failed.
 			expect(
 				fake.steps.find((step) => step.name === "group-1-write")?.attempts,
@@ -1518,20 +1703,21 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				confidence: null,
 			});
 			expect(await logged([target])).toBe(0);
-			expect(await categoryOf(ids[0] as number)).not.toBeNull();
-			expect(await categoryOf(ids[2] as number)).not.toBeNull();
-			expect(await logged([ids[0] as number, ids[2] as number])).toBe(2);
+			expect(await categoryOf(idAt(ids, 0))).not.toBeNull();
+			expect(await categoryOf(idAt(ids, 2))).not.toBeNull();
+			expect(await logged([idAt(ids, 0), idAt(ids, 2)])).toBe(2);
 			expect(await callsUsed()).toBe(3);
 		},
 	);
 
 	it("a credit asked only for its category keeps no answer when its category was archived since the read", async () => {
 		const ids = await addWaiting(3);
-		const credit = ids[2] as number;
+		const credit = idAt(ids, 2);
 		await changeRow(
 			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
 			credit,
 		);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1)
@@ -1540,6 +1726,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 					);
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1550,6 +1737,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 			),
 			{ rulesApplied: true, onlyIds: ids, runId: "run-archived-credit" },
 		);
+
 		expect(await categoryOf(credit)).toBeNull();
 		expect(await logged([credit])).toBe(0);
 		expect(done).toEqual({ asked: 3, applied: 2 });
@@ -1557,6 +1745,7 @@ describe("a category archived or removed since the read keeps no answer (decisio
 
 	it("a category archived and restored before the save still applies", async () => {
 		const ids = await addWaiting(3);
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1) {
@@ -1569,14 +1758,17 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				}
 			},
 		});
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
 			vi.fn(async () => reply(0.9)),
 			{ rulesApplied: true, onlyIds: ids, runId: "run-restored" },
 		);
+
 		expect(done).toEqual({ asked: 3, applied: 3 });
-		for (const id of ids) expect(await categoryOf(id as number)).not.toBeNull();
+
+		for (const id of ids) expect(await categoryOf(id)).not.toBeNull();
 		expect(await logged(ids)).toBe(3);
 	});
 });
@@ -1585,6 +1777,7 @@ describe("the reservation record (decision 143)", () => {
 	it("a reserve that throws before its batch reserves normally when it runs again", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps({ throws: { "group-1-reserve": 1 } });
+
 		const done = await sortGroups(
 			withKey,
 			fake.runStep,
@@ -1595,6 +1788,7 @@ describe("the reservation record (decision 143)", () => {
 				runId: "run-reserve-throw",
 			},
 		);
+
 		expect(
 			fake.steps.find((step) => step.name === "group-1-reserve")?.attempts,
 		).toBe(2);
@@ -1648,19 +1842,33 @@ describe("nextWait: when a busy Jev is asked again (decision 145)", () => {
 		category: { label: "Eating Out", confidence: 0.9 },
 		flags: { transfer: 0.01, reimbursement: 0.01, income: 0.01 },
 	};
+
 	const answered = (id: number): AskResult => ({
 		id,
 		outcome: "answered",
 		answer: ANSWER,
 	});
-	const failed = (status: number | null, retryAfterMs?: number): AskResult => ({
-		id: 99,
-		outcome: "failed",
-		status,
-		requestId: null,
-		serviceWide: true,
-		...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-	});
+
+	const failed = (status: number | null, retryAfterMs?: number): AskResult => {
+		if (retryAfterMs === undefined)
+			return {
+				id: 99,
+				outcome: "failed",
+				status,
+				requestId: null,
+				serviceWide: true,
+			};
+
+		return {
+			id: 99,
+			outcome: "failed",
+			status,
+			requestId: null,
+			serviceWide: true,
+			retryAfterMs,
+		};
+	};
+
 	/** Groups that each only failed, one after another. */
 	const failedGroups = (n: number): AskResult[][] =>
 		Array.from({ length: n }, () => [failed(429)]);
@@ -1748,6 +1956,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 	/** Records each wait the run asks for, in order. The sleep returns at once. */
 	function recordingSleep() {
 		const sleeps: [string, number][] = [];
+
 		return {
 			sleeps,
 			sleep: async (name: string, ms: number) => {
@@ -1759,8 +1968,10 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 	/** A Jev fetch: the calls numbered in `busy` answer with their response, every other call a Jev reply. */
 	function jevBusyAt(busy: Record<number, () => Response>) {
 		let call = 0;
+
 		return vi.fn(async () => {
 			call += 1;
+
 			return busy[call]?.() ?? reply(0.9);
 		});
 	}
@@ -1803,13 +2014,13 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		ids: number[],
 		runId: string,
 		sleep?: (name: string, ms: number) => Promise<void>,
-	) =>
-		sortGroups(withKey, fake.runStep, fetchImpl, {
-			rulesApplied: true,
-			onlyIds: ids,
-			runId,
-			...(sleep ? { sleep } : {}),
-		});
+	) => {
+		const options: SortOptions = { rulesApplied: true, onlyIds: ids, runId };
+
+		if (sleep) options.sleep = sleep;
+
+		return sortGroups(withKey, fake.runStep, fetchImpl, options);
+	};
 
 	it("waits out a 429 and asks the row again: the 26th call answers 429, all 30 are sorted, one 30 s wait", async () => {
 		const ids = await addWaiting(30);
@@ -1846,6 +2057,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		const { sleeps, sleep } = recordingSleep();
 		const fake = fakeSteps();
 		const fetchImpl = jevBusyAt({ 2: () => rateLimit("5") });
+
 		const done = await sortWith(
 			fake,
 			fetchImpl,
@@ -1853,6 +2065,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 			"run-busy-partial",
 			sleep,
 		);
+
 		expect(sleeps).toEqual([["wait-1", 30_000]]);
 		expect(fake.names()).toContain(`group-2-ask-${ids[1]}`);
 		expect(fetchImpl).toHaveBeenCalledTimes(4);
@@ -1905,12 +2118,14 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 	it("when the write stops the run (both Guess categories and Spot paychecks off), a 429 group waits for nothing", async () => {
 		const ids = await addWaiting(30);
 		const { sleeps, sleep } = recordingSleep();
+
 		const fake = fakeSteps({
 			beforeAttempt: async (name) => {
 				if (name === "group-1-write")
 					await saveAiSwitches(db, { categories: false, income: false });
 			},
 		});
+
 		const fetchImpl = jevBusyAt({ 1: () => rateLimit("5") });
 		await sortWith(fake, fetchImpl, ids, "run-busy-off-write", sleep);
 		expect(sleeps).toEqual([]);
@@ -1921,10 +2136,12 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 	it("switches turned off during the wait end the run after the sleep, with no further call", async () => {
 		const ids = await addWaiting(30);
 		const sleeps: [string, number][] = [];
+
 		const sleep = async (name: string, ms: number) => {
 			sleeps.push([name, ms]);
 			await saveAiSwitches(db, { categories: false, income: false });
 		};
+
 		const fake = fakeSteps();
 		const fetchImpl = jevBusyAt({ 1: () => rateLimit("5") });
 		await sortWith(fake, fetchImpl, ids, "run-busy-off-wait", sleep);
@@ -1952,11 +2169,15 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		const ids = await addWaiting(30);
 		const { sleeps, sleep } = recordingSleep();
 		let call = 0;
+
 		const fetchImpl = vi.fn(async () => {
 			call += 1;
+
 			if (call === 1) throw new TypeError("network down");
+
 			return reply(0.9);
 		});
+
 		await sortWith(fakeSteps(), fetchImpl, ids, "run-busy-none", sleep);
 		expect(sleeps).toEqual([["wait-1", 30_000]]);
 		expect(await sortedByJev(ids)).toBe(30);
@@ -1966,10 +2187,12 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		const ids = await addWaiting(30);
 		const { sleeps, sleep } = recordingSleep();
 		const fake = fakeSteps();
+
 		const fetchImpl = jevBusyAt({
 			26: () => rateLimit("5"),
 			27: () => rateLimit("5"),
 		});
+
 		await sortWith(fake, fetchImpl, ids, "run-busy-twice", sleep);
 		expect(sleeps).toEqual([
 			["wait-2", 30_000],
@@ -1986,6 +2209,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		const fake = fakeSteps();
 		const fetchImpl = jevBusyAt({ 26: () => rateLimit("5") });
 		const first = recordingSleep();
+
 		const done = await sortWith(
 			fake,
 			fetchImpl,
@@ -1993,8 +2217,10 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 			"run-busy-replay",
 			first.sleep,
 		);
+
 		const before = fake.steps.length;
 		const second = recordingSleep();
+
 		const again = await sortWith(
 			fake,
 			fetchImpl,
@@ -2002,6 +2228,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 			"run-busy-replay",
 			second.sleep,
 		);
+
 		expect(second.sleeps).toEqual(first.sleeps);
 		expect(again).toEqual(done);
 		expect(fetchImpl).toHaveBeenCalledTimes(31);

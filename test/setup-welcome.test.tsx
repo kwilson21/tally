@@ -1,4 +1,6 @@
 /** @jsxImportSource hono/jsx */
+
+import type { JSX } from "hono/jsx";
 import { describe, expect, it } from "vitest";
 import { SetupScreen } from "../src/views/setup-screen";
 import {
@@ -8,10 +10,12 @@ import {
 } from "../src/views/setup-welcome";
 
 // A setup screen's frame (P142 A, decision 148): its body, then its foot. On a phone the foot is pinned to the screen's foot.
-const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+const html = (node: JSX.Element) => String(node).replaceAll("&#39;", "'");
+
 /** The opening tag of the element with this id. */
 const tagWithId = (markup: string, id: string) =>
 	markup.match(new RegExp(`<div\\b[^>]*\\bid="${id}"[^>]*>`))?.[0] ?? "";
+
 /** The class tokens of an opening tag. */
 const classesOf = (tag: string) =>
 	(tag.match(/\bclass="([^"]*)"/)?.[1] ?? "").split(" ").filter(Boolean);
@@ -23,6 +27,7 @@ describe("SetupScreen", () => {
 				<p>The body</p>
 			</SetupScreen>,
 		);
+
 		expect(markup).toMatch(/<div\b[^>]*\bid="setup-screen"[^>]*>/);
 		expect(classesOf(tagWithId(markup, "setup-screen"))).toEqual(
 			expect.arrayContaining([
@@ -42,10 +47,12 @@ describe("SetupScreen", () => {
 				<p>The body</p>
 			</SetupScreen>,
 		);
+
 		const body =
 			markup.match(
 				/<div\b[^>]*\bid="setup-screen"[^>]*>\s*<div([^>]*)>/,
 			)?.[1] ?? "";
+
 		expect(classesOf(`<div${body}>`)).toContain("max-lg:flex-1");
 		expect(classesOf(tagWithId(markup, "setup-foot"))).toEqual(
 			expect.arrayContaining(["sticky", "bottom-0", "mt-8"]),
@@ -58,6 +65,7 @@ describe("SetupScreen", () => {
 				<p>The body</p>
 			</SetupScreen>,
 		);
+
 		expect(markup.indexOf("The body")).toBeLessThan(
 			markup.indexOf("Link your bank"),
 		);
@@ -74,6 +82,7 @@ describe("SetupScreen", () => {
 				<p>The body</p>
 			</SetupScreen>,
 		);
+
 		const foot = markup.match(/<div\b[^>]*\sid="setup-foot"[^>]*>/)?.[0] ?? "";
 		expect(foot).toMatch(/\bclass="[^"]*\bsticky bottom-0\b/);
 		expect(markup.match(/id="setup-foot"/g)).toHaveLength(1);
@@ -90,6 +99,7 @@ describe("SetupScreen", () => {
 describe("SetupWelcome", () => {
 	const welcome = (props: Parameters<typeof SetupWelcome>[0] = {}) =>
 		html(SetupWelcome(props));
+
 	const LINK_BUTTON = <button type="button">Link your bank</button>;
 	const LINK = '<button type="button">Link your bank</button>';
 	const LINE = "Tally can only read your bank. It can't move money.";
@@ -115,6 +125,7 @@ describe("SetupWelcome", () => {
 			["Your bills", "So they're set aside before you spend.", "One question"],
 			["Your budgets", "Suggested from what you really spend.", "One tap"],
 		]);
+
 		for (const step of WELCOME_STEPS) {
 			expect(markup).toContain(step.name);
 			expect(markup).toContain(step.benefit);

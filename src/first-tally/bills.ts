@@ -34,6 +34,7 @@ export function keepShown(
 	values: string[],
 ): BillSuggestion[] {
 	const shown = new Set(values);
+
 	return current.filter((suggestion) => shown.has(shownBillValue(suggestion)));
 }
 
@@ -44,27 +45,38 @@ export function keepShown(
  */
 export function keepReply(kept: number, changed: number): string {
 	if (changed === 0 && kept === 0) return "Nothing to keep.";
+
 	const keptWords =
 		kept === 0
 			? "Nothing kept."
 			: kept === 1
 				? "Kept 1 bill."
 				: `Kept ${kept} bills.`;
+
 	if (changed === 0) return keptWords;
+
 	const askedPart =
 		changed === 1
 			? "1 charge changed since the page drew, so it's asked again below."
 			: `${changed} charges changed since the page drew, so they're asked again below.`;
+
 	return `${keptWords} ${askedPart}`;
 }
+
+/** The two halves splitKeepable returns: the one-tap answer, and the charges that stay in Possible bills. */
+type SplitKeepable = { keep: BillSuggestion[]; waiting: BillSuggestion[] };
+
+/** A double-ruled total's two lines: the count and the amount. */
+type TotalLine = { label: string; amount: string };
 
 /** The found charges, split: `keep` is the one-tap answer, and `waiting` stays in Possible bills. */
 export function splitKeepable(
 	suggestions: BillSuggestion[],
 	activeNames: string[],
-): { keep: BillSuggestion[]; waiting: BillSuggestion[] } {
+): SplitKeepable {
 	const keep: BillSuggestion[] = [];
 	const waiting: BillSuggestion[] = [];
+
 	for (const suggestion of suggestions) {
 		const collides =
 			suggestions.some(
@@ -73,13 +85,16 @@ export function splitKeepable(
 					sameBillName(other.displayName, suggestion.displayName),
 			) ||
 			activeNames.some((name) => sameBillName(name, suggestion.displayName));
+
 		const leftOut =
 			suggestion.displayName.trim() === "" ||
 			suggestion.categoryId === null ||
 			suggestion.amountCents > BIG_BILL_CENTS ||
 			collides;
+
 		(leftOut ? waiting : keep).push(suggestion);
 	}
+
 	return { keep, waiting };
 }
 
@@ -89,6 +104,7 @@ export function splitKeepable(
  */
 export function waitingWords(count: number): string | null {
 	if (count === 0) return null;
+
 	return count === 1 ? "1 more waits in" : `${count} more wait in`;
 }
 
@@ -105,17 +121,23 @@ export function keepHeading(count: number): string {
  */
 export function billsMutedLine(charges: BillSuggestion[]): string {
 	const total = charges.reduce((sum, charge) => sum + charge.amountCents, 0);
+
 	const named = charges
 		.slice(0, 3)
 		.map(
 			(charge) => `${charge.displayName} ${dollarsWords(charge.amountCents)}`,
 		);
+
 	const more = charges.length - named.length;
+
 	const list =
 		more > 0 ? `${named.join(", ")} and ${more} more` : named.join(", ");
+
 	const count = charges.length;
+
 	const noun =
 		count === 1 ? "charge that comes back" : "charges that come back";
+
 	return `Your bank shows ${count} ${noun} every month, about ${wholeDollars(total)} in all: ${list}.`;
 }
 
@@ -133,10 +155,7 @@ export function billsLead(count: number): string {
  * The bills card's double-ruled total (P142 A): the count of the charges the screen keeps, and their monthly total in whole
  * dollars as billsLedgerLine words it ("8 bills", "about $1,972 a month"; "1 bill" for one).
  */
-export function billsTotalLine(
-	count: number,
-	cents: number,
-): { label: string; amount: string } {
+export function billsTotalLine(count: number, cents: number): TotalLine {
 	return {
 		label: count === 1 ? "1 bill" : `${count} bills`,
 		amount: `about ${wholeDollars(cents)} a month`,

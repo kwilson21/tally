@@ -39,6 +39,7 @@ describe("migration 0053: planned expenses and the never-both guard", () => {
 		const { results } = await env.DB.prepare(
 			"SELECT name FROM pragma_table_info('planned_expenses')",
 		).all<{ name: string }>();
+
 		const columns = results.map((c) => c.name);
 		expect(columns).toEqual([
 			"id",
@@ -54,9 +55,11 @@ describe("migration 0053: planned expenses and the never-both guard", () => {
 		await env.DB.prepare(
 			"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',18000,'2026-10',9501,'demo')",
 		).run();
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id FROM planned_expenses WHERE name='Car registration'",
 		).first<{ transaction_id: number }>();
+
 		expect(row?.transaction_id).toBe(9501);
 	});
 
@@ -118,9 +121,11 @@ describe("migration 0053: planned expenses and the never-both guard", () => {
 		await env.DB.prepare(
 			"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',18000,'2026-10',9505,'demo')",
 		).run();
+
 		const row = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE transaction_id=9505",
 		).first<{ n: number }>();
+
 		expect(row?.n).toBe(1);
 	});
 
@@ -140,9 +145,11 @@ describe("migration 0053: planned expenses and the never-both guard", () => {
 			"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',18000,'2026-10',9501,'demo')",
 		).run();
 		await env.DB.prepare("DELETE FROM transactions WHERE id=9501").run();
+
 		const row = await env.DB.prepare(
 			"SELECT transaction_id FROM planned_expenses WHERE name='Car registration'",
 		).first<{ transaction_id: number | null }>();
+
 		expect(row?.transaction_id).toBeNull();
 	});
 });

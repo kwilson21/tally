@@ -9,6 +9,7 @@ async function tables() {
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
 		)
 		.all<{ name: string }>();
+
 	return results.map((r) => r.name);
 }
 
@@ -16,6 +17,7 @@ async function columns(table: string) {
 	const { results } = await db
 		.prepare(`PRAGMA table_info(${table})`)
 		.all<{ name: string }>();
+
 	return results.map((column) => column.name);
 }
 
@@ -90,6 +92,7 @@ describe("schema", () => {
 		const { results } = await db
 			.prepare("PRAGMA table_info(categories)")
 			.all<{ name: string; notnull: number }>();
+
 		expect(
 			results.find((column) => column.name === "archived_on"),
 		).toMatchObject({
@@ -133,6 +136,7 @@ describe("schema", () => {
 		const { results } = await db
 			.prepare("PRAGMA table_info(merchant_name_failures)")
 			.all<{ name: string; notnull: number; pk: number }>();
+
 		expect(results.find((column) => column.name === "raw_name")).toMatchObject({
 			pk: 1,
 		});

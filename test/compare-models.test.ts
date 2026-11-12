@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from "vitest";
 import { formatReport } from "../scripts/compare-models/report";
 import {
 	buildCases,
@@ -16,6 +24,8 @@ import worker, {
 import { JEV_URL, type JevResult } from "../src/ai/categorize";
 import { type Flag, type JevAnswer, NONE_FIT } from "../src/ai/decide";
 import { buildSeed, type Seed, type SeedTransaction } from "../src/demo/seed";
+import { fakeAi as bindingOf, fakeFetch } from "./helpers/doubles";
+import { itemAt, present } from "./helpers/present";
 
 const TODAY = "2026-10-19";
 const NAMES = ["Groceries", "Eating Out", "Household"];
@@ -67,26 +77,25 @@ const modelAnswer = (choice = "Groceries") => ({
 	usage: { input_tokens: 100, output_tokens: 1 },
 });
 
-type RunArgs = [string, Record<string, unknown>, { signal?: unknown }];
+/** A JSON value, as the Worker reads a request body. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
-/** A fake Workers AI. `run` decides each answer, and every call is recorded. */
+/** The JSON body a Workers AI call sends. */
+type Body = { [field: string]: Json };
+
+type RunOptions = { signal?: AbortSignal };
+
+type Run = (model: string, body: Body, options?: RunOptions) => Promise<object>;
+
+/** A fake Workers AI. `answer` decides each answer, and every call is recorded. */
 const fakeAi = (
-	run: (model: string, body: Record<string, unknown>) => unknown = (
-		_model,
-		body,
-	) => ({
+	answer: (model: string, body: Body) => object = (_model, body) => ({
 		...modelAnswer(),
 		model: body.model,
 	}),
-) =>
-	({
-		run: vi.fn(async (model: string, body: Record<string, unknown>) =>
-			run(model, body),
-		),
-	}) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+) => bindingOf(vi.fn<Run>(async (model, body) => answer(model, body)));
 
-const callsOf = (ai: { run: ReturnType<typeof vi.fn> }) =>
-	ai.run.mock.calls as RunArgs[];
+const callsOf = (ai: { run: Mock<Run> }) => ai.run.mock.calls;
 
 const CLEF = "@cf/cloudflare/clef";
 const CLEF_FLASH = "@cf/cloudflare/clef-flash";
@@ -237,7 +246,9 @@ describe("buildCases", () => {
 			accountId: 4,
 		}),
 	]);
+
 	const cases = buildCases(seed);
+
 	const byKey = (rawName: string, direction: Case["direction"]) =>
 		cases.find((c) => c.rawName === rawName && c.direction === direction);
 
@@ -294,6 +305,7 @@ describe("buildCases", () => {
 		const demo = buildCases(buildSeed(TODAY));
 		expect(demo.length).toBe(36);
 		const answers = new Set(demo.map((c) => c.rightCategory));
+
 		for (const name of demoCategories(buildSeed(TODAY))) {
 			expect(answers.has(name)).toBe(true);
 		}
@@ -351,6 +363,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("left: unsure");
 		expect(row.answer?.rightPick).toBe(true);
 	});
@@ -368,6 +381,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("wrong");
 		expect(row.answer?.rightPick).toBe(false);
 	});
@@ -384,6 +398,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("applied");
 	});
 
@@ -394,6 +409,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("left: unsure");
 	});
 
@@ -410,17 +426,20 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.answer?.flags).toEqual({
 			transfer: "hit",
 			reimbursement: "missed",
 			income: "false alarm",
 		});
+
 		const quiet = scoreCase(
 			kase(),
 			ok(jevAnswer("Groceries", 0.95)),
 			NAMES,
 			120,
 		);
+
 		expect(quiet.answer?.flags).toEqual({
 			transfer: "quiet",
 			reimbursement: "quiet",
@@ -435,6 +454,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.answer?.flags.income).toBe("quiet");
 	});
 
@@ -455,14 +475,17 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(both.answer?.mixed).toBe(true);
 		expect(both.answer?.note).toBe(true);
+
 		const neither = scoreCase(
 			kase(),
 			ok(jevAnswer("Groceries", 0.95)),
 			NAMES,
 			120,
 		);
+
 		expect(neither.answer?.mixed).toBe(false);
 		expect(neither.answer?.note).toBe(false);
 	});
@@ -474,6 +497,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("failed: HTTP 429");
 		expect(row.answer).toBeNull();
 	});
@@ -485,6 +509,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("failed: no response");
 	});
 
@@ -495,6 +520,7 @@ describe("scoreCase", () => {
 			NAMES,
 			120,
 		);
+
 		expect(row.outcome).toBe("unreadable");
 	});
 });
@@ -531,6 +557,7 @@ describe("summarize", () => {
 		scoreCase(kase(), { ok: false, status: 429, requestId: null }, NAMES, 50),
 		scoreCase(kase(), { ok: false, status: 200, requestId: null }, NAMES, 60),
 	];
+
 	const summary = summarize(rows);
 
 	it("counts each outcome and the calls that worked", () => {
@@ -566,6 +593,7 @@ describe("summarize", () => {
 				10,
 			),
 		]);
+
 		expect(none.confidence).toBeNull();
 		expect(none.worked).toBe(0);
 	});
@@ -578,16 +606,18 @@ describe("formatReport", () => {
 		kase({ rawName: "BLUE BOTTLE", rightCategory: "Eating Out" }),
 		kase({ rawName: "CHECKCARD 0921 CVS", rightCategory: null }),
 	];
+
 	const rowsFor = (answer: JevAnswer | null, outcome: string): Row[] => [
 		{
 			outcome,
 			ms: 120,
 			answer: answer
-				? scoreCase(cases[0] as Case, ok(answer), NAMES, 120).answer
+				? scoreCase(itemAt(cases, 0), ok(answer), NAMES, 120).answer
 				: null,
 		},
 		{ outcome: "failed: HTTP 429", ms: 80, answer: null },
 	];
+
 	const report = (
 		overrides: Partial<Parameters<typeof formatReport>[0]> = {},
 	) =>
@@ -660,6 +690,7 @@ describe("formatReport", () => {
 	it("says to read the picks on the fifty-list tables only", () => {
 		const line =
 			"Some of the 50 names fit these stores as well as the demo's own category does, so read the picks, not just the count.";
+
 		const text = report();
 		expect(text.split(line).length - 1).toBe(1);
 		expect(text.indexOf(line)).toBeGreaterThan(
@@ -678,6 +709,7 @@ describe("formatReport", () => {
 				},
 			],
 		});
+
 		expect(text.split("Workers AI is busy").length - 1).toBe(1);
 		expect(text.split('{"model":"clef-unique"}').length - 1).toBe(1);
 		expect(text).toContain('"input_tokens": 7');
@@ -686,6 +718,7 @@ describe("formatReport", () => {
 		const text = report({
 			notes: [{ name: "Jev" }, { name: "Clef", usage: { input_tokens: 7 } }],
 		});
+
 		expect(text).not.toContain("### Jev");
 		expect(text).toContain("### Clef");
 	});
@@ -697,11 +730,13 @@ describe("Clef through Workers AI", () => {
 	it("sends the model's own selector and passes the request's timeout signal", async () => {
 		const ai = fakeAi();
 		const fetchImpl = viaWorkersAI(ai, CLEF, "clef");
+
 		const response = await fetchImpl(JEV_URL, {
 			method: "POST",
 			body: JSON.stringify({ model: "jev-latest", state: {}, questions: {} }),
 			signal: AbortSignal.timeout(10_000),
 		});
+
 		expect(response.status).toBe(200);
 		const [model, body, options] = callsOf(ai)[0] ?? [];
 		expect(model).toBe(CLEF);
@@ -728,7 +763,7 @@ describe("runComparison", () => {
 		expect(clef.every(([, body]) => body.model === "clef")).toBe(true);
 		expect(flash.every(([, body]) => body.model === "clef-flash")).toBe(true);
 		expect(
-			calls.every(([, , options]) => options.signal instanceof AbortSignal),
+			calls.every(([, , options]) => options?.signal instanceof AbortSignal),
 		).toBe(true);
 	});
 
@@ -746,14 +781,19 @@ describe("runComparison", () => {
 	});
 
 	it("sends Jev's request to JEV_URL with the bearer key", async () => {
-		const jev = vi.fn(async () => Response.json(modelAnswer()));
+		const jev = fakeFetch(
+			vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				Response.json(modelAnswer()),
+			),
+		);
+
 		await runComparison({ AI: fakeAi(), JEV_API_KEY: "test-key" }, jev, TODAY, {
 			lists: ["demo"],
 			models: ["jev"],
 		});
-		const [url, init] = jev.mock.calls[0] as unknown as [string, RequestInit];
+		const [url, init] = present(jev.mock.calls[0]);
 		expect(url).toBe(JEV_URL);
-		expect((init.headers as Record<string, string>).Authorization).toBe(
+		expect(new Headers(init?.headers).get("Authorization")).toBe(
 			"Bearer test-key",
 		);
 	});
@@ -773,12 +813,15 @@ describe("runComparison", () => {
 	it("shows a Clef call that throws as failed: no response, with its message once", async () => {
 		const ai = fakeAi((model, body) => {
 			if (model === CLEF) throw new Error("Workers AI is busy");
+
 			return { ...modelAnswer(), model: body.model };
 		});
+
 		const text = await runComparison({ AI: ai }, noJev(), TODAY, {
 			lists: ["demo"],
 			models: ["clef"],
 		});
+
 		expect(text).toContain("failed: no response");
 		expect(text.split("Workers AI is busy").length - 1).toBe(1);
 	});
@@ -787,10 +830,12 @@ describe("runComparison", () => {
 		const ai = fakeAi((model) =>
 			model === CLEF ? { model: "clef" } : modelAnswer(),
 		);
+
 		const text = await runComparison({ AI: ai }, noJev(), TODAY, {
 			lists: ["demo"],
 			models: ["clef"],
 		});
+
 		expect(text).toContain("unreadable");
 		expect(text.split('{"model":"clef"}').length - 1).toBe(1);
 	});
@@ -808,10 +853,12 @@ describe("the Worker's routes", () => {
 
 	it("runs only the asked-for model and list for ?model=clef&list=demo", async () => {
 		const ai = fakeAi();
+
 		const response = await worker.fetch(
 			new Request("https://compare.test/?model=clef&list=demo"),
 			{ AI: ai },
 		);
+
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("text/markdown");
 		const calls = callsOf(ai);
@@ -821,20 +868,24 @@ describe("the Worker's routes", () => {
 
 	it("answers any other path with a 404 and makes no call", async () => {
 		const ai = fakeAi();
+
 		const response = await worker.fetch(
 			new Request("https://compare.test/favicon.ico"),
 			{ AI: ai },
 		);
+
 		expect(response.status).toBe(404);
 		expect(ai.run).not.toHaveBeenCalled();
 	});
 
 	it("answers an unknown model or list with a 400 and makes no call", async () => {
 		const ai = fakeAi();
+
 		const response = await worker.fetch(
 			new Request("https://compare.test/?model=gpt"),
 			{ AI: ai },
 		);
+
 		expect(response.status).toBe(400);
 		expect(ai.run).not.toHaveBeenCalled();
 	});

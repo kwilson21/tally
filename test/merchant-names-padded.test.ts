@@ -51,11 +51,13 @@ describe("a padded text Workers AI is asked about keeps its key (the names are t
 
 	it("an answer with names creates a pending row under the padded key, with the names trimmed and in order", async () => {
 		expect(await merchantsToAsk(db, 1000)).toContain(" Padded Co ");
+
 		const suggested = await saveAskedNames(
 			db,
 			[{ rawName: " Padded Co ", names: ["  Padded Co  ", " Padded Two", ""] }],
 			[],
 		);
+
 		expect(suggested).toBe(1);
 		expect(
 			await db
@@ -120,6 +122,7 @@ describe("a padded text Workers AI is asked about keeps its key (the names are t
 			],
 			[],
 		);
+
 		expect(suggested).toBe(1);
 		expect(await merchantNames(db, "")).toEqual([]);
 		await assertMerchantInvariants(db);

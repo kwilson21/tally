@@ -13,6 +13,17 @@ import { resetDemo } from "../src/demo/reset";
 // The writes enforce "no two active bills share a name" themselves (spec §8.5), so two saves that
 // both passed the form's check can't both land. The demo has Streaming (1), Water (2), Electric (3),
 // Internet (5) and Soccer league (6) active, and Old phone plan (7) inactive.
+/** The bills columns the tests read back, as a SELECT * returns them. */
+type AddedBill = {
+	amount_cents: number;
+	due_day: number;
+	frequency: string;
+	anchor_month: string | null;
+	category_id: number | null;
+	merchant_raw_name: string;
+	active: number;
+};
+
 const fields = (over: Partial<BillFields> = {}): BillFields => ({
 	name: "Gym",
 	amountCents: 4250,
@@ -23,6 +34,7 @@ const fields = (over: Partial<BillFields> = {}): BillFields => ({
 	merchantRawName: "CITY GYM",
 	...over,
 });
+
 const count = async (where = "1=1") =>
 	(
 		await env.DB.prepare(
@@ -31,6 +43,7 @@ const count = async (where = "1=1") =>
 			n: number;
 		}>()
 	)?.n;
+
 const row = (id: number) =>
 	env.DB.prepare("SELECT name,amount_cents,active FROM bills WHERE id=?")
 		.bind(id)
@@ -42,9 +55,11 @@ describe("bill writes", () => {
 	describe("insertBill", () => {
 		it("adds a bill with a free name", async () => {
 			expect(await insertBill(env.DB, fields())).toBe(true);
+
 			const added = await env.DB.prepare(
 				"SELECT * FROM bills WHERE name='Gym'",
-			).first<Record<string, unknown>>();
+			).first<AddedBill>();
+
 			expect(added).toMatchObject({
 				amount_cents: 4250,
 				due_day: 12,
@@ -61,14 +76,18 @@ describe("bill writes", () => {
 			expect(
 				await insertBill(env.DB, fields({ name: "Dated" }), "2026-10-10"),
 			).toBe(true);
+
 			const dated = await env.DB.prepare(
 				"SELECT added_on AS addedOn FROM bills WHERE name='Dated'",
 			).first<{ addedOn: string }>();
+
 			expect(dated?.addedOn).toBe("2026-10-10");
 			expect(await insertBill(env.DB, fields({ name: "Undated" }))).toBe(true);
+
 			const undated = await env.DB.prepare(
 				"SELECT added_on AS addedOn FROM bills WHERE name='Undated'",
 			).first<{ addedOn: string }>();
+
 			expect(undated?.addedOn).toBe(todayIn(DEFAULT_TIME_ZONE));
 		});
 
@@ -129,6 +148,7 @@ describe("bill writes", () => {
 				)
 					.bind(existing)
 					.run();
+
 				const active = (
 					await env.DB.prepare("SELECT id,name,active FROM bills").all<{
 						id: number;
@@ -136,6 +156,7 @@ describe("bill writes", () => {
 						active: number;
 					}>()
 				).results;
+
 				expect(duplicateBillName(active, typed) !== undefined).toBe(same);
 				expect(await insertBill(env.DB, fields({ name: typed }))).toBe(!same);
 				await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -175,6 +196,7 @@ describe("bill writes", () => {
 						).run()
 					).meta.last_row_id,
 				);
+
 			const flagOf = (id: number) =>
 				env.DB.prepare(
 					"SELECT merchant_raw_name, merchant_raw_text FROM bills WHERE id=?",
@@ -274,6 +296,7 @@ describe("bill writes", () => {
 				const transaction = await env.DB.prepare(
 					"SELECT id FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
 				).first<{ id: number }>();
+
 				await env.DB.prepare(
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9,'2020-01',?,'user','dismissed')",
 				)
@@ -353,15 +376,18 @@ describe("bill writes", () => {
 			const transaction = await env.DB.prepare(
 				"SELECT id FROM transactions WHERE id NOT IN (SELECT transaction_id FROM bill_payments WHERE status='linked') LIMIT 1",
 			).first<{ id: number }>();
+
 			await env.DB.prepare(
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(2,'2020-01',?,'user','dismissed')",
 			)
 				.bind(transaction?.id)
 				.run();
+
 			const dismissed = () =>
 				env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=2 AND status='dismissed'",
 				).first("n");
+
 			// A refused save keeps its dismissals, as it keeps everything else.
 			expect(
 				await updateBill(

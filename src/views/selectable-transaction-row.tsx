@@ -35,6 +35,7 @@ export function SelectableTransactionRow({
 }) {
 	const nameId = `select-${row.id}-name`;
 	const reasonId = `select-${row.id}-reason`;
+
 	return (
 		<li data-transaction={row.id} class="group/tx">
 			{/* relative keeps the visually hidden checkbox inside its own row. The label is the named group `group/select`, so its check reads only this checkbox: a bare `group` ancestor, like the off-page disclosure's `details.group`, would match a checked tick in another row (#701). */}

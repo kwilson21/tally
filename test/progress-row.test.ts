@@ -164,6 +164,7 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 			budgetCents: 0,
 			nudge: { href: "/budget/3/nudge", id: "nudge-3", focus: "up" },
 		}).toString();
+
 		expect(html).toMatch(/id="nudge-3-up"[^>]*autofocus/);
 		expect(html).not.toMatch(/id="nudge-3-down"[^>]*autofocus/);
 	});

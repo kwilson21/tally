@@ -3,12 +3,22 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { resetDemo } from "../src/demo/reset";
+import { isMethod } from "./helpers/present";
 
 // The day's Jev count (spec §8.6): one number per household date that every run, at a sync or
 // overnight, counts against, so a day never goes over the cap. A run reserves the calls it wants in
 // one step before it starts, and gives back what it didn't use when it ends.
 
 const db = env.DB;
+
+/** True for a member the D1 binding has, so the Proxy below reads only members that exist. */
+function isDbKey(
+	target: D1Database,
+	property: string | symbol,
+): property is keyof D1Database {
+	return property in target;
+}
+
 const rows = async () =>
 	(
 		await db
@@ -17,10 +27,13 @@ const rows = async () =>
 			)
 			.all<{ key: string; value: string }>()
 	).results;
+
 let turns = 0;
+
 /** A reserve for a new sorting group: each group's name is unique, so each reserve gets its own turn. */
 const reserve = (day: string, cap: number, wanted: number) =>
 	reserveJevCalls(db, day, cap, wanted, `group:${++turns}`);
+
 /** How many of the day's calls are spoken for. */
 const used = async (day: string) =>
 	Number((await rows()).find((r) => r.key === `jev_calls_${day}`)?.value ?? 0);
@@ -66,9 +79,11 @@ describe("reserving Jev's calls for the day", () => {
 		const grants = await Promise.all(
 			Array.from({ length: 12 }, () => reserve("2026-10-06", 50, 7)),
 		);
+
 		const total = grants.reduce((a, b) => a + b, 0);
 		expect(total).toBe(50);
 		expect(await used("2026-10-06")).toBe(50);
+
 		// Each run got a whole number between none and what it asked for.
 		for (const granted of grants) {
 			expect(granted).toBeGreaterThanOrEqual(0);
@@ -93,30 +108,34 @@ describe("reserving Jev's calls for the day", () => {
 	it("leaves the household's other settings alone", async () => {
 		await reserve("2026-10-06", 3, 3);
 		await reserve("2026-10-07", 3, 1);
+
 		const others = await db
 			.prepare(
 				"SELECT key FROM household_settings WHERE key NOT GLOB 'jev_calls_*' ORDER BY key",
 			)
 			.all<{ key: string }>();
+
 		expect(others.results.map((r) => r.key)).toContain("time_zone");
 	});
 
 	it("takes one batch, so the count it read and the count it wrote are one step", async () => {
 		const batches: number[] = [];
+
 		const spied = new Proxy(db, {
 			get(target, property) {
-				const value = Reflect.get(target, property);
 				if (property === "batch")
-					return (statements: unknown[]) => {
+					return (statements: D1PreparedStatement[]) => {
 						batches.push(statements.length);
-						return (value as (s: unknown[]) => unknown).call(
-							target,
-							statements,
-						);
+
+						return target.batch(statements);
 					};
-				return typeof value === "function" ? value.bind(target) : value;
+
+				const value = isDbKey(target, property) ? target[property] : undefined;
+
+				return isMethod(value) ? value.bind(target) : value;
 			},
 		});
+
 		await reserveJevCalls(spied, "2026-10-06", 40, 12, "spied:1");
 		expect(batches).toHaveLength(1);
 	});
@@ -143,11 +162,13 @@ describe("the demo's nightly reset", () => {
 			.run();
 		await saveAiSwitches(db, { categories: false, income: false });
 		await resetDemo(db, "2026-10-06");
+
 		const settings = (
 			await db
 				.prepare("SELECT key, value FROM household_settings ORDER BY key")
 				.all<{ key: string; value: string }>()
 		).results;
+
 		expect(settings).toEqual([
 			{ key: "jev_calls_2026-10-06", value: "3" },
 			{ key: "time_zone", value: "America/New_York" },

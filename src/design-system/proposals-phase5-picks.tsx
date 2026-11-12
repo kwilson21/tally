@@ -45,9 +45,11 @@ import { NeedsLine } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
+
 /** Safe to spend below $0: a minus sign and the amount, with cents only when it's under $1. */
 const negative = (cents: number) =>
 	`−${cents < 100 ? formatCents(cents) : whole(cents)}`;
+
 const sum = (cents: number[]) => cents.reduce((s, c) => s + c, 0);
 
 // ---------------------------------------------------------------------------------------------
@@ -124,6 +126,7 @@ const BUDGETS = {
 	household: 25000,
 	utilities: 45000,
 };
+
 const BUDGET_CENTS = sum(Object.values(BUDGETS)); // $1,850
 
 /** A month's budgeted rows, in Settings' order. */
@@ -142,8 +145,10 @@ type Month = {
 	uncategorizedCents: number;
 	billsDueCents: number;
 };
+
 const spentOf = (m: Month) =>
 	sum(m.rows.map((r) => r.spentCents)) + m.noBudgetCents + m.uncategorizedCents;
+
 /** Spec §6: the whole budget, minus counted spending, minus bills due and unpaid. */
 const safeOf = (m: Month) => BUDGET_CENTS - spentOf(m) - m.billsDueCents;
 
@@ -225,7 +230,9 @@ function Bar({ pct, fill }: { pct: number; fill: string }) {
 // The month heading and its strip of dots (P92).
 
 const STRIP = ["May", "Jun", "Jul", "Aug", "Sep", "Oct"] as const;
+
 type Short = (typeof STRIP)[number];
+
 const FULL: Record<Short, string> = {
 	May: "May",
 	Jun: "June",
@@ -249,6 +256,7 @@ function MonthArrow({
 			class={`size-6 ${direction === "previous" ? "rotate-180" : ""}`}
 		/>
 	);
+
 	if (!to) {
 		return (
 			<span
@@ -259,6 +267,7 @@ function MonthArrow({
 			</span>
 		);
 	}
+
 	return (
 		<a
 			href="#p92-month-dots"
@@ -286,6 +295,7 @@ function MonthNav({
 	const i = STRIP.indexOf(viewing);
 	const prev = viewing === first ? undefined : STRIP[i - 1];
 	const next = STRIP[i + 1];
+
 	return (
 		<div>
 			<div class="flex items-center gap-3">
@@ -301,6 +311,7 @@ function MonthNav({
 						{STRIP.slice(STRIP.indexOf(first)).map((m) => {
 							const now = m === "Oct";
 							const here = m === viewing;
+
 							return (
 								<li>
 									<a
@@ -353,8 +364,10 @@ const BAR_CAP = 1.25;
  */
 export function endBarRatio(spentCents: number, budgetCents: number) {
 	if (spentCents <= 0) return { ratio: 0, capped: false };
+
 	if (budgetCents <= 0) return { ratio: BAR_CAP, capped: true };
 	const ratio = spentCents / budgetCents;
+
 	return ratio > BAR_CAP
 		? { ratio: BAR_CAP, capped: true }
 		: { ratio, capped: false };
@@ -376,9 +389,11 @@ export function EndBars({ rows }: { rows: Row[] }) {
 	const step = n > 1 ? Math.min(66, (areaRight - left - width) / (n - 1)) : 66;
 	const x0 = left + (areaRight - left - ((n - 1) * step + width)) / 2;
 	const lineY = base - unit;
+
 	const words = rows
 		.map((r) => `${r.name} ${whole(r.spentCents)} of ${whole(r.budgetCents)}`)
 		.join(", ");
+
 	return (
 		<svg
 			viewBox={`0 0 ${W} 142`}
@@ -400,11 +415,14 @@ export function EndBars({ rows }: { rows: Row[] }) {
 			</text>
 			{rows.map((r, i) => {
 				const over = r.spentCents > r.budgetCents;
+
 				const h = Math.max(
 					3,
 					Math.round(endBarRatio(r.spentCents, r.budgetCents).ratio * unit),
 				);
+
 				const x = x0 + i * step;
+
 				return (
 					<g>
 						<rect
@@ -447,6 +465,7 @@ const SEPTEMBER: Month = {
 	uncategorizedCents: 0,
 	billsDueCents: 0,
 };
+
 /** July, finished: Eating Out and Gas over, and Kids had $62 with no budget. */
 const JULY: Month = {
 	rows: budgeted([68400, 28600, 21200, 21000, 43800]),
@@ -454,6 +473,7 @@ const JULY: Month = {
 	uncategorizedCents: 0,
 	billsDueCents: 0,
 };
+
 /** May, the first month with transactions in the demo: it ended $340 under. */
 const MAY: Month = {
 	rows: budgeted([59800, 21400, 17600, 12000, 40200]),
@@ -461,6 +481,7 @@ const MAY: Month = {
 	uncategorizedCents: 0,
 	billsDueCents: 0,
 };
+
 /** A month with a $0 budget that still spent $45, and Eating Out far over: the bars cap, and each says by how much. */
 const STRETCH: Month = {
 	rows: [
@@ -471,6 +492,7 @@ const STRETCH: Month = {
 	uncategorizedCents: 0,
 	billsDueCents: 0,
 };
+
 /** A finished month's number: its budgets minus its spending; a goal and plans never change it. */
 const endedBy = (m: Month) => BUDGET_CENTS - spentOf(m);
 
@@ -486,6 +508,7 @@ function PastTop({
 }) {
 	const by = endedBy(month);
 	const over = by < 0;
+
 	return (
 		<>
 			<MonthNav viewing={viewing} strip={strip} />
@@ -511,6 +534,7 @@ function PastTop({
 function PastRow({ r }: { r: Row }) {
 	const over = r.spentCents > r.budgetCents;
 	const { fillPct } = barGeometry(r.spentCents, r.budgetCents);
+
 	return (
 		<li class="flex items-start gap-4 py-3">
 			<CategoryIcon icon={r.icon} color={r.color} />
@@ -614,11 +638,13 @@ const BELOW: Month = {
 	uncategorizedCents: 0,
 	billsDueCents: 14200,
 };
+
 /** …and the same month with $40 less spent in Household, so it ends 40¢ below $0. */
 const JUST_BELOW: Month = {
 	...BELOW,
 	rows: budgeted([74200, 28600, 19800, 4240, 44000]),
 };
+
 const OVER_SENTENCE =
 	"Over budget this month. Spending more takes it further over.";
 
@@ -650,9 +676,11 @@ type Pace = {
 	/** Bills due this month that aren't paid. */
 	billsDueCents: number;
 };
+
 /** Money out so far that doesn't pay a bill or a plan, with refunds added back, so the pace never projects them. */
 const everydayOut = (p: Pace) =>
 	p.soFarCents - p.paysBillsCents - p.paysPlansCents + p.refundsCents;
+
 /** The rule: spending so far, plus the bills still due, plus the everyday pace times the days left. */
 const forecastEnd = (p: Pace) =>
 	p.soFarCents +
@@ -661,12 +689,15 @@ const forecastEnd = (p: Pace) =>
 
 /** How the days of spending ran up to today: a plain shape, scaled so it ends on the real total. */
 const WEIGHTS = [3, 5, 1, 7, 2, 9, 4, 1, 6, 8, 2, 5, 1, 7, 4];
+
 const cumulative = (total: number, days: number) => {
 	const w = WEIGHTS.slice(0, days);
 	const all = sum(w);
 	let seen = 0;
+
 	return w.map((x, i) => {
 		seen += x;
+
 		return i === w.length - 1 ? total : Math.round((total * seen) / all);
 	});
 };
@@ -678,6 +709,7 @@ const UNDER_MONTH: Month = {
 	uncategorizedCents: 3000,
 	billsDueCents: 20500,
 };
+
 const UNDER_PACE: Pace = {
 	day: 15,
 	daysInMonth: 31,
@@ -687,6 +719,7 @@ const UNDER_PACE: Pace = {
 	refundsCents: 0,
 	billsDueCents: UNDER_MONTH.billsDueCents,
 };
+
 /** Oct 15, on pace to finish over: Eating Out is already $25 over and the pace is $53 a day. */
 const OVER_MONTH: Month = {
 	rows: budgeted([38000, 27500, 11000, 6000, 8300]),
@@ -694,6 +727,7 @@ const OVER_MONTH: Month = {
 	uncategorizedCents: 700,
 	billsDueCents: 20500,
 };
+
 const OVER_PACE: Pace = { ...UNDER_PACE, soFarCents: spentOf(OVER_MONTH) };
 
 /** The chart and its one sentence. An amount under rounds down and one over rounds up. */
@@ -701,20 +735,26 @@ function Forecast({ pace }: { pace: Pace }) {
 	const end = forecastEnd(pace);
 	const diff = BUDGET_CENTS - end;
 	const under = diff >= 0;
+
 	const shown = under
 		? Math.floor(diff / 100) * 100
 		: Math.ceil(-diff / 100) * 100;
+
 	const left = 10;
 	const right = 340;
 	const top = 34;
 	const base = 142;
 	const ymax = Math.max(BUDGET_CENTS, end, pace.soFarCents);
+
 	const x = (d: number) =>
 		left + ((d - 1) / (pace.daysInMonth - 1)) * (right - left);
+
 	const y = (c: number) => base - (c / ymax) * (base - top);
+
 	const line = cumulative(pace.soFarCents, pace.day)
 		.map((c, i) => `${x(i + 1).toFixed(1)},${y(c).toFixed(1)}`)
 		.join(" ");
+
 	return (
 		<figure class="mt-3">
 			<svg
@@ -792,6 +832,7 @@ const workedPace = (p: Pace) => {
 	const everyday = everydayOut(p);
 	const left = p.daysInMonth - p.day;
 	const perDay = Math.round(everyday / p.day);
+
 	return `Oct ${p.day}: ${whole(p.soFarCents)} spent, ${whole(p.billsDueCents)} in bills still due, and ${whole(Math.round((everyday * left) / p.day))} more at about ${whole(perDay)} a day for ${left} days, so ${whole(forecastEnd(p))} against ${whole(BUDGET_CENTS)}.`;
 };
 
@@ -1399,6 +1440,7 @@ const HOLIDAY: Plan = {
 	cents: 40000,
 	line: "Set aside from December",
 };
+
 const RENT_NOV = bill(6, "Rent", 120000, "paid", "2026-11-01", RENT_CAT);
 const ELECTRIC_NOV: BillRowData = { ...ELECTRIC, dueDate: "2026-11-08" };
 
@@ -1423,6 +1465,7 @@ const MONTHLY_BILLS =
 	INTERNET.amountCents +
 	CAR.amountCents +
 	RENT_PAID.amountCents;
+
 const STILL_TO_PAY =
 	ELECTRIC.amountCents + INTERNET.amountCents + CAR.amountCents;
 
@@ -1501,11 +1544,13 @@ const planUnpaid = (
 const RENT_PART = bill(6, "Rent", 120000, "overdue", "2026-10-01", RENT_CAT);
 const RENT_PAID_SO_FAR = 60000;
 const RENT_LEFT = RENT_PART.amountCents - RENT_PAID_SO_FAR;
+
 const PART_MONTHLY =
 	RENT_PART.amountCents +
 	ELECTRIC.amountCents +
 	INTERNET.amountCents +
 	CAR.amountCents;
+
 const PART_TO_PAY =
 	RENT_LEFT + ELECTRIC.amountCents + INTERNET.amountCents + CAR.amountCents;
 

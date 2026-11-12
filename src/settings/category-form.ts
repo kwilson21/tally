@@ -9,22 +9,27 @@ import { CATEGORY_NAME_MAX } from "../limits";
 export const MAX_ACTIVE = 50;
 
 type Existing = { id: number; name: string; archived: boolean }[];
+
 /** What a full list says, for adding a category or restoring one. */
 export const fullMessage = (action: "add" | "restore") =>
 	`Tally has room for ${MAX_ACTIVE} categories. Archive one to ${action} another.`;
 
 export type CategoryValue = { name: string };
+
 export type CategoryErrors = Partial<Record<"name", string>>;
 
 export const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
+
 /**
  * A category name as the form compares it: ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. It is stored
  * as `name_key`, which the unique index checks, so the database refuses the second of two saves at once (migration 0052).
  */
 export const nameKey = (name: string) => normalizeName(name).toLowerCase();
+
 /** Whether two category names are the same, ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. */
 export const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
+
 /**
  * The active category with this name (ignoring case and spacing), or undefined. The one check for "is this name an
  * active category": the form, the Maybe card's "Existing category" row and the naming's choices all use it (decision 165).
@@ -35,6 +40,7 @@ export function activeNamed<T extends { name: string; archived?: boolean }>(
 ): T | undefined {
 	return categories.find((c) => !c.archived && sameName(c.name, name));
 }
+
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
 
@@ -42,6 +48,7 @@ const activeCount = (existing: Existing) =>
 export function nameForm(name: string | File | null): FormData {
 	const form = new FormData();
 	form.set("name", String(name ?? ""));
+
 	return form;
 }
 
@@ -55,6 +62,7 @@ export function parseCategory(
 	const errors: CategoryErrors = {};
 
 	const clash = existing.find((c) => c.id !== id && sameName(c.name, name));
+
 	if (name === "") errors.name = "Give the category a name.";
 	else if (name.length > CATEGORY_NAME_MAX)
 		errors.name = `Keep the name to ${CATEGORY_NAME_MAX} characters.`;
@@ -68,6 +76,7 @@ export function parseCategory(
 		errors.name = fullMessage("add");
 
 	if (Object.keys(errors).length > 0) return { ok: false, errors };
+
 	return { ok: true, value: { name } };
 }
 

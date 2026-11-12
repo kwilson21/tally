@@ -9,6 +9,7 @@ describe("Chip", () => {
 			String(
 				Chip({ type: "radio", name: "category", value: "1", children: "Gas" }),
 			).match(/<label [^>]*>/)?.[0] ?? "";
+
 		expect(label).toContain("has-[:disabled]:cursor-not-allowed");
 		expect(label).toContain("has-[:disabled]:opacity-40");
 	});
@@ -22,6 +23,7 @@ describe("Chip", () => {
 				children: "Householdandgardensuppliesandmore",
 			}),
 		);
+
 		expect(html).toContain(
 			'<span class="min-w-0 overflow-hidden text-ellipsis">Householdandgardensuppliesandmore</span>',
 		);

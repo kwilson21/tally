@@ -31,6 +31,7 @@ describe("amountForMonth", () => {
 			row("2026-05", 1200),
 			row("2026-10", 900),
 		];
+
 		expect(amountForMonth(rows, "2026-08", 900)).toBe(1200);
 		expect(amountForMonth(rows, "2026-05", 900)).toBe(1200);
 		expect(amountForMonth(rows, "2026-04", 900)).toBe(1000);

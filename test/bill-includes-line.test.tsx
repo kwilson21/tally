@@ -70,16 +70,19 @@ describe("includesLine: the words under a heading whose total counts unlisted oc
 			frequency: "weekly" as const,
 			dueDates: ["2026-10-02", "2026-10-09"],
 		};
+
 		const gym = {
 			name: "Gym",
 			frequency: "monthly" as const,
 			dueDates: ["2026-10-04"],
 		};
+
 		const netflix = {
 			name: "Netflix",
 			frequency: "monthly" as const,
 			dueDates: ["2026-10-05"],
 		};
+
 		expect(includesLine([daycare, gym])).toBe(
 			"Includes Daycare's Fridays on Oct 2 and 9, Gym on Oct 4",
 		);
@@ -107,6 +110,7 @@ describe("BillStatusHeading with its unlisted line", () => {
 				includes: "Includes Daycare's Fridays on Oct 2 and 9",
 			}),
 		);
+
 		expect(html).toContain("$496.98</span>");
 		expect(html).toContain(
 			'<p class="text-sm text-muted">Includes Daycare&#39;s Fridays on Oct 2 and 9</p>',
@@ -118,6 +122,7 @@ describe("BillStatusHeading with its unlisted line", () => {
 		const html = String(
 			BillStatusHeading({ status: "paid", totalCents: 1698 }),
 		);
+
 		expect(html).not.toMatch(/<p[ >]/);
 	});
 });

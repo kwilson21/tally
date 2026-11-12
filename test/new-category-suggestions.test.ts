@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { setArchived } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -10,6 +11,7 @@ const THIS = TODAY.slice(0, 7);
 
 async function get(path = "/settings/categories") {
 	const res = await exports.default.fetch(BASE + path);
+
 	return { res, html: await res.text() };
 }
 
@@ -24,6 +26,7 @@ async function post(path: string, fields: [string, string][]) {
 		},
 		body: new URLSearchParams(fields).toString(),
 	});
+
 	return { res, html: await res.text() };
 }
 
@@ -40,25 +43,31 @@ beforeEach(async () => {
 		),
 		env.DB.prepare("DELETE FROM category_suggestions"),
 	]);
-	suggestion = (
-		await env.DB.prepare(
-			"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-		).first<{ id: number }>()
-	)?.id as number;
-	first = (
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 6412, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
-		)
-			.bind(`${THIS}-05`, suggestion)
-			.first<{ id: number }>()
-	)?.id as number;
-	second = (
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 2399, 'PETSMART 0412', 'Petsmart', 1, ?) RETURNING id",
-		)
-			.bind(`${THIS}-02`, suggestion)
-			.first<{ id: number }>()
-	)?.id as number;
+	suggestion = present(
+		(
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
+			).first<{ id: number }>()
+		)?.id,
+	);
+	first = present(
+		(
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 6412, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
+			)
+				.bind(`${THIS}-05`, suggestion)
+				.first<{ id: number }>()
+		)?.id,
+	);
+	second = present(
+		(
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 2399, 'PETSMART 0412', 'Petsmart', 1, ?) RETURNING id",
+			)
+				.bind(`${THIS}-02`, suggestion)
+				.first<{ id: number }>()
+		)?.id,
+	);
 });
 
 describe("Settings' Suggested card for a category that already exists", () => {
@@ -81,13 +90,17 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'tag', 'cat-plum', 99)",
 		).run();
-		const made = (
-			await env.DB.prepare(
-				"SELECT id FROM categories WHERE name = 'Pet Care'",
-			).first<{
-				id: number;
-			}>()
-		)?.id as number;
+
+		const made = present(
+			(
+				await env.DB.prepare(
+					"SELECT id FROM categories WHERE name = 'Pet Care'",
+				).first<{
+					id: number;
+				}>()
+			)?.id,
+		);
+
 		const categories = (
 			await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
 				n: number;
@@ -101,26 +114,32 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		]);
 
 		expect(res.status).toBe(200);
+
 		const filed = await env.DB.prepare(
 			"SELECT id, category_id AS categoryId, category_source AS source FROM transactions WHERE id IN (?, ?) ORDER BY id",
 		)
 			.bind(first, second)
 			.all<{ id: number; categoryId: number | null; source: string | null }>();
+
 		expect(filed.results).toEqual([
 			{ id: first, categoryId: made, source: "user" },
 			{ id: second, categoryId: null, source: null },
 		]);
+
 		const count = (
 			await env.DB.prepare("SELECT COUNT(*) AS n FROM categories").first<{
 				n: number;
 			}>()
 		)?.n;
+
 		expect(count).toBe(categories);
+
 		const status = await env.DB.prepare(
 			"SELECT status FROM category_suggestions WHERE id = ?",
 		)
 			.bind(suggestion)
 			.first<{ status: string }>();
+
 		expect(status?.status).toBe("created");
 	});
 
@@ -171,12 +190,16 @@ describe("Settings' Suggested card for a category that already exists", () => {
 describe("Settings' Suggested card for an archived category with that name (decision 110)", () => {
 	/** Pet Care as the family had it: its own icon and colour, archived on July 15 (its archive period open). */
 	async function archivePetCare(): Promise<number> {
-		const id = (
-			await env.DB.prepare(
-				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 99) RETURNING id",
-			).first<{ id: number }>()
-		)?.id as number;
+		const id = present(
+			(
+				await env.DB.prepare(
+					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 99) RETURNING id",
+				).first<{ id: number }>()
+			)?.id,
+		);
+
 		await setArchived(env.DB, id, true, "2026-07-15");
+
 		return id;
 	}
 
@@ -228,6 +251,7 @@ describe("Settings' Suggested card for an archived category with that name (deci
 		).toMatchObject({
 			results: [{ archived_on: "2026-07-15", restored_on: TODAY }],
 		});
+
 		const filed = await env.DB.prepare(
 			"SELECT id, category_id AS categoryId, category_source AS source FROM transactions WHERE id IN (?, ?) ORDER BY id",
 		)
@@ -237,15 +261,18 @@ describe("Settings' Suggested card for an archived category with that name (deci
 				categoryId: number | null;
 				source: string | null;
 			}>();
+
 		expect(filed.results).toEqual([
 			{ id: first, categoryId: id, source: "user" },
 			{ id: second, categoryId: id, source: "user" },
 		]);
+
 		const status = await env.DB.prepare(
 			"SELECT status FROM category_suggestions WHERE id = ?",
 		)
 			.bind(suggestion)
 			.first<{ status: string }>();
+
 		expect(status?.status).toBe("created");
 	});
 
@@ -264,11 +291,15 @@ describe("Settings' Suggested card for an archived category with that name (deci
 
 	it("refuses while 50 categories are active, with the restore words, and leaves it archived", async () => {
 		const id = await archivePetCare();
-		const have = (
-			await env.DB.prepare(
-				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
-			).first<{ n: number }>()
-		)?.n as number;
+
+		const have = present(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+				).first<{ n: number }>()
+			)?.n,
+		);
+
 		for (let i = have; i < 50; i++)
 			await env.DB.prepare(
 				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",

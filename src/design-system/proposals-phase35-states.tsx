@@ -32,6 +32,7 @@ const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
  * and $207 set aside for the bills to pay soon (Electric $142 and Internet $65), so $971 is safe.
  */
 const SAFE_TO_SPEND = 170000 - 52200 - 20700;
+
 const homeBehind = (
 	<HomeTop
 		month="October"
@@ -447,6 +448,7 @@ const RENT = {
 	category: "Household",
 	paidTo: "HARBOR PROPERTY MGMT",
 };
+
 const TOO_BIG = "$150,000.00 is a lot for a bill.";
 
 /** A: the form comes back with the line under the amount and a toggle chip to tick before Save. */

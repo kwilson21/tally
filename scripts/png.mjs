@@ -30,13 +30,16 @@ export async function readPng(bytes) {
 	let header = null;
 	const idats = [];
 	let at = SIGNATURE.length;
+
 	while (at < bytes.length) {
 		if (at + 8 > bytes.length) throw new Error(TRUNCATED);
 		const length = view.getUint32(at);
 		const type = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
 		const start = at + 8;
 		const end = start + length;
+
 		if (end + 4 > bytes.length) throw new Error(TRUNCATED);
+
 		if (type === "IHDR" && length === 13)
 			header = {
 				width: view.getUint32(start),
@@ -51,10 +54,12 @@ export async function readPng(bytes) {
 		else if (type === "IEND") break;
 		at = end + 4;
 	}
+
 	if (!header || idats.length === 0) throw new Error(NO_HEADER_OR_DATA);
 
 	const { width, height, bitDepth, colourType, compression, filterMethod } =
 		header;
+
 	if (
 		bitDepth !== 8 ||
 		(colourType !== 2 && colourType !== 6) ||
@@ -62,10 +67,12 @@ export async function readPng(bytes) {
 		filterMethod !== 0
 	)
 		throw new Error(UNSUPPORTED);
+
 	if (header.interlace !== 0) throw new Error(INTERLACED);
 	const channels = colourType === 2 ? 3 : 4;
 
 	let raw;
+
 	try {
 		raw = new Uint8Array(
 			await new Response(
@@ -81,16 +88,21 @@ export async function readPng(bytes) {
 
 	// Each row is one filter-type byte, then its bytes.
 	const stride = width * channels;
+
 	if (raw.length !== height * (stride + 1)) throw new Error(DAMAGED);
 	const data = new Uint8Array(height * stride);
+
 	for (let y = 0; y < height; y++) {
 		const line = y * (stride + 1);
 		const row = y * stride;
+
 		for (let x = 0; x < stride; x++) {
 			const left = x >= channels ? data[row + x - channels] : 0;
 			const up = y > 0 ? data[row - stride + x] : 0;
+
 			const upLeft =
 				x >= channels && y > 0 ? data[row - stride + x - channels] : 0;
+
 			// Uint8Array stores the sum mod 256, as the PNG spec asks.
 			data[row + x] = undoFilter(
 				raw[line],
@@ -101,6 +113,7 @@ export async function readPng(bytes) {
 			);
 		}
 	}
+
 	return { width, height, channels, data };
 }
 
@@ -144,7 +157,10 @@ function paeth(a, b, c) {
 	const pa = Math.abs(p - a);
 	const pb = Math.abs(p - b);
 	const pc = Math.abs(p - c);
+
 	if (pa <= pb && pa <= pc) return a;
+
 	if (pb <= pc) return b;
+
 	return c;
 }

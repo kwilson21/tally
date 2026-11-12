@@ -19,8 +19,10 @@ import { usableSuggestedNames } from "./transactions/name-suggestions";
  * step cut short keeps its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
+
 // While a name waits, notes take at most half the night's calls, so the names always get the other half (#458).
 const noteCallLimitWhileNamesWait = Math.floor(nameCallLimit / 2);
+
 // The switches are read after every five calls, so one turned off mid-run stops within five; a batch's
 // answers are kept or dropped together.
 const SWITCH_CHECK_BATCH = 5;
@@ -43,46 +45,61 @@ export async function suggestTransactionNotes(
 	time?: Deadline,
 ): Promise<{ asked: number; suggested: number }> {
 	const done = { asked: 0, suggested: 0 };
+
 	if (!env.AI || limit <= 0 || pastDeadline(time)) return done;
 	const switches = await readAiSwitches(env.DB);
+
 	if (!switches.details) return done;
 	const transactions = await transactionsNeedingNoteGuess(env.DB, limit);
 	let failuresInARow = 0;
+
 	for (let i = 0; i < transactions.length; i += SWITCH_CHECK_BATCH) {
 		const answered: number[] = [];
 		const failed: number[] = [];
 		const guesses: { id: number; note: string }[] = [];
+
 		for (const transaction of transactions.slice(i, i + SWITCH_CHECK_BATCH)) {
 			if (pastDeadline(time)) break;
 			done.asked += 1;
 			const result = await suggestNote(env.AI, transaction.rawName);
+
 			if (!result.ok) {
 				failed.push(transaction.id);
 				failuresInARow += 1;
+
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
 				continue;
 			}
+
 			failuresInARow = 0;
 			answered.push(transaction.id);
+
 			if (result.note !== null)
 				guesses.push({ id: transaction.id, note: result.note });
 		}
+
 		// Keep or discard this small batch together if the details switch changed during an AI call.
 		const current = await readAiSwitches(env.DB);
+
 		if (!current.details) break;
+
 		const kept = await notesNotRestatingShownNames(
 			env.DB,
 			guesses,
 			current.names,
 		);
+
 		// Answered calls are remembered as tried, even when their note is dropped; a failed one stays untried and is asked again tomorrow, after the rest.
 		await saveNoteAttempts(env.DB, answered, kept, failed);
 		done.suggested += kept.length;
+
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
+
 	console.log(
 		`workers-ai: notes asked ${done.asked}, suggested ${done.suggested}`,
 	);
+
 	return done;
 }
 
@@ -97,13 +114,17 @@ async function notesNotRestatingShownNames(
 	namesOn: boolean,
 ): Promise<{ id: number; note: string }[]> {
 	if (guesses.length === 0) return guesses;
+
 	const rows = await noteNameRows(
 		db,
 		guesses.map((guess) => guess.id),
 	);
+
 	const byId = new Map(rows.map((row) => [row.id, row]));
+
 	return guesses.filter(({ id, note }) => {
 		const row = byId.get(id);
+
 		return (
 			row !== undefined &&
 			!restatesStore(note, [
@@ -138,40 +159,53 @@ export async function suggestMerchantNames(
 ): Promise<{ asked: number; suggested: number }> {
 	const done = { asked: 0, suggested: 0 };
 	const ai = env.AI;
+
 	if (!ai) return done;
+
 	if (pastDeadline(time)) return done;
+
 	if (!(await readAiSwitches(env.DB)).names) return done;
 
 	let failuresInARow = 0;
 	const rawNames = await merchantsToAsk(env.DB, limit);
+
 	for (let i = 0; i < rawNames.length; i += SWITCH_CHECK_BATCH) {
 		const answers: { rawName: string; names: string[] }[] = [];
 		const failed: string[] = [];
+
 		for (const rawName of rawNames.slice(i, i + SWITCH_CHECK_BATCH)) {
 			if (pastDeadline(time)) {
 				console.log("workers-ai: names stopped at the time budget");
 				break;
 			}
+
 			done.asked += 1;
 			const result = await suggestNames(ai, rawName);
+
 			if (!result.ok) {
 				// Recorded before the stop below, so the failure that ends the run is in this batch's write too.
 				failed.push(rawName);
 				failuresInARow += 1;
+
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
 				continue;
 			}
+
 			failuresInARow = 0;
 			answers.push({ rawName, names: result.names });
 		}
+
 		// One read per batch of five keeps the switch boundary (a switch turned off mid-run stops it)
 		// without a D1 read for every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
 		// A batch's answers and failed calls are saved in one D1 batch.
 		done.suggested += await saveAskedNames(env.DB, answers, failed);
+
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
+
 	console.log(`workers-ai: asked ${done.asked}, suggested ${done.suggested}`);
+
 	return done;
 }
 
@@ -187,6 +221,7 @@ export async function suggestNightlyNames(
 	const notesLimit = (await namesWaiting(env))
 		? noteCallLimitWhileNamesWait
 		: nameCallLimit;
+
 	const notes = await suggestTransactionNotes(env, notesLimit, time);
 	await suggestMerchantNames(env, nameCallLimit - notes.asked, time);
 }
@@ -197,6 +232,8 @@ export async function suggestNightlyNames(
  */
 async function namesWaiting(env: NamesEnv): Promise<boolean> {
 	if (!env.AI) return false;
+
 	if (!(await readAiSwitches(env.DB)).names) return false;
+
 	return (await merchantsToAsk(env.DB, 1)).length > 0;
 }

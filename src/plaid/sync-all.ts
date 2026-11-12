@@ -35,6 +35,7 @@ export async function syncAllItems(
 	{ retryFlagged = false }: { retryFlagged?: boolean } = {},
 ): Promise<SyncAllResult> {
 	const startedAt = now();
+
 	const result: SyncAllResult = {
 		added: 0,
 		modified: 0,
@@ -45,14 +46,17 @@ export async function syncAllItems(
 		failed: 0,
 		failedBanks: [],
 	};
+
 	if (!enabled(env)) {
 		logResult(result);
+
 		return result;
 	}
 
 	// The daily run also retries a bank that needs attention (decision 173): a sync that gets every page clears its
 	// flag. A bank that still fails stays flagged, and its reminder is not touched here.
 	const liveStatuses = retryFlagged ? "('ok', 'needs_attention')" : "('ok')";
+
 	const { results: items } = await env.DB.prepare(
 		`SELECT id, institution_name FROM plaid_items WHERE status IN ${liveStatuses} AND disconnected_at IS NULL ORDER BY id`,
 	).all<{ id: number; institution_name: string }>();
@@ -74,24 +78,29 @@ export async function syncAllItems(
 			)
 				.bind(item.id)
 				.run();
+
 			if (claim.meta.changes !== 1) {
 				result.skipped += 1;
 				result.busy += 1;
 				continue;
 			}
+
 			const current = await env.DB.prepare(
 				"SELECT status FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
 			)
 				.bind(item.id)
 				.first<{ status: string }>();
+
 			// Gone, disconnected, or (for a manual run) flagged since the list was read: skip.
 			if (!current || (!retryFlagged && current.status !== "ok")) {
 				result.skipped += 1;
 				continue;
 			}
+
 			const synced = await syncItem(env, item.id, fetchImpl, {
 				runAfterSync: false,
 			});
+
 			if ("skipped" in synced) {
 				result.skipped += 1;
 				result.busy += 1;
@@ -99,17 +108,20 @@ export async function syncAllItems(
 				result.synced += 1;
 				result.added += synced.added;
 				result.modified += synced.modified;
+
 				for (const id of synced.changedIds) result.changedIds.push(id);
 			}
 		} catch (error) {
 			result.failed += 1;
 			result.failedBanks.push(item.institution_name);
+
 			const kind =
 				error instanceof PlaidError
 					? `plaid ${error.request_id ?? "unknown"}`
 					: error instanceof Error
 						? error.name
 						: "unknown";
+
 			console.error(`plaid daily sync: item ${item.id} failed ${kind}`);
 		}
 	}
@@ -125,7 +137,9 @@ export async function syncAllItems(
 			`plaid daily sync: after sync failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
+
 	logResult(result);
+
 	return result;
 }
 

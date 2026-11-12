@@ -64,6 +64,7 @@ const ELECTRIC: BillRowData = {
 	icon: "bills",
 	color: "",
 };
+
 const NETFLIX: BillRowData = {
 	id: 4,
 	name: "Netflix",
@@ -74,6 +75,7 @@ const NETFLIX: BillRowData = {
 	color: "",
 	priceOffer: { amountCents: 1799, date: "2026-10-14" },
 };
+
 const RENT: BillRowData = {
 	id: 9,
 	name: "Rent",
@@ -84,6 +86,7 @@ const RENT: BillRowData = {
 	icon: "bills",
 	color: "",
 };
+
 const INTERNET: BillRowData = {
 	id: 5,
 	name: "Internet",
@@ -93,6 +96,7 @@ const INTERNET: BillRowData = {
 	icon: "bills",
 	color: "",
 };
+
 const DAYCARE: BillRowData = {
 	id: 8,
 	name: "Daycare",
@@ -114,6 +118,7 @@ type Month = {
 	/** A charge Tally found that matches this month and asks to be linked (the demo's lookalike). */
 	charge?: boolean;
 };
+
 const STREAMING: Month[] = [
 	{ period: "2026-12", month: "December", status: "upcoming", due: "Dec 15" },
 	{ period: "2026-11", month: "November", status: "upcoming", due: "Nov 15" },
@@ -131,6 +136,7 @@ const STREAMING: Month[] = [
 	{ period: "2026-05", month: "May", status: "not-paid", due: "May 15" },
 	{ period: "2026-04", month: "April", status: "not-paid", due: "Apr 15" },
 ];
+
 const OCTOBER_PAYMENT: OccurrencePayment = {
 	transactionId: 77,
 	displayName: "Apple.com/bill",
@@ -138,6 +144,7 @@ const OCTOBER_PAYMENT: OccurrencePayment = {
 	amountCents: 299,
 	matchedBy: "auto",
 };
+
 /**
  * The demo's Apple.com/bill lookalike (seed.ts's streaming block): eight days after the prior month's
  * due day, which is min(16, today's day). On Oct 15 that is Sep 23.
@@ -155,6 +162,7 @@ type BudgetRow = {
 	spentCents: number;
 	budgetCents: number;
 };
+
 /** A category with no budget, as Not budgeted lists it. */
 type Unbudgeted = {
 	name: string;
@@ -200,10 +208,12 @@ const SEP_BUDGETS: BudgetRow[] = [
 		budgetCents: 25000,
 	},
 ];
+
 const SEP_UNBUDGETED: Unbudgeted[] = [
 	{ name: "Childcare", icon: "kids", color: "cat-blue", spentCents: 96000 },
 	{ name: "Rent", icon: "rent", color: "cat-slate", spentCents: 120000 },
 ];
+
 /** A sample month, with numbers of its own (not the demo's): Eating Out and Kids over, all else under. */
 const SAMPLE_BUDGETS: BudgetRow[] = [
 	{
@@ -242,10 +252,7 @@ const SAMPLE_BUDGETS: BudgetRow[] = [
  * one. October is so far, so its spending is to date. August's spending is its budgeted rows ($1,556.48)
  * and the $277.11 in Needs a category, which Home counts toward its result too: it ends $134 over.
  */
-const MONTHS: Record<
-	string,
-	{ budgetCents: number; spentCents: number } | null
-> = {
+const MONTHS = {
 	"2026-04": null,
 	"2026-05": { budgetCents: 165000, spentCents: 134000 },
 	"2026-06": { budgetCents: 165000, spentCents: 155200 },
@@ -253,8 +260,10 @@ const MONTHS: Record<
 	"2026-08": { budgetCents: 170000, spentCents: 183359 },
 	"2026-09": { budgetCents: 170000, spentCents: 383447 },
 	"2026-10": { budgetCents: 394000, spentCents: 166531 },
-};
+} satisfies Record<string, { budgetCents: number; spentCents: number } | null>;
+
 const FIRST_MONTH = "2026-05";
+
 const STRIP_MONTHS = [
 	"2026-04",
 	"2026-05",
@@ -273,6 +282,7 @@ const GROCERIES_MONTHS: MonthPoint[] = [
 	{ month: "2026-09", cents: 67200, partial: false },
 	{ month: "2026-10", cents: 8410, partial: true },
 ];
+
 const EATING_MONTHS: MonthPoint[] = [
 	{ month: "2026-05", cents: 17000, partial: false },
 	{ month: "2026-06", cents: 19500, partial: false },
@@ -290,6 +300,7 @@ const EATING_MONTHS: MonthPoint[] = [
 function resultCents(rows: BudgetRow[], unbudgeted: Unbudgeted[]): number {
 	const budget = rows.reduce((sum, row) => sum + row.budgetCents, 0);
 	const spent = rows.reduce((sum, row) => sum + row.spentCents, 0);
+
 	return (
 		budget - spent - unbudgeted.reduce((sum, row) => sum + row.spentCents, 0)
 	);
@@ -297,7 +308,9 @@ function resultCents(rows: BudgetRow[], unbudgeted: Unbudgeted[]): number {
 
 /** A strip month's result in cents, or null for a month with no budgets. */
 function resultOf(item: string): number | null {
-	const month = MONTHS[item] ?? null;
+	// SAFETY: item is one of the STRIP_MONTHS, which are exactly MONTHS's keys; any other string reads undefined and the ?? null covers it.
+	const month = MONTHS[item as keyof typeof MONTHS] ?? null;
+
 	return month ? month.budgetCents - month.spentCents : null;
 }
 
@@ -331,6 +344,7 @@ function GroupHeading({
 	why?: Child;
 }) {
 	const look = GROUP_LOOK[group];
+
 	return (
 		<div class="flex items-center gap-2 text-sm text-muted">
 			<h2 class="flex min-w-0 items-center gap-2">
@@ -519,14 +533,17 @@ function TrendsPicture({
 	mode: TrendsMode;
 }) {
 	const sentence = "$339 less than by this time in September.";
+
 	const groupWhy = (topic: string): Child | undefined => {
 		if (mode === "a") return undefined;
+
 		return mode === "today" ? (
 			<WhyLink section="trends" topic={topic} />
 		) : (
 			<QuietWhy section="trends" topic={topic} />
 		);
 	};
+
 	return (
 		<>
 			{mode === "b" ? (
@@ -743,15 +760,20 @@ function LedgerRow({
 function LedgerMonths({ opened }: { opened: boolean }) {
 	const charge = STREAMING.find((m) => m.charge);
 	const quiet = STREAMING.filter((m) => m.status === "not-paid" && !m.charge);
+
 	return (
 		<>
-			{STREAMING.filter((m) => m.status === "upcoming").map((m) => (
-				<LedgerMonth
-					href={`/bills/1/occurrences/${m.period}/link#payment-picker`}
-					month={m.month}
-					words={`Due ${m.due} · $2.99`}
-				/>
-			))}
+			{STREAMING.flatMap((m) =>
+				m.status === "upcoming"
+					? [
+							<LedgerMonth
+								href={`/bills/1/occurrences/${m.period}/link#payment-picker`}
+								month={m.month}
+								words={`Due ${m.due} · $2.99`}
+							/>,
+						]
+					: [],
+			)}
 			<LedgerDisclosure
 				month="October"
 				words="Paid Oct 15 · $2.99"
@@ -806,6 +828,7 @@ const YEAR = [
 	"2027-02",
 	"2027-03",
 ];
+
 const INITIALS = "JFMAMJJASOND";
 
 /** The months that need a line of their own: each unpaid one, the due ones and the past ones with no payment. */
@@ -815,30 +838,38 @@ const needsRow = (period: string) =>
 /** A month's status in words, as the year strip says it to a screen reader. */
 function yearStatus(period: string): "paid" | "due" | "no payment linked" {
 	const status = STREAMING.find((m) => m.period === period)?.status;
+
 	if (status === "paid") return "paid";
+
 	// The two upcoming months, and January to March, are still to come.
 	if (status === "upcoming" || period > CURRENT) return "due";
+
 	return "no payment linked";
 }
 
 function YearStrip({ idPrefix }: { idPrefix: string }) {
 	const mark = (period: string) => {
 		const status = yearStatus(period);
+
 		if (status === "paid")
 			return (
 				<span data-mark="paid" class="text-ok">
 					<Icon name="check" class="size-4" />
 				</span>
 			);
+
 		// A ring for the months still to come, a dash for an unpaid past month.
 		if (status === "due")
 			return (
 				<span data-mark="due" class="size-3 rounded-full border-2 border-ink" />
 			);
+
 		return <span data-mark="none" class="h-0.5 w-3 bg-muted" />;
 	};
+
 	const look =
 		"flex min-h-11 w-7 flex-col items-center justify-center gap-1 text-sm text-ink no-underline";
+
 	return (
 		<ol class="mt-4 flex justify-between">
 			{YEAR.map((period) => {
@@ -851,6 +882,7 @@ function YearStrip({ idPrefix }: { idPrefix: string }) {
 						<span class="sr-only">{`${monthName(period)}, ${yearStatus(period)}`}</span>
 					</>
 				);
+
 				return (
 					<li>
 						{needsRow(period) ? (
@@ -871,20 +903,22 @@ function YearStrip({ idPrefix }: { idPrefix: string }) {
 function YearMonths({ idPrefix }: { idPrefix: string }) {
 	return (
 		<>
-			{[...STREAMING]
-				.filter((m) => m.status !== "paid")
-				.map((m) => (
-					<LedgerRow
-						id={`${idPrefix}-${m.period}`}
-						period={m.period}
-						month={m.month}
-						detail={
-							m.status === "upcoming"
-								? `Due ${m.due} · $2.99`
-								: "Link a payment"
-						}
-					/>
-				))}
+			{[...STREAMING].flatMap((m) =>
+				m.status !== "paid"
+					? [
+							<LedgerRow
+								id={`${idPrefix}-${m.period}`}
+								period={m.period}
+								month={m.month}
+								detail={
+									m.status === "upcoming"
+										? `Due ${m.due} · $2.99`
+										: "Link a payment"
+								}
+							/>,
+						]
+					: [],
+			)}
 		</>
 	);
 }
@@ -895,6 +929,7 @@ function YearMonths({ idPrefix }: { idPrefix: string }) {
 /** EndBars' rows: each budgeted category with its short label, as MonthEnd gives them. */
 function barRows(rows: BudgetRow[]) {
 	const labels = monthEndLabels(rows.map((row) => row.name));
+
 	return rows.map((row, index) => ({
 		...row,
 		short: labels[index] ?? row.name,
@@ -943,6 +978,7 @@ function CauseMonth({
 }) {
 	const overCents = -resultCents(rows, unbudgeted);
 	const cause = monthCause(monthCauses(rows, unbudgeted, 0), overCents);
+
 	return (
 		<>
 			<p class="mt-4 text-lg text-muted">{name} ended</p>
@@ -1045,6 +1081,7 @@ function MonthStrip({
 }) {
 	const previous = month > FIRST_MONTH ? monthsBefore(month, 1) : undefined;
 	const next = month < CURRENT ? monthsBefore(month, -1) : undefined;
+
 	return (
 		<div>
 			<div class="flex items-center gap-3">
@@ -1107,6 +1144,7 @@ function markedCell(item: string, shown: boolean) {
  */
 function strokesCell(item: string, shown: boolean) {
 	const state = stateOf(item);
+
 	const stroke =
 		state === "empty" ? (
 			<svg
@@ -1174,6 +1212,7 @@ function strokesCell(item: string, shown: boolean) {
 				)}
 			</svg>
 		);
+
 	return (
 		<>
 			<span class="flex h-6 items-end">{stroke}</span>
@@ -1191,6 +1230,7 @@ function strokesCell(item: string, shown: boolean) {
  */
 function tokensCell(item: string, shown: boolean) {
 	const state = stateOf(item);
+
 	const disc =
 		state === "under"
 			? "bg-ok"
@@ -1199,6 +1239,7 @@ function tokensCell(item: string, shown: boolean) {
 				: state === "empty"
 					? "border border-dashed border-muted bg-paper"
 					: "border-2 border-ink bg-paper";
+
 	const mark =
 		state === "under" ? (
 			<Icon name="check" class="size-4 text-paper" />
@@ -1214,6 +1255,7 @@ function tokensCell(item: string, shown: boolean) {
 		) : state === "current" ? (
 			<span class="size-1.5 rounded-full bg-ink" />
 		) : null;
+
 	return (
 		<>
 			<span
@@ -1236,10 +1278,13 @@ function tokensCell(item: string, shown: boolean) {
  */
 function barsCell(item: string, shown: boolean) {
 	const state = stateOf(item);
-	const month = MONTHS[item] ?? null;
+	// SAFETY: item is one of the STRIP_MONTHS, which are exactly MONTHS's keys; any other string reads undefined and the ?? null covers it.
+	const month = MONTHS[item as keyof typeof MONTHS] ?? null;
+
 	const height = month
 		? Math.round(Math.min(month.spentCents / month.budgetCents, 1.2) * 25)
 		: 0;
+
 	const bar =
 		state === "empty" ? (
 			<rect
@@ -1279,6 +1324,7 @@ function barsCell(item: string, shown: boolean) {
 				)}
 			</>
 		);
+
 	return (
 		<>
 			<svg

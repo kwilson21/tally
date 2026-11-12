@@ -9,6 +9,7 @@ import { SelectionFields } from "./selection-action-bar";
 import { TextInput } from "./text-input";
 
 type Category = { id: number; name: string; icon: string; color: string };
+
 export function CashForm({
 	values,
 	errors = {},

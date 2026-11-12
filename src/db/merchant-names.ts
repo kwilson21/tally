@@ -87,6 +87,7 @@ export function pendingNameStatements(
 	// text while its name is trimmed, so the bank's-own-name test (name = key) could never match it.
 	const usable = `c.value = trim(c.value, ${NAME_TRIM_SQL}) AND c.value <> ''`;
 	const waiting = `(SELECT raw_name FROM merchants WHERE display_name IS NULL AND suggestion_status = 'pending')`;
+
 	return [
 		db
 			.prepare(
@@ -135,6 +136,7 @@ export async function merchantsToAsk(
 		)
 		.bind(limit)
 		.all<{ rawName: string }>();
+
 	return results.map((row) => row.rawName);
 }
 
@@ -154,20 +156,24 @@ export async function saveAskedNames(
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
 	const firstByText = new Map<string, { rawName: string; names: string[] }>();
+
 	// The key is kept exactly as the bank text is (a padded text has its own row, as merchantsToAsk asked it): only the names
 	// are trimmed. An empty key is refused. Padded bank-sent names are skipped in pendingNameStatements, where a name must
 	// equal its key.
 	for (const answer of answers)
 		if (answer.rawName !== "" && !firstByText.has(answer.rawName))
 			firstByText.set(answer.rawName, answer);
+
 	const kept = [...firstByText.values()].map(({ rawName, names }) => {
 		const usable = normaliseNames(names);
+
 		return {
 			rawName,
 			names: usable,
 			status: usable.length > 0 ? "pending" : "none",
 		};
 	});
+
 	if (kept.length > 0) {
 		const json = JSON.stringify(kept);
 		statements.push(
@@ -198,6 +204,7 @@ export async function saveAskedNames(
 				.bind(json),
 		);
 	}
+
 	if (failed.length > 0) {
 		statements.push(
 			db
@@ -209,6 +216,7 @@ export async function saveAskedNames(
 				.bind(JSON.stringify(failed)),
 		);
 	}
+
 	if (answers.length > 0) {
 		statements.push(
 			db
@@ -218,13 +226,17 @@ export async function saveAskedNames(
 				.bind(JSON.stringify(answers.map(({ rawName }) => rawName))),
 		);
 	}
+
 	if (statements.length === 0) return 0;
+
 	const [saved] = await db.batch<{
 		raw_name: string;
 		suggestion_status: string;
 	}>(statements);
+
 	// The answers' upsert is the batch's first statement: its RETURNING rows are the merchants it left pending.
 	if (kept.length === 0 || !saved) return 0;
+
 	return saved.results.filter((row) => row.suggestion_status === "pending")
 		.length;
 }
@@ -272,6 +284,7 @@ export async function namesToReview(
 	switches?: AiSwitches,
 ): Promise<NameReview[]> {
 	const namesOn = (switches ?? (await readAiSwitches(db))).names;
+
 	const { results } = await db
 		.prepare(
 			`SELECT m.raw_name AS key, m.rowid AS id, ${merchantNamesJsonSql("m.raw_name")} AS stored, t.raw_name AS bankText, COUNT(*) AS count,
@@ -289,13 +302,18 @@ export async function namesToReview(
 			count: number;
 			owned: number;
 		}>();
+
 	const byKey = new Map<string, typeof results>();
+
 	for (const row of results) {
 		const texts = byKey.get(row.key);
+
 		if (texts) texts.push(row);
 		else byKey.set(row.key, [row]);
 	}
+
 	const reviews: NameReview[] = [];
+
 	for (const [key, texts] of byKey) {
 		const total = texts.reduce((sum, text) => sum + text.count, 0);
 		const owned = texts.reduce((sum, text) => sum + text.owned, 0);
@@ -303,11 +321,13 @@ export async function namesToReview(
 		texts.sort(
 			(a, b) => b.count - a.count || compareText(a.bankText, b.bankText),
 		);
+
 		for (const text of texts) {
 			const names = offeredNames(
 				{ stored: text.stored, status: "pending", key, namesOn },
 				text.bankText,
 			);
+
 			if (names.length === 0) continue;
 			reviews.push({
 				key,
@@ -322,6 +342,7 @@ export async function namesToReview(
 			break;
 		}
 	}
+
 	return reviews.sort((a, b) => b.count - a.count || compareText(a.key, b.key));
 }
 
@@ -357,17 +378,21 @@ export async function settleSuggestion(
 						 WHERE raw_name = ?2 AND suggestion_status = 'pending' AND display_name IS NULL`,
 					)
 					.bind(choice.name, key);
+
 	// A guessed name a person keeps is logged first, while the suggestion is still pending (spec §8.6).
 	if (choice.kind === "keep" || nameSource([choice.name], key) !== "tally") {
 		const result = await update.run();
+
 		return result.meta.changes > 0;
 	}
+
 	const [, result] = await db.batch([
 		db
 			.prepare(KEPT_NAME_LOG_SQL)
 			.bind(await householdToday(db), key, choice.name),
 		update,
 	]);
+
 	return (result?.meta.changes ?? 0) > 0;
 }
 
@@ -380,11 +405,13 @@ export async function merchantDisplayNames(
 	keys: string[],
 ): Promise<Map<string, string | null>> {
 	if (keys.length === 0) return new Map();
+
 	const { results } = await db
 		.prepare(
 			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
 		)
 		.bind(JSON.stringify(keys))
 		.all<{ key: string; displayName: string | null }>();
+
 	return new Map(results.map((row) => [row.key, row.displayName]));
 }

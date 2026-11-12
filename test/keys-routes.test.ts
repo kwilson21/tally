@@ -14,6 +14,7 @@ const decodeAttributes = (text: string) =>
 
 async function page(path: string) {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
+
 	return decodeAttributes(await res.text());
 }
 
@@ -21,6 +22,7 @@ async function page(path: string) {
 function keysRegion(html: string) {
 	const start = html.indexOf('<div id="keys"');
 	const end = html.indexOf('<div id="toasts"', start);
+
 	return start === -1 || end === -1 ? "" : html.slice(start, end);
 }
 
@@ -71,6 +73,7 @@ describe("the keys sheet (?keys, P128 C)", () => {
 
 	it("draws the ledger of keys in the sheet, each key in a kbd", async () => {
 		const region = keysRegion(await page("/?keys"));
+
 		for (const words of [
 			"Search transactions",
 			"Show these keys",
@@ -87,6 +90,7 @@ describe("the keys sheet (?keys, P128 C)", () => {
 	it("titles each group of keys with a heading under the sheet's title", async () => {
 		const region = keysRegion(await page("/?keys"));
 		const groups = ["Anywhere", "In a list", "On Home", "After a change"];
+
 		for (const group of groups)
 			expect(region).toContain(
 				`<h3 class="text-sm font-medium text-muted">${group}</h3>`,
@@ -231,6 +235,7 @@ describe("the demo and the family's app", () => {
 				children: HowFoot({ section: "budget" }),
 			}).toString(),
 		);
+
 		expect(shell).toContain('<script src="/js/keyboard.js" type="module">');
 		expect(keysRegion(shell)).toContain("keys-title");
 		expect(shell).toMatch(
@@ -251,6 +256,7 @@ describe("an address the layout cannot parse as a URL", () => {
 		const res = await exports.default.fetch(
 			"http://tally.test//evil.example/x?keys",
 		);
+
 		const html = decodeAttributes(await res.text());
 		expect(res.status).toBe(404);
 		expect(keysRegion(html)).toContain('hx-get="/evil.example/x"');
@@ -262,6 +268,7 @@ describe("an address the layout cannot parse as a URL", () => {
 		const res = await exports.default.fetch(
 			"http://tally.test/%5Cevil.example/x?keys",
 		);
+
 		const html = decodeAttributes(await res.text());
 		expect(res.status).toBe(404);
 		expect(keysRegion(html)).toContain('hx-get="/"');
@@ -274,6 +281,7 @@ describe("an address the layout cannot parse as a URL", () => {
 		const res = await exports.default.fetch(
 			"http://tally.test/%09/evil.example/x?keys",
 		);
+
 		const html = decodeAttributes(await res.text());
 		expect(res.status).toBe(404);
 		expect(keysRegion(html)).toContain('hx-get="/"');
@@ -290,10 +298,13 @@ describe("an address the layout cannot parse as a URL", () => {
 		]) {
 			const res = await exports.default.fetch(`http://tally.test${path}`);
 			const region = keysRegion(decodeAttributes(await res.text()));
+
 			const links = [...region.matchAll(/(?:href|hx-get)="([^"]*)"/g)].map(
 				([, link = ""]) => link,
 			);
+
 			expect(links.length).toBeGreaterThan(0);
+
 			for (const link of links)
 				expect(new URL(link, "http://tally.test").origin).toBe(
 					"http://tally.test",
@@ -310,10 +321,12 @@ describe("the address a Select-mode reply pushes", () => {
 			"http://tally.test/transactions?select=1&keys",
 			{ headers: { "HX-Request": "true" } },
 		);
+
 		const pushed = new URL(
 			res.headers.get("HX-Push-Url") ?? "",
 			"http://tally.test",
 		);
+
 		expect(pushed.searchParams.has("select")).toBe(true);
 		expect(pushed.searchParams.has("keys")).toBe(true);
 	});
@@ -323,10 +336,12 @@ describe("the address a Select-mode reply pushes", () => {
 			"http://tally.test/transactions?select=1",
 			{ headers: { "HX-Request": "true" } },
 		);
+
 		const pushed = new URL(
 			res.headers.get("HX-Push-Url") ?? "",
 			"http://tally.test",
 		);
+
 		expect(pushed.searchParams.has("select")).toBe(true);
 		expect(pushed.searchParams.has("keys")).toBe(false);
 	});

@@ -175,9 +175,9 @@ export const SHADOW_TOKENS = [
 	},
 ] as const;
 
-export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>
-	t.name.startsWith("cat-"),
-).map((t) => t.name);
+export const CATEGORY_COLORS = COLOR_TOKENS.flatMap((t) =>
+	t.name.startsWith("cat-") ? [t.name] : [],
+);
 
 // Each type role with its real classes (DESIGN.md "Type roles").
 export const TYPE_ROLES = [

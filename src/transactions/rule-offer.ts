@@ -47,8 +47,11 @@ export async function categoryRuleOffer(
 		)
 		.bind(merchantKey, categoryId)
 		.first<{ count: number }>();
+
 	const count = row?.count ?? 0;
+
 	if (count < 3) return null;
+
 	return { merchantKey, categoryId, count };
 }
 
@@ -86,6 +89,7 @@ export async function firstRuleOfferAmong(
 		)
 		.bind(JSON.stringify(ids), categoryId, categoryId)
 		.first<{ merchantKey: string; transactionId: number; count: number }>();
+
 	return row ? { ...row, categoryId } : null;
 }
 
@@ -107,5 +111,6 @@ export async function ruleOfferForTransaction(
 		)
 		.bind(transactionId, categoryId)
 		.first<{ merchantKey: string }>();
+
 	return row ? categoryRuleOffer(db, row.merchantKey, categoryId) : null;
 }

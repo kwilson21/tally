@@ -9,11 +9,13 @@ import { DEMO_MONTH_RESULTS } from "../src/design-system/demo-month-results";
 /** A finished month's result as Home's MonthEnd shows it: budgets minus all counted spending, null with no budgets. */
 async function resultFromSummary(month: string) {
 	const data = await loadMonth(env.DB, month);
+
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents: 0,
 	});
+
 	return summary.categories.length > 0
 		? summary.totalBudgetCents - summary.totalSpentCents
 		: null;
@@ -27,12 +29,15 @@ describe("monthResults", () => {
 	it("matches the result Home's MonthEnd shows for every month of the demo", async () => {
 		const current = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const first = await firstCountedMonth(env.DB);
+
 		if (!first) throw new Error("Demo has no counted month");
 		const months: string[] = [];
+
 		for (let month = first; month <= current; month = monthsBefore(month, -1))
 			months.push(month);
 		const results = await monthResults(env.DB, months);
 		expect(Object.keys(results).sort()).toEqual([...months].sort());
+
 		for (const month of months) {
 			expect(results[month], month).toBe(await resultFromSummary(month));
 		}
@@ -49,6 +54,7 @@ describe("monthResults", () => {
 		]);
 		const months = ["2026-04", "2026-06", "2026-07", "2026-08", "2026-09"];
 		const results = await monthResults(env.DB, months);
+
 		for (const month of months) {
 			expect(results[month], month).toBe(await resultFromSummary(month));
 		}
@@ -57,7 +63,7 @@ describe("monthResults", () => {
 	it("gives null for a month with no budget, and nothing for a month not asked for", async () => {
 		const results = await monthResults(env.DB, ["2026-04", "2026-09"]);
 		expect(results["2026-04"]).toBeNull();
-		expect(typeof results["2026-09"]).toBe("number");
+		expect(results["2026-09"]).toEqual(expect.any(Number));
 		expect("2026-05" in results).toBe(false);
 	});
 

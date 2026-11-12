@@ -21,6 +21,7 @@ export async function homeForecastDays(
 	today: string,
 ): Promise<HomeForecastDay[]> {
 	const nextMonth = `${monthsBefore(month, -1)}-01`;
+
 	// A payment that pays a planned expense has its own role: it is in spending so far, but not in the everyday pace
 	// projected forward, so the 'plan' role stays out of everydayCents (decision 82).
 	const { results } = await db
@@ -42,5 +43,6 @@ export async function homeForecastDays(
 		)
 		.bind(`${month}-01`, nextMonth, today, month)
 		.all<HomeForecastDay>();
+
 	return results;
 }

@@ -27,6 +27,7 @@ export function MerchantRuleTick({
 	const hint = ruleCategory
 		? `${merchant} is always ${ruleCategory}. Untick it and save to remove the rule.`
 		: "Leave it unticked to change just this one.";
+
 	return (
 		<label class="group/rule flex min-h-11 cursor-pointer items-start gap-3 py-2 text-base text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 			<input

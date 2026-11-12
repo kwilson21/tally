@@ -15,7 +15,7 @@ import { TextInput } from "../src/views/text-input";
 const SOURCES = import.meta.glob(
 	["../src/views/*.tsx", "../src/routes/*.tsx"],
 	{ query: "?raw", import: "default", eager: true },
-) as Record<string, string>;
+);
 
 const OPTIONS = [
 	{ value: "1", label: "Groceries" },
@@ -30,6 +30,7 @@ describe("no mid-word wraps", () => {
 					Shopping · Suggested
 				</Chip>,
 			);
+
 			expect(html).not.toContain("wrap-anywhere");
 			expect(html).toContain("break-normal");
 			expect(html).toContain("whitespace-normal");
@@ -40,6 +41,7 @@ describe("no mid-word wraps", () => {
 		const html = renderToString(
 			<MaybeCategory name="Household and garden supplies" kind="category" />,
 		);
+
 		expect(html).not.toContain("wrap-anywhere");
 		expect(html).not.toContain("truncate");
 		expect(html).toContain("whitespace-normal break-normal");
@@ -53,6 +55,7 @@ describe("no mid-word wraps", () => {
 				kind="category"
 			/>,
 		);
+
 		expect(html).toContain(
 			'<span class="min-w-0 overflow-hidden text-ellipsis">Maybe Householdandgardensuppliesandmore</span>',
 		);
@@ -65,6 +68,7 @@ describe("no mid-word wraps", () => {
 				leading={<span>Shopping · Suggested</span>}
 			/>,
 		);
+
 		expect(html).toContain('<div class="col-span-2 min-w-0"><span>Shopping');
 	});
 });
@@ -74,6 +78,7 @@ describe("SelectField", () => {
 		const html = renderToString(
 			<SelectField name="month" id="month" options={OPTIONS} variant="pill" />,
 		);
+
 		expect(html).toContain("appearance-none");
 		expect(html).toMatch(
 			/<svg [^>]*data-icon="chevron"[^>]*aria-hidden="true"|<svg [^>]*aria-hidden="true"[^>]*data-icon="chevron"/,
@@ -88,6 +93,7 @@ describe("SelectField", () => {
 		const html = renderToString(
 			<SelectField name="month" id="month" options={OPTIONS} variant="pill" />,
 		);
+
 		expect(html).toContain("pl-4");
 		expect(html).toContain("right-4");
 	});
@@ -100,6 +106,7 @@ describe("SelectField", () => {
 				<SelectField name="month" id="month" options={OPTIONS} variant="pill" />
 			</div>,
 		);
+
 		expect(html).toMatch(/<select [^>]*class="(?:[^"]* )?w-full(?: [^"]*)?"/);
 		expect(html).not.toMatch(
 			/<span data-select-field="" class="[^"]*\bself-start\b/,
@@ -118,6 +125,7 @@ describe("SelectField", () => {
 				variant="ledger"
 			/>,
 		);
+
 		expect(html).toMatch(/<select name="due_day"/);
 		expect(html).toContain("border-b");
 		expect(html).not.toContain("rounded-full");
@@ -133,6 +141,7 @@ describe("SelectField", () => {
 				selected="1"
 			/>,
 		);
+
 		expect(html).toContain("appearance-none");
 		expect(html).toContain("data-select-field");
 		expect(html).not.toContain("wrap-anywhere");
@@ -141,6 +150,7 @@ describe("SelectField", () => {
 
 // Tailwind's spacing scale: px-N and pl-N are N x 0.25rem.
 const rem = (n: string) => `${Number(n) * 0.25}rem`;
+
 // The class list of the date input in a render, whatever order its attributes come in.
 const dateClass = (html: string) =>
 	html
@@ -154,6 +164,7 @@ describe("the arrow and the date icon sit at their variant's text inset", () => 
 			const html = renderToString(
 				<SelectField name="x" id="x" options={OPTIONS} variant={variant} />,
 			);
+
 			const padding = html.match(/\bpl-(\d+)\b/)?.[1];
 			const inset = html.match(/\bright-(\d+)\b/)?.[1];
 			expect(padding).toBeDefined();
@@ -172,6 +183,7 @@ describe("the arrow and the date icon sit at their variant's text inset", () => 
 		const html = renderToString(
 			<TextInput id="d" name="date" label="Date" type="date" surface="paper" />,
 		);
+
 		const input = dateClass(html);
 		const padding = input?.match(/\bpx-(\d+)\b/)?.[1];
 		expect(padding).toBeDefined();
@@ -194,6 +206,7 @@ describe("guardrails", () => {
 			.filter(([path]) => !path.endsWith("/select-field.tsx"))
 			.filter(([, source]) => /<select[\s>]/.test(source))
 			.map(([path]) => path);
+
 		expect(offenders).toEqual([]);
 	});
 

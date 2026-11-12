@@ -54,8 +54,10 @@ describe("TallySteps", () => {
 			],
 			1,
 		);
+
 		const html = String(await TallySteps({ steps }));
 		expect(html).toContain("Your first tally · 1 of 5");
+
 		for (const name of NAMES) expect(html).toContain(name);
 		expect(html.match(/, done</g)?.length).toBe(1);
 		expect(html).toContain("Chase, linked");
@@ -88,10 +90,13 @@ describe("TallySteps: the re-ask line (#714)", () => {
 			{ name: "Your budgets", done: false, note: "Later" },
 			{ name: NAMES[4] ?? "", done: false, note: "Later" },
 		];
+
 		const html = String(await TallySteps({ steps }));
+
 		const line = html.indexOf(
 			"Wells Fargo linked: Tally asks again about pay, bills and budgets.",
 		);
+
 		expect(line).toBeGreaterThan(html.indexOf("Link your bank"));
 		expect(line).toBeLessThan(html.indexOf("Your pay"));
 		expect(html).toMatch(
@@ -107,6 +112,7 @@ describe("TallySteps: the re-ask line (#714)", () => {
 				steps: stepsOf(NAMES, ["Chase, linked", "", "", "", ""], 1),
 			}),
 		);
+
 		expect(html).not.toContain("basis-full");
 	});
 });

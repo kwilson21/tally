@@ -84,6 +84,7 @@ describe("threeMonthAverageSpentCents", () => {
 			.prepare(`EXPLAIN QUERY PLAN ${THREE_MONTH_AVERAGE_SQL}`)
 			.bind("2026-08", "2026-09", "2026-10", "2026-07-01", "2026-12-01", 1)
 			.all<{ detail: string }>();
+
 		const plan = results.map((row) => row.detail).join("\n");
 		expect(plan).toMatch(
 			/SEARCH transactions USING (COVERING )?INDEX transactions_date/,
@@ -98,16 +99,20 @@ describe("setBudget", () => {
 	it("sets a budget from this month on, and changes it in place when set again", async () => {
 		await setBudget(db, 1, 65000, MONTH);
 		await setBudget(db, 1, 66050, MONTH);
+
 		const rows = await db
 			.prepare(
 				"SELECT amount_cents AS cents FROM budget_amounts WHERE category_id = 1 AND effective_month = ?",
 			)
 			.bind(MONTH)
 			.all<{ cents: number }>();
+
 		expect(rows.results).toEqual([{ cents: 66050 }]);
+
 		const groceries = (await settingsCategories(db, MONTH)).active.find(
 			(c) => c.id === 1,
 		);
+
 		expect(groceries?.budgetCents).toBe(66050);
 	});
 
@@ -143,11 +148,13 @@ describe("lastMonthSpentCents", () => {
 				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(94,'2026-08',904,'user','linked')",
 			),
 		]);
+
 		const augustBankTotal = await db
 			.prepare(
 				"SELECT COALESCE(SUM(amount_cents),0) AS n FROM transactions WHERE category_id=1 AND substr(date,1,7)='2026-08' AND excluded=0 AND is_split=0 AND flag_income=0",
 			)
 			.first<{ n: number }>();
+
 		expect(await lastMonthSpentCents(db, 1, "2026-09")).toBe(
 			(augustBankTotal?.n ?? 0) + 1234,
 		);
@@ -160,6 +167,7 @@ describe("lastMonthSpentCents", () => {
 				 AND excluded = 0 AND is_split = 0 AND flag_income = 0`,
 			)
 			.first<{ n: number }>();
+
 		expect(await lastMonthSpentCents(db, 1, MONTH)).toBe(expected?.n);
 		expect(expected?.n).toBeGreaterThan(0);
 	});
@@ -189,6 +197,7 @@ describe("nudgeBudget", () => {
 			MAX_BUDGET_CENTS - 1,
 			MAX_BUDGET_CENTS,
 		];
+
 		for (const cents of amounts)
 			for (const direction of ["up", "down"] as const) {
 				await setBudget(db, 1, cents, MONTH);

@@ -6,6 +6,7 @@ const budgeted = (name: string, budgetCents: number, spentCents: number) => ({
 	budgetCents,
 	spentCents,
 });
+
 const unbudgeted = (name: string, spentCents: number) => ({ name, spentCents });
 
 describe("monthCauses", () => {
@@ -19,6 +20,7 @@ describe("monthCauses", () => {
 			[unbudgeted("Childcare", 96000), unbudgeted("Refunds", -5000)],
 			0,
 		);
+
 		expect(causes).toEqual([
 			{ name: "Eating Out", cents: 18000, kind: "over" },
 			{ name: "Kids", cents: 2000, kind: "over" },
@@ -84,6 +86,7 @@ describe("monthCause", () => {
 			{ name: "Eating Out", cents: 18000, kind: "over" as const },
 			{ name: "Kids", cents: 4000, kind: "over" as const },
 		];
+
 		expect(monthCause(causes, 22000)).toEqual({
 			text: "Most of it was over budget: Eating Out $180 and Kids $40.",
 			lead: "Most of it was over budget: ",
@@ -99,6 +102,7 @@ describe("monthCause", () => {
 			{ name: "Eating Out", cents: 18000, kind: "over" as const },
 			{ name: "Rent", cents: 120000, kind: "unbudgeted" as const },
 		];
+
 		expect(monthCause(causes, 150000)).toEqual({
 			text: "Most of it: Eating Out $180 over and Rent $1,200 with no budget.",
 			lead: "Most of it: ",
@@ -189,6 +193,7 @@ describe("monthCause", () => {
 			{ name: "Eating Out", cents: 18000, kind: "over" as const },
 			...sept,
 		];
+
 		expect(monthCause(causes, 213447)?.text).toBe(
 			"Most of it had no budget: Childcare $960 and Rent $1,200.",
 		);

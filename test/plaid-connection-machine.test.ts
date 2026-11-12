@@ -10,6 +10,7 @@ const STATES = [
 	"login_broken_and_needs_relink",
 	"disconnected",
 ] as const;
+
 const EVENTS = [
 	"LOGIN_BROKEN",
 	"RELINK_NEEDED",
@@ -18,7 +19,12 @@ const EVENTS = [
 	"DISCONNECT",
 ] as const;
 
-const LEGAL: Partial<Record<string, Partial<Record<string, string>>>> = {
+const LEGAL: Partial<
+	Record<
+		(typeof STATES)[number],
+		Partial<Record<(typeof EVENTS)[number], string>>
+	>
+> = {
 	ok: {
 		LOGIN_BROKEN: "login_broken",
 		RELINK_NEEDED: "needs_relink",

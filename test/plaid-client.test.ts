@@ -1,17 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 import { PlaidError, plaidPost } from "../src/plaid/client";
 
+/** The PlaidError a call rejects with; a call that resolves, or rejects with anything else, fails the test. */
+const plaidFailure = (call: Promise<unknown>): Promise<PlaidError> =>
+	call.then(
+		() => {
+			throw new Error("expected the Plaid call to fail");
+		},
+		(caught: Error) => {
+			if (caught instanceof PlaidError) return caught;
+
+			throw caught;
+		},
+	);
+
 describe("plaidPost", () => {
 	it("turns network timeouts into bodyless Plaid errors", async () => {
 		let options: RequestInit | undefined;
+
 		const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
 			options = init;
 			throw new DOMException("upstream details", "TimeoutError");
 		});
 
-		const error = await plaidPost({}, "/test", {}, fetch).catch(
-			(caught) => caught as PlaidError,
-		);
+		const error = await plaidFailure(plaidPost({}, "/test", {}, fetch));
 
 		expect(error).toBeInstanceOf(PlaidError);
 		expect(error).toMatchObject({
@@ -64,12 +76,16 @@ describe("plaidPost", () => {
 				{ status: 500 },
 			),
 		);
-		const error = await plaidPost(
-			{ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" },
-			"/test",
-			{ public_token: "public-secret" },
-			fetch,
-		).catch((caught) => caught as PlaidError);
+
+		const error = await plaidFailure(
+			plaidPost(
+				{ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" },
+				"/test",
+				{ public_token: "public-secret" },
+				fetch,
+			),
+		);
+
 		expect(error).toBeInstanceOf(PlaidError);
 		expect(error).toMatchObject({
 			error_type: "API_ERROR",
@@ -82,15 +98,17 @@ describe("plaidPost", () => {
 	});
 
 	it("sanitizes non-JSON error responses", async () => {
-		const error = await plaidPost(
-			{ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" },
-			"/test",
-			{},
-			vi.fn(async () => new Response("upstream secret", { status: 500 })),
-		).catch((caught) => caught as PlaidError);
+		const error = await plaidFailure(
+			plaidPost(
+				{ PLAID_CLIENT_ID: "client", PLAID_SECRET: "secret" },
+				"/test",
+				{},
+				vi.fn(async () => new Response("upstream secret", { status: 500 })),
+			),
+		);
 
 		expect(error).toBeInstanceOf(PlaidError);
-		expect((error as PlaidError).message).toBe("Plaid request failed");
+		expect(error.message).toBe("Plaid request failed");
 		expect(JSON.stringify(error)).not.toContain("secret");
 	});
 });

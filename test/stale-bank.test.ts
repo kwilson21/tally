@@ -201,6 +201,7 @@ describe("homeBankNotice", () => {
 			{ name: "Recent Bank", reason: "stale" as const, since: "2026-10-02" },
 			{ name: "Older Bank", reason: "stale" as const, since: "2026-09-20" },
 		];
+
 		for (const order of [banks, [...banks].reverse()]) {
 			expect(homeBankNotice(order, TODAY)).toEqual({
 				words: [
@@ -271,6 +272,7 @@ describe("homeBankNotice", () => {
 			{ name: "No Date A", reason: "sign-in" as const },
 			{ name: "Same A", reason: "stale" as const, since: "2026-09-20" },
 		];
+
 		for (const order of [banks, [...banks].reverse()]) {
 			expect(homeBankNotice(order, TODAY)?.words).toEqual([
 				"Same A stopped updating Sep 20",
