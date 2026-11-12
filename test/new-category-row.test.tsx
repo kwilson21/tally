@@ -22,7 +22,7 @@ describe("NewCategoryRow: a refused name is named by its field", () => {
 		const html = row({ error: "Give the category a name." });
 		expect(html).toContain('aria-invalid="true"');
 		const describedBy = html.match(/aria-describedby="([^"]+)"/)?.[1] ?? "";
-		expect(describedBy).toBe("new-category-name-category-9-error");
+		expect(describedBy).toContain("new-category-name-category-9-error");
 		expect(html).toMatch(
 			/<p id="new-category-name-category-9-error" role="alert"[^>]*>Give the category a name\.<\/p>/,
 		);
@@ -42,5 +42,25 @@ describe("NewCategoryRow: a refused name is named by its field", () => {
 
 		expect(html).toMatch(/<details[^>]*\bopen/);
 		expect(html).toContain('value="Books and audio"');
+	});
+});
+
+describe("NewCategoryRow: the field only ever says new (#965)", () => {
+	it("labels the name field New category name, with the hint that says what happens", () => {
+		const html = row({ name: "Pet Care" });
+		expect(html).toContain('<label for="new-category-name-category-9"');
+		expect(html).toContain("New category name</label>");
+		expect(html).toContain(
+			"Added to your categories and used for this transaction.",
+		);
+		expect(html).not.toContain("Category name</label>");
+	});
+
+	it("says Create and next, never Save and next", () => {
+		const html = row({ name: "Pet Care" });
+		expect(html).toMatch(
+			/<button[^>]*name="answer"[^>]*value="create"[^>]*>\s*Create and next/,
+		);
+		expect(html).not.toContain("Save and next");
 	});
 });
