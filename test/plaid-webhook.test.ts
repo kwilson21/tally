@@ -5,6 +5,7 @@ import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { app } from "../src/index";
 import { clearAttention, markSyncSucceeded } from "../src/plaid/item-store";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { forwardMember, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -22,39 +23,6 @@ type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 const json64 = (value: Json) => b64(encoder.encode(JSON.stringify(value)));
 
-/** A value the test's own insert returned: a missing one means the setup broke, so the test fails here. */
-function known<Value>(value: Value | null | undefined): Value {
-	if (value === null || value === undefined)
-		throw new Error("the test's setup did not create this value");
-
-	return value;
-}
-
-type Method = (...args: never[]) => void;
-
-function isMember<Target extends object>(
-	target: Target,
-	property: PropertyKey,
-): property is keyof Target {
-	return property in target;
-}
-
-function isMethod(value: unknown): value is Method {
-	return typeof value === "function";
-}
-
-/** A member of a database or statement as a proxy hands it on: a method bound to its target, anything else as it is. */
-function member<Target extends object>(
-	target: Target,
-	property: PropertyKey,
-): Target[keyof Target] | Method | undefined {
-	if (!isMember(target, property)) return undefined;
-
-	const value = target[property];
-
-	return isMethod(value) ? value.bind(target) : value;
-}
-
 /** A statement whose `bind` is replaced by `bind`; every other member is the real statement's. */
 function rebinding(
 	statement: D1PreparedStatement,
@@ -64,7 +32,7 @@ function rebinding(
 		get(target, property) {
 			if (property === "bind") return bind;
 
-			return member(target, property);
+			return forwardMember(target, property);
 		},
 	});
 }
@@ -397,7 +365,7 @@ describe("Plaid webhook route", () => {
 
 		const racing = new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop !== "prepare") return member(target, prop);
+				if (prop !== "prepare") return forwardMember(target, prop);
 
 				return (sql: string) => {
 					const statement = target.prepare(sql);
@@ -420,7 +388,7 @@ describe("Plaid webhook route", () => {
 								.prepare(
 									"UPDATE plaid_items SET attention_held = 1 - attention_held WHERE id = ?",
 								)
-								.bind(known(row).id)
+								.bind(present(row).id)
 								.run();
 						};
 
@@ -623,7 +591,7 @@ describe("Plaid webhook route", () => {
 
 		const racing = new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop !== "prepare") return member(target, prop);
+				if (prop !== "prepare") return forwardMember(target, prop);
 
 				return (sql: string) => {
 					const statement = target.prepare(sql);
@@ -841,9 +809,9 @@ describe("Plaid webhook route", () => {
 
 					// The good sync (or relink) completes while Plaid's error is being confirmed; the state stays ok.
 					if (landing === "sync") {
-						await markSyncSucceeded(env.DB, known(row).id, "lease-x");
+						await markSyncSucceeded(env.DB, present(row).id, "lease-x");
 					} else {
-						await clearAttention(env.DB, known(row).id);
+						await clearAttention(env.DB, present(row).id);
 					}
 
 					return Response.json({

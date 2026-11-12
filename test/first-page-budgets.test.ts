@@ -32,7 +32,7 @@ import { firstPage, questionScreen } from "../src/routes/first-page";
 import { setupRoute } from "../src/routes/setup";
 import { safeToSpendText } from "../src/views/home-top";
 import { envWith } from "./helpers/doubles";
-import { isMethod, itemAt } from "./helpers/present";
+import { isMemberOf, isMethod, itemAt } from "./helpers/present";
 import { pinClock } from "./pinned-clock";
 
 // The budgets step of the question page (P125 E, spec §6 and §8.8, decision 114, #590): once pay and bills are done,
@@ -172,14 +172,6 @@ const trigger = (res: Response) => {
 
 /** A value a test writes into a transactions row. */
 type Cell = string | number | null;
-
-/** True when `prop` is a member of `target`, so reading it is a typed read. */
-function isMemberOf<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): prop is keyof Target {
-	return prop in target;
-}
 
 let seq = 0;
 

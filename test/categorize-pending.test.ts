@@ -22,19 +22,11 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { jevCallLimit } from "../src/sort-groups";
 import { seedMerchant } from "./helpers/merchants";
-import { isMethod, itemAt, present } from "./helpers/present";
+import { isMemberOf, isMethod, itemAt, present } from "./helpers/present";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
 const MONTH = "2026-09";
-
-/** True when `prop` is a member of `target`, so reading it is a typed read. */
-function isMemberOf<Target extends object>(
-	target: Target,
-	prop: PropertyKey,
-): prop is keyof Target {
-	return prop in target;
-}
 
 /** A Jev reply: Eating Out at the given confidence, no flags. */
 const reply = (confidence: number) =>
