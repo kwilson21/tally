@@ -1,3 +1,5 @@
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
@@ -15,10 +17,8 @@ import { appleCardUpload, bankSyncs } from "../db/accounts";
 import {
 	budgetFacts,
 	budgetFactsOf,
-	budgetSaveStatement,
-	decideAndSave,
-	savingsGoalFacts,
-	savingsGoalSaveStatement,
+	decideBudget,
+	decideSavingsGoal,
 } from "../db/budget-saves";
 import {
 	type BudgetCategory,
@@ -27,6 +27,7 @@ import {
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
 import { COUNTED_JOINS, countedMonthSql } from "../db/counted-month";
+import { runWith } from "../db/database";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
@@ -39,12 +40,10 @@ import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
 import {
 	type BudgetFacts,
-	type BudgetWrite,
 	nudgeBudget,
 	saveBudget,
 	saveSavingsGoal,
 } from "../rules/budgets";
-import { handle } from "../rules/rule";
 import { CategoryId } from "../settings/category-form";
 import {
 	asOfDate,
@@ -621,7 +620,7 @@ async function activeCategory(c: Context<App>) {
 
 /**
  * The facts a budget rule decides from: first what the page already read with the category, then a fresh read each time
- * the save finds they changed (decideAndSave asks again).
+ * the save finds they changed (decideBudget asks again).
  */
 function budgetFactsFrom(
 	db: D1Database,
@@ -917,13 +916,9 @@ home.post("/savings-goal", async (c) => {
 	}
 
 	// The rule has no refusal, and a goal already at that amount is saved as far as the family can tell.
-	await decideAndSave(
-		async () =>
-			saveSavingsGoal.decide(
-				{ cents: parsed.cents, month },
-				await savingsGoalFacts(c.env.DB, month),
-			),
-		(save) => savingsGoalSaveStatement(c.env.DB, save),
+	await runWith(
+		c.env.DB,
+		decideSavingsGoal(saveSavingsGoal, { cents: parsed.cents, month }, month),
 	);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
@@ -992,20 +987,21 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 		});
 	}
 
-	const facts = budgetFactsFrom(c.env.DB, category, month);
-
-	const outcome = await decideAndSave(
-		async () =>
-			saveBudget.decide(
-				{ categoryId: category.id, cents: parsed.cents, month },
-				await facts(),
-			),
-		(save) => budgetSaveStatement(c.env.DB, save),
-	);
-
 	// A category archived while its sheet was open is gone, as it is for a sheet opened afterwards. A budget already at
 	// that amount is saved as far as the family can tell, so it answers as a save does.
-	if (outcome.kind === "refuse") return c.notFound();
+	const saved = await runWith(
+		c.env.DB,
+		decideBudget(
+			saveBudget,
+			{ categoryId: category.id, cents: parsed.cents, month },
+			budgetFactsFrom(c.env.DB, category, month),
+		).pipe(
+			Effect.as(true),
+			Effect.catchTag("CategoryNotOnBudget", () => Effect.succeed(false)),
+		),
+	);
+
+	if (!saved) return c.notFound();
 
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
@@ -1035,25 +1031,26 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 	if (!active || !way.ok) return c.notFound();
 	const { category, today, month } = active;
 	const direction = way.value;
+
 	// Two taps at once (two phones) both count: the one that saves second finds the budget changed, and decides again.
-	const facts = budgetFactsFrom(c.env.DB, category, month);
-
-	const outcome = await decideAndSave(
-		async () =>
-			nudgeBudget.decide(
-				{ categoryId: category.id, direction, month },
-				await facts(),
+	// Only a budgeted category has buttons; one without a budget gets it from its sheet. The answer is the new amount,
+	// null when the budget was already as far as it goes that way, or undefined when the rule refused.
+	const cents = await runWith(
+		c.env.DB,
+		decideBudget(
+			nudgeBudget,
+			{ categoryId: category.id, direction, month },
+			budgetFactsFrom(c.env.DB, category, month),
+		).pipe(
+			Effect.map(({ decided }) =>
+				Option.isSome(decided) ? decided.value.cents : null,
 			),
-		(save) => budgetSaveStatement(c.env.DB, save),
+			Effect.catchTags({
+				CategoryNotOnBudget: () => Effect.succeed(undefined),
+				NoBudgetToAdjust: () => Effect.succeed(undefined),
+			}),
+		),
 	);
-
-	// Only a budgeted category has buttons; one without a budget gets it from its sheet. The new amount, or null when the
-	// budget was already as far as it goes that way.
-	const cents = handle<BudgetWrite, number | null | undefined>(outcome, {
-		write: (save) => save.cents,
-		nothingToDo: () => null,
-		refuse: () => undefined,
-	});
 
 	if (cents === undefined) return c.notFound();
 

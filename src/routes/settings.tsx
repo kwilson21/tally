@@ -28,7 +28,7 @@ import {
 	type PendingSuggestion,
 	pendingSuggestionPage,
 } from "../db/category-suggestions";
-import { Database } from "../db/database";
+import { type Database, runWith } from "../db/database";
 import { isUniqueViolation } from "../db/errors";
 import { waitsForRunStatement } from "../db/first-tally";
 import {
@@ -1749,7 +1749,7 @@ settings.post("/settings/time-zone", async (c) => {
 const run = (
 	c: Context<App>,
 	program: Effect.Effect<Response | Promise<Response>, never, Database>,
-) => Effect.runPromise(program.pipe(Effect.provideService(Database, c.env.DB)));
+) => runWith(c.env.DB, program);
 
 /** The typed name, read at the edge (decision 206): the tidied name, or the sentence to show under the field. */
 const typedName = (form: FormData) =>

@@ -291,7 +291,7 @@ describe("a save on a list that changed since the rule read it", () => {
 			await someoneElseRenames();
 			const before = await rows();
 
-			expect(await ending(statements(version))).toBe("ListChangedSinceRead");
+			expect(await ending(statements(version))).toBe("ChangedSinceRead");
 			expect(await rows()).toEqual(before);
 			expect(await periods(1)).toEqual([]);
 		},

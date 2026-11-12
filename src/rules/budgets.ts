@@ -1,8 +1,11 @@
-// The budgets area's rules (decisions 187 and 192): save a budget, nudge a budget, save the savings goal. Each takes a
-// typed request and the stored facts and answers what to save. The month is an input (decision 195), and nothing here
-// parses, reads a clock or touches the database. The save's guard is in src/db/budget-saves.ts (decision 190).
+// The budgets area's rules (decisions 187 and 206): save a budget, nudge a budget, save the savings goal. Each takes a
+// typed request and the stored facts, and is written as a list of its parts (`rule`, in ./terms). The month is an input
+// (decision 195), and nothing here parses, reads a clock or touches the database. The save's guard is in
+// src/db/budget-saves.ts (decision 190).
+
+import * as Data from "effect/Data";
 import { nudgeCents } from "../budgets/nudge";
-import { defineRule2, term, unless } from "./rule";
+import { rule, term, unless } from "./terms";
 
 /** What the budget rules read about a category: whether it exists and is archived, and its budget in the month. */
 export type BudgetFacts = {
@@ -26,55 +29,40 @@ export type SavingsGoalWrite = {
 	expectedGoalCents: number | null;
 };
 
+// The refusals: one class each, with the sentence a person reads.
+
+export class CategoryNotOnBudget extends Data.TaggedError(
+	"CategoryNotOnBudget",
+) {
+	readonly say = "That category isn't on the budget.";
+}
+
+export class NoBudgetToAdjust extends Data.TaggedError("NoBudgetToAdjust") {
+	readonly say = "That category has no budget to adjust yet.";
+}
+
 const onBudget = (facts: BudgetFacts) =>
 	facts.category !== null && !facts.category.archived;
 
-const categoryIsOnBudget = term<{ onBudget: boolean }>(
-	"the category is on the budget",
-	(g) => g.onBudget,
+const categoryIsOnBudget = unless(
+	term<{ onBudget: boolean }>(
+		"the category is on the budget",
+		(g) => g.onBudget,
+	),
+	() => new CategoryNotOnBudget(),
 );
 
-const notOnBudget = unless(
-	categoryIsOnBudget,
-	"CategoryNotOnBudget",
-	"That category isn't on the budget.",
-);
-
-type SaveBudgetGiven = {
-	categoryId: number;
-	cents: number;
-	month: string;
-	onBudget: boolean;
-	now: number | null;
-};
-
-type NudgeBudgetGiven = {
-	categoryId: number;
-	direction: "up" | "down";
-	month: string;
-	onBudget: boolean;
-	now: number | null;
-	/** Where one tap takes the budget, or null when there is none to move. */
-	next: number | null;
-};
-
-type SavingsGoalGiven = { cents: number; month: string; now: number | null };
-
-export const saveBudget = defineRule2({
+export const saveBudget = rule({
 	name: "Save a budget",
 	given: (
 		request: { categoryId: number; cents: number; month: string },
 		facts: BudgetFacts,
-	): SaveBudgetGiven => ({
-		...request,
-		onBudget: onBudget(facts),
-		now: facts.budgetCents,
-	}),
-	nothingToDoIf: term<SaveBudgetGiven>(
+	) => ({ ...request, onBudget: onBudget(facts), now: facts.budgetCents }),
+	nothingToDoIf: term<{ onBudget: boolean; now: number | null; cents: number }>(
 		"the category is on the budget and its budget is already that amount",
 		(g) => g.onBudget && g.now === g.cents,
 	),
-	refusals: [notOnBudget],
+	refusals: [categoryIsOnBudget],
 	writes: (g): BudgetWrite => ({
 		categoryId: g.categoryId,
 		month: g.month,
@@ -84,12 +72,19 @@ export const saveBudget = defineRule2({
 	writesText: "Sets the category's budget to that amount from this month on.",
 });
 
-export const nudgeBudget = defineRule2({
+/** What a nudge is decided from. `next` is where one tap takes the budget, or null when there is none to move. */
+type NudgeGiven = {
+	onBudget: boolean;
+	now: number | null;
+	next: number | null;
+};
+
+export const nudgeBudget = rule({
 	name: "Nudge a budget",
 	given: (
 		request: { categoryId: number; direction: "up" | "down"; month: string },
 		facts: BudgetFacts,
-	): NudgeBudgetGiven => ({
+	) => ({
 		...request,
 		onBudget: onBudget(facts),
 		now: facts.budgetCents,
@@ -98,19 +93,15 @@ export const nudgeBudget = defineRule2({
 				? null
 				: nudgeCents(facts.budgetCents, request.direction),
 	}),
-	nothingToDoIf: term<NudgeBudgetGiven>(
+	nothingToDoIf: term<NudgeGiven>(
 		"the category is on the budget and its budget is already as far as it goes that way",
 		(g) => g.onBudget && g.now !== null && g.next === g.now,
 	),
 	refusals: [
-		notOnBudget,
+		categoryIsOnBudget,
 		unless(
-			term<NudgeBudgetGiven>(
-				"the category has a budget",
-				(g) => g.now !== null,
-			),
-			"NoBudgetToAdjust",
-			"That category has no budget to adjust yet.",
+			term<NudgeGiven>("the category has a budget", (g) => g.now !== null),
+			() => new NoBudgetToAdjust(),
 		),
 	],
 	writes: (g): BudgetWrite => {
@@ -128,14 +119,14 @@ export const nudgeBudget = defineRule2({
 		"Sets the category's budget to the next round $10 that way, from this month on.",
 });
 
-export const saveSavingsGoal = defineRule2({
+export const saveSavingsGoal = rule({
 	name: "Save the savings goal",
 	given: (
 		request: { cents: number; month: string },
 		facts: { goalCents: number | null },
-	): SavingsGoalGiven => ({ ...request, now: facts.goalCents }),
+	) => ({ ...request, now: facts.goalCents }),
 	// Saving $0 removes the goal, so no goal and a $0 goal are the same thing.
-	nothingToDoIf: term<SavingsGoalGiven>(
+	nothingToDoIf: term<{ now: number | null; cents: number }>(
 		"the savings goal is already that amount",
 		(g) => (g.now ?? 0) === g.cents,
 	),

@@ -1,10 +1,5 @@
-// How the categories area's rules (src/rules/categories.ts) read their facts and save what they decide (decision 190).
-// The rule decides in TypeScript; the database only checks that the list the rule read has not changed since, and
-// raises an error when it has, so nothing is saved on a stale list.
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import type * as Option from "effect/Option";
 import {
 	type AddCategoryWrite,
 	type ArchiveCategoryWrite,
@@ -18,6 +13,7 @@ import {
 import type { Refusal } from "../rules/terms";
 import { Database } from "./database";
 import { isUniqueViolation } from "./errors";
+import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 
 /**
  * The whole list as one text, as SQL: every category's id, whether it is archived, its place and its name. Two reads
@@ -136,11 +132,6 @@ export const moveCategoryStatements = (
 	),
 ];
 
-/** The save found the list changed since the rule read it. Never shown to a person: the rule is asked again. */
-export class ListChangedSinceRead extends Data.TaggedError(
-	"ListChangedSinceRead",
-) {}
-
 /** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a NULL name. */
 const GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
 
@@ -156,9 +147,9 @@ const runBatch = <E = never>(
 			try: () => db.batch(statements),
 			catch: (cause) => cause,
 		}).pipe(
-			Effect.catch((cause): Effect.Effect<never, ListChangedSinceRead | E> => {
+			Effect.catch((cause): Effect.Effect<never, ChangedSinceRead | E> => {
 				if (cause instanceof Error && GUARD_RAISED.test(cause.message))
-					return Effect.fail(new ListChangedSinceRead());
+					return Effect.fail(new ChangedSinceRead());
 
 				// Anything else is a defect: it is not caught, and the request fails as it would have.
 				return whenNameTaken && isUniqueViolation(cause)
@@ -168,7 +159,7 @@ const runBatch = <E = never>(
 		);
 	});
 
-/** Runs a save's batch. The guard's failure becomes ListChangedSinceRead; anything else is a defect. */
+/** Runs a save's batch. The guard's failure becomes ChangedSinceRead; anything else is a defect. */
 export const saveCategories = (statements: D1PreparedStatement[]) =>
 	runBatch(statements);
 
@@ -180,8 +171,8 @@ export const saveNamedCategory = (statements: D1PreparedStatement[]) =>
 	runBatch(statements, () => new NameTaken());
 
 /**
- * Reads the list, asks a category rule and saves what it decides in one batch. When the guard raises, it reads and
- * decides again on the fresh list, three times in all, so two saves at once both count; it then gives up with an error.
+ * Reads the list, asks a category rule and saves what it decides in one batch, asking again on the fresh list when the
+ * guard raises (decideAndSave).
  * Answers with the list it decided on, what the rule decided (nothing, when what was asked is already true), and the
  * batch's results for a save. `save` is saveNamedCategory for a rule that sets a name.
  */
@@ -198,28 +189,17 @@ export const decideCategory = <Request, W, E extends Refusal, E2 = never>(
 		statements: D1PreparedStatement[],
 	) => Effect.Effect<
 		D1Result[],
-		ListChangedSinceRead | E2,
+		ChangedSinceRead | E2,
 		Database
 	> = saveCategories,
 ) =>
 	Effect.gen(function* () {
 		const db = yield* Database;
-		const facts = yield* categoryFacts;
-		const decided = yield* rule.decide(request, facts);
 
-		const saved = Option.isSome(decided)
-			? yield* save(statements(db, decided.value))
-			: undefined;
-
-		return { facts, decided, saved };
-	}).pipe(
-		Effect.retry({
-			times: 2,
-			while: Predicate.isTagged("ListChangedSinceRead"),
-		}),
-		Effect.catchTag("ListChangedSinceRead", () =>
-			Effect.die(
-				new Error("The categories kept changing while one was being saved."),
-			),
-		),
-	);
+		return yield* decideAndSave({
+			facts: categoryFacts,
+			decide: (facts) => rule.decide(request, facts),
+			save: (write) => save(statements(db, write)),
+			gaveUp: "The categories kept changing while one was being saved.",
+		});
+	});

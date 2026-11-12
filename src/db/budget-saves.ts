@@ -1,14 +1,16 @@
 // How the budgets area's rules (src/rules/budgets.ts) read their facts and save what they decide (decision 190). The
 // rule decides in TypeScript; the database only checks that what the rule read has not changed since, and raises an
 // error when it has, so nothing is saved on stale facts.
+import * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import type {
 	BudgetFacts,
 	BudgetWrite,
 	SavingsGoalWrite,
 } from "../rules/budgets";
-import type { Outcome } from "../rules/rule";
 import { type BudgetCategory, budgetCategory } from "./budgets";
-import { decideAndSaveWith } from "./guarded-save";
+import { Database } from "./database";
+import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 
 /** A category's budget in `month`, as SQL: the latest amount at or before it, or NULL when it has none yet. */
 const BUDGET_IN_MONTH =
@@ -95,17 +97,64 @@ export function changedSinceRead(error: Error): boolean {
 	return GUARD_RAISED.test(error.message);
 }
 
-/** Reads, decides and saves a budget or the savings goal, asking again when the guard raises (decideAndSaveWith). */
-export async function decideAndSave<W>(
-	decide: () => Promise<Outcome<W>>,
-	save: (what: W) => D1PreparedStatement,
-): Promise<Outcome<W>> {
-	const { outcome } = await decideAndSaveWith({
-		decide,
-		save: (what: W) => save(what).run(),
-		changedSinceRead,
-		gaveUp: "The budget kept changing while it was being saved.",
+/** Runs a budget or savings save. The guard's failure becomes ChangedSinceRead; anything else is a defect. */
+const save = (statement: D1PreparedStatement) =>
+	Effect.tryPromise({
+		try: () => statement.run(),
+		catch: (cause) => cause,
+	}).pipe(
+		Effect.catch((cause) =>
+			cause instanceof Error && changedSinceRead(cause)
+				? Effect.fail(new ChangedSinceRead())
+				: Effect.die(cause),
+		),
+	);
+
+const GAVE_UP = "The budget kept changing while it was being saved.";
+
+/**
+ * Asks a budget rule and saves what it decides, asking again on fresh facts when the guard raises (decideAndSave).
+ * `facts` reads what the rule decides from each time it is asked.
+ */
+export const decideBudget = <Request, E>(
+	budgetRule: {
+		decide: (
+			request: Request,
+			facts: BudgetFacts,
+		) => Effect.Effect<Option.Option<BudgetWrite>, E>;
+	},
+	request: Request,
+	facts: () => Promise<BudgetFacts>,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		return yield* decideAndSave({
+			facts: Effect.promise(facts),
+			decide: (read) => budgetRule.decide(request, read),
+			save: (write) => save(budgetSaveStatement(db, write)),
+			gaveUp: GAVE_UP,
+		});
 	});
 
-	return outcome;
-}
+/** Asks the savings rule and saves what it decides, asking again on a fresh goal when the guard raises. */
+export const decideSavingsGoal = <Request, E>(
+	goalRule: {
+		decide: (
+			request: Request,
+			facts: { goalCents: number | null },
+		) => Effect.Effect<Option.Option<SavingsGoalWrite>, E>;
+	},
+	request: Request,
+	month: string,
+) =>
+	Effect.gen(function* () {
+		const db = yield* Database;
+
+		return yield* decideAndSave({
+			facts: Effect.promise(() => savingsGoalFacts(db, month)),
+			decide: (read) => goalRule.decide(request, read),
+			save: (write) => save(savingsGoalSaveStatement(db, write)),
+			gaveUp: GAVE_UP,
+		});
+	});

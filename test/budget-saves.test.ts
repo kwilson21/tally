@@ -1,15 +1,19 @@
 import { env } from "cloudflare:workers";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	budgetFacts,
 	budgetSaveStatement,
 	changedSinceRead,
-	decideAndSave,
+	decideBudget,
+	decideSavingsGoal,
 	savingsGoalFacts,
 	savingsGoalSaveStatement,
 } from "../src/db/budget-saves";
+import { Database } from "../src/db/database";
 import { resetDemo } from "../src/demo/reset";
-import { nudgeBudget, saveSavingsGoal } from "../src/rules/budgets";
+import { nudgeBudget, saveBudget, saveSavingsGoal } from "../src/rules/budgets";
 
 // The budgets area's guard (decision 190): a save lands only while what the rule read is still true, and a miss raises
 // an error the route recognises, so nothing is saved on stale facts and the route reads and decides again.
@@ -218,26 +222,28 @@ describe("changedSinceRead", () => {
 	});
 });
 
-describe("decideAndSave", () => {
-	const nudgeUp = (stale?: number) => {
+describe("decideBudget and decideSavingsGoal", () => {
+	const run = <A, E>(program: Effect.Effect<A, E, Database>) =>
+		Effect.runPromise(program.pipe(Effect.provideService(Database, db)));
+
+	/** The facts as a tap reads them: the first read can be made to see an old amount, as a tap that lost a race would. */
+	const reading = (stale?: number) => {
 		let reads = 0;
 
 		return {
 			reads: () => reads,
-			decide: async () => {
+			facts: async () => {
 				reads += 1;
 				const facts = await budgetFacts(db, 1, MONTH);
 
-				// The first read is made to see an old amount, as a tap that lost a race would.
-				return nudgeBudget.decide(
-					{ categoryId: 1, direction: "up", month: MONTH },
-					reads === 1 && stale !== undefined
-						? { ...facts, budgetCents: stale }
-						: facts,
-				);
+				return reads === 1 && stale !== undefined
+					? { ...facts, budgetCents: stale }
+					: facts;
 			},
 		};
 	};
+
+	const UP = { categoryId: 1, direction: "up", month: MONTH } as const;
 
 	const seed = (cents: number) =>
 		db
@@ -249,65 +255,70 @@ describe("decideAndSave", () => {
 
 	it("saves what the rule decided and hands the answer back", async () => {
 		await seed(71240);
-		const tap = nudgeUp();
+		const tap = reading();
+		const answer = await run(decideBudget(nudgeBudget, UP, tap.facts));
 
-		const answer = await decideAndSave(tap.decide, (w) =>
-			budgetSaveStatement(db, w),
-		);
-
-		expect(answer.kind).toBe("write");
+		expect(Option.getOrUndefined(answer.decided)?.cents).toBe(72000);
 		expect(tap.reads()).toBe(1);
 		expect((await budgetRows())[0]?.cents).toBe(72000);
 	});
 
 	it("reads and decides again when the facts changed under it, so a tap that lost a race still counts", async () => {
 		await seed(72000);
-		const tap = nudgeUp(71240);
+		const tap = reading(71240);
+		const answer = await run(decideBudget(nudgeBudget, UP, tap.facts));
 
-		const answer = await decideAndSave(tap.decide, (w) =>
-			budgetSaveStatement(db, w),
-		);
-
-		expect(answer).toMatchObject({ kind: "write", write: { cents: 73000 } });
+		expect(Option.getOrUndefined(answer.decided)?.cents).toBe(73000);
 		expect(tap.reads()).toBe(2);
 		expect((await budgetRows())[0]?.cents).toBe(73000);
 	});
 
-	it("saves nothing for nothing to do or a refusal, and reads once", async () => {
-		await seed(20000);
-		let reads = 0;
-
-		const answer = await decideAndSave(
-			async () => {
-				reads += 1;
-
-				return saveSavingsGoal.decide(
-					{ cents: 0, month: MONTH },
-					await savingsGoalFacts(db, MONTH),
-				);
-			},
-			(w) => savingsGoalSaveStatement(db, w),
+	it("saves nothing when there is nothing to do, and reads once", async () => {
+		const answer = await run(
+			decideSavingsGoal(saveSavingsGoal, { cents: 0, month: MONTH }, MONTH),
 		);
 
-		expect(answer.kind).toBe("nothingToDo");
-		expect(reads).toBe(1);
+		expect(Option.isNone(answer.decided)).toBe(true);
+		expect(answer.saved).toBeUndefined();
 		expect(await goalRows()).toEqual([]);
+	});
+
+	it("saves the savings goal the rule decided", async () => {
+		await run(
+			decideSavingsGoal(saveSavingsGoal, { cents: 20000, month: MONTH }, MONTH),
+		);
+		expect(await goalRows()).toEqual([
+			{ month: MONTH, cents: 20000, type: "integer" },
+		]);
+	});
+
+	it("fails with the rule's refusal and saves nothing", async () => {
+		await db.prepare("UPDATE categories SET archived = 1 WHERE id = 1").run();
+
+		const refused = await run(
+			decideBudget(nudgeBudget, UP, reading().facts).pipe(
+				Effect.match({
+					onFailure: (refusal) => refusal._tag,
+					onSuccess: () => "saved",
+				}),
+			),
+		);
+
+		expect(refused).toBe("CategoryNotOnBudget");
+		expect(await budgetRows()).toEqual([]);
 	});
 
 	it("gives up with an error after three lost races, saving nothing", async () => {
 		await seed(72000);
 		let reads = 0;
+
 		await expect(
-			decideAndSave(
-				async () => {
+			run(
+				decideBudget(nudgeBudget, UP, async () => {
 					reads += 1;
 
-					return nudgeBudget.decide(
-						{ categoryId: 1, direction: "up", month: MONTH },
-						{ category: { archived: false }, budgetCents: 100 },
-					);
-				},
-				(w) => budgetSaveStatement(db, w),
+					return { category: { archived: false }, budgetCents: 100 };
+				}),
 			),
 		).rejects.toThrow(/kept changing/);
 		expect(reads).toBe(3);
@@ -315,20 +326,46 @@ describe("decideAndSave", () => {
 	});
 
 	it("passes any other failure on at once", async () => {
+		// A trigger stands in for any failure that is not the guard: it must not be retried or taken for a refusal.
+		await db
+			.prepare(
+				"CREATE TRIGGER no_budget_saves BEFORE INSERT ON budget_amounts BEGIN SELECT RAISE(ABORT, 'not the guard'); END",
+			)
+			.run();
 		let reads = 0;
-		await expect(
-			decideAndSave(
-				async () => {
-					reads += 1;
 
-					return nudgeBudget.decide(
-						{ categoryId: 1, direction: "up", month: MONTH },
-						{ category: { archived: false }, budgetCents: 100 },
-					);
-				},
-				() => db.prepare("INSERT INTO no_such_table VALUES (1)"),
-			),
-		).rejects.toThrow();
-		expect(reads).toBe(1);
+		try {
+			await expect(
+				run(
+					decideBudget(nudgeBudget, UP, async () => {
+						reads += 1;
+
+						return { category: { archived: false }, budgetCents: null };
+					}).pipe(
+						Effect.catchTag("NoBudgetToAdjust", () =>
+							Effect.succeed("refused"),
+						),
+					),
+				),
+			).resolves.toBe("refused");
+
+			await expect(
+				run(
+					decideBudget(
+						saveBudget,
+						{ categoryId: 1, cents: 5000, month: MONTH },
+						async () => {
+							reads += 1;
+
+							return { category: { archived: false }, budgetCents: null };
+						},
+					),
+				),
+			).rejects.toThrow(/not the guard/);
+		} finally {
+			await db.prepare("DROP TRIGGER no_budget_saves").run();
+		}
+
+		expect(reads).toBe(2);
 	});
 });
