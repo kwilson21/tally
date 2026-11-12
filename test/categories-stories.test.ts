@@ -17,7 +17,7 @@ import {
 	MoveDirection,
 } from "../src/settings/category-form";
 
-// The categories area's five rules as stories (decisions 187, 205): each row is what was asked, what was stored, and
+// The categories area's five rules as stories (decisions 187, 206): each row is what was asked, what was stored, and
 // what the rule answers. The date is an input (decision 195); nothing here touches a clock or a database.
 
 /** What a story expects: what to save, nothing to do, or a named refusal with its sentence. */

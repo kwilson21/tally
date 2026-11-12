@@ -2406,10 +2406,13 @@ step(
 
 // Seven-figure amounts on a 320px phone (decision 110). The writes go to the local D1 after everything
 // above has run, so no earlier step sees them; the demo reset below puts the seed's numbers back.
+// The local database's placeholder ID, as cloudflare.config.ts names it for local development (decision 205).
+const LOCAL_DATABASE = "00000000-0000-4000-8000-000000000000";
+
 const writeLocalD1 = (sql) =>
 	execFileSync(
-		"npx",
-		["wrangler", "d1", "execute", "DB", "--local", "--command", sql],
+		"pnpm",
+		["exec", "cf", "d1", "raw", LOCAL_DATABASE, "--local", "--sql", sql],
 		{ stdio: "pipe" },
 	);
 

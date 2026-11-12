@@ -8,7 +8,7 @@ export default defineConfig({
 		".wrangler/**",
 		"public/vendor/**",
 		"public/assets/**",
-		"worker-configuration.d.ts",
+		".cloudflare/**",
 		"tools/oxlint/anti-slop/**",
 	],
 	jsPlugins: [
@@ -46,7 +46,7 @@ export default defineConfig({
 		{
 			// Two of the Effect rules read any code as if it were Effect code: one takes every imported make… function for an
 			// Effect service constructor, and one wants Effect's Match for every chained ternary. Effect style is for the write
-			// handlers' rules and saves only (decision 205), so those two apply to the files written in it.
+			// handlers' rules and saves only (decision 206), so those two apply to the files written in it.
 			files: ["src/rules/**", "src/db/*-saves.ts", "src/db/database.ts"],
 			rules: {
 				"anti-slop-effect/no-service-constructor-imports": "error",

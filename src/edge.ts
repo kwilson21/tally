@@ -1,4 +1,4 @@
-// The edge (decision 205): where a form field, a part of the address or stored text becomes a typed value, with Effect's
+// The edge (decision 206): where a form field, a part of the address or stored text becomes a typed value, with Effect's
 // Schema. Plain code reads through readAtEdge; rules inside the app take the typed value and never parse again.
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";

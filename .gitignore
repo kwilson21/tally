@@ -1,5 +1,8 @@
 node_modules
 .wrangler/
+# cf's local state and build output; the generated types are kept (pnpm run cf-typegen).
+.cloudflare/*
+!.cloudflare/types/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example

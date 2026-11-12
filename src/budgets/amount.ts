@@ -10,7 +10,7 @@ export const MAX_BUDGET_CENTS = 100_000_000;
 const NOT_DOLLARS = "Enter a dollar amount, like 250 or 250.50.";
 
 /**
- * The typed budget as integer cents, at the edge (decision 205): text in, cents out, or one of the two sentences. It's
+ * The typed budget as integer cents, at the edge (decision 206): text in, cents out, or one of the two sentences. It's
  * required: a budget can't be removed yet (spec §12). toCents throws for text it can't read, so it is caught here.
  */
 export const BudgetAmount = Schema.String.pipe(

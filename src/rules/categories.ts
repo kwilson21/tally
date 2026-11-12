@@ -1,4 +1,4 @@
-// The categories area's rules (decisions 187 and 205): add, rename, archive, restore and move a category. Each takes a
+// The categories area's rules (decisions 187 and 206): add, rename, archive, restore and move a category. Each takes a
 // typed request and the stored list, and is written as a list of its parts (`rule`, in ./terms). Its `decide` answers
 // what to save, or nothing when what was asked is already true, or fails with a named refusal. The date is an input
 // (decision 195), and nothing here parses, reads a clock or touches the database. The save's guard is in

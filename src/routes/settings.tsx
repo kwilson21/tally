@@ -1745,13 +1745,13 @@ settings.post("/settings/time-zone", async (c) => {
 	);
 });
 
-/** Runs a category rule's program for this request: its database is the request's own (decision 205). */
+/** Runs a category rule's program for this request: its database is the request's own (decision 206). */
 const run = (
 	c: Context<App>,
 	program: Effect.Effect<Response | Promise<Response>, never, Database>,
 ) => Effect.runPromise(program.pipe(Effect.provideService(Database, c.env.DB)));
 
-/** The typed name, read at the edge (decision 205): the tidied name, or the sentence to show under the field. */
+/** The typed name, read at the edge (decision 206): the tidied name, or the sentence to show under the field. */
 const typedName = (form: FormData) =>
 	readAtEdge(CategoryName, String(form.get("name") ?? ""));
 

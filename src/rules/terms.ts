@@ -1,4 +1,4 @@
-// Named terms and the one form every Effect rule is written in (decision 205). A condition's English text is its name,
+// Named terms and the one form every Effect rule is written in (decision 206). A condition's English text is its name,
 // and rules share the same term (decision 198's one vocabulary). A rule states each of its parts once, as a list, and
 // `rule` builds its `decide` from them, so the rule sheet and the code cannot disagree.
 import * as Effect from "effect/Effect";
