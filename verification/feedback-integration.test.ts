@@ -126,6 +126,8 @@ function fakeDb() {
 					binds.push(args);
 
 					return {
+						// The rule's read of how many messages the sender has stored this hour: none yet.
+						first: async () => ({ sentThisHour: 0 }),
 						run: async () => ({ meta: { changes: 1, last_row_id: 1 } }),
 					};
 				},
@@ -133,8 +135,19 @@ function fakeDb() {
 		},
 	};
 
-	// SAFETY: the tests here set no FEEDBACK_GITHUB_TOKEN, so the routes reach only prepare, bind and run on this stub, and it supplies those three.
-	return { db: db as D1Database, binds, statements };
+	/** Where the statement that stores the message is: each prepare here is bound once, so the two lists line up. */
+	const stores = () =>
+		statements.findIndex((sql) => sql.includes("INSERT INTO feedback"));
+
+	// SAFETY: the tests here set no FEEDBACK_GITHUB_TOKEN, so the routes reach only prepare, bind, first and run on this stub, and it supplies those four.
+	return {
+		db: db as D1Database,
+		binds,
+		statements,
+		/** The statement that stores the message, and the values bound to it. */
+		insert: () => statements[stores()] ?? "",
+		stored: () => binds[stores()],
+	};
 }
 
 describe("feedback route privacy", () => {
@@ -152,7 +165,7 @@ describe("feedback route privacy", () => {
 		expect(cookie).not.toContain("fixture@example.test");
 	});
 	it("stores sanitized text, route and coarse device under the random limiter ID", async () => {
-		const { db, binds, statements } = fakeDb();
+		const { db, binds, insert, stored } = fakeDb();
 		const limiter = "123e4567-e89b-12d3-a456-426614174000";
 
 		const response = await app.fetch(
@@ -187,15 +200,15 @@ describe("feedback route privacy", () => {
 		);
 
 		expect(response.status).toBe(303);
-		expect(statements[0]).not.toContain("replay_url");
-		expect(binds[0]?.[0]).toBe(limiter);
-		expect(binds[0]?.[3]).toContain("[email removed]");
-		expect(binds[0]?.[3]).toContain("[address removed]");
-		expect(binds[0]?.[3]).toContain("[account detail removed]");
-		expect(binds[0]?.[3]).toContain("[amount removed]");
-		expect(binds[0]?.[3]).not.toContain("Riley Example");
-		expect(binds[0]?.[4]).toBe("/transactions");
-		expect(binds[0]?.[5]).toBe("Unknown");
+		expect(insert()).not.toContain("replay_url");
+		expect(stored()?.[0]).toBe(limiter);
+		expect(stored()?.[3]).toContain("[email removed]");
+		expect(stored()?.[3]).toContain("[address removed]");
+		expect(stored()?.[3]).toContain("[account detail removed]");
+		expect(stored()?.[3]).toContain("[amount removed]");
+		expect(stored()?.[3]).not.toContain("Riley Example");
+		expect(stored()?.[4]).toBe("/transactions");
+		expect(stored()?.[5]).toBe("Unknown");
 		expect(JSON.stringify(binds)).not.toContain("riley@example.test");
 		expect(JSON.stringify(binds)).not.toContain("123456789");
 		expect(JSON.stringify(binds)).not.toContain("fake-session");
@@ -287,7 +300,7 @@ describe("feedback route privacy", () => {
 		"//other.test/SECRET",
 	])
 		it(`sanitizes stored page with diagnostics off: ${from}`, async () => {
-			const { db, binds } = fakeDb();
+			const { db, binds, stored } = fakeDb();
 
 			const response = await app.fetch(
 				new Request(`${base}/feedback`, {
@@ -310,7 +323,7 @@ describe("feedback route privacy", () => {
 			);
 
 			expect(response.status).toBe(303);
-			expect(binds[0]?.[4]).toBe(
+			expect(stored()?.[4]).toBe(
 				from.startsWith("/transactions") ? "/transactions" : "/other",
 			);
 			expect(JSON.stringify(binds)).not.toContain("SECRET");
@@ -342,7 +355,7 @@ describe("feedback route privacy", () => {
 });
 
 it("uses only legacy columns when diagnostics are disabled", async () => {
-	const { db, statements } = fakeDb();
+	const { db, insert } = fakeDb();
 	await app.fetch(
 		new Request(`${base}/feedback`, {
 			method: "POST",
@@ -362,13 +375,13 @@ it("uses only legacy columns when diagnostics are disabled", async () => {
 		}),
 		{ ...bindings(), DB: db },
 	);
-	expect(statements[0]).not.toContain("client_context");
-	expect(statements[0]).not.toContain("replay_url");
+	expect(insert()).not.toContain("client_context");
+	expect(insert()).not.toContain("replay_url");
 });
 
 for (const consent of [false, true])
 	it(`ignores replay identifiers regardless of checkbox: ${consent}`, async () => {
-		const { db, binds, statements } = fakeDb();
+		const { db, binds, insert } = fakeDb();
 		await app.fetch(
 			new Request(`${base}/feedback`, {
 				method: "POST",
@@ -399,7 +412,7 @@ for (const consent of [false, true])
 				DB: db,
 			},
 		);
-		expect(statements[0]).not.toContain("replay_url");
+		expect(insert()).not.toContain("replay_url");
 		expect(JSON.stringify(binds)).not.toContain("fake-session");
 	});
 
