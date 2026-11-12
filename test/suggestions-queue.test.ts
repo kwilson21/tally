@@ -1210,7 +1210,7 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 
 		const res = await answerOn(
 			{ id: `category-${id}`, answer: "yes" },
-			racing("UPDATE transactions SET category_id = jev_category_id", () =>
+			racing("UPDATE transactions SET category_id = ?", () =>
 				db
 					.prepare(
 						"UPDATE transactions SET category_confidence = ? WHERE id = ?",

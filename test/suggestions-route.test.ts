@@ -2066,7 +2066,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		).toMatchObject({ category_id: null });
 	});
 
-	it("a Something else whose category was archived after the queue was read sets no category", async () => {
+	it("a Something else whose category was archived after the queue was read sets no category and says it is gone", async () => {
 		const eatingOut = await categoryId("Eating Out");
 		const groceries = await categoryId("Groceries");
 
@@ -2095,7 +2095,11 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			),
 		);
 
-		expect(trigger(res).toast?.message).toBe(STALE);
+		// The rule is asked again on the fresh rows (decision 190), and says what happened: the category is gone.
+		expect(res.status).toBe(422);
+		expect(textOf(await res.text())).toContain(
+			"That category is gone. Choose another.",
+		);
 		expect(
 			await row(
 				"SELECT category_id, category_source FROM transactions WHERE id = ?",
