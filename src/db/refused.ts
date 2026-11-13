@@ -61,3 +61,19 @@ export const isNotNullFailed = (
 export const isTableMissing = (
 	refusal: DatabaseRefusal | null,
 ): refusal is TableMissing => refusal instanceof TableMissing;
+
+/**
+ * Whether an error is the database refusing to leave this one column empty. A save's guard leaves a column empty on
+ * purpose when what its rule read has changed (decision 190), so this is how a save tells its guard from any other failure.
+ */
+export const leftEmpty =
+	(table: string, column: string) =>
+	(error: Error): boolean => {
+		const refusal = databaseRefusal(error);
+
+		return (
+			isNotNullFailed(refusal) &&
+			refusal.table === table &&
+			refusal.column === column
+		);
+	};

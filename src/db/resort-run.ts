@@ -22,6 +22,7 @@ import { COUNTED_JOINS } from "./counted-month";
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
 import { WAITING } from "./more-like-this";
+import { leftEmpty } from "./refused";
 import {
 	RESORT_CANDIDATE_MAX,
 	type ResortCandidate,
@@ -991,14 +992,8 @@ export function undoSaveStatements(
 	];
 }
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to store a NULL setting. */
-const UNDO_GUARD_RAISED =
-	/NOT NULL constraint failed: household_settings\.value/;
-
-/** Whether an Undo's save failed because what the rule read had changed, and not for any other reason. */
-export function undoChangedSinceRead(error: Error): boolean {
-	return UNDO_GUARD_RAISED.test(error.message);
-}
+/** Whether an Undo's save failed because what the rule read had changed, and not for any other reason. Only the guard can try to store a NULL setting. */
+export const undoChangedSinceRead = leftEmpty("household_settings", "value");
 
 /**
  * Undo: reads the run's record and its moved rows, asks the rule and saves what it decides in one batch, asking again

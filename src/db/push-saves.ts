@@ -6,6 +6,7 @@ import type * as Option from "effect/Option";
 import type { DeviceFacts, DeviceRequest, DeviceWrite } from "../rules/push";
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { leftEmpty } from "./refused";
 
 /** Whether the person (?1) is a member now, as SQL: 1 or 0. */
 const IS_MEMBER =
@@ -82,14 +83,11 @@ export const deviceSaveStatements = (db: D1Database, save: DeviceWrite) => [
 		.bind(save.member, JSON.stringify(save.drop)),
 ];
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to store a device for nobody. */
-const GUARD_RAISED =
-	/NOT NULL constraint failed: push_subscriptions\.member_email/;
-
-/** Whether a save failed because what the rule read had changed, and not for any other reason. */
-export function devicesChangedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
-}
+/** Whether a save failed because what the rule read had changed, and not for any other reason. Only the guard can try to store a device for nobody. */
+export const devicesChangedSinceRead = leftEmpty(
+	"push_subscriptions",
+	"member_email",
+);
 
 /**
  * Reads the facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the guard
