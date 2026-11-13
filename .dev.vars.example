@@ -1,6 +1,7 @@
 # Copy to .dev.vars for local development. Never commit .dev.vars.
 # Real values are stored with `pnpm exec wrangler secret put <NAME>` (owner only).
 JEV_API_KEY=replace-me
+TAVILY_API_KEY=replace-me
 # Plaid uses Sandbox unless this is exactly "production".
 PLAID_ENV=sandbox
 # Generate with: openssl rand -base64 32

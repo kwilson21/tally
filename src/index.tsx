@@ -69,6 +69,8 @@ type ScheduledEnv = PlaidEnv & {
 		}): Promise<EmailSent>;
 	};
 	JEV_API_KEY?: string;
+	/** The store lookup's web search (src/ai/lookup-store.ts). Nothing calls it yet. */
+	TAVILY_API_KEY?: string;
 	/** The sorting Workflow (decision 139): the 09:00 run starts the night's instance. */
 	SORT: Env["SORT"];
 	FEEDBACK_GITHUB_TOKEN?: string;
