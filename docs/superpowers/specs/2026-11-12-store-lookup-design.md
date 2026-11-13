@@ -59,20 +59,26 @@ Stores that already exist when this ships are looked up by the same run, oldest 
 
 ### When a store is not searched (code rules, no model)
 
-Checked in this order; the first that applies wins:
+This section says the same as spec §7 "Store lookup"; the spec wins if the two ever differ. The privacy table in "The model" below has one row for each case.
 
-1. **Private:** stored as `skipped`, never searched. This rule is about privacy, not cost: "ZELLE TO JANE DOE" never leaves the app, and `redactBankTextForAi` drops numbers, not names. A store is private when any of these holds:
-   - any of its transactions has one of Plaid's transfer categories (`TRANSFER_CATEGORIES` in `src/db/plaid-transfers.ts`) or Plaid's income category, or a person marked one a transfer;
-   - its text starts with a payment app's name, from a short list in code (Venmo, Zelle, Cash App, PayPal, Apple Cash, and the like). This is the net for rows with no Plaid category: Apple Card CSV rows and any other import store none (`src/plaid/sync.ts` is the only writer of `plaid_category`);
-   - it has only cash, hand-entered or Apple Card CSV transactions. The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it (my call, the cautious one: Apple Card rows carry no Plaid category to check);
-   - the redacted text is empty.
+A store is searched only when **all** of these hold. The first three are about privacy, not cost: a person's name must never leave the app, and `redactBankTextForAi` drops numbers, not names.
 
-   **Not a store** is skipped the same way: a text whose transactions carry Plaid's bank-fees category (`BANK_FEES`: fees and interest charges). A web search has nothing to say about these (the owner's pick, 2026-11-12, after a read of production found 12 of its 30 candidate texts were bank fees).
-2. **Already settled:** the merchant has a merchant rule or a bank-text rule. Left as `none`; it is searched later only if the rule is removed. A rule only stops the search: a line found before the rule was made is kept and still shown.
-3. **Already looked up:** `found`, `nothing_found` or `skipped`.
-4. **Cap reached:** left as `none` for the next run.
+1. **Something says it is a store (it fails closed).** At least one of its transactions carries a Plaid category that is not one of the private ones. A text none of whose rows Plaid gave a category is not searched; it becomes eligible if a later row arrives with one.
+2. **Nothing says it is private.** It is stored as `skipped` and never searched when any of these holds, for any merchant and any transaction that shares its lookup text (one private row makes the text private):
+   - a Plaid transfer category (`TRANSFER_CATEGORIES` in `src/db/plaid-transfers.ts`), Plaid's income category, or Plaid's bank-fees category (`BANK_FEES`: not a store; the owner's pick after a read of production found 12 of its 30 candidate texts were bank fees), or a row a person marked a transfer;
+   - a payment app's name **anywhere** in the text as whole words (Venmo, Zelle, Cash App, PayPal, Apple Cash and the like, a short list in code);
+   - a bank-rail phrase anywhere in the text (ACH, wire, a check, "payment to", "transfer to" and the like);
+   - text that reads as an instruction, after it is folded to plain characters;
+   - nothing left after redaction.
 
-Everything else is searched. Stores Plaid already names are searched too (the owner's pick, 2026-11-12). Workers AI is only asked for names when Plaid sends none (decision 68), so for a Plaid-named store the line helps Jev's category only, not the name. Searching them roughly doubles the searches; skipping them means a store Plaid names but Jev misfiles gets no help.
+   These text checks run on the merchant key as stored **and on the raw bank text of every one of its transactions**, before cleaning and before the 40-character cut, since the cleaner strips "PAYPAL *" and a Plaid name can hide a raw text that names a rail.
+3. **It is not only cash, hand-entered or Apple Card rows.** The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it.
+4. **No rule already settles it.** A merchant rule or bank-text rule on all of it leaves it not looked up; it is searched later only if the rule goes. A rule only stops the search: a line found before the rule was made is kept and still shown.
+5. **It has not been looked up**, and the day's cap has room.
+
+Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched.
+
+Stores Plaid already names are searched too when they pass these rules (the owner's pick, 2026-11-12). Workers AI is only asked for names when Plaid sends none (decision 68), so for a Plaid-named store the line helps Jev's category only, not the name.
 
 ### The states (the rule, stated once)
 
@@ -85,12 +91,13 @@ The store's lookup (the stored `status`; `claimed` and `to retry` are both store
 ```mermaid
 stateDiagram-v2
     [*] --> none
-    none --> skipped: private (never searched)
+    none --> skipped: private (never searched), checked before every claim
     none --> claimed: a run takes a search from the day's count and claims it
     claimed --> found: the owner saves a usable line
     claimed --> nothing_found: the owner saves "nothing found"
     claimed --> to_retry: the search failed, or 15 minutes passed
     to_retry --> claimed: a run claims it again
+    to_retry --> skipped: it became private since the last try
     claimed --> gave_up: the third failure in a row
     found --> skipped: a person says "Don't use this"
     nothing_found --> [*]
@@ -151,7 +158,7 @@ Four rules the review of the plan added (PR #997):
 - **Privacy is checked on the merchant key as stored**, before cleaning and the 40-character cap (the cleaner strips "PAYPAL *"), and when several merchants share one lookup text, one private merchant makes the text private.
 - **It fails closed.** A text is searched only when at least one of its transactions carries a Plaid category outside the private ones; a text with no Plaid category at all is not searched, and a bank-rail phrase (ACH, wire, a check, "payment to") makes a text private. Raised by the security review: "ACH PAYMENT TO JANE DOE" on a row with no category names no payment app.
 - **Privacy reads the raw bank text too.** A merchant key is Plaid's name when there is one, so "ACH PAYMENT TO JANE DOE" named "Jane Doe" by Plaid would pass a check of the key alone; every transaction's raw text is checked as well.
-- **The re-ask is the existing "ask again"**, not decision 157's re-check path, which only runs inside a re-check; which rows are owed one is read from what was saved, never decided before the calls.
+- **The re-ask is its own small step, modelled on "ask again" but not that helper unchanged** (and not decision 157's re-check path, which only runs inside a re-check). In one save it takes a Jev call from the day's count and clears the old category guess, so the cap cannot strand a card; it does not reset the row's count of Jev failures, so a row Jev keeps failing on still gives up after five; and it asks Jev the category question only and saves only the category, never the income, transfer or reimbursement answers or the details. Which rows are owed one is read from what was saved, never decided before the calls.
 - **A line is shown only under a guess that used it**, and the re-ask skips rows already asked with the line and waits while the switch is off.
 
 The key is the lookup text, not the merchant key, because an unnamed store's merchant key is its raw text with the date in it (`src/db/merchant-key.ts`): "LA COOP … 07/24" and "… 07/25" are two merchant rows and one lookup text, so the store is still searched once. A merchant key finds its lookup through a stored table, `merchant_lookup_texts` (`merchant_key`, `lookup_text`, `private`), which the lookup run fills from the transactions' merchant keys, since the text is computed in TypeScript and SQL cannot join without it, and a store can have transactions and no `merchants` row. Which rows are owed a re-ask is read from `lookup_answers`, not from a mark on the store (see "The model"). A chain Plaid names ("Target") is one lookup for every branch, so the summary says where a place is only when the results agree on one place.
@@ -221,11 +228,11 @@ My calls, open to correction:
 
 ## The model (docs/verification.md, "Quint")
 
-The owner asked on 2026-11-12 for plans like this one to start from state machines and a Quint model, after the first prose plan drew 26 review findings, about half of them about the order things happen in. The two machines above were then written as a Quint model with these events in any order: two runs claiming, searching, saving, crashing and losing their claim to the clock; Jev asked, answering, failing; a person answering; a re-ask; "Don't use this"; the switch flipped; a category re-check starting and ending. The model is a scratch aid and is not committed.
+The owner asked on 2026-11-12 for plans like this one to start from state machines and a Quint model, after the first prose plan drew 26 review findings, about half of them about the order things happen in. The two machines above were then written as a Quint model with these events in any order: two runs claiming, searching, saving, crashing and losing their claim to the clock; Jev asked, answering, failing; a person answering; a re-ask; "Don't use this"; the switch flipped; a category re-check starting and ending; a new row arriving that makes a store private. The model is a scratch aid and is not committed.
 
 **Seven rules, each checked after every event:**
 
-1. A private store is never searched.
+1. A private store is never searched, and none is claimed after it becomes private.
 2. The day's search cap is never passed, counting every outside call.
 3. One run owns a store at a time.
 4. The stored line is the newest claim's, never a reclaimed run's.
@@ -233,12 +240,12 @@ The owner asked on 2026-11-12 for plans like this one to start from state machin
 6. A line sits only under an open guess whose store still has it.
 7. Jev's cap is never passed.
 
-**Result:** no rule broke in 300,000 random orderings of up to 40 events. This is a random search, not a proof. Each rule was shown to bite: with one guard removed at a time (no claim before searching, no claim token on the save, no "the line still stands" check on an answer's save, no "nobody changed the row" check, the cap counted from rows instead of a counter), the matching rule failed within seconds. Those five are the planted bugs the builders' tests must also reject.
+**Result:** no rule broke in 200,000 random orderings of up to 40 events (300,000 before the last event was added). This is a random search, not a proof. Each rule was shown to bite: with one guard removed at a time (no privacy check before reclaiming a store, no claim before searching, no claim token on the save, no "the line still stands" check on an answer's save, no "nobody changed the row" check, the cap counted from rows instead of a counter), the matching rule failed within seconds. Those six are the planted bugs the builders' tests must also reject.
 
 **What the model changed in the design:**
 
 - **No mark on the store.** The earlier plan marked a store once its open guesses had been asked again. The model needs no such mark: "owed a re-ask" can be read from each row. That removes a column and two of the review's findings with it, and it also covers a case the mark got wrong: guesses made while the switch was off are asked again when it comes back on.
-- **A re-ask takes its Jev call when it clears the old guess.** Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
+- **A re-ask takes its Jev call in the same save that clears the old guess.** The existing "ask again" clears first and reserves later, so the lookup's re-ask cannot simply call it. Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
 
 **What a model like this does not cover**, and so has its own checklist:
 
