@@ -3,7 +3,10 @@
 // It fills what nothing has filled, or a bill's category, exactly as a merchant rule does (applyMerchantRules): a
 // person's choice, a Jev guess and a split are never touched.
 
+import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { cleanBankText } from "../clean-bank-text";
+import { bankTextRules, categories, transactions } from "./schema";
 import { merchantRuleStatement } from "./transactions";
 
 /** The raw names one UPDATE takes at most: a few hundred ids in all, per the bounded-work rule (decision 163). */
@@ -25,20 +28,23 @@ export type RuleMapping = { cleanedText: string; categoryId: number };
 export async function activeBankTextRules(
 	db: D1Database,
 ): Promise<BankTextRule[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT b.cleaned_text AS cleanedText, b.category_id AS categoryId,
-				c.name AS categoryName, c.icon, c.color
-			FROM bank_text_rules b JOIN categories c ON c.id = b.category_id
-			WHERE c.archived = 0
-			ORDER BY b.cleaned_text`,
-		)
-		.all<BankTextRule>();
-
-	return results;
+	return drizzle(db)
+		.select({
+			cleanedText: bankTextRules.cleanedText,
+			categoryId: bankTextRules.categoryId,
+			categoryName: categories.name,
+			icon: categories.icon,
+			color: categories.color,
+		})
+		.from(bankTextRules)
+		.innerJoin(categories, eq(categories.id, bankTextRules.categoryId))
+		.where(eq(categories.archived, 0))
+		.orderBy(asc(bankTextRules.cleanedText))
+		.all();
 }
 
 /** The upsert that makes the rule for a cleaned text, or moves it to another category: one row per text (decision 163). */
+// stays raw: its statement feeds a raw db.batch in settings-saves.ts; moves with that batch.
 function upsertBankTextRule(
 	db: D1Database,
 	cleanedText: string,
@@ -82,13 +88,27 @@ export async function bankTextRuleStatements(
 	if (rules.length === 0) return [];
 	const categoryFor = new Map(rules.map((rule) => [rule.cleanedText, rule]));
 
-	const { results: open } = await db
-		.prepare(
-			`SELECT DISTINCT raw_name AS rawName FROM transactions
-			WHERE is_split = 0 AND ((category_id IS NULL AND category_source IS NULL) OR category_source = 'bill')
-				AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)`,
+	const open = await drizzle(db)
+		.selectDistinct({ rawName: transactions.rawName })
+		.from(transactions)
+		.where(
+			and(
+				eq(transactions.isSplit, 0),
+				or(
+					and(
+						isNull(transactions.categoryId),
+						isNull(transactions.categorySource),
+					),
+					eq(transactions.categorySource, "bill"),
+				),
+				// NOT (a removed part AND a category): both are never NULL, so this is the same as the two IS NULLs below.
+				or(
+					isNull(transactions.splitRemovedFromCents),
+					isNull(transactions.categoryId),
+				),
+			),
 		)
-		.all<{ rawName: string }>();
+		.all();
 
 	const namesByText = new Map<string, string[]>();
 
@@ -111,6 +131,7 @@ export async function bankTextRuleStatements(
 
 		for (let i = 0; i < names.length; i += RAW_NAMES_PER_UPDATE) {
 			const chunk = names.slice(i, i + RAW_NAMES_PER_UPDATE);
+			// stays raw: returned to a raw db.batch in settings-saves.ts (via changeBankTextRuleStatements); moves with that batch.
 			statements.push(
 				db
 					.prepare(
@@ -143,9 +164,11 @@ export async function bankTextRuleStatements(
  * about bank text is logged.
  */
 export async function applyBankTextRules(db: D1Database): Promise<void> {
-	const any = await db
-		.prepare("SELECT 1 AS one FROM bank_text_rules LIMIT 1")
-		.first<{ one: number }>();
+	const any = await drizzle(db)
+		.select({ id: bankTextRules.id })
+		.from(bankTextRules)
+		.limit(1)
+		.get();
 
 	if (!any) return;
 	const rules = await activeBankTextRules(db);

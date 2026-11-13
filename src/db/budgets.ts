@@ -1,4 +1,6 @@
 // Budget amounts as Home's budget sheet reads and sets them (spec §5, §7, #66).
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { budgetForMonth } from "../budget";
 import { monthsBefore } from "../dates";
 import { averageMonthlyCents, firstMonthIsPart } from "../trends";
@@ -8,7 +10,9 @@ import {
 	countedCategorySql,
 	countedMonthSql,
 } from "./counted-month";
+import { budgetAmounts, categories } from "./schema";
 
+// stays SQL: a WITH statement built from the shared counted-month helpers; test/budgets-db.test.ts runs EXPLAIN on it.
 export const THREE_MONTH_AVERAGE_SQL = `WITH monthly AS (
 				SELECT ${countedMonthSql()} AS month, SUM(t.amount_cents) AS cents
 				FROM (
@@ -27,21 +31,23 @@ export const THREE_MONTH_AVERAGE_SQL = `WITH monthly AS (
 			FROM monthly`;
 
 /**
- * The statement that sets a category's budget from `month` on, replacing one already set for that month. The first
+ * The query that sets a category's budget from `month` on, replacing one already set for that month. The first
  * page's budget answers write their own guarded statement (budgetWriteStatement, first-tally/first-page.ts).
+ * It is a Drizzle query, not a D1 statement, so it cannot sit in a raw db.batch; setBudget is its only caller.
  */
 export function setBudgetStatement(
 	db: D1Database,
 	categoryId: number,
 	cents: number,
 	month: string,
-): D1PreparedStatement {
-	return db
-		.prepare(
-			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)
-			ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
-		)
-		.bind(categoryId, month, cents);
+) {
+	return drizzle(db)
+		.insert(budgetAmounts)
+		.values({ categoryId, effectiveMonth: month, amountCents: cents })
+		.onConflictDoUpdate({
+			target: [budgetAmounts.categoryId, budgetAmounts.effectiveMonth],
+			set: { amountCents: sql`excluded.amount_cents` },
+		});
 }
 
 /**
@@ -73,33 +79,38 @@ export async function budgetCategory(
 	id: number,
 	month: string,
 ): Promise<BudgetCategory | null> {
-	// SAFETY: db.batch returns one result per statement in the order listed: the categories SELECT first, then the budget_amounts SELECT.
-	const [category, amounts] = (await db.batch([
-		db
-			.prepare(
-				"SELECT id, name, icon, color, archived FROM categories WHERE id = ?",
-			)
-			.bind(id),
-		db
-			.prepare(
-				"SELECT category_id AS categoryId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM budget_amounts WHERE category_id = ?",
-			)
-			.bind(id),
-	])) as [
-		D1Result<
-			Omit<BudgetCategory, "archived" | "budgetCents"> & { archived: number }
-		>,
-		D1Result<Parameters<typeof budgetForMonth>[0][number]>,
-	];
+	const orm = drizzle(db);
 
-	const row = category.results[0];
+	// orm.batch returns one array per query, in the order listed: the category rows first, then the budget rows.
+	const [category, amounts] = await orm.batch([
+		orm
+			.select({
+				id: categories.id,
+				name: categories.name,
+				icon: categories.icon,
+				color: categories.color,
+				archived: categories.archived,
+			})
+			.from(categories)
+			.where(eq(categories.id, id)),
+		orm
+			.select({
+				categoryId: budgetAmounts.categoryId,
+				effectiveMonth: budgetAmounts.effectiveMonth,
+				amountCents: budgetAmounts.amountCents,
+			})
+			.from(budgetAmounts)
+			.where(eq(budgetAmounts.categoryId, id)),
+	]);
+
+	const row = category[0];
 
 	if (!row) return null;
 
 	return {
 		...row,
 		archived: row.archived === 1,
-		budgetCents: budgetForMonth(amounts.results, id, month),
+		budgetCents: budgetForMonth(amounts, id, month),
 	};
 }
 
@@ -118,6 +129,7 @@ export async function lastMonthSpentCents(
 	categoryId: number,
 	month: string,
 ): Promise<number> {
+	// stays SQL: built from COUNTED_JOINS and the counted helpers, shared SQL strings (decision 179).
 	const row = await db
 		.prepare(
 			`SELECT COALESCE(SUM(t.amount_cents), 0) AS cents FROM transactions t
@@ -140,6 +152,7 @@ export async function threeMonthAverageSpentCents(
 	const fromDate = `${monthsBefore(months[0] ?? month, 1)}-01`;
 	const throughDate = `${monthsBefore(months[2] ?? month, -2)}-01`;
 
+	// stays SQL: THREE_MONTH_AVERAGE_SQL, the WITH statement above (decision 179).
 	const row = await db
 		.prepare(THREE_MONTH_AVERAGE_SQL)
 		.bind(months[0], months[1], months[2], fromDate, throughDate, categoryId)

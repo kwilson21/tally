@@ -1,5 +1,8 @@
+import { count, isNotNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { shownName } from "../transactions/name-suggestions";
 import { merchantKeySql, merchantNamesJsonSql } from "./merchant-key";
+import { merchants } from "./schema";
 
 export const CLEAR_MERCHANT_RULE_SQL =
 	"UPDATE merchants SET default_category_id = NULL WHERE raw_name = ?";
@@ -22,12 +25,13 @@ export async function merchantRules(
 	search = "",
 	removing = false,
 ): Promise<{ rules: MerchantRuleRow[]; total: number }> {
-	const [count, rows] = await Promise.all([
-		db
-			.prepare(
-				"SELECT COUNT(*) AS n FROM merchants WHERE default_category_id IS NOT NULL",
-			)
-			.first<{ n: number }>(),
+	const [total, rows] = await Promise.all([
+		drizzle(db)
+			.select({ n: count() })
+			.from(merchants)
+			.where(isNotNull(merchants.defaultCategoryId))
+			.get(),
+		// stays SQL: interpolates merchantNamesJsonSql, a shared helper string the builder cannot bind (decision 179).
 		db
 			.prepare(
 				`SELECT m.raw_name AS merchantKey, m.display_name, ${merchantNamesJsonSql("m.raw_name")} AS suggestedNames, m.suggestion_status,
@@ -60,7 +64,7 @@ export async function merchantRules(
 	);
 
 	const query =
-		(count?.n ?? 0) - Number(removing) > 20
+		(total?.n ?? 0) - Number(removing) > 20
 			? search
 					.normalize("NFC")
 					.trim()
@@ -92,6 +96,7 @@ export async function merchantRules(
 	);
 	const keys = visible.map(({ merchantKey }) => merchantKey);
 
+	// stays SQL: INDEXED BY and a merchantKeySql join, the all-time grouped count (decision 179).
 	const counts = keys.length
 		? await db
 				.prepare(
@@ -115,7 +120,7 @@ export async function merchantRules(
 			...rule,
 			transactions: transactionCounts.get(rule.merchantKey) ?? 0,
 		})),
-		total: count?.n ?? 0,
+		total: total?.n ?? 0,
 	};
 }
 
@@ -124,6 +129,7 @@ export async function removeMerchantRule(
 	db: D1Database,
 	merchantKey: string,
 ): Promise<string | null> {
+	// stays SQL: an UPDATE ... RETURNING with COALESCE/NULLIF (decision 179); no caller, audit #966.
 	const result = await db
 		.prepare(
 			`${CLEAR_MERCHANT_RULE_SQL} AND default_category_id IS NOT NULL
