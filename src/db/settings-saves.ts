@@ -1,6 +1,9 @@
 // How the settings rules (src/rules/settings.ts) read their facts and save what they decide (decisions 190 and 206).
 // The rule decides in TypeScript; the database only checks that what the rule read has not changed since, and raises
 // an error when it has, so a setting is never saved on rows that changed a moment earlier.
+import { eq, type SQL, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import {
@@ -39,6 +42,13 @@ import {
 	removeNeverSuggestStatement,
 } from "./never-suggest";
 import { leftEmpty } from "./refused";
+import {
+	householdMembers,
+	householdPeople,
+	householdSettings,
+	pushSubscriptions,
+	transactions,
+} from "./schema";
 import { waitingForJevSql } from "./transactions";
 
 /**
@@ -46,8 +56,9 @@ import { waitingForJevSql } from "./transactions";
  * rule read them, and tries to add a setting with no value when they are not. The value is NOT NULL, so that fails
  * the statement and the whole batch with an error settingsChangedSinceRead knows (SQLite's RAISE works only inside a
  * trigger). `version` is the rule's version SQL; its own values are bound first, then the version the rule read.
+ * A list still written as SQL uses this one; a list written with Drizzle uses guardOrm, the same statement.
  */
-const guard = (
+const rawGuard = (
 	db: D1Database,
 	version: string,
 	expectedVersion: string,
@@ -59,11 +70,43 @@ const guard = (
 		)
 		.bind(...binds, expectedVersion);
 
+/**
+ * The same guard as guardOrm's builder: `version` is the rule's version as Drizzle SQL with its values bound, and the
+ * version the rule read is bound last, as the raw guard binds it.
+ */
+const guardOrm = (db: D1Database, version: SQL, expectedVersion: string) =>
+	drizzle(db)
+		.insert(householdSettings)
+		.select(
+			drizzle(db)
+				.select({
+					key: sql`'settings_guard'`.as("key"),
+					value: sql`NULL`.as("value"),
+				})
+				.from(sql`(SELECT 1)`)
+				.where(sql`${version} IS NOT ${expectedVersion}`),
+		);
+
 /** Whether a save failed because what the rule read had changed, and not for any other reason. Only a guard can try to store a NULL setting. */
 export const settingsChangedSinceRead = leftEmpty(
 	"household_settings",
 	"value",
 );
+
+/** A Drizzle batch: one or more builder statements, run with drizzle(db).batch, which needs at least one. */
+type DrizzleItems = [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]];
+
+/**
+ * What a save runs in one batch: the raw D1 statements of a list still written as SQL (they move with their batch), or
+ * a Drizzle batch (`drizzle` is the batch's statements). Both are atomic; the two kinds are told apart by this wrapper.
+ */
+export type SettingBatch = D1PreparedStatement[] | { drizzle: DrizzleItems };
+
+/** One Drizzle batch of the statements given, in order. */
+const inOneBatch = (...items: DrizzleItems) => ({ drizzle: items });
+
+const runBatch = (db: D1Database, batch: SettingBatch) =>
+	Array.isArray(batch) ? db.batch(batch) : drizzle(db).batch(batch.drizzle);
 
 /**
  * Reads a settings rule's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts
@@ -76,10 +119,7 @@ export const decideSetting = <Request, F, W, E, Taken = never>(
 	},
 	request: Request,
 	facts: (db: D1Database) => Promise<F>,
-	statements: (
-		db: D1Database,
-		save: W,
-	) => D1PreparedStatement[] | Promise<D1PreparedStatement[]>,
+	statements: (db: D1Database, save: W) => SettingBatch | Promise<SettingBatch>,
 	whenNameTaken?: () => Taken,
 ) =>
 	Effect.gen(function* () {
@@ -90,7 +130,7 @@ export const decideSetting = <Request, F, W, E, Taken = never>(
 			decide: (read) => settingRule.decide(request, read),
 			save: (write) =>
 				guardedSave(
-					async () => db.batch(await statements(db, write)),
+					async () => runBatch(db, await statements(db, write)),
 					settingsChangedSinceRead,
 					whenNameTaken,
 				),
@@ -117,11 +157,12 @@ export async function aiSwitchesFacts(
 }
 
 /** The switches that changed, and with Sort on arrival's turn-on, the mark that the rows it left wait for the daily run (decision 150). */
+// stays SQL: its statements come from ai-switches.ts and first-tally.ts; moves with D2b.
 export const aiSwitchesStatements = (db: D1Database, save: AiSwitchesWrite) => {
 	const waiting = save.rowsWaitFor && waitingForJevSql(save.rowsWaitFor);
 
 	return [
-		guard(db, AI_SWITCHES_VERSION, save.expectedVersion),
+		rawGuard(db, AI_SWITCHES_VERSION, save.expectedVersion),
 		...aiSwitchStatements(db, save.changed),
 		...(waiting ? [waitsForRunStatement(db, waiting)] : []),
 	];
@@ -130,20 +171,21 @@ export const aiSwitchesStatements = (db: D1Database, save: AiSwitchesWrite) => {
 // One stored value each.
 
 const setting = (db: D1Database, key: string, value: string) =>
-	db
-		.prepare(
-			"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-		)
-		.bind(key, value);
+	drizzle(db)
+		.insert(householdSettings)
+		.values({ key, value })
+		.onConflictDoUpdate({
+			target: householdSettings.key,
+			set: { value: sql`excluded.value` },
+		});
 
-export const timeZoneStatements = (db: D1Database, save: { zone: string }) => [
-	setting(db, "time_zone", save.zone),
-];
+export const timeZoneStatements = (db: D1Database, save: { zone: string }) =>
+	inOneBatch(setting(db, "time_zone", save.zone));
 
 export const bankSignInEmailsStatements = (
 	db: D1Database,
 	save: { on: boolean },
-) => [setting(db, "bank_sign_in_emails", save.on ? "on" : "off")];
+) => inOneBatch(setting(db, "bank_sign_in_emails", save.on ? "on" : "off"));
 
 // A sign-in address.
 
@@ -161,20 +203,24 @@ export async function addressFacts(db: D1Database, email: string) {
 	return { known: row?.known === 1, version: row?.version ?? "" };
 }
 
+/** ADDRESS_VERSION as Drizzle SQL, for the Drizzle guard. The facts reader keeps the text form until it moves. */
+const addressVersion = (email: string) =>
+	sql`(SELECT COUNT(*) || ':' || COALESCE(MAX(${householdMembers.removedAt}), '') FROM ${householdMembers} WHERE ${householdMembers.email} = ${email})`;
+
 export const removeAddressStatements = (
 	db: D1Database,
 	save: RemoveAddressWrite,
-) => [
-	guard(db, ADDRESS_VERSION, save.expectedVersion, save.email),
-	db
-		.prepare(
-			"UPDATE household_members SET removed_at = datetime(?2 / 1000, 'unixepoch') WHERE email = ?1",
-		)
-		.bind(save.email, save.now),
-	db
-		.prepare("DELETE FROM push_subscriptions WHERE member_email = ?")
-		.bind(save.email),
-];
+) =>
+	inOneBatch(
+		guardOrm(db, addressVersion(save.email), save.expectedVersion),
+		drizzle(db)
+			.update(householdMembers)
+			.set({ removedAt: sql`datetime(${save.now} / 1000, 'unixepoch')` })
+			.where(eq(householdMembers.email, save.email)),
+		drizzle(db)
+			.delete(pushSubscriptions)
+			.where(eq(pushSubscriptions.memberEmail, save.email)),
+	);
 
 // The people of the household.
 
@@ -198,33 +244,43 @@ export async function personFacts(
 /** The table's own index refuses a name the household has, in any capitals. */
 export const personNameTaken = () => new PersonNameTaken();
 
-export const addPersonStatements = (db: D1Database, save: { name: string }) => [
-	db.prepare("INSERT INTO household_people (name) VALUES (?)").bind(save.name),
-];
+/** PERSON_VERSION as Drizzle SQL, for the Drizzle guard. The facts reader keeps the text form until it moves. */
+const personVersion = (id: number) =>
+	sql`COALESCE((SELECT hex(${householdPeople.name}) FROM ${householdPeople} WHERE ${householdPeople.id} = ${id}), 'none')`;
+
+export const addPersonStatements = (db: D1Database, save: { name: string }) =>
+	inOneBatch(drizzle(db).insert(householdPeople).values({ name: save.name }));
 
 export const renamePersonStatements = (
 	db: D1Database,
 	save: RenamePersonWrite,
-) => [
-	guard(db, PERSON_VERSION, save.expectedVersion, save.id),
-	db
-		.prepare("UPDATE household_people SET name = ? WHERE id = ?")
-		.bind(save.name, save.id),
-];
+) =>
+	inOneBatch(
+		guardOrm(db, personVersion(save.id), save.expectedVersion),
+		drizzle(db)
+			.update(householdPeople)
+			.set({ name: save.name })
+			.where(eq(householdPeople.id, save.id)),
+	);
 
 /** The person's purchases have no cap, so one statement clears them all (decision 209); its result says how many. */
 export const removePersonStatements = (
 	db: D1Database,
 	save: RemovePersonWrite,
-) => [
-	guard(db, PERSON_VERSION, save.expectedVersion, save.id),
-	db
-		.prepare(
-			"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0, updated_by = ?, updated_at = datetime('now') WHERE for_person_id = ?",
-		)
-		.bind(save.who, save.id),
-	db.prepare("DELETE FROM household_people WHERE id = ?").bind(save.id),
-];
+) =>
+	inOneBatch(
+		guardOrm(db, personVersion(save.id), save.expectedVersion),
+		drizzle(db)
+			.update(transactions)
+			.set({
+				forPersonId: null,
+				forPersonGuessed: 0,
+				updatedBy: save.who,
+				updatedAt: sql`datetime('now')`,
+			})
+			.where(eq(transactions.forPersonId, save.id)),
+		drizzle(db).delete(householdPeople).where(eq(householdPeople.id, save.id)),
+	);
 
 // Tally's rules.
 
@@ -246,11 +302,12 @@ export async function alwaysRuleFacts(
 	return { merchant: row?.merchant ?? null, version: row?.version ?? "" };
 }
 
+// stays SQL: its statement is CLEAR_MERCHANT_RULE_SQL; moves with D2b.
 export const removeAlwaysRuleStatements = (
 	db: D1Database,
 	save: RemoveAlwaysRuleWrite,
 ) => [
-	guard(db, ALWAYS_VERSION, save.expectedVersion, save.merchantKey),
+	rawGuard(db, ALWAYS_VERSION, save.expectedVersion, save.merchantKey),
 	db.prepare(CLEAR_MERCHANT_RULE_SQL).bind(save.merchantKey),
 ];
 
@@ -273,11 +330,12 @@ export async function neverSuggestLineFacts(
 	return { line, version: version?.version ?? "" };
 }
 
+// stays SQL: its statement comes from never-suggest.ts; moves with D2b and D2d.
 export const removeNeverSuggestStatements = (
 	db: D1Database,
 	save: RemoveNeverSuggestWrite<NeverSuggestRule>,
 ) => [
-	guard(db, NEVER_VERSION, save.expectedVersion, save.line.id),
+	rawGuard(db, NEVER_VERSION, save.expectedVersion, save.line.id),
 	removeNeverSuggestStatement(db, save.line),
 ];
 
@@ -337,8 +395,9 @@ const utc = (mark: string) =>
  * The Forget, one batch: it remembers the rule it removes (its Undo puts that rule back) and the time of an earlier
  * Forget, then the rule goes. The insert reads the rule before the delete, in order.
  */
+// stays SQL: a Forget's own statements; moves with D2c.
 export const forgetStatements = (db: D1Database, save: ForgetWrite) => [
-	guard(db, TEXT_VERSION, save.expectedVersion, save.text),
+	rawGuard(db, TEXT_VERSION, save.expectedVersion, save.text),
 	db
 		.prepare(
 			`INSERT INTO forgotten_texts (cleaned_text, forgotten_at, rule_category_id)
@@ -397,8 +456,9 @@ export async function undoForgetFacts(
  * The Undo, one batch: the rule the Forget removed comes back, unless the text has a newer rule (ON CONFLICT keeps that
  * one), and the Forget's row goes back to its earlier time, or goes.
  */
+// stays SQL: an Undo's own statements; moves with D2c.
 export const undoForgetStatements = (db: D1Database, save: UndoForgetWrite) => [
-	guard(db, FORGET_VERSION, save.expectedVersion, save.id),
+	rawGuard(db, FORGET_VERSION, save.expectedVersion, save.id),
 	db
 		.prepare(
 			`INSERT INTO bank_text_rules (cleaned_text, category_id)
@@ -453,10 +513,17 @@ export async function changeLineFacts(
  * A Change's batch: the guard, the rule, then the merchant rules and every bank-text rule's fill, so a merchant rule
  * still wins. The rows a rule fills have no cap, so SQL fills them (decision 209).
  */
+// stays SQL: it uses merchantRuleStatement in transactions.ts; moves with D2e.
 export const changeLineStatements = async (
 	db: D1Database,
 	save: ChangeLineWrite,
 ) => [
-	guard(db, CHANGE_VERSION, save.expectedVersion, save.text, save.categoryId),
+	rawGuard(
+		db,
+		CHANGE_VERSION,
+		save.expectedVersion,
+		save.text,
+		save.categoryId,
+	),
 	...(await changeBankTextRuleStatements(db, save.text, save.categoryId)),
 ];
