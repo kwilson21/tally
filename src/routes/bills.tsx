@@ -47,6 +47,8 @@ import {
 	dateOfDayNumber,
 	dayNumber,
 	householdToday,
+	isRealDate,
+	isRealMonth,
 	monthLabel,
 	ordinal,
 	shortDay,
@@ -151,11 +153,6 @@ type Values = {
 	category_id: string;
 	merchant_raw_name: string;
 };
-
-const validDateString = (date: string) =>
-	/^\d{4}-\d{2}-\d{2}$/.test(date) &&
-	!Number.isNaN(Date.parse(`${date}T00:00:00Z`)) &&
-	new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
 
 /** Bills' page, with an optional sheet over it: a bill's, or a planned expense's (`plan`, drawn by plans.tsx). */
 export async function page(
@@ -696,7 +693,7 @@ function BillSheet({
 						value={values.anchor_date}
 						error={errors.anchor_date}
 						hint={
-							values.anchor_date && validDateString(values.anchor_date)
+							values.anchor_date && isRealDate(values.anchor_date)
 								? `Then every two weeks from that date. Next: ${shortDate(nextTwoWeeksAfter(values.anchor_date, today))}.`
 								: "Then every two weeks from that date."
 						}
@@ -941,7 +938,7 @@ async function save(c: Context<App>, id?: number) {
 		errors.amount = `Enter an amount of ${formatCents(MAX_OCCURRENCE_CENTS, { wholeDollars: true })} or less.`;
 
 	const anchorDate = values.anchor_date;
-	const validAnchorDate = validDateString(anchorDate);
+	const validAnchorDate = isRealDate(anchorDate);
 
 	const due =
 		values.frequency === "biweekly" && validAnchorDate
@@ -1323,14 +1320,15 @@ const periodLabel = (bill: DbBill, period: string, today: string) =>
 		? monthName(billPeriodMonth(countedBill(bill), period), today)
 		: occurrenceLabel(occurrenceDate(bill, period));
 
-/** The shape of each frequency's payment keys (bill_payments.period), so a key of another shape never sets a start. */
-const periodKeyPattern: Record<DbBill["frequency"], RegExp> = {
-	monthly: /^\d{4}-\d{2}$/,
-	yearly: /^\d{4}$/,
-	weekly: /^\d{4}-\d{2}-\d{2}$/,
-	biweekly: /^\d{4}-\d{2}-\d{2}$/,
-	quarterly: /^\d{4}-Q[1-4]$/,
-};
+/** Whether a payment key (bill_payments.period) is of its frequency's form, so a key of another form never sets a start. */
+const validPeriodKey: Record<DbBill["frequency"], (period: string) => boolean> =
+	{
+		monthly: isRealMonth,
+		yearly: (period) => /^\d{4}$/.test(period),
+		weekly: isRealDate,
+		biweekly: isRealDate,
+		quarterly: (period) => /^\d{4}-Q[1-4]$/.test(period),
+	};
 
 /** The periods a bill's page lists and accepts: back to its earliest linked payment (or six months), ahead two months (a year for yearly bills). */
 async function billPeriods(db: D1Database, bill: DbBill, today: string) {
@@ -1344,7 +1342,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 	let start = addMonths(today.slice(0, 7), -6);
 
 	for (const { period } of linked.results) {
-		if (!periodKeyPattern[bill.frequency].test(period)) continue;
+		if (!validPeriodKey[bill.frequency](period)) continue;
 		const month = occurrenceMonth(bill, period);
 
 		if (month < start) start = month;

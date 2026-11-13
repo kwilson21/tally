@@ -1,4 +1,5 @@
 // The list's filters live in the URL, so every filtered view is a link that can be shared and reloaded.
+import { isRealMonth } from "../dates";
 import { toCents } from "../money";
 
 /** The Show choice's options, in the order it lists them (spec §8.4). */
@@ -38,8 +39,6 @@ export type Filters = {
 	/** The demo's "Without Tally" view (`?raw=1`, spec §8.6): the list as the bank sends it. Never set outside the demo. */
 	raw: boolean;
 };
-
-const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /** The search text as the list reads it: trimmed, and at most 100 characters. */
 export const searchText = (value: string | null | undefined) =>
@@ -180,7 +179,7 @@ export function parseFilters(
 
 	return {
 		q: searchText(params.get("q")),
-		month: month === "all" || MONTH.test(month) ? month : thisMonth,
+		month: month === "all" || isRealMonth(month) ? month : thisMonth,
 		category: Number.isInteger(category) && category > 0 ? category : null,
 		account: Number.isInteger(account) && account > 0 ? account : null,
 		// A link made when Excluded was a chip (`excluded=1`) still shows the excluded ones.
