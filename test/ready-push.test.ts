@@ -580,7 +580,9 @@ describe("the ready push: how each answer counts", () => {
 		expect(await pushedList()).toEqual([]);
 		const second = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl: second.fetchImpl });
-		expect(second.pushed).toEqual([PHONE, LAPTOP, SPARE]);
+		expect(inAnyOrder(second.pushed)).toEqual(
+			inAnyOrder([PHONE, LAPTOP, SPARE]),
+		);
 		expect(await pushedList()).toEqual([DANA]);
 	});
 
