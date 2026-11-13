@@ -273,6 +273,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered its rows |
 | JANE DOE | none | GENERAL_SERVICES, one row answered, another Jev gave up on | Not yet | a row Jev gave up on has no privacy answer |
 | ＶＥＮＭＯ *ＪＡＮＥ ＤＯＥ (full-width) | none | GENERAL_SERVICES | No | folded first, then a payment app's name |
+| JANE DOE (a credit) | none | GENERAL_SERVICES, Jev unsure it is a reimbursement | Not yet | an unsure reimbursement answer holds the row, as a Maybe transfer does |
 | CORNER CAFE, corrected by Plaid to JANE DOE | none | GENERAL_SERVICES, Jev answered the old text | Not yet | Jev's answer counts only for the text it was asked about; the row is asked again first |
 | JANE DOE | none | GENERAL_SERVICES, a new row arrives after the claim | Not yet | the whole test is made again just before the search is sent |
 | JANE DOE | none | GENERAL_SERVICES, a person filed it under Kids, Jev never asked | No | a person's category choice is not Jev's privacy answer |
