@@ -2,8 +2,8 @@
 // migrations/*.sql are the only thing that changes the database; this file is written to match them, and
 // test/db-schema.test.ts fails when they disagree: columns, SQLite types, not-null, defaults, primary keys, CHECK
 // value lists, indexes (unique and partial), foreign keys (target, ON UPDATE and ON DELETE), and the unique
-// constraints a CREATE TABLE writes inline. The same test fails when a live application table is not described here
-// and not listed in its NOT_YET_DESCRIBED.
+// constraints a CREATE TABLE writes inline. The same test fails for any live application table this file does not
+// describe.
 //
 // The CHECK value lists are CHECK_LISTS at the bottom of this file: the drift test compares them both ways with the
 // live CREATE TABLE statements, so they are the verified record. No CHECK() is declared here, because nothing
@@ -750,7 +750,11 @@ export const householdSettings = sqliteTable("household_settings", {
 });
 
 /** maybe_answers.kind: the CHECK in migrations/0062_maybe_answers.sql. */
-export const MAYBE_ANSWER_KIND_VALUES = ["category", "income", "transfer"] as const;
+export const MAYBE_ANSWER_KIND_VALUES = [
+	"category",
+	"income",
+	"transfer",
+] as const;
 
 /** maybe_answers.answer: the CHECK in migrations/0062_maybe_answers.sql. */
 export const MAYBE_ANSWER_ANSWER_VALUES = [

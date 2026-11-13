@@ -17,8 +17,8 @@ import {
 import { describe, expect, it } from "vitest";
 import * as schemaModule from "../src/db/schema";
 import {
-	accounts,
 	AI_LOG_KIND_VALUES,
+	accounts,
 	aiLog,
 	BILL_FREQUENCY_VALUES,
 	BILL_PAYMENT_MATCHED_BY_VALUES,
@@ -43,9 +43,9 @@ import {
 	householdSettings,
 	MAYBE_ANSWER_ANSWER_VALUES,
 	MAYBE_ANSWER_KIND_VALUES,
+	MERCHANT_STATUS_VALUES,
 	maybeAnswers,
 	maybeNames,
-	MERCHANT_STATUS_VALUES,
 	merchantNameFailures,
 	merchantSuggestedNames,
 	merchants,
@@ -64,30 +64,15 @@ import {
 // It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
 // database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
-// The described tables are the ones src/db/schema.ts exports (today: accounts, balance_history, bank_text_rules,
-// bill_amounts, bill_payments, bills, budget_amounts, cash_delete_holds, categories, category_archive_periods,
-// category_suggestions, forgotten_texts, household_people, maybe_names, merchant_suggested_names, merchants,
-// planned_delete_holds, planned_expenses, plaid_items, savings_goal_amounts, transactions). Every other live application
-// table is listed by name in NOT_YET_DESCRIBED below, with its reason, until a later PR describes it.
+// Every one of the 30 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
+// bank_text_rules, bill_amounts, bill_payments, bills, budget_amounts, cash_delete_holds, categories,
+// category_archive_periods, category_suggestions, documents, feedback, forgotten_texts, household_members,
+// household_people, household_settings, maybe_answers, maybe_names, merchant_name_failures, merchant_suggested_names,
+// merchants, never_suggest_rules, plaid_items, planned_delete_holds, planned_expenses, push_subscriptions,
+// savings_goal_amounts, transactions. A live application table the schema file does not describe fails the table-set
+// test, so a later migration that adds a table cannot skip it.
 
 type Lists = Record<string, Record<string, readonly string[]>>;
-
-/**
- * Application tables that src/db/schema.ts does not describe yet, each with its reason. The list can only shrink:
- * the table-set test fails when a name here is described already or is not in the database. The last PR for #963
- * empties it, and the check becomes "every live table is in the schema".
- */
-const NOT_YET_DESCRIBED = {
-	ai_log: "described in a later #963 PR",
-	documents: "described in a later #963 PR",
-	feedback: "described in a later #963 PR",
-	household_members: "described in a later #963 PR",
-	household_settings: "described in a later #963 PR",
-	maybe_answers: "described in a later #963 PR",
-	merchant_name_failures: "described in a later #963 PR",
-	never_suggest_rules: "described in a later #963 PR",
-	push_subscriptions: "described in a later #963 PR",
-} satisfies Record<string, string>;
 
 interface LiveForeignKey {
 	table: string;
@@ -527,33 +512,20 @@ function schemaTables(): SQLiteTable[] {
 }
 
 /**
- * The table-set rule as a pure function of three lists: every live table is described or listed as not yet
- * described; a listed table is neither described nor missing from the database; a described table is in the database.
+ * The table-set rule as a pure function of two lists: every live table is described in the schema file, and every
+ * described table is in the database.
  */
 function tableSetProblems(
 	live: readonly string[],
 	described: readonly string[],
-	notYetDescribed: readonly string[],
 ): string[] {
 	const problems: string[] = [];
 
 	for (const name of live)
-		if (!described.includes(name) && !notYetDescribed.includes(name))
+		if (!described.includes(name))
 			problems.push(
-				`${name} is in the database, but neither src/db/schema.ts nor NOT_YET_DESCRIBED names it`,
+				`${name} is in the database, but src/db/schema.ts does not describe it`,
 			);
-
-	for (const name of notYetDescribed) {
-		if (described.includes(name))
-			problems.push(
-				`${name} is in NOT_YET_DESCRIBED, but src/db/schema.ts describes it`,
-			);
-
-		if (!live.includes(name))
-			problems.push(
-				`${name} is in NOT_YET_DESCRIBED, but the database has no such table`,
-			);
-	}
 
 	for (const name of described)
 		if (!live.includes(name))
@@ -693,16 +665,10 @@ describe("the schema file matches the live database", () => {
 		expect(await drift(pushSubscriptions, CHECK_LISTS)).toEqual([]);
 	});
 
-	it("every live application table is described in the schema or listed as not yet described", async () => {
+	it("every live application table is described in the schema", async () => {
 		const described = schemaTables().map((table) => getTableConfig(table).name);
 
-		expect(
-			tableSetProblems(
-				await appTableNames(),
-				described,
-				Object.keys(NOT_YET_DESCRIBED),
-			),
-		).toEqual([]);
+		expect(tableSetProblems(await appTableNames(), described)).toEqual([]);
 	});
 
 	it("the CHECK value lists are read from the live CREATE TABLE and compared both ways", () => {
@@ -1567,9 +1533,7 @@ describe("the drift check fails on a wrong household, feedback, AI or push table
 				transactionId: integer("transaction_id"),
 				merchantRawName: text("merchant_raw_name"),
 				householdDay: text("household_day").notNull(),
-				createdAt: text("created_at")
-					.notNull()
-					.default(sql`(datetime('now'))`),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 			},
 			(t) => [uniqueIndex("ai_log_merchant_name").on(t.merchantRawName)], // the database: WHERE kind = 'name'
 		);
@@ -1587,9 +1551,7 @@ describe("the drift check fails on a wrong household, feedback, AI or push table
 				merchantKey: text("merchant_key").notNull(),
 				kind: text({ enum: NEVER_SUGGEST_RULE_KIND_VALUES }).notNull(),
 				decidedOn: text("decided_on").notNull(),
-				createdAt: text("created_at")
-					.notNull()
-					.default(sql`(datetime('now'))`),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 			},
 			(t) => [uniqueIndex("never_suggest_rules_one").on(t.merchantKey)], // the database: ON (merchant_key, kind)
 		);
@@ -1620,9 +1582,7 @@ describe("the drift check fails on a wrong household, feedback, AI or push table
 			confidence: integer().notNull(), // the database: confidence REAL NOT NULL
 			answer: text({ enum: MAYBE_ANSWER_ANSWER_VALUES }).notNull(),
 			householdDay: text("household_day").notNull(),
-			createdAt: text("created_at")
-				.notNull()
-				.default(sql`(datetime('now'))`),
+			createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 		});
 
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
@@ -1639,9 +1599,7 @@ describe("the drift check fails on a wrong household, feedback, AI or push table
 				endpoint: text().notNull(), // the database: endpoint TEXT NOT NULL UNIQUE
 				p256dh: text().notNull(),
 				auth: text().notNull(),
-				createdAt: text("created_at")
-					.notNull()
-					.default(sql`(datetime('now'))`),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 			},
 			(t) => [index("push_subscriptions_member").on(t.memberEmail)],
 		);
@@ -1655,41 +1613,30 @@ describe("the drift check fails on a wrong household, feedback, AI or push table
 describe("the table-set check fails on a wrong list", () => {
 	const described = ["a"];
 
-	it("a live table in neither the schema nor the not-yet list", () => {
-		expect(tableSetProblems(["a", "b"], described, [])).toEqual([
-			"b is in the database, but neither src/db/schema.ts nor NOT_YET_DESCRIBED names it",
-		]);
-	});
-
-	it("a not-yet-described name that is not in the database", () => {
-		expect(tableSetProblems(["a"], described, ["gone"])).toEqual([
-			"gone is in NOT_YET_DESCRIBED, but the database has no such table",
-		]);
-	});
-
-	it("a described table still listed as not yet described", () => {
-		expect(tableSetProblems(["a"], described, ["a"])).toEqual([
-			"a is in NOT_YET_DESCRIBED, but src/db/schema.ts describes it",
+	it("a live table the schema does not describe", () => {
+		expect(tableSetProblems(["a", "b"], described)).toEqual([
+			"b is in the database, but src/db/schema.ts does not describe it",
 		]);
 	});
 
 	it("a described table that is not in the database", () => {
-		expect(tableSetProblems([], described, [])).toEqual([
+		expect(tableSetProblems([], described)).toEqual([
 			"a is described in src/db/schema.ts, but the database has no such table",
 		]);
 	});
 
-	it("passes when every live table is described or listed", () => {
-		expect(tableSetProblems(["a", "b"], described, ["b"])).toEqual([]);
+	it("passes when every live table is described", () => {
+		expect(tableSetProblems(["a"], described)).toEqual([]);
 	});
 
-	it("the exports the drift test enumerates are the described tables only", () => {
+	it("the exports the drift test enumerates are all 30 application tables", () => {
 		expect(
 			schemaTables()
 				.map((table) => getTableConfig(table).name)
 				.sort(),
 		).toEqual([
 			"accounts",
+			"ai_log",
 			"balance_history",
 			"bank_text_rules",
 			"bill_amounts",
@@ -1700,14 +1647,22 @@ describe("the table-set check fails on a wrong list", () => {
 			"categories",
 			"category_archive_periods",
 			"category_suggestions",
+			"documents",
+			"feedback",
 			"forgotten_texts",
+			"household_members",
 			"household_people",
+			"household_settings",
+			"maybe_answers",
 			"maybe_names",
+			"merchant_name_failures",
 			"merchant_suggested_names",
 			"merchants",
+			"never_suggest_rules",
 			"plaid_items",
 			"planned_delete_holds",
 			"planned_expenses",
+			"push_subscriptions",
 			"savings_goal_amounts",
 			"transactions",
 		]);
