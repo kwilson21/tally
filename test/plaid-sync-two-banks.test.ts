@@ -289,4 +289,57 @@ describe("one bank's page saved while another bank adds a charge with the same P
 		expect(await status("Bean House Roasters")).toBe("pending");
 		expect(await status("Bean house")).toBe("none");
 	});
+
+	it("does not move its position when settling the names fails, so the next run takes the page again and settles them", async () => {
+		const one = await addBank("account-one");
+		const two = await addBank("account-two");
+
+		await syncBank(one, [
+			{
+				text: "COFFEE TEXT ONE",
+				name: "Bean house",
+				id: "earlier",
+				date: "2026-09-01",
+			},
+		]);
+
+		const positionOf = async () =>
+			(
+				await env.DB.prepare("SELECT sync_cursor FROM plaid_items WHERE id = ?")
+					.bind(one.id)
+					.first<{ sync_cursor: string | null }>()
+			)?.sync_cursor;
+
+		const before = await positionOf();
+		let batches = 0;
+
+		// Bank two's charge lands before bank one's page is saved, as above, and then the database fails once, on the
+		// batch that settles the names again.
+		const db = Object.assign(Object.create(env.DB), {
+			prepare: (query: string) => env.DB.prepare(query),
+			batch: async (statements: D1PreparedStatement[]) => {
+				batches += 1;
+
+				if (batches === 1)
+					await syncBank(two, [{ text: "BEAN HOUSE", name: "Bean house" }]);
+
+				if (batches === 2) throw new Error("the database was busy");
+
+				return env.DB.batch(statements);
+			},
+		});
+
+		const renamed = [{ text: "COFFEE TEXT ONE", name: "Bean House Roasters" }];
+
+		await expect(syncBank(one, renamed, undefined, db)).rejects.toThrow(
+			"the database was busy",
+		);
+		expect(await positionOf()).toBe(before);
+		expect(await status("Bean house")).toBe("pending");
+
+		await syncBank(one, renamed);
+		expect(await positionOf()).not.toBe(before);
+		expect(await status("Bean house")).toBe("none");
+		expect(await status("Bean House Roasters")).toBe("pending");
+	});
 });
