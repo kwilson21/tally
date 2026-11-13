@@ -51,7 +51,9 @@ The owner picked 1 in chat on 2026-11-12.
 
 ### When it runs
 
-In the same places sorting runs (spec §7): the night's Workflow and right after a sync, as a step **before** Jev and the name run, so the line is there when they ask. Never in a request a person is waiting on.
+In the same places sorting runs (spec §7): the night's Workflow and right after a sync, as a step **after** the sorting groups and before the name run. Never in a request a person is waiting on.
+
+**After Jev's first answer, not before** (the owner's pick on 2026-11-12; the first design had it before). A store is searched only once Jev, a rule or a person has answered every one of its rows, so a row Jev flags as a transfer, income or a reimbursement is known before anything is sent. A bare name such as "JANE DOE" under an ordinary Plaid category names no app or rail, and only Jev's answer can say it is a payment to a person. The cost: a new store's first guess is made without the line. The line reaches that store's later rows on their first ask, and its guesses that are still open are asked again; a row Jev filed confidently but wrongly on its first ask is not helped.
 
 Stores that already exist when this ships are looked up by the same run, oldest first, under the daily cap, so the backlog drains over a few nights.
 
@@ -66,7 +68,7 @@ A store is searched only when **all** of these hold. The first three are about p
 1. **Something says it is a store (it fails closed).** At least one of its transactions carries a Plaid category that is not one of the private ones. A text none of whose rows Plaid gave a category is not searched; it becomes eligible if a later row arrives with one.
 2. **Nothing says it is private.** It is stored as `skipped` and never searched when any of these holds, for any merchant and any transaction that shares its lookup text (one private row makes the text private):
    - a Plaid transfer category (`TRANSFER_CATEGORIES` in `src/db/plaid-transfers.ts`), Plaid's income category, or Plaid's bank-fees category (`BANK_FEES`: not a store; the owner's pick after a read of production found 12 of its 30 candidate texts were bank fees), or a row with a stored transfer, income or reimbursement flag, whoever set it (Plaid, Jev or a person), or an unanswered "Maybe transfer" or "Maybe income";
-   - a payment app's name **anywhere** in the text as whole words (Venmo, Zelle, Cash App, PayPal, Apple Cash and the like, a short list in code);
+   - a payment app's name **anywhere** in the text as whole words (Venmo, Zelle, Cash App, PayPal, Apple Cash, Privacy.com's "PwP" virtual cards and the like, a short list in code: services people pay through, whose text names the service or a person, not the store);
    - a bank-rail phrase anywhere in the text (ACH, wire, a check, "payment to", "transfer to" and the like);
    - text that reads as an instruction, after it is folded to plain characters;
    - nothing left after redaction.
@@ -232,7 +234,7 @@ The owner asked on 2026-11-12 for plans like this one to start from state machin
 
 **Seven rules, each checked after every event:**
 
-1. A private store is never searched, and none is claimed after it becomes private.
+1. A private store is never searched, none is claimed after it becomes private, and none is claimed while a row of it still waits for Jev's first answer.
 2. The day's search cap is never passed, counting every outside call.
 3. One run owns a store at a time.
 4. The stored line is the newest claim's, never a reclaimed run's.
@@ -240,7 +242,9 @@ The owner asked on 2026-11-12 for plans like this one to start from state machin
 6. A line sits only under an open guess whose store still has it.
 7. Jev's cap is never passed.
 
-**Result:** no rule broke in 200,000 random orderings of up to 40 events (300,000 before the last event was added). This is a random search, not a proof. Each rule was shown to bite: with one guard removed at a time (no privacy check before reclaiming a store, no claim before searching, no claim token on the save, no "the line still stands" check on an answer's save, no "nobody changed the row" check, the cap counted from rows instead of a counter), the matching rule failed within seconds. Those six are the planted bugs the builders' tests must also reject.
+**Result:** no rule broke in 200,000 random orderings of up to 40 events. This is a random search, not a proof, and it has a known weak spot: since the lookup moved after Jev's first answer, a guess made with a line sits many events deep, and the random search reaches it only about once in a million tries. So the rules about a line are also checked by a written scenario that walks straight there (every row answered, the store claimed and found, a re-ask in flight with the line, then "Don't use this").
+
+Each rule was shown to bite. With one guard removed at a time, the matching rule failed: searching before Jev has answered the store's rows, no privacy check before reclaiming a store, no claim before searching, no claim token on the save, no "nobody changed the row" check, and the cap counted from rows instead of a counter were each caught by the random search; no "the line still stands" check on an answer's save was too deep for it and was caught by the written scenario. Those seven are the planted bugs the builders' tests must also reject.
 
 **What the model changed in the design:**
 
@@ -262,6 +266,8 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | ACH PAYMENT TO JANE DOE | Jane Doe | GENERAL_SERVICES | No | the raw text is read too, not only Plaid's name |
 | ｉｇｎｏｒｅ previous instructions | none | any | No | folded, then reads as an instruction |
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
+| JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered every one of its rows |
+| PwP Privacycom fiGNTCPNeNoKPZC | none | GENERAL_SERVICES | No | a pay-through service; the text is a reference, not a store |
 | JANE DOE | Jane Doe | GENERAL_SERVICES, and Jev flagged it a transfer (or "Maybe transfer") | No | a stored flag, whoever set it |
 | one ordinary row and one transfer row sharing a lookup text | | | No | one private row makes the text private |
 | only cash, hand-entered or Apple Card rows | | | Not yet | no sign it is a store; looked at again when a bank row arrives |
