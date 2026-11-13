@@ -427,3 +427,69 @@ const LIST_URL = /^\/transactions(\?[^#]*)?$/;
 export function safeBack(url: string | null | undefined): string {
 	return url && LIST_URL.test(url) ? url : "/transactions";
 }
+
+/**
+ * A transfer credit a person turns Exclude off on counts as income, reviewed by that person (#878; the owner's
+ * rule in chat on 2026-11-13). The edit it returns is what saveEdit writes: the same save with the income and
+ * the review ticked. It only applies when the save changes nothing else about income or review, so an explicit
+ * review as not income wins, and so does a link as a refund. A split part or parent, a row that isn't a transfer
+ * credit, a row that is already income or already linked (as a refund), a row whose income the person already chose
+ * (income_source 'user', so unticking it and excluding it again keeps it not income), and a credit the person already
+ * reviewed as not income keep their own rules.
+ */
+export function includedTransferCredit(
+	edit: Edit,
+	stored: {
+		amountCents: number;
+		flagTransfer: number;
+		excluded: number;
+		income: number;
+		isSplit: number;
+		parentId: number | null;
+		refundOfId: number | null;
+		incomeSource: string | null;
+		creditReviewedByUser: boolean;
+	},
+): Edit {
+	const turnedOffTransferCredit =
+		stored.amountCents < 0 &&
+		stored.flagTransfer === 1 &&
+		stored.excluded === 1 &&
+		stored.income === 0 &&
+		stored.isSplit === 0 &&
+		stored.parentId === null &&
+		stored.refundOfId === null &&
+		stored.incomeSource !== "user" &&
+		!stored.creditReviewedByUser &&
+		!edit.excluded;
+
+	const linking =
+		edit.refundOfId !== undefined &&
+		edit.refundOfId !== null &&
+		edit.refundOfId !== stored.refundOfId;
+
+	const incomeLeftAlone =
+		(edit.incomeWas ?? stored.income === 1) === edit.income;
+
+	const reviewLeftAlone =
+		edit.creditReviewedProvided === false ||
+		edit.creditReviewed ===
+			(edit.creditReviewedWas ?? stored.creditReviewedByUser);
+
+	if (
+		!turnedOffTransferCredit ||
+		linking ||
+		!incomeLeftAlone ||
+		!reviewLeftAlone
+	)
+		return edit;
+
+	return {
+		...edit,
+		income: true,
+		incomeWas: false,
+		creditReviewed: true,
+		creditReviewedWas: false,
+		creditReviewedProvided: true,
+	};
+}

@@ -598,6 +598,66 @@ describe("Bills", () => {
 		).toEqual({ due_day: 5, anchor_date: "2026-10-02" });
 	});
 
+	it.each(["2026-02-30", "2025-02-29", "2026-13-01"])(
+		"refuses a biweekly anchor date that is not a real day (%s), and saves nothing",
+		async (anchorDate) => {
+			const name = `Unreal anchor ${anchorDate}`;
+
+			const response = await exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				redirect: "manual",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name,
+					amount: "10.00",
+					due_day: "",
+					frequency: "biweekly",
+					anchor_date: anchorDate,
+					category_id: "1",
+					merchant_raw_name: name.toUpperCase(),
+				}),
+			});
+
+			expect(response.status).toBe(200);
+			expect(await response.text()).toContain("Choose a date.");
+			expect(
+				await env.DB.prepare("SELECT id FROM bills WHERE name = ?")
+					.bind(name)
+					.first(),
+			).toBeNull();
+		},
+	);
+
+	it("saves a biweekly anchor on a real leap day", async () => {
+		const response = await exports.default.fetch("http://tally.test/bills", {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Leap anchor fixture",
+				amount: "10.00",
+				due_day: "",
+				frequency: "biweekly",
+				anchor_date: "2028-02-29",
+				category_id: "1",
+				merchant_raw_name: "LEAP ANCHOR FIXTURE",
+			}),
+		});
+
+		expect(response.status).toBe(303);
+		expect(
+			await env.DB.prepare(
+				"SELECT anchor_date FROM bills WHERE name='Leap anchor fixture'",
+			).first(),
+		).toEqual({ anchor_date: "2028-02-29" });
+	});
+
 	it("adds a bill and returns htmx feedback", async () => {
 		const body = new URLSearchParams({
 			name: "Gym",

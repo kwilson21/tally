@@ -13,7 +13,7 @@ import {
 	type MonthSpent,
 	monthlyMeanCents,
 } from "../budgets/first-suggestion";
-import { householdToday } from "../dates";
+import { householdToday, isRealMonth } from "../dates";
 import { readAiSwitches } from "../db/ai-switches";
 import {
 	COUNTED_JOINS,
@@ -357,7 +357,7 @@ function savingsLedger(
  * a budget takes effect from its month on. `month` is code (YYYY-MM), checked here.
  */
 export function budgetAppliesSql(alias: string, month: string): string {
-	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+	if (!isRealMonth(month)) throw new Error(`not a month: ${month}`);
 
 	return `EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = ${alias}.id AND b.effective_month <= '${month}')`;
 }

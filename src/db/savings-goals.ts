@@ -1,10 +1,12 @@
+import { isRealMonth } from "../dates";
+
 /**
  * The current savings goal, as SQL: the cents of the latest goal row at or before `month` (`YYYY-MM`, code, checked here),
  * or NULL when that row is $0 or there is none. Home writes $0 to remove a goal, so a $0 row is no goal (month.ts reads
  * the same latest row). Shared by the first week's savings question (first-page.ts) and the Home sheet's write.
  */
 export function currentGoalSql(month: string): string {
-	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+	if (!isRealMonth(month)) throw new Error(`not a month: ${month}`);
 
 	return `(SELECT NULLIF(amount_cents, 0) FROM savings_goal_amounts WHERE effective_month <= '${month}' ORDER BY effective_month DESC LIMIT 1)`;
 }

@@ -12,7 +12,13 @@ import {
 	NudgeDirection,
 	parseBudgetAmount,
 } from "../budgets/amount";
-import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
+import {
+	daysInMonth,
+	householdToday,
+	isRealMonth,
+	monthLabel,
+	monthName,
+} from "../dates";
 import { appleCardUpload, bankSyncs } from "../db/accounts";
 import {
 	budgetFacts,
@@ -655,7 +661,7 @@ home.get("/", async (c) => {
 
 	const viewMonth =
 		requested &&
-		/^\d{4}-(0[1-9]|1[0-2])$/.test(requested) &&
+		isRealMonth(requested) &&
 		requested >= firstMonth &&
 		requested <= currentMonth
 			? requested

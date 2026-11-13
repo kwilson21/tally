@@ -7,6 +7,8 @@ import {
 	daysBefore,
 	daysInMonth,
 	householdToday,
+	isRealDate,
+	isRealMonth,
 	monthName,
 	monthsBefore,
 	shortDay,
@@ -192,4 +194,69 @@ describe("dayNumber and dateOfDayNumber", () => {
 		expect(dayNumber("0100-01-01") - dayNumber("0099-12-31")).toBe(1);
 		expect(dateOfDayNumber(dayNumber("0099-12-31"))).toBe("0099-12-31");
 	});
+});
+
+describe("isRealDate", () => {
+	it.each([
+		"2026-01-01",
+		"2026-12-31",
+		"2028-02-29",
+		"2000-02-29",
+		"2026-09-22",
+	])("accepts the real date %s", (date) => expect(isRealDate(date)).toBe(true));
+
+	it.each([
+		"2026-02-29",
+		"1900-02-29",
+		"2026-04-31",
+		"2026-13-01",
+		"2026-00-10",
+		"2026-01-00",
+		"2026-01-32",
+	])("refuses %s, which is not a real calendar date", (date) =>
+		expect(isRealDate(date)).toBe(false),
+	);
+
+	it.each([
+		"",
+		"2026-1-01",
+		"26-01-01",
+		"2026-01-1",
+		" 2026-01-01",
+		"2026-01-01 ",
+		"2026-01-01\n",
+		"2026/01/01",
+		"2026-01-01T00:00:00Z",
+		"\uFF12026-01-01",
+		"2026-01-0\uFF11",
+	])("refuses %j, which is not YYYY-MM-DD", (date) =>
+		expect(isRealDate(date)).toBe(false),
+	);
+});
+
+describe("isRealMonth", () => {
+	it.each(["2026-01", "2026-09", "2026-12"])(
+		"accepts the real month %s",
+		(month) => expect(isRealMonth(month)).toBe(true),
+	);
+
+	it.each(["2026-00", "2026-13", "2026-99"])(
+		"refuses %s, which is not a month",
+		(month) => expect(isRealMonth(month)).toBe(false),
+	);
+
+	it.each([
+		"",
+		"2026-1",
+		"26-10",
+		"2026-10-01",
+		" 2026-10",
+		"2026-10 ",
+		"2026-10\n",
+		"2026/10",
+		"\uFF12026-10",
+		"2026-1\uFF10",
+	])("refuses %j, which is not YYYY-MM", (month) =>
+		expect(isRealMonth(month)).toBe(false),
+	);
 });

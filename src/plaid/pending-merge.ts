@@ -123,6 +123,18 @@ const OWN_INCOME =
 const OWN_REVIEW = `transactions.credit_reviewed_by = 'user'
 	AND (transactions.credit_reviewed IS NOT pe.credit_reviewed OR pe.credit_reviewed_by IS NOT 'user')`;
 
+// What the merge copies from a pending row onto a posted row, read from the posted row before the merge changes it
+// (the one statement that sets both). A person's income choice is copied unless the posted row has its own income
+// choice or a person's review (a refund linked and reviewed). A credit review is copied when a person made it on the
+// pending row, or when the transfer rule included the pending credit (#878, its income chosen with no review),
+// unless the posted row has a person's review or its own income choice.
+const INCOME_TAKEN = `p.income_source = 'user' AND COALESCE(transactions.income_source, '') != 'user'
+	AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`;
+
+const REVIEW_TAKEN = `COALESCE(transactions.credit_reviewed_by, '') != 'user'
+	AND (p.credit_reviewed_by = 'user' OR (p.income_source = 'user' AND p.credit_reviewed = 1
+		AND p.credit_reviewed_by IS NULL AND COALESCE(transactions.income_source, '') != 'user'))`;
+
 /**
  * Whether the pending row's Kind (or For, the same way) replaces the posted row's. A Kind a person chose or
  * cleared on the posted row always stays. Otherwise a posted row with nothing takes the pending row's, and a
@@ -272,11 +284,15 @@ const STATEMENTS = [
 	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'user',
 		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement
 	 ${FROM_PENDING} AND p.excluded_source = 'user' AND COALESCE(transactions.excluded_source, '') != 'user'`,
-	// Income choice, and a credit's review.
-	`UPDATE transactions SET flag_income = p.flag_income, income_source = 'user'
-	 ${FROM_PENDING} AND p.income_source = 'user' AND COALESCE(transactions.income_source, '') != 'user'`,
-	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = 'user'
-	 ${FROM_PENDING} AND p.credit_reviewed_by = 'user' AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`,
+	// A person's income choice and credit review on the pending row, copied onto the posted row in one statement. Each
+	// column is decided from the posted row's values before the statement (SQLite's SET reads the old row), so a copy of
+	// one never changes whether the other is taken, and a person's own choice or review on the posted row stands.
+	`UPDATE transactions SET
+		flag_income = CASE WHEN ${INCOME_TAKEN} THEN p.flag_income ELSE transactions.flag_income END,
+		income_source = CASE WHEN ${INCOME_TAKEN} THEN 'user' ELSE transactions.income_source END,
+		credit_reviewed = CASE WHEN ${REVIEW_TAKEN} THEN p.credit_reviewed ELSE transactions.credit_reviewed END,
+		credit_reviewed_by = CASE WHEN ${REVIEW_TAKEN} THEN p.credit_reviewed_by ELSE transactions.credit_reviewed_by END
+	 ${FROM_PENDING} AND (${INCOME_TAKEN} OR ${REVIEW_TAKEN})`,
 	// A name a person gave the pending row alone clears Tally's answer on the posted row, which was made for the old
 	// name, so the night run asks again with it. Only Jev's pick and an empty category (an unsure answer included):
 	// a person's pick and a merchant rule's stay. Only where Jev can be asked about the posted row and the pending

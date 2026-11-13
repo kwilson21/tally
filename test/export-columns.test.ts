@@ -21,7 +21,7 @@ const NAMED_OMISSIONS = {
 	},
 	merchants: {
 		started_by_sync:
-			"The lock id of the sync that started the row: internal bookkeeping, not family data (migration 0072, decision 217).",
+			"The lock id of the sync that started the row: internal bookkeeping, not family data (migration 0072, decision 218).",
 	},
 	plaid_items: {
 		id: "A row number; banks come out by name and status only (spec, Download your data).",
