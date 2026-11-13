@@ -1427,13 +1427,13 @@ describe("a copy whose winner has no names, over a destination that had names", 
 				},
 			],
 			{
-				// Between the pages T is an asked text with no names, the state the copy on page two starts from.
+				// Between the pages T is an asked text with no names, the state the copy on page two starts from. The row is
+				// changed in place, as the app would: it stays the row this run made, so page two may go on filling it (#1048).
 				between: async () => {
-					await seedMerchant(env.DB, {
-						key: "T",
-						status: "none",
-						namesAsked: true,
-					});
+					await setMerchantNames(env.DB, "T", []);
+					await env.DB.prepare(
+						"UPDATE merchants SET suggestion_status = 'none', names_asked = 1 WHERE raw_name = 'T'",
+					).run();
 				},
 			},
 		);
