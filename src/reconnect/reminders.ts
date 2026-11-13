@@ -6,11 +6,15 @@ import { renderReconnectEmail } from "./email";
 
 const REMINDER_DAYS = 3;
 
-/**
- * How many people one bank's reminder is sent to at the same moment. Three, well inside Resend's ten requests a second
- * for a team, so a slow answer for one person no longer holds up the next.
- */
+/** How many people one bank's reminder is sent to at the same moment, so a slow answer for one no longer holds up the next. */
 const REMINDERS_AT_ONCE = 3;
+
+/**
+ * The least time between the starts of two sends, in milliseconds, across every bank of a run: at most eight a second
+ * however fast the answers come, inside Resend's ten requests a second for a team. A send past that limit is refused,
+ * and then falls back or waits for the next three-day pass.
+ */
+export const REMINDER_PACE_MS = 125;
 
 type ReminderEnv = DeliveryEnv & {
 	DB: D1Database;
@@ -30,6 +34,7 @@ export async function runReconnectReminders(
 	fetchImpl: typeof fetch = fetch,
 	now: Date = new Date(),
 	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
+	paceMs: number = REMINDER_PACE_MS,
 ) {
 	if (env.DEMO === "true" || !(await readBankSignInEmails(env.DB))) return;
 	const zone = await householdTimeZone(env.DB);
@@ -71,6 +76,17 @@ export async function runReconnectReminders(
 		return;
 	}
 
+	// Each send waits for its start time, which is the pace after the start before it, whichever bank it is for.
+	let nextStartAt = 0;
+
+	const paced = async () => {
+		const startAt = Math.max(Date.now(), nextStartAt);
+		nextStartAt = startAt + paceMs;
+		const wait = startAt - Date.now();
+
+		if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+	};
+
 	// Counts are per address and bank; the failure kinds name a provider status, never an address.
 	let sentCount = 0;
 	let failedCount = 0;
@@ -106,9 +122,11 @@ export async function runReconnectReminders(
 			Effect.forEach(
 				recipients.results,
 				({ email: recipient }) =>
-					Effect.promise(() =>
-						deliver(env, recipient, email, fetchImpl, timeoutSignal),
-					),
+					Effect.promise(async () => {
+						await paced();
+
+						return deliver(env, recipient, email, fetchImpl, timeoutSignal);
+					}),
 				{ concurrency: REMINDERS_AT_ONCE },
 			),
 		);

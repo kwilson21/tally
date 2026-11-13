@@ -10,6 +10,7 @@ import { resetDemo } from "../src/demo/reset";
 import handler from "../src/index";
 import { renderReconnectEmail } from "../src/reconnect/email";
 import {
+	REMINDER_PACE_MS,
 	reconnectRecipients,
 	runReconnectReminders,
 } from "../src/reconnect/reminders";
@@ -392,6 +393,39 @@ describe("reconnect reminder schedule", () => {
 		for (const send of answer.values()) send();
 		await run;
 		expect(asked[3]).toBe("d@example.com");
+	});
+
+	it("never starts more than ten sends in a second, however fast the answers come", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email) VALUES ('a@example.com'), ('b@example.com'), ('c@example.com'), ('d@example.com'), ('e@example.com'), ('f@example.com')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (912, 'Chase', X'', 'a@example.com', 'needs_attention'), (913, 'Amex', X'', 'a@example.com', 'needs_attention')",
+		).run();
+		const startedAt: number[] = [];
+
+		// Twelve sends over two banks, each answered at once.
+		await runReconnectReminders(
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
+			async () => {
+				startedAt.push(Date.now());
+
+				return new Response("{}", { status: 200 });
+			},
+			new Date("2026-10-07T13:00:00Z"),
+		);
+
+		expect(startedAt).toHaveLength(12);
+
+		// Each send began at least the pace after the one before, so no second holds more than nine starts.
+		for (let index = 1; index < startedAt.length; index += 1)
+			expect(
+				(startedAt[index] ?? 0) - (startedAt[index - 1] ?? 0),
+			).toBeGreaterThanOrEqual(REMINDER_PACE_MS - 5);
+
+		expect(
+			(startedAt.at(-1) ?? 0) - (startedAt[0] ?? 0),
+		).toBeGreaterThanOrEqual(11 * REMINDER_PACE_MS - 5);
 	});
 
 	it("times out stalled Resend for each recipient, falls back, releases a failed claim, and logs no address", async () => {
@@ -1071,6 +1105,9 @@ describe("bank sign-in reminder Settings", () => {
 			{ DB: env.DB, DEMO: "false", RESEND_API_KEY: "test-key" },
 			async () => new Response("{}"),
 			new Date("2026-10-07T13:00:00Z"),
+			undefined,
+			// No pace between the hundred sends: this test counts statements, and the pace has its own test.
+			0,
 		);
 		expect(prepare.mock.calls.length).toBeLessThan(1000);
 		prepare.mockRestore();
