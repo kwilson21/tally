@@ -186,8 +186,8 @@ export async function saveCategory(
 	id: number,
 	value: CategoryValue,
 ): Promise<void> {
-	// stays SQL: Drizzle wraps a driver error as "Failed query: ...", which drops the UNIQUE text the rename's callers and
-	// test/categories-db.test.ts read from the message (decision 179).
+	// stays SQL: Drizzle's wrapped error ("Failed query: ...") drops the UNIQUE text that test/categories-db.test.ts
+	// reads from the message (decision 179).
 	await db
 		.prepare("UPDATE categories SET name = ?, name_key = ? WHERE id = ?")
 		.bind(value.name, nameKey(value.name), id)
@@ -263,13 +263,15 @@ export async function moveCategory(
 	// SAFETY: from and to were checked against order.length above, so both entries exist.
 	[order[from], order[to]] = [order[to] as number, order[from] as number];
 
+	const orm = drizzle(db);
+
 	const [first, ...rest] = order.map((categoryId, i) =>
-		drizzle(db)
+		orm
 			.update(categories)
 			.set({ sortOrder: i + 1 })
 			.where(eq(categories.id, categoryId)),
 	);
 
 	// The list has at least two entries here (from and to both exist), so there is always a first statement.
-	if (first) await drizzle(db).batch([first, ...rest]);
+	if (first) await orm.batch([first, ...rest]);
 }
