@@ -94,11 +94,11 @@ export type FirstTally = {
 	 * readyClaimedAt is written with the ready email's claim, under the address's hash, as `YYYY-MM-DDTHH:MM:SSZ`: the time the
 	 * run claimed the address. Removed when the claim's email is delivered, or released with nothing kept or held. A stamp
 	 * ten minutes old, with a kept try stored, is a run that was cut off: the next run sends that stored email again (decision
-	 * 222). An address listed with no stamp was claimed before the stamp existed, and is not recovered. Absent until a claim writes one.
+	 * 223). An address listed with no stamp was claimed before the stamp existed, and is not recovered. Absent until a claim writes one.
 	 */
 	readyClaimedAt?: Record<string, string>;
 	/**
-	 * The kept tries of the ready email (decisions 146, 147 and 222), keyed by the SHA-256 in hex of the lower-cased address: the
+	 * The kept tries of the ready email (decisions 146, 147 and 223), keyed by the SHA-256 in hex of the lower-cased address: the
 	 * whole email (subject, HTML and text) and the UTC time of its first try (`YYYY-MM-DDTHH:MM:SSZ`). An entry with `tried: false`
 	 * was stored by a claim whose email no run has sent yet, so the first try may use Cloudflare's email as a fresh try does; an
 	 * entry without it may already have reached Resend, so every later try sends that same email under the same key, through

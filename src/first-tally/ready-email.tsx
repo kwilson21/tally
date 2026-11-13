@@ -9,7 +9,7 @@
 // already have accepted (no answer, or any answer but a success, deliver.ts) is kept: the whole email it tried and the UTC time of
 // that first try are stored, and every later try sends that same stored email through Resend only, under the same key, until
 // Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a deploy that changes the words cannot
-// change the key. After that the address stays reached and nothing more is sent (decisions 146, 147 and 222). It is drawn like
+// change the key. After that the address stays reached and nothing more is sent (decisions 146, 147 and 223). It is drawn like
 // the bank sign-in email (src/reconnect/email.tsx).
 import {
 	anyQuestionAnswered,
@@ -414,7 +414,7 @@ type Sending = {
 };
 
 /**
- * One email's outcome for its address (decisions 146 and 222). A delivered email drops its kept try and stamp. A held try keeps
+ * One email's outcome for its address (decisions 146 and 223). A delivered email drops its kept try and stamp. A held try keeps
  * its email and its first time, without the fresh mark, so later tries send it through Resend only. A definite failure keeps
  * nothing. `onlyResend` is set for a recovered claim (its earlier run may have sent) and for a kept try that may have reached
  * Resend already; a fresh claim's email may fall back to Cloudflare's, as any first try does.
