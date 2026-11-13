@@ -272,11 +272,17 @@ const STATEMENTS = [
 	`UPDATE transactions SET excluded = p.excluded, excluded_source = 'user',
 		flag_transfer = p.flag_transfer, flag_reimbursement = p.flag_reimbursement
 	 ${FROM_PENDING} AND p.excluded_source = 'user' AND COALESCE(transactions.excluded_source, '') != 'user'`,
+	// Runs before the income statement below, so the posted row's income is still its own (a copied 'user' would look like a choice).
+	// A pending credit a person reviewed copies its review: as the person's (credit_reviewed_by 'user'), or, for a credit
+	// included by the transfer rule (#878), as income they chose with its review left unset. The second only where the
+	// posted row has no income choice of its own, as the income statement above.
+	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = p.credit_reviewed_by
+	 ${FROM_PENDING} AND COALESCE(transactions.credit_reviewed_by, '') != 'user'
+	 AND (p.credit_reviewed_by = 'user' OR (p.income_source = 'user' AND p.credit_reviewed = 1
+		AND p.credit_reviewed_by IS NULL AND COALESCE(transactions.income_source, '') != 'user'))`,
 	// Income choice, and a credit's review.
 	`UPDATE transactions SET flag_income = p.flag_income, income_source = 'user'
 	 ${FROM_PENDING} AND p.income_source = 'user' AND COALESCE(transactions.income_source, '') != 'user'`,
-	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = 'user'
-	 ${FROM_PENDING} AND p.credit_reviewed_by = 'user' AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`,
 	// A name a person gave the pending row alone clears Tally's answer on the posted row, which was made for the old
 	// name, so the night run asks again with it. Only Jev's pick and an empty category (an unsure answer included):
 	// a person's pick and a merchant rule's stay. Only where Jev can be asked about the posted row and the pending
