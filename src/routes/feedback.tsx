@@ -295,6 +295,12 @@ function diagnosticLines(item: FeedbackRow) {
 	return lines;
 }
 
+/** GitHub's answer to a created issue. Its number is checked as an integer where it is used. */
+async function readIssue(response: Response): Promise<{ number?: number }> {
+	// SAFETY: a successful GitHub create-issue response is a JSON object, and its number field is checked as an integer by the caller.
+	return (await response.json()) as { number?: number };
+}
+
 /** How long GitHub may take to file one issue. */
 const FILING_TIMEOUT_MS = 15_000;
 
@@ -383,8 +389,14 @@ export async function fileFeedbackIssue(
 		throw new FilingError(response.status);
 	}
 
-	// SAFETY: a successful GitHub create-issue response is a JSON object, and its number field is checked as an integer just below.
-	const issue = (await response.json()) as { number?: number };
+	// The deadline also covers reading the answer, so a body that stalls is a failed try too, and gives the claim back.
+	const issue = await readIssue(response).catch(async (error) => {
+		await db
+			.prepare("UPDATE feedback SET filing_at = NULL WHERE id = ?")
+			.bind(item.id)
+			.run();
+		throw error;
+	});
 
 	if (!Number.isInteger(issue.number))
 		throw new Error("Feedback GitHub response had no issue number");

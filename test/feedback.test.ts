@@ -1150,6 +1150,42 @@ describe("feedback filing safeguards", () => {
 		).toEqual({ filing_at: null, github_issue_number: null });
 	});
 
+	it("gives the claim back when GitHub's answer cannot be read in time", async () => {
+		await insertOld(1);
+
+		const row = await env.DB.prepare(
+			"SELECT * FROM feedback",
+		).first<FiledRow>();
+
+		if (!row) throw new Error("missing fixture");
+
+		// GitHub accepts the request, then its body is cut off, as when the deadline passes while it is still arriving.
+		const cutOff = new ReadableStream({
+			start(controller) {
+				controller.error(
+					new DOMException("The operation timed out.", "TimeoutError"),
+				);
+			},
+		});
+
+		const fetchStub = fakeFetch(
+			vi.fn(
+				async (_input: RequestInfo | URL, _init?: RequestInit) =>
+					new Response(cutOff, { status: 201 }),
+			),
+		);
+
+		await expect(
+			fileFeedbackIssue(env.DB, "token", row, fetchStub),
+		).rejects.toMatchObject({ name: "TimeoutError" });
+
+		expect(
+			await env.DB.prepare(
+				"SELECT filing_at, github_issue_number FROM feedback",
+			).first(),
+		).toEqual({ filing_at: null, github_issue_number: null });
+	});
+
 	it("processes at most 20 eligible rows", async () => {
 		await insertOld(21);
 
