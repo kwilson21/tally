@@ -10,11 +10,12 @@ const REMINDER_DAYS = 3;
 const REMINDERS_AT_ONCE = 3;
 
 /**
- * The least time between the starts of two sends, in milliseconds, across every bank of a run: at most eight a second
- * however fast the answers come, inside Resend's ten requests a second for a team. A send past that limit is refused,
- * and then falls back or waits for the next three-day pass.
+ * The least time between the starts of two sends, in milliseconds, across every bank of a run: at most four a second
+ * however fast the answers come. Resend allows a team ten requests a second, and a send past that is refused, and then
+ * falls back or waits for the next three-day pass. Four leaves room for the one other sender that can run in the same
+ * minute, the ready email (first-tally/ready-email.tsx), which goes to a new household's few people one at a time.
  */
-export const REMINDER_PACE_MS = 125;
+export const REMINDER_PACE_MS = 250;
 
 type ReminderEnv = DeliveryEnv & {
 	DB: D1Database;
