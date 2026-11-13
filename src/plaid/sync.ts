@@ -16,6 +16,12 @@ import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
+import {
+	bareColumn,
+	columnOf,
+	jevGuessClearedByAmountSql,
+	setCategoryClearedByBankSql,
+} from "./category-clear";
 import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { markNeedsAttention, markSyncSucceeded, readSeen } from "./item-store";
 import { loginStillBroken } from "./login-broken";
@@ -374,8 +380,7 @@ function splitBillStatements(
 /**
  * A bank correction that clears Jev's category (its amount changed) lets go of that category's What AI did
  * row, so a later pick isn't counted as changing Tally's work; the row still counts as sorted (spec section 5).
- * It mirrors the Jev arm of the category CASE in both update statements below, so a change to one must change
- * the other.
+ * It uses the same Jev case as the category CASE in both update statements below (src/plaid/category-clear.ts).
  */
 function forgetClearedJevLog(
 	env: SyncEnv,
@@ -388,7 +393,7 @@ function forgetClearedJevLog(
 		`UPDATE ai_log SET transaction_id = NULL
 		 WHERE kind = 'category' AND transaction_id = (
 			SELECT id FROM transactions WHERE plaid_transaction_id = ?
-			AND is_split = 0 AND category_source = 'jev' AND split_removed_from_cents IS NULL AND amount_cents != ?
+			AND ${jevGuessClearedByAmountSql(bareColumn, "amount_cents != ?")}
 		 ) AND ${OWNS_LOCK}`,
 	).bind(plaidTransactionId, cents, itemRowId, lockId);
 }
@@ -859,8 +864,10 @@ export async function syncItem(
 								credit_reviewed = CASE WHEN transactions.credit_reviewed_by = 'user' THEN transactions.credit_reviewed WHEN transactions.amount_cents = excluded.amount_cents THEN transactions.credit_reviewed WHEN excluded.amount_cents < 0 THEN 0 ELSE 1 END,
 								credit_reviewed_by = CASE WHEN transactions.credit_reviewed_by = 'jev' AND transactions.amount_cents != excluded.amount_cents THEN NULL ELSE transactions.credit_reviewed_by END,
 							split_removed_from_cents = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN transactions.amount_cents ELSE transactions.split_removed_from_cents END,
-							category_id = CASE WHEN ((transactions.is_split = 0 AND transactions.category_source = 'jev' AND transactions.split_removed_from_cents IS NULL) AND transactions.amount_cents != excluded.amount_cents) OR (NOT (transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents) AND transactions.split_removed_from_cents IS NULL AND transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_id END,
-							category_source = CASE WHEN ((transactions.is_split = 0 AND transactions.category_source = 'jev' AND transactions.split_removed_from_cents IS NULL) AND transactions.amount_cents != excluded.amount_cents) OR (NOT (transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents) AND transactions.split_removed_from_cents IS NULL AND transactions.category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}) THEN NULL ELSE transactions.category_source END,
+							${setCategoryClearedByBankSql(columnOf("transactions"), {
+								amount: "transactions.amount_cents != excluded.amount_cents",
+								merchant: `${merchantKeySql("transactions")} != ${merchantKeySql("excluded")}`,
+							})},
 							${clearJevAnswersOnAmountChange("transactions.amount_cents != excluded.amount_cents")},
 							is_split = CASE WHEN transactions.is_split = 1 AND transactions.amount_cents != excluded.amount_cents THEN 0 ELSE transactions.is_split END,
 							amount_cents = excluded.amount_cents,
@@ -951,8 +958,10 @@ export async function syncItem(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,
 							split_removed_from_cents = CASE WHEN is_split = 1 AND amount_cents != ? THEN amount_cents ELSE split_removed_from_cents END,
-							category_id = CASE WHEN ((is_split = 0 AND category_source = 'jev' AND split_removed_from_cents IS NULL) AND amount_cents != ?) OR (NOT (is_split = 1 AND amount_cents != ?) AND split_removed_from_cents IS NULL AND category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_id END,
-							category_source = CASE WHEN ((is_split = 0 AND category_source = 'jev' AND split_removed_from_cents IS NULL) AND amount_cents != ?) OR (NOT (is_split = 1 AND amount_cents != ?) AND split_removed_from_cents IS NULL AND category_source = 'merchant_rule' AND ${merchantKeySql("transactions")} != ?) THEN NULL ELSE category_source END,
+							${setCategoryClearedByBankSql(bareColumn, {
+								amount: "amount_cents != ?",
+								merchant: `${merchantKeySql("transactions")} != ?`,
+							})},
 							${clearJevAnswersOnAmountChange("amount_cents != ?")},
 							is_split = CASE WHEN is_split = 1 AND amount_cents != ? THEN 0 ELSE is_split END,
 							amount_cents = ?, raw_name = ?, merchant_name = ?,

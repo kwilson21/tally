@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
 import type { UndoFacts, UndoWrite } from "../rules/sorting";
+import { UNDO_MS } from "../undo";
 import { COUNTED_JOINS } from "./counted-month";
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
@@ -46,9 +47,6 @@ export const RUN_KEY = "resort_run";
 
 /** A run older than this is closed when the next run starts (decision 160), and an unclaimed record lasts as long. */
 export const STALE_MS = 2 * 60 * 60_000;
-
-/** How long Undo stays open after the closing toast is claimed (decision 160, the existing toast's 10 seconds). */
-export const UNDO_MS = 10_000;
 
 const MOVED_PREFIX = "resort_moved_";
 export const movedKey = (runId: string) => `${MOVED_PREFIX}${runId}`;

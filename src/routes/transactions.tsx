@@ -119,6 +119,7 @@ import {
 } from "../transactions/selection";
 import { parseSplit } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
+import { undoWords } from "../undo";
 import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -3899,8 +3900,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 				undo: undoToken,
 				undoExpiresInMs,
 			},
-			// The Undo window is ten seconds by design (the token's life), so the words say so (#342).
-			announce: `${deleted} Undo for 10 seconds.`,
+			// The Undo window is the token's life (src/undo.ts), so the words say so (#342).
+			announce: undoWords(deleted),
 		}),
 	);
 	c.header("HX-Push-Url", back);

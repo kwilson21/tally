@@ -229,8 +229,9 @@ export function followsPurchaseAfterSave(
  * Whether a row is excluded from the budget once this edit is saved. The panel posts its Exclude chip as it was drawn,
  * so this is what the save leaves, not what was posted: a new link includes the row (saveEdit writes excluded = 0),
  * and a save lifts Plaid's exclusion off a credit it reviews as not income or marks as income (saveEdit's lift,
- * decision 70). A person's or Jev's exclusion is never lifted. Keep it in step with saveEdit's exclusion writes;
- * a bill payment counts whatever its exclusion, which isIncluded (src/db/counted-month.ts) reads.
+ * decision 70). A person's or Jev's exclusion is never lifted. test/excluded-after-save.test.ts runs saveEdit for every
+ * stored exclusion and every answer the panel can post, and fails where this and the row it leaves disagree.
+ * A bill payment counts whatever its exclusion, which isIncluded (src/db/counted-month.ts) reads.
  */
 export function excludedAfterSave(
 	stored: {

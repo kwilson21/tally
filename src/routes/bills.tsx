@@ -83,6 +83,7 @@ import {
 } from "../rules/bills";
 import { decided, everyRefusal } from "../rules/terms";
 import { tidyName } from "../transactions/tidy-name";
+import { UNDO_MS, undoWords } from "../undo";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import {
@@ -2172,7 +2173,7 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		id,
 		"Payment unlinked",
 		undefined,
-		"Payment unlinked. Undo for 10 seconds.",
+		undoWords("Payment unlinked."),
 		{
 			undo: undo.token,
 			undoExpiresInMs: undo.ms,
@@ -2182,15 +2183,15 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 });
 
 /**
- * The Undo for a Not this one (#340): its token, and the rest of its ten seconds, counted by the database's clock as
+ * The Undo for a Not this one (#340): its token, and the rest of its window (src/undo.ts), counted by the database's clock as
  * its created_at was. The row is found by its undo_token, which is random, so a later Not this one never matches it.
  */
 async function unlinkUndo(db: D1Database, token: string) {
 	const row = await db
 		.prepare(
-			"SELECT CAST(MAX(0, MIN(10000, (julianday(created_at) + 10.0 / 86400 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM bill_payments WHERE undo_token=?",
+			"SELECT CAST(MAX(0, MIN(?1, (julianday(created_at) - julianday('now')) * 86400000 + ?1)) AS INTEGER) AS ms FROM bill_payments WHERE undo_token=?2",
 		)
-		.bind(token)
+		.bind(UNDO_MS, token)
 		.first<{ ms: number }>();
 
 	return { token, ms: row?.ms ?? 0 };
@@ -2210,9 +2211,9 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	// The Not this one the token names, if it is still there, and whether its ten seconds are still running.
 	const held = transactionId
 		? await c.env.DB.prepare(
-				"SELECT transaction_id AS transactionId, period, julianday('now')-julianday(created_at)<10.0/86400 AS fresh FROM bill_payments WHERE undo_token=? AND transaction_id=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
+				"SELECT transaction_id AS transactionId, period, (julianday('now')-julianday(created_at))*86400000<? AS fresh FROM bill_payments WHERE undo_token=? AND transaction_id=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
 			)
-				.bind(token, Number(transactionId), id)
+				.bind(UNDO_MS, token, Number(transactionId), id)
 				.first<{ transactionId: number; period: string; fresh: number }>()
 		: null;
 
@@ -2234,10 +2235,16 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 				await c.env.DB.batch([
 					c.env.DB.prepare(
 						`INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
-						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE undo_token=?4 AND transaction_id=?3 AND status='dismissed' AND matched_by='user' AND julianday('now')-julianday(created_at)<10.0/86400)
+						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE undo_token=?4 AND transaction_id=?3 AND status='dismissed' AND matched_by='user' AND (julianday('now')-julianday(created_at))*86400000<?5)
 						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE transaction_id=?3 AND status='linked')
 						 AND EXISTS(SELECT 1 FROM transactions t WHERE t.id=?3 AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT ${paysPlanGroupSql("t")})`,
-					).bind(id, undone.period, undone.transactionId, undone.token),
+					).bind(
+						id,
+						undone.period,
+						undone.transactionId,
+						undone.token,
+						UNDO_MS,
+					),
 					c.env.DB.prepare(liftNotThisOneSql).bind(
 						id,
 						undone.period,

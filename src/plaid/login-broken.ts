@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { getItem, type PlaidEnv } from "./client";
 import { decryptToken } from "./token-crypto";
 
@@ -15,9 +16,15 @@ export async function loginStillBroken(
 			env.TOKEN_ENCRYPTION_KEY,
 		);
 
-		const result = await getItem(env, accessToken, fetchImpl);
-
-		return result.item?.error !== null;
+		// Plaid's item carries a null error while the login works. Any failure to ask counts as still broken.
+		return await Effect.runPromise(
+			getItem(env, accessToken, fetchImpl).pipe(
+				Effect.match({
+					onFailure: () => true,
+					onSuccess: (result) => result.item.error !== null,
+				}),
+			),
+		);
 	} catch {
 		// A failed lookup counts as still broken, so the login error is kept when Plaid can't confirm. A repair that
 		// landed meanwhile is still protected by the caller's seen state (decision 173).

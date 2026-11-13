@@ -30,7 +30,6 @@ import {
 	editPlan,
 	linkPayment,
 	movePlan,
-	PLAN_UNDO_MS,
 	type PlanFields,
 	PlanGone,
 	PlanMovedOrPaid,
@@ -38,6 +37,7 @@ import {
 	restorePlan,
 	unlinkPayment,
 } from "../rules/plans";
+import { UNDO_MS, undoWords } from "../undo";
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Layout } from "../views/layout";
@@ -562,10 +562,10 @@ async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 			message: deleted,
 			type: "success",
 			undo: token,
-			undoExpiresInMs: PLAN_UNDO_MS,
+			undoExpiresInMs: UNDO_MS,
 			undoAction: "/plans/undo-delete",
 		},
-		`${deleted} Undo for 10 seconds.`,
+		undoWords(deleted),
 	);
 }
 

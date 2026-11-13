@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { SQL, sql } from "drizzle-orm";
+import { getTableName, is, SQL, sql } from "drizzle-orm";
 import {
 	getTableConfig,
 	type Index,
@@ -7,26 +7,79 @@ import {
 	integer,
 	type SQLiteColumn,
 	SQLiteSyncDialect,
-	type SQLiteTable,
+	SQLiteTable,
 	sqliteTable,
 	text,
 	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
+import * as schemaModule from "../src/db/schema";
 import {
+	accounts,
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	CHECK_LISTS,
+	categories,
 	categorySuggestions,
+	householdPeople,
 	MERCHANT_STATUS_VALUES,
 	merchantSuggestedNames,
 	merchants,
+	plaidItems,
 } from "../src/db/schema";
 
 // The drift test: src/db/schema.ts (hand-written, see its top comment) must say what the live database says.
-// It reads the live tables with PRAGMA table_info and sqlite_master, so it runs in the Workers runtime against the
-// migrated database. Foreign keys are not described or compared yet.
+// It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
+// database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
+// constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
 
 type Lists = Record<string, Record<string, readonly string[]>>;
+
+/**
+ * Application tables that src/db/schema.ts does not describe yet, each with its reason. The list can only shrink:
+ * the table-set test fails when a name here is described already or is not in the database. The last PR for #963
+ * empties it, and the check becomes "every live table is in the schema".
+ */
+const NOT_YET_DESCRIBED = {
+	ai_log: "described in a later #963 PR",
+	balance_history: "described in a later #963 PR",
+	bank_text_rules: "described in a later #963 PR",
+	bill_amounts: "described in a later #963 PR",
+	bill_payments: "described in a later #963 PR",
+	bills: "described in a later #963 PR",
+	budget_amounts: "described in a later #963 PR",
+	cash_delete_holds: "described in a later #963 PR",
+	category_archive_periods: "described in a later #963 PR",
+	documents: "described in a later #963 PR",
+	feedback: "described in a later #963 PR",
+	forgotten_texts: "described in a later #963 PR",
+	household_members: "described in a later #963 PR",
+	household_settings: "described in a later #963 PR",
+	maybe_answers: "described in a later #963 PR",
+	maybe_names: "described in a later #963 PR",
+	merchant_name_failures: "described in a later #963 PR",
+	never_suggest_rules: "described in a later #963 PR",
+	planned_delete_holds: "described in a later #963 PR",
+	planned_expenses: "described in a later #963 PR",
+	push_subscriptions: "described in a later #963 PR",
+	savings_goal_amounts: "described in a later #963 PR",
+	transactions: "described in a later #963 PR",
+} satisfies Record<string, string>;
+
+interface LiveForeignKey {
+	table: string;
+	from: string;
+	to: string;
+	on_update: string;
+	on_delete: string;
+}
+
+/** A foreign key as the drift test compares it: the target table and column, and both actions in SQLite's spelling. */
+interface ForeignKeyTarget {
+	table: string;
+	column: string;
+	onUpdate: string;
+	onDelete: string;
+}
 
 interface LiveColumn {
 	name: string;
@@ -296,7 +349,197 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 				`index ${declared.config.name} is in the schema, not in the database`,
 			);
 
+	const wantForeignKeys = schemaForeignKeys(table);
+	const haveForeignKeys = await liveForeignKeys(tableName);
+
+	for (const [column, have] of haveForeignKeys) {
+		const where = `${tableName}.${column}`;
+		const want = wantForeignKeys.get(column);
+
+		if (!want) {
+			problems.push(
+				`${where} is a foreign key in the database, not in the schema`,
+			);
+			continue;
+		}
+
+		if (want.table !== have.table || want.column !== have.column)
+			problems.push(
+				`${where} foreign key target differs: schema ${want.table}.${want.column}, database ${have.table}.${have.column}`,
+			);
+
+		if (want.onDelete !== have.onDelete)
+			problems.push(
+				`${where} ON DELETE differs: schema ${want.onDelete}, database ${have.onDelete}`,
+			);
+
+		if (want.onUpdate !== have.onUpdate)
+			problems.push(
+				`${where} ON UPDATE differs: schema ${want.onUpdate}, database ${have.onUpdate}`,
+			);
+	}
+
+	for (const column of wantForeignKeys.keys())
+		if (!haveForeignKeys.has(column))
+			problems.push(
+				`${tableName}.${column} is a foreign key in the schema, not in the database`,
+			);
+
+	const haveUniques = await liveUniqueConstraints(tableName);
+	const wantUniques = schemaUniqueConstraints(table);
+
+	for (const key of haveUniques)
+		if (!wantUniques.includes(key))
+			problems.push(
+				`${tableName} unique constraint on (${key}) is in the database, not in the schema`,
+			);
+
+	for (const key of wantUniques)
+		if (!haveUniques.includes(key))
+			problems.push(
+				`${tableName} unique constraint on (${key}) is in the schema, not in the database`,
+			);
+
 	return problems;
+}
+
+/**
+ * The foreign keys a table declares (inline .references() or foreignKey()), keyed by child column. An action the
+ * schema leaves out is NO ACTION, which is what SQLite assumes too.
+ */
+function schemaForeignKeys(table: SQLiteTable): Map<string, ForeignKeyTarget> {
+	const keys = new Map<string, ForeignKeyTarget>();
+
+	for (const foreignKey of getTableConfig(table).foreignKeys) {
+		const { columns, foreignColumns, foreignTable } = foreignKey.reference();
+
+		for (const [i, column] of columns.entries()) {
+			keys.set(column.name, {
+				table: getTableName(foreignTable),
+				column: foreignColumns[i]?.name ?? "",
+				onUpdate: (foreignKey.onUpdate ?? "no action").toUpperCase(),
+				onDelete: (foreignKey.onDelete ?? "no action").toUpperCase(),
+			});
+		}
+	}
+
+	return keys;
+}
+
+/** The foreign keys SQLite reports for a live table, keyed by child column. */
+async function liveForeignKeys(
+	tableName: string,
+): Promise<Map<string, ForeignKeyTarget>> {
+	const { results } = await env.DB.prepare(
+		`PRAGMA foreign_key_list(${tableName})`,
+	).all<LiveForeignKey>();
+
+	return new Map(
+		results.map((row) => [
+			row.from,
+			{
+				table: row.table,
+				column: row.to,
+				onUpdate: row.on_update,
+				onDelete: row.on_delete,
+			},
+		]),
+	);
+}
+
+/**
+ * The unique constraints a table declares: .unique() on a column and unique() in the table config, as a sorted
+ * list of column lists. Drizzle cannot say a collation, so a COLLATE NOCASE in the database is not compared.
+ */
+function schemaUniqueConstraints(table: SQLiteTable): string[] {
+	const config = getTableConfig(table);
+	const keys: string[] = [];
+
+	for (const column of config.columns)
+		if (column.isUnique) keys.push(column.name);
+
+	for (const constraint of config.uniqueConstraints)
+		keys.push(constraint.columns.map((column) => column.name).join(", "));
+
+	return keys.sort();
+}
+
+/**
+ * The unique constraints a CREATE TABLE writes inline, as SQLite lists them: automatic indexes with origin `u`.
+ * Primary keys (origin `pk`) are not unique constraints and are left out, and explicit CREATE UNIQUE INDEX
+ * statements (origin `c`) are compared as indexes above.
+ */
+async function liveUniqueConstraints(tableName: string): Promise<string[]> {
+	const { results: indexes } = await env.DB.prepare(
+		`PRAGMA index_list(${tableName})`,
+	).all<{ name: string; origin: string }>();
+
+	const keys: string[] = [];
+
+	for (const live of indexes) {
+		if (live.origin !== "u") continue;
+
+		const { results: columns } = await env.DB.prepare(
+			`PRAGMA index_info(${live.name})`,
+		).all<{ name: string | null }>();
+
+		keys.push(columns.map((column) => column.name ?? "").join(", "));
+	}
+
+	return keys.sort();
+}
+
+/** The tables src/db/schema.ts exports, found by type so no export list has to be kept in step. */
+function schemaTables(): SQLiteTable[] {
+	const values: unknown[] = Object.values(schemaModule);
+
+	return values.filter((value): value is SQLiteTable => is(value, SQLiteTable));
+}
+
+/**
+ * The table-set rule as a pure function of three lists: every live table is described or listed as not yet
+ * described; a listed table is neither described nor missing from the database; a described table is in the database.
+ */
+function tableSetProblems(
+	live: readonly string[],
+	described: readonly string[],
+	notYetDescribed: readonly string[],
+): string[] {
+	const problems: string[] = [];
+
+	for (const name of live)
+		if (!described.includes(name) && !notYetDescribed.includes(name))
+			problems.push(
+				`${name} is in the database, but neither src/db/schema.ts nor NOT_YET_DESCRIBED names it`,
+			);
+
+	for (const name of notYetDescribed) {
+		if (described.includes(name))
+			problems.push(
+				`${name} is in NOT_YET_DESCRIBED, but src/db/schema.ts describes it`,
+			);
+
+		if (!live.includes(name))
+			problems.push(
+				`${name} is in NOT_YET_DESCRIBED, but the database has no such table`,
+			);
+	}
+
+	for (const name of described)
+		if (!live.includes(name))
+			problems.push(
+				`${name} is described in src/db/schema.ts, but the database has no such table`,
+			);
+
+	return problems;
+}
+
+async function appTableNames(): Promise<string[]> {
+	const { results } = await env.DB.prepare(
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
+	).all<{ name: string }>();
+
+	return results.map((row) => row.name);
 }
 
 describe("the schema file matches the live database", () => {
@@ -310,6 +553,34 @@ describe("the schema file matches the live database", () => {
 
 	it("category_suggestions matches the live table, index included", async () => {
 		expect(await drift(categorySuggestions, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("categories matches the live table, its inline unique and both indexes included", async () => {
+		expect(await drift(categories, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("household_people matches the live table, its inline unique included", async () => {
+		expect(await drift(householdPeople, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("plaid_items matches the live table, its status and flag CHECKs included", async () => {
+		expect(await drift(plaidItems, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("accounts matches the live table, its foreign key, inline unique and partial indexes included", async () => {
+		expect(await drift(accounts, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("every live application table is described in the schema or listed as not yet described", async () => {
+		const described = schemaTables().map((table) => getTableConfig(table).name);
+
+		expect(
+			tableSetProblems(
+				await appTableNames(),
+				described,
+				Object.keys(NOT_YET_DESCRIBED),
+			),
+		).toEqual([]);
 	});
 
 	it("the CHECK value lists are read from the live CREATE TABLE and compared both ways", () => {
@@ -589,5 +860,246 @@ describe("the drift check fails on a wrong schema", () => {
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"index category_suggestions_pending_name uniqueness differs",
 		);
+	});
+});
+
+describe("the drift check fails on a wrong foreign key", () => {
+	it("a foreign key the database has but the schema leaves out", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name").primaryKey(),
+			displayName: text("display_name"),
+			defaultCategoryId: integer("default_category_id"), // the database: REFERENCES categories(id)
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants.default_category_id is a foreign key in the database, not in the schema",
+		);
+	});
+
+	it("a foreign key the schema declares but the database does not have", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name").primaryKey(),
+			displayName: text("display_name").references(() => categories.id),
+			defaultCategoryId: integer("default_category_id").references(
+				() => categories.id,
+				{ onDelete: "set null" },
+			),
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants.display_name is a foreign key in the schema, not in the database",
+		);
+	});
+
+	it("a foreign key that points at the wrong table", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name").primaryKey(),
+			displayName: text("display_name"),
+			defaultCategoryId: integer("default_category_id").references(
+				() => accounts.id,
+				{ onDelete: "set null" },
+			),
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants.default_category_id foreign key target differs: schema accounts.id, database categories.id",
+		);
+	});
+
+	it("a foreign key with the wrong ON DELETE action", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name").primaryKey(),
+			displayName: text("display_name"),
+			defaultCategoryId: integer("default_category_id").references(
+				() => categories.id,
+				{ onDelete: "cascade" },
+			), // the database: ON DELETE SET NULL
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants.default_category_id ON DELETE differs: schema CASCADE, database SET NULL",
+		);
+	});
+
+	it("a foreign key with the wrong ON UPDATE action", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name").primaryKey(),
+			displayName: text("display_name"),
+			defaultCategoryId: integer("default_category_id").references(
+				() => categories.id,
+				{ onDelete: "set null", onUpdate: "cascade" },
+			), // the database: ON UPDATE NO ACTION
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants.default_category_id ON UPDATE differs: schema CASCADE, database NO ACTION",
+		);
+	});
+
+	it("a plaid_items status CHECK with a value the database does not allow", async () => {
+		const lists = {
+			...CHECK_LISTS,
+			plaid_items: { ...CHECK_LISTS.plaid_items, status: ["ok", "broken"] },
+		};
+
+		expect((await drift(plaidItems, lists)).join("\n")).toContain(
+			"plaid_items.status CHECK differs",
+		);
+	});
+});
+
+describe("the drift check fails on a wrong unique constraint", () => {
+	it("a unique constraint the database has but the schema leaves out", async () => {
+		const wrong = sqliteTable("household_people", {
+			id: integer().primaryKey({ autoIncrement: true }),
+			name: text().notNull(), // the database: UNIQUE COLLATE NOCASE
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"household_people unique constraint on (name) is in the database, not in the schema",
+		);
+	});
+
+	it("a unique constraint the schema declares but the database does not have", async () => {
+		const wrong = sqliteTable("merchants", {
+			rawName: text("raw_name").primaryKey(),
+			displayName: text("display_name").unique(), // the database: no UNIQUE here
+			defaultCategoryId: integer("default_category_id").references(
+				() => categories.id,
+				{ onDelete: "set null" },
+			),
+			suggestionStatus: text("suggestion_status", {
+				enum: MERCHANT_STATUS_VALUES,
+			})
+				.notNull()
+				.default("none"),
+			namesAsked: integer("names_asked").notNull().default(0),
+			notABill: integer("not_a_bill").notNull().default(0),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"merchants unique constraint on (display_name) is in the schema, not in the database",
+		);
+	});
+
+	it("a unique constraint on different columns", async () => {
+		const wrong = sqliteTable(
+			"accounts",
+			{
+				id: integer().primaryKey(),
+				plaidItemId: integer("plaid_item_id").references(() => plaidItems.id),
+				plaidAccountId: text("plaid_account_id"), // the database: UNIQUE here
+				name: text().notNull().unique(), // the database: no UNIQUE here
+				mask: text(),
+				type: text().notNull(),
+				subtype: text(),
+				isLiability: integer("is_liability").notNull().default(0),
+				balanceCents: integer("balance_cents").notNull().default(0),
+				updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+				uploadedOn: text("uploaded_on"),
+				balanceOn: text("balance_on"),
+				removedAt: text("removed_at"),
+				countedFrom: text("counted_from"),
+			},
+			(t) => [
+				uniqueIndex("accounts_one_apple_card")
+					.on(t.subtype)
+					.where(sql`${t.subtype} = 'apple_card'`),
+				uniqueIndex("accounts_one_cash")
+					.on(t.type)
+					.where(sql`${t.type} = 'cash'`),
+			],
+		);
+
+		const problems = (await drift(wrong, CHECK_LISTS)).join("\n");
+		expect(problems).toContain(
+			"accounts unique constraint on (plaid_account_id) is in the database, not in the schema",
+		);
+		expect(problems).toContain(
+			"accounts unique constraint on (name) is in the schema, not in the database",
+		);
+	});
+});
+
+describe("the table-set check fails on a wrong list", () => {
+	const described = ["a"];
+
+	it("a live table in neither the schema nor the not-yet list", () => {
+		expect(tableSetProblems(["a", "b"], described, [])).toEqual([
+			"b is in the database, but neither src/db/schema.ts nor NOT_YET_DESCRIBED names it",
+		]);
+	});
+
+	it("a not-yet-described name that is not in the database", () => {
+		expect(tableSetProblems(["a"], described, ["gone"])).toEqual([
+			"gone is in NOT_YET_DESCRIBED, but the database has no such table",
+		]);
+	});
+
+	it("a described table still listed as not yet described", () => {
+		expect(tableSetProblems(["a"], described, ["a"])).toEqual([
+			"a is in NOT_YET_DESCRIBED, but src/db/schema.ts describes it",
+		]);
+	});
+
+	it("a described table that is not in the database", () => {
+		expect(tableSetProblems([], described, [])).toEqual([
+			"a is described in src/db/schema.ts, but the database has no such table",
+		]);
+	});
+
+	it("passes when every live table is described or listed", () => {
+		expect(tableSetProblems(["a", "b"], described, ["b"])).toEqual([]);
+	});
+
+	it("the exports the drift test enumerates are the described tables only", () => {
+		expect(
+			schemaTables()
+				.map((table) => getTableConfig(table).name)
+				.sort(),
+		).toEqual([
+			"accounts",
+			"categories",
+			"category_suggestions",
+			"household_people",
+			"merchant_suggested_names",
+			"merchants",
+			"plaid_items",
+		]);
 	});
 });
