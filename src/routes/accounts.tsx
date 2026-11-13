@@ -1,4 +1,6 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -28,7 +30,7 @@ import {
 	APPLE_CARD_SAMPLE_BALANCE_CENTS,
 	appleCardSample,
 } from "../demo/apple-card-sample";
-import { readAtEdge } from "../edge";
+import { readAtEdge, readText } from "../edge";
 import { RowId } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { PlaidBank } from "../machines/bank-request";
@@ -347,25 +349,34 @@ async function readForm(c: Context<App>) {
 }
 
 /**
- * A balance as integer cents: blank is no balance, a leading minus is a credit, and anything else (or a value that isn't
- * a safe whole number of cents, or is past $100,000,000 either way) is null. toCents names the text it refused, so the text is dropped, never rethrown.
+ * A balance typed on the upload sheet, as integer cents, read at the edge (decision 206): blank is no balance (null), and a
+ * leading minus is a credit. Anything else that isn't a dollar amount is refused with BAD_BALANCE, and so is a value that
+ * isn't a safe whole number of cents or is past MAX_BALANCE_CENTS either way: net worth refuses that (docs/verification.md,
+ * "Numbers"), so one is never saved. toCents names the text it refused, so the text is dropped, never rethrown.
  */
-function parseBalance(text: string): { cents: number | null } | null {
-	const trimmed = text.trim();
+const BalanceText = Schema.String.pipe(
+	Schema.decodeTo(Schema.NullOr(Schema.Number), {
+		decode: readText<number | null>((text) => {
+			const trimmed = text.trim();
 
-	if (trimmed === "") return { cents: null };
+			if (trimmed === "") return { value: null };
 
-	try {
-		const cents = toCents(trimmed);
+			try {
+				const cents = toCents(trimmed);
 
-		// Net worth refuses a balance past MAX_BALANCE_CENTS (docs/verification.md, "Numbers"), so one is never saved.
-		return Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_BALANCE_CENTS
-			? { cents: cents === 0 ? 0 : cents }
-			: null;
-	} catch {
-		return null;
-	}
-}
+				return Number.isSafeInteger(cents) &&
+					Math.abs(cents) <= MAX_BALANCE_CENTS
+					? { value: cents === 0 ? 0 : cents }
+					: { say: BAD_BALANCE };
+			} catch {
+				return { say: BAD_BALANCE };
+			}
+		}),
+		encode: SchemaGetter.transform((cents: number | null) =>
+			cents === null ? "" : (cents / 100).toFixed(2),
+		),
+	}),
+);
 
 /** A refused size gate: htmx keeps the page with one error toast, and a plain browser gets the page with the sheet open. */
 async function sizeRefused(
@@ -557,7 +568,8 @@ accounts.post("/accounts/apple-card", async (c) => {
 	const file = form.file;
 	const balanceText = isText(form.balance) ? form.balance : "";
 	const fileRead = await readUpload(file);
-	const balance = parseBalance(balanceText);
+	const balanceRead = readAtEdge(BalanceText, balanceText);
+	const balance = balanceRead.ok ? { cents: balanceRead.value } : null;
 
 	const asked = decided(
 		uploadRule.decide(

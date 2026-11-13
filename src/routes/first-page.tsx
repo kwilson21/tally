@@ -1,4 +1,5 @@
 import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
@@ -9,6 +10,8 @@ import {
 	strokeStatement,
 } from "../db/first-tally";
 import { currentGoalSql, savingsGoalStatement } from "../db/savings-goals";
+import { readAtEdge } from "../edge";
+import { RowId, WholeCentsText } from "../edge-kinds";
 import { keepHeading, keepReply } from "../first-tally/bills";
 import {
 	askHeading,
@@ -68,6 +71,12 @@ import {
 // redirects back to /setup. /first-page, the question page this replaced, now sends a family to /setup.
 
 type App = { Bindings: Env; Variables: { actor: string } };
+
+// The answer words a question's form posts, read at the edge (decision 206). A word not on the list is refused by the route
+// with its own sentence, as before; the rule takes only a word on the list.
+const YesOrNo = Schema.Literals(["yes", "no"]);
+const BudgetAnswerWord = Schema.Literals(["all", "yes", "another", "skip"]);
+const SavingsAnswerWord = Schema.Literals(["save", "skip"]);
 
 export const firstPage = new Hono<App>();
 
@@ -320,21 +329,21 @@ firstPage.post("/setup/pay", async (c) => {
 	const open = await readQuestionsGate(c.env.DB);
 	const form = await c.req.formData();
 	const key = String(form.get("merchant") ?? "");
-	const answer = String(form.get("answer") ?? "");
+	const answer = readAtEdge(YesOrNo, String(form.get("answer") ?? ""));
 
 	const shown = form
 		.getAll("deposit")
 		.filter((value): value is string => typeof value === "string");
 
-	if (open && answer !== "yes" && answer !== "no")
-		return c.text("Choose yes or no.", 400);
+	if (open && !answer.ok) return c.text("Choose yes or no.", 400);
 	const before = open ? await settleAndLoad(c.env.DB, today) : null;
 
 	const asked = decided(
 		answerPayRule.decide(
 			{
 				merchantKey: key,
-				answer: answer === "no" ? "no" : "yes",
+				// A closed gate refuses the answer whatever it is, so a word not on the list reads as the old coercion did: Yes.
+				answer: answer.ok ? answer.value : "yes",
 				shown,
 				who: actor(c),
 			},
@@ -457,10 +466,10 @@ firstPage.post("/setup/budgets", async (c) => {
 
 	if (!open) return notOpen(c);
 	const form = await c.req.formData();
-	const answer = String(form.get("answer") ?? "");
+	const word = readAtEdge(BudgetAnswerWord, String(form.get("answer") ?? ""));
 
-	if (!["all", "yes", "another", "skip"].includes(answer))
-		return c.text("Choose an answer.", 400);
+	if (!word.ok) return c.text("Choose an answer.", 400);
+	const answer = word.value;
 
 	// Keep all is the only answer to its own question; every other answer is one at a time, so its screen is drawn that way.
 	const before = await settleAndLoad(c.env.DB, today, {
@@ -514,6 +523,14 @@ firstPage.post("/setup/budgets", async (c) => {
 		return answered(c, after, keptBudgetsWords(landed.length, changed));
 	}
 
+	// The category id and the shown price are digits the form wrote (RowId, WholeCentsText). A refused one is 0: no category
+	// has id 0, and no suggestion is 0 (firstBudgetSuggestion gives none for a total of $0 or less), so the rule answers it
+	// as it answered NaN, since both are only compared with ===.
+	const category = readAtEdge(RowId, String(form.get("category") ?? ""));
+	const categoryId = category.ok ? category.value : 0;
+	const shown = readAtEdge(WholeCentsText, String(form.get("shown") ?? ""));
+	const shownCents = shown.ok ? shown.value : 0;
+
 	const typed = String(form.get("budget") ?? "");
 	const parsed = parseBudgetAmount(typed);
 
@@ -521,12 +538,12 @@ firstPage.post("/setup/budgets", async (c) => {
 		answerOneBudget.decide(
 			{
 				month,
-				categoryId: Number(form.get("category")),
+				categoryId,
 				answer:
 					answer === "skip"
 						? { kind: "skip" }
 						: answer === "yes"
-							? { kind: "yes", shownCents: Number(form.get("shown")) }
+							? { kind: "yes", shownCents }
 							: {
 									kind: "another",
 									typed: parsed.ok
@@ -553,9 +570,7 @@ firstPage.post("/setup/budgets", async (c) => {
 			);
 
 		// The page names the category whose suggestion moved since it drew.
-		const name = step?.asks.find(
-			(ask) => ask.id === Number(form.get("category")),
-		)?.name;
+		const name = step?.asks.find((ask) => ask.id === categoryId)?.name;
 
 		return answered(
 			c,
@@ -608,10 +623,10 @@ firstPage.post("/setup/savings", async (c) => {
 
 	if (!open) return notOpen(c);
 	const form = await c.req.formData();
-	const answer = String(form.get("answer") ?? "");
+	const word = readAtEdge(SavingsAnswerWord, String(form.get("answer") ?? ""));
 
-	if (answer !== "save" && answer !== "skip")
-		return c.text("Choose an answer.", 400);
+	if (!word.ok) return c.text("Choose an answer.", 400);
+	const answer = word.value;
 	const month = today.slice(0, 7);
 	const typed = String(form.get("goal") ?? "");
 	// A blank amount is read before parseBudgetAmount, which reads it as a bad amount; $0 is no goal.
