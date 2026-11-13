@@ -1268,6 +1268,80 @@ describe("syncItem", () => {
 		expect(sentCursor).toEqual([false]);
 	});
 
+	it("restarts a mutated update from its first cursor, even when an earlier run saved part of it and died", async () => {
+		const id = await addItem();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET sync_cursor = 'saved' WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		const cursors: unknown[] = [];
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		// The first run stores the update's first page and its cursor, then dies before the second page.
+		await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch((body) => {
+				if (body.cursor === "saved")
+					return response(
+						page({
+							added: [transaction({ amount: 10 })],
+							next_cursor: "middle",
+							has_more: true,
+						}),
+					);
+
+				throw new Error("the Worker was stopped");
+			}),
+		).catch(() => {});
+		expect((await itemState(id))?.sync_cursor).toBe("middle");
+
+		// Meanwhile the bank's data changed. Plaid now refuses the middle cursor every time (its documented rule: start
+		// again from the cursor of the update's first page), and tells the update anew from that first cursor.
+		const result = await syncItem(
+			{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+			id,
+			plaidFetch((body) => {
+				cursors.push(body.cursor);
+
+				if (body.cursor === "saved")
+					return response(
+						page({
+							added: [
+								transaction({ amount: 12 }),
+								transaction({ transaction_id: "transaction-2", amount: 3 }),
+							],
+							next_cursor: "done",
+						}),
+					);
+
+				return response(
+					{
+						error_type: "TRANSACTIONS_ERROR",
+						error_code: "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
+						request_id: "mutation",
+					},
+					400,
+				);
+			}),
+		);
+
+		expect(cursors).toEqual(["middle", "saved"]);
+		expect(result).toMatchObject({ added: 1, modified: 0, removed: 0 });
+		expect((await itemState(id))?.sync_cursor).toBe("done");
+		expect(
+			await env.DB.prepare(
+				"SELECT plaid_transaction_id AS id, amount_cents FROM transactions ORDER BY plaid_transaction_id",
+			).all(),
+		).toMatchObject({
+			results: [
+				{ id: "transaction-1", amount_cents: 1200 },
+				{ id: "transaction-2", amount_cents: 300 },
+			],
+		});
+	});
+
 	it("restarts mutated pagination, corrects re-added rows, and preserves decisions", async () => {
 		const id = await addItem();
 		await env.DB.prepare(

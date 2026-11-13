@@ -31,6 +31,8 @@ const NAMED_OMISSIONS = {
 			"The encrypted access token; access tokens are never in the download (spec, Download your data).",
 		sync_cursor:
 			"Plaid's sync position; sync cursors are never in the download (spec, Download your data).",
+		sync_update_cursor:
+			"Where the bank's update in progress began; sync cursors are never in the download (spec, Download your data).",
 		sync_locked_until:
 			"When the sync lease ends; sync locks are never in the download (spec, Download your data).",
 		sync_lock_id:

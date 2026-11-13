@@ -85,6 +85,7 @@ type SyncRequest = {
 type ItemRow = {
 	access_token_encrypted: ArrayBuffer;
 	sync_cursor: string | null;
+	sync_update_cursor: string | null;
 };
 
 /** Item errors that clear up on their own; every other ITEM_ERROR needs the person to fix the connection. */
@@ -593,7 +594,7 @@ export async function syncItem(
 
 	try {
 		const item = await env.DB.prepare(
-			"SELECT access_token_encrypted, sync_cursor FROM plaid_items WHERE id = ?",
+			"SELECT access_token_encrypted, sync_cursor, sync_update_cursor FROM plaid_items WHERE id = ?",
 		)
 			.bind(itemRowId)
 			.first<ItemRow>();
@@ -641,8 +642,15 @@ export async function syncItem(
 			...stored.results.map((account) => account.plaid_account_id),
 		]);
 
-		const startCursor = item.sync_cursor;
-		let cursor = startCursor;
+		// The run goes on from the saved position. An update that changed while it was being paged starts again from its
+		// first page's cursor (Plaid's rule), which an earlier run saved if it stored part of this update and stopped
+		// (sync_update_cursor, decision 221); otherwise the saved position is itself where this update begins.
+		const firstCursor =
+			item.sync_update_cursor === null
+				? item.sync_cursor
+				: item.sync_update_cursor || null;
+
+		let cursor = item.sync_cursor;
 		let mutationRestarts = 0;
 		let firstPage = true;
 		let summary = { added: 0, modified: 0, removed: 0 };
@@ -684,7 +692,7 @@ export async function syncItem(
 						`plaid sync mutation retry ${mutationRestarts + 1} ${error.request_id ?? ""}`.trim(),
 					);
 					mutationRestarts += 1;
-					cursor = startCursor;
+					cursor = firstCursor;
 					firstPage = true;
 					summary = { added: 0, modified: 0, removed: 0 };
 					waitingDrops.clear();
@@ -1287,10 +1295,12 @@ export async function syncItem(
 
 			statements.push(
 				env.DB.prepare(
-					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : lastPageStamp}
+					`UPDATE plaid_items SET sync_cursor = ?, sync_update_cursor = ?${page.has_more ? "" : lastPageStamp}
 					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(
 					page.has_more && holdAt ? holdAt.cursor : page.next_cursor,
+					// While more pages wait, where this update began ('' for no cursor); nothing once its last page is in.
+					page.has_more ? (firstCursor ?? "") : null,
 					itemRowId,
 					lockId,
 				),
