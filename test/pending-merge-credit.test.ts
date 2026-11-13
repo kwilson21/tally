@@ -59,6 +59,7 @@ async function insertCredit(
 		creditReviewedBy: null,
 		...over,
 	};
+
 	const result = await db
 		.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, updated_by,
