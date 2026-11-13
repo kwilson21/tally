@@ -68,8 +68,8 @@ const TIMEOUT = "30 seconds";
 
 type PlaidBody = { [field: string]: JsonValue | undefined };
 
-/** What Plaid sent back: whether it accepted the request, and its JSON. */
-type Sent = { ok: boolean; body: JsonValue };
+/** What Plaid sent back: whether it accepted the request, and the text of its answer. */
+type Sent = { ok: boolean; text: string };
 
 // A refusal's three fields, each read on its own, so one that is missing or not text leaves the other two.
 const ErrorType = Schema.Struct({ error_type: Schema.String });
@@ -106,9 +106,10 @@ export const askPlaid = <S extends Schema.ConstraintDecoder<unknown>>(
 			? "https://production.plaid.com"
 			: "https://sandbox.plaid.com";
 
+	// The request and the reading of its answer share one signal, so a timeout stops the download too.
 	const send = Effect.tryPromise({
-		try: (signal) =>
-			fetchImpl(`${baseUrl}${path}`, {
+		try: async (signal): Promise<Sent> => {
+			const response = await fetchImpl(`${baseUrl}${path}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -117,33 +118,37 @@ export const askPlaid = <S extends Schema.ConstraintDecoder<unknown>>(
 					secret: env.PLAID_SECRET,
 				}),
 				signal,
-			}),
+			});
+
+			return { ok: response.ok, text: await response.text() };
+		},
 		catch: () => new PlaidUnreachable(),
 	});
 
-	const read = (response: Response) =>
-		Effect.tryPromise({
-			try: async (): Promise<Sent> => ({
-				ok: response.ok,
-				body: JSON.parse(await response.text()),
-			}),
+	const read = (sent: Sent) =>
+		Effect.try({
+			try: (): JsonValue => JSON.parse(sent.text),
 			catch: () => new PlaidUnreadable(),
 		});
 
 	return send.pipe(
-		Effect.flatMap(read),
 		Effect.timeoutOrElse({
 			duration: TIMEOUT,
 			orElse: () => Effect.fail(new PlaidUnreachable()),
 		}),
-		Effect.flatMap((sent): Effect.Effect<S["Type"], PlaidFailure> => {
-			if (!sent.ok) return Effect.fail(refusalOf(sent.body));
-			const decoded = Schema.decodeUnknownResult(answer)(sent.body);
+		Effect.flatMap((sent) =>
+			Effect.flatMap(
+				read(sent),
+				(json): Effect.Effect<S["Type"], PlaidFailure> => {
+					if (!sent.ok) return Effect.fail(refusalOf(json));
+					const decoded = Schema.decodeUnknownResult(answer)(json);
 
-			return Result.isSuccess(decoded)
-				? Effect.succeed(decoded.success)
-				: Effect.fail(new PlaidUnreadable());
-		}),
+					return Result.isSuccess(decoded)
+						? Effect.succeed(decoded.success)
+						: Effect.fail(new PlaidUnreadable());
+				},
+			),
+		),
 	);
 };
 

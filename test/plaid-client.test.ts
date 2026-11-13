@@ -196,6 +196,25 @@ describe("askPlaid", () => {
 		expect(signal).toBeInstanceOf(AbortSignal);
 	});
 
+	it("stops reading an answer that stalls, when the call is interrupted", async () => {
+		let signal: AbortSignal | null | undefined;
+
+		// Plaid answers, then its body never arrives.
+		const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+			signal = init?.signal;
+
+			return new Response(new ReadableStream({ start() {} }));
+		});
+
+		await Effect.runPromise(
+			askPlaid(ENV, "/test", {}, Answer, fetch).pipe(
+				Effect.timeoutOption("20 millis"),
+			),
+		);
+
+		expect(signal?.aborted).toBe(true);
+	});
+
 	it.each([
 		["text that is not JSON", new Response("upstream secret")],
 		["a field of the wrong kind", Response.json({ value: "three" })],
