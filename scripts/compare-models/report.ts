@@ -174,7 +174,12 @@ export type LookupEntry = {
 };
 
 export type LookupCounts = {
+	/** Every case with a line, whether or not one of its calls failed. */
 	cases: number;
+	/** Cases whose three calls all gave a readable answer: every count but cases and leftOut is over these. */
+	complete: number;
+	/** Cases left out because one of their calls gave no readable answer. */
+	leftOut: number;
 	/** Cases with a right answer: the ones the right and wrong counts are over. */
 	scored: number;
 	/** Cases whose two plain runs gave a different category. */
@@ -194,8 +199,14 @@ export type LookupCounts = {
 	filedAfter: number;
 };
 
+/** A case is counted only when all three of its calls gave a readable answer. */
+const isComplete = (e: LookupEntry) =>
+	e.plain.answer !== null && e.again.answer !== null && e.lined.answer !== null;
+
 /** The counts over the lookup entries. A case with no right answer is in the totals only, not in the right counts. */
-export function lookupCounts(entries: LookupEntry[]): LookupCounts {
+export function lookupCounts(all: LookupEntry[]): LookupCounts {
+	// A case with a failed call is left out of every count, so a failure never reads as a move or as a noise pair.
+	const entries = all.filter(isComplete);
 	const scored = entries.filter((e) => e.kase.rightCategory !== null);
 
 	const plainPairs = entries.flatMap(({ plain, again }) =>
@@ -219,7 +230,9 @@ export function lookupCounts(entries: LookupEntry[]): LookupCounts {
 	);
 
 	return {
-		cases: entries.length,
+		cases: all.length,
+		complete: entries.length,
+		leftOut: all.length - entries.length,
 		scored: scored.length,
 		planDiffers: plainPairs.filter(([a, b]) => a.pick !== b.pick).length,
 		largestGap: gaps.length > 0 ? Math.max(...gaps) : null,
@@ -257,13 +270,32 @@ function lookupCell(row: Row): string {
 	return cell(`${row.answer.pick} ${pct(row.answer.confidence)}${check}`);
 }
 
+/** The calls in a case that gave no readable answer, with each one's outcome. */
+function failedCalls(e: LookupEntry): string {
+	const calls: [string, Row][] = [
+		["plain", e.plain],
+		["plain again", e.again],
+		["with the line", e.lined],
+	];
+
+	return calls
+		.flatMap(([label, row]) =>
+			row.answer === null ? [`${label} (${row.outcome})`] : [],
+		)
+		.join(", ");
+}
+
+const leftOutLine = (e: LookupEntry) =>
+	`- ${cell(e.kase.rawName)}: ${failedCalls(e)}`;
+
 export function formatLookupReport(input: LookupReportInput): string {
 	const c = lookupCounts(input.entries);
+	const leftOut = input.entries.filter((e) => !isComplete(e));
 
 	const noise =
 		c.largestGap === null
 			? "Noise floor: no two plain runs both gave an answer, so there is nothing to compare."
-			: `Noise floor: the two plain runs gave a different category for ${c.planDiffers} of ${c.cases} cases, and the largest confidence gap between them was ${pct(c.largestGap)}. Read every move below against this.`;
+			: `Noise floor: the two plain runs gave a different category for ${c.planDiffers} of ${c.complete} cases, and the largest confidence gap between them was ${pct(c.largestGap)}. Read every move below against this.`;
 
 	const lines = [
 		"# Does a store line help Jev?",
@@ -290,6 +322,7 @@ export function formatLookupReport(input: LookupReportInput): string {
 		`| Category changed either way | ${c.changed} |`,
 		`| Median category confidence, before / after | ${c.medianBefore === null ? "—" : pct(c.medianBefore)} / ${c.medianAfter === null ? "—" : pct(c.medianAfter)} |`,
 		`| Filed (at or above the threshold), before / after | ${c.filedBefore} / ${c.filedAfter} |`,
+		`| Cases left out because a call failed | ${c.leftOut} |`,
 		"",
 		"## Cases",
 		"",
@@ -299,6 +332,12 @@ export function formatLookupReport(input: LookupReportInput): string {
 			(e) =>
 				`| ${cell(e.kase.rawName)} | ${cell(e.line)} | ${cell(e.kase.rightCategory ?? "a person decides")} | ${lookupCell(e.plain)} | ${lookupCell(e.again)} | ${lookupCell(e.lined)} |`,
 		),
+		"",
+		"## Cases left out because a call failed",
+		"",
+		"A case is left out of every count above when any of its three calls gave no readable answer. Its failed calls:",
+		"",
+		...(leftOut.length > 0 ? leftOut.map(leftOutLine) : ["None."]),
 		"",
 		"## No line",
 		"",
@@ -359,6 +398,10 @@ export type PayeeReportInput = {
 	notes: ModelNote[];
 };
 
+/** The rows whose Jev call failed (its status, or no response): they are held back, and counted here. */
+export const payeeFailedCalls = (rows: PayeeRow[]): number =>
+	rows.filter((r) => r.outcome.startsWith("Jev call failed")).length;
+
 export function formatPayeeReport(input: PayeeReportInput): string {
 	const c = payeeCounts(input.rows);
 
@@ -375,6 +418,8 @@ export function formatPayeeReport(input: PayeeReportInput): string {
 		`- People held back: ${c.peopleHeldBack}`,
 		`- Businesses let through: ${c.businessesLetThrough}`,
 		`- Businesses held back: ${c.businessesHeldBack}`,
+		"",
+		`Rows where a Jev call failed (counted as held back): ${payeeFailedCalls(input.rows)}.`,
 		"",
 		"A business is let through only at the threshold or more. Anything else is held back, including no answer.",
 		"",

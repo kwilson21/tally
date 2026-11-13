@@ -37,7 +37,6 @@ export const LOOKUP_LINES = {
 	"SQ *FARMERS MKT": "Farmers market stall",
 	"SQ *LOCAL BAKERY 4432": "Bakery",
 	"TST* CORNER DELI": "Deli and sandwich shop",
-	"DR MARTIN FAMILY PRACTICE REFUND": "Family doctor's office",
 } satisfies Record<string, string>;
 
 const LINE_BY_NAME = new Map(Object.entries(LOOKUP_LINES));

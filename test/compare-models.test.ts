@@ -927,6 +927,7 @@ const linedCases = lookupCases.filter(
 );
 
 const unlinedNames = [
+	"DR MARTIN FAMILY PRACTICE REFUND",
 	"VENMO *J RIVERA",
 	"PAYPAL *XYZSHOP",
 	"ACME CORP PAYROLL",
@@ -970,6 +971,10 @@ const payeeReply = (choice: string, confidence: number | string) => ({
 /** A scored row for a fixed answer, with the demo's three names as the list. */
 const scored = (kase: Case, [label, confidence]: [string, number]): Row =>
 	scoreCase(kase, ok(jevAnswer(label, confidence)), NAMES, 1);
+
+/** A row for a call that failed with `status` (null: no response), scored the way the report scores it. */
+const failedRow = (kase: Case, status: number | null): Row =>
+	scoreCase(kase, { ok: false, status, requestId: null }, NAMES, 1);
 
 /** The text between two headings of a rendered report. */
 const sectionOf = (text: string, from: string, to: string) =>
@@ -1079,7 +1084,20 @@ describe("the store lookup line (#984)", () => {
 		expect(
 			Object.keys(LOOKUP_LINES).filter((name) => !names.has(name)),
 		).toEqual([]);
-		expect(Object.keys(LOOKUP_LINES).length).toBe(33);
+		expect(Object.keys(LOOKUP_LINES).length).toBe(32);
+	});
+
+	it("never gives a line to a seed row with a transfer, income or reimbursement flag", () => {
+		const flagged = lookupCases
+			.filter(
+				(c) => c.flags.transfer || c.flags.reimbursement || c.flags.income,
+			)
+			.map((c) => c.rawName);
+
+		expect(flagged.length).toBeGreaterThan(0);
+		expect(
+			Object.keys(LOOKUP_LINES).filter((name) => flagged.includes(name)),
+		).toEqual([]);
 	});
 
 	const entries: LookupEntry[] = [
@@ -1278,11 +1296,124 @@ describe("the store lookup line (#984)", () => {
 			"| Category changed either way | 4 |",
 			"| Median category confidence, before / after | 92.50% / 95.00% |",
 			"| Filed (at or above the threshold), before / after | 5 / 6 |",
+			"| Cases left out because a call failed | 0 |",
 		]);
 		expect(text).toContain("Cases with a line: 6. Cases with no line: 0.");
 		expect(text).toContain(
 			"gave a different category for 2 of 6 cases, and the largest confidence gap between them was 20.00%.",
 		);
+	});
+
+	it("does not count a case as a move when its plain call failed, even if its lined call is right", () => {
+		const failed = kase({ rawName: "F PLAIN", rightCategory: "Groceries" });
+
+		const text = formatLookupReport({
+			jevStatus: "ran",
+			entries: [
+				{
+					kase: failed,
+					line: "Store line",
+					plain: failedRow(failed, 500),
+					again: scored(failed, ["Groceries", 0.95]),
+					lined: scored(failed, ["Groceries", 0.95]),
+				},
+				lookupEntry(
+					"G",
+					"Groceries",
+					["Groceries", 0.95],
+					["Groceries", 0.95],
+					["Groceries", 0.95],
+				),
+			],
+			noLine: [],
+			notes: [],
+		});
+
+		expect(summaryRows(text)).toEqual([
+			"| Cases with a right answer | 1 |",
+			"| Right before | 1 |",
+			"| Right after | 1 |",
+			"| Moved from wrong or unsure to right | 0 |",
+			"| Moved from right to wrong or unsure | 0 |",
+			"| Category changed either way | 0 |",
+			"| Median category confidence, before / after | 95.00% / 95.00% |",
+			"| Filed (at or above the threshold), before / after | 1 / 1 |",
+			"| Cases left out because a call failed | 1 |",
+		]);
+		expect(text).toContain("- F PLAIN: plain (failed: HTTP 500)");
+	});
+
+	it("does not count a case as a move away from right when its lined call failed", () => {
+		const failed = kase({ rawName: "F LINED", rightCategory: "Groceries" });
+
+		const text = formatLookupReport({
+			jevStatus: "ran",
+			entries: [
+				{
+					kase: failed,
+					line: "Store line",
+					plain: scored(failed, ["Groceries", 0.95]),
+					again: scored(failed, ["Groceries", 0.95]),
+					lined: failedRow(failed, null),
+				},
+				lookupEntry(
+					"G",
+					"Groceries",
+					["Groceries", 0.95],
+					["Groceries", 0.95],
+					["Groceries", 0.95],
+				),
+			],
+			noLine: [],
+			notes: [],
+		});
+
+		expect(summaryRows(text)).toEqual([
+			"| Cases with a right answer | 1 |",
+			"| Right before | 1 |",
+			"| Right after | 1 |",
+			"| Moved from wrong or unsure to right | 0 |",
+			"| Moved from right to wrong or unsure | 0 |",
+			"| Category changed either way | 0 |",
+			"| Median category confidence, before / after | 95.00% / 95.00% |",
+			"| Filed (at or above the threshold), before / after | 1 / 1 |",
+			"| Cases left out because a call failed | 1 |",
+		]);
+		expect(text).toContain("- F LINED: with the line (failed: no response)");
+	});
+
+	it("leaves a case with a failed repeat out of the noise floor and the case count", () => {
+		const failed = kase({ rawName: "F AGAIN", rightCategory: "Groceries" });
+
+		const text = formatLookupReport({
+			jevStatus: "ran",
+			entries: [
+				{
+					kase: failed,
+					line: "Store line",
+					plain: scored(failed, ["Groceries", 0.95]),
+					again: failedRow(failed, 503),
+					lined: scored(failed, ["Groceries", 0.95]),
+				},
+				lookupEntry(
+					"G",
+					"Groceries",
+					["Groceries", 0.95],
+					["Eating Out", 0.95],
+					["Groceries", 0.95],
+				),
+			],
+			noLine: [],
+			notes: [],
+		});
+
+		expect(text).toContain(
+			"the two plain runs gave a different category for 1 of 1 cases, and the largest confidence gap between them was 0.00%.",
+		);
+		expect(summaryRows(text)).toContain(
+			"| Cases left out because a call failed | 1 |",
+		);
+		expect(text).toContain("- F AGAIN: plain again (failed: HTTP 503)");
 	});
 });
 
@@ -1350,9 +1481,9 @@ describe("the payee question (#984, part two)", () => {
 
 		const bodies = sentBodies(jev);
 
-		// 12 hand-written rows, plus the lookup-line raw names that are not one of them: 33 names, less CITY GYM MEMBERSHIP,
+		// 12 hand-written rows, plus the lookup-line raw names that are not one of them: 32 names, less CITY GYM MEMBERSHIP,
 		// which is both a hand-written row and a lookup-line case. TARGET T-1432 has two cases, but is asked once.
-		expect(bodies.length).toBe(44);
+		expect(bodies.length).toBe(43);
 		expect(bodies.every((b) => questionOf(b, "payee") !== undefined)).toBe(
 			true,
 		);
@@ -1512,6 +1643,40 @@ describe("the payee question (#984, part two)", () => {
 			"- Businesses held back: 3",
 		]);
 	});
+
+	it("does not answer from a call Jev failed, even when its reply holds a payee answer", async () => {
+		const jev = fakeFetch(
+			vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				Response.json(payeeReply("business", 0.95), { status: 500 }),
+			),
+		);
+
+		const text = await runPayee({ AI: fakeAi(), JEV_API_KEY: "test-key" }, jev);
+
+		expect(text).toContain(
+			"- People Jev would let be searched (the one that matters): 0",
+		);
+		expect(text).toContain("- Businesses let through: 0");
+		expect(text).toContain("Jev call failed (HTTP 500)");
+		expect(text).toContain(
+			"Rows where a Jev call failed (counted as held back): 43.",
+		);
+		expect(text).not.toContain("| yes |");
+	});
+
+	it("shows no payee answer for an ok reply without answers.payee, and keeps that reply", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(),
+		);
+
+		expect(text).toContain("no payee answer");
+		expect(text).not.toMatch(/\| Jev call failed/);
+		expect(text).toContain(
+			"Rows where a Jev call failed (counted as held back): 0.",
+		);
+		expect(text).toContain("First unreadable body:");
+	});
 });
 
 describe("the lookup and payee routes (#984)", () => {
@@ -1561,7 +1726,7 @@ describe("the lookup and payee routes (#984)", () => {
 		}
 	});
 
-	it("runs ?lookup=1 through worker.fetch with a key: a 200, the report's heading, and 102 calls to Jev", async () => {
+	it("runs ?lookup=1 through worker.fetch with a key: a 200, the report's heading, and 99 calls to Jev", async () => {
 		const ai = fakeAi();
 
 		const response = await worker.fetch(
@@ -1571,11 +1736,11 @@ describe("the lookup and payee routes (#984)", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.text()).toContain("# Does a store line help Jev?");
-		expect(jev).toHaveBeenCalledTimes(102);
+		expect(jev).toHaveBeenCalledTimes(99);
 		expect(ai.run).not.toHaveBeenCalled();
 	});
 
-	it("runs ?payee=1 through worker.fetch with a key: a 200, the report's heading, and 44 calls to Jev", async () => {
+	it("runs ?payee=1 through worker.fetch with a key: a 200, the report's heading, and 43 calls to Jev", async () => {
 		const ai = fakeAi();
 
 		const response = await worker.fetch(
@@ -1587,7 +1752,7 @@ describe("the lookup and payee routes (#984)", () => {
 		expect(await response.text()).toContain(
 			"# Can Jev tell a person from a business?",
 		);
-		expect(jev).toHaveBeenCalledTimes(44);
+		expect(jev).toHaveBeenCalledTimes(43);
 		expect(ai.run).not.toHaveBeenCalled();
 	});
 });

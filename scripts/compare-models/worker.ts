@@ -319,6 +319,20 @@ export async function runLookup(
 	});
 }
 
+/**
+ * A payee row's outcome. A call that failed is held back whatever its reply said, and an ok reply without a readable
+ * payee answer says so.
+ */
+function payeeOutcome(result: JevResult, answer: PayeeAnswer): string {
+	if (!result.ok) {
+		return result.status === null
+			? "Jev call failed (no response)"
+			: `Jev call failed (HTTP ${result.status})`;
+	}
+
+	return answer ? "answered" : "no payee answer";
+}
+
 /** The payee measurement (#984, part two): the hand-written rows, then the lookup-line cases as businesses. */
 export async function runPayee(
 	env: CompareEnv,
@@ -381,10 +395,27 @@ export async function runPayee(
 			},
 		);
 
-		await askJev(ask.input, categories, key, fetchWithPayee, OPTIONS);
+		const result = await askJev(
+			ask.input,
+			categories,
+			key,
+			fetchWithPayee,
+			OPTIONS,
+		);
 
-		const answer = answers[0] ?? null;
-		const outcome = answer ? "answered" : "no answer";
+		const answer = result.ok ? (answers[0] ?? null) : null;
+		const outcome = payeeOutcome(result, answer);
+
+		// Keep the first reply the report should show: one with no payee answer, or one that was not readable at all.
+		const unreadable =
+			!result.ok &&
+			result.status !== null &&
+			result.status >= 200 &&
+			result.status < 300;
+
+		if (outcome === "no payee answer" || unreadable) {
+			rec.unreadable ??= rec.body;
+		}
 
 		console.log(`compare-models payee ${outcome}`);
 		rows.push({
