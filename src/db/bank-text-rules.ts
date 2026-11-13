@@ -101,7 +101,7 @@ export async function bankTextRuleStatements(
 					),
 					eq(transactions.categorySource, "bill"),
 				),
-				// NOT (a removed part AND a category): both are never NULL, so this is the same as the two IS NULLs below.
+				// NOT (a removed part AND a category) is the same as "no removed part OR no category" (De Morgan), so the two IS NULLs below say it.
 				or(
 					isNull(transactions.splitRemovedFromCents),
 					isNull(transactions.categoryId),
