@@ -13,6 +13,8 @@ import {
 import { rule, term, unless } from "./terms";
 
 // A selection's refusals, shared by its two actions. Over a limit the words win, even when nothing is left selected.
+// A selection made with Select all is every row the filters match, which has no cap, so its two saves leave each row
+// to SQL (decision 209): the statement picks the rows and writes them, and says which rows it changed.
 
 export class TooManySelected extends Data.TaggedError("TooManySelected") {
 	readonly say = TOO_MANY;
