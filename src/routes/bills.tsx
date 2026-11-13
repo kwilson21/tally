@@ -83,6 +83,7 @@ import {
 } from "../rules/bills";
 import { decided, everyRefusal } from "../rules/terms";
 import { tidyName } from "../transactions/tidy-name";
+import { UNDO_MS, undoWords } from "../undo";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
 import {
@@ -2172,7 +2173,7 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		id,
 		"Payment unlinked",
 		undefined,
-		"Payment unlinked. Undo for 10 seconds.",
+		undoWords("Payment unlinked."),
 		{
 			undo: undo.token,
 			undoExpiresInMs: undo.ms,
@@ -2182,15 +2183,15 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 });
 
 /**
- * The Undo for a Not this one (#340): its token, and the rest of its ten seconds, counted by the database's clock as
+ * The Undo for a Not this one (#340): its token, and the rest of its window (src/undo.ts), counted by the database's clock as
  * its created_at was. The row is found by its undo_token, which is random, so a later Not this one never matches it.
  */
 async function unlinkUndo(db: D1Database, token: string) {
 	const row = await db
 		.prepare(
-			"SELECT CAST(MAX(0, MIN(10000, (julianday(created_at) + 10.0 / 86400 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM bill_payments WHERE undo_token=?",
+			"SELECT CAST(MAX(0, MIN(?1, (julianday(created_at) - julianday('now')) * 86400000 + ?1)) AS INTEGER) AS ms FROM bill_payments WHERE undo_token=?2",
 		)
-		.bind(token)
+		.bind(UNDO_MS, token)
 		.first<{ ms: number }>();
 
 	return { token, ms: row?.ms ?? 0 };

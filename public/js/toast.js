@@ -4,6 +4,9 @@
 // auto-save fails goes back to how the page drew it, when its form carries data-switches-revert.
 (() => {
 	const DISPLAY_MS = 4000;
+	// The longest an Undo stays open, as src/undo.ts says it (test/undo-window.test.ts checks they match). The server
+	// sends the time left; this only keeps a wrong header from holding a toast open longer than the window.
+	const UNDO_MAX_MS = 10_000;
 	const SVG_NS = "http://www.w3.org/2000/svg";
 	const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 	const COULDNT_LOAD = "Couldn't load. Check your connection and try again.";
@@ -372,7 +375,7 @@
 			// A property, not a style attribute: the page's CSP (style-src 'self') refuses the attribute.
 			toast.style.setProperty(
 				"--duration-undo-toast",
-				`${Math.min(10_000, undoExpiresInMs)}ms`,
+				`${Math.min(UNDO_MAX_MS, undoExpiresInMs)}ms`,
 			);
 
 			// The swap that removed the delete's sheet left focus nowhere, so focus moves to Undo and a keyboard
@@ -383,7 +386,7 @@
 
 		setTimeout(
 			() => takeOffPage(toast),
-			undo ? Math.min(10_000, undoExpiresInMs) : DISPLAY_MS,
+			undo ? Math.min(UNDO_MAX_MS, undoExpiresInMs) : DISPLAY_MS,
 		);
 	};
 

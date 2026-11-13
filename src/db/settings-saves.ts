@@ -9,7 +9,6 @@ import {
 	type AlwaysRuleFacts,
 	type ChangeLineFacts,
 	type ChangeLineWrite,
-	FORGET_UNDO_MS,
 	type ForgetWrite,
 	type NeverSuggestLineFacts,
 	type PersonFacts,
@@ -23,6 +22,7 @@ import {
 	type UndoForgetFacts,
 	type UndoForgetWrite,
 } from "../rules/settings";
+import { undoLeftMs } from "../undo";
 import {
 	AI_SWITCHES_VERSION,
 	aiSwitchStatements,
@@ -358,7 +358,7 @@ export const forgetStatements = (db: D1Database, save: ForgetWrite) => [
 
 /** The time left on a Forget's Undo, in milliseconds, for a Forget made at `forgottenAt` and read at `now`. */
 export const forgetUndoLeftMs = (forgottenAt: number, now: number) =>
-	Math.max(0, Math.min(FORGET_UNDO_MS, forgottenAt + FORGET_UNDO_MS - now));
+	undoLeftMs(forgottenAt, now);
 
 /** A Forget row's time in milliseconds, as SQL. */
 const FORGOTTEN_MS =

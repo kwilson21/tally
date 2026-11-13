@@ -36,7 +36,7 @@ export type PlanPaymentCandidate = {
 	excluded: boolean;
 };
 
-export { PLAN_UNDO_MS, type PlanFields } from "../rules/plans";
+export type { PlanFields } from "../rules/plans";
 
 const PAYER_NAME = `COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")})`;
 

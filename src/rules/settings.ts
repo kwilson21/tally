@@ -4,6 +4,7 @@
 // inputs (decision 195), and nothing here parses, reads a clock or touches the database. The saves' guards are in
 // src/db/settings-saves.ts (decision 190).
 import * as Data from "effect/Data";
+import { UNDO_MS } from "../undo";
 import { rule, term, unless } from "./terms";
 
 // The AI switches (spec §8.6, decision 73).
@@ -282,9 +283,6 @@ export const removeNeverSuggestLine = <Line>() =>
 
 // The learned lines (decisions 162 and 163).
 
-/** How long a Forget's Undo stays open, in milliseconds (decision 162). */
-export const FORGET_UNDO_MS = 10_000;
-
 export type ForgetWrite = {
 	text: string;
 	now: number;
@@ -351,8 +349,7 @@ export const undoForget = rule({
 		unless(
 			term<UndoForgetGiven>(
 				"its ten seconds have not passed",
-				(g) =>
-					g.forgotten !== null && g.now - g.forgotten.atMs < FORGET_UNDO_MS,
+				(g) => g.forgotten !== null && g.now - g.forgotten.atMs < UNDO_MS,
 			),
 			() => new ForgetUndoExpired(),
 		),

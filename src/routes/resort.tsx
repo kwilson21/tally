@@ -6,7 +6,6 @@ import {
 	decideUndo,
 	readMoved,
 	readRun,
-	UNDO_MS,
 } from "../db/resort-run";
 import { isRunning } from "../db/resort-start";
 import { hxTrigger } from "../htmx";
@@ -16,6 +15,7 @@ import {
 	undoWords,
 } from "../resort-toast";
 import { undoResort } from "../rules/sorting";
+import { UNDO_MS } from "../undo";
 import {
 	heldQuarter,
 	RECHECK_PAGES,
