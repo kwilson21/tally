@@ -106,12 +106,9 @@ export function isRealMonth(text: string): boolean {
 export function isRealDate(text: string): boolean {
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
 	const month = text.slice(0, 7);
+	const day = Number(text.slice(8, 10));
 
-	return (
-		isRealMonth(month) &&
-		Number(text.slice(8, 10)) >= 1 &&
-		Number(text.slice(8, 10)) <= daysInMonth(month)
-	);
+	return isRealMonth(month) && day >= 1 && day <= daysInMonth(month);
 }
 
 const SHORT = [
