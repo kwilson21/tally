@@ -61,12 +61,14 @@ export const NAME_ASKED_SQL = `t.parent_id IS NULL AND NULLIF(t.merchant_name, '
  * never touched; a guess still waiting gives way (its names are replaced). `names` are the bank's texts (a blank one is
  * skipped). `guard` is the SQL that must hold for any of the rows to be written: a sync's lock (OWNS_LOCK, bound with
  * `guardBinds`), or `1` for an upload, which runs in one batch with nothing to lock. Callers must run all of them.
+ * `startedBy` is as pendingNameStatements takes it.
  */
 export function suggestBankNames(
 	db: D1Database,
 	names: readonly string[],
 	guard: string,
 	guardBinds: readonly (string | number)[],
+	startedBy: string | null = null,
 ): D1PreparedStatement[] {
 	return pendingNameStatements(
 		db,
@@ -74,6 +76,7 @@ export function suggestBankNames(
 		[JSON.stringify(names)],
 		guard,
 		guardBinds,
+		startedBy,
 	);
 }
 
@@ -84,7 +87,8 @@ export function suggestBankNames(
  * a candidate only when its name is not blank. A merchant a person named, or whose suggestion they decided, is never
  * touched; a guess still waiting gives way (its names are replaced). `guard` is the SQL that must hold for any of the
  * rows to be written: a sync's lock (OWNS_LOCK, bound with `guardBinds`), or `1` for an upload, which runs in one batch
- * with nothing to lock. Callers must run all of them.
+ * with nothing to lock. Callers must run all of them. `startedBy` is a sync's lock id, recorded on each merchant row
+ * these statements make (`started_by_sync`, #1048) and never on one that was already there; an upload passes none.
  */
 export function pendingNameStatements(
 	db: D1Database,
@@ -92,6 +96,7 @@ export function pendingNameStatements(
 	binds: readonly unknown[],
 	guard: string,
 	guardBinds: readonly unknown[],
+	startedBy: string | null = null,
 ): D1PreparedStatement[] {
 	// Every statement reads the candidates first, then the guard's binds.
 	const all = [...binds, ...guardBinds];
@@ -104,12 +109,12 @@ export function pendingNameStatements(
 	return [
 		db
 			.prepare(
-				`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
-				 SELECT c.value, 'pending', 0 FROM ${from} WHERE ${usable} AND ${guard}
+				`INSERT INTO merchants (raw_name, suggestion_status, names_asked, started_by_sync)
+				 SELECT c.value, 'pending', 0, ? FROM ${from} WHERE ${usable} AND ${guard}
 				 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = 'pending', names_asked = 0
 				 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
 			)
-			.bind(...all),
+			.bind(startedBy, ...all),
 		db
 			.prepare(
 				`DELETE FROM merchant_suggested_names

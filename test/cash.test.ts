@@ -14,7 +14,7 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
-import { entryKeyOf } from "../src/transactions/cash";
+import { entryKeyOf, parseCashDateAmount } from "../src/transactions/cash";
 import { CashForm } from "../src/views/cash-form";
 import { present } from "./helpers/present";
 
@@ -4158,5 +4158,35 @@ describe("a bank transaction split into parts", () => {
 		expect(partPanel.html).not.toContain(
 			"Its date and amount stay as the bank sent them",
 		);
+	});
+});
+
+describe("parseCashDateAmount's date check", () => {
+	const TODAY = "2026-11-13";
+
+	it.each(["2026-02-30", "2025-02-29", "2026-13-01", "2026-04-31"])(
+		"refuses %s, which is not a real day",
+		(date) =>
+			expect(parseCashDateAmount(date, "1.00", TODAY).errors.date).toBe(
+				"Choose today or an earlier date.",
+			),
+	);
+
+	it("accepts a real leap day, and still refuses a day after today", () => {
+		expect(
+			parseCashDateAmount("2024-02-29", "1.00", TODAY).errors.date,
+		).toBeUndefined();
+		expect(parseCashDateAmount("2026-11-14", "1.00", TODAY).errors.date).toBe(
+			"Choose today or an earlier date.",
+		);
+	});
+
+	it("keeps the ten-year window", () => {
+		expect(parseCashDateAmount("2016-11-12", "1.00", TODAY).errors.date).toBe(
+			"Choose a date within the last 10 years.",
+		);
+		expect(
+			parseCashDateAmount("2016-11-13", "1.00", TODAY).errors.date,
+		).toBeUndefined();
 	});
 });

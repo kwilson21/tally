@@ -37,6 +37,15 @@ async function homeAt(month: string) {
 	return { res, html: await res.text() };
 }
 
+// A ?month= that is not a real month (2026-13) shows the current month, the same as no month at all (#967).
+it("shows the current month for ?month=2026-13, as it does for no month", async () => {
+	const bad = await homeAt("2026-13");
+	const plain = await home();
+
+	expect(bad.res.status).toBe(plain.res.status);
+	expect(bad.html).toBe(plain.html);
+});
+
 // The demo's months, "Back to <month>" and the finished-month figures all follow the household's today, so the
 // clock is pinned to October 2026 for the whole file (#808).
 beforeEach(() => pinClock());

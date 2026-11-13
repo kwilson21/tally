@@ -40,6 +40,20 @@ describe("unpaidBillsSentence", () => {
 	});
 });
 
+describe("unpaidBillsSentence's occurrence", () => {
+	it("still throws for a month that is not real (2026-13), as before", () => {
+		expect(() =>
+			unpaidBillsSentence([{ name: "Rent", period: "2026-13" }]),
+		).toThrow();
+	});
+
+	it("still names a real month", () => {
+		expect(unpaidBillsSentence([{ name: "Rent", period: "2026-02" }])).toBe(
+			"The Rent bill for February 2026 is no longer paid.",
+		);
+	});
+});
+
 describe("parseUnpaidBills", () => {
 	it("reads what a bank change stored", () => {
 		expect(parseUnpaidBills('[{"name":"Water","period":"2026-09"}]')).toEqual([

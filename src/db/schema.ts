@@ -139,6 +139,7 @@ export const merchants = sqliteTable("merchants", {
 		.default("none"),
 	namesAsked: integer("names_asked").notNull().default(0),
 	notABill: integer("not_a_bill").notNull().default(0),
+	startedBySync: text("started_by_sync"),
 });
 
 /** A merchant's suggested names, one row per name, by position (migrations/0071_merchant_suggested_names.sql). */
@@ -351,6 +352,167 @@ export const transactions = sqliteTable(
 );
 
 /**
+ * bills.frequency: the CHECK in migrations/0035_bill_cadence.sql (0001 wrote monthly and yearly; 0035 rebuilt the table
+ * with the other three).
+ */
+export const BILL_FREQUENCY_VALUES = [
+	"monthly",
+	"yearly",
+	"weekly",
+	"biweekly",
+	"quarterly",
+] as const;
+
+/**
+ * bill_payments.matched_by: the CHECK in migrations/0035_bill_cadence.sql (0001 wrote it; 0017, 0026 and 0035 rebuilt
+ * the table with the same list).
+ */
+export const BILL_PAYMENT_MATCHED_BY_VALUES = ["auto", "user"] as const;
+
+/**
+ * bill_payments.status: the CHECK in migrations/0035_bill_cadence.sql (0001 wrote it; 0017, 0026 and 0035 rebuilt the
+ * table with the same list).
+ */
+export const BILL_PAYMENT_STATUS_VALUES = ["linked", "dismissed"] as const;
+
+/**
+ * A recurring bill, matched to bank transactions by its merchant. The table has 12 columns, grouped below by what they
+ * are for. Its three table-level CHECKs (frequency against anchor_month and against anchor_date, and a weekly or
+ * biweekly bill's due_day of 1 to 7) are not IN lists, so the drift test does not read them.
+ */
+export const bills = sqliteTable("bills", {
+	// What the bill is, its amount, and when it falls due.
+	id: integer().primaryKey(),
+	name: text().notNull(),
+	// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents > 0), not an IN list, so the drift
+	// test does not read it.
+	amountCents: integer("amount_cents").notNull(),
+	// The migration's CHECK here is (due_day BETWEEN 1 AND 31), not an IN list, so the drift test does not read it.
+	dueDay: integer("due_day").notNull(),
+	frequency: text({ enum: BILL_FREQUENCY_VALUES }).notNull(),
+	// The migration's CHECK here is (anchor_month BETWEEN 1 AND 12), not an IN list, so the drift test does not read it.
+	anchorMonth: integer("anchor_month"),
+	// The migration's CHECK here is (anchor_date IS NULL OR anchor_date GLOB 'YYYY-MM-DD'), not an IN list, so the drift
+	// test does not read it.
+	anchorDate: text("anchor_date"),
+
+	// Where the bill is filed and how its merchant was known when it was saved.
+	categoryId: integer("category_id").references(() => categories.id, {
+		onDelete: "set null",
+	}),
+	merchantRawName: text("merchant_raw_name").notNull(),
+	merchantRawText: integer("merchant_raw_text").notNull().default(0),
+
+	// Whether the bill is still active, and the day it was added.
+	active: integer().notNull().default(1),
+	// The migration's CHECK here is (added_on IS NULL OR added_on GLOB 'YYYY-MM-DD'), not an IN list, so the drift test
+	// does not read it.
+	addedOn: text("added_on"),
+});
+
+/**
+ * A bill's amount from a month on, one row per bill and month (migrations/0044_bill_amount_history.sql). The key is
+ * (bill_id, effective_month), so both columns are NOT NULL and in the composite primary key.
+ */
+export const billAmounts = sqliteTable(
+	"bill_amounts",
+	{
+		billId: integer("bill_id")
+			.notNull()
+			.references(() => bills.id, { onDelete: "cascade" }),
+		// The migration's CHECK here is (effective_month GLOB 'YYYY-MM' AND the month is 01 to 12), not an IN list, so the
+		// drift test does not read it.
+		effectiveMonth: text("effective_month").notNull(),
+		// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents > 0), not an IN list, so the
+		// drift test does not read it.
+		amountCents: integer("amount_cents").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.billId, t.effectiveMonth] })],
+);
+
+/**
+ * A bill matched to one bank transaction in one period, or dismissed by a person ("Not this one"). At most one linked
+ * row per transaction, by a partial unique index (migrations/0001_initial_schema.sql, rebuilt by 0035).
+ */
+export const billPayments = sqliteTable(
+	"bill_payments",
+	{
+		id: integer().primaryKey(),
+		billId: integer("bill_id")
+			.notNull()
+			.references(() => bills.id, { onDelete: "cascade" }),
+		// The migration's CHECK here is four GLOB alternatives (YYYY, YYYY-MM, YYYY-MM-DD and YYYY-Qn), not an IN list, so
+		// the drift test does not read it.
+		period: text().notNull(),
+		transactionId: integer("transaction_id")
+			.notNull()
+			.references(() => transactions.id, { onDelete: "cascade" }),
+		matchedBy: text("matched_by", {
+			enum: BILL_PAYMENT_MATCHED_BY_VALUES,
+		}).notNull(),
+		status: text({ enum: BILL_PAYMENT_STATUS_VALUES }).notNull(),
+		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+		// The Undo token of a person's "Not this one" (migrations/0048_bill_payment_undo_token.sql).
+		undoToken: text("undo_token"),
+	},
+	(t) => [
+		uniqueIndex("bill_payments_one_bill_per_transaction")
+			.on(t.transactionId)
+			.where(sql`${t.status} = 'linked'`),
+	],
+);
+
+/**
+ * A category's budget from a month on, one row per category and month (migrations/0001_initial_schema.sql). The key is
+ * (category_id, effective_month), so both columns are NOT NULL and in the composite primary key.
+ */
+export const budgetAmounts = sqliteTable(
+	"budget_amounts",
+	{
+		categoryId: integer("category_id")
+			.notNull()
+			.references(() => categories.id, { onDelete: "cascade" }),
+		// The migration's CHECK here is (effective_month GLOB 'YYYY-MM'), not an IN list, so the drift test does not read it.
+		effectiveMonth: text("effective_month").notNull(),
+		// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents >= 0), not an IN list, so the
+		// drift test does not read it.
+		amountCents: integer("amount_cents").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.categoryId, t.effectiveMonth] })],
+);
+
+/** The savings goal for each month, one row per month (migrations/0029_savings_goal_amounts.sql). */
+export const savingsGoalAmounts = sqliteTable("savings_goal_amounts", {
+	// The migration's CHECK here is (effective_month GLOB 'YYYY-MM' AND the month is 01 to 12), not an IN list, so the
+	// drift test does not read it. The month is unique: the migration's table-level UNIQUE is written here as .unique().
+	effectiveMonth: text("effective_month").notNull().unique(),
+	// The migration's CHECK here is (amount_cents >= 0 AND typeof(amount_cents) = 'integer'), not an IN list, so the
+	// drift test does not read it.
+	amountCents: integer("amount_cents").notNull(),
+});
+
+/**
+ * A span in which a category was archived. restored_on is NULL while the category is still archived, and at most one
+ * open span per category is allowed by a partial unique index (migrations/0038_category_archive_periods.sql).
+ */
+export const categoryArchivePeriods = sqliteTable(
+	"category_archive_periods",
+	{
+		id: integer().primaryKey(),
+		categoryId: integer("category_id")
+			.notNull()
+			.references(() => categories.id, { onDelete: "cascade" }),
+		archivedOn: text("archived_on").notNull(),
+		restoredOn: text("restored_on"),
+	},
+	(t) => [
+		uniqueIndex("category_archive_periods_open")
+			.on(t.categoryId)
+			.where(sql`${t.restoredOn} IS NULL`),
+	],
+);
+
+/**
  * Every `col IN (...)` CHECK the described tables have in the live database, by table and column, as text. The drift
  * test reads each one from the live CREATE TABLE and compares it both ways with this list.
  */
@@ -365,6 +527,15 @@ export const CHECK_LISTS = {
 	},
 	accounts: {
 		is_liability: ["0", "1"],
+	},
+	bills: {
+		frequency: BILL_FREQUENCY_VALUES,
+		merchant_raw_text: ["0", "1"],
+		active: ["0", "1"],
+	},
+	bill_payments: {
+		matched_by: BILL_PAYMENT_MATCHED_BY_VALUES,
+		status: BILL_PAYMENT_STATUS_VALUES,
 	},
 	merchants: {
 		suggestion_status: MERCHANT_STATUS_VALUES,

@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import { enabled } from "../routes/plaid";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError } from "./client";
-import { merchantTurns, syncItem } from "./sync";
+import { syncItem } from "./sync";
 import {
 	SYNC_BANKS_AT_ONCE,
 	SYNC_COOLDOWN_SECONDS,
@@ -93,9 +93,6 @@ export async function syncAllItems(
 		`SELECT id, institution_name FROM plaid_items WHERE status IN ${liveStatuses} AND disconnected_at IS NULL ORDER BY id`,
 	).all<Bank>();
 
-	// The one step the banks do not do side by side: starting a merchant two of them name for the first time.
-	const merchantTurn = merchantTurns();
-
 	// One bank's turn. It never throws: a failure is counted and logged here, so one bank cannot stop the others.
 	const syncBank = async (item: Bank): Promise<BankOutcome> => {
 		// The budget is checked as each bank starts, so a bank that has not started when it runs out waits for the next run.
@@ -127,7 +124,6 @@ export async function syncAllItems(
 
 			const synced = await syncItem(env, item.id, fetchImpl, {
 				runAfterSync: false,
-				merchantTurn,
 			});
 
 			return "skipped" in synced
