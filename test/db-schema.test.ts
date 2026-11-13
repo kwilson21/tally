@@ -18,6 +18,8 @@ import { describe, expect, it } from "vitest";
 import * as schemaModule from "../src/db/schema";
 import {
 	accounts,
+	AI_LOG_KIND_VALUES,
+	aiLog,
 	BILL_FREQUENCY_VALUES,
 	BILL_PAYMENT_MATCHED_BY_VALUES,
 	BILL_PAYMENT_STATUS_VALUES,
@@ -33,15 +35,26 @@ import {
 	categories,
 	categoryArchivePeriods,
 	categorySuggestions,
+	documents,
+	feedback,
 	forgottenTexts,
+	householdMembers,
 	householdPeople,
-	MERCHANT_STATUS_VALUES,
+	householdSettings,
+	MAYBE_ANSWER_ANSWER_VALUES,
+	MAYBE_ANSWER_KIND_VALUES,
+	maybeAnswers,
 	maybeNames,
+	MERCHANT_STATUS_VALUES,
+	merchantNameFailures,
 	merchantSuggestedNames,
 	merchants,
+	NEVER_SUGGEST_RULE_KIND_VALUES,
+	neverSuggestRules,
 	plaidItems,
 	plannedDeleteHolds,
 	plannedExpenses,
+	pushSubscriptions,
 	savingsGoalAmounts,
 	TRANSACTION_KIND_VALUES,
 	transactions,
@@ -642,6 +655,42 @@ describe("the schema file matches the live database", () => {
 
 	it("forgotten_texts matches the live table, its inline unique and SET NULL foreign key included", async () => {
 		expect(await drift(forgottenTexts, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("ai_log matches the live table, its two partial unique indexes and both CHECK lists included", async () => {
+		expect(await drift(aiLog, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("documents matches the live table, its inline unique and CHECK that is not an IN list left out", async () => {
+		expect(await drift(documents, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("feedback matches the live table, its sixteen columns and index included", async () => {
+		expect(await drift(feedback, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("household_members matches the live table, its text primary key included", async () => {
+		expect(await drift(householdMembers, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("household_settings matches the live table, its text primary key included", async () => {
+		expect(await drift(householdSettings, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("maybe_answers matches the live table, its REAL column, index and both CHECK lists included", async () => {
+		expect(await drift(maybeAnswers, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("merchant_name_failures matches the live table, its text primary key included", async () => {
+		expect(await drift(merchantNameFailures, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("never_suggest_rules matches the live table, its composite unique index and CHECK list included", async () => {
+		expect(await drift(neverSuggestRules, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("push_subscriptions matches the live table, its inline unique and index included", async () => {
+		expect(await drift(pushSubscriptions, CHECK_LISTS)).toEqual([]);
 	});
 
 	it("every live application table is described in the schema or listed as not yet described", async () => {
@@ -1485,6 +1534,120 @@ describe("the drift check fails on a wrong planned, balance, rule or name table"
 
 		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
 			"planned_delete_holds.created_ms type differs: schema TEXT, database INTEGER",
+		);
+	});
+});
+
+describe("the drift check fails on a wrong household, feedback, AI or push table", () => {
+	it("a text primary key made integer, on household_members", async () => {
+		const wrong = sqliteTable("household_members", {
+			email: integer().primaryKey(), // the database: email TEXT PRIMARY KEY
+			firstSeenAt: text("first_seen_at")
+				.notNull()
+				.default(sql`(datetime('now'))`),
+			lastSeenAt: text("last_seen_at")
+				.notNull()
+				.default(sql`(datetime('now'))`),
+			sessionIssuedAt: integer("session_issued_at").notNull().default(0),
+			removedAt: text("removed_at"),
+			homeSeenAt: text("home_seen_at"),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"household_members.email type differs: schema INTEGER, database TEXT",
+		);
+	});
+
+	it("a partial unique index made non-partial, on ai_log", async () => {
+		const wrong = sqliteTable(
+			"ai_log",
+			{
+				id: integer().primaryKey(),
+				kind: text({ enum: AI_LOG_KIND_VALUES }).notNull(),
+				transactionId: integer("transaction_id"),
+				merchantRawName: text("merchant_raw_name"),
+				householdDay: text("household_day").notNull(),
+				createdAt: text("created_at")
+					.notNull()
+					.default(sql`(datetime('now'))`),
+			},
+			(t) => [uniqueIndex("ai_log_merchant_name").on(t.merchantRawName)], // the database: WHERE kind = 'name'
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index ai_log_merchant_name partial-ness differs",
+		);
+	});
+
+	it("a composite unique index with a column dropped, on never_suggest_rules", async () => {
+		const wrong = sqliteTable(
+			"never_suggest_rules",
+			{
+				id: integer().primaryKey({ autoIncrement: true }),
+				merchantKey: text("merchant_key").notNull(),
+				kind: text({ enum: NEVER_SUGGEST_RULE_KIND_VALUES }).notNull(),
+				decidedOn: text("decided_on").notNull(),
+				createdAt: text("created_at")
+					.notNull()
+					.default(sql`(datetime('now'))`),
+			},
+			(t) => [uniqueIndex("never_suggest_rules_one").on(t.merchantKey)], // the database: ON (merchant_key, kind)
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index never_suggest_rules_one expression differs",
+		);
+	});
+
+	it("an IN list with an extra word, on maybe_answers.answer", async () => {
+		const lists = {
+			...CHECK_LISTS,
+			maybe_answers: {
+				...CHECK_LISTS.maybe_answers,
+				answer: [...MAYBE_ANSWER_ANSWER_VALUES, "maybe"],
+			},
+		};
+
+		expect((await drift(maybeAnswers, lists)).join("\n")).toContain(
+			"maybe_answers.answer CHECK differs",
+		);
+	});
+
+	it("a REAL column declared as INTEGER, on maybe_answers", async () => {
+		const wrong = sqliteTable("maybe_answers", {
+			id: integer().primaryKey(),
+			kind: text({ enum: MAYBE_ANSWER_KIND_VALUES }).notNull(),
+			confidence: integer().notNull(), // the database: confidence REAL NOT NULL
+			answer: text({ enum: MAYBE_ANSWER_ANSWER_VALUES }).notNull(),
+			householdDay: text("household_day").notNull(),
+			createdAt: text("created_at")
+				.notNull()
+				.default(sql`(datetime('now'))`),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"maybe_answers.confidence type differs: schema INTEGER, database REAL",
+		);
+	});
+
+	it("an inline unique removed, on push_subscriptions.endpoint", async () => {
+		const wrong = sqliteTable(
+			"push_subscriptions",
+			{
+				id: integer().primaryKey(),
+				memberEmail: text("member_email").notNull(),
+				endpoint: text().notNull(), // the database: endpoint TEXT NOT NULL UNIQUE
+				p256dh: text().notNull(),
+				auth: text().notNull(),
+				createdAt: text("created_at")
+					.notNull()
+					.default(sql`(datetime('now'))`),
+			},
+			(t) => [index("push_subscriptions_member").on(t.memberEmail)],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"push_subscriptions unique constraint on (endpoint) is in the database, not in the schema",
 		);
 	});
 });
