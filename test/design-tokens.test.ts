@@ -963,11 +963,14 @@ describe("DESIGN.md says the values app.css has (audit finding)", () => {
 		const wrong = hexTokens.flatMap(({ name, hex }) => {
 			if (name.startsWith("cat-")) return [];
 
-			const row = new RegExp(`^\\| ${name} \\| (#[0-9a-f]{6})\\b`, "im").exec(
-				design,
-			);
+			// Every row that starts with the token's name, so a second row for it is a mistake, not a pass.
+			const rows = [
+				...design.matchAll(new RegExp(`^\\| ${name} \\|([^|]*)\\|`, "gm")),
+			];
 
-			return row?.[1]?.toLowerCase() === hex ? [] : [name];
+			const said = /#[0-9a-f]{6}\b/i.exec(rows[0]?.[1] ?? "")?.[0];
+
+			return rows.length === 1 && said?.toLowerCase() === hex ? [] : [name];
 		});
 
 		expect(wrong).toEqual([]);
@@ -976,10 +979,15 @@ describe("DESIGN.md says the values app.css has (audit finding)", () => {
 	it("lists the category colours in the order app.css has them, in one row", () => {
 		const categories = hexTokens.filter(({ name }) => name.startsWith("cat-"));
 
-		const row =
-			/^\| cat-blue \/ plum \/ slate \/ ochre \/ brown \| ([^|]+) \|/m.exec(
-				design,
-			);
+		const rows = [
+			...design.matchAll(
+				/^\| cat-blue \/ plum \/ slate \/ ochre \/ brown \| ([^|]+) \|/gm,
+			),
+		];
+
+		const row = rows[0];
+
+		expect(rows).toHaveLength(1);
 
 		expect(categories.length).toBe(5);
 		expect(
@@ -998,11 +1006,16 @@ describe("DESIGN.md says the values app.css has (audit finding)", () => {
 		expect(durations.length).toBeGreaterThan(5);
 
 		const wrong = durations.flatMap(({ name, written }) => {
-			const said = new RegExp(
-				`\`--duration-${name}\` ([\\d.]+) (ms|s)\\b`,
-			).exec(design);
+			// Every place the paragraph gives the token a length, so a second, different one is a mistake, not a pass.
+			const said = [
+				...design.matchAll(
+					new RegExp(`\`--duration-${name}\` ([\\d.]+) (ms|s)\\b`, "g"),
+				),
+			];
 
-			return said !== null && `${said[1]}${said[2]}` === written ? [] : [name];
+			return said.length === 1 && `${said[0]?.[1]}${said[0]?.[2]}` === written
+				? []
+				: [name];
 		});
 
 		expect(wrong).toEqual([]);
