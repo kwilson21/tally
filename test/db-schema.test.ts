@@ -6,6 +6,7 @@ import {
 	type Index,
 	index,
 	integer,
+	primaryKey,
 	type SQLiteColumn,
 	SQLiteSyncDialect,
 	SQLiteTable,
@@ -17,15 +18,24 @@ import { describe, expect, it } from "vitest";
 import * as schemaModule from "../src/db/schema";
 import {
 	accounts,
+	BILL_FREQUENCY_VALUES,
+	BILL_PAYMENT_MATCHED_BY_VALUES,
+	BILL_PAYMENT_STATUS_VALUES,
+	billAmounts,
+	billPayments,
+	bills,
+	budgetAmounts,
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	CHECK_LISTS,
 	categories,
+	categoryArchivePeriods,
 	categorySuggestions,
 	householdPeople,
 	MERCHANT_STATUS_VALUES,
 	merchantSuggestedNames,
 	merchants,
 	plaidItems,
+	savingsGoalAmounts,
 	TRANSACTION_KIND_VALUES,
 	transactions,
 } from "../src/db/schema";
@@ -34,8 +44,9 @@ import {
 // It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
 // database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
-// The described tables are the ones src/db/schema.ts exports (today: accounts, categories, category_suggestions,
-// household_people, merchant_suggested_names, merchants, plaid_items, transactions). Every other live application
+// The described tables are the ones src/db/schema.ts exports (today: accounts, bill_amounts, bill_payments, bills,
+// budget_amounts, categories, category_archive_periods, category_suggestions, household_people,
+// merchant_suggested_names, merchants, plaid_items, savings_goal_amounts, transactions). Every other live application
 // table is listed by name in NOT_YET_DESCRIBED below, with its reason, until a later PR describes it.
 
 type Lists = Record<string, Record<string, readonly string[]>>;
@@ -49,12 +60,7 @@ const NOT_YET_DESCRIBED = {
 	ai_log: "described in a later #963 PR",
 	balance_history: "described in a later #963 PR",
 	bank_text_rules: "described in a later #963 PR",
-	bill_amounts: "described in a later #963 PR",
-	bill_payments: "described in a later #963 PR",
-	bills: "described in a later #963 PR",
-	budget_amounts: "described in a later #963 PR",
 	cash_delete_holds: "described in a later #963 PR",
-	category_archive_periods: "described in a later #963 PR",
 	documents: "described in a later #963 PR",
 	feedback: "described in a later #963 PR",
 	forgotten_texts: "described in a later #963 PR",
@@ -67,7 +73,6 @@ const NOT_YET_DESCRIBED = {
 	planned_delete_holds: "described in a later #963 PR",
 	planned_expenses: "described in a later #963 PR",
 	push_subscriptions: "described in a later #963 PR",
-	savings_goal_amounts: "described in a later #963 PR",
 } satisfies Record<string, string>;
 
 interface LiveForeignKey {
@@ -150,11 +155,17 @@ function isPlainDefault(value: unknown): value is string | number {
 	return typeof value === "string" || typeof value === "number";
 }
 
-/** The CHECK value lists in a CREATE TABLE statement: `col IN ('a', 'b')` and `col IN (0, 1)`, as text. */
+/**
+ * The CHECK value lists in a CREATE TABLE statement: `CHECK (col IN ('a', 'b'))` and `CHECK (col IN (0, 1))`, as text.
+ * Only a column's own CHECK counts: a table-level CHECK that mentions `col IN (...)` inside a larger expression, or
+ * a `NOT IN`, is not a value list for any column (bills has both).
+ */
 function liveChecks(createSql: string) {
 	const found: [string, string[]][] = [];
 
-	for (const match of createSql.matchAll(/\b(\w+)\s+IN\s*\(([^)]*)\)/gi)) {
+	for (const match of createSql.matchAll(
+		/CHECK\s*\(\s*(\w+)\s+IN\s*\(([^)]*)\)\s*\)/gi,
+	)) {
 		const column = match[1] ?? "";
 		found.push([
 			column,
@@ -580,6 +591,30 @@ describe("the schema file matches the live database", () => {
 		expect(await drift(transactions, CHECK_LISTS)).toEqual([]);
 	});
 
+	it("bills matches the live table, its three IN lists and its CHECKs that are not IN lists left out", async () => {
+		expect(await drift(bills, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("bill_amounts matches the live table, its composite key and cascade foreign key included", async () => {
+		expect(await drift(billAmounts, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("bill_payments matches the live table, its partial index and two IN lists included", async () => {
+		expect(await drift(billPayments, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("budget_amounts matches the live table, its composite key and cascade foreign key included", async () => {
+		expect(await drift(budgetAmounts, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("savings_goal_amounts matches the live table, its inline unique included", async () => {
+		expect(await drift(savingsGoalAmounts, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("category_archive_periods matches the live table, its partial index included", async () => {
+		expect(await drift(categoryArchivePeriods, CHECK_LISTS)).toEqual([]);
+	});
+
 	it("every live application table is described in the schema or listed as not yet described", async () => {
 		const described = schemaTables().map((table) => getTableConfig(table).name);
 
@@ -599,6 +634,15 @@ describe("the schema file matches the live database", () => {
 				"CREATE TABLE m (a TEXT CHECK (a IN ('x', 'y')), b INTEGER CHECK (b IN (0,1)))",
 			),
 		).toEqual({ a: ["x", "y"], b: ["0", "1"] });
+	});
+
+	it("reads a column's own IN list only, not a table-level CHECK or a NOT IN", () => {
+		// The shape of bills: a table-level CHECK repeats `frequency IN (...)` and writes `NOT IN (...)`.
+		expect(
+			liveChecks(
+				"CREATE TABLE bills (frequency TEXT NOT NULL CHECK (frequency IN ('monthly', 'yearly', 'weekly')), anchor_month INTEGER, CHECK ((frequency IN ('yearly', 'quarterly') AND anchor_month IS NOT NULL) OR (frequency NOT IN ('yearly', 'quarterly') AND anchor_month IS NULL)), CHECK (frequency NOT IN ('weekly', 'biweekly') OR due_day BETWEEN 1 AND 7))",
+			),
+		).toEqual({ frequency: ["monthly", "yearly", "weekly"] });
 	});
 
 	it("normalises defaults the way the drift check compares them", () => {
@@ -1168,6 +1212,131 @@ describe("the drift check fails on a wrong transactions table", () => {
 	});
 });
 
+describe("the drift check fails on a wrong bills table", () => {
+	it("a composite key the schema leaves out of the key, on bill_amounts", async () => {
+		const wrong = sqliteTable("bill_amounts", {
+			billId: integer("bill_id")
+				.notNull()
+				.references(() => bills.id, { onDelete: "cascade" }), // the database: part of PRIMARY KEY (bill_id, effective_month)
+			effectiveMonth: text("effective_month").notNull(),
+			amountCents: integer("amount_cents").notNull(),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"bill_amounts.bill_id primary key differs",
+		);
+	});
+
+	it("a composite key the schema leaves out of the key, on budget_amounts", async () => {
+		const wrong = sqliteTable("budget_amounts", {
+			categoryId: integer("category_id")
+				.notNull()
+				.references(() => categories.id, { onDelete: "cascade" }), // the database: part of PRIMARY KEY (category_id, effective_month)
+			effectiveMonth: text("effective_month").notNull(),
+			amountCents: integer("amount_cents").notNull(),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"budget_amounts.category_id primary key differs",
+		);
+	});
+
+	it("a CASCADE foreign key declared as SET NULL, on bill_amounts", async () => {
+		const wrong = sqliteTable(
+			"bill_amounts",
+			{
+				billId: integer("bill_id")
+					.notNull()
+					.references(() => bills.id, { onDelete: "set null" }), // the database: ON DELETE CASCADE
+				effectiveMonth: text("effective_month").notNull(),
+				amountCents: integer("amount_cents").notNull(),
+			},
+			(t) => [primaryKey({ columns: [t.billId, t.effectiveMonth] })],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"bill_amounts.bill_id ON DELETE differs: schema SET NULL, database CASCADE",
+		);
+	});
+
+	it("a partial unique index made non-partial, on bill_payments", async () => {
+		const wrong = sqliteTable(
+			"bill_payments",
+			{
+				id: integer().primaryKey(),
+				billId: integer("bill_id")
+					.notNull()
+					.references(() => bills.id, { onDelete: "cascade" }),
+				period: text().notNull(),
+				transactionId: integer("transaction_id")
+					.notNull()
+					.references(() => transactions.id, { onDelete: "cascade" }),
+				matchedBy: text("matched_by", {
+					enum: BILL_PAYMENT_MATCHED_BY_VALUES,
+				}).notNull(),
+				status: text({ enum: BILL_PAYMENT_STATUS_VALUES }).notNull(),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+				undoToken: text("undo_token"),
+			},
+			(t) => [
+				uniqueIndex("bill_payments_one_bill_per_transaction").on(
+					t.transactionId,
+				), // the database: WHERE status = 'linked'
+			],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index bill_payments_one_bill_per_transaction partial-ness differs",
+		);
+	});
+
+	it("a savings goal month without the inline unique", async () => {
+		const wrong = sqliteTable("savings_goal_amounts", {
+			effectiveMonth: text("effective_month").notNull(), // the database: UNIQUE (effective_month)
+			amountCents: integer("amount_cents").notNull(),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"savings_goal_amounts unique constraint on (effective_month) is in the database, not in the schema",
+		);
+	});
+
+	it("a bills frequency list with an extra word", async () => {
+		const lists = {
+			...CHECK_LISTS,
+			bills: {
+				...CHECK_LISTS.bills,
+				frequency: [...BILL_FREQUENCY_VALUES, "daily"],
+			},
+		};
+
+		expect((await drift(bills, lists)).join("\n")).toContain(
+			"bills.frequency CHECK differs",
+		);
+	});
+
+	it("a bill payment's transaction_id without its foreign key", async () => {
+		const wrong = sqliteTable("bill_payments", {
+			id: integer().primaryKey(),
+			billId: integer("bill_id")
+				.notNull()
+				.references(() => bills.id, { onDelete: "cascade" }),
+			period: text().notNull(),
+			transactionId: integer("transaction_id").notNull(), // the database: REFERENCES transactions(id) ON DELETE CASCADE
+			matchedBy: text("matched_by", {
+				enum: BILL_PAYMENT_MATCHED_BY_VALUES,
+			}).notNull(),
+			status: text({ enum: BILL_PAYMENT_STATUS_VALUES }).notNull(),
+			createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+			undoToken: text("undo_token"),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"bill_payments.transaction_id is a foreign key in the database, not in the schema",
+		);
+	});
+});
+
 describe("the table-set check fails on a wrong list", () => {
 	const described = ["a"];
 
@@ -1206,12 +1375,18 @@ describe("the table-set check fails on a wrong list", () => {
 				.sort(),
 		).toEqual([
 			"accounts",
+			"bill_amounts",
+			"bill_payments",
+			"bills",
+			"budget_amounts",
 			"categories",
+			"category_archive_periods",
 			"category_suggestions",
 			"household_people",
 			"merchant_suggested_names",
 			"merchants",
 			"plaid_items",
+			"savings_goal_amounts",
 			"transactions",
 		]);
 	});
