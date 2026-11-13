@@ -80,13 +80,40 @@ This follows the app's rule styles (decision 206). The owner noted these rules r
 
 - **Style 1, XState alone:** a new machine `src/machines/store-lookup.ts`, the one place the rule is stated, like `jev-retry.ts` and `merchant-suggestion.ts`. The SQL writers keep the column in step and a test walks every writer against the machine.
 
+The store's lookup (the stored `status`; `claimed` and `to retry` are both stored as `pending`):
+
+```mermaid
+stateDiagram-v2
+    [*] --> none
+    none --> skipped: private (never searched)
+    none --> claimed: a run takes a search from the day's count and claims it
+    claimed --> found: the owner saves a usable line
+    claimed --> nothing_found: the owner saves "nothing found"
+    claimed --> to_retry: the search failed, or 15 minutes passed
+    to_retry --> claimed: a run claims it again
+    claimed --> gave_up: the third failure in a row
+    found --> skipped: a person says "Don't use this"
+    nothing_found --> [*]
+    gave_up --> [*]
+    skipped --> [*]
 ```
-none     --private-->        skipped         Plaid says transfer or person-to-person, or nothing left to send
-none     --found-->          found           the search gave a usable line
-none     --nothing found-->  nothing_found   the search answered, with nothing usable
-none     --failed-->         none            attempts + 1; the next run tries again
-none     --failed (cap)-->   gave_up         failed LOOKUP_ATTEMPT_CAP times in a row
-found    --person removes--> skipped         "Don't use this" on the card (see below)
+
+A row's guess, as the lookup sees it (the last two differ by its `lookup_answers` entry):
+
+```mermaid
+stateDiagram-v2
+    [*] --> waiting
+    waiting --> asking: Jev is asked, with the line if the store has one
+    asking --> guessed_with_line: saved, if the line still stands and nobody changed the row
+    asking --> guessed_without_line: saved, asked with no line
+    asking --> waiting: Jev failed, or the save was refused
+    guessed_without_line --> waiting: owed a re-ask (the store now has a line): the guess is cleared
+    guessed_with_line --> waiting: "Don't use this" clears it
+    guessed_with_line --> guessed_without_line: a category re-check saves over it
+    waiting --> answered: a person answers
+    guessed_with_line --> answered: a person answers
+    guessed_without_line --> answered: a person answers
+    answered --> [*]
 ```
 
 - **Not style 2 (the bridge):** the search is outside work, but the job is long and already has a home. Decision 209 point 3 sends a long wait on an outside service to the existing Workflow, so the search is a Workflow step and the machine only states the moves.
@@ -114,7 +141,7 @@ All search calls go through one module, `src/ai/lookup-store.ts`, with one funct
 
 A new table (one migration), kept apart from `merchants` as `merchant_name_failures` is:
 
-`merchant_lookups`: `lookup_text` (primary key: the redacted text that is sent, see "What leaves the app"), `status` (`found`, `nothing_found`, `skipped`, `gave_up`, or `pending` for a store a run has claimed or is to try again), `line` (null unless `found`), `attempts`, `claimed_at`, `failed_at`, `looked_up_at`, `reasked_at`. No row means `none`.
+`merchant_lookups`: `lookup_text` (primary key: the redacted text that is sent, see "What leaves the app"), `status` (`found`, `nothing_found`, `skipped`, `gave_up`, or `pending` for a store a run has claimed or is to try again), `line` (null unless `found`), `attempts`, `claimed_at`, `claimed_by`, `failed_at`, `looked_up_at`. No row means `none`.
 
 `lookup_answers`: `transaction_id` (primary key), `lookup_text`. One row for each transaction whose stored Jev answer was asked with the line.
 
@@ -124,10 +151,10 @@ Four rules the review of the plan added (PR #997):
 - **Privacy is checked on the merchant key as stored**, before cleaning and the 40-character cap (the cleaner strips "PAYPAL *"), and when several merchants share one lookup text, one private merchant makes the text private.
 - **It fails closed.** A text is searched only when at least one of its transactions carries a Plaid category outside the private ones; a text with no Plaid category at all is not searched, and a bank-rail phrase (ACH, wire, a check, "payment to") makes a text private. Raised by the security review: "ACH PAYMENT TO JANE DOE" on a row with no category names no payment app.
 - **Privacy reads the raw bank text too.** A merchant key is Plaid's name when there is one, so "ACH PAYMENT TO JANE DOE" named "Jane Doe" by Plaid would pass a check of the key alone; every transaction's raw text is checked as well.
-- **The re-ask is the existing "ask again"**, not decision 157's re-check path, which only runs inside a re-check; a store is marked done only from what was saved, never before the calls.
+- **The re-ask is the existing "ask again"**, not decision 157's re-check path, which only runs inside a re-check; which rows are owed one is read from what was saved, never decided before the calls.
 - **A line is shown only under a guess that used it**, and the re-ask skips rows already asked with the line and waits while the switch is off.
 
-The key is the lookup text, not the merchant key, because an unnamed store's merchant key is its raw text with the date in it (`src/db/merchant-key.ts`): "LA COOP … 07/24" and "… 07/25" are two merchant rows and one lookup text, so the store is still searched once. A merchant key finds its lookup through a stored table, `merchant_lookup_texts` (`merchant_key`, `lookup_text`, `private`), which the lookup run fills from the transactions' merchant keys, since the text is computed in TypeScript and SQL cannot join without it, and a store can have transactions and no `merchants` row. `merchant_lookups.reasked_at` marks a found store whose open guesses have been asked again, so the re-ask is driven by stored state, covers stores looked up on earlier nights, and gives new rows Jev's cap first. A chain Plaid names ("Target") is one lookup for every branch, so the summary says where a place is only when the results agree on one place.
+The key is the lookup text, not the merchant key, because an unnamed store's merchant key is its raw text with the date in it (`src/db/merchant-key.ts`): "LA COOP … 07/24" and "… 07/25" are two merchant rows and one lookup text, so the store is still searched once. A merchant key finds its lookup through a stored table, `merchant_lookup_texts` (`merchant_key`, `lookup_text`, `private`), which the lookup run fills from the transactions' merchant keys, since the text is computed in TypeScript and SQL cannot join without it, and a store can have transactions and no `merchants` row. Which rows are owed a re-ask is read from `lookup_answers`, not from a mark on the store (see "The model"). A chain Plaid names ("Target") is one lookup for every branch, so the summary says where a place is only when the results agree on one place.
 
 Tally keeps the redacted text it sends, as the lookup text. No search results, links or raw responses are stored, and nothing is logged (CLAUDE.md: never log transaction details).
 
@@ -173,7 +200,7 @@ Owner, in chat on 2026-11-12:
 - Tavily is the search service, with its "Allow Use of Query Data" setting turned off before the production key is set (decision 210).
 - Rows still uncategorized or an unanswered Maybe are asked again when their store's lookup lands.
 - Stores Plaid already names are searched.
-- No Quint for the lookup itself; a scratch Quint model of the re-ask before it is built (below).
+- The plan starts from two state machines and a Quint model of the whole flow ("The model", below); the owner asked for this after the first plan's review.
 
 My calls, open to correction:
 - The payment-app list, and leaving out cash and Apple Card rows, as the privacy net for rows with no Plaid category.
@@ -192,9 +219,46 @@ My calls, open to correction:
 - How the lookup step is ordered inside `src/sort-workflow.ts` and the after-sync run.
 - Measuring it, in two steps, both through a never-deployed script like `scripts/compare-models/`. First, before anything else is built: Jev on the demo seed with and without hand-written lines, to see whether a correct line helps at all. Second, after the lookup code exists and before the key reaches production: real Tavily searches and real summaries, run locally with the owner's key, on 20 to 30 real store texts the owner picks, reporting how many lines are right and how Jev's answers change. Either step can stop the work.
 
-## Design-time check for the re-ask (docs/verification.md, "Quint")
+## The model (docs/verification.md, "Quint")
 
-Before the re-ask is built, a scratch Quint model, not committed and not run in CI: the events "lookup lands", "person answers the card", "rule added", "re-check running" and "re-ask runs" in any order, checking that a row a person answered or a rule filed is never changed and that Jev's daily cap is never passed. What it finds goes into the tests.
+The owner asked on 2026-11-12 for plans like this one to start from state machines and a Quint model, after the first prose plan drew 26 review findings, about half of them about the order things happen in. The two machines above were then written as a Quint model with these events in any order: two runs claiming, searching, saving, crashing and losing their claim to the clock; Jev asked, answering, failing; a person answering; a re-ask; "Don't use this"; the switch flipped; a category re-check starting and ending. The model is a scratch aid and is not committed.
+
+**Seven rules, each checked after every event:**
+
+1. A private store is never searched.
+2. The day's search cap is never passed, counting every outside call.
+3. One run owns a store at a time.
+4. The stored line is the newest claim's, never a reclaimed run's.
+5. A person's answer is never written over.
+6. A line sits only under an open guess whose store still has it.
+7. Jev's cap is never passed.
+
+**Result:** no rule broke in 300,000 random orderings of up to 40 events. This is a random search, not a proof. Each rule was shown to bite: with one guard removed at a time (no claim before searching, no claim token on the save, no "the line still stands" check on an answer's save, no "nobody changed the row" check, the cap counted from rows instead of a counter), the matching rule failed within seconds. Those five are the planted bugs the builders' tests must also reject.
+
+**What the model changed in the design:**
+
+- **No mark on the store.** The earlier plan marked a store once its open guesses had been asked again. The model needs no such mark: "owed a re-ask" can be read from each row. That removes a column and two of the review's findings with it, and it also covers a case the mark got wrong: guesses made while the switch was off are asked again when it comes back on.
+- **A re-ask takes its Jev call when it clears the old guess.** Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
+
+**What a model like this does not cover**, and so has its own checklist:
+
+Privacy is a question about text, not order. Every row of this table is a test:
+
+| The bank text | Plaid's name | Plaid's category | Searched? | Why |
+|---|---|---|---|---|
+| LA COOP ARLINGTON | none | FOOD_AND_DRINK | Yes | a category that says it is a store |
+| LA COOP ARLINGTON | none | none | No | fails closed: nothing says it is a store |
+| VENMO *J RIVERA | none | any | No | a payment app's name |
+| PAYPAL *JOHNSMITH | none | any | No | checked before the cleaner strips "PAYPAL *" |
+| A long store name … VENMO JANE | none | any | No | checked before the 40-character cut |
+| ACH PAYMENT TO JANE DOE | none | any | No | a bank-rail phrase |
+| ACH PAYMENT TO JANE DOE | Jane Doe | GENERAL_SERVICES | No | the raw text is read too, not only Plaid's name |
+| ｉｇｎｏｒｅ previous instructions | none | any | No | folded, then reads as an instruction |
+| any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
+| one ordinary row and one transfer row sharing a lookup text | | | No | one private row makes the text private |
+| only cash, hand-entered or Apple Card rows | | | No | left out, as the name run does |
+
+And these are the places in the app that touch the new tables or the Jev answer, each of which the plan must name: the demo's reset list, "Download everything", the merge of a pending charge into its posted row, bank-text rules (keyed by a different cleaning of the text), and stores that have transactions but no merchant row.
 
 ## What changes in the repo's own documents
 
