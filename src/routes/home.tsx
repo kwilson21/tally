@@ -32,6 +32,7 @@ import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
 import { readAtEdge } from "../edge";
+import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
@@ -771,10 +772,12 @@ home.post("/home/seen", async (c) => {
 		}),
 	);
 
-	// The row is written only while the person is still a member, as the rule read them.
+	// The save checks again what the rule read: the person is still a member, and no other tab's check-in landed inside
+	// the window meanwhile, so one window is written once and an older request never overwrites a newer one.
 	if (asked.kind === "write")
 		await c.env.DB.prepare(
-			"UPDATE household_members SET home_seen_at = datetime(?1 / 1000, 'unixepoch') WHERE email = ?2 AND removed_at IS NULL",
+			`UPDATE household_members SET home_seen_at = datetime(?1 / 1000, 'unixepoch') WHERE email = ?2 AND removed_at IS NULL
+			 AND (home_seen_at IS NULL OR unixepoch(home_seen_at) <= ?1 / 1000 - ${HOME_SEEN_EVERY_MS / 1000})`,
 		)
 			.bind(asked.save.now, asked.save.member)
 			.run();
