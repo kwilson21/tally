@@ -9,7 +9,7 @@ const SOURCES = import.meta.glob<string>(
 // A comment that says one thing must be kept in step with another is a promise only a person keeps.
 // It is fine when a test keeps it instead, so the comment has to name which one: a test file, like test/refunds.test.ts.
 const ASKS_TO_KEEP_IN_STEP =
-	/\bkeep\b[^.]*\bin step\b|\bin step with\b|\b(?:SQL|plan) twin\b|\btwin of\b/i;
+	/\bkeep\b[^\n]{0,80}?\bin step\b|\bin step with\b|\b(?:SQL|plan) twin\b|\btwin of\b/i;
 
 const NAMES_A_TEST_FILE = /[\w-]+\.test\.tsx?\b/;
 
@@ -24,20 +24,32 @@ function commentBlocks(text: string): { line: number; text: string }[] {
 	let inBlock = false;
 
 	for (const [i, raw] of text.split("\n").entries()) {
-		let comment = inBlock ? raw : "";
+		let comment = "";
 
 		if (inBlock) {
-			inBlock = !raw.includes("*/");
+			const close = raw.indexOf("*/");
+
+			// Comment text ends at the `*/`; whatever follows it on the line is code.
+			comment = close === -1 ? raw : raw.slice(0, close + 2);
+			inBlock = close === -1;
 		} else {
+			// Look for the marker with string literals blanked out (same length, so positions still line up).
+			const blanked = raw.replace(
+				/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g,
+				(literal) => "x".repeat(literal.length),
+			);
 			// The first comment marker on the line: at its start, after a space, or after the `{` of a JSX comment.
-			const marker = /(^|[\s{])(\/\/|\/\*)/.exec(raw);
+
+			const marker = /(^|[\s{])(\/\/|\/\*)/.exec(blanked);
 
 			if (marker) {
 				const at = marker.index + (marker[1] ?? "").length;
+				const rest = raw.slice(at);
+				const close = marker[2] === "/*" ? rest.indexOf("*/", 2) : -1;
 
-				comment = raw.slice(at);
-				// Only `/*` opens a block, and only if the same line does not close it; a `/*` inside a `//` comment is text.
-				inBlock = marker[2] === "/*" && !raw.slice(at + 2).includes("*/");
+				// A `/*` opens a block unless the same line closes it; a `/*` inside a `//` comment is just text.
+				comment = close === -1 ? rest : rest.slice(0, close + 2);
+				inBlock = marker[2] === "/*" && close === -1;
 			}
 		}
 
@@ -88,6 +100,14 @@ describe("comments that ask to be kept in step", () => {
 		const lineWithMarker =
 			'// the route glob is "/design-system/*"\nconst a = 1;\n// Keep it in step with b.\n';
 
+		const afterClose =
+			'/* Keep A in step with B. */ const f = "fake.test.ts";\n';
+
+		const dotted = "// Keep foo.ts and bar.ts in step.\n";
+
+		const inString =
+			'const e = " // Keep A in step with B."; const g = "/*";\n';
+
 		const url = 'const u = "https://x.test/a"; const b = 2;\n';
 
 		expect(untestedPromises({ "../src/a.ts": bare })).toEqual(["src/a.ts:1"]);
@@ -99,6 +119,11 @@ describe("comments that ask to be kept in step", () => {
 		]);
 		expect(untestedPromises({ "../src/a.ts": block })).toEqual(["src/a.ts:1"]);
 		expect(untestedPromises({ "../src/a.ts": url })).toEqual([]);
+		expect(untestedPromises({ "../src/a.ts": afterClose })).toEqual([
+			"src/a.ts:1",
+		]);
+		expect(untestedPromises({ "../src/a.ts": dotted })).toEqual(["src/a.ts:1"]);
+		expect(untestedPromises({ "../src/a.ts": inString })).toEqual([]);
 		expect(untestedPromises({ "../src/a.tsx": jsx })).toEqual(["src/a.tsx:1"]);
 		expect(untestedPromises({ "../src/a.ts": named })).toEqual(["src/a.ts:1"]);
 		expect(untestedPromises({ "../src/a.ts": lineWithMarker })).toEqual([
