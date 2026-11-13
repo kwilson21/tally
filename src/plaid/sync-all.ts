@@ -1,8 +1,13 @@
+import * as Effect from "effect/Effect";
 import { enabled } from "../routes/plaid";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError } from "./client";
 import { syncItem } from "./sync";
-import { SYNC_COOLDOWN_SECONDS, SYNC_RUN_BUDGET_MS } from "./timing";
+import {
+	SYNC_BANKS_AT_ONCE,
+	SYNC_COOLDOWN_SECONDS,
+	SYNC_RUN_BUDGET_MS,
+} from "./timing";
 
 type SyncAllEnv = PlaidEnv & { DB: D1Database; DEMO?: string };
 
@@ -22,8 +27,35 @@ export type SyncAllResult = {
 	afterSyncFailed?: true;
 };
 
+type Bank = { id: number; institution_name: string };
+
+/** How one bank's turn ended. A busy bank was attempted within the last minute, or is locked by a sync already running. */
+type BankOutcome =
+	| { kind: "skipped" }
+	| { kind: "busy" }
+	| { kind: "failed"; bank: string }
+	| { kind: "synced"; added: number; modified: number; changedIds: number[] };
+
+/** Adds one bank's outcome to the run's totals. */
+function count(result: SyncAllResult, outcome: BankOutcome) {
+	if (outcome.kind === "synced") {
+		result.synced += 1;
+		result.added += outcome.added;
+		result.modified += outcome.modified;
+
+		for (const id of outcome.changedIds) result.changedIds.push(id);
+	} else if (outcome.kind === "failed") {
+		result.failed += 1;
+		result.failedBanks.push(outcome.bank);
+	} else {
+		result.skipped += 1;
+
+		if (outcome.kind === "busy") result.busy += 1;
+	}
+}
+
 /**
- * Syncs each healthy Plaid Item in turn so one failure cannot stop the daily catch-up.
+ * Syncs every healthy Plaid Item, a few at once, so one failure cannot stop the daily catch-up.
  * `retryFlagged` (the daily run only) also syncs a bank that needs attention (decision 173). Manual Sync now
  * leaves it out, so a flagged bank still answers "Fix the connection first.".
  */
@@ -59,13 +91,12 @@ export async function syncAllItems(
 
 	const { results: items } = await env.DB.prepare(
 		`SELECT id, institution_name FROM plaid_items WHERE status IN ${liveStatuses} AND disconnected_at IS NULL ORDER BY id`,
-	).all<{ id: number; institution_name: string }>();
+	).all<Bank>();
 
-	for (const [index, item] of items.entries()) {
-		if (now() - startedAt >= SYNC_RUN_BUDGET_MS) {
-			result.skipped += items.length - index;
-			break;
-		}
+	// One bank's turn. It never throws: a failure is counted and logged here, so one bank cannot stop the others.
+	const syncBank = async (item: Bank): Promise<BankOutcome> => {
+		// The budget is checked as each bank starts, so a bank that has not started when it runs out waits for the next run.
+		if (now() - startedAt >= SYNC_RUN_BUDGET_MS) return { kind: "skipped" };
 
 		try {
 			// Claiming the attempt is one statement, so two overlapping manual syncs can't both win.
@@ -79,11 +110,7 @@ export async function syncAllItems(
 				.bind(item.id)
 				.run();
 
-			if (claim.meta.changes !== 1) {
-				result.skipped += 1;
-				result.busy += 1;
-				continue;
-			}
+			if (claim.meta.changes !== 1) return { kind: "busy" };
 
 			const current = await env.DB.prepare(
 				"SELECT status FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
@@ -92,29 +119,22 @@ export async function syncAllItems(
 				.first<{ status: string }>();
 
 			// Gone, disconnected, or (for a manual run) flagged since the list was read: skip.
-			if (!current || (!retryFlagged && current.status !== "ok")) {
-				result.skipped += 1;
-				continue;
-			}
+			if (!current || (!retryFlagged && current.status !== "ok"))
+				return { kind: "skipped" };
 
 			const synced = await syncItem(env, item.id, fetchImpl, {
 				runAfterSync: false,
 			});
 
-			if ("skipped" in synced) {
-				result.skipped += 1;
-				result.busy += 1;
-			} else {
-				result.synced += 1;
-				result.added += synced.added;
-				result.modified += synced.modified;
-
-				for (const id of synced.changedIds) result.changedIds.push(id);
-			}
+			return "skipped" in synced
+				? { kind: "busy" }
+				: {
+						kind: "synced",
+						added: synced.added,
+						modified: synced.modified,
+						changedIds: synced.changedIds,
+					};
 		} catch (error) {
-			result.failed += 1;
-			result.failedBanks.push(item.institution_name);
-
 			const kind =
 				error instanceof PlaidError
 					? `plaid ${error.request_id ?? "unknown"}`
@@ -123,8 +143,20 @@ export async function syncAllItems(
 						: "unknown";
 
 			console.error(`plaid daily sync: item ${item.id} failed ${kind}`);
+
+			return { kind: "failed", bank: item.institution_name };
 		}
-	}
+	};
+
+	// The banks sync side by side, a few at once (SYNC_BANKS_AT_ONCE): each claims itself and holds its own lease, so
+	// they share nothing but this run's totals, which are added up in bank order once every bank has answered.
+	const outcomes = await Effect.runPromise(
+		Effect.forEach(items, (item) => Effect.promise(() => syncBank(item)), {
+			concurrency: SYNC_BANKS_AT_ONCE,
+		}),
+	);
+
+	for (const outcome of outcomes) count(result, outcome);
 
 	// Rules and bill matching cover the whole household, so they run once after every bank, not per
 	// bank. They run even when no bank could sync (busy, failed part-way or needing attention): what

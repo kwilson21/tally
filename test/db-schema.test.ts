@@ -17,24 +17,44 @@ import {
 import { describe, expect, it } from "vitest";
 import * as schemaModule from "../src/db/schema";
 import {
+	AI_LOG_KIND_VALUES,
 	accounts,
+	aiLog,
 	BILL_FREQUENCY_VALUES,
 	BILL_PAYMENT_MATCHED_BY_VALUES,
 	BILL_PAYMENT_STATUS_VALUES,
+	balanceHistory,
+	bankTextRules,
 	billAmounts,
 	billPayments,
 	bills,
 	budgetAmounts,
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	CHECK_LISTS,
+	cashDeleteHolds,
 	categories,
 	categoryArchivePeriods,
 	categorySuggestions,
+	documents,
+	feedback,
+	forgottenTexts,
+	householdMembers,
 	householdPeople,
+	householdSettings,
+	MAYBE_ANSWER_ANSWER_VALUES,
+	MAYBE_ANSWER_KIND_VALUES,
 	MERCHANT_STATUS_VALUES,
+	maybeAnswers,
+	maybeNames,
+	merchantNameFailures,
 	merchantSuggestedNames,
 	merchants,
+	NEVER_SUGGEST_RULE_KIND_VALUES,
+	neverSuggestRules,
 	plaidItems,
+	plannedDeleteHolds,
+	plannedExpenses,
+	pushSubscriptions,
 	savingsGoalAmounts,
 	TRANSACTION_KIND_VALUES,
 	transactions,
@@ -44,36 +64,15 @@ import {
 // It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
 // database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
-// The described tables are the ones src/db/schema.ts exports (today: accounts, bill_amounts, bill_payments, bills,
-// budget_amounts, categories, category_archive_periods, category_suggestions, household_people,
-// merchant_suggested_names, merchants, plaid_items, savings_goal_amounts, transactions). Every other live application
-// table is listed by name in NOT_YET_DESCRIBED below, with its reason, until a later PR describes it.
+// Every one of the 30 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
+// bank_text_rules, bill_amounts, bill_payments, bills, budget_amounts, cash_delete_holds, categories,
+// category_archive_periods, category_suggestions, documents, feedback, forgotten_texts, household_members,
+// household_people, household_settings, maybe_answers, maybe_names, merchant_name_failures, merchant_suggested_names,
+// merchants, never_suggest_rules, plaid_items, planned_delete_holds, planned_expenses, push_subscriptions,
+// savings_goal_amounts, transactions. A live application table the schema file does not describe fails the table-set
+// test, so a later migration that adds a table cannot skip it.
 
 type Lists = Record<string, Record<string, readonly string[]>>;
-
-/**
- * Application tables that src/db/schema.ts does not describe yet, each with its reason. The list can only shrink:
- * the table-set test fails when a name here is described already or is not in the database. The last PR for #963
- * empties it, and the check becomes "every live table is in the schema".
- */
-const NOT_YET_DESCRIBED = {
-	ai_log: "described in a later #963 PR",
-	balance_history: "described in a later #963 PR",
-	bank_text_rules: "described in a later #963 PR",
-	cash_delete_holds: "described in a later #963 PR",
-	documents: "described in a later #963 PR",
-	feedback: "described in a later #963 PR",
-	forgotten_texts: "described in a later #963 PR",
-	household_members: "described in a later #963 PR",
-	household_settings: "described in a later #963 PR",
-	maybe_answers: "described in a later #963 PR",
-	maybe_names: "described in a later #963 PR",
-	merchant_name_failures: "described in a later #963 PR",
-	never_suggest_rules: "described in a later #963 PR",
-	planned_delete_holds: "described in a later #963 PR",
-	planned_expenses: "described in a later #963 PR",
-	push_subscriptions: "described in a later #963 PR",
-} satisfies Record<string, string>;
 
 interface LiveForeignKey {
 	table: string;
@@ -513,33 +512,20 @@ function schemaTables(): SQLiteTable[] {
 }
 
 /**
- * The table-set rule as a pure function of three lists: every live table is described or listed as not yet
- * described; a listed table is neither described nor missing from the database; a described table is in the database.
+ * The table-set rule as a pure function of two lists: every live table is described in the schema file, and every
+ * described table is in the database.
  */
 function tableSetProblems(
 	live: readonly string[],
 	described: readonly string[],
-	notYetDescribed: readonly string[],
 ): string[] {
 	const problems: string[] = [];
 
 	for (const name of live)
-		if (!described.includes(name) && !notYetDescribed.includes(name))
+		if (!described.includes(name))
 			problems.push(
-				`${name} is in the database, but neither src/db/schema.ts nor NOT_YET_DESCRIBED names it`,
+				`${name} is in the database, but src/db/schema.ts does not describe it`,
 			);
-
-	for (const name of notYetDescribed) {
-		if (described.includes(name))
-			problems.push(
-				`${name} is in NOT_YET_DESCRIBED, but src/db/schema.ts describes it`,
-			);
-
-		if (!live.includes(name))
-			problems.push(
-				`${name} is in NOT_YET_DESCRIBED, but the database has no such table`,
-			);
-	}
 
 	for (const name of described)
 		if (!live.includes(name))
@@ -615,16 +601,74 @@ describe("the schema file matches the live database", () => {
 		expect(await drift(categoryArchivePeriods, CHECK_LISTS)).toEqual([]);
 	});
 
-	it("every live application table is described in the schema or listed as not yet described", async () => {
+	it("planned_expenses matches the live table, its SET NULL foreign key and inline unique included", async () => {
+		expect(await drift(plannedExpenses, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("planned_delete_holds matches the live table, its foreign key and 0/1 CHECK included", async () => {
+		expect(await drift(plannedDeleteHolds, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("cash_delete_holds matches the live table, its defaulted column included", async () => {
+		expect(await drift(cashDeleteHolds, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("maybe_names matches the live table, its primary key and CASCADE foreign key included", async () => {
+		expect(await drift(maybeNames, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("balance_history matches the live table, its composite key and CASCADE foreign key included", async () => {
+		expect(await drift(balanceHistory, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("bank_text_rules matches the live table, its inline unique and CASCADE foreign key included", async () => {
+		expect(await drift(bankTextRules, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("forgotten_texts matches the live table, its inline unique and SET NULL foreign key included", async () => {
+		expect(await drift(forgottenTexts, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("ai_log matches the live table, its two partial unique indexes and both CHECK lists included", async () => {
+		expect(await drift(aiLog, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("documents matches the live table, its inline unique and CHECK that is not an IN list left out", async () => {
+		expect(await drift(documents, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("feedback matches the live table, its sixteen columns and index included", async () => {
+		expect(await drift(feedback, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("household_members matches the live table, its text primary key included", async () => {
+		expect(await drift(householdMembers, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("household_settings matches the live table, its text primary key included", async () => {
+		expect(await drift(householdSettings, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("maybe_answers matches the live table, its REAL column, index and both CHECK lists included", async () => {
+		expect(await drift(maybeAnswers, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("merchant_name_failures matches the live table, its text primary key included", async () => {
+		expect(await drift(merchantNameFailures, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("never_suggest_rules matches the live table, its composite unique index and CHECK list included", async () => {
+		expect(await drift(neverSuggestRules, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("push_subscriptions matches the live table, its inline unique and index included", async () => {
+		expect(await drift(pushSubscriptions, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("every live application table is described in the schema", async () => {
 		const described = schemaTables().map((table) => getTableConfig(table).name);
 
-		expect(
-			tableSetProblems(
-				await appTableNames(),
-				described,
-				Object.keys(NOT_YET_DESCRIBED),
-			),
-		).toEqual([]);
+		expect(tableSetProblems(await appTableNames(), described)).toEqual([]);
 	});
 
 	it("the CHECK value lists are read from the live CREATE TABLE and compared both ways", () => {
@@ -1337,55 +1381,288 @@ describe("the drift check fails on a wrong bills table", () => {
 	});
 });
 
+describe("the drift check fails on a wrong planned, balance, rule or name table", () => {
+	it("a SET NULL foreign key declared as CASCADE, on planned_expenses", async () => {
+		const wrong = sqliteTable("planned_expenses", {
+			id: integer().primaryKey({ autoIncrement: true }),
+			name: text().notNull(),
+			amountCents: integer("amount_cents").notNull(),
+			month: text().notNull(),
+			transactionId: integer("transaction_id")
+				.unique()
+				.references(() => transactions.id, { onDelete: "cascade" }), // the database: ON DELETE SET NULL
+			createdBy: text("created_by").notNull(),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"planned_expenses.transaction_id ON DELETE differs: schema CASCADE, database SET NULL",
+		);
+	});
+
+	it("a column dropped from balance_history's composite key", async () => {
+		const wrong = sqliteTable(
+			"balance_history",
+			{
+				accountId: integer("account_id")
+					.notNull()
+					.references(() => accounts.id, { onDelete: "cascade" }),
+				date: text().notNull(),
+				balanceCents: integer("balance_cents").notNull(),
+			},
+			(t) => [primaryKey({ columns: [t.accountId] })], // the database: PRIMARY KEY (account_id, date)
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"balance_history.date primary key differs",
+		);
+	});
+
+	it("a composite key column without NOT NULL, on balance_history", async () => {
+		const wrong = sqliteTable(
+			"balance_history",
+			{
+				accountId: integer("account_id")
+					.notNull()
+					.references(() => accounts.id, { onDelete: "cascade" }),
+				date: text(), // the database: date TEXT NOT NULL
+				balanceCents: integer("balance_cents").notNull(),
+			},
+			(t) => [primaryKey({ columns: [t.accountId, t.date] })],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"balance_history.date not-null differs",
+		);
+	});
+
+	it("bank_text_rules without its inline unique on cleaned_text", async () => {
+		const wrong = sqliteTable("bank_text_rules", {
+			id: integer().primaryKey(),
+			cleanedText: text("cleaned_text").notNull(), // the database: UNIQUE
+			categoryId: integer("category_id")
+				.notNull()
+				.references(() => categories.id, { onDelete: "cascade" }),
+			createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+			updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"bank_text_rules unique constraint on (cleaned_text) is in the database, not in the schema",
+		);
+	});
+
+	it("a foreign key left out, on maybe_names", async () => {
+		const wrong = sqliteTable("maybe_names", {
+			transactionId: integer("transaction_id").primaryKey(), // the database: REFERENCES transactions(id) ON DELETE CASCADE
+			name: text(),
+			claim: text().notNull(),
+			createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+			categoriesKey: text("categories_key"),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"maybe_names.transaction_id is a foreign key in the database, not in the schema",
+		);
+	});
+
+	it("a wrong default, on cash_delete_holds", async () => {
+		const wrong = sqliteTable("cash_delete_holds", {
+			token: text().primaryKey(),
+			createdAt: integer("created_at").notNull(),
+			displayName: text("display_name").notNull(),
+			transactionRow: text("transaction_row").notNull(),
+			splitRows: text("split_rows").notNull(),
+			paymentRows: text("payment_rows").notNull(),
+			refundRows: text("refund_rows").notNull(),
+			restoreMarker: text("restore_marker"),
+			planRows: text("plan_rows").notNull().default("{}"), // the database: DEFAULT '[]'
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"cash_delete_holds.plan_rows default differs",
+		);
+	});
+
+	it("a column declared TEXT that the database has as INTEGER, on planned_delete_holds", async () => {
+		const wrong = sqliteTable("planned_delete_holds", {
+			token: text().primaryKey(),
+			createdMs: text("created_ms").notNull(), // the database: created_ms INTEGER NOT NULL
+			name: text().notNull(),
+			amountCents: integer("amount_cents").notNull(),
+			month: text().notNull(),
+			transactionId: integer("transaction_id").references(
+				() => transactions.id,
+				{ onDelete: "set null" },
+			),
+			hadPayment: integer("had_payment").notNull().default(0),
+			createdBy: text("created_by").notNull(),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"planned_delete_holds.created_ms type differs: schema TEXT, database INTEGER",
+		);
+	});
+});
+
+describe("the drift check fails on a wrong household, feedback, AI or push table", () => {
+	it("a text primary key made integer, on household_members", async () => {
+		const wrong = sqliteTable("household_members", {
+			email: integer().primaryKey(), // the database: email TEXT PRIMARY KEY
+			firstSeenAt: text("first_seen_at")
+				.notNull()
+				.default(sql`(datetime('now'))`),
+			lastSeenAt: text("last_seen_at")
+				.notNull()
+				.default(sql`(datetime('now'))`),
+			sessionIssuedAt: integer("session_issued_at").notNull().default(0),
+			removedAt: text("removed_at"),
+			homeSeenAt: text("home_seen_at"),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"household_members.email type differs: schema INTEGER, database TEXT",
+		);
+	});
+
+	it("a partial unique index made non-partial, on ai_log", async () => {
+		const wrong = sqliteTable(
+			"ai_log",
+			{
+				id: integer().primaryKey(),
+				kind: text({ enum: AI_LOG_KIND_VALUES }).notNull(),
+				transactionId: integer("transaction_id"),
+				merchantRawName: text("merchant_raw_name"),
+				householdDay: text("household_day").notNull(),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+			},
+			(t) => [uniqueIndex("ai_log_merchant_name").on(t.merchantRawName)], // the database: WHERE kind = 'name'
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index ai_log_merchant_name partial-ness differs",
+		);
+	});
+
+	it("a composite unique index with a column dropped, on never_suggest_rules", async () => {
+		const wrong = sqliteTable(
+			"never_suggest_rules",
+			{
+				id: integer().primaryKey({ autoIncrement: true }),
+				merchantKey: text("merchant_key").notNull(),
+				kind: text({ enum: NEVER_SUGGEST_RULE_KIND_VALUES }).notNull(),
+				decidedOn: text("decided_on").notNull(),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+			},
+			(t) => [uniqueIndex("never_suggest_rules_one").on(t.merchantKey)], // the database: ON (merchant_key, kind)
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index never_suggest_rules_one expression differs",
+		);
+	});
+
+	it("an IN list with an extra word, on maybe_answers.answer", async () => {
+		const lists = {
+			...CHECK_LISTS,
+			maybe_answers: {
+				...CHECK_LISTS.maybe_answers,
+				answer: [...MAYBE_ANSWER_ANSWER_VALUES, "maybe"],
+			},
+		};
+
+		expect((await drift(maybeAnswers, lists)).join("\n")).toContain(
+			"maybe_answers.answer CHECK differs",
+		);
+	});
+
+	it("a REAL column declared as INTEGER, on maybe_answers", async () => {
+		const wrong = sqliteTable("maybe_answers", {
+			id: integer().primaryKey(),
+			kind: text({ enum: MAYBE_ANSWER_KIND_VALUES }).notNull(),
+			confidence: integer().notNull(), // the database: confidence REAL NOT NULL
+			answer: text({ enum: MAYBE_ANSWER_ANSWER_VALUES }).notNull(),
+			householdDay: text("household_day").notNull(),
+			createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"maybe_answers.confidence type differs: schema INTEGER, database REAL",
+		);
+	});
+
+	it("an inline unique removed, on push_subscriptions.endpoint", async () => {
+		const wrong = sqliteTable(
+			"push_subscriptions",
+			{
+				id: integer().primaryKey(),
+				memberEmail: text("member_email").notNull(),
+				endpoint: text().notNull(), // the database: endpoint TEXT NOT NULL UNIQUE
+				p256dh: text().notNull(),
+				auth: text().notNull(),
+				createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+			},
+			(t) => [index("push_subscriptions_member").on(t.memberEmail)],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"push_subscriptions unique constraint on (endpoint) is in the database, not in the schema",
+		);
+	});
+});
+
 describe("the table-set check fails on a wrong list", () => {
 	const described = ["a"];
 
-	it("a live table in neither the schema nor the not-yet list", () => {
-		expect(tableSetProblems(["a", "b"], described, [])).toEqual([
-			"b is in the database, but neither src/db/schema.ts nor NOT_YET_DESCRIBED names it",
-		]);
-	});
-
-	it("a not-yet-described name that is not in the database", () => {
-		expect(tableSetProblems(["a"], described, ["gone"])).toEqual([
-			"gone is in NOT_YET_DESCRIBED, but the database has no such table",
-		]);
-	});
-
-	it("a described table still listed as not yet described", () => {
-		expect(tableSetProblems(["a"], described, ["a"])).toEqual([
-			"a is in NOT_YET_DESCRIBED, but src/db/schema.ts describes it",
+	it("a live table the schema does not describe", () => {
+		expect(tableSetProblems(["a", "b"], described)).toEqual([
+			"b is in the database, but src/db/schema.ts does not describe it",
 		]);
 	});
 
 	it("a described table that is not in the database", () => {
-		expect(tableSetProblems([], described, [])).toEqual([
+		expect(tableSetProblems([], described)).toEqual([
 			"a is described in src/db/schema.ts, but the database has no such table",
 		]);
 	});
 
-	it("passes when every live table is described or listed", () => {
-		expect(tableSetProblems(["a", "b"], described, ["b"])).toEqual([]);
+	it("passes when every live table is described", () => {
+		expect(tableSetProblems(["a"], described)).toEqual([]);
 	});
 
-	it("the exports the drift test enumerates are the described tables only", () => {
+	it("the exports the drift test enumerates are all 30 application tables", () => {
 		expect(
 			schemaTables()
 				.map((table) => getTableConfig(table).name)
 				.sort(),
 		).toEqual([
 			"accounts",
+			"ai_log",
+			"balance_history",
+			"bank_text_rules",
 			"bill_amounts",
 			"bill_payments",
 			"bills",
 			"budget_amounts",
+			"cash_delete_holds",
 			"categories",
 			"category_archive_periods",
 			"category_suggestions",
+			"documents",
+			"feedback",
+			"forgotten_texts",
+			"household_members",
 			"household_people",
+			"household_settings",
+			"maybe_answers",
+			"maybe_names",
+			"merchant_name_failures",
 			"merchant_suggested_names",
 			"merchants",
+			"never_suggest_rules",
 			"plaid_items",
+			"planned_delete_holds",
+			"planned_expenses",
+			"push_subscriptions",
 			"savings_goal_amounts",
 			"transactions",
 		]);

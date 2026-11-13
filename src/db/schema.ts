@@ -2,8 +2,8 @@
 // migrations/*.sql are the only thing that changes the database; this file is written to match them, and
 // test/db-schema.test.ts fails when they disagree: columns, SQLite types, not-null, defaults, primary keys, CHECK
 // value lists, indexes (unique and partial), foreign keys (target, ON UPDATE and ON DELETE), and the unique
-// constraints a CREATE TABLE writes inline. The same test fails when a live application table is not described here
-// and not listed in its NOT_YET_DESCRIBED.
+// constraints a CREATE TABLE writes inline. The same test fails for any live application table this file does not
+// describe.
 //
 // The CHECK value lists are CHECK_LISTS at the bottom of this file: the drift test compares them both ways with the
 // live CREATE TABLE statements, so they are the verified record. No CHECK() is declared here, because nothing
@@ -139,6 +139,7 @@ export const merchants = sqliteTable("merchants", {
 		.default("none"),
 	namesAsked: integer("names_asked").notNull().default(0),
 	notABill: integer("not_a_bill").notNull().default(0),
+	startedBySync: text("started_by_sync"),
 });
 
 /** A merchant's suggested names, one row per name, by position (migrations/0071_merchant_suggested_names.sql). */
@@ -512,10 +513,341 @@ export const categoryArchivePeriods = sqliteTable(
 );
 
 /**
+ * A one-off cost set aside in one month until a payment is linked to it (migrations/0053_planned_expenses.sql). A plan
+ * has no category. Its transaction link is UNIQUE, and is cleared (SET NULL) when that transaction is deleted.
+ */
+export const plannedExpenses = sqliteTable("planned_expenses", {
+	id: integer().primaryKey({ autoIncrement: true }),
+	name: text().notNull(),
+	// The migration's CHECK here is (amount_cents > 0), not an IN list, so the drift test does not read it.
+	amountCents: integer("amount_cents").notNull(),
+	// The migration's CHECK here is (month GLOB 'YYYY-MM'), not an IN list, so the drift test does not read it.
+	month: text().notNull(),
+	// The payment linked to the plan. One payment pays at most one plan.
+	transactionId: integer("transaction_id")
+		.unique()
+		.references(() => transactions.id, { onDelete: "set null" }),
+	// The email claim of who planned it (or 'demo').
+	createdBy: text("created_by").notNull(),
+});
+
+/**
+ * The undo hold for a deleted planned expense, kept for ten seconds so its Undo writes the plan back once
+ * (migrations/0053_planned_expenses.sql). Holds older than that are pruned by each delete.
+ */
+export const plannedDeleteHolds = sqliteTable("planned_delete_holds", {
+	// The undo token the toast carries.
+	token: text().primaryKey(),
+	// The server's clock in epoch milliseconds, for pruning.
+	createdMs: integer("created_ms").notNull(),
+	name: text().notNull(),
+	amountCents: integer("amount_cents").notNull(),
+	month: text().notNull(),
+	// The payment the plan had. ON DELETE SET NULL, so a payment deleted inside the window is forgotten.
+	transactionId: integer("transaction_id").references(() => transactions.id, {
+		onDelete: "set null",
+	}),
+	// Whether the plan had a payment, so Undo can say it is no longer linked. The only IN list in this table.
+	hadPayment: integer("had_payment").notNull().default(0),
+	createdBy: text("created_by").notNull(),
+});
+
+/**
+ * A cash entry's delete snapshot, kept so its Undo can restore it once from the toast
+ * (migrations/0027_cash_delete_undo.sql, with plan_rows added later).
+ */
+export const cashDeleteHolds = sqliteTable("cash_delete_holds", {
+	// The undo token the toast carries.
+	token: text().primaryKey(),
+	createdAt: integer("created_at").notNull(),
+	displayName: text("display_name").notNull(),
+	// The entry, its split parts, its payments and its refunds, as stored when it was deleted.
+	transactionRow: text("transaction_row").notNull(),
+	splitRows: text("split_rows").notNull(),
+	paymentRows: text("payment_rows").notNull(),
+	refundRows: text("refund_rows").notNull(),
+	// Added by migrations/0031; NULL when the hold has none.
+	restoreMarker: text("restore_marker"),
+	// The planned expenses the entry paid, as JSON, so Undo can point each plan back at the restored row (migrations/0054).
+	planRows: text("plan_rows").notNull().default("[]"),
+});
+
+/**
+ * The name Workers AI gave a Maybe card's "New category" row, kept once for each transaction (migrations/0063_maybe_names.sql).
+ * The row goes with its transaction (CASCADE).
+ */
+export const maybeNames = sqliteTable("maybe_names", {
+	// The transaction the name was asked for. Its primary key, so one row per transaction.
+	transactionId: integer("transaction_id")
+		.primaryKey()
+		.references(() => transactions.id, { onDelete: "cascade" }),
+	// The name Tally suggested, or NULL for "no name" (so a transaction is never asked twice).
+	name: text(),
+	// A random token set when a request claims the transaction. Only the request holding it may finish the row.
+	claim: text().notNull(),
+	createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	categoriesKey: text("categories_key"),
+});
+
+/**
+ * A bank's balance on a day, one row per account and date (migrations/0001_initial_schema.sql). The key is
+ * (account_id, date), so both columns are NOT NULL and in the composite primary key.
+ */
+export const balanceHistory = sqliteTable(
+	"balance_history",
+	{
+		accountId: integer("account_id")
+			.notNull()
+			.references(() => accounts.id, { onDelete: "cascade" }),
+		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		date: text().notNull(),
+		// The migration's CHECK here is (typeof(balance_cents) = 'integer'), not an IN list, so the drift test does not
+		// read it.
+		balanceCents: integer("balance_cents").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.accountId, t.date] })],
+);
+
+/**
+ * A rule that files every transaction whose cleaned bank text matches in one category, before Jev is asked
+ * (migrations/0065_bank_text_rules.sql). One rule per text.
+ */
+export const bankTextRules = sqliteTable("bank_text_rules", {
+	// The row's own id.
+	id: integer().primaryKey(),
+	// The cleaned bank text the rule is for. One rule per text.
+	cleanedText: text("cleaned_text").notNull().unique(),
+	// The category the rule files a matching transaction in. Removing the category removes the rule.
+	categoryId: integer("category_id")
+		.notNull()
+		.references(() => categories.id, { onDelete: "cascade" }),
+	createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
+/**
+ * A cleaned bank text the person forgot on the Settings page "What Tally has learned" (migrations/0064_forgotten_texts.sql).
+ * One row per text.
+ */
+export const forgottenTexts = sqliteTable("forgotten_texts", {
+	id: integer().primaryKey({ autoIncrement: true }),
+	cleanedText: text("cleaned_text").notNull().unique(),
+	// Only an answer changed after this brings the line back.
+	forgottenAt: text("forgotten_at").notNull().default(sql`(datetime('now'))`),
+	// The forgotten_at a second Forget replaced, so its Undo puts that back. NULL when the text was forgotten once.
+	previousForgottenAt: text("previous_forgotten_at"),
+	// The rule a Forget removed, so its Undo can put it back. NULL when the text had no rule.
+	ruleCategoryId: integer("rule_category_id").references(() => categories.id, {
+		onDelete: "set null",
+	}),
+});
+
+/** ai_log.kind: the CHECK in migrations/0041_ai_log.sql. */
+export const AI_LOG_KIND_VALUES = ["category", "income", "name"] as const;
+
+/**
+ * One row for each thing Tally's AI applied, for "What AI did" (migrations/0041_ai_log.sql). It holds no amounts. A
+ * category or income row is one per transaction and kind; a name row is one per merchant.
+ */
+export const aiLog = sqliteTable(
+	"ai_log",
+	{
+		id: integer().primaryKey(),
+		kind: text({ enum: AI_LOG_KIND_VALUES }).notNull(),
+		// The transaction, for category and income rows. Cleared when a bank correction clears Jev's category.
+		transactionId: integer("transaction_id"),
+		// The merchant's raw name, for name rows.
+		merchantRawName: text("merchant_raw_name"),
+		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		householdDay: text("household_day").notNull(),
+		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	},
+	(t) => [
+		index("ai_log_household_day").on(t.householdDay),
+		uniqueIndex("ai_log_merchant_name")
+			.on(t.merchantRawName)
+			.where(sql`${t.kind} = 'name'`),
+		uniqueIndex("ai_log_transaction_kind")
+			.on(t.transactionId, t.kind)
+			.where(sql`${t.transactionId} IS NOT NULL`),
+	],
+);
+
+/**
+ * A file a person uploaded: its key in R2, its name, its size and who uploaded it (migrations/0001_initial_schema.sql).
+ */
+export const documents = sqliteTable("documents", {
+	id: integer().primaryKey(),
+	r2Key: text("r2_key").notNull().unique(),
+	filename: text().notNull(),
+	// The migration's CHECK here is (size_bytes >= 0), not an IN list, so the drift test does not read it.
+	sizeBytes: integer("size_bytes").notNull(),
+	uploadedBy: text("uploaded_by").notNull(),
+	uploadedAt: text("uploaded_at").notNull().default(sql`(datetime('now'))`),
+	note: text(),
+});
+
+/**
+ * A feedback report from the form, and its filing as a GitHub issue (migrations/0009_feedback.sql, with 0011 and 0036).
+ * The row stays after it is filed; github_issue_number is set once GitHub has taken it. Its 16 columns, by what they
+ * are for, are below.
+ */
+export const feedback = sqliteTable(
+	"feedback",
+	{
+		id: integer().primaryKey({ autoIncrement: true }),
+		// When the report was sent.
+		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		// Who sent it: the signed-in person's email, from the verified sign-in.
+		actor: text().notNull(),
+		// The kind the person picked on the form (Bug, Idea, Question or Other).
+		type: text().notNull(),
+		// The feeling the person picked on the form.
+		feeling: text().notNull(),
+		// What the person wrote.
+		message: text().notNull(),
+		// The page the form was opened from.
+		page: text().notNull(),
+		// The device and browser the form was sent from.
+		device: text().notNull(),
+		// The app version that was running when the report was sent.
+		appVersion: text("app_version"),
+		// The browser's diagnostics as JSON, from the feedback form's diagnostics (src/feedback/diagnostics.ts).
+		clientContext: text("client_context"),
+		// A session replay link. No code writes it today: replay links stay off (src/feedback/diagnostics.ts).
+		replayUrl: text("replay_url"),
+		// The GitHub issue number, once GitHub has taken the report. NULL until then.
+		githubIssueNumber: integer("github_issue_number"),
+		// When GitHub took the report.
+		filedAt: text("filed_at"),
+		// When a filing try claimed the report. Cleared when the try ends, so a stuck claim can be retried after ten minutes.
+		filingAt: text("filing_at"),
+		// How many filing tries have counted. A try that GitHub refuses over its token does not count.
+		attempts: integer().notNull().default(0),
+		// The HTTP status GitHub last answered the filing with.
+		lastStatus: integer("last_status"),
+	},
+	(t) => [index("feedback_actor_created_at").on(t.actor, t.createdAt)],
+);
+
+/**
+ * A person in the household, by email: when they were first and last seen, the session time their last sign-in was
+ * issued, whether they were removed, and when their Home page last checked in (migrations/0018 and 0034, with 0059).
+ */
+export const householdMembers = sqliteTable("household_members", {
+	email: text().primaryKey(),
+	firstSeenAt: text("first_seen_at").notNull().default(sql`(datetime('now'))`),
+	lastSeenAt: text("last_seen_at").notNull().default(sql`(datetime('now'))`),
+	sessionIssuedAt: integer("session_issued_at").notNull().default(0),
+	removedAt: text("removed_at"),
+	homeSeenAt: text("home_seen_at"),
+});
+
+/** A household-wide setting, one row per key (migrations/0018_household_settings.sql). */
+export const householdSettings = sqliteTable("household_settings", {
+	key: text().primaryKey(),
+	value: text().notNull(),
+});
+
+/** maybe_answers.kind: the CHECK in migrations/0062_maybe_answers.sql. */
+export const MAYBE_ANSWER_KIND_VALUES = [
+	"category",
+	"income",
+	"transfer",
+] as const;
+
+/** maybe_answers.answer: the CHECK in migrations/0062_maybe_answers.sql. */
+export const MAYBE_ANSWER_ANSWER_VALUES = [
+	"yes",
+	"no",
+	"something_else",
+] as const;
+
+/**
+ * What a person answered to a "Maybe ..." question, for the record of how often Tally's guesses were right
+ * (migrations/0062_maybe_answers.sql). It names no transaction, merchant or amount, on purpose.
+ */
+export const maybeAnswers = sqliteTable(
+	"maybe_answers",
+	{
+		id: integer().primaryKey(),
+		kind: text({ enum: MAYBE_ANSWER_KIND_VALUES }).notNull(),
+		// The guess's stored confidence when the person answered.
+		confidence: real().notNull(),
+		answer: text({ enum: MAYBE_ANSWER_ANSWER_VALUES }).notNull(),
+		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		householdDay: text("household_day").notNull(),
+		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	},
+	(t) => [index("maybe_answers_household_day").on(t.householdDay)],
+);
+
+/**
+ * When Workers AI last failed to name a bank text, so the names pass asks the failed ones after the never-tried ones
+ * (migrations/0051_merchant_name_failures.sql). There is no foreign key, as a bank text often has no merchants row.
+ */
+export const merchantNameFailures = sqliteTable("merchant_name_failures", {
+	rawName: text("raw_name").primaryKey(),
+	failedAt: text("failed_at").notNull(),
+});
+
+/** never_suggest_rules.kind: the CHECK in migrations/0043_never_suggest_rules.sql. */
+export const NEVER_SUGGEST_RULE_KIND_VALUES = [
+	"new_category",
+	"income",
+	"transfer",
+] as const;
+
+/**
+ * A "never suggest" rule: one suggestion a person said No to for a store, so Tally does not make it again until the
+ * line is removed in Settings (migrations/0043_never_suggest_rules.sql). One rule per merchant key and kind.
+ */
+export const neverSuggestRules = sqliteTable(
+	"never_suggest_rules",
+	{
+		id: integer().primaryKey({ autoIncrement: true }),
+		merchantKey: text("merchant_key").notNull(),
+		kind: text({ enum: NEVER_SUGGEST_RULE_KIND_VALUES }).notNull(),
+		// The household's day of the answer, which Settings shows ("You said No on Oct 3").
+		decidedOn: text("decided_on").notNull(),
+		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	},
+	(t) => [uniqueIndex("never_suggest_rules_one").on(t.merchantKey, t.kind)],
+);
+
+/**
+ * A device a person turned Web Push notifications on for (migrations/0060_push_subscriptions.sql). The endpoint is
+ * unique, so a device that subscribes again replaces its row.
+ */
+export const pushSubscriptions = sqliteTable(
+	"push_subscriptions",
+	{
+		id: integer().primaryKey(),
+		memberEmail: text("member_email").notNull(),
+		endpoint: text().notNull().unique(),
+		// The subscription's keys (base64url, RFC 8291).
+		p256dh: text().notNull(),
+		auth: text().notNull(),
+		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	},
+	(t) => [index("push_subscriptions_member").on(t.memberEmail)],
+);
+
+/**
  * Every `col IN (...)` CHECK the described tables have in the live database, by table and column, as text. The drift
  * test reads each one from the live CREATE TABLE and compares it both ways with this list.
  */
 export const CHECK_LISTS = {
+	ai_log: {
+		kind: AI_LOG_KIND_VALUES,
+	},
+	maybe_answers: {
+		kind: MAYBE_ANSWER_KIND_VALUES,
+		answer: MAYBE_ANSWER_ANSWER_VALUES,
+	},
+	never_suggest_rules: {
+		kind: NEVER_SUGGEST_RULE_KIND_VALUES,
+	},
 	categories: {
 		archived: ["0", "1"],
 	},
@@ -543,6 +875,9 @@ export const CHECK_LISTS = {
 	},
 	merchant_suggested_names: {
 		position: ["0", "1", "2"],
+	},
+	planned_delete_holds: {
+		had_payment: ["0", "1"],
 	},
 	category_suggestions: {
 		status: CATEGORY_SUGGESTION_STATUS_VALUES,

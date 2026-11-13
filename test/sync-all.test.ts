@@ -165,6 +165,138 @@ describe("syncAllItems", () => {
 		]);
 	});
 
+	it("syncs three banks at once, and a fourth waits for one of them to finish", async () => {
+		for (let i = 0; i < 4; i++) await addItem();
+		const plaid = fakePlaid();
+		const inFlight = new Set<string>();
+		let release = () => {};
+
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		// Each bank's first call to Plaid is held open, so the banks that have started can be counted.
+		const fetchImpl = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const body: { access_token: string } = JSON.parse(String(init?.body));
+
+				if (String(url).endsWith("/accounts/get")) {
+					inFlight.add(body.access_token);
+					await held;
+				}
+
+				return plaid(url, init);
+			},
+		);
+
+		const run = syncAllItems(enabledEnv, fetchImpl);
+
+		await vi.waitFor(() => expect(inFlight.size).toBe(3));
+		// Long enough for a fourth to start, if nothing held it back.
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(inFlight.size).toBe(3);
+
+		release();
+
+		expect(await run).toMatchObject({ synced: 4, added: 4, failed: 0 });
+		expect(inFlight.size).toBe(4);
+	});
+
+	it("gives a merchant two banks name for the first time to one of them, never a mix of both", async () => {
+		await addItem();
+		await addItem();
+		await env.DB.prepare("DELETE FROM merchants").run();
+
+		const category = present(
+			await env.DB.prepare(
+				"SELECT id FROM categories ORDER BY id LIMIT 1",
+			).first<{ id: number }>(),
+		).id;
+
+		// What each bank's own text for the cafe already holds: one a name a person gave it, the other a category rule.
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('CAFE TEXT ONE', 'Our cafe')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('CAFE TEXT TWO', ?)",
+			).bind(category),
+		]);
+
+		const texts = new Map<string, string>();
+		let bothAsked = () => {};
+
+		const together = new Promise<void>((resolve) => {
+			bothAsked = resolve;
+		});
+
+		// Both banks' pages name the same merchant, "Cafe", each under its own text, and arrive at the same moment.
+		const fetchImpl = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const body: { access_token: string } = JSON.parse(String(init?.body));
+				const token = body.access_token;
+
+				if (String(url).endsWith("/accounts/get"))
+					return response({
+						accounts: [
+							{
+								account_id: `account-${token}`,
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					});
+
+				if (!texts.has(token))
+					texts.set(
+						token,
+						texts.size === 0 ? "CAFE TEXT ONE" : "CAFE TEXT TWO",
+					);
+
+				if (texts.size === 2) bothAsked();
+				await together;
+
+				return response({
+					added: [
+						{
+							transaction_id: `transaction-${token}`,
+							account_id: `account-${token}`,
+							date: "2026-09-27",
+							amount: 1,
+							name: texts.get(token) ?? "",
+							merchant_name: "Cafe",
+							pending: false,
+						},
+					],
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				});
+			},
+		);
+
+		expect(await syncAllItems(enabledEnv, fetchImpl)).toMatchObject({
+			synced: 2,
+			failed: 0,
+		});
+
+		const cafe = await env.DB.prepare(
+			"SELECT display_name, default_category_id FROM merchants WHERE raw_name = 'Cafe'",
+		).first<{
+			display_name: string | null;
+			default_category_id: number | null;
+		}>();
+
+		// The first bank to save its page starts the merchant from its own text; the other finds it started and adds
+		// nothing, as a later sync always has. So it holds the name or the rule, not both.
+		expect([
+			{ display_name: "Our cafe", default_category_id: null },
+			{ display_name: null, default_category_id: category },
+		]).toContainEqual(cafe);
+	});
+
 	it("clears a flagged Item's flag and reminder when the daily run's sync succeeds", async () => {
 		const id = await addItem("needs_attention");
 		await env.DB.prepare(
@@ -513,22 +645,36 @@ describe("syncAllItems", () => {
 		await addItem();
 		const second = await addItem();
 		const fetchImpl = fakePlaid();
-		let calls = 0;
-		fetchImpl.mockImplementation(async (url, init) => {
-			calls += 1;
 
-			if (calls === 2) {
-				await env.DB.prepare(
-					"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
-				)
-					.bind(second)
-					.run();
-			}
+		// The second bank is disconnected after the run has listed the banks and before it reaches that bank's own check.
+		// The banks sync side by side, so the change lands as the list is read, not during the first bank's sync.
+		const afterTheList = (sql: string) => {
+			const statement = env.DB.prepare(sql);
 
-			return fakePlaid()(url, init);
-		});
+			if (!sql.includes("SELECT id, institution_name FROM plaid_items"))
+				return statement;
 
-		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			return {
+				all: async () => {
+					const listed = await statement.all();
+
+					await env.DB.prepare(
+						"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
+					)
+						.bind(second)
+						.run();
+
+					return listed;
+				},
+			};
+		};
+
+		const racing = {
+			...enabledEnv,
+			DB: Object.assign(Object.create(env.DB), { prepare: afterTheList }),
+		};
+
+		expect(await syncAllItems(racing, fetchImpl)).toEqual({
 			added: 1,
 			modified: 0,
 			changedIds: expect.any(Array),
@@ -589,19 +735,19 @@ describe("syncAllItems", () => {
 		expect(log.mock.calls).toEqual([
 			["plaid daily sync: synced 0, skipped 0, failed 2"],
 		]);
-		expect(error.mock.calls).toEqual([
-			["plaid sync error request-1"],
-			[
-				expect.stringMatching(
-					/^plaid daily sync: item \d+ failed plaid request-1$/,
-				),
-			],
-			["plaid sync error request-2"],
-			[
-				expect.stringMatching(
-					/^plaid daily sync: item \d+ failed plaid request-2$/,
-				),
-			],
+		// The banks sync side by side, so their lines interleave: each bank's two lines are there, in no fixed order
+		// between banks, and nothing else is logged.
+		const lines = error.mock.calls.map(([line]) => String(line)).sort();
+
+		expect(lines).toEqual([
+			expect.stringMatching(
+				/^plaid daily sync: item \d+ failed plaid request-1$/,
+			),
+			expect.stringMatching(
+				/^plaid daily sync: item \d+ failed plaid request-2$/,
+			),
+			"plaid sync error request-1",
+			"plaid sync error request-2",
 		]);
 	});
 

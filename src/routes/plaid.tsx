@@ -8,6 +8,8 @@ import {
 	strokeStatement,
 	takeBackQuestionStrokes,
 } from "../db/first-tally";
+import { readAtEdge } from "../edge";
+import { RowId } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { PlaidBank } from "../machines/bank-request";
 import { askBank, plaidBankFor } from "../plaid/bank-request";
@@ -83,13 +85,15 @@ function repairFailure(cause: unknown) {
 }
 
 async function storedItem(db: D1Database, id: string) {
-	if (!/^\d+$/.test(id)) return null;
+	const read = readAtEdge(RowId, id);
+
+	if (!read.ok) return null;
 
 	return db
 		.prepare(
 			"SELECT id, access_token_encrypted, institution_name FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
 		)
-		.bind(Number(id))
+		.bind(read.value)
 		.first<{
 			id: number;
 			access_token_encrypted: ArrayBuffer;

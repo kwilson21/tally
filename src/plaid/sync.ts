@@ -176,19 +176,19 @@ const namedKeySql = (key: string) =>
 
 /**
  * The winner of each Plaid name the page starts a row for (copyPlaidNamesSql). One `?` for the pairs, a JSON array of
- * `[Plaid name, bank text]` in the order the charges arrived, and one for the names opened in this run, a JSON array
- * (`[]` when none). The candidates for a name are the rows of its page's bank texts, and its own row when it has one as
+ * `[Plaid name, bank text]` in the order the charges arrived, and one for this run's lock id. A name starts a row when
+ * it has none, and goes on filling the one it has only when this run made it (`started_by_sync`, #1048): the test is in
+ * the statement, so two banks syncing at the same moment can't both pass it. The candidates for a name are the rows of its page's bank texts, and its own row when it has one as
  * candidate `n = -1` so it wins a tie. A candidate's rank is pickSql's, with the same `named` for every candidate of the
  * name. `winner.t` is the bank text whose row the name takes, or NULL when its own row wins. The three statements of
  * copyPlaidNamesSql all read this CTE, and it is read before any of them writes, so they agree with each other.
  */
 const COPY_WINNERS = `WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),
-	 opened(k) AS (SELECT value FROM json_each(?)),
 	 src(k, n, t, pick, status, asked, display_name, default_category_id, not_a_bill) AS (
 	   SELECT p.k, p.n, p.t, ${suggestionPickSql("m.suggestion_status", "m.names_asked", namedKeySql("p.k"))}, m.suggestion_status, m.names_asked,
 	     m.display_name, m.default_category_id, m.not_a_bill
 	   FROM pair p JOIN merchants m ON m.raw_name = p.t
-	   WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k) OR p.k IN (SELECT k FROM opened)),
+	   WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k AND x.started_by_sync IS NOT ?)),
 	 cand(k, n, t, pick, status, asked) AS (
 	   SELECT k, n, t, pick, status, asked FROM src
 	   UNION ALL
@@ -207,7 +207,8 @@ const COPY_WINNERS = `WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'),
  * winner, and a name's display name, default category and Not a bill come from the first text that has each. An
  * existing row keeps its own status unless the winner ranks strictly better, the same comparison COPY_WINNERS makes
  * (`takeNew`), so the two statements can't disagree. The names are copied by copyPlaidNamesSql, which runs first.
- * Two `?`s, then the lock's: the pairs and the opened names, as copyNeverSuggestSql takes them.
+ * A row it makes records this run (`started_by_sync`); a row it fills keeps its mark. Three `?`s, then the lock's: the
+ * pairs and the lock id for COPY_WINNERS, and the lock id again for the new row.
  */
 const copyMerchantRowSql = (ownsLock: string) => {
 	const namedNow =
@@ -216,12 +217,12 @@ const copyMerchantRowSql = (ownsLock: string) => {
 	const takeNew = `${suggestionPickSql("excluded.suggestion_status", "excluded.names_asked", namedNow)} < ${suggestionPickSql("merchants.suggestion_status", "merchants.names_asked", namedNow)}`;
 
 	return `${COPY_WINNERS}
-	 INSERT INTO merchants (raw_name, display_name, default_category_id, suggestion_status, names_asked, not_a_bill)
+	 INSERT INTO merchants (raw_name, display_name, default_category_id, suggestion_status, names_asked, not_a_bill, started_by_sync)
 	 SELECT w.k,
 	   (SELECT s.display_name FROM src s WHERE s.k = w.k AND s.display_name IS NOT NULL ORDER BY s.n LIMIT 1),
 	   (SELECT s.default_category_id FROM src s WHERE s.k = w.k AND s.default_category_id IS NOT NULL ORDER BY s.n LIMIT 1),
 	   w.status, w.asked,
-	   (SELECT MAX(s.not_a_bill) FROM src s WHERE s.k = w.k)
+	   (SELECT MAX(s.not_a_bill) FROM src s WHERE s.k = w.k), ?
 	 FROM winner w
 	 WHERE ${ownsLock}
 	 ON CONFLICT(raw_name) DO UPDATE SET
@@ -288,6 +289,11 @@ const copyNeverSuggestSql = (ownsLock: string) =>
  * the bank's own suggestion when its names are exactly its key (bankOnlySql), and it is withdrawn only when nobody has
  * named it, it has a charge with one of these bank texts, and it is the newest Plaid name (latest date, then latest id)
  * for none of its charges' bank texts. Its names go with it in the page's last name statement (sweepStaleNamesSql).
+ *
+ * The texts are read before the page is saved, because only TypeScript can tidy one, so another bank's sync can store a
+ * charge with the same Plaid name under a text that isn't among them (#1048). The last test covers that: a name that is
+ * the newest for a text the page never looked at stays for now. The page's position is not saved while such a text
+ * exists (savePosition), and the names are settled again once it has been read and tidied (#1054).
  */
 const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
@@ -301,6 +307,13 @@ const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	       AND c.merchant_name != p.tidied
 	       AND c.merchant_name = (SELECT n.merchant_name FROM transactions n
 	         WHERE n.raw_name = c.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
+	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
+	   AND NOT EXISTS (
+	     SELECT 1 FROM transactions o
+	     WHERE o.parent_id IS NULL AND o.merchant_name = merchants.raw_name
+	       AND o.raw_name NOT IN (SELECT text FROM pair)
+	       AND o.merchant_name = (SELECT n.merchant_name FROM transactions n
+	         WHERE n.raw_name = o.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
 	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
 	   AND ${ownsLock}`;
 
@@ -341,6 +354,9 @@ const sweepStaleNamesSql = (ownsLock: string) =>
 	   AND ${ownsLock}`;
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
+/** How many times a page settles its names again when another bank's charge lands while it does (#1054). */
+const SETTLE_TRIES = 3;
+
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
 
@@ -553,7 +569,10 @@ export async function syncItem(
 	{
 		runAfterSync = true,
 		historyComplete = false,
-	}: { runAfterSync?: boolean; historyComplete?: boolean } = {},
+	}: {
+		runAfterSync?: boolean;
+		historyComplete?: boolean;
+	} = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 
@@ -637,10 +656,6 @@ export async function syncItem(
 		// Pending transactions the bank dropped on an earlier page of this run, and where the run's saved
 		// position is held while any waits (see below).
 		const waitingDrops = new Set<string>();
-		// The merchant keys that had no row when a page of this run first named them. A row this run makes for one is open
-		// to the later pages of the run (see the merchant copy below). A restart keeps them, since the rows an abandoned
-		// pass wrote remain.
-		const openMerchantKeys = new Set<string>();
 		let holdAt: { cursor: string | null } | null = null;
 		// Plaid said the 90-day history is in: by the webhook, or by a page's transactions_update_status. Kept across a
 		// restart, since Plaid's report doesn't change with the pass (#581).
@@ -1047,7 +1062,7 @@ export async function syncItem(
 			// starts from the rows saved under the bank texts it came with, if there are any: its name, rule and Not
 			// a bill come from the first text that has each, and its suggestion from one row (see copyMerchantRowSql).
 			// The first sync's copy wins, and a later edit to the old row never reaches the new one. Within one sync, a later
-			// page also fills in a choice the new row doesn't have yet (see openMerchantKeys). A guess Workers AI made for
+			// page also fills in a choice the new row doesn't have yet (see COPY_WINNERS). A guess Workers AI made for
 			// the bank text is cleared again below when Plaid's name is only that text (spec §7, decision 79).
 			// One statement for the page's charges.
 			const pairs = new Map<string, [string, string]>();
@@ -1063,37 +1078,22 @@ export async function syncItem(
 			}
 
 			if (pairs.size > 0) {
-				// Read before the batch, so it sees only the rows of earlier pages and syncs: the names with no row yet.
-				// This run's copy and suggestBankNames make rows for this page's names, and pendingNameStatements
-				// for names a stored charge already carries, whose row the page that stored the charge made. So a row this
-				// run makes is for a name read here or on an earlier page. A sync that resumes from a saved cursor is a
-				// separate run: it opens no names, and the rows an earlier run made are never filled.
-				const pairKeys = [...new Set([...pairs.values()].map(([key]) => key))];
-
-				const fresh = await env.DB.prepare(
-					"SELECT value FROM json_each(?) WHERE value NOT IN (SELECT raw_name FROM merchants)",
-				)
-					.bind(JSON.stringify(pairKeys))
-					.all<{ value: string }>();
-
-				for (const { value } of fresh.results) openMerchantKeys.add(value);
-				const open = pairKeys.filter((key) => openMerchantKeys.has(key));
 				// The names are copied first, from the state before this page (copyPlaidNamesSql); then the merchant rows, which
 				// take the same winner's status; then the never-suggest lines.
 				const [copyNames, dropOtherNames] = copyPlaidNamesSql(OWNS_LOCK);
 				const pairJson = JSON.stringify([...pairs.values()]);
-				const openJson = JSON.stringify(open);
 				statements.push(
-					env.DB.prepare(copyNames).bind(pairJson, openJson, itemRowId, lockId),
+					env.DB.prepare(copyNames).bind(pairJson, lockId, itemRowId, lockId),
 					env.DB.prepare(dropOtherNames).bind(
 						pairJson,
-						openJson,
+						lockId,
 						itemRowId,
 						lockId,
 					),
 					env.DB.prepare(copyMerchantRowSql(OWNS_LOCK)).bind(
 						pairJson,
-						openJson,
+						lockId,
+						lockId,
 						itemRowId,
 						lockId,
 					),
@@ -1120,10 +1120,13 @@ export async function syncItem(
 
 			if (suggested.size > 0) {
 				statements.push(
-					...suggestBankNames(env.DB, [...suggested], OWNS_LOCK, [
-						itemRowId,
+					...suggestBankNames(
+						env.DB,
+						[...suggested],
+						OWNS_LOCK,
+						[itemRowId, lockId],
 						lockId,
-					]),
+					),
 				);
 			}
 
@@ -1201,9 +1204,10 @@ export async function syncItem(
 				for (const row of results) textsOfCharges.add(row.raw_name);
 			}
 
-			if (textsOfCharges.size > 0) {
-				const names = new Set<string>();
+			// The Plaid names those texts go by, kept for the second look after the save (see below).
+			const names = new Set<string>();
 
+			if (textsOfCharges.size > 0) {
 				const current = await env.DB.prepare(
 					`SELECT DISTINCT merchant_name FROM transactions
 					 WHERE parent_id IS NULL AND raw_name IN (SELECT value FROM json_each(?))
@@ -1249,6 +1253,7 @@ export async function syncItem(
 						[texts],
 						OWNS_LOCK,
 						[itemRowId, lockId],
+						lockId,
 					),
 				);
 			}
@@ -1285,22 +1290,80 @@ export async function syncItem(
 				? ", last_synced_at = datetime('now'), history_complete_at = COALESCE(history_complete_at, datetime('now'))"
 				: ", last_synced_at = datetime('now')";
 
-			statements.push(
+			// The page's position, saved in the same batch as its rows. It is not saved while a charge with one of the page's
+			// Plaid names sits under a bank text the page never read: another bank's sync stored it after the texts above
+			// were read (#1048, #1054). The names are then settled again with that text read and tidied, and the position is
+			// saved with them (below). A run that stops in between has not moved its position, so the next run takes the
+			// page again, and nothing is left half-settled.
+			const savePosition = (texts: Iterable<string>) =>
 				env.DB.prepare(
 					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : lastPageStamp}
-					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
+					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL
+					   AND NOT EXISTS (SELECT 1 FROM transactions o WHERE o.parent_id IS NULL
+					     AND o.merchant_name IN (SELECT value FROM json_each(?))
+					     AND o.raw_name NOT IN (SELECT value FROM json_each(?)))`,
 				).bind(
 					page.has_more && holdAt ? holdAt.cursor : page.next_cursor,
 					itemRowId,
 					lockId,
-				),
-			);
+					JSON.stringify([...names]),
+					JSON.stringify([...texts]),
+				);
+
+			statements.push(savePosition(textsOfCharges));
 			const results = await env.DB.batch(statements);
 
 			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
 			if (results[0]?.meta.changes === 0) {
 				throw new Error("Plaid sync lost its lock to a newer run");
 			}
+
+			let positionSaved = (results.at(-1)?.meta.changes ?? 0) > 0;
+
+			// A text was missed. It is read now, with the page's rows in, and the names are settled as they would have been
+			// had the other bank's charge come first. A few tries, since yet another charge can land meanwhile.
+			for (
+				let attempt = 0;
+				!positionSaved && attempt < SETTLE_TRIES;
+				attempt += 1
+			) {
+				const now = await env.DB.prepare(
+					`SELECT DISTINCT raw_name FROM transactions
+					 WHERE parent_id IS NULL AND merchant_name IN (SELECT value FROM json_each(?))`,
+				)
+					.bind(JSON.stringify([...names]))
+					.all<{ raw_name: string }>();
+
+				for (const row of now.results) textsOfCharges.add(row.raw_name);
+
+				const texts = JSON.stringify(
+					[...textsOfCharges].map((text) => [text, tidyName(text)]),
+				);
+
+				const settled = await env.DB.batch([
+					env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
+						texts,
+						itemRowId,
+						lockId,
+					),
+					...pendingNameStatements(
+						env.DB,
+						newestPlaidNameCandidatesSql,
+						[texts],
+						OWNS_LOCK,
+						[itemRowId, lockId],
+						lockId,
+					),
+					env.DB.prepare(sweepStaleNamesSql(OWNS_LOCK)).bind(itemRowId, lockId),
+					savePosition(textsOfCharges),
+				]);
+
+				positionSaved = (settled.at(-1)?.meta.changes ?? 0) > 0;
+			}
+
+			// Still not saved: the lease went, or charges kept landing. The run stops, and the next one takes the page again.
+			if (!positionSaved)
+				throw new Error("Plaid sync could not save its position");
 
 			let inserted = 0;
 
