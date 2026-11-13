@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 25,
+	"legacyBaseline": 15,
 	"handlers": [
 		{
 			"method": "POST",
@@ -44,70 +44,100 @@
 			"path": "/bills",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/deactivate",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/link",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/occurrences/:period/price/accept",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/occurrences/:period/price/dismiss",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/occurrences/:period/unlink",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/reactivate",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/:id/undo-unlink",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/bills/find/:merchant/dismiss",
 			"file": "bills.tsx",
 			"area": "bills",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/bills.ts",
+			"stories": "test/bills-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
