@@ -17,7 +17,7 @@ export const FOLLOWS_PURCHASE =
 /**
  * FOLLOWS_PURCHASE for a linked credit, in TypeScript, for the edit panel and the route, which decide before a
  * save. It is the credit's own part: the purchase must still be linked and not excluded, which the caller checks.
- * Keep it in step with FOLLOWS_PURCHASE (the tests check that they agree).
+ * Keep it in step with FOLLOWS_PURCHASE (test/refunds.test.ts checks that they agree).
  */
 export function followsPurchase(credit: {
 	amountCents: number;
@@ -188,7 +188,7 @@ export type CountedBill = {
  * The month a bill's period is for, in TypeScript, as occurrenceMonthSql reads it (the SQL that billMonthSql and
  * occurrenceUnpaidSql use): a yearly bill's anchor month, a quarter's first month, a week's or fortnight's month
  * (its period is the date), else the period itself. The bills page works this out before a payment is linked.
- * Keep it in step with occurrenceMonthSql; the refunds test checks that they agree for every frequency.
+ * Keep it in step with occurrenceMonthSql; test/refunds.test.ts checks that they agree for every frequency.
  */
 export function billPeriodMonth(bill: CountedBill, period: string): string {
 	if (bill.frequency === "yearly")
@@ -214,7 +214,7 @@ export function billPeriodMonth(bill: CountedBill, period: string): string {
 /**
  * The month a linked bill payment counts in, in TypeScript, as countedMonthSql() reads it: the period's month
  * when that is earlier than the bank's month, else the bank's month. `bankMonth` is YYYY-MM. Keep it in step with
- * countedMonthSql(); the refunds test checks that they agree for every frequency, early and late payments alike.
+ * countedMonthSql(); test/refunds.test.ts checks that they agree for every frequency, early and late payments alike.
  */
 export function billPaymentMonth(
 	bill: CountedBill,
