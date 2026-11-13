@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { transition } from "xstate";
 import { next } from "../src/machines/next";
 import {
 	STORE_LOOKUP_ROWS,
@@ -39,6 +40,21 @@ const MOVES: [string, string, string][] = [
 ];
 
 const attemptsAt = (attempts: number) => ({ attempts });
+
+/**
+ * One move, read back through the machine's own transition: the state it lands in, and the attempts the context holds
+ * after it. Unlike next(), this sees the context a transition assigns, so a change to attempts fails a test.
+ */
+function move(state: string, attempts: number, event: string) {
+	const current = storeLookupMachine.resolveState({
+		value: state,
+		context: { attempts },
+	});
+
+	const [after] = transition(storeLookupMachine, current, { type: event });
+
+	return { state: String(after.value), attempts: after.context.attempts };
+}
 
 describe("store lookup machine: the listed moves", () => {
 	for (const [from, event, to] of MOVES) {
@@ -125,17 +141,53 @@ describe("store lookup machine: failed searches and attempts", () => {
 		expect(state).toBe("gave_up");
 	});
 
-	it("LET_GO and LEASE_EXPIRED never change the attempts count", () => {
-		// The machine's transitions carry no context change, so the count a row has is the count it keeps.
-		const before = { attempts: 2 };
+	it("each failed search adds one to attempts, and the third gives up", () => {
+		expect(move("claimed", 0, "SEARCH_FAILED")).toEqual({
+			state: "to_retry",
+			attempts: 1,
+		});
+		expect(move("claimed", 1, "SEARCH_FAILED")).toEqual({
+			state: "to_retry",
+			attempts: 2,
+		});
+		expect(move("claimed", 2, "SEARCH_FAILED")).toEqual({
+			state: "gave_up",
+			attempts: 3,
+		});
+	});
 
-		expect(next(storeLookupMachine, "claimed", "LET_GO", before)).toBe(
-			"to_retry",
-		);
-		expect(next(storeLookupMachine, "claimed", "LEASE_EXPIRED", before)).toBe(
-			"to_retry",
-		);
-		expect(before.attempts).toBe(2);
+	it("LET_GO keeps attempts unchanged", () => {
+		expect(move("claimed", 2, "LET_GO")).toEqual({
+			state: "to_retry",
+			attempts: 2,
+		});
+	});
+
+	it("LEASE_EXPIRED keeps attempts unchanged", () => {
+		expect(move("claimed", 1, "LEASE_EXPIRED")).toEqual({
+			state: "to_retry",
+			attempts: 1,
+		});
+	});
+
+	it("a walk of claim, fail, claim, let go, claim, fail, claim, fail ends in gave_up with the right counts", () => {
+		const steps = [
+			["CLAIM", "claimed", 0],
+			["SEARCH_FAILED", "to_retry", 1],
+			["CLAIM", "claimed", 1],
+			["LET_GO", "to_retry", 1],
+			["CLAIM", "claimed", 1],
+			["SEARCH_FAILED", "to_retry", 2],
+			["CLAIM", "claimed", 2],
+			["SEARCH_FAILED", "gave_up", 3],
+		] as const;
+
+		let at = { state: "none", attempts: 0 };
+
+		for (const [event, state, attempts] of steps) {
+			at = move(at.state, at.attempts, event);
+			expect(at).toEqual({ state, attempts });
+		}
 	});
 });
 

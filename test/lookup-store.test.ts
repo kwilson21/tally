@@ -215,6 +215,10 @@ describe("cleanLine", () => {
 		expect(long.charAt(line?.length ?? 0)).toBe(" ");
 	});
 
+	it("is null for one word longer than 80 characters, since it cannot be cut at a word", () => {
+		expect(cleanLine("a".repeat(81))).toBeNull();
+	});
+
 	it("passes a plain line unchanged", () => {
 		expect(cleanLine("Coffee shop in Arlington, VA")).toBe(
 			"Coffee shop in Arlington, VA",

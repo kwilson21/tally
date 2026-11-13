@@ -179,7 +179,11 @@ export function cleanLine(reply: string): string | null {
 	const cut = plain.slice(0, MAX_LINE + 1);
 	const space = cut.lastIndexOf(" ");
 
-	const line = (space > 0 ? cut.slice(0, space) : plain.slice(0, MAX_LINE))
+	// No word boundary within the limit: a line that cannot be cut at a word is scrapped, not cut mid-word.
+	if (space <= 0) return null;
+
+	const line = cut
+		.slice(0, space)
 		.replace(/[\s,.&'(-]+$/, "")
 		.trim();
 
