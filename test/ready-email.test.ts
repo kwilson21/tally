@@ -279,7 +279,7 @@ async function hashOf(address: string) {
 		.join("");
 }
 
-/** The email a claim stores with its address (decision 222), and the time its first try is stored as. */
+/** The email a claim stores with its address (decision 223), and the time its first try is stored as. */
 const CLAIM_MAIL = renderReadyEmail(
 	"Tally has read your last 90 days from Chase.",
 );
@@ -1824,7 +1824,7 @@ describe("the 10:00 run", () => {
 	});
 });
 
-describe("the ready email's claim keeps its email, so a run cut off after the claim loses none (decision 222)", () => {
+describe("the ready email's claim keeps its email, so a run cut off after the claim loses none (decision 223)", () => {
 	afterEach(() => vi.restoreAllMocks());
 
 	const LINE =

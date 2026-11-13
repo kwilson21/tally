@@ -1,8 +1,11 @@
 // "Never suggest" rules (spec §5, §7, §8.6, decision 101): the lines a person said Yes to, so Tally stops
 // making that suggestion for that store. Only a Yes writes one; nothing else in the app does. A rule only
 // hides the suggestion below the threshold: a guess Tally is sure of still applies (decision 101).
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { tidyName } from "../transactions/tidy-name";
 import { merchantKeySql } from "./merchant-key";
+import { merchants, neverSuggestRules as ruleTable } from "./schema";
 
 // A name or a category has no No, so only these three suggestions ever write a line (decision 101).
 export const NEVER_SUGGEST_KINDS = [
@@ -54,6 +57,7 @@ const toRule = (row: Row): NeverSuggestRule => ({
 export async function neverSuggestRules(
 	db: D1Database,
 ): Promise<NeverSuggestRule[]> {
+	// stays SQL: a NOT EXISTS over transactions joined to the rules, decision 179.
 	const { results } = await db
 		.prepare(
 			`${RULE_SELECT}
@@ -83,6 +87,7 @@ export async function addNeverSuggest(
 		decidedOn: string;
 	},
 ): Promise<boolean> {
+	// stays SQL: INSERT OR IGNORE also skips CHECK and NOT NULL failures, which onConflictDoNothing does not (decision 179).
 	const result = await db
 		.prepare(
 			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
@@ -106,12 +111,24 @@ export async function neverSuggestLine(
 
 	if (knownKind === undefined) return null;
 
-	const rule = await db
-		.prepare(
-			`${RULE_SELECT} WHERE r.id = ? AND r.merchant_key = ? AND r.kind = ?`,
+	const rule = await drizzle(db)
+		.select({
+			id: ruleTable.id,
+			merchantKey: ruleTable.merchantKey,
+			displayName: merchants.displayName,
+			kind: ruleTable.kind,
+			decidedOn: ruleTable.decidedOn,
+		})
+		.from(ruleTable)
+		.leftJoin(merchants, eq(merchants.rawName, ruleTable.merchantKey))
+		.where(
+			and(
+				eq(ruleTable.id, id),
+				eq(ruleTable.merchantKey, merchantKey),
+				eq(ruleTable.kind, knownKind),
+			),
 		)
-		.bind(id, merchantKey, knownKind)
-		.first<Row>();
+		.get();
 
 	return rule ? toRule(rule) : null;
 }
@@ -121,6 +138,7 @@ export async function neverSuggestLine(
  * bank-text lines of its charges, under every key the store goes by (decision 101), so a later sync can't copy a
  * removed line back.
  */
+// stays raw: feeds a raw db.batch in settings-saves.ts; moves with that batch.
 export const removeNeverSuggestStatement = (
 	db: D1Database,
 	rule: Pick<NeverSuggestRule, "merchantKey" | "kind">,

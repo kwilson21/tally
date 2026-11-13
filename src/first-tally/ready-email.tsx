@@ -3,7 +3,7 @@
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
 // still on setup's reading screen (while it refreshes) or the questions page sees the questions there instead. An address is
 // claimed in the record's readyEmailedTo before its email goes, and the claim stores that email (its whole subject, HTML and
-// text, as a kept try with tried: false), and the claim's time (readyClaimedAt), in the same write (decision 222). The claim is
+// text, as a kept try with tried: false), and the claim's time (readyClaimedAt), in the same write (decision 223). The claim is
 // released unless the email is delivered. A claim cut off after its write (a deploy, a crash, an eviction) is found after
 // READY_LEASE_MINUTES (ten minutes): the next run sends the stored email again, through Resend only, under the same key. A try Resend may
 // already have accepted (no answer, or any answer but a success, deliver.ts) is kept: the whole email it tried and the UTC time of
@@ -64,7 +64,7 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
  * reconnectRecipients' rule), or when its person checked in on a first-week page within `awayMs` (home_seen_at): they are
  * still there, so a later minute tries them. `extraGuard` adds one more condition after the list's, with ?1 as the address.
  * `extraSet` writes more paths in the same statement, as `, '<path>', <value>, ...` (the push's stamp, decision 149; the
- * email's kept try and its stamp, decision 222), so the list and those paths change together or not at all.
+ * email's kept try and its stamp, decision 223), so the list and those paths change together or not at all.
  */
 export function claimSql(
 	listPath: string,
@@ -88,7 +88,7 @@ export function claimSql(
 const PUSH_WAIT_GUARD = `\n\t\tAND (json_type(household_settings.value, '$.readyPushedAt."' || ?2 || '"') IS NULL
 		OR datetime(json_extract(household_settings.value, '$.readyPushedAt."' || ?2 || '"')) <= datetime('now', '-${EMAIL_AFTER_PUSH_MS / 1000} seconds'))`;
 
-// The email's claim writes its kept try and its stamp with the list (decision 222): ?2 is the address's hash and ?3 the kept try the
+// The email's claim writes its kept try and its stamp with the list (decision 223): ?2 is the address's hash and ?3 the kept try the
 // claim stores, as JSON ({"mail", "at", "tried": false}). An entry already kept for the hash stays as it is (COALESCE), so an earlier
 // try's email and time are never replaced. The stamp is SQLite's UTC time, as the push's is (PUSH_STAMP_SQL).
 const CLAIM_KEPT = `, '$.heldReadyEmail."' || ?2 || '"', json(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail."' || ?2 || '"'), json(?3))),
@@ -124,7 +124,7 @@ const DROP_HELD_SQL = `UPDATE household_settings
 		'$.readyClaimedAt."' || ?1 || '"')
 	WHERE key = 'first_tally'`;
 
-// Recovers a cut-off claim (decision 222): re-stamps it, and only while the address is still listed, a kept try is stored, and the
+// Recovers a cut-off claim (decision 223): re-stamps it, and only while the address is still listed, a kept try is stored, and the
 // stamp is at least the lease old. Of several runs at once only the one that changes the row (meta.changes) sends. ?1 is the
 // address's hash and ?2 the address. A stamp that is missing reads NULL, so a claim with no stamp is never recovered.
 const RECOVER_SQL = `UPDATE household_settings
@@ -149,7 +149,7 @@ const UPGRADE_LEGACY_SQL = `UPDATE household_settings
 /**
  * A try Resend may hold, kept for its address (decision 146): the whole email it tried, and the UTC time of the first such try
  * as `YYYY-MM-DDTHH:MM:SSZ`, which later held tries never change. `tried: false` marks an email a claim stored before any run
- * sent it (decision 222): its first try is a fresh try, so Cloudflare's email may still be used. Without it, the email may
+ * sent it (decision 223): its first try is a fresh try, so Cloudflare's email may still be used. Without it, the email may
  * already have reached Resend, and only Resend is tried.
  */
 type KeptTry = { mail: Mail; at: string; tried?: false };
@@ -469,7 +469,7 @@ async function sendKept(
 }
 
 /**
- * Sends the stored email of an address whose claim was cut off (decision 222), if this run is the one that re-stamps it. Returns
+ * Sends the stored email of an address whose claim was cut off (decision 223), if this run is the one that re-stamps it. Returns
  * false when the address is not in that state (it is not listed, it has no kept try, its stamp is under the lease, or another
  * run re-stamped it first): the address then goes on to the claim, which changes no row for a listed address. Returns true when
  * this run took the address, so no fresh email is built for it. A stored email that can't be read is dropped, not sent.
@@ -510,7 +510,7 @@ async function recoverCutOff(
  * the gate is read again and the email is built from that read, so its words are true when it goes. A closed gate (a question
  * answered, a bank linked with its history still loading, the last bank removed, a sort waiting) ends the run there, and
  * nothing more is sent. Another bank linked or removed changes the words from then on. An address no longer a member is
- * skipped on its own (CLAIM_SQL). Each address's claim stores the email it will send, with the time of the claim (decision 222).
+ * skipped on its own (CLAIM_SQL). Each address's claim stores the email it will send, with the time of the claim (decision 223).
  * A claim cut off after that write is found by a later run once its stamp is READY_LEASE_MINUTES (ten minutes) old, and that stored email
  * is sent again, through Resend only, under its key, if this run is the one that takes it; the record is read again first, so
  * a closed gate sends nothing. A try Resend may hold keeps its whole email and the time of that first try (KeptTry). The
@@ -552,7 +552,7 @@ export async function runReadyEmail(
 		if (read === null) break;
 		const hash = await addressHashOf(recipient);
 
-		// A claim cut off earlier is sent again first (decision 222); an address it does not take is claimed below.
+		// A claim cut off earlier is sent again first (decision 223); an address it does not take is claimed below.
 		if (await recoverCutOff(sending, recipient, hash)) continue;
 
 		// The email is built before the claim, so the claim stores the words it will send, with the time of the claim.
