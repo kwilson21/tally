@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
 import {
+	excludedBreakdown,
 	getTransaction,
 	listTransactions,
 	monthCounts,
@@ -778,6 +779,10 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 	const PART = 9513;
 	const DEBIT = 9514;
 	const NOT_TRANSFER = 9515;
+	const PLAID_CREDIT = 9516;
+	const PLAID_DEBIT = 9517;
+	const PLAID_OTHER = 9518;
+	const PLAID_CARD = 9519;
 	const MONTH = "2026-09";
 
 	const loadMonthSummary = async (month: string) =>
@@ -793,11 +798,12 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 		flagTransfer?: number;
 		flagIncome?: number;
 		excluded?: number;
-		excludedSource?: "user" | "jev" | null;
+		excludedSource?: "user" | "jev" | "plaid" | null;
 		isSplit?: number;
 		parentId?: number | null;
 		refundOfId?: number | null;
 		categoryId?: number | null;
+		plaidCategory?: string | null;
 	};
 
 	/** Inserts one row in the bank account with the given state; everything else is the column default. */
@@ -819,13 +825,14 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 			parentId: null,
 			refundOfId: null,
 			categoryId: null,
+			plaidCategory: null,
 			...over,
 		};
 
 		await db
 			.prepare(
-				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, flag_transfer, flag_income, excluded, excluded_source, is_split, parent_id, refund_of_id, updated_by) VALUES
-				(?, ?, '2026-09-05', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')`,
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, flag_transfer, flag_income, excluded, excluded_source, is_split, parent_id, refund_of_id, plaid_category, updated_by) VALUES
+				(?, ?, '2026-09-05', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')`,
 			)
 			.bind(
 				id,
@@ -841,6 +848,7 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 				s.isSplit,
 				s.parentId,
 				s.refundOfId,
+				s.plaidCategory,
 			)
 			.run();
 	};
@@ -963,6 +971,148 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 			income_source: null,
 			credit_reviewed: null,
 		});
+	});
+
+	it("a credit only Plaid marked as a transfer counts as income, reviewed by the person, when Exclude is turned off", async () => {
+		await seedRow(PLAID_CREDIT, {
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_IN",
+			excludedSource: "plaid",
+		});
+
+		expect(await saveEdit(db, PLAID_CREDIT, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(PLAID_CREDIT)).toEqual(incomeColumns);
+	});
+
+	it("a credit only Plaid marked as a loan payment, on a card, counts as income when Exclude is turned off", async () => {
+		await seedRow(PLAID_CARD, {
+			flagTransfer: 0,
+			plaidCategory: "LOAN_PAYMENTS",
+			excludedSource: "plaid",
+		});
+		await db
+			.prepare(
+				"UPDATE transactions SET account_id = (SELECT id FROM accounts WHERE type = 'credit' LIMIT 1) WHERE id = ?",
+			)
+			.bind(PLAID_CARD)
+			.run();
+
+		expect(await saveEdit(db, PLAID_CARD, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(PLAID_CARD)).toEqual(incomeColumns);
+	});
+
+	it("guard, passes before the change too: a debit only Plaid marked as a transfer is unchanged when Exclude is turned off", async () => {
+		await seedRow(PLAID_DEBIT, {
+			amountCents: 5000,
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_OUT",
+			excludedSource: "plaid",
+		});
+
+		await saveEdit(db, PLAID_DEBIT, panelPost(), "test");
+		expect(await creditRow(PLAID_DEBIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+			credit_reviewed_by: null,
+			refund_of_id: null,
+		});
+	});
+
+	it("guard, passes before the change too: a credit excluded some other way, with no transfer category, is unchanged", async () => {
+		await seedRow(PLAID_OTHER, {
+			flagTransfer: 0,
+			plaidCategory: "GENERAL_MERCHANDISE",
+			excludedSource: "jev",
+		});
+
+		await saveEdit(db, PLAID_OTHER, panelPost(), "test");
+		expect(await creditRow(PLAID_OTHER)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+			credit_reviewed_by: null,
+			refund_of_id: null,
+		});
+	});
+
+	it("guard, passes before the change too: an explicit review as not income wins for a credit only Plaid marked", async () => {
+		await seedRow(PLAID_CREDIT, {
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_IN",
+			excludedSource: "plaid",
+		});
+
+		expect(
+			await saveEdit(
+				db,
+				PLAID_CREDIT,
+				panelPost({ creditReviewed: true, creditReviewedWas: false }),
+				"test",
+			),
+		).toEqual({ saved: true });
+		expect(await creditRow(PLAID_CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			refund_of_id: null,
+		});
+	});
+
+	it("guard, passes before the change too: a person's earlier income choice stands for a credit only Plaid marked", async () => {
+		await seedRow(PLAID_CREDIT, {
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_IN",
+			excludedSource: "plaid",
+		});
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(PLAID_CREDIT)
+			.run();
+
+		expect(await saveEdit(db, PLAID_CREDIT, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(PLAID_CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+			refund_of_id: null,
+		});
+	});
+
+	it("the month's buckets move the Plaid-only credit from excluded to counted, and it is not held for review", async () => {
+		await seedRow(PLAID_CREDIT, {
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_IN",
+			excludedSource: "plaid",
+		});
+		const before = await monthCounts(db, MONTH);
+		const beforeExcluded = await excludedBreakdown(db, MONTH);
+
+		await saveEdit(db, PLAID_CREDIT, panelPost(), "test");
+
+		const after = await monthCounts(db, MONTH);
+		const afterExcluded = await excludedBreakdown(db, MONTH);
+		expect(after.counted - before.counted).toBe(1);
+		expect(after.heldForReview).toBe(before.heldForReview);
+		expect(beforeExcluded.transfer - afterExcluded.transfer).toBe(1);
 	});
 
 	it("guard, passes before the change too: a split part and a split parent are left as they were", async () => {
