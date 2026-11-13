@@ -70,10 +70,10 @@ A store is searched only when **all** of these hold. The first three are about p
    - a Plaid transfer category (`TRANSFER_CATEGORIES` in `src/db/plaid-transfers.ts`), Plaid's income category, or Plaid's bank-fees category (`BANK_FEES`: not a store; the owner's pick after a read of production found 12 of its 30 candidate texts were bank fees), or a row with a stored transfer, income or reimbursement flag, whoever set it (Plaid, Jev or a person), or an unanswered "Maybe transfer" or "Maybe income";
    - a payment app's name **anywhere** in the text as whole words (Venmo, Zelle, Cash App, PayPal, Apple Cash, Privacy.com's "PwP" virtual cards and the like, a short list in code: services people pay through, whose text names the service or a person, not the store);
    - a bank-rail phrase anywhere in the text (ACH, wire, a check, "payment to", "transfer to" and the like);
-   - text that reads as an instruction, after it is folded to plain characters;
+   - text that reads as an instruction;
    - nothing left after redaction, or once its words with a digit are dropped (an empty text is never sent and never used as a key).
 
-   These text checks run on the merchant key as stored **and on the raw bank text of every one of its transactions**, before cleaning and before the 40-character cut, since the cleaner strips "PAYPAL *" and a Plaid name can hide a raw text that names a rail.
+   Every one of these text checks reads the text folded to plain characters (NFKC, so full-width "ＶＥＮＭＯ" is Venmo). These text checks run on the merchant key as stored **and on the raw bank text of every one of its transactions**, before cleaning and before the 40-character cut, since the cleaner strips "PAYPAL *" and a Plaid name can hide a raw text that names a rail.
 3. **Cash, hand-entered and Apple Card rows never count as the sign in rule 1.** The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it. A text that only lacks the sign is not stored as `skipped`; it has no lookup yet and is looked at again when a new row arrives.
 4. **No rule already settles it.** A merchant rule or bank-text rule on all of it leaves it not looked up; it is searched later only if the rule goes. A rule only stops the search: a line found before the rule was made is kept and still shown.
 5. **It has not been looked up**, and the day's cap has room.
@@ -101,7 +101,9 @@ stateDiagram-v2
     to_retry --> claimed: a run claims it again
     to_retry --> skipped: it became private since the last try
     claimed --> gave_up: the third failure in a row
+    claimed --> to_retry: the last check refused it (a new row, a switch off), no failure counted
     found --> skipped: a person says "Don't use this"
+    found --> skipped: it became private (a later private row shares its text), line dropped
     nothing_found --> [*]
     gave_up --> [*]
     skipped --> [*]
@@ -251,7 +253,7 @@ Each rule was shown to bite. With one guard removed at a time, the matching rule
 - **No mark on the store.** The earlier plan marked a store once its open guesses had been asked again. The model needs no such mark: "owed a re-ask" can be read from each row. That removes a column and two of the review's findings with it, and it also covers a case the mark got wrong: guesses made while the switch was off are asked again when it comes back on.
 - **A re-ask takes its Jev call in the same save that clears the old guess.** The existing "ask again" clears first and reserves later, so the lookup's re-ask cannot simply call it. Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
 
-**Not in the model yet** (added to it before the first build brief is written): a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, the name save's guard, and a row whose bank text a sync corrected after Jev answered it (its answer no longer counts; how the row records the text Jev was asked about is settled with the model). They are stated in spec §7 and in the privacy table below.
+**Not in the model yet** (added to it before the first build brief is written): a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, the name save's guard, and a row whose bank text a sync corrected after Jev answered it (its answer no longer counts: the sync marks the row in `lookup_holds`, spec §5), the check before the Workers AI call, a claim let go by the last check, and a found text that becomes private. They are stated in spec §7 and in the privacy table below.
 
 **What a model like this does not cover**, and so has its own checklist:
 
@@ -270,6 +272,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
 | JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered its rows |
 | JANE DOE | none | GENERAL_SERVICES, one row answered, another Jev gave up on | Not yet | a row Jev gave up on has no privacy answer |
+| ＶＥＮＭＯ *ＪＡＮＥ ＤＯＥ (full-width) | none | GENERAL_SERVICES | No | folded first, then a payment app's name |
 | CORNER CAFE, corrected by Plaid to JANE DOE | none | GENERAL_SERVICES, Jev answered the old text | Not yet | Jev's answer counts only for the text it was asked about; the row is asked again first |
 | JANE DOE | none | GENERAL_SERVICES, a new row arrives after the claim | Not yet | the whole test is made again just before the search is sent |
 | JANE DOE | none | GENERAL_SERVICES, a person filed it under Kids, Jev never asked | No | a person's category choice is not Jev's privacy answer |
