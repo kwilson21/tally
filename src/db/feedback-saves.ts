@@ -10,6 +10,7 @@ import type {
 } from "../rules/feedback";
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { leftEmpty } from "./refused";
 
 /** How many messages a sender has stored in the hour before a time, as SQL over those two parameters. */
 const sentThisHour = (sender: string, now: string) =>
@@ -65,13 +66,11 @@ export function feedbackSaveStatement(
 		);
 }
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the statement above can write a NULL message. */
-const GUARD_RAISED = /NOT NULL constraint failed: feedback\.message/;
-
-/** Whether a save failed because the sender's hour had filled up since the rule read it, and not for any other reason. */
-export function feedbackChangedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
-}
+/**
+ * Whether a save failed because the sender's hour had filled up since the rule read it, and not for any other reason.
+ * Only the statement above can write a NULL message.
+ */
+export const feedbackChangedSinceRead = leftEmpty("feedback", "message");
 
 /**
  * Reads the sender's count, asks the rule and stores the message, asking again on a fresh count when the guard raises

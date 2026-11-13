@@ -11,6 +11,7 @@ import type {
 import { type BudgetCategory, budgetCategory } from "./budgets";
 import { Database } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { leftEmpty } from "./refused";
 
 /** A category's budget in `month`, as SQL: the latest amount at or before it, or NULL when it has none yet. */
 const BUDGET_IN_MONTH =
@@ -88,13 +89,15 @@ export function savingsGoalSaveStatement(
 		.bind(save.month, save.cents, save.expectedGoalCents);
 }
 
-/** The text of the guards' failure, as D1 passes SQLite's message on. Only the two statements above can write a NULL amount. */
-const GUARD_RAISED =
-	/NOT NULL constraint failed: (budget_amounts|savings_goal_amounts)\.amount_cents/;
+const budgetGuardRaised = leftEmpty("budget_amounts", "amount_cents");
+const savingsGuardRaised = leftEmpty("savings_goal_amounts", "amount_cents");
 
-/** Whether a save failed because what the rule read had changed, and not for any other reason. */
+/**
+ * Whether a save failed because what the rule read had changed, and not for any other reason. Only the two statements
+ * above can write a NULL amount.
+ */
 export function changedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
+	return budgetGuardRaised(error) || savingsGuardRaised(error);
 }
 
 /** Runs a budget or savings save. The guard's failure becomes ChangedSinceRead; anything else is a defect. */

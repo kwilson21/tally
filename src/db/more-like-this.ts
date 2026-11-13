@@ -18,6 +18,7 @@ import { Database, runWith } from "./database";
 import { decideAndSave, guardedSave } from "./guarded-save";
 import { merchantKeySql } from "./merchant-key";
 import { jevSaysMixedSql } from "./mixed-trip";
+import { leftEmpty } from "./refused";
 import { cardLabel, JOIN_MERCHANT, LABEL_SQL } from "./suggestions-queue";
 import { NEEDS_CATEGORY, visibleNoteSql } from "./transactions";
 
@@ -260,8 +261,8 @@ export const moreStatements = (
 		.bind(save.categoryId, save.who, JSON.stringify(save.move)),
 ];
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. */
-const GUARD_RAISED = /NOT NULL constraint failed: maybe_answers\.confidence/;
+/** Whether an Add's save failed because its guard raised: only the guard can try to record a NULL guess. */
+const guardRaised = leftEmpty("maybe_answers", "confidence");
 
 /**
  * Reads the Add's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the
@@ -286,7 +287,7 @@ export const decideMore = <E>(
 			save: (write) =>
 				guardedSave(
 					() => db.batch(moreStatements(db, write, posted)),
-					(error) => GUARD_RAISED.test(error.message),
+					guardRaised,
 				),
 			gaveUp: "The purchases kept changing while they were being added.",
 		});

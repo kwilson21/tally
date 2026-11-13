@@ -22,6 +22,7 @@ import { ChangedSinceRead, decideAndSave, guardedSave } from "./guarded-save";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
+import { leftEmpty } from "./refused";
 import { categorySuggestions } from "./schema";
 import type { ListRow } from "./transactions";
 
@@ -506,8 +507,8 @@ export const createStatements = (
 		.bind(save.suggestionId),
 ];
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a category with no name. */
-const CREATE_GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
+/** Whether a Yes's save failed because its guard raised. Only the guard can try to add a category with no name. */
+const createGuardRaised = leftEmpty("categories", "name");
 
 /**
  * Reads the Yes's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the
@@ -534,7 +535,7 @@ export const decideCreate = <E>(
 			save: (write) =>
 				guardedSave(
 					() => db.batch(createStatements(db, write, request.shown)),
-					(error) => CREATE_GUARD_RAISED.test(error.message),
+					createGuardRaised,
 					() => new NameTaken(),
 				),
 			gaveUp: "A suggestion kept changing while its Yes was being saved.",

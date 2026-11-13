@@ -38,6 +38,7 @@ import {
 	neverSuggestLine,
 	removeNeverSuggestStatement,
 } from "./never-suggest";
+import { leftEmpty } from "./refused";
 import { waitingForJevSql } from "./transactions";
 
 /**
@@ -58,13 +59,11 @@ const guard = (
 		)
 		.bind(...binds, expectedVersion);
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only a guard can try to store a NULL setting. */
-const GUARD_RAISED = /NOT NULL constraint failed: household_settings\.value/;
-
-/** Whether a save failed because what the rule read had changed, and not for any other reason. */
-export function settingsChangedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
-}
+/** Whether a save failed because what the rule read had changed, and not for any other reason. Only a guard can try to store a NULL setting. */
+export const settingsChangedSinceRead = leftEmpty(
+	"household_settings",
+	"value",
+);
 
 /**
  * Reads a settings rule's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts

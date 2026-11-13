@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 import {
 	databaseRefusal,
+	leftEmpty,
 	NotNullFailed,
 	TableMissing,
 	TriggerRaised,
@@ -81,4 +82,27 @@ it("names nothing for an error that is not the database stopping a write", () =>
 	expect(
 		databaseRefusal(new Error("D1_ERROR: Network connection lost.")),
 	).toBeNull();
+});
+
+it("tells a save's guard by the one column it leaves empty, and nothing else", async () => {
+	let raised = new Error("nothing raised");
+
+	try {
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('refusal_probe', NULL)",
+		).run();
+	} catch (error) {
+		if (error instanceof Error) raised = error;
+	}
+
+	expect(leftEmpty("household_settings", "value")(raised)).toBe(true);
+	expect(leftEmpty("household_settings", "key")(raised)).toBe(false);
+	expect(leftEmpty("categories", "value")(raised)).toBe(false);
+
+	expect(
+		leftEmpty(
+			"household_settings",
+			"value",
+		)(new Error("D1_ERROR: Network connection lost.")),
+	).toBe(false);
 });
