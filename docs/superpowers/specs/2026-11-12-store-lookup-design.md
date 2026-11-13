@@ -309,7 +309,8 @@ The measurement cannot show how far a wrong line pushes Jev, and the family's vo
 - **The line is only a second look.** A transaction's ordinary Jev call never carries the line, so flags, details and sure guesses are made and applied as today. The line goes only into the category-only second ask about a guess Jev was not sure of.
 - **Keep the better guess.** The first guess stays while Jev is asked again; the line-backed answer replaces it only if Jev is more sure with the line than without.
 - **A guess made with a line is never filed alone, for now.** It is a Maybe however sure Jev is. A guess made without a line is filed as before. Filing at 80% or more is the aim, turned on by a new decision once at least 30 such guesses have been answered and no more than one was wrong.
-- **One answer corrects the whole store.** A person's answer clears the store's other open line-backed guesses, which are sorted again from that answer.
+- **One answer corrects the whole store.** A store is a lookup text, so every branch counts as one: a person's answer stops the line for all of its bank texts and clears its other open line-backed guesses, which are sorted again without it.
+- **A second ask that fails is not tried again.** The first guess stays and the step stops for that run.
 - **Nothing is forced.** The line stays one short free-text line; the prompt tells Workers AI to answer "nothing found" unless the results plainly say what kind of place it is, and the three code checks (length, plain characters, not an instruction) stay behind it.
 
 Dropped: the real-search measurement (#986), a shadow trial, and a fixed list of kinds of place (#1030).
