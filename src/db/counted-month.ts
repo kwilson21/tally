@@ -38,7 +38,7 @@ export const paysBillSql = (alias: string) =>
 
 /**
  * True when a planned expense's linked payment is the transaction `alias` names, or, for a split part, its parent
- * (decision 82): the plan twin of paysBillSql. A plan's payment keeps its own category and counts on its own date;
+ * (decision 82): the planned-expense version of paysBillSql. A plan's payment keeps its own category and counts on its own date;
  * the link only keeps an excluded payment in the budget, once, as a bill's link does.
  */
 export const paysPlanSql = (alias: string) =>
@@ -82,7 +82,7 @@ export const includedSql = (
 /**
  * includedSql in TypeScript, for a row as a save leaves it: not excluded, or paying a bill or a planned expense.
  * `excluded` is the exclusion once saved (excludedAfterSave in src/transactions/edit.ts), so a lifted Plaid exclusion
- * counts. Keep it in step with includedSql. The save feeds jevAsksAbout's `included` from it; the edit panel draws as if
+ * counts. Keep it in step with includedSql (test/included-sql.test.ts checks every case). The save feeds jevAsksAbout's `included` from it; the edit panel draws as if
  * included (name-choices.tsx).
  */
 export function isIncluded(
