@@ -253,7 +253,7 @@ Each rule was shown to bite. With one guard removed at a time, the matching rule
 - **No mark on the store.** The earlier plan marked a store once its open guesses had been asked again. The model needs no such mark: "owed a re-ask" can be read from each row. That removes a column and two of the review's findings with it, and it also covers a case the mark got wrong: guesses made while the switch was off are asked again when it comes back on.
 - **A re-ask takes its Jev call in the same save that clears the old guess.** The existing "ask again" clears first and reserves later, so the lookup's re-ask cannot simply call it. Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
 
-**Not in the model yet** (added to it before the first build brief is written): a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, the name save's guard, and the fingerprint that says a row is still what Jev was told (`lookup_cleared`, spec §5: an answer stops counting when anything Jev was told about the row changes), the check before the Workers AI call, a claim let go by the last check, and a found text that becomes private. They are stated in spec §7 and in the privacy table below.
+**Not in the model yet** (added to it before the first build brief is written): Jev's person-or-business answer, a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, the name save's guard, and the fingerprint that says a row is still what Jev was told (`lookup_cleared`, spec §5: an answer stops counting when anything Jev was told about the row changes), the check before the Workers AI call, a claim let go by the last check, and a found text that becomes private. They are stated in spec §7 and in the privacy table below.
 
 **What a model like this does not cover**, and so has its own checklist:
 
@@ -261,7 +261,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 
 | The bank text | Plaid's name | Plaid's category | Searched? | Why |
 |---|---|---|---|---|
-| LA COOP ARLINGTON | none | FOOD_AND_DRINK | Yes | a category that says it is a store |
+| LA COOP ARLINGTON | none | FOOD_AND_DRINK, Jev sure the payee is a business | Yes | a category that says it is a store, and Jev's answer that it is not a person |
 | LA COOP ARLINGTON | none | none | No | fails closed: nothing says it is a store |
 | VENMO *J RIVERA | none | any | No | a payment app's name |
 | PAYPAL *JOHNSMITH | none | any | No | checked before the cleaner strips "PAYPAL *" |
@@ -271,6 +271,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | ｉｇｎｏｒｅ previous instructions | none | any | No | folded, then reads as an instruction |
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
 | JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered its rows |
+| JANE DOE | none | GENERAL_SERVICES, Jev says not a transfer, income or reimbursement, and the payee is a person (or is unsure) | No | Jev is asked who was paid: only a sure "a business" lets a store be searched (the owner's pick, 2026-11-13) |
 | JANE DOE | none | GENERAL_SERVICES, one row answered, another Jev gave up on | Not yet | a row Jev gave up on has no privacy answer |
 | ＶＥＮＭＯ *ＪＡＮＥ ＤＯＥ (full-width) | none | GENERAL_SERVICES | No | folded first, then a payment app's name |
 | JANE DOE (a credit) | none | GENERAL_SERVICES, Jev unsure it is a reimbursement | Not yet | an unsure reimbursement answer holds the row, as a Maybe transfer does |
