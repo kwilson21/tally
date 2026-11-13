@@ -141,19 +141,38 @@ const PERSON_TAKEN = takesDetailSql(
 	"for_person_cleared",
 );
 
-// Which category log row moves with the pending row's category (the first statement below). Each arm mirrors the
-// category statement it names, so a change to that statement must change its arm too. `p` is the pending row, `t` the posted.
-/** Mirrors the first category statement: a person's pick on the pending row moves onto the posted row. */
-const LOG_PERSON_PICK = `p.category_source = 'user' AND p.category_id IS NOT NULL
-	AND COALESCE(t.category_source, '') != 'user'`;
+// The three cases in which the pending row's category moves onto the posted row, each written once as a condition on
+// the posted row. A category statement below and the log's arm for it both call the same function, so the log row moves
+// exactly when the category does (test/pending-merge-log.test.ts runs every pending row against every posted row).
+// `p` is the pending row; `posted` names the posted row: "transactions" in a statement, "t" in the log's subquery.
 
-/** Mirrors JEV_CATEGORY_ARM (the Jev answer statement): Jev's category moves onto a posted row with no category, at the same amount, never a split. */
-const LOG_JEV_PICK = `p.category_confidence IS NOT NULL AND p.amount_cents = ?3
-	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL AND t.is_split = 0`;
+/** A person's pick on the pending row moves onto the posted row, unless the posted row holds a person's pick of its own. */
+const personPickMoves = (posted: string) =>
+	`p.category_source = 'user' AND p.category_id IS NOT NULL AND COALESCE(${posted}.category_source, '') != 'user'`;
 
-/** Mirrors the split statement that takes the pre-split category when the amount changed. */
-const LOG_SPLIT_CATEGORY = `p.is_split = 1 AND p.amount_cents != ?3
-	AND t.is_split = 0 AND t.split_removed_from_cents IS NULL AND COALESCE(t.category_source, '') != 'user'`;
+/** Jev's category arm: a pick, or one below the threshold kept with its confidence, onto a posted row with no category. */
+const jevCategoryArm = (posted: string) =>
+	`p.category_confidence IS NOT NULL AND ${posted}.category_id IS NULL AND ${posted}.category_source IS NULL`;
+
+/** What the Jev answer statement needs of the posted row whichever arm it takes: the same amount, no confidence of its own, not a split. */
+const jevAnswerFits = (posted: string) =>
+	`p.amount_cents = ?3 AND ${posted}.category_confidence IS NULL AND ${posted}.is_split = 0`;
+
+/** The pending purchase was split and the bank's amount is different now: its parts go, and a split is not carried over. */
+const PENDING_SPLIT_AMOUNT_CHANGED = `p.is_split = 1 AND p.amount_cents != ?3`;
+
+/** The posted row says its split was removed because the amount changed, and takes the category the pending purchase had. */
+const splitRemovedByAmount = (posted: string) =>
+	`${PENDING_SPLIT_AMOUNT_CHANGED} AND ${posted}.is_split = 0 AND ${posted}.split_removed_from_cents IS NULL`;
+
+/** The posted row holds a person's pick, which a split's removal leaves alone. */
+const holdsPersonsPick = (posted: string) =>
+	`COALESCE(${posted}.category_source, '') = 'user'`;
+
+/** The log arms: each is the condition of the category statement it is named for, with the posted row called `t`. */
+const LOG_PERSON_PICK = personPickMoves("t");
+const LOG_JEV_PICK = `${jevCategoryArm("t")} AND ${jevAnswerFits("t")}`;
+const LOG_SPLIT_CATEGORY = `${splitRemovedByAmount("t")} AND NOT ${holdsPersonsPick("t")}`;
 
 /**
  * The posted row's part a pending part's linked bill payment moves to: its lowest-id part with the same amount and
@@ -185,10 +204,10 @@ const POSTED_GROUP_PAYS = `(EXISTS (SELECT 1 FROM bill_payments other WHERE othe
 
 /**
  * Jev's category arm of the Jev answer statement (STATEMENTS): a confident pick, or one below the threshold kept with its
- * confidence, onto a posted row with no category and no confidence. The statement's shared guard adds the amount, the
- * unset confidence and that the purchase isn't split.
+ * confidence, onto a posted row with no category and no confidence. The statement's shared guard (`jevAnswerFits`) adds
+ * the amount, the unset confidence and that the purchase isn't split.
  */
-const JEV_CATEGORY_ARM = `p.category_confidence IS NOT NULL AND transactions.category_id IS NULL AND transactions.category_source IS NULL`;
+const JEV_CATEGORY_ARM = jevCategoryArm("transactions");
 
 /**
  * Jev's mixed-trip arm of the same statement (#233, #546): its pick, none-fit or mixed reading onto a posted row with a
@@ -218,8 +237,7 @@ const STATEMENTS = [
 		AND (${LOG_PERSON_PICK} OR ${LOG_JEV_PICK} OR ${LOG_SPLIT_CATEGORY}))`,
 	// Category: a person's pick on the pending row wins over anything but a person's pick on the posted one.
 	`UPDATE transactions SET category_id = p.category_id, category_source = 'user', category_confidence = NULL
-	 ${FROM_PENDING} AND p.category_source = 'user' AND p.category_id IS NOT NULL
-	 AND COALESCE(transactions.category_source, '') != 'user'`,
+	 ${FROM_PENDING} AND ${personPickMoves("transactions")}`,
 	// The note: the rank rule picks the state (the later one, a tie keeping the posted row's), and the text moves with it. Every
 	// compatibility flag is then written from that picked state, so one rule decides the row and no flag is reread from another.
 	// Each SET reads the row's values from before this statement.
@@ -290,7 +308,7 @@ const STATEMENTS = [
 		category_confidence = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_confidence ELSE transactions.category_confidence END,
 		jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
 		jev_also_category_id = p.jev_also_category_id
-	 ${FROM_PENDING} AND p.amount_cents = ?3 AND transactions.category_confidence IS NULL AND transactions.is_split = 0
+	 ${FROM_PENDING} AND ${jevAnswerFits("transactions")}
 	 AND (${JEV_CATEGORY_ARM} OR ${JEV_MIXED_ARM})`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
@@ -388,21 +406,20 @@ const STATEMENTS = [
 	// picked the posted row's category.
 	`UPDATE transactions SET split_removed_from_cents = p.amount_cents,
 		split_removed_bills = ${UNPAID_BILLS_SQL(PENDING)},
-		category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_id ELSE p.category_id END,
-		category_source = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_source ELSE p.category_source END,
-		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE NULL END,
-		category_suggestion_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_suggestion_id ELSE NULL END,
-		jev_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_category_id ELSE NULL END,
-		jev_none_fit = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_none_fit ELSE 0 END,
-		jev_mixed = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_mixed ELSE NULL END,
-		jev_also_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_also_category_id ELSE NULL END
-	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
-	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
+		category_id = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.category_id ELSE p.category_id END,
+		category_source = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.category_source ELSE p.category_source END,
+		category_confidence = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.category_confidence ELSE NULL END,
+		category_suggestion_id = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.category_suggestion_id ELSE NULL END,
+		jev_category_id = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.jev_category_id ELSE NULL END,
+		jev_none_fit = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.jev_none_fit ELSE 0 END,
+		jev_mixed = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.jev_mixed ELSE NULL END,
+		jev_also_category_id = CASE WHEN ${holdsPersonsPick("transactions")} THEN transactions.jev_also_category_id ELSE NULL END
+	 ${FROM_PENDING} AND ${splitRemovedByAmount("transactions")}`,
 	// A refund of one of those parts is unlinked, and its row says which purchase changed, with the pending
 	// purchase's date, until a person links it again (decision 99), as sync does. Its parts are deleted below.
 	`UPDATE transactions SET refund_of_id = NULL, refund_unlinked_purchase_date = (SELECT p.date FROM transactions p WHERE p.id = ${PENDING})
 	 WHERE refund_of_id IN (SELECT part.id FROM transactions part WHERE part.parent_id = ${PENDING})
-	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
+	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND ${PENDING_SPLIT_AMOUNT_CHANGED})
 	 AND ${READY}`,
 	// When the posted row keeps its own split, a pending part's linked bill payment stays paid on the posted part with the
 	// same amount and category that has no payment of its own, as saveSplit keeps one (decision 99). When no such part is
