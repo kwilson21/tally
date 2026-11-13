@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import { actor } from "../actor";
 import { householdToday } from "../dates";
@@ -8,6 +9,8 @@ import {
 	takeBackQuestionStrokes,
 } from "../db/first-tally";
 import { hxTrigger } from "../htmx";
+import { PlaidBank } from "../machines/bank-request";
+import { askBank, plaidBankFor } from "../plaid/bank-request";
 import {
 	createLinkToken,
 	exchangePublicToken,
@@ -167,16 +170,21 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 	if (!item) return c.notFound();
 
 	try {
-		const accessToken = await decryptToken(
-			item.access_token_encrypted,
-			c.env.TOKEN_ENCRYPTION_KEY ?? "",
+		// The request waits for Plaid inside the bridged machine (decision 210): the bank is fixed only once Plaid says
+		// its login works. What Plaid answered is logged where it is asked.
+		const from = await readConnection(c.env.DB, item.id);
+
+		if (from === null) return c.notFound();
+
+		const landed = await Effect.runPromise(
+			askBank(from, "FIX").pipe(
+				Effect.provideService(PlaidBank, plaidBankFor(c.env, item)),
+			),
 		);
 
-		const result = await getItem(c.env, accessToken);
+		if (landed.outcome === "waiting") return c.notFound();
 
-		if (result.item.error) {
-			return c.html(repairFailure(result.item.error), 502);
-		}
+		if (landed.outcome !== "done") return c.html(repairFailure(null), 502);
 
 		let repaired = await clearAttention(c.env.DB, item.id);
 

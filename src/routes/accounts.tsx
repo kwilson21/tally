@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -28,14 +29,15 @@ import {
 	appleCardSample,
 } from "../demo/apple-card-sample";
 import { hxTrigger } from "../htmx";
+import { PlaidBank } from "../machines/bank-request";
 import { toCents } from "../money";
 import { netWorthView } from "../net-worth";
 import { afterSyncSteps } from "../plaid/after-sync";
-import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
-import { disconnectStatement } from "../plaid/item-store";
+import { askBank, plaidBankFor } from "../plaid/bank-request";
+import type { PlaidEnv } from "../plaid/client";
+import { disconnectStatement, readConnection } from "../plaid/item-store";
 import { sortAfterSync } from "../plaid/sort-after-sync";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
-import { decryptToken } from "../plaid/token-crypto";
 import { AccountsTop } from "../views/accounts-top";
 import { AppleCardGroup, type AppleCardView } from "../views/apple-card-group";
 import { AppleCardRemove } from "../views/apple-card-remove";
@@ -787,22 +789,19 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
 	const plaidEnv: Env & PlaidEnv = c.env;
 
-	try {
-		const token = await decryptToken(
-			item.access_token_encrypted,
-			plaidEnv.TOKEN_ENCRYPTION_KEY ?? "",
-		);
+	// The request waits for Plaid inside the bridged machine (decision 210): the bank is disconnected only once Plaid
+	// has let it go, or already had. A bank disconnected since the row was read takes no request.
+	const from = (await readConnection(c.env.DB, item.id)) ?? "disconnected";
 
-		try {
-			await removeItem(plaidEnv, token);
-		} catch (error) {
-			if (
-				!(error instanceof PlaidError) ||
-				error.error_code !== "ITEM_NOT_FOUND"
-			)
-				throw error;
-		}
-	} catch {
+	const landed = await Effect.runPromise(
+		askBank(from, "DISCONNECT").pipe(
+			Effect.provideService(PlaidBank, plaidBankFor(plaidEnv, item)),
+		),
+	);
+
+	if (landed.outcome === "waiting") return backToAccounts(c, already);
+
+	if (landed.outcome !== "done")
 		return c.html(
 			<DisconnectPage
 				item={item}
@@ -811,7 +810,6 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 			/>,
 			502,
 		);
-	}
 
 	// One batch is one transaction. Each delete runs only while the bank is still connected, and the
 	// disconnect comes last, so a second submit (another tab kept the history) deletes nothing.
