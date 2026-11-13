@@ -512,6 +512,136 @@ export const categoryArchivePeriods = sqliteTable(
 );
 
 /**
+ * A one-off cost set aside in one month until a payment is linked to it (migrations/0053_planned_expenses.sql). A plan
+ * has no category. Its transaction link is UNIQUE, and is cleared (SET NULL) when that transaction is deleted.
+ */
+export const plannedExpenses = sqliteTable("planned_expenses", {
+	id: integer().primaryKey({ autoIncrement: true }),
+	name: text().notNull(),
+	// The migration's CHECK here is (amount_cents > 0), not an IN list, so the drift test does not read it.
+	amountCents: integer("amount_cents").notNull(),
+	// The migration's CHECK here is (month GLOB 'YYYY-MM'), not an IN list, so the drift test does not read it.
+	month: text().notNull(),
+	// The payment linked to the plan. One payment pays at most one plan.
+	transactionId: integer("transaction_id")
+		.unique()
+		.references(() => transactions.id, { onDelete: "set null" }),
+	// The email claim of who planned it (or 'demo').
+	createdBy: text("created_by").notNull(),
+});
+
+/**
+ * The undo hold for a deleted planned expense, kept for ten seconds so its Undo writes the plan back once
+ * (migrations/0053_planned_expenses.sql). Holds older than that are pruned by each delete.
+ */
+export const plannedDeleteHolds = sqliteTable("planned_delete_holds", {
+	// The undo token the toast carries.
+	token: text().primaryKey(),
+	// The server's clock in epoch milliseconds, for pruning.
+	createdMs: integer("created_ms").notNull(),
+	name: text().notNull(),
+	amountCents: integer("amount_cents").notNull(),
+	month: text().notNull(),
+	// The payment the plan had. ON DELETE SET NULL, so a payment deleted inside the window is forgotten.
+	transactionId: integer("transaction_id").references(() => transactions.id, {
+		onDelete: "set null",
+	}),
+	// Whether the plan had a payment, so Undo can say it is no longer linked. The only IN list in this table.
+	hadPayment: integer("had_payment").notNull().default(0),
+	createdBy: text("created_by").notNull(),
+});
+
+/**
+ * A cash entry's delete snapshot, kept so its Undo can restore it once from the toast
+ * (migrations/0027_cash_delete_undo.sql, with plan_rows added later).
+ */
+export const cashDeleteHolds = sqliteTable("cash_delete_holds", {
+	// The undo token the toast carries.
+	token: text().primaryKey(),
+	createdAt: integer("created_at").notNull(),
+	displayName: text("display_name").notNull(),
+	// The entry, its split parts, its payments and its refunds, as stored when it was deleted.
+	transactionRow: text("transaction_row").notNull(),
+	splitRows: text("split_rows").notNull(),
+	paymentRows: text("payment_rows").notNull(),
+	refundRows: text("refund_rows").notNull(),
+	// Added by migrations/0031; NULL when the hold has none.
+	restoreMarker: text("restore_marker"),
+	// The planned expenses the entry paid, as JSON, so Undo can point each plan back at the restored row (migrations/0054).
+	planRows: text("plan_rows").notNull().default("[]"),
+});
+
+/**
+ * The name Workers AI gave a Maybe card's "New category" row, kept once for each transaction (migrations/0063_maybe_names.sql).
+ * The row goes with its transaction (CASCADE).
+ */
+export const maybeNames = sqliteTable("maybe_names", {
+	// The transaction the name was asked for. Its primary key, so one row per transaction.
+	transactionId: integer("transaction_id")
+		.primaryKey()
+		.references(() => transactions.id, { onDelete: "cascade" }),
+	// The name Tally suggested, or NULL for "no name" (so a transaction is never asked twice).
+	name: text(),
+	// A random token set when a request claims the transaction. Only the request holding it may finish the row.
+	claim: text().notNull(),
+	createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	categoriesKey: text("categories_key"),
+});
+
+/**
+ * A bank's balance on a day, one row per account and date (migrations/0001_initial_schema.sql). The key is
+ * (account_id, date), so both columns are NOT NULL and in the composite primary key.
+ */
+export const balanceHistory = sqliteTable(
+	"balance_history",
+	{
+		accountId: integer("account_id")
+			.notNull()
+			.references(() => accounts.id, { onDelete: "cascade" }),
+		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		date: text().notNull(),
+		// The migration's CHECK here is (typeof(balance_cents) = 'integer'), not an IN list, so the drift test does not
+		// read it.
+		balanceCents: integer("balance_cents").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.accountId, t.date] })],
+);
+
+/**
+ * A rule that files every transaction whose cleaned bank text matches in one category, before Jev is asked
+ * (migrations/0065_bank_text_rules.sql). One rule per text.
+ */
+export const bankTextRules = sqliteTable("bank_text_rules", {
+	// The row's own id.
+	id: integer().primaryKey(),
+	// The cleaned bank text the rule is for. One rule per text.
+	cleanedText: text("cleaned_text").notNull().unique(),
+	// The category the rule files a matching transaction in. Removing the category removes the rule.
+	categoryId: integer("category_id")
+		.notNull()
+		.references(() => categories.id, { onDelete: "cascade" }),
+	createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+	updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
+/**
+ * A cleaned bank text the person forgot on the Settings page "What Tally has learned" (migrations/0064_forgotten_texts.sql).
+ * One row per text.
+ */
+export const forgottenTexts = sqliteTable("forgotten_texts", {
+	id: integer().primaryKey({ autoIncrement: true }),
+	cleanedText: text("cleaned_text").notNull().unique(),
+	// Only an answer changed after this brings the line back.
+	forgottenAt: text("forgotten_at").notNull().default(sql`(datetime('now'))`),
+	// The forgotten_at a second Forget replaced, so its Undo puts that back. NULL when the text was forgotten once.
+	previousForgottenAt: text("previous_forgotten_at"),
+	// The rule a Forget removed, so its Undo can put it back. NULL when the text had no rule.
+	ruleCategoryId: integer("rule_category_id").references(() => categories.id, {
+		onDelete: "set null",
+	}),
+});
+
+/**
  * Every `col IN (...)` CHECK the described tables have in the live database, by table and column, as text. The drift
  * test reads each one from the live CREATE TABLE and compares it both ways with this list.
  */
@@ -543,6 +673,9 @@ export const CHECK_LISTS = {
 	},
 	merchant_suggested_names: {
 		position: ["0", "1", "2"],
+	},
+	planned_delete_holds: {
+		had_payment: ["0", "1"],
 	},
 	category_suggestions: {
 		status: CATEGORY_SUGGESTION_STATUS_VALUES,
