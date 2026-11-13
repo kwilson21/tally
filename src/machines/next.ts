@@ -7,7 +7,7 @@ export type MachineContext = {
 
 // Asks a small state machine what it does next. Pure: no actors, no timers, no effects.
 // Tally's real writes are SQL compare-and-set guards; these machines describe the rules
-// so people can read them, and tests keep the two in step.
+// so people can read them, and a test per machine keeps the two in step (for example test/suggestion-machines.test.ts).
 
 /**
  * The state the machine moves to on this event, or null when it may not.
