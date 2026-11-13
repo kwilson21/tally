@@ -20,6 +20,7 @@
 // 8 minutes from the claim (above). The email's own claim (readyEmailedTo) does not depend on this one, so the email still goes.
 // The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
 
+import * as Effect from "effect/Effect";
 import { readFirstTally } from "../db/first-tally";
 import { MAX_DEVICES_PER_PERSON } from "../push/devices";
 import { isPushServiceEndpoint } from "../push/endpoint";
@@ -108,6 +109,9 @@ type Device = {
 /** How one device's answer counts (decision 149). */
 type Answer = "sent" | "gone" | "permanent" | "transient";
 
+/** One device's answer and, unless it took the push, the kind of failure the log counts. */
+type DeviceResult = { answer: Answer; failure: string | null };
+
 function answerOf(status: number | null): Answer {
 	if (status === null) return "transient";
 
@@ -165,6 +169,51 @@ export async function runReadyPush(
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
 
+	// One device's send, and how its answer counts. It never throws: a throw (a database error, say) is a failed device, and
+	// transient, so the claim is not left stuck.
+	const sendTo = async (device: Device): Promise<DeviceResult> => {
+		// A device stored on another host is never fetched. It is a permanent failure, so the claim is kept and no later run sends.
+		if (!isPushServiceEndpoint(device.endpoint))
+			return { answer: "permanent", failure: "push endpoint refused" };
+
+		try {
+			const { status } = await sendPush(
+				{
+					endpoint: device.endpoint,
+					p256dh: device.p256dh,
+					auth: device.auth,
+				},
+				PUSH_PAYLOAD,
+				keys,
+				{
+					fetchImpl: options.fetchImpl,
+					timeoutSignal: options.timeoutSignal,
+					nowSec: Math.floor(nowMs / 1000),
+				},
+			);
+
+			const answer = answerOf(status);
+
+			// A device that is gone is deleted by the id and endpoint read before the claims. Ids are not AUTOINCREMENT, so a freed
+			// id can be given to another device before this DELETE lands: the endpoint keeps that device (and a subscription made since).
+			if (answer === "gone")
+				await env.DB.prepare(
+					"DELETE FROM push_subscriptions WHERE id = ? AND endpoint = ?",
+				)
+					.bind(device.id, device.endpoint)
+					.run();
+
+			if (answer === "sent") return { answer, failure: null };
+
+			return {
+				answer,
+				failure: status === null ? "push no answer" : `push ${status}`,
+			};
+		} catch {
+			return { answer: "transient", failure: "push error" };
+		}
+	};
+
 	for (const [email, devices] of byPerson) {
 		// The gate, read again before this person's claim: a bank linked or a question answered since the last person ends the run.
 		if (!(await gateOpen(env.DB))) break;
@@ -174,61 +223,30 @@ export async function runReadyPush(
 		// No row changed: already pushed (an earlier run, or one still going), emailed, removed, or still on a first-week page.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
-		let delivered = 0;
-		let transient = false;
+		// A person's devices are sent to at the same moment: at most MAX_DEVICES_PER_PERSON, each on its own push service, so
+		// a slow one no longer holds up the others. `sendTo` never throws, so one device's failure never stops the rest.
 
-		for (const device of devices) {
-			// A device stored on another host is never fetched. It is a permanent failure, so the claim is kept and no later run sends.
-			if (!isPushServiceEndpoint(device.endpoint)) {
-				failedCount += 1;
-				failureKinds.add("push endpoint refused");
-				continue;
-			}
+		const results = await Effect.runPromise(
+			Effect.forEach(
+				devices,
+				(device) => Effect.promise(() => sendTo(device)),
+				{
+					concurrency: "unbounded",
+				},
+			),
+		);
 
-			try {
-				const { status } = await sendPush(
-					{
-						endpoint: device.endpoint,
-						p256dh: device.p256dh,
-						auth: device.auth,
-					},
-					PUSH_PAYLOAD,
-					keys,
-					{
-						fetchImpl: options.fetchImpl,
-						timeoutSignal: options.timeoutSignal,
-						nowSec: Math.floor(nowMs / 1000),
-					},
-				);
+		const delivered = results.filter(
+			(result) => result.answer === "sent",
+		).length;
 
-				const answer = answerOf(status);
+		const transient = results.some((result) => result.answer === "transient");
 
-				// A device that is gone is deleted by the id and endpoint read before the claims. Ids are not AUTOINCREMENT, so a freed
-				// id can be given to another device before this DELETE lands: the endpoint keeps that device (and a subscription made since).
-				if (answer === "gone")
-					await env.DB.prepare(
-						"DELETE FROM push_subscriptions WHERE id = ? AND endpoint = ?",
-					)
-						.bind(device.id, device.endpoint)
-						.run();
+		sentCount += delivered;
+		failedCount += results.length - delivered;
 
-				if (answer === "sent") {
-					sentCount += 1;
-					delivered += 1;
-					continue;
-				}
-
-				failedCount += 1;
-				failureKinds.add(status === null ? "push no answer" : `push ${status}`);
-
-				if (answer === "transient") transient = true;
-			} catch {
-				// A throw (a database error, say) is a failed device, and transient, so the claim is not left stuck.
-				failedCount += 1;
-				failureKinds.add("push error");
-				transient = true;
-			}
-		}
+		for (const result of results)
+			if (result.failure) failureKinds.add(result.failure);
 
 		if (delivered > 0) {
 			// The email waits EMAIL_AFTER_PUSH_MS from this delivery (decision 149). If the time can't be stored, that is counted, and
