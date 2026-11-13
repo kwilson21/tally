@@ -153,7 +153,7 @@ describe("parseFirstTally", () => {
 		});
 	});
 
-	it("keeps only the text stamps of the ready email's claims, by address hash (decision 223)", () => {
+	it("keeps only the text stamps of the ready email's claims, by address hash (decision 224)", () => {
 		const record = parseFirstTally(
 			JSON.stringify({
 				readyClaimedAt: { abc: "2026-09-24T10:00:00Z", def: 7, ghi: null },

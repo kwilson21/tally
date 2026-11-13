@@ -1,6 +1,6 @@
 import { setup } from "xstate";
 
-// The ready email's claim for one address (issue #863, second half; decision 223). An address is in one of four states,
+// The ready email's claim for one address (issue #863, second half; decision 224). An address is in one of four states,
 // read from the stored record by readyStateOf below. The claim writes the email it will send, its kept try, and a stamp
 // (readyClaimedAt) in one statement, so a run cut off after the claim leaves the email behind for the next run to send.
 // This machine says what may happen next; the SQL writers in src/first-tally/ready-email.tsx keep the record in step with

@@ -280,14 +280,14 @@ async function hashOf(address: string) {
 		.join("");
 }
 
-/** The email a claim stores with its address (decision 223), and the time its first try is stored as. */
+/** The email a claim stores with its address (decision 224), and the time its first try is stored as. */
 const CLAIM_MAIL = renderReadyEmail(
 	"Tally has read your last 90 days from Chase.",
 );
 
 const CLAIM_AT = "2026-10-07T09:00:00Z";
 
-/** The claim for one address: CLAIM_SQL takes the address, its hash and the kept try the claim stores (decisions 149 and 223). */
+/** The claim for one address: CLAIM_SQL takes the address, its hash and the kept try the claim stores (decisions 149 and 224). */
 const claimOf = async (address: string) =>
 	env.DB.prepare(CLAIM_SQL)
 		.bind(
@@ -1506,7 +1506,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 
 				const before = await heldOf();
 				await runReadyEmail(production({ DB: db }), resendFake().fetchImpl);
-				// Decision 223: the claim and the cut-off recovery now write heldReadyEmail's path too, but both keep an
+				// Decision 224: the claim and the cut-off recovery now write heldReadyEmail's path too, but both keep an
 				// entry that is already stored (the claim by COALESCE, the recovery not at all). What must not happen is a write
 				// to the kept entry that is neither: an upgrade, or a release, which also clears a claim's stamp.
 				expect(
@@ -1825,7 +1825,7 @@ describe("the 10:00 run", () => {
 	});
 });
 
-describe("the ready email's claim keeps its email, so a run cut off after the claim loses none (decision 223)", () => {
+describe("the ready email's claim keeps its email, so a run cut off after the claim loses none (decision 224)", () => {
 	afterEach(() => vi.restoreAllMocks());
 
 	const LINE =
