@@ -293,7 +293,8 @@ const copyNeverSuggestSql = (ownsLock: string) =>
  *
  * The texts are read before the page is saved, because only TypeScript can tidy one, so another bank's sync can store a
  * charge with the same Plaid name under a text that isn't among them (#1048). The last test covers that: a name that is
- * the newest for a text the page never looked at stays, as it would had the other bank's charge come first.
+ * the newest for a text the page never looked at stays for now. The page's position is not saved while such a text
+ * exists (savePosition), and the names are settled again once it has been read and tidied (#1054).
  */
 const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
@@ -354,6 +355,9 @@ const sweepStaleNamesSql = (ownsLock: string) =>
 	   AND ${ownsLock}`;
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
+/** How many times a page settles its names again when another bank's charge lands while it does (#1054). */
+const SETTLE_TRIES = 3;
+
 const OWNS_LOCK =
 	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
 
@@ -1208,9 +1212,10 @@ export async function syncItem(
 				for (const row of results) textsOfCharges.add(row.raw_name);
 			}
 
-			if (textsOfCharges.size > 0) {
-				const names = new Set<string>();
+			// The Plaid names those texts go by, kept for the second look after the save (see below).
+			const names = new Set<string>();
 
+			if (textsOfCharges.size > 0) {
 				const current = await env.DB.prepare(
 					`SELECT DISTINCT merchant_name FROM transactions
 					 WHERE parent_id IS NULL AND raw_name IN (SELECT value FROM json_each(?))
@@ -1293,24 +1298,82 @@ export async function syncItem(
 				? ", last_synced_at = datetime('now'), history_complete_at = COALESCE(history_complete_at, datetime('now'))"
 				: ", last_synced_at = datetime('now')";
 
-			statements.push(
+			// The page's position, saved in the same batch as its rows. It is not saved while a charge with one of the page's
+			// Plaid names sits under a bank text the page never read: another bank's sync stored it after the texts above
+			// were read (#1048, #1054). The names are then settled again with that text read and tidied, and the position is
+			// saved with them (below). A run that stops in between has not moved its position, so the next run takes the
+			// page again, and nothing is left half-settled.
+			const savePosition = (texts: Iterable<string>) =>
 				env.DB.prepare(
 					`UPDATE plaid_items SET sync_cursor = ?, sync_update_cursor = ?${page.has_more ? "" : lastPageStamp}
-					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
+					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL
+					   AND NOT EXISTS (SELECT 1 FROM transactions o WHERE o.parent_id IS NULL
+					     AND o.merchant_name IN (SELECT value FROM json_each(?))
+					     AND o.raw_name NOT IN (SELECT value FROM json_each(?)))`,
 				).bind(
 					page.has_more && holdAt ? holdAt.cursor : page.next_cursor,
 					// While more pages wait, where this update began ('' for no cursor); nothing once its last page is in.
 					page.has_more ? (firstCursor ?? "") : null,
 					itemRowId,
 					lockId,
-				),
-			);
+					JSON.stringify([...names]),
+					JSON.stringify([...texts]),
+				);
+
+			statements.push(savePosition(textsOfCharges));
 			const results = await env.DB.batch(statements);
 
 			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
 			if (results[0]?.meta.changes === 0) {
 				throw new Error("Plaid sync lost its lock to a newer run");
 			}
+
+			let positionSaved = (results.at(-1)?.meta.changes ?? 0) > 0;
+
+			// A text was missed. It is read now, with the page's rows in, and the names are settled as they would have been
+			// had the other bank's charge come first. A few tries, since yet another charge can land meanwhile.
+			for (
+				let attempt = 0;
+				!positionSaved && attempt < SETTLE_TRIES;
+				attempt += 1
+			) {
+				const now = await env.DB.prepare(
+					`SELECT DISTINCT raw_name FROM transactions
+					 WHERE parent_id IS NULL AND merchant_name IN (SELECT value FROM json_each(?))`,
+				)
+					.bind(JSON.stringify([...names]))
+					.all<{ raw_name: string }>();
+
+				for (const row of now.results) textsOfCharges.add(row.raw_name);
+
+				const texts = JSON.stringify(
+					[...textsOfCharges].map((text) => [text, tidyName(text)]),
+				);
+
+				const settled = await env.DB.batch([
+					env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
+						texts,
+						itemRowId,
+						lockId,
+					),
+					...pendingNameStatements(
+						env.DB,
+						newestPlaidNameCandidatesSql,
+						[texts],
+						OWNS_LOCK,
+						[itemRowId, lockId],
+						lockId,
+					),
+					env.DB.prepare(sweepStaleNamesSql(OWNS_LOCK)).bind(itemRowId, lockId),
+					savePosition(textsOfCharges),
+				]);
+
+				positionSaved = (settled.at(-1)?.meta.changes ?? 0) > 0;
+			}
+
+			// Still not saved: the lease went, or charges kept landing. The run stops, and the next one takes the page again.
+			if (!positionSaved)
+				throw new Error("Plaid sync could not save its position");
 
 			let inserted = 0;
 
