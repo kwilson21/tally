@@ -451,9 +451,10 @@ export async function retryFeedback(
 				fetchImpl,
 			);
 		} catch (error) {
+			// A token refusal stops the run: every other row would be refused the same way.
 			if (
 				error instanceof FilingError &&
-				(error.status === 401 || error.status === 403)
+				answerOf(error.status) === "TOKEN_REFUSED"
 			)
 				break;
 		}
