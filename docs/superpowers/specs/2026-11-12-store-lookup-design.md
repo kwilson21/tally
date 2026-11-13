@@ -123,6 +123,7 @@ Four rules the review of the plan added (PR #997):
 - **Count every search.** The day's cap is a counter of its own, taken before the calls as Jev's is, not worked out from the rows' last timestamps.
 - **Privacy is checked on the merchant key as stored**, before cleaning and the 40-character cap (the cleaner strips "PAYPAL *"), and when several merchants share one lookup text, one private merchant makes the text private.
 - **It fails closed.** A text is searched only when at least one of its transactions carries a Plaid category outside the private ones; a text with no Plaid category at all is not searched, and a bank-rail phrase (ACH, wire, a check, "payment to") makes a text private. Raised by the security review: "ACH PAYMENT TO JANE DOE" on a row with no category names no payment app.
+- **Privacy reads the raw bank text too.** A merchant key is Plaid's name when there is one, so "ACH PAYMENT TO JANE DOE" named "Jane Doe" by Plaid would pass a check of the key alone; every transaction's raw text is checked as well.
 - **The re-ask is the existing "ask again"**, not decision 157's re-check path, which only runs inside a re-check; a store is marked done only from what was saved, never before the calls.
 - **A line is shown only under a guess that used it**, and the re-ask skips rows already asked with the line and waits while the switch is off.
 
