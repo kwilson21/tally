@@ -16,6 +16,7 @@ import {
 	sanitizeFeedbackMessage,
 	sanitizeFeedbackRoute,
 } from "../feedback/privacy";
+import { readySql, releaseSql } from "../machines/feedback-filing";
 import { sendFeedback } from "../rules/feedback";
 import type { Refusal } from "../rules/terms";
 import { FeedbackForm, type FeedbackValues } from "../views/feedback-form";
@@ -242,11 +243,6 @@ class FilingError extends Error {
 	}
 }
 
-// Not filed, not given up (5 attempts), and not claimed in the last 10 minutes: a claim
-// older than that belongs to a run that was cut off, so the row is ready again.
-const READY =
-	"github_issue_number IS NULL AND attempts < 5 AND (filing_at IS NULL OR filing_at <= datetime('now', '-10 minutes'))";
-
 /** The longest run of backticks, counted without spreading, so any length of text is safe. */
 function longestBacktickRun(text: string): number {
 	let longest = 0;
@@ -295,10 +291,43 @@ function diagnosticLines(item: FeedbackRow) {
 	return lines;
 }
 
-/** GitHub's answer to a created issue. Its number is checked as an integer where it is used. */
-async function readIssue(response: Response): Promise<{ number?: number }> {
-	// SAFETY: a successful GitHub create-issue response is a JSON object, and its number field is checked as an integer by the caller.
-	return (await response.json()) as { number?: number };
+/** GitHub's answer to a created issue. A JSON null has no number, and the caller checks the number as an integer. */
+async function readIssue(
+	response: Response,
+): Promise<{ number?: number } | null> {
+	// SAFETY: a successful GitHub create-issue response is a JSON object or null, and its number field is checked as an integer by the caller.
+	return (await response.json()) as { number?: number } | null;
+}
+
+/**
+ * The move a GitHub answer makes on a row (decision 218): 422 rejects it, 401 and 403 refuse the token, any other 2xx
+ * is accepted (filed when its body has a number), and anything else is a failed try.
+ */
+function answerOf(
+	status: number,
+): "ACCEPTED" | "REJECTED" | "TOKEN_REFUSED" | "FAILED" {
+	if (status === 422) return "REJECTED";
+
+	if (status === 401 || status === 403) return "TOKEN_REFUSED";
+
+	if (status >= 200 && status < 300) return "ACCEPTED";
+
+	return "FAILED";
+}
+
+/** Gives a claim back for a move the machine makes; the status is stored only when GitHub answered. */
+async function giveBack(
+	db: D1Database,
+	id: number,
+	move: "REJECTED" | "TOKEN_REFUSED" | "FAILED",
+	status?: number,
+) {
+	const statement = db.prepare(releaseSql(move, status !== undefined));
+
+	await (status === undefined
+		? statement.bind(id)
+		: statement.bind(status, id)
+	).run();
 }
 
 /** How long GitHub may take to file one issue. */
@@ -314,7 +343,7 @@ export async function fileFeedbackIssue(
 
 	const claim = await db
 		.prepare(
-			`UPDATE feedback SET filing_at = CURRENT_TIMESTAMP, attempts = attempts + 1 WHERE id = ? AND ${READY}`,
+			`UPDATE feedback SET filing_at = CURRENT_TIMESTAMP, attempts = attempts + 1 WHERE id = ? AND ${readySql()}`,
 		)
 		.bind(item.id)
 		.run();
@@ -366,45 +395,39 @@ export async function fileFeedbackIssue(
 			},
 		);
 	} catch (error) {
-		await db
-			.prepare("UPDATE feedback SET filing_at = NULL WHERE id = ?")
-			.bind(item.id)
-			.run();
+		await giveBack(db, item.id, "FAILED");
 		throw error;
 	}
 
 	console.info(`Feedback GitHub status ${response.status}`);
 
-	if (!response.ok) {
-		await db
-			.prepare(
-				// 422: GitHub will never accept it, so give up. 401/403: the token is wrong,
-				// not the row, so the attempt doesn't count.
-				`UPDATE feedback SET last_status = ?1, filing_at = NULL,
-					attempts = CASE WHEN ?1 = 422 THEN 5 WHEN ?1 IN (401, 403) THEN attempts - 1 ELSE attempts END
-				WHERE id = ?2`,
-			)
-			.bind(response.status, item.id)
-			.run();
+	const answer = answerOf(response.status);
+
+	if (answer !== "ACCEPTED") {
+		await giveBack(db, item.id, answer, response.status);
 		throw new FilingError(response.status);
 	}
 
 	// The deadline also covers reading the answer, so a body that stalls is a failed try too, and gives the claim back.
 	const issue = await readIssue(response).catch(async (error) => {
-		await db
-			.prepare("UPDATE feedback SET filing_at = NULL WHERE id = ?")
-			.bind(item.id)
-			.run();
+		await giveBack(db, item.id, "FAILED");
 		throw error;
 	});
+	const number = issue?.number;
 
-	if (!Number.isInteger(issue.number))
+	// A 2xx with no number (or a null body) is a failed try, and its status is written, as any other failure's is.
+	if (!Number.isInteger(number)) {
+		await giveBack(db, item.id, "FAILED", response.status);
 		throw new Error("Feedback GitHub response had no issue number");
+	}
+
+	// If GitHub created the issue and this write fails, the next try files it again: a duplicate. No machine can close
+	// that gap, since the number is never stored (decision 218).
 	await db
 		.prepare(
 			"UPDATE feedback SET github_issue_number = ?, filed_at = CURRENT_TIMESTAMP, last_status = ? WHERE id = ?",
 		)
-		.bind(issue.number, response.status, item.id)
+		.bind(number, response.status, item.id)
 		.run();
 }
 
@@ -415,7 +438,8 @@ export async function retryFeedback(
 	if (env.DEMO === "true" || !env.FEEDBACK_GITHUB_TOKEN) return;
 
 	const rows = await env.DB.prepare(
-		`SELECT * FROM feedback WHERE ${READY} AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20`,
+		// The created_at wait is the retry's own, not part of the machine's rule for an unfiled row.
+		`SELECT * FROM feedback WHERE ${readySql()} AND created_at <= datetime('now', '-10 minutes') ORDER BY id LIMIT 20`,
 	).all<FeedbackRow>();
 
 	for (const row of rows.results) {
