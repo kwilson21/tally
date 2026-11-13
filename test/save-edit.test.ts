@@ -5,12 +5,14 @@ import { loadMonth } from "../src/db/month";
 import {
 	getTransaction,
 	listTransactions,
+	monthCounts,
 	needsCategoryCount,
 	saveEdit,
 	saveJevDetailsStatement,
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { classify, type Row } from "../src/transactions/classify";
 import { parseEdit } from "../src/transactions/edit";
 import { parseFilters } from "../src/transactions/filters";
 import { itemAt, present } from "./helpers/present";
@@ -766,5 +768,366 @@ describe("saveEdit recounts a linked credit when this save makes it count with i
 			flag_income: 1,
 			refund_of_id: PURCHASE,
 		});
+	});
+});
+
+describe("saveEdit counts a transfer credit as income when a person turns Exclude off on it (#878)", () => {
+	const CREDIT = 9510;
+	const PURCHASE = 9511;
+	const PARENT = 9512;
+	const PART = 9513;
+	const DEBIT = 9514;
+	const NOT_TRANSFER = 9515;
+	const MONTH = "2026-09";
+
+	const loadMonthSummary = async (month: string) =>
+		summarizeMonth({
+			month,
+			...(await loadMonth(db, month)),
+			unpaidDueBillsCents: 0,
+		});
+
+	type Seed = {
+		amountCents?: number;
+		rawName?: string;
+		flagTransfer?: number;
+		flagIncome?: number;
+		excluded?: number;
+		excludedSource?: "user" | "jev" | null;
+		isSplit?: number;
+		parentId?: number | null;
+		refundOfId?: number | null;
+		categoryId?: number | null;
+	};
+
+	/** Inserts one row in the bank account with the given state; everything else is the column default. */
+	const seedRow = async (id: number, over: Seed = {}) => {
+		const bank = await db
+			.prepare("SELECT id FROM accounts WHERE type != 'cash' LIMIT 1")
+			.first<{ id: number }>();
+
+		if (!bank) throw new Error("bank account missing");
+
+		const s = {
+			amountCents: -5000,
+			rawName: "ONLINE TRANSFER FROM SAV",
+			flagTransfer: 1,
+			flagIncome: 0,
+			excluded: 1,
+			excludedSource: "jev",
+			isSplit: 0,
+			parentId: null,
+			refundOfId: null,
+			categoryId: null,
+			...over,
+		};
+
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, flag_transfer, flag_income, excluded, excluded_source, is_split, parent_id, refund_of_id, updated_by) VALUES
+				(?, ?, '2026-09-05', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')`,
+			)
+			.bind(
+				id,
+				bank.id,
+				s.amountCents,
+				s.rawName,
+				s.categoryId,
+				s.categoryId === null ? null : "user",
+				s.flagTransfer,
+				s.flagIncome,
+				s.excluded,
+				s.excludedSource,
+				s.isSplit,
+				s.parentId,
+				s.refundOfId,
+			)
+			.run();
+	};
+
+	const creditRow = (id: number) =>
+		db
+			.prepare(
+				"SELECT excluded, excluded_source, flag_income, income_source, credit_reviewed, credit_reviewed_by, refund_of_id FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{
+				excluded: number;
+				excluded_source: string | null;
+				flag_income: number;
+				income_source: string | null;
+				credit_reviewed: number | null;
+				credit_reviewed_by: string | null;
+				refund_of_id: number | null;
+			}>();
+
+	/** The panel's post for a row whose Exclude chip was turned off and nothing else was touched. */
+	const panelPost = (over: Partial<Parameters<typeof saveEdit>[2]> = {}) => ({
+		categoryId: null,
+		alwaysForMerchant: false,
+		displayName: null,
+		note: null,
+		excluded: false,
+		income: false,
+		incomeWas: false,
+		creditReviewed: false,
+		creditReviewedWas: false,
+		creditReviewedProvided: true,
+		...over,
+	});
+
+	const incomeColumns = {
+		excluded: 0,
+		excluded_source: "user",
+		flag_income: 1,
+		income_source: "user",
+		credit_reviewed: 1,
+		credit_reviewed_by: null,
+		refund_of_id: null,
+	};
+
+	it("a credit Jev excluded counts as income, reviewed by the person, when Exclude is turned off", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+
+		expect(await saveEdit(db, CREDIT, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(CREDIT)).toEqual(incomeColumns);
+	});
+
+	it('a credit the person excluded ("yes, it is a transfer") counts as income when Exclude is turned off', async () => {
+		await seedRow(CREDIT, { excludedSource: "user" });
+
+		expect(await saveEdit(db, CREDIT, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(CREDIT)).toEqual(incomeColumns);
+	});
+
+	it("guard, passes before the change too: an explicit review as not income in the same save wins", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+
+		expect(
+			await saveEdit(
+				db,
+				CREDIT,
+				panelPost({ creditReviewed: true, creditReviewedWas: false }),
+				"test",
+			),
+		).toEqual({ saved: true });
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			refund_of_id: null,
+		});
+	});
+
+	it("guard, passes before the change too: a credit left excluded is unchanged", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+
+		await saveEdit(db, CREDIT, panelPost({ excluded: true }), "test");
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 1,
+			excluded_source: "jev",
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+			credit_reviewed_by: null,
+			refund_of_id: null,
+		});
+	});
+
+	it("guard, passes before the change too: a debit marked a transfer is not income when Exclude is turned off", async () => {
+		await seedRow(DEBIT, { amountCents: 5000, excludedSource: "jev" });
+
+		await saveEdit(db, DEBIT, panelPost(), "test");
+		expect(await creditRow(DEBIT)).toMatchObject({
+			excluded: 0,
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+		});
+	});
+
+	it("guard, passes before the change too: an excluded credit that is not a transfer is unchanged", async () => {
+		await seedRow(NOT_TRANSFER, { flagTransfer: 0, excludedSource: "jev" });
+
+		await saveEdit(db, NOT_TRANSFER, panelPost(), "test");
+		expect(await creditRow(NOT_TRANSFER)).toMatchObject({
+			excluded: 0,
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+		});
+	});
+
+	it("guard, passes before the change too: a split part and a split parent are left as they were", async () => {
+		await seedRow(PARENT, { isSplit: 1, excludedSource: "jev" });
+		await seedRow(PART, { parentId: PARENT, excludedSource: "jev" });
+
+		await saveEdit(db, PART, panelPost(), "test");
+		expect(await creditRow(PART)).toMatchObject({
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+		});
+
+		await saveEdit(db, PARENT, panelPost(), "test");
+		expect(await creditRow(PARENT)).toMatchObject({
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+		});
+	});
+
+	it("guard, passes before the change too: a credit linked as a refund in the same save is a refund, not income", async () => {
+		await seedRow(PURCHASE, {
+			amountCents: 5000,
+			flagTransfer: 0,
+			excluded: 0,
+			excludedSource: null,
+			categoryId: 1,
+		});
+		await seedRow(CREDIT, { amountCents: -2000, excludedSource: "jev" });
+
+		expect(
+			await saveEdit(db, CREDIT, panelPost({ refundOfId: PURCHASE }), "test"),
+		).toEqual({ saved: true });
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			refund_of_id: PURCHASE,
+		});
+	});
+
+	it("a credit already linked as a refund stays a refund when Exclude is turned off and the link is kept", async () => {
+		await seedRow(PURCHASE, {
+			amountCents: 5000,
+			flagTransfer: 0,
+			excluded: 0,
+			excludedSource: null,
+			categoryId: 1,
+		});
+		await seedRow(CREDIT, {
+			amountCents: -2000,
+			excludedSource: "jev",
+			refundOfId: PURCHASE,
+		});
+
+		expect(await saveEdit(db, CREDIT, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+			credit_reviewed_by: null,
+			refund_of_id: PURCHASE,
+		});
+	});
+
+	it("a credit the person already reviewed as not income stays not income when Exclude is turned off", async () => {
+		await seedRow(CREDIT, { excludedSource: "user" });
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user', income_source = 'user' WHERE id = ?",
+			)
+			.bind(CREDIT)
+			.run();
+
+		expect(
+			await saveEdit(
+				db,
+				CREDIT,
+				panelPost({ creditReviewed: true, creditReviewedWas: true }),
+				"test",
+			),
+		).toEqual({ saved: true });
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+			refund_of_id: null,
+		});
+	});
+
+	it("include, exclude, include again: the income columns stay, and only Exclude moves", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+
+		await saveEdit(db, CREDIT, panelPost(), "test");
+		expect(await creditRow(CREDIT)).toEqual(incomeColumns);
+
+		// Turning Exclude back on leaves the income and the review the first save wrote: saveEdit has no revert path.
+		const income = {
+			income: true,
+			incomeWas: true,
+			creditReviewedProvided: false,
+		};
+
+		await saveEdit(
+			db,
+			CREDIT,
+			{ ...panelPost(income), excluded: true },
+			"test",
+		);
+		expect(await creditRow(CREDIT)).toEqual({ ...incomeColumns, excluded: 1 });
+
+		await saveEdit(
+			db,
+			CREDIT,
+			{ ...panelPost(income), excluded: false },
+			"test",
+		);
+		expect(await creditRow(CREDIT)).toEqual(incomeColumns);
+	});
+
+	it("after the first save, the month counts the credit as income, not spending (guard: heldForReview never held it)", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+		const spentBefore = (await loadMonthSummary(MONTH)).totalSpentCents;
+		const incomeBefore = (await loadMonthSummary(MONTH)).incomeCents;
+		const heldBefore = (await monthCounts(db, MONTH)).heldForReview;
+
+		await saveEdit(db, CREDIT, panelPost(), "test");
+
+		const after = await loadMonthSummary(MONTH);
+		expect(after.incomeCents - incomeBefore).toBe(5000);
+		expect(after.totalSpentCents).toBe(spentBefore);
+		expect((await monthCounts(db, MONTH)).heldForReview).toBe(heldBefore);
+	});
+
+	it("classify() names the credit income, set by the person, counted and not excluded", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+		await saveEdit(db, CREDIT, panelPost(), "test");
+
+		const r = await db
+			.prepare("SELECT * FROM transactions WHERE id = ?")
+			.bind(CREDIT)
+			.first<Row>();
+
+		if (!r) throw new Error("credit missing");
+
+		const c = classify(r, {
+			paysBillOrPlan: false,
+			refundTarget: null,
+			jevCategoryActive: false,
+			anyActiveCategory: true,
+			neverSuggestIncome: false,
+		});
+
+		expect(c.income).toEqual({ kind: "income", setBy: "user" });
+		expect(c.budget).toEqual({ kind: "counted", because: "not_excluded" });
 	});
 });
