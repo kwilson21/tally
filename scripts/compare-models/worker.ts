@@ -338,16 +338,25 @@ function payeeOutcome(result: JevResult, answer: PayeeAnswer): string {
 
 	if (!answer) return "no payee answer";
 
-	// A business Jev is sure of would be searched, unless its reimbursement answer is in the transfer Maybe range: the
-	// app writes no lookup mark then (spec §5, lookup_cleared), so the row is held back.
+	// A business Jev is sure of would be searched, unless one of its privacy answers holds it back: the app writes no
+	// lookup mark then (spec §5, lookup_cleared). The first check that applies gives the outcome.
 	const businessSure =
 		answer.choice === "business" && answer.confidence >= JEV_THRESHOLD;
 
-	if (businessSure && isUnsure(result.answer.flags.reimbursement, "transfer")) {
-		return "reimbursement unsure";
-	}
+	if (!businessSure) return "answered";
 
-	return "answered";
+	const { transfer, income, reimbursement } = result.answer.flags;
+
+	const privacy: [boolean, string][] = [
+		[transfer >= JEV_THRESHOLD, "flagged a transfer"],
+		[income >= JEV_THRESHOLD, "flagged income"],
+		[reimbursement >= JEV_THRESHOLD, "flagged a reimbursement"],
+		[isUnsure(transfer, "transfer"), "transfer unsure"],
+		[isUnsure(income, "income"), "income unsure"],
+		[isUnsure(reimbursement, "transfer"), "reimbursement unsure"],
+	];
+
+	return privacy.find(([held]) => held)?.[1] ?? "answered";
 }
 
 /** The payee measurement (#984, part two): the hand-written rows, then the lookup-line cases as businesses. */
@@ -438,8 +447,8 @@ export async function runPayee(
 		rows.push({
 			rawName: ask.rawName,
 			expected: ask.expected,
-			// A held-back reimbursement row shows its outcome, not the payee answer it would otherwise have been searched on.
-			answer: outcome === "reimbursement unsure" ? null : answer,
+			// A held-back row shows its outcome, not the payee answer it would otherwise have been searched on.
+			answer: outcome === "answered" ? answer : null,
 			outcome,
 		});
 	}

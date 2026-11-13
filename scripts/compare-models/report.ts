@@ -7,6 +7,7 @@ import {
 	median,
 	type PayeeAnswer,
 	type Row,
+	SKIPPED_OUTCOME,
 	type Summary,
 	summarize,
 } from "./score";
@@ -289,6 +290,9 @@ function failedCalls(e: LookupEntry): string {
 		.join(", ");
 }
 
+/** What a report says in place of its results when Jev was not asked (no key), so nothing reads as an outcome. */
+const NOT_ASKED = "Jev was not asked, so there are no results.";
+
 const leftOutLine = (e: LookupEntry) =>
 	`- ${cell(e.kase.rawName)}: ${failedCalls(e)}`;
 
@@ -300,6 +304,42 @@ export function formatLookupReport(input: LookupReportInput): string {
 		c.largestGap === null
 			? "Noise floor: no two plain runs both gave an answer, so there is nothing to compare."
 			: `Noise floor: the two plain runs gave a different category for ${c.planDiffers} of ${c.complete} cases, and the largest confidence gap between them was ${pct(c.largestGap)}. Read every move below against this.`;
+
+	// A skipped run made no calls, so it has no results to count and no failed calls to list.
+	const skipped = input.entries.some(
+		(e) => e.plain.outcome === SKIPPED_OUTCOME,
+	);
+
+	const summaryLines = skipped
+		? [NOT_ASKED]
+		: [
+				noise,
+				"",
+				"Unsure means Jev left the case: unsure, or none of the categories fit.",
+				"",
+				"| Count | Value |",
+				"|---|---|",
+				`| Cases with a right answer | ${c.scored} |`,
+				`| Right before | ${c.rightBefore} |`,
+				`| Right after | ${c.rightAfter} |`,
+				`| Moved from wrong or unsure to right | ${c.movedToRight} |`,
+				`| Moved from right to wrong or unsure | ${c.movedFromRight} |`,
+				`| Category changed either way | ${c.changed} |`,
+				`| Median category confidence, before / after | ${c.medianBefore === null ? "—" : pct(c.medianBefore)} / ${c.medianAfter === null ? "—" : pct(c.medianAfter)} |`,
+				`| Filed (at or above the threshold), before / after | ${c.filedBefore} / ${c.filedAfter} |`,
+				`| Cases left out because a call failed | ${c.leftOut} |`,
+			];
+
+	const leftOutLines = skipped
+		? []
+		: [
+				"## Cases left out because a call failed",
+				"",
+				"A case is left out of every count above when any of its three calls gave no readable answer. Its failed calls:",
+				"",
+				...(leftOut.length > 0 ? leftOut.map(leftOutLine) : ["None."]),
+				"",
+			];
 
 	const lines = [
 		"# Does a store line help Jev?",
@@ -313,21 +353,7 @@ export function formatLookupReport(input: LookupReportInput): string {
 		"",
 		"## Summary",
 		"",
-		noise,
-		"",
-		"Unsure means Jev left the case: unsure, or none of the categories fit.",
-		"",
-		"| Count | Value |",
-		"|---|---|",
-		`| Cases with a right answer | ${c.scored} |`,
-		`| Right before | ${c.rightBefore} |`,
-		`| Right after | ${c.rightAfter} |`,
-		`| Moved from wrong or unsure to right | ${c.movedToRight} |`,
-		`| Moved from right to wrong or unsure | ${c.movedFromRight} |`,
-		`| Category changed either way | ${c.changed} |`,
-		`| Median category confidence, before / after | ${c.medianBefore === null ? "—" : pct(c.medianBefore)} / ${c.medianAfter === null ? "—" : pct(c.medianAfter)} |`,
-		`| Filed (at or above the threshold), before / after | ${c.filedBefore} / ${c.filedAfter} |`,
-		`| Cases left out because a call failed | ${c.leftOut} |`,
+		...summaryLines,
 		"",
 		"## Cases",
 		"",
@@ -338,12 +364,7 @@ export function formatLookupReport(input: LookupReportInput): string {
 				`| ${cell(e.kase.rawName)} | ${cell(e.line)} | ${cell(e.kase.rightCategory ?? "a person decides")} | ${lookupCell(e.plain)} | ${lookupCell(e.again)} | ${lookupCell(e.lined)} |`,
 		),
 		"",
-		"## Cases left out because a call failed",
-		"",
-		"A case is left out of every count above when any of its three calls gave no readable answer. Its failed calls:",
-		"",
-		...(leftOut.length > 0 ? leftOut.map(leftOutLine) : ["None."]),
-		"",
+		...leftOutLines,
 		"## No line",
 		"",
 		"These cases have no line, so they are never searched and Jev was not asked about them:",
@@ -407,12 +428,57 @@ export type PayeeReportInput = {
 export const payeeFailedCalls = (rows: PayeeRow[]): number =>
 	rows.filter((r) => r.outcome.startsWith("Jev call failed")).length;
 
-/** The rows held back because Jev's reimbursement answer was in the unsure range (spec §5: no mark for a Maybe). */
-const payeeReimbursementHeld = (rows: PayeeRow[]): number =>
-	rows.filter((r) => r.outcome === "reimbursement unsure").length;
+/**
+ * The outcomes of a business Jev is sure of that a privacy answer still holds back (spec §5: the app writes no lookup
+ * mark then). Worker's payeeOutcome gives them, in the order it checks them.
+ */
+const PRIVACY_OUTCOMES = [
+	"flagged a transfer",
+	"flagged income",
+	"flagged a reimbursement",
+	"transfer unsure",
+	"income unsure",
+	"reimbursement unsure",
+] as const;
+
+/** One line for every privacy hold: the total, then each outcome that occurred with its count. */
+const payeePrivacyLine = (rows: PayeeRow[]): string => {
+	const countOf = (outcome: string) =>
+		rows.filter((r) => r.outcome === outcome).length;
+
+	const total = PRIVACY_OUTCOMES.reduce(
+		(sum, outcome) => sum + countOf(outcome),
+		0,
+	);
+
+	const parts = PRIVACY_OUTCOMES.flatMap((outcome) =>
+		countOf(outcome) > 0 ? [`${outcome}: ${countOf(outcome)}`] : [],
+	);
+
+	const detail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+
+	return `Rows held back by a privacy answer: ${total}${detail}.`;
+};
 
 export function formatPayeeReport(input: PayeeReportInput): string {
 	const c = payeeCounts(input.rows);
+
+	// A skipped run made no calls, so it has no results to count.
+	const skipped = input.rows.some((r) => r.outcome === SKIPPED_OUTCOME);
+
+	const summaryLines = skipped
+		? [NOT_ASKED]
+		: [
+				`- People Jev would let be searched (the one that matters): ${c.peopleLetThrough}`,
+				`- People held back: ${c.peopleHeldBack}`,
+				`- Businesses let through: ${c.businessesLetThrough}`,
+				`- Businesses held back: ${c.businessesHeldBack}`,
+				"",
+				`Rows where a Jev call failed (counted as held back): ${payeeFailedCalls(input.rows)}.`,
+				payeePrivacyLine(input.rows),
+				"",
+				"A business is let through only at the threshold or more. Anything else is held back, including no answer.",
+			];
 
 	const lines = [
 		"# Can Jev tell a person from a business?",
@@ -424,15 +490,7 @@ export function formatPayeeReport(input: PayeeReportInput): string {
 		"",
 		"## Summary",
 		"",
-		`- People Jev would let be searched (the one that matters): ${c.peopleLetThrough}`,
-		`- People held back: ${c.peopleHeldBack}`,
-		`- Businesses let through: ${c.businessesLetThrough}`,
-		`- Businesses held back: ${c.businessesHeldBack}`,
-		"",
-		`Rows where a Jev call failed (counted as held back): ${payeeFailedCalls(input.rows)}.`,
-		`Rows held back because Jev's reimbursement answer was unsure: ${payeeReimbursementHeld(input.rows)}.`,
-		"",
-		"A business is let through only at the threshold or more. Anything else is held back, including no answer.",
+		...summaryLines,
 		"",
 		"## Rows",
 		"",

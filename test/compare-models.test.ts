@@ -1680,15 +1680,21 @@ describe("the payee question (#984, part two)", () => {
 });
 
 describe("the payee reimbursement, the warnings, and the hand-written names (#984)", () => {
-	/** A business payee answer whose reimbursement answer is `reimbursement`. */
-	const businessWithReimbursement = (reimbursement: number) => {
+	/** A business payee answer with the given privacy answers; the rest are at 0.05, as modelAnswer has them. */
+	const businessWith = (flags: {
+		transfer?: number;
+		income?: number;
+		reimbursement?: number;
+	}) => {
 		const reply = payeeReply("business", 0.95);
 
 		return {
 			...reply,
 			answers: {
 				...reply.answers,
-				reimbursement: { type: "noul", noul: reimbursement },
+				transfer: { type: "noul", noul: flags.transfer ?? 0.05 },
+				income: { type: "noul", noul: flags.income ?? 0.05 },
+				reimbursement: { type: "noul", noul: flags.reimbursement ?? 0.05 },
 			},
 		};
 	};
@@ -1696,27 +1702,89 @@ describe("the payee reimbursement, the warnings, and the hand-written names (#98
 	it("holds back a business whose reimbursement answer is unsure, and counts it under the summary", async () => {
 		const text = await runPayee(
 			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
-			jevFetch(() => businessWithReimbursement(0.6)),
+			jevFetch(() => businessWith({ reimbursement: 0.6 })),
 		);
 
 		expect(text).toContain("reimbursement unsure");
 		expect(text).not.toMatch(/\| yes \|/);
 		expect(text).toContain(
-			"Rows held back because Jev's reimbursement answer was unsure: 43.",
+			"Rows held back by a privacy answer: 43 (reimbursement unsure: 43).",
 		);
 	});
 
 	it("lets a business through when its reimbursement answer is below the unsure range", async () => {
 		const text = await runPayee(
 			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
-			jevFetch(() => businessWithReimbursement(0.3)),
+			jevFetch(() => businessWith({ reimbursement: 0.3 })),
 		);
 
 		expect(text).not.toContain("reimbursement unsure");
 		expect(text).toMatch(/\| yes \|/);
-		expect(text).toContain(
-			"Rows held back because Jev's reimbursement answer was unsure: 0.",
+		expect(text).toContain("Rows held back by a privacy answer: 0.");
+	});
+
+	it("holds back a business flagged as a reimbursement, and counts it by outcome", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(() => businessWith({ reimbursement: 0.9 })),
 		);
+
+		expect(text).toContain("flagged a reimbursement");
+		expect(text).not.toMatch(/\| yes \|/);
+		expect(text).toContain(
+			"Rows held back by a privacy answer: 43 (flagged a reimbursement: 43).",
+		);
+	});
+
+	it("holds back a business whose transfer answer is in the Maybe range", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(() => businessWith({ transfer: 0.6 })),
+		);
+
+		expect(text).not.toMatch(/\| yes \|/);
+		expect(text).toContain(
+			"Rows held back by a privacy answer: 43 (transfer unsure: 43).",
+		);
+	});
+
+	it("holds back a business whose income answer is in the Maybe range", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(() => businessWith({ income: 0.6 })),
+		);
+
+		expect(text).not.toMatch(/\| yes \|/);
+		expect(text).toContain(
+			"Rows held back by a privacy answer: 43 (income unsure: 43).",
+		);
+	});
+
+	it("lets a clean business through, with no privacy holds", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(() => businessWith({})),
+		);
+
+		expect(text).toMatch(/\| yes \|/);
+		expect(text).toContain("Rows held back by a privacy answer: 0.");
+	});
+
+	it("says in a skipped payee report that Jev was not asked, with no counts", async () => {
+		const text = await runPayee({ AI: fakeAi() }, jevFetch());
+
+		expect(text).toContain("Jev was not asked, so there are no results.");
+		expect(text).not.toContain("- People Jev would let be searched");
+		expect(text).not.toContain("Rows held back by a privacy answer");
+		expect(text).not.toContain("Rows where a Jev call failed");
+	});
+
+	it("says in a skipped lookup report that Jev was not asked, with no call-failed wording", async () => {
+		const text = await runLookup({ AI: fakeAi() }, jevFetch());
+
+		expect(text).toContain("Jev was not asked, so there are no results.");
+		expect(text).not.toContain("call failed");
+		expect(text).not.toContain("| Right before |");
 	});
 
 	it("warns in the lookup report that the bank's category hint is not sent", () => {
