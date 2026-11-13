@@ -43,6 +43,31 @@ export const check = <G, R extends readonly Unless<G, Refusal>[]>(
 };
 
 /**
+ * Every refusal of a rule whose term does not hold, in the rule's order. For a form that shows all of its errors at
+ * once; `decide` still fails with the first.
+ */
+export const everyRefusal = <
+	Request,
+	Facts,
+	G,
+	R extends readonly Unless<G, Refusal>[],
+>(
+	of: { given: (request: Request, facts: Facts) => G; refusals: R },
+	request: Request,
+	facts: Facts,
+): ReturnType<R[number]["refuse"]>[] => {
+	const given = of.given(request, facts);
+
+	return of.refusals
+		.filter((r) => !r.unless.holds(given))
+		.map(
+			(r) =>
+				// SAFETY: `refuse` of an entry of R makes one of the refusals R's entries make, which is the type named above.
+				r.refuse() as ReturnType<R[number]["refuse"]>,
+		);
+};
+
+/**
  * Defines a rule from its parts. `given` works out, once, the values the checks use from the request and the stored
  * facts. `nothingToDoIf` is checked first, so a second press is never refused by its own effect (decision 194); a rule
  * that always has something to do leaves it out. The refusals are then checked in order, and the first whose term does
