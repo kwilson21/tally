@@ -564,6 +564,17 @@ describe("the VAPID header's cache (decision 149)", () => {
 		expect(second).toBe(first);
 	});
 
+	it("signs one token for two sends to the same origin that start at the same moment", async () => {
+		const pair = await keys();
+
+		const [first, second] = await Promise.all([
+			authorizationOf(`${ORIGIN}/send/one`, pair, NOW),
+			authorizationOf(`${ORIGIN}/send/two`, pair, NOW),
+		]);
+
+		expect(second).toBe(first);
+	});
+
 	it("reuses a token until eleven hours after it was signed, and no later", async () => {
 		const pair = await keys();
 		const first = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW);
