@@ -1,3 +1,5 @@
+import { createEffectActor, waitFor } from "@xstate/effect";
+import * as Effect from "effect/Effect";
 import { movePartDismissalsSql } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { householdToday } from "../dates";
@@ -13,6 +15,13 @@ import {
 	unlinkUnfitPlanPaymentsSql,
 } from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
+import {
+	type Asked,
+	RESTARTS,
+	type Saved,
+	SyncPages,
+	syncPagesMachine,
+} from "../machines/sync-pages";
 import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { afterSync } from "./after-sync";
@@ -654,9 +663,6 @@ export async function syncItem(
 				? item.sync_cursor
 				: item.sync_update_cursor || null;
 
-		let cursor = item.sync_cursor;
-		let mutationRestarts = 0;
-		let firstPage = true;
 		let summary = { added: 0, modified: 0, removed: 0 };
 		// Kept across a restart: the rows an abandoned pass wrote are still written.
 		const changedIds = new Set<number>();
@@ -669,51 +675,18 @@ export async function syncItem(
 		// restart, since Plaid's report doesn't change with the pass (#581).
 		let historyReported = historyComplete;
 
-		for (;;) {
-			let page: SyncResponse;
-
-			try {
-				// Pinned: each page is one D1 batch, sized for 100 rows (issue #418).
-				const request: SyncRequest = { access_token: accessToken, count: 100 };
-
-				// Plaid's cursor is empty until an Item's data is ready, and its reference documents only an omitted cursor
-				// (the entire history of updates), so an empty one is sent as none.
-				if (cursor) request.cursor = cursor;
-
-				page = await plaidPost<SyncResponse>(
-					env,
-					"/transactions/sync",
-					request,
-					fetchImpl,
-				);
-			} catch (error) {
-				if (
-					error instanceof PlaidError &&
-					error.error_code === "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" &&
-					mutationRestarts < 3
-				) {
-					console.error(
-						`plaid sync mutation retry ${mutationRestarts + 1} ${error.request_id ?? ""}`.trim(),
-					);
-					mutationRestarts += 1;
-					cursor = firstCursor;
-					firstPage = true;
-					summary = { added: 0, modified: 0, removed: 0 };
-					waitingDrops.clear();
-					holdAt = null;
-					continue;
-				}
-
-				if (!(error instanceof PlaidError)) throw error;
-
-				return await handlePlaidError(
-					env,
-					itemRowId,
-					lockId,
-					item.access_token_encrypted,
-					error,
-					fetchImpl,
-				);
+		// Saves one page: its rows and its position in one batch, then what follows the last page. `cursor` is the cursor
+		// the page was asked for at, and `firstPage` is true for the first page of a pass (the run's first, or the first
+		// after starting again), which begins the pass's counts and held drops anew.
+		const savePage = async (
+			page: SyncResponse,
+			cursor: string | null,
+			firstPage: boolean,
+		) => {
+			if (firstPage) {
+				summary = { added: 0, modified: 0, removed: 0 };
+				waitingDrops.clear();
+				holdAt = null;
 			}
 
 			if (page.transactions_update_status === HISTORICAL_UPDATE_COMPLETE)
@@ -1414,8 +1387,6 @@ export async function syncItem(
 				changedIds,
 			);
 
-			cursor = page.next_cursor;
-			firstPage = false;
 			summary.added += inserted;
 			summary.modified += page.modified.length;
 			summary.removed += page.removed.length;
@@ -1441,10 +1412,110 @@ export async function syncItem(
 				}
 
 				if (runAfterSync) await afterSync(env.DB);
-
-				return { ...summary, changedIds: [...changedIds] };
 			}
-		}
+		};
+
+		// The page Plaid last answered with, kept for the save that follows, and whatever stopped the run, kept so the
+		// run fails with it exactly as it was thrown.
+		let asked: SyncResponse | null = null;
+		let stopped: { error: unknown } | null = null;
+
+		const pages: SyncPages["Service"] = {
+			ask: ({ cursor, restarts }) =>
+				Effect.promise(async (): Promise<Asked> => {
+					try {
+						// Pinned: each page is one D1 batch, sized for 100 rows (issue #418).
+						const request: SyncRequest = {
+							access_token: accessToken,
+							count: 100,
+						};
+
+						// Plaid's cursor is empty until an Item's data is ready, and its reference documents only an omitted cursor
+						// (the entire history of updates), so an empty one is sent as none.
+						if (cursor) request.cursor = cursor;
+
+						asked = await plaidPost<SyncResponse>(
+							env,
+							"/transactions/sync",
+							request,
+							fetchImpl,
+						);
+
+						return {
+							kind: "page",
+							next: asked.next_cursor,
+							more: asked.has_more,
+						};
+					} catch (error) {
+						stopped = { error };
+
+						if (!(error instanceof PlaidError)) return { kind: "failed" };
+
+						if (
+							error.error_code !==
+							"TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"
+						)
+							return { kind: "refused" };
+
+						// The machine starts again while it has restarts left, and this is the line that says so.
+						if (restarts < RESTARTS)
+							console.error(
+								`plaid sync mutation retry ${restarts + 1} ${error.request_id ?? ""}`.trim(),
+							);
+
+						return { kind: "changed" };
+					}
+				}),
+			save: ({ cursor, fresh }) =>
+				Effect.promise(async (): Promise<Saved> => {
+					try {
+						if (!asked) throw new Error("Plaid sync has no page to save");
+						await savePage(asked, cursor, fresh);
+
+						return "saved";
+					} catch (error) {
+						stopped = { error };
+
+						return "failed";
+					}
+				}),
+		};
+
+		// The run's moves are the machine's (src/machines/sync-pages.ts): ask, save, start again, stop.
+		const outcome = await Effect.runPromise(
+			Effect.gen(function* () {
+				const actor = yield* createEffectActor(syncPagesMachine, {
+					input: { first: firstCursor, cursor: item.sync_cursor },
+				});
+
+				const landed = yield* waitFor(
+					actor,
+					(snapshot) => snapshot.context.outcome !== "running",
+					// Far longer than a Worker lives: the run ends by its pages, a refusal or a failure, never by this.
+					{ timeout: "1 hour" },
+				);
+
+				return landed.context.outcome;
+			}).pipe(Effect.scoped, Effect.provideService(SyncPages, pages)),
+		);
+
+		if (outcome === "done") return { ...summary, changedIds: [...changedIds] };
+
+		// SAFETY: `stopped` is assigned inside the closures above, which TypeScript does not follow, so it reads as null here.
+		const failure = stopped as { error: unknown } | null;
+
+		// Plaid refused: the bank may need attention, and the run fails with Plaid's error.
+		if (outcome === "refused" && failure?.error instanceof PlaidError)
+			return await handlePlaidError(
+				env,
+				itemRowId,
+				lockId,
+				item.access_token_encrypted,
+				failure.error,
+				fetchImpl,
+			);
+
+		throw failure?.error ?? new Error("Plaid sync stopped without a reason");
 	} finally {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND sync_lock_id = ?",
