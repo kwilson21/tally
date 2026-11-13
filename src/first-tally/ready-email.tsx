@@ -405,6 +405,14 @@ type RunCounts = {
 	kinds: Set<string>;
 };
 
+/** What every send in one run is made with: the providers, the fetch and its timeout, and the run's counts. */
+type Sending = {
+	env: DeliveryEnv & { DB: D1Database };
+	fetchImpl: typeof fetch;
+	timeoutSignal: (milliseconds: number) => AbortSignal;
+	counts: RunCounts;
+};
+
 /**
  * One email's outcome for its address (decisions 146 and 222). A delivered email drops its kept try and stamp. A held try keeps
  * its email and its first time, without the fresh mark, so later tries send it through Resend only. A definite failure keeps
@@ -412,15 +420,14 @@ type RunCounts = {
  * Resend already; a fresh claim's email may fall back to Cloudflare's, as any first try does.
  */
 async function sendKept(
-	env: DeliveryEnv & { DB: D1Database },
+	sending: Sending,
 	recipient: string,
 	hash: string,
 	kept: KeptTry,
 	onlyResend: boolean,
-	counts: RunCounts,
-	fetchImpl: typeof fetch,
-	timeoutSignal: (milliseconds: number) => AbortSignal,
 ) {
+	const { env, fetchImpl, timeoutSignal, counts } = sending;
+
 	if (keptTooOld(kept, Date.now())) {
 		// Resend keeps the key for a day, so a later try could be a new send: nothing more is sent. The address stays reached.
 		await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
@@ -468,13 +475,11 @@ async function sendKept(
  * this run took the address, so no fresh email is built for it. A stored email that can't be read is dropped, not sent.
  */
 async function recoverCutOff(
-	env: DeliveryEnv & { DB: D1Database },
+	sending: Sending,
 	recipient: string,
 	hash: string,
-	counts: RunCounts,
-	fetchImpl: typeof fetch,
-	timeoutSignal: (milliseconds: number) => AbortSignal,
 ): Promise<boolean> {
+	const { env, counts } = sending;
 	const won = await env.DB.prepare(RECOVER_SQL).bind(hash, recipient).run();
 
 	if (!won.meta.changes) return false;
@@ -491,16 +496,7 @@ async function recoverCutOff(
 	}
 
 	// Always Resend only: the cut-off run may already have sent this email, under this key.
-	await sendKept(
-		env,
-		recipient,
-		hash,
-		kept,
-		true,
-		counts,
-		fetchImpl,
-		timeoutSignal,
-	);
+	await sendKept(sending, recipient, hash, kept, true);
 
 	return true;
 }
@@ -548,6 +544,8 @@ export async function runReadyEmail(
 		kinds: new Set<string>(),
 	};
 
+	const sending: Sending = { env, fetchImpl, timeoutSignal, counts };
+
 	for (const { email: recipient } of recipients) {
 		const read = await currentRead(env);
 
@@ -555,17 +553,7 @@ export async function runReadyEmail(
 		const hash = await addressHashOf(recipient);
 
 		// A claim cut off earlier is sent again first (decision 222); an address it does not take is claimed below.
-		if (
-			await recoverCutOff(
-				env,
-				recipient,
-				hash,
-				counts,
-				fetchImpl,
-				timeoutSignal,
-			)
-		)
-			continue;
+		if (await recoverCutOff(sending, recipient, hash)) continue;
 
 		// The email is built before the claim, so the claim stores the words it will send, with the time of the claim.
 		const built = renderReadyEmail(read);
@@ -598,16 +586,7 @@ export async function runReadyEmail(
 		};
 
 		// A kept try from before this claim (no fresh mark) may already have reached Resend: only Resend is tried for it.
-		await sendKept(
-			env,
-			recipient,
-			hash,
-			kept,
-			kept.tried !== false,
-			counts,
-			fetchImpl,
-			timeoutSignal,
-		);
+		await sendKept(sending, recipient, hash, kept, kept.tried !== false);
 	}
 
 	if (counts.claimed > 0)
