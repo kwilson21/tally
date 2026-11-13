@@ -598,12 +598,15 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 
 		await background();
+
 		const announce = JSON.parse(
 			response.headers.get("HX-Trigger") ?? "{}",
 		).announce;
+
 		expect(announce).not.toContain("guesses its category again");
 		expect(waitUntil).not.toHaveBeenCalled();
 		expect(jev.bodies).toHaveLength(0);
+
 		expect(await rowOf(bakery)).toMatchObject({ category_id: category });
 		expect(
 			await db
