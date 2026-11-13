@@ -413,6 +413,7 @@ export async function fileFeedbackIssue(
 		await giveBack(db, item.id, "FAILED");
 		throw error;
 	});
+
 	const number = issue?.number;
 
 	// A 2xx with no number (or a null body) is a failed try, and its status is written, as any other failure's is.

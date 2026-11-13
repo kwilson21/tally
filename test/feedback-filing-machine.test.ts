@@ -19,6 +19,7 @@ import { present } from "./helpers/present";
 // machine's own moves; test/feedback.test.ts pins the stored columns each writer leaves behind.
 
 const CAP = FILING_ATTEMPT_CAP;
+
 const EVENTS = [
 	"CLAIM",
 	"FILED",
@@ -34,6 +35,7 @@ function moveOf(state: string, attempts: number, event: string) {
 		value: state,
 		context: { attempts },
 	});
+
 	const [after] = transition(feedbackFiling, from, { type: event });
 
 	return { state: String(after.value), attempts: after.context.attempts };
@@ -145,6 +147,7 @@ describe("the feedback filing machine", () => {
 describe("filingStateOf and giveUpReason", () => {
 	// A fixed clock: the helper takes the time as an input, so these rows are read at one instant.
 	const NOW = Date.parse("2026-11-13T12:00:00Z");
+
 	const row = (over: Partial<StoredFiling>): StoredFiling => ({
 		attempts: 0,
 		githubIssueNumber: null,
@@ -293,6 +296,7 @@ describe("readySql selects exactly the rows the machine calls unfiled", () => {
 		).all<StoredFiling & { id: number; message: string }>();
 
 		const now = Date.now();
+
 		const byMachine = stored.results
 			.filter((row) => filingStateOf(row, now) === "unfiled")
 			.map((row) => row.id)
@@ -478,12 +482,14 @@ describe("every writer agrees with the machine, from every state", () => {
 		for (const answer of answers) {
 			it(`${start.label}, then ${answer.label}`, async () => {
 				await env.DB.prepare("DELETE FROM feedback").run();
+
 				const seeded = await env.DB.prepare(
 					`INSERT INTO feedback (actor, type, feeling, message, page, device, attempts, filing_at, github_issue_number, last_status)
 					 VALUES ('person', 'Bug', 'Okay', 'Broken', '/', 'Desktop Chrome', ?, ${start.filingAt ?? "NULL"}, ?, ?) RETURNING id`,
 				)
 					.bind(start.attempts, start.issue, start.lastStatus)
 					.first<{ id: number }>();
+
 				const id = present(seeded).id;
 
 				const before = present(
@@ -498,6 +504,7 @@ describe("every writer agrees with the machine, from every state", () => {
 							issue: number | null;
 						}>(),
 				);
+
 				expect(
 					filingStateOf(
 						{ ...before, githubIssueNumber: before.issue },
@@ -506,11 +513,13 @@ describe("every writer agrees with the machine, from every state", () => {
 				).toBe(start.state);
 
 				const fetchStub = fakeFetch(vi.fn(async () => answer.answer()));
+
 				const row = present(
 					await env.DB.prepare("SELECT * FROM feedback WHERE id = ?")
 						.bind(id)
 						.first<Parameters<typeof fileFeedbackIssue>[2]>(),
 				);
+
 				await fileFeedbackIssue(env.DB, "token", row, fetchStub).catch(
 					() => {},
 				);
@@ -520,6 +529,7 @@ describe("every writer agrees with the machine, from every state", () => {
 					next(feedbackFiling, start.state, "CLAIM", {
 						attempts: start.attempts,
 					}) !== null;
+
 				const expected = claimable
 					? {
 							...runFrom(start.state, start.attempts, ["CLAIM", answer.event]),
@@ -531,6 +541,7 @@ describe("every writer agrees with the machine, from every state", () => {
 							attempts: start.attempts,
 							lastStatus: start.lastStatus,
 						};
+
 				expect(fetchStub).toHaveBeenCalledTimes(claimable ? 1 : 0);
 
 				const stored = present(

@@ -140,6 +140,7 @@ export function releaseSql(
 		TOKEN_REFUSED: ", attempts = attempts - 1",
 		FAILED: "",
 	}[move];
+
 	const status = statusReceived ? ", last_status = ?1" : "";
 	const id = statusReceived ? "?2" : "?1";
 

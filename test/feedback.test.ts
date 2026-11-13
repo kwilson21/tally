@@ -1507,6 +1507,7 @@ describe("a GitHub answer leaves the stored columns the machine's move says", ()
 			FILING_ATTEMPT_CAP,
 			"datetime('now', '-11 minutes')",
 		);
+
 		const fetchStub = reply(201, '{"number":9}');
 
 		await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
@@ -1525,6 +1526,7 @@ describe("a GitHub answer leaves the stored columns the machine's move says", ()
 			FILING_ATTEMPT_CAP - 1,
 			"datetime('now', '-11 minutes')",
 		);
+
 		const fetchStub = reply(500);
 
 		await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
