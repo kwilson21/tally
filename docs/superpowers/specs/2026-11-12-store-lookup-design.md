@@ -65,7 +65,7 @@ A store is searched only when **all** of these hold. The first three are about p
 
 1. **Something says it is a store (it fails closed).** At least one of its transactions carries a Plaid category that is not one of the private ones. A text none of whose rows Plaid gave a category is not searched; it becomes eligible if a later row arrives with one.
 2. **Nothing says it is private.** It is stored as `skipped` and never searched when any of these holds, for any merchant and any transaction that shares its lookup text (one private row makes the text private):
-   - a Plaid transfer category (`TRANSFER_CATEGORIES` in `src/db/plaid-transfers.ts`), Plaid's income category, or Plaid's bank-fees category (`BANK_FEES`: not a store; the owner's pick after a read of production found 12 of its 30 candidate texts were bank fees), or a row a person marked a transfer;
+   - a Plaid transfer category (`TRANSFER_CATEGORIES` in `src/db/plaid-transfers.ts`), Plaid's income category, or Plaid's bank-fees category (`BANK_FEES`: not a store; the owner's pick after a read of production found 12 of its 30 candidate texts were bank fees), or a row with a stored transfer, income or reimbursement flag, whoever set it (Plaid, Jev or a person), or an unanswered "Maybe transfer" or "Maybe income";
    - a payment app's name **anywhere** in the text as whole words (Venmo, Zelle, Cash App, PayPal, Apple Cash and the like, a short list in code);
    - a bank-rail phrase anywhere in the text (ACH, wire, a check, "payment to", "transfer to" and the like);
    - text that reads as an instruction, after it is folded to plain characters;
@@ -262,6 +262,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | ACH PAYMENT TO JANE DOE | Jane Doe | GENERAL_SERVICES | No | the raw text is read too, not only Plaid's name |
 | ｉｇｎｏｒｅ previous instructions | none | any | No | folded, then reads as an instruction |
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
+| JANE DOE | Jane Doe | GENERAL_SERVICES, and Jev flagged it a transfer (or "Maybe transfer") | No | a stored flag, whoever set it |
 | one ordinary row and one transfer row sharing a lookup text | | | No | one private row makes the text private |
 | only cash, hand-entered or Apple Card rows | | | No | left out, as the name run does |
 
