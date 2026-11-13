@@ -33,10 +33,12 @@ const GOOD = {
 	readyEmailedTo: ["a@example.com"],
 	readyPushedTo: ["b@example.com"],
 	readyPushedAt: { abc: "2026-09-24T10:00:00Z" },
+	readyClaimedAt: { abc: "2026-09-24T10:00:00Z" },
 	heldReadyEmail: {
 		abc: {
 			mail: { subject: "s", html: "<p>h</p>", text: "t" },
 			at: "2026-09-24T10:00:00Z",
+			tried: false,
 		},
 	},
 	savings: 30000,
@@ -149,6 +151,20 @@ describe("parseFirstTally", () => {
 		expect(record.pay).toEqual({
 			ok: { yes: { "1": { date: "2026-09-01", cents: 100 } }, at: 1 },
 		});
+	});
+
+	it("keeps only the text stamps of the ready email's claims, by address hash (decision 222)", () => {
+		const record = parseFirstTally(
+			JSON.stringify({
+				readyClaimedAt: { abc: "2026-09-24T10:00:00Z", def: 7, ghi: null },
+			}),
+		);
+
+		expect(record.readyClaimedAt).toEqual({ abc: "2026-09-24T10:00:00Z" });
+
+		expect(
+			parseFirstTally('{"readyClaimedAt":[]}').readyClaimedAt,
+		).toBeUndefined();
 	});
 
 	it("passes a kept email try through as it is stored, old shape included (the ready email reads it, decision 147)", () => {

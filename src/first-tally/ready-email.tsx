@@ -1,19 +1,23 @@
 // The ready email (P140, decision 134, decision 146, spec §8.8): one email to each person on the household list once a new
 // family's first questions are open, while pay, bills and budgets are all undrawn. The minute run sends it (the 10:00 run
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
-// still on setup's reading screen (while it refreshes) or the questions page sees the questions there instead. An address is claimed in
-// the record's readyEmailedTo before its email goes, and released unless the email is delivered. A try Resend may already
-// have accepted (no answer, or any answer but a success, deliver.ts) is kept: the whole email it tried (subject, HTML and
-// text) and the UTC time of that first try are stored, and every later try sends that same stored email through Resend
-// only, under the same key, until Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a
-// deploy that changes the words cannot change the key. After that the address stays reached and nothing more is sent
-// (decisions 146 and 147). It is drawn like the bank sign-in email (src/reconnect/email.tsx).
+// still on setup's reading screen (while it refreshes) or the questions page sees the questions there instead. An address is
+// claimed in the record's readyEmailedTo before its email goes, and the claim stores that email (its whole subject, HTML and
+// text, as a kept try with tried: false), and the claim's time (readyClaimedAt), in the same write (decision 222). The claim is
+// released unless the email is delivered. A claim cut off after its write (a deploy, a crash, an eviction) is found after
+// READY_LEASE_MINUTES (ten minutes): the next run sends the stored email again, through Resend only, under the same key. A try Resend may
+// already have accepted (no answer, or any answer but a success, deliver.ts) is kept: the whole email it tried and the UTC time of
+// that first try are stored, and every later try sends that same stored email through Resend only, under the same key, until
+// Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a deploy that changes the words cannot
+// change the key. After that the address stays reached and nothing more is sent (decisions 146, 147 and 222). It is drawn like
+// the bank sign-in email (src/reconnect/email.tsx).
 import {
 	anyQuestionAnswered,
 	type FirstTally,
 	QUESTION_STROKES,
 	readFirstTally,
 } from "../db/first-tally";
+import { READY_LEASE_MINUTES } from "../machines/ready-claim";
 import {
 	type DeliveryEnv,
 	deliver,
@@ -59,8 +63,8 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
  * either once a question is answered, or when the address is no longer one the send goes to (removed, or not seen in 90 days:
  * reconnectRecipients' rule), or when its person checked in on a first-week page within `awayMs` (home_seen_at): they are
  * still there, so a later minute tries them. `extraGuard` adds one more condition after the list's, with ?1 as the address.
- * `extraSet` writes one more path in the same statement, as `, '<path>', <value>` (the push's stamp, decision 149), so the
- * list and that path change together or not at all.
+ * `extraSet` writes more paths in the same statement, as `, '<path>', <value>, ...` (the push's stamp, decision 149; the
+ * email's kept try and its stamp, decision 222), so the list and those paths change together or not at all.
  */
 export function claimSql(
 	listPath: string,
@@ -84,30 +88,51 @@ export function claimSql(
 const PUSH_WAIT_GUARD = `\n\t\tAND (json_type(household_settings.value, '$.readyPushedAt."' || ?2 || '"') IS NULL
 		OR datetime(json_extract(household_settings.value, '$.readyPushedAt."' || ?2 || '"')) <= datetime('now', '-${EMAIL_AFTER_PUSH_MS / 1000} seconds'))`;
 
-// Claims an address before its email is sent. ?1 is the address and ?2 its hash. A refused address is skipped; runReadyEmail reads
-// the gate again before the next one, so a question answered meanwhile ends it (claimSql has the rest).
+// The email's claim writes its kept try and its stamp with the list (decision 222): ?2 is the address's hash and ?3 the kept try the
+// claim stores, as JSON ({"mail", "at", "tried": false}). An entry already kept for the hash stays as it is (COALESCE), so an earlier
+// try's email and time are never replaced. The stamp is SQLite's UTC time, as the push's is (PUSH_STAMP_SQL).
+const CLAIM_KEPT = `, '$.heldReadyEmail."' || ?2 || '"', json(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail."' || ?2 || '"'), json(?3))),
+		'$.readyClaimedAt."' || ?2 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')`;
+
+// Claims an address before its email is sent. ?1 is the address, ?2 its hash and ?3 the kept try the claim stores. A refused
+// address is skipped; runReadyEmail reads the gate again before the next one, so a question answered meanwhile ends it (claimSql
+// has the rest).
 export const CLAIM_SQL = claimSql(
 	"$.readyEmailedTo",
 	EMAIL_AWAY_AFTER_MS,
 	PUSH_WAIT_GUARD,
+	CLAIM_KEPT,
 );
 
-// Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
-// address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL when none is kept: a definite failure
-// keeps no try, so it removes any kept before (json_patch takes a null away), and the next try uses fresh words. The
-// address's old entry is removed first, so the new one replaces it whole: a patch alone would merge it into an entry the
-// merged code kept as its read line ({"line", "at"}), and leave that line behind.
+// Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again, and removes
+// its claim's stamp (readyClaimedAt). ?2 is the address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL
+// when none is kept: a definite failure keeps no try, so it removes any kept before (json_patch takes a null away), and the next
+// try uses fresh words. The address's old entry is removed first, so the new one replaces it whole: a patch alone would merge it
+// into an entry the merged code kept as its read line ({"line", "at"}), and leave that line behind.
 const RELEASE_SQL = `UPDATE household_settings
-	SET value = json_set(household_settings.value,
+	SET value = json_remove(json_set(household_settings.value,
 		'$.readyEmailedTo', json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)),
-		'$.heldReadyEmail', json(json_patch(json_remove(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), '$."' || ?2 || '"'), json_object(?2, json(?3)))))
+		'$.heldReadyEmail', json(json_patch(json_remove(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), '$."' || ?2 || '"'), json_object(?2, json(?3))))),
+		'$.readyClaimedAt."' || ?2 || '"')
 	WHERE key = 'first_tally'`;
 
-// Removes one address's kept try and leaves the address on the list: the kept try was delivered, or is too old to try again.
+// Removes one address's kept try and its claim's stamp, and leaves the address on the list: the kept try was delivered, or is too
+// old to try again. ?1 is the address's hash.
 const DROP_HELD_SQL = `UPDATE household_settings
-	SET value = json_set(household_settings.value,
-		'$.heldReadyEmail', json(json_patch(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), json_object(?1, NULL))))
+	SET value = json_remove(json_set(household_settings.value,
+		'$.heldReadyEmail', json(json_patch(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), json_object(?1, NULL)))),
+		'$.readyClaimedAt."' || ?1 || '"')
 	WHERE key = 'first_tally'`;
+
+// Recovers a cut-off claim (decision 222): re-stamps it, and only while the address is still listed, a kept try is stored, and the
+// stamp is at least the lease old. Of several runs at once only the one that changes the row (meta.changes) sends. ?1 is the
+// address's hash and ?2 the address. A stamp that is missing reads NULL, so a claim with no stamp is never recovered.
+const RECOVER_SQL = `UPDATE household_settings
+	SET value = json_set(household_settings.value, '$.readyClaimedAt."' || ?1 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+	WHERE key = 'first_tally'
+		AND EXISTS (SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?2)
+		AND json_type(household_settings.value, '$.heldReadyEmail."' || ?1 || '"') IS NOT NULL
+		AND datetime(json_extract(household_settings.value, '$.readyClaimedAt."' || ?1 || '"')) <= datetime('now', '-${READY_LEASE_MINUTES * 60} seconds')`;
 
 // The kept tries (heldReadyEmail), read whole: the minute run picks one address's out of them.
 const HELD_SQL = `SELECT json_extract(value, '$.heldReadyEmail') AS held FROM household_settings WHERE key = 'first_tally'`;
@@ -123,9 +148,11 @@ const UPGRADE_LEGACY_SQL = `UPDATE household_settings
 
 /**
  * A try Resend may hold, kept for its address (decision 146): the whole email it tried, and the UTC time of the first such try
- * as `YYYY-MM-DDTHH:MM:SSZ`, which later held tries never change.
+ * as `YYYY-MM-DDTHH:MM:SSZ`, which later held tries never change. `tried: false` marks an email a claim stored before any run
+ * sent it (decision 222): its first try is a fresh try, so Cloudflare's email may still be used. Without it, the email may
+ * already have reached Resend, and only Resend is tried.
  */
-type KeptTry = { mail: Mail; at: string };
+type KeptTry = { mail: Mail; at: string; tried?: false };
 
 /**
  * A kept try the merged code stored before the whole email was kept (c5577a5): its read line and the time of its first try,
@@ -133,8 +160,13 @@ type KeptTry = { mail: Mail; at: string };
  */
 type LegacyTry = { line: string; at: string };
 
-/** A stored kept try's fields, each checked where it is read: a whole email, a read line and a time. */
-type StoredTry = { mail?: unknown; line?: unknown; at?: unknown };
+/** A stored kept try's fields, each checked where it is read: a whole email, a read line, a time and the fresh mark. */
+type StoredTry = {
+	mail?: unknown;
+	line?: unknown;
+	at?: unknown;
+	tried?: unknown;
+};
 
 /** The fields of a stored email, each checked where it is read. */
 type StoredMail = { subject?: unknown; html?: unknown; text?: unknown };
@@ -249,19 +281,26 @@ async function keptTryOf(
 
 	if (!isStored<StoredTry>(entry)) return null;
 
-	const { mail, line, at } = entry;
+	const { mail, line, at, tried } = entry;
 
 	if (!isText(at)) return null;
 
+	// Only a claim's own entry is marked fresh: the email was stored and no run has sent it.
+	const fresh = tried === false;
+
 	if (mail === undefined && isText(line))
-		return { mail: renderReadyEmail(line), at };
+		return { mail: renderReadyEmail(line), at, ...(fresh && { tried: false }) };
 
 	if (!isStored<StoredMail>(mail)) return null;
 
 	const { subject, html, text } = mail;
 
 	return isText(subject) && isText(html) && isText(text)
-		? { mail: { subject, html, text }, at }
+		? {
+				mail: { subject, html, text },
+				at,
+				...(fresh && { tried: false }),
+			}
 		: null;
 }
 
@@ -358,6 +397,114 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
 	return openRead(env.DB, await readFirstTally(env.DB));
 }
 
+/** What one run counts: the addresses it claimed or recovered, the sends that were delivered and that failed, and the kinds. */
+type RunCounts = {
+	claimed: number;
+	sent: number;
+	failed: number;
+	kinds: Set<string>;
+};
+
+/**
+ * One email's outcome for its address (decisions 146 and 222). A delivered email drops its kept try and stamp. A held try keeps
+ * its email and its first time, without the fresh mark, so later tries send it through Resend only. A definite failure keeps
+ * nothing. `onlyResend` is set for a recovered claim (its earlier run may have sent) and for a kept try that may have reached
+ * Resend already; a fresh claim's email may fall back to Cloudflare's, as any first try does.
+ */
+async function sendKept(
+	env: DeliveryEnv & { DB: D1Database },
+	recipient: string,
+	hash: string,
+	kept: KeptTry,
+	onlyResend: boolean,
+	counts: RunCounts,
+	fetchImpl: typeof fetch,
+	timeoutSignal: (milliseconds: number) => AbortSignal,
+) {
+	if (keptTooOld(kept, Date.now())) {
+		// Resend keeps the key for a day, so a later try could be a new send: nothing more is sent. The address stays reached.
+		await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
+		counts.failed += 1;
+		counts.kinds.add(HELD_OVER_A_DAY);
+
+		return;
+	}
+
+	// The email's words give the key. The stored email is the one every try sends, so its key never changes with the code.
+	const outcome = await deliver(
+		env,
+		recipient,
+		kept.mail,
+		fetchImpl,
+		timeoutSignal,
+		await readyEmailKey(recipient, kept.mail),
+		{ onlyResend },
+	);
+
+	if (outcome.delivered) {
+		counts.sent += 1;
+		await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
+
+		return;
+	}
+
+	counts.failed += 1;
+
+	for (const kind of outcome.kinds) counts.kinds.add(kind);
+
+	// A try Resend may hold keeps its whole email and the time of its first such try, which a later held try never moves. Any
+	// other failure keeps nothing.
+	const keep = outcome.held
+		? JSON.stringify({ mail: kept.mail, at: kept.at })
+		: null;
+
+	await env.DB.prepare(RELEASE_SQL).bind(recipient, hash, keep).run();
+}
+
+/**
+ * Sends the stored email of an address whose claim was cut off (decision 222), if this run is the one that re-stamps it. Returns
+ * false when the address is not in that state (it is not listed, it has no kept try, its stamp is under the lease, or another
+ * run re-stamped it first): the address then goes on to the claim, which changes no row for a listed address. Returns true when
+ * this run took the address, so no fresh email is built for it. A stored email that can't be read is dropped, not sent.
+ */
+async function recoverCutOff(
+	env: DeliveryEnv & { DB: D1Database },
+	recipient: string,
+	hash: string,
+	counts: RunCounts,
+	fetchImpl: typeof fetch,
+	timeoutSignal: (milliseconds: number) => AbortSignal,
+): Promise<boolean> {
+	const won = await env.DB.prepare(RECOVER_SQL).bind(hash, recipient).run();
+
+	if (!won.meta.changes) return false;
+	counts.claimed += 1;
+
+	const kept = await keptTryOf(env.DB, recipient);
+
+	if (kept === null) {
+		await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
+		counts.failed += 1;
+		counts.kinds.add(HELD_OVER_A_DAY);
+
+		return true;
+	}
+
+	// Always Resend only: the cut-off run may already have sent this email, under this key.
+	await sendKept(
+		env,
+		recipient,
+		hash,
+		kept,
+		true,
+		counts,
+		fetchImpl,
+		timeoutSignal,
+	);
+
+	return true;
+}
+
 /**
  * The ready email, sent by the minute run (decision 146; the 10:00 run is the backstop). It sends only while the first week's
  * questions are open (questionsOpen, the gate) and pay, bills and budgets are all undrawn, so a household set up before this
@@ -367,10 +514,13 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
  * the gate is read again and the email is built from that read, so its words are true when it goes. A closed gate (a question
  * answered, a bank linked with its history still loading, the last bank removed, a sort waiting) ends the run there, and
  * nothing more is sent. Another bank linked or removed changes the words from then on. An address no longer a member is
- * skipped on its own (CLAIM_SQL). A try Resend may hold keeps its whole email and the time of that first try (KeptTry). The
+ * skipped on its own (CLAIM_SQL). Each address's claim stores the email it will send, with the time of the claim (decision 222).
+ * A claim cut off after that write is found by a later run once its stamp is READY_LEASE_MINUTES (ten minutes) old, and that stored email
+ * is sent again, through Resend only, under its key, if this run is the one that takes it; the record is read again first, so
+ * a closed gate sends nothing. A try Resend may hold keeps its whole email and the time of that first try (KeptTry). The
  * next try sends that stored email again under the same key, through Resend only, until Resend answers (decisions 146 and
  * 147). A kept try 23 hours old is dropped, and the address stays reached. The log line is written only when an address was
- * claimed, so a quiet minute logs nothing.
+ * claimed or recovered, so a quiet minute logs nothing.
  */
 export async function runReadyEmail(
 	env: DeliveryEnv & { DB: D1Database; DEMO?: string },
@@ -390,71 +540,76 @@ export async function runReadyEmail(
 
 	if ((await currentRead(env)) === null) return;
 	const recipients = (await reconnectRecipients(env.DB)).results;
-	let claimedCount = 0;
-	let sentCount = 0;
-	let failedCount = 0;
-	const failureKinds = new Set<string>();
+
+	const counts: RunCounts = {
+		claimed: 0,
+		sent: 0,
+		failed: 0,
+		kinds: new Set<string>(),
+	};
 
 	for (const { email: recipient } of recipients) {
 		const read = await currentRead(env);
 
 		if (read === null) break;
 		const hash = await addressHashOf(recipient);
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient, hash).run();
+
+		// A claim cut off earlier is sent again first (decision 222); an address it does not take is claimed below.
+		if (
+			await recoverCutOff(
+				env,
+				recipient,
+				hash,
+				counts,
+				fetchImpl,
+				timeoutSignal,
+			)
+		)
+			continue;
+
+		// The email is built before the claim, so the claim stores the words it will send, with the time of the claim.
+		const built = renderReadyEmail(read);
+
+		const claim = await env.DB.prepare(CLAIM_SQL)
+			.bind(
+				recipient,
+				hash,
+				JSON.stringify({
+					mail: built,
+					at: isoSecond(Date.now()),
+					tried: false,
+				}),
+			)
+			.run();
 
 		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, its
 		// person is still on a first-week page, or their readyPushedAt stamp is under EMAIL_AFTER_PUSH_MS old (a push in flight, one
 		// that reached a device, or a claim whose stamp could not be removed). Each is skipped.
 		// A question answered after the read above is caught by the next address's read.
 		if (!claim.meta.changes) continue;
-		claimedCount += 1;
-		// The kept try for this address, if a try Resend may hold kept one (decision 146). Its stored email is sent again, through
-		// Resend only; otherwise this read's email goes out, and a failure that Resend may not hold keeps nothing (RELEASE_SQL).
-		const kept = await keptTryOf(env.DB, recipient);
+		counts.claimed += 1;
 
-		if (kept && keptTooOld(kept, Date.now())) {
-			// Resend keeps the key for a day, so a later try could be a new send: nothing more is sent. The address stays reached.
-			await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
-			failedCount += 1;
-			failureKinds.add(HELD_OVER_A_DAY);
-			continue;
-		}
+		// The stored try after the claim: this address's kept try if one was kept before, else the email this claim stored. A stored
+		// entry that can't be read is replaced by this claim's email, as a first try was always sent (no entry was kept to match).
+		const kept: KeptTry = (await keptTryOf(env.DB, recipient)) ?? {
+			mail: built,
+			at: isoSecond(Date.now()),
+			tried: false,
+		};
 
-		// One Mail for this address: its words give the key and are the body Resend is sent. A kept try's stored Mail is that
-		// email, so its key never changes with the code.
-		const mail = kept ? kept.mail : renderReadyEmail(read);
-
-		const outcome = await deliver(
+		// A kept try from before this claim (no fresh mark) may already have reached Resend: only Resend is tried for it.
+		await sendKept(
 			env,
 			recipient,
-			mail,
+			hash,
+			kept,
+			kept.tried !== false,
+			counts,
 			fetchImpl,
 			timeoutSignal,
-			await readyEmailKey(recipient, mail),
-			{ onlyResend: kept !== null },
 		);
-
-		if (outcome.delivered) {
-			sentCount += 1;
-
-			// Reached: its kept try is no longer needed.
-			if (kept) await env.DB.prepare(DROP_HELD_SQL).bind(hash).run();
-			continue;
-		}
-
-		failedCount += 1;
-
-		for (const kind of outcome.kinds) failureKinds.add(kind);
-
-		// A try Resend may hold keeps its whole email and the time of its first such try, which a later held try never moves. Any
-		// other failure keeps nothing.
-		const keep = outcome.held
-			? JSON.stringify({ mail, at: kept?.at ?? isoSecond(Date.now()) })
-			: null;
-
-		await env.DB.prepare(RELEASE_SQL).bind(recipient, hash, keep).run();
 	}
 
-	if (claimedCount > 0)
-		logDeliveries("ready email", sentCount, failedCount, failureKinds);
+	if (counts.claimed > 0)
+		logDeliveries("ready email", counts.sent, counts.failed, counts.kinds);
 }

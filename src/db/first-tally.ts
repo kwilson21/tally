@@ -71,9 +71,9 @@ export type FirstTally = {
 	 */
 	waitsForRun?: true;
 	/**
-	 * The addresses the ready email (decision 134) has reached or is sending to. An address is added before its email goes
-	 * and taken off again if neither provider delivers, so each person gets it once (src/first-tally/ready-email.tsx).
-	 * Absent until one is added.
+	 * The addresses the ready email (decision 134) has reached or is sending to. An address is added in the same statement
+	 * that stores its email (heldReadyEmail) and its claim's stamp (readyClaimedAt), before its email goes; it is taken off
+	 * again if neither provider delivers, so each person gets it once (src/first-tally/ready-email.tsx). Absent until one is added.
 	 */
 	readyEmailedTo?: string[];
 	/**
@@ -91,15 +91,27 @@ export type FirstTally = {
 	 */
 	readyPushedAt?: Record<string, string>;
 	/**
-	 * The kept tries of the ready email (decisions 146 and 147), keyed by the SHA-256 in hex of the lower-cased address: the whole
-	 * email (subject, HTML and text) a try Resend may hold sent, and the UTC time of that first try (`YYYY-MM-DDTHH:MM:SSZ`). The
-	 * next try sends that same email under the same key, through Resend only, until Resend answers or the entry is 23 hours old.
-	 * An entry kept as only its read line (before the whole email was kept) is turned into that email by the next minute run
-	 * (ready-email.tsx). Absent until one is kept.
+	 * readyClaimedAt is written with the ready email's claim, under the address's hash, as `YYYY-MM-DDTHH:MM:SSZ`: the time the
+	 * run claimed the address. Removed when the claim's email is delivered, or released with nothing kept or held. A stamp
+	 * ten minutes old, with a kept try stored, is a run that was cut off: the next run sends that stored email again (decision
+	 * 222). An address listed with no stamp was claimed before the stamp existed, and is not recovered. Absent until a claim writes one.
+	 */
+	readyClaimedAt?: Record<string, string>;
+	/**
+	 * The kept tries of the ready email (decisions 146, 147 and 222), keyed by the SHA-256 in hex of the lower-cased address: the
+	 * whole email (subject, HTML and text) and the UTC time of its first try (`YYYY-MM-DDTHH:MM:SSZ`). An entry with `tried: false`
+	 * was stored by a claim whose email no run has sent yet, so the first try may use Cloudflare's email as a fresh try does; an
+	 * entry without it may already have reached Resend, so every later try sends that same email under the same key, through
+	 * Resend only, until Resend answers or the entry is 23 hours old. An entry kept as only its read line (before the whole email
+	 * was kept) is turned into that email by the next minute run (ready-email.tsx). Absent until one is kept.
 	 */
 	heldReadyEmail?: Record<
 		string,
-		{ mail: { subject: string; html: string; text: string }; at: string }
+		{
+			mail: { subject: string; html: string; text: string };
+			at: string;
+			tried?: false;
+		}
 	>;
 	/**
 	 * The savings question's answer (decision 135, #721): the goal's cents the household kept, or "skipped" for Not now. Set
@@ -254,6 +266,11 @@ export function parseFirstTally(value: string): FirstTally {
 
 	if (isObject(parsed.readyPushedAt))
 		record.readyPushedAt = pickEntries(parsed.readyPushedAt, (at) =>
+			isText(at) ? at : undefined,
+		);
+
+	if (isObject(parsed.readyClaimedAt))
+		record.readyClaimedAt = pickEntries(parsed.readyClaimedAt, (at) =>
 			isText(at) ? at : undefined,
 		);
 
