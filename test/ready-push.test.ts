@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { CLAIM_SQL, runReadyEmail } from "../src/first-tally/ready-email";
+import {
+	CLAIM_SQL,
+	renderReadyEmail,
+	runReadyEmail,
+} from "../src/first-tally/ready-email";
 import {
 	PUSH_PAYLOAD,
 	PUSH_RELEASE_SQL,
@@ -832,7 +836,17 @@ describe("the ready push holds the email while it is in flight, and after each a
 				// The email's own claim (CLAIM_SQL), made while the push to the phone is still out. The person is away 25 minutes and
 				// unanswered, so nothing but the push's stamp can stop it.
 				const claim = await env.DB.prepare(CLAIM_SQL)
-					.bind(DANA, await heldKeyOf(DANA))
+					.bind(
+						DANA,
+						await heldKeyOf(DANA),
+						JSON.stringify({
+							mail: renderReadyEmail(
+								"Tally has read your last 90 days from Chase.",
+							),
+							at: "2026-10-07T09:00:00Z",
+							tried: false,
+						}),
+					)
 					.run();
 
 				claims.push(claim.meta.changes);
