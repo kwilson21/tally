@@ -686,6 +686,24 @@ describe("verifiedEmail explains a refusal in the log", () => {
 		);
 	});
 
+	it("refuses the sign-in when the signing keys take too long to fetch", async () => {
+		const team = "log-slow.cloudflareaccess.com";
+		const { privateKey } = await keys();
+		// What a deadline does: the request is aborted, and fetch rejects with a TimeoutError.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new DOMException("The operation timed out.", "TimeoutError");
+			}),
+		);
+		const jwt = await token(privateKey, team);
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe(
+			"Access sign-in refused: couldn't fetch the signing keys from https://log-slow.cloudflareaccess.com/cdn-cgi/access/certs (TimeoutError: The operation timed out.)",
+		);
+	});
+
 	it("says no key matched and the signature failed", async () => {
 		const team = "log-kid.cloudflareaccess.com";
 		const { privateKey, jwk } = await keys();

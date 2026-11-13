@@ -1123,6 +1123,33 @@ describe("feedback filing safeguards", () => {
 		expect(body.body).toMatch(/```\n[^`]*\n```$/);
 	});
 
+	it("gives the claim back when the request to GitHub runs out of time", async () => {
+		await insertOld(1);
+
+		const row = await env.DB.prepare(
+			"SELECT * FROM feedback",
+		).first<FiledRow>();
+
+		if (!row) throw new Error("missing fixture");
+
+		// What a deadline does: the request is aborted, and fetch rejects with a TimeoutError.
+		const fetchStub = fakeFetch(
+			vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+				throw new DOMException("The operation timed out.", "TimeoutError");
+			}),
+		);
+
+		await expect(
+			fileFeedbackIssue(env.DB, "token", row, fetchStub),
+		).rejects.toMatchObject({ name: "TimeoutError" });
+
+		expect(
+			await env.DB.prepare(
+				"SELECT filing_at, github_issue_number FROM feedback",
+			).first(),
+		).toEqual({ filing_at: null, github_issue_number: null });
+	});
+
 	it("processes at most 20 eligible rows", async () => {
 		await insertOld(21);
 
