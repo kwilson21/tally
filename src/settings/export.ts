@@ -11,6 +11,10 @@ export const EXPORT_COLUMNS = {
 		"raw_name, display_name, default_category_id, suggestion_status, names_asked, not_a_bill",
 	// One row per suggested name of a merchant, by position (merchant_suggested_names, migration 0071).
 	merchant_suggested_names: "merchant_key, position, name",
+	// The store lookup's state and its line, per bank text searched (migration 0074, spec §7).
+	merchant_lookups:
+		"lookup_text, status, line, attempts, claimed_at, claimed_by, failed_at, looked_up_at",
+	merchant_lookup_texts: "merchant_key, lookup_text, private",
 	merchant_name_failures: "raw_name, failed_at",
 	// Each account names its bank and says whether it's disconnected, since bank rows carry no id. An uploaded Apple Card
 	// has no bank connection: its bank is Apple Card, and it can't be disconnected (spec §8.10).

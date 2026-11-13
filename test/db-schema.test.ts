@@ -46,6 +46,8 @@ import {
 	MERCHANT_STATUS_VALUES,
 	maybeAnswers,
 	maybeNames,
+	merchantLookups,
+	merchantLookupTexts,
 	merchantNameFailures,
 	merchantSuggestedNames,
 	merchants,
@@ -64,7 +66,7 @@ import {
 // It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
 // database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
-// Every one of the 30 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
+// Every one of the 32 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
 // bank_text_rules, bill_amounts, bill_payments, bills, budget_amounts, cash_delete_holds, categories,
 // category_archive_periods, category_suggestions, documents, feedback, forgotten_texts, household_members,
 // household_people, household_settings, maybe_answers, maybe_names, merchant_name_failures, merchant_suggested_names,
@@ -551,6 +553,14 @@ describe("the schema file matches the live database", () => {
 
 	it("merchant_suggested_names matches the live table, its composite key included", async () => {
 		expect(await drift(merchantSuggestedNames, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("merchant_lookups matches the live table, its status CHECK included", async () => {
+		expect(await drift(merchantLookups, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("merchant_lookup_texts matches the live table, its index and 0/1 CHECK included", async () => {
+		expect(await drift(merchantLookupTexts, CHECK_LISTS)).toEqual([]);
 	});
 
 	it("category_suggestions matches the live table, index included", async () => {
@@ -1655,6 +1665,8 @@ describe("the table-set check fails on a wrong list", () => {
 			"household_settings",
 			"maybe_answers",
 			"maybe_names",
+			"merchant_lookup_texts",
+			"merchant_lookups",
 			"merchant_name_failures",
 			"merchant_suggested_names",
 			"merchants",

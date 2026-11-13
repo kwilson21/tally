@@ -154,6 +154,38 @@ export const merchantSuggestedNames = sqliteTable(
 	(t) => [primaryKey({ columns: [t.merchantKey, t.position] })],
 );
 
+/** merchant_lookups.status: the CHECK in migrations/0074_store_lookups.sql. */
+export const MERCHANT_LOOKUP_STATUS_VALUES = [
+	"found",
+	"nothing_found",
+	"skipped",
+	"gave_up",
+	"pending",
+] as const;
+
+/** A store's web lookup, one row per bank text searched (migrations/0074_store_lookups.sql). */
+export const merchantLookups = sqliteTable("merchant_lookups", {
+	lookupText: text("lookup_text").primaryKey(),
+	status: text("status", { enum: MERCHANT_LOOKUP_STATUS_VALUES }).notNull(),
+	line: text("line"),
+	attempts: integer("attempts").notNull().default(0),
+	claimedAt: text("claimed_at"),
+	claimedBy: text("claimed_by"),
+	failedAt: text("failed_at"),
+	lookedUpAt: text("looked_up_at"),
+});
+
+/** Which lookup text a merchant key uses, and whether that text is private (migrations/0074_store_lookups.sql). */
+export const merchantLookupTexts = sqliteTable(
+	"merchant_lookup_texts",
+	{
+		merchantKey: text("merchant_key").primaryKey(),
+		lookupText: text("lookup_text").notNull(),
+		isPrivate: integer("private").notNull().default(0),
+	},
+	(t) => [index("merchant_lookup_texts_lookup_text").on(t.lookupText)],
+);
+
 export const categorySuggestions = sqliteTable(
 	"category_suggestions",
 	{
@@ -876,6 +908,12 @@ export const CHECK_LISTS = {
 	},
 	merchant_suggested_names: {
 		position: ["0", "1", "2"],
+	},
+	merchant_lookups: {
+		status: MERCHANT_LOOKUP_STATUS_VALUES,
+	},
+	merchant_lookup_texts: {
+		private: ["0", "1"],
 	},
 	planned_delete_holds: {
 		had_payment: ["0", "1"],
