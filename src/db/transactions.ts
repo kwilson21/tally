@@ -82,6 +82,11 @@ import {
 	splitPartMisfitSql,
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
+import {
+	type DatabaseRefusal,
+	databaseRefusal,
+	isNotNullFailed,
+} from "./refused";
 import { withTurnGuard } from "./sorting-turn";
 import { askedSql } from "./suggestions-queue";
 
@@ -2403,14 +2408,17 @@ export async function saveSplit(
 		)
 		.bind(parentId, total, movedIds);
 
-	// The text of refuseMovedPlan's failure, as D1 passes SQLite's message on. No other statement in the batch writes
-	// planned_expenses.amount_cents, so this text is refuseMovedPlan's alone.
-	const movedPlanRefusal =
-		/NOT NULL constraint failed: planned_expenses\.amount_cents/;
-
-	// The text of refuseMovedBill's failure, as D1 passes it on. No other statement in the batch writes a NULL bill_id
-	// (the bill-copying inserts take it from a row), so this text is refuseMovedBill's alone.
-	const movedBillRefusal = /NOT NULL constraint failed: bill_payments\.bill_id/;
+	// refuseMovedPlan fails on planned_expenses.amount_cents, and no other statement in the batch writes that column, so a
+	// NOT NULL failure there is refuseMovedPlan's alone. refuseMovedBill fails on bill_payments.bill_id, and no other
+	// statement writes a NULL bill_id (the bill-copying inserts take it from a row), so that failure is its alone.
+	const failedOn = (
+		refusal: DatabaseRefusal | null,
+		table: string,
+		column: string,
+	) =>
+		isNotNullFailed(refusal) &&
+		refusal.table === table &&
+		refusal.column === column;
 
 	// Runs before any write. A plan the read didn't see on its part fails this statement (amount_cents is NOT NULL), and D1
 	// rolls the whole batch back, so nothing is written and the catch below says planLinked. RAISE(ABORT) works only inside
@@ -2503,10 +2511,12 @@ export async function saveSplit(
 	try {
 		results = await db.batch(statements);
 	} catch (error) {
-		// A NOT NULL failure on planned_expenses.amount_cents (movedPlanRefusal) is refuseMovedPlan's, for a plan that moved
-		// since the read, and one on bill_payments.bill_id (movedBillRefusal) is refuseMovedBill's, for a bill payment that
-		// did. Each is refused. Any other error is rethrown unchanged.
-		if (error instanceof Error && movedPlanRefusal.test(error.message))
+		// A NOT NULL failure on planned_expenses.amount_cents is refuseMovedPlan's, for a plan that moved since the read, and
+		// one on bill_payments.bill_id is refuseMovedBill's, for a bill payment that did. Each is refused. Any other error
+		// is rethrown unchanged.
+		const refusal = error instanceof Error ? databaseRefusal(error) : null;
+
+		if (failedOn(refusal, "planned_expenses", "amount_cents"))
 			return {
 				saved: false,
 				planLinked: true,
@@ -2515,7 +2525,7 @@ export async function saveSplit(
 				moved: [],
 			};
 
-		if (error instanceof Error && movedBillRefusal.test(error.message))
+		if (failedOn(refusal, "bill_payments", "bill_id"))
 			return {
 				saved: false,
 				billLinked: true,

@@ -300,6 +300,9 @@ async function devicesOf(email: string) {
 	return results.map((row) => row.endpoint);
 }
 
+/** One person's devices are sent to at the same moment, so the order they were reached in says nothing: compare them sorted. */
+const inAnyOrder = (endpoints: readonly string[]) => [...endpoints].sort();
+
 beforeEach(async () => resetDemo(env.DB, "2026-10-07"));
 
 afterEach(() => {
@@ -326,7 +329,34 @@ describe("the ready push: who gets it, and when", () => {
 		await addDevice(DANA, LAPTOP);
 		const { fetchImpl, pushed } = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl });
-		expect(pushed).toEqual([PHONE, LAPTOP]);
+		expect(inAnyOrder(pushed)).toEqual(inAnyOrder([PHONE, LAPTOP]));
+		expect(await pushedList()).toEqual([DANA]);
+	});
+
+	it("sends to a person's devices at the same moment, not one after another", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		await addDevice(DANA, LAPTOP);
+		let asked = 0;
+		let bothAsked = () => {};
+
+		const together = new Promise<void>((resolve) => {
+			bothAsked = resolve;
+		});
+
+		// Neither push service answers until both have been asked, so one device waiting for the other would never finish.
+		const { fetchImpl, pushed } = fakeFetch({
+			beforeAnswer: async () => {
+				asked += 1;
+
+				if (asked === 2) bothAsked();
+				await together;
+			},
+		});
+
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(inAnyOrder(pushed)).toEqual(inAnyOrder([PHONE, LAPTOP]));
 		expect(await pushedList()).toEqual([DANA]);
 	});
 
@@ -550,7 +580,9 @@ describe("the ready push: how each answer counts", () => {
 		expect(await pushedList()).toEqual([]);
 		const second = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl: second.fetchImpl });
-		expect(second.pushed).toEqual([PHONE, LAPTOP, SPARE]);
+		expect(inAnyOrder(second.pushed)).toEqual(
+			inAnyOrder([PHONE, LAPTOP, SPARE]),
+		);
 		expect(await pushedList()).toEqual([DANA]);
 	});
 
@@ -577,7 +609,7 @@ describe("the ready push: how each answer counts", () => {
 		});
 
 		await runReadyPush(pushing(), { fetchImpl });
-		expect(pushed).toEqual([PHONE, LAPTOP]);
+		expect(inAnyOrder(pushed)).toEqual(inAnyOrder([PHONE, LAPTOP]));
 		expect(await pushedList()).toEqual([DANA]);
 	});
 
@@ -607,7 +639,7 @@ describe("the ready push: how each answer counts", () => {
 			pushing({ DB: failingOn("DELETE FROM push_subscriptions") }),
 			{ fetchImpl },
 		);
-		expect(pushed).toEqual([PHONE, LAPTOP]);
+		expect(inAnyOrder(pushed)).toEqual(inAnyOrder([PHONE, LAPTOP]));
 		expect(await pushedList()).toEqual([DANA]);
 	});
 
@@ -655,14 +687,15 @@ describe("the ready push: at most 5 devices per person (decision 149, spec §10)
 		await addDevice(RILEY, SPARE, "2026-10-01 09:00:00");
 		const { fetchImpl, pushed } = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl });
-		expect(pushed).toEqual([
+		// Dana's five newest, in any order since they are sent to at once, and then Riley's, since people go one at a time.
+		expect(inAnyOrder(pushed.slice(0, 5))).toEqual([
 			"https://fcm.googleapis.com/send/dana-3",
 			"https://fcm.googleapis.com/send/dana-4",
 			"https://fcm.googleapis.com/send/dana-5",
 			"https://fcm.googleapis.com/send/dana-6",
 			"https://fcm.googleapis.com/send/dana-7",
-			SPARE,
 		]);
+		expect(pushed.slice(5)).toEqual([SPARE]);
 		expect(await pushedList()).toEqual([DANA, RILEY]);
 	});
 });

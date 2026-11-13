@@ -1,9 +1,21 @@
+import * as Effect from "effect/Effect";
 import { daysBefore, householdTimeZone, todayIn } from "../dates";
 import { readBankSignInEmails } from "../db/reconnect";
 import { type DeliveryEnv, deliver, logDeliveries } from "./deliver";
 import { renderReconnectEmail } from "./email";
 
 const REMINDER_DAYS = 3;
+
+/** How many people one bank's reminder is sent to at the same moment, so a slow answer for one no longer holds up the next. */
+const REMINDERS_AT_ONCE = 3;
+
+/**
+ * The least time between the starts of two sends, in milliseconds, across every bank of a run: at most four a second
+ * however fast the answers come. Resend allows a team ten requests a second, and a send past that is refused, and then
+ * falls back or waits for the next three-day pass. Four leaves room for the one other sender that can run in the same
+ * minute, the ready email (first-tally/ready-email.tsx), which goes to a new household's few people one at a time.
+ */
+export const REMINDER_PACE_MS = 250;
 
 type ReminderEnv = DeliveryEnv & {
 	DB: D1Database;
@@ -23,6 +35,7 @@ export async function runReconnectReminders(
 	fetchImpl: typeof fetch = fetch,
 	now: Date = new Date(),
 	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
+	paceMs: number = REMINDER_PACE_MS,
 ) {
 	if (env.DEMO === "true" || !(await readBankSignInEmails(env.DB))) return;
 	const zone = await householdTimeZone(env.DB);
@@ -64,6 +77,22 @@ export async function runReconnectReminders(
 		return;
 	}
 
+	// Each send waits its turn to start: the pace after the moment the send before it really started, whichever bank it
+	// is for. Counting from the real start, not a planned one, keeps two starts the pace apart even when a timer runs late.
+	let lastStart: Promise<number> = Promise.resolve(Number.NEGATIVE_INFINITY);
+
+	const paced = () => {
+		lastStart = lastStart.then(async (startedAt) => {
+			const wait = startedAt + paceMs - Date.now();
+
+			if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+
+			return Date.now();
+		});
+
+		return lastStart;
+	};
+
 	// Counts are per address and bank; the failure kinds name a provider status, never an address.
 	let sentCount = 0;
 	let failedCount = 0;
@@ -94,15 +123,21 @@ export async function runReconnectReminders(
 		const email = renderReconnectEmail(input, zone);
 		let sent = false;
 
-		for (const { email: recipient } of recipients.results) {
-			const outcome = await deliver(
-				env,
-				recipient,
-				email,
-				fetchImpl,
-				timeoutSignal,
-			);
+		// `deliver` never throws: a failed send is an outcome. The outcomes come back in the recipients' order.
+		const outcomes = await Effect.runPromise(
+			Effect.forEach(
+				recipients.results,
+				({ email: recipient }) =>
+					Effect.promise(async () => {
+						await paced();
 
+						return deliver(env, recipient, email, fetchImpl, timeoutSignal);
+					}),
+				{ concurrency: REMINDERS_AT_ONCE },
+			),
+		);
+
+		for (const outcome of outcomes) {
 			if (outcome.delivered) {
 				sentCount += 1;
 				sent = true;
