@@ -1,33 +1,43 @@
 {
-	"legacyBaseline": 32,
+	"legacyBaseline": 25,
 	"handlers": [
 		{
 			"method": "POST",
 			"path": "/accounts/:itemId{[0-9]+}/disconnect",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/machines/bank-request.ts",
+			"stories": "test/bank-request-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/accounts/apple-card",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts",
+			"reason": "The rule decides whether the upload is taken; which rows are new is decided by the import's SQL, which re-checks each row as it writes."
 		},
 		{
 			"method": "POST",
 			"path": "/accounts/apple-card/remove",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/accounts/sync",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts",
+			"reason": "The rule refuses nothing; the sync engine is plain TypeScript until it moves to Effect (decision 210)."
 		},
 		{
 			"method": "POST",
@@ -215,7 +225,9 @@
 			"path": "/plaid/exchange",
 			"file": "plaid.tsx",
 			"area": "plaid",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts"
 		},
 		{
 			"method": "POST",
@@ -230,7 +242,9 @@
 			"path": "/plaid/items/:id/repaired",
 			"file": "plaid.tsx",
 			"area": "plaid",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/machines/bank-request.ts",
+			"stories": "test/bank-request-stories.test.ts"
 		},
 		{
 			"method": "POST",
@@ -449,7 +463,9 @@
 			"path": "/home/seen",
 			"file": "home.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts"
 		},
 		{
 			"method": "POST",

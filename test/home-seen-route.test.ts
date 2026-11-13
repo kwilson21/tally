@@ -176,6 +176,44 @@ describe("POST /home/seen: the presence check-in", () => {
 		expect(await seenOf(PERSON)).toBe(before);
 	});
 
+	it("leaves another tab's check-in that landed between its read and its save", async () => {
+		await setSeen(PERSON, "-31 seconds");
+
+		// The database as this request sees it: once it has read the member's row, another tab's check-in lands.
+		const afterTheRead = (sql: string) => {
+			const statement = env.DB.prepare(sql);
+
+			if (!sql.startsWith("SELECT removed_at IS NULL")) return statement;
+
+			return {
+				bind: (...values: (string | number)[]) => ({
+					first: async () => {
+						const row = await statement.bind(...values).first();
+						await setSeen(PERSON, "+5 seconds");
+
+						return row;
+					},
+				}),
+			};
+		};
+
+		const racing: Bindings = {
+			DEMO: "false",
+			DB: Object.assign(Object.create(env.DB), { prepare: afterTheRead }),
+		};
+
+		expect((await checkIn(racing)).status).toBe(204);
+
+		// The other tab's time, which is the later one, is still there.
+		const stored = await env.DB.prepare(
+			"SELECT home_seen_at >= datetime('now', '+3 seconds') AS kept FROM household_members WHERE email = ?",
+		)
+			.bind(PERSON)
+			.first<{ kept: number }>();
+
+		expect(stored?.kept).toBe(1);
+	});
+
 	it("writes again once 30 seconds have passed", async () => {
 		await setSeen(PERSON, "-31 seconds");
 		const before = await seenOf(PERSON);

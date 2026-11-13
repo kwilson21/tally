@@ -38,12 +38,14 @@ import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
+import { checkIn } from "../rules/accounts";
 import {
 	type BudgetFacts,
 	nudgeBudget,
 	saveBudget,
 	saveSavingsGoal,
 } from "../rules/budgets";
+import { decided } from "../rules/terms";
 import { CategoryId } from "../settings/category-form";
 import {
 	asOfDate,
@@ -755,11 +757,30 @@ const SHOWN_STEPS: readonly ShownStep[] = ["reading", "sorting", "slow", "run"];
  */
 home.post("/home/seen", async (c) => {
 	if (c.env.DEMO === "true") return c.body(null, 204);
-	await c.env.DB.prepare(
-		"UPDATE household_members SET home_seen_at = datetime('now') WHERE email = ? AND removed_at IS NULL AND (home_seen_at IS NULL OR home_seen_at < datetime('now', ?))",
+	const request = { member: actor(c), now: Date.now() };
+
+	const seen = await c.env.DB.prepare(
+		"SELECT removed_at IS NULL AS member, unixepoch(home_seen_at) * 1000 AS last_seen_ms FROM household_members WHERE email = ?",
 	)
-		.bind(actor(c), `-${HOME_SEEN_EVERY_MS / 1000} seconds`)
-		.run();
+		.bind(request.member)
+		.first<{ member: number; last_seen_ms: number | null }>();
+
+	const asked = decided(
+		checkIn.decide(request, {
+			member: seen?.member === 1,
+			lastSeenMs: seen?.last_seen_ms ?? null,
+		}),
+	);
+
+	// The save checks again what the rule read: the person is still a member, and no other tab's check-in landed inside
+	// the window meanwhile, so one window is written once and an older request never overwrites a newer one.
+	if (asked.kind === "write")
+		await c.env.DB.prepare(
+			`UPDATE household_members SET home_seen_at = datetime(?1 / 1000, 'unixepoch') WHERE email = ?2 AND removed_at IS NULL
+			 AND (home_seen_at IS NULL OR unixepoch(home_seen_at) <= ?1 / 1000 - ${HOME_SEEN_EVERY_MS / 1000})`,
+		)
+			.bind(asked.save.now, asked.save.member)
+			.run();
 	const form = await c.req.parseBody();
 	const shown = SHOWN_STEPS.find((step) => step === form.step);
 
