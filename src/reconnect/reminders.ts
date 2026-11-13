@@ -76,15 +76,20 @@ export async function runReconnectReminders(
 		return;
 	}
 
-	// Each send waits for its start time, which is the pace after the start before it, whichever bank it is for.
-	let nextStartAt = 0;
+	// Each send waits its turn to start: the pace after the moment the send before it really started, whichever bank it
+	// is for. Counting from the real start, not a planned one, keeps two starts the pace apart even when a timer runs late.
+	let lastStart: Promise<number> = Promise.resolve(Number.NEGATIVE_INFINITY);
 
-	const paced = async () => {
-		const startAt = Math.max(Date.now(), nextStartAt);
-		nextStartAt = startAt + paceMs;
-		const wait = startAt - Date.now();
+	const paced = () => {
+		lastStart = lastStart.then(async (startedAt) => {
+			const wait = startedAt + paceMs - Date.now();
 
-		if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+			if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+
+			return Date.now();
+		});
+
+		return lastStart;
 	};
 
 	// Counts are per address and bank; the failure kinds name a provider status, never an address.
