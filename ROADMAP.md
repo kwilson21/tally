@@ -89,6 +89,19 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
 | Jev told each merchant's recent categories, so every guess improves (decision 90, Q69 A); built before #233 | [#265](https://github.com/kwilson21/tally/issues/265) | — |
 
+## Store lookup (decision 216; spec §7)
+
+The first time Tally sees a store, it searches the web for it once and tells Jev and the name run what it found. Design: [docs/superpowers/specs/2026-11-12-store-lookup-design.md](docs/superpowers/specs/2026-11-12-store-lookup-design.md). Each build issue gets its plan from a state-machine and Quint model of the flow, written before its brief. Built in this order.
+
+| Part | Issue | Status |
+|---|---|---|
+| The spec and the decision | [#983](https://github.com/kwilson21/tally/issues/983) | Open |
+| Does a correct line help Jev? (hand-written lines, no search) | [#984](https://github.com/kwilson21/tally/issues/984) | Open |
+| The table, the machine, the search and the night step, nothing shown | [#985](https://github.com/kwilson21/tally/issues/985) | Open |
+| Are the real lines right? (real searches on store texts the owner approves) | [#986](https://github.com/kwilson21/tally/issues/986) | Open |
+| The line to Jev and the name run, and asking again about open guesses | [#987](https://github.com/kwilson21/tally/issues/987) | Open |
+| The line on the card, "Don't use this", the Settings switch and the demo's lookups | [#988](https://github.com/kwilson21/tally/issues/988) | Open |
+
 ## Phase 5 (decisions 66, 74, 76, 82; spec §8.4)
 
 The owner picked each open question's answer from a picture (decision 82, P91–P109 on the proposals page, and decision 86 for the bank email).
