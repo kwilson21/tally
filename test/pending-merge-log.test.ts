@@ -252,26 +252,51 @@ describe("a pending purchase's category log follows its category onto the posted
 });
 
 describe("the conditions are written once", () => {
-	const countOf = (needle: string) => MERGE_SOURCE.split(needle).length - 1;
+	const countOf = (pattern: RegExp) =>
+		MERGE_SOURCE.match(new RegExp(pattern, "g"))?.length ?? 0;
 
+	// Each pattern matches the condition whatever the posted row is called (`${posted}`, `transactions`, `t`), so an inline
+	// copy written for one statement is found as well as one written for the log.
 	it.each([
 		[
 			"a person's pick moves",
-			"p.category_source = 'user' AND p.category_id IS NOT NULL",
+			/p\.category_source = 'user' AND p\.category_id IS NOT NULL/,
 		],
-		["the posted row holds a person's pick", "category_source, '') = 'user'"],
+		[
+			"the posted row does not hold a person's pick",
+			/category_source, ''\) != 'user'/,
+		],
+		["the posted row holds a person's pick", /category_source, ''\) = 'user'/],
 		[
 			"the posted row's category is open to Jev",
-			`category_id IS NULL AND \${posted}.category_source IS NULL`,
+			/p\.category_confidence IS NOT NULL AND \S+category_id IS NULL AND \S+category_source IS NULL/,
+		],
+		[
+			"a Jev answer fits the posted row",
+			/p\.amount_cents = \?3 AND \S+category_confidence IS NULL AND \S+is_split = 0/,
 		],
 		[
 			"a split is removed by the amount",
-			"p.is_split = 1 AND p.amount_cents != ?3",
+			/p\.is_split = 1 AND p\.amount_cents != \?3/,
 		],
 	])(
-		"%s is spelled once in src/plaid/pending-merge.ts (the category statement and the log call its function)",
-		(_name, needle) => {
-			expect(countOf(needle)).toBe(1);
+		"%s is spelled once in src/plaid/pending-merge.ts, in the function the statement and the log both call",
+		(_name, pattern) => {
+			expect(countOf(pattern)).toBe(1);
+		},
+	);
+
+	it.each([
+		"personPickMoves",
+		"jevCategoryArm",
+		"jevAnswerFits",
+		"splitRemovedByAmount",
+		"holdsPersonsPick",
+	])(
+		"%s is called for the category statement and for the log's arm",
+		(name) => {
+			expect(MERGE_SOURCE).toContain(`${name}("transactions")`);
+			expect(MERGE_SOURCE).toContain(`${name}("t")`);
 		},
 	);
 });
