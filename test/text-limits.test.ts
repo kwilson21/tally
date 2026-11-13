@@ -95,6 +95,11 @@ describe("the text limits", () => {
 				why: "the longest note the model may suggest",
 			},
 			{
+				file: "src/ai/lookup-store.ts",
+				name: "MAX_LINE",
+				why: "the longest store line the model may give (a search answer, not typed text)",
+			},
+			{
 				file: "src/ai/suggest-name.ts",
 				name: "MAX_BANK_TEXT",
 				why: "how much bank text may be sent to the model",
