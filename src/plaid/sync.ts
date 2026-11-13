@@ -292,7 +292,8 @@ const copyNeverSuggestSql = (ownsLock: string) =>
  *
  * The texts are read before the page is saved, because only TypeScript can tidy one, so another bank's sync can store a
  * charge with the same Plaid name under a text that isn't among them (#1048). The last test covers that: a name that is
- * the newest for a text the page never looked at stays, as it would had the other bank's charge come first.
+ * the newest for a text the page never looked at stays for now, and the page settles it in its second look, after the
+ * save, once that text has been read and tidied (#1054).
  */
 const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
@@ -1200,9 +1201,10 @@ export async function syncItem(
 				for (const row of results) textsOfCharges.add(row.raw_name);
 			}
 
-			if (textsOfCharges.size > 0) {
-				const names = new Set<string>();
+			// The Plaid names those texts go by, kept for the second look after the save (see below).
+			const names = new Set<string>();
 
+			if (textsOfCharges.size > 0) {
 				const current = await env.DB.prepare(
 					`SELECT DISTINCT merchant_name FROM transactions
 					 WHERE parent_id IS NULL AND raw_name IN (SELECT value FROM json_each(?))
@@ -1300,6 +1302,51 @@ export async function syncItem(
 			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
 			if (results[0]?.meta.changes === 0) {
 				throw new Error("Plaid sync lost its lock to a newer run");
+			}
+
+			// A second look, now the page is saved (#1048). The texts above were read before the save, so another bank's
+			// sync may have stored a charge with one of these Plaid names under a text this page never read. The save left
+			// such a name alone (see withdrawOlderPlaidNamesSql); with the missed texts read and tidied, it is settled here
+			// as it would have been had the other bank's charge come first. Nothing is read twice when no text was missed.
+			if (names.size > 0) {
+				const now = await env.DB.prepare(
+					`SELECT DISTINCT raw_name FROM transactions
+					 WHERE parent_id IS NULL AND merchant_name IN (SELECT value FROM json_each(?))`,
+				)
+					.bind(JSON.stringify([...names]))
+					.all<{ raw_name: string }>();
+
+				const missed = now.results.filter(
+					(row) => !textsOfCharges.has(row.raw_name),
+				);
+
+				if (missed.length > 0) {
+					for (const row of missed) textsOfCharges.add(row.raw_name);
+
+					const texts = JSON.stringify(
+						[...textsOfCharges].map((text) => [text, tidyName(text)]),
+					);
+
+					await env.DB.batch([
+						env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
+							texts,
+							itemRowId,
+							lockId,
+						),
+						...pendingNameStatements(
+							env.DB,
+							newestPlaidNameCandidatesSql,
+							[texts],
+							OWNS_LOCK,
+							[itemRowId, lockId],
+							lockId,
+						),
+						env.DB.prepare(sweepStaleNamesSql(OWNS_LOCK)).bind(
+							itemRowId,
+							lockId,
+						),
+					]);
+				}
 			}
 
 			let inserted = 0;

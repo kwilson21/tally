@@ -248,4 +248,45 @@ describe("one bank's page saved while another bank adds a charge with the same P
 		expect(await status("Bean House Roasters")).toBe("pending");
 		expect(await status("Bean House")).toBe("pending");
 	});
+
+	it("withdraws a suggested name the other bank's new charge uses only as its own text, tidied", async () => {
+		const one = await addBank("account-one");
+		const two = await addBank("account-two");
+
+		await syncBank(one, [
+			{
+				text: "COFFEE TEXT ONE",
+				name: "Bean house",
+				id: "earlier",
+				date: "2026-09-01",
+			},
+		]);
+		expect(await status("Bean house")).toBe("pending");
+
+		// As above, but bank two's text is BEAN HOUSE: its Plaid name is only that text tidied, which needs no suggestion.
+		let between = true;
+
+		const db = Object.assign(Object.create(env.DB), {
+			prepare: (query: string) => env.DB.prepare(query),
+			batch: async (statements: D1PreparedStatement[]) => {
+				if (between) {
+					between = false;
+					await syncBank(two, [{ text: "BEAN HOUSE", name: "Bean house" }]);
+				}
+
+				return env.DB.batch(statements);
+			},
+		});
+
+		await syncBank(
+			one,
+			[{ text: "COFFEE TEXT ONE", name: "Bean House Roasters" }],
+			undefined,
+			db,
+		);
+
+		// Bank two then bank one, one after the other, withdraws it: no text has it as a newest name worth suggesting.
+		expect(await status("Bean House Roasters")).toBe("pending");
+		expect(await status("Bean house")).toBe("none");
+	});
 });
