@@ -579,6 +579,45 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		expect(await rowOf(bakery)).toMatchObject({ category_id: null });
 	});
 
+	it("a one-off name in the save that turns Exclude off on a transfer credit doesn't say Tally guesses it again (#878)", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -5000, flag_transfer = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const jev = fakeJev(() => reply(0.2));
+
+		const { response } = await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+
+		await background();
+
+		const announce = JSON.parse(
+			response.headers.get("HX-Trigger") ?? "{}",
+		).announce;
+
+		expect(announce).not.toContain("guesses its category again");
+		expect(waitUntil).not.toHaveBeenCalled();
+		expect(jev.bodies).toHaveLength(0);
+
+		expect(await rowOf(bakery)).toMatchObject({ category_id: category });
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_income, income_source FROM transactions WHERE id = ?",
+				)
+				.bind(bakery)
+				.first(),
+		).toEqual({ flag_income: 1, income_source: "user" });
+	});
+
 	it("the store's own name under This one only is a one-off name too: Jev guesses the category again", async () => {
 		const category = await firstCategory();
 		await pickedByTally(category);

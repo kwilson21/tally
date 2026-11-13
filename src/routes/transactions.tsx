@@ -3429,6 +3429,10 @@ async function savePanel(
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
 
+	// The row as the save left it: a save can change its income on its own (a transfer credit turned out of Exclude,
+	// #878), so the guess below reads the saved income, not the form's.
+	const after = await getTransaction(c.env.DB, tx.id);
+
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
@@ -3441,7 +3445,7 @@ async function savePanel(
 		row: {
 			included: isIncluded(excludedNow, paysBillOrPlan),
 			isSplit: tx.isSplit === true,
-			income: parsed.value.income,
+			income: after?.income ?? parsed.value.income,
 			followsPurchase:
 				refunds.some((p) => p.id === refundOfId && !p.excluded) &&
 				followsPurchaseAfterSave(tx, { ...parsed.value, refundOfId }),
@@ -3484,7 +3488,6 @@ async function savePanel(
 	// The toast and the announcer say what the row reads once saved, read back from the database: its own name,
 	// else the merchant's, else the bank's text tidied (never the raw bank string, #93). A split part keeps its
 	// purchase's own name when All doesn't reach it, so the toast names that, not the name the save gave.
-	const after = await getTransaction(c.env.DB, tx.id);
 	const name = after?.displayName ?? tx.displayName;
 	// A save that chose no name while the row still shows an undecided guess named nothing: it says just "Saved.".
 	const unnamed = after?.nameSuggested === true;
