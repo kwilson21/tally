@@ -13,7 +13,8 @@ import { setup } from "xstate";
 //   REJECTED       GitHub answered 422, which it never accepts: the row gives up at once.
 //   TOKEN_REFUSED  GitHub answered 401 or 403, so the token is wrong, not the row: the try is given back.
 //   FAILED         any other failed try (a non-2xx answer, a timeout, an unreadable body, a 2xx with no issue number):
-//                  the claim is released, and the try stays counted.
+//                  the claim is released, and the try stays counted. Every case after GitHub's answer writes its status;
+//                  only a fetch that never got an answer, such as a timeout, writes none.
 //   LEASE_EXPIRED  a claim has run out with no answer: the same as a failed try.
 //
 // Not a move: a row that GitHub filed, but whose number could not be stored (the final UPDATE failed), is filed again by

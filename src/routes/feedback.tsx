@@ -409,8 +409,9 @@ export async function fileFeedbackIssue(
 	}
 
 	// The deadline also covers reading the answer, so a body that stalls is a failed try too, and gives the claim back.
+	// GitHub answered, so its status is written even when the body cannot be read.
 	const issue = await readIssue(response).catch(async (error) => {
-		await giveBack(db, item.id, "FAILED");
+		await giveBack(db, item.id, "FAILED", response.status);
 		throw error;
 	});
 

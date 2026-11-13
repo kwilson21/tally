@@ -457,6 +457,7 @@ describe("every writer agrees with the machine, from every state", () => {
 		{
 			label: "an unreadable body",
 			event: "FAILED",
+			status: 201,
 			answer: () => new Response("not json", { status: 201 }),
 		},
 	];

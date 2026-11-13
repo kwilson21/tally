@@ -1486,8 +1486,9 @@ describe("a GitHub answer leaves the stored columns the machine's move says", ()
 		},
 	);
 
+	// GitHub answered 201, so the status is written even though the body cannot be read; only a fetch with no answer writes none.
 	it.each([0, 4])(
-		"an unreadable body gives the claim back and writes no status, from %i tries",
+		"an unreadable body gives the claim back and writes its status, from %i tries",
 		async (before) => {
 			const id = await seedWith(before);
 			await fileOnce(id, reply(201, "not json"));
@@ -1495,7 +1496,7 @@ describe("a GitHub answer leaves the stored columns the machine's move says", ()
 			expect(await columnsOf(id)).toEqual({
 				attempts: before + 1,
 				filingAt: null,
-				lastStatus: null,
+				lastStatus: 201,
 				issue: null,
 			});
 		},
