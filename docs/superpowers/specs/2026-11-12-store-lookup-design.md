@@ -53,7 +53,7 @@ The owner picked 1 in chat on 2026-11-12.
 
 In the same places sorting runs (spec §7): the night's Workflow and right after a sync, as a step **after** the sorting groups and before the name run. Never in a request a person is waiting on.
 
-**After Jev's first answer, not before** (the owner's pick on 2026-11-12; the first design had it before). A store is searched only once Jev itself has answered at least one of its rows and none is still waiting for Jev, so a row Jev flags as a transfer, income or a reimbursement is known before anything is sent. A category a person chose, or a rule applied, is not that answer: filing "JANE DOE" under Kids does not say the payee is a store, so a store whose rows only a person or a rule has filed is not searched. A bare name such as "JANE DOE" under an ordinary Plaid category names no app or rail, and only Jev's answer can say it is a payment to a person. The cost: a new store's first guess is made without the line. The line reaches that store's later rows on their first ask, and its guesses that are still open are asked again; a row Jev filed confidently but wrongly on its first ask is not helped.
+**After Jev's first answer, not before** (the owner's pick on 2026-11-12; the first design had it before). A store is searched only once Jev itself has answered at least one of its rows and none is still waiting for Jev, so a row Jev flags as a transfer, income or a reimbursement is known before anything is sent. Jev's answer counts only when its privacy answers were kept: the row has Jev's category answer (with its transfer and reimbursement answers) and its income answer stored. With "Guess categories" or "Spot paychecks" off Tally keeps neither, even though Jev may still be asked for details, so nothing is searched while either switch is off, and the lookup switch is greyed as "Sort right away" is. A category a person chose, or a rule applied, is not that answer: filing "JANE DOE" under Kids does not say the payee is a store, so a store whose rows only a person or a rule has filed is not searched. A bare name such as "JANE DOE" under an ordinary Plaid category names no app or rail, and only Jev's answer can say it is a payment to a person. The cost: a new store's first guess is made without the line. The line reaches that store's later rows on their first ask, and its guesses that are still open are asked again; a row Jev filed confidently but wrongly on its first ask is not helped.
 
 Stores that already exist when this ships are looked up by the same run, oldest first, under the daily cap, so the backlog drains over a few nights.
 
@@ -127,7 +127,7 @@ stateDiagram-v2
 
 - **Not style 2 (the bridge):** the search is outside work, but the job is long and already has a home. Decision 209 point 3 sends a long wait on an outside service to the existing Workflow, so the search is a Workflow step and the machine only states the moves.
 - **Not style 3 (Effect) for the run:** decision 206 keeps Effect style for write handlers; the lookup run is background work like sync and stays plain TypeScript.
-- **Style 3 for the one write a person makes:** "Don't use this" on a lookup line is a write handler, so it is a `rule({...})` from `src/rules/terms.ts`, with an entry in `docs/write-handlers.json`.
+- **Style 3 for the one write a person makes:** "Don't use this" on a lookup line is a write handler, so it is a `rule({...})` from `src/rules/terms.ts`, with its stories test beside it (decisions 211 and 212 retired `docs/write-handlers.json`, so there is no list to add it to).
 - **`Schema` at the edge:** the search service's JSON is decoded with Effect `Schema` once, in the lookup module (decision 206).
 
 ### What leaves the app
@@ -268,6 +268,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
 | JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered its rows |
 | JANE DOE | none | GENERAL_SERVICES, a person filed it under Kids, Jev never asked | No | a person's category choice is not Jev's privacy answer |
+| JANE DOE | none | GENERAL_SERVICES, Jev asked for details only ("Guess categories" or "Spot paychecks" off) | No | Jev's transfer and income answers were not kept |
 | PwP Privacycom fiGNTCPNeNoKPZC | none | GENERAL_SERVICES | No | a pay-through service; the text is a reference, not a store |
 | JANE DOE | Jane Doe | GENERAL_SERVICES, and Jev flagged it a transfer (or "Maybe transfer") | No | a stored flag, whoever set it |
 | one ordinary row and one transfer row sharing a lookup text | | | No | one private row makes the text private |
