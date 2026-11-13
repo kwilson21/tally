@@ -11,8 +11,9 @@ import { present } from "./helpers/present";
 
 // The Name row's CSS-only hooks (src/views/name-choices.tsx) read class names and a named group that are also exported
 // constants. Tailwind compiles a hook only from literal text, so the hooks repeat each name as text; a constant renamed
-// on its own would leave the hooks matching nothing, and the note or the field would stop folding with no error
-// (audit finding: only a comment said the two must stay in step).
+// or swapped on its own would leave the hooks matching nothing, and the note or the field would stop folding with no
+// error (audit finding: only a comment said the two must stay in step). This builds each hook from the constants and
+// looks for exactly that text in the source, then checks the rest of the hooks' names are whole and known.
 
 const SOURCE = present(
 	Object.values(
@@ -24,6 +25,8 @@ const SOURCE = present(
 	)[0],
 );
 
+const EDIT = present(EDIT_FORM_GROUP.split("/")[1]);
+
 const HOOK_CLASSES = [
 	NAME_PICK_CLASS,
 	OWN_PICK_CLASS,
@@ -32,9 +35,33 @@ const HOOK_CLASSES = [
 	TALLY_CATEGORY_CLASS,
 ];
 
-/** Every `group-has-[...]` hook in the file, with its optional `/group` name. The brackets nest (`input[name=x]`). */
-function hooksOf(source: string) {
-	const found: { condition: string; group: string | undefined }[] = [];
+/** Every hook the source is expected to write, each built from the constants that name its class and its group. */
+const EXPECTED_HOOKS = [
+	// The Name list shows while a name is ticked, and "Type your own"'s field while that radio is (no named group).
+	`group-has-[.${NAME_PICK_CLASS}:checked]:flex`,
+	`group-has-[.${OWN_PICK_CLASS}:checked]:block`,
+	// The re-guess note's folds, read from the edit form's group.
+	`group-has-[input[name=category]:checked:enabled:not(.${TALLY_CATEGORY_CLASS})]/${EDIT}:hidden`,
+	`group-has-[.${LINKED_PURCHASE_CLASS}:checked:not([checked])]/${EDIT}:hidden`,
+	`group-has-[input[name=creditReviewed]:checked]/${EDIT}:group-has-[.${LINKED_PURCHASE_CLASS}:checked]/${EDIT}:hidden`,
+	`group-has-[.${SAME_NAME_CLASS}:checked]/${EDIT}:hidden`,
+	`"group-has-[.${LINKED_PURCHASE_CLASS}:checked]/${EDIT}:hidden"`,
+];
+
+/** The two hooks that read the Name row's own unnamed group; every other hook reads the edit form's. */
+const UNNAMED = [`.${NAME_PICK_CLASS}:checked`, `.${OWN_PICK_CLASS}:checked`];
+
+type Hook = {
+	condition: string;
+	/** The `/name` after the brackets, or undefined for an unnamed group. */
+	group: string | undefined;
+	/** True when what follows the brackets is neither `:` nor `/name:`. */
+	malformed: boolean;
+};
+
+/** Every `group-has-[...]` hook in a text. The brackets nest (`input[name=x]`), and names are read whole. */
+function hooksOf(source: string): Hook[] {
+	const found: Hook[] = [];
 	const opener = "group-has-[";
 	let from = source.indexOf(opener);
 
@@ -50,34 +77,35 @@ function hooksOf(source: string) {
 			at += 1;
 		}
 
-		const condition = source.slice(from + opener.length, at - 1);
-		const group = /^\/([a-z]+):/.exec(source.slice(at))?.[1];
+		const after = /^(?:\/([\w-]+))?:/.exec(source.slice(at));
 
-		found.push({ condition, group });
+		found.push({
+			condition: source.slice(from + opener.length, at - 1),
+			group: after?.[1],
+			malformed: after === null,
+		});
 		from = source.indexOf(opener, at);
 	}
 
 	return found;
 }
 
-const hooks = hooksOf(SOURCE);
-
-/** The class names a hook's condition mentions: `.name-same` in `.name-same:checked`. */
+/** The class names a hook's condition mentions, whole: `name-same2` in `.name-same2:checked`. */
 const classesIn = (condition: string) =>
-	[...condition.matchAll(/\.([a-z][a-z-]*)/g)].map((match) => match[1]);
+	[...condition.matchAll(/\.([\w-]+)/g)].map((match) => match[1]);
+
+const hooks = hooksOf(SOURCE);
 
 describe("the Name row's hooks follow its exported constants", () => {
 	it("finds the hooks it is meant to check", () => {
 		expect(hooks.length).toBeGreaterThan(8);
 	});
 
-	it.each(HOOK_CLASSES)("the class %s is named by a hook", (name) => {
-		expect(hooks.some((hook) => classesIn(hook.condition).includes(name))).toBe(
-			true,
-		);
+	it.each(EXPECTED_HOOKS)("writes the hook %s", (hook) => {
+		expect(SOURCE).toContain(hook);
 	});
 
-	it("every class a hook names is one of the exported classes", () => {
+	it("reads no hook with a name it does not know: every class is a whole exported class", () => {
 		const unknown = hooks.flatMap((hook) =>
 			classesIn(hook.condition).filter(
 				(name) => name !== undefined && !HOOK_CLASSES.includes(name),
@@ -87,14 +115,49 @@ describe("the Name row's hooks follow its exported constants", () => {
 		expect(unknown).toEqual([]);
 	});
 
-	it("every named group a hook reads is the edit form's group", () => {
-		const edit = present(EDIT_FORM_GROUP.split("/")[1]);
+	it("reads every hook's group as the edit form's, except the two on the Name row's own group", () => {
+		const wrong = hooks.flatMap((hook) => {
+			const expected = UNNAMED.includes(hook.condition) ? undefined : EDIT;
 
-		const others = hooks.flatMap((hook) =>
-			hook.group !== undefined && hook.group !== edit ? [hook.group] : [],
+			return hook.group === expected ? [] : [hook.condition];
+		});
+
+		expect(wrong).toEqual([]);
+	});
+
+	it("reads no hook it cannot parse", () => {
+		expect(hooks.filter((hook) => hook.malformed)).toEqual([]);
+	});
+});
+
+describe("the reader of hooks sees the mistakes it guards against", () => {
+	it("keeps a class whole when it ends in a digit", () => {
+		const [hook] = hooksOf("group-has-[.name-same2:checked]/edit:hidden");
+
+		expect(classesIn(hook?.condition ?? "")).toEqual(["name-same2"]);
+	});
+
+	it("reads a misspelled group as that group, not as none", () => {
+		const [hook] = hooksOf("group-has-[.name-same:checked]/edit-form:hidden");
+
+		expect(hook?.group).toBe("edit-form");
+	});
+
+	it("reads a hook with no group as unnamed, and one with a missing colon as malformed", () => {
+		const [unnamed, broken] = hooksOf(
+			"group-has-[.a:checked]:flex group-has-[.b:checked]/edit hidden",
 		);
 
-		expect(others).toEqual([]);
-		expect(hooks.some((hook) => hook.group === edit)).toBe(true);
+		expect(unnamed?.group).toBeUndefined();
+		expect(unnamed?.malformed).toBe(false);
+		expect(broken?.malformed).toBe(true);
+	});
+
+	it("reads two hooks chained in one class", () => {
+		const found = hooksOf(
+			"group-has-[a]/edit:group-has-[.linked-purchase:checked]/edit:hidden",
+		);
+
+		expect(found.map((hook) => hook.group)).toEqual(["edit", "edit"]);
 	});
 });
