@@ -165,6 +165,43 @@ describe("syncAllItems", () => {
 		]);
 	});
 
+	it("syncs three banks at once, and a fourth waits for one of them to finish", async () => {
+		for (let i = 0; i < 4; i++) await addItem();
+		const plaid = fakePlaid();
+		const inFlight = new Set<string>();
+		let release = () => {};
+
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		// Each bank's first call to Plaid is held open, so the banks that have started can be counted.
+		const fetchImpl = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const body: { access_token: string } = JSON.parse(String(init?.body));
+
+				if (String(url).endsWith("/accounts/get")) {
+					inFlight.add(body.access_token);
+					await held;
+				}
+
+				return plaid(url, init);
+			},
+		);
+
+		const run = syncAllItems(enabledEnv, fetchImpl);
+
+		await vi.waitFor(() => expect(inFlight.size).toBe(3));
+		// Long enough for a fourth to start, if nothing held it back.
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(inFlight.size).toBe(3);
+
+		release();
+
+		expect(await run).toMatchObject({ synced: 4, added: 4, failed: 0 });
+		expect(inFlight.size).toBe(4);
+	});
+
 	it("clears a flagged Item's flag and reminder when the daily run's sync succeeds", async () => {
 		const id = await addItem("needs_attention");
 		await env.DB.prepare(
@@ -513,22 +550,36 @@ describe("syncAllItems", () => {
 		await addItem();
 		const second = await addItem();
 		const fetchImpl = fakePlaid();
-		let calls = 0;
-		fetchImpl.mockImplementation(async (url, init) => {
-			calls += 1;
 
-			if (calls === 2) {
-				await env.DB.prepare(
-					"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
-				)
-					.bind(second)
-					.run();
-			}
+		// The second bank is disconnected after the run has listed the banks and before it reaches that bank's own check.
+		// The banks sync side by side, so the change lands as the list is read, not during the first bank's sync.
+		const afterTheList = (sql: string) => {
+			const statement = env.DB.prepare(sql);
 
-			return fakePlaid()(url, init);
-		});
+			if (!sql.includes("SELECT id, institution_name FROM plaid_items"))
+				return statement;
 
-		expect(await syncAllItems(enabledEnv, fetchImpl)).toEqual({
+			return {
+				all: async () => {
+					const listed = await statement.all();
+
+					await env.DB.prepare(
+						"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
+					)
+						.bind(second)
+						.run();
+
+					return listed;
+				},
+			};
+		};
+
+		const racing = {
+			...enabledEnv,
+			DB: Object.assign(Object.create(env.DB), { prepare: afterTheList }),
+		};
+
+		expect(await syncAllItems(racing, fetchImpl)).toEqual({
 			added: 1,
 			modified: 0,
 			changedIds: expect.any(Array),
@@ -589,19 +640,19 @@ describe("syncAllItems", () => {
 		expect(log.mock.calls).toEqual([
 			["plaid daily sync: synced 0, skipped 0, failed 2"],
 		]);
-		expect(error.mock.calls).toEqual([
-			["plaid sync error request-1"],
-			[
-				expect.stringMatching(
-					/^plaid daily sync: item \d+ failed plaid request-1$/,
-				),
-			],
-			["plaid sync error request-2"],
-			[
-				expect.stringMatching(
-					/^plaid daily sync: item \d+ failed plaid request-2$/,
-				),
-			],
+		// The banks sync side by side, so their lines interleave: each bank's two lines are there, in no fixed order
+		// between banks, and nothing else is logged.
+		const lines = error.mock.calls.map(([line]) => String(line)).sort();
+
+		expect(lines).toEqual([
+			expect.stringMatching(
+				/^plaid daily sync: item \d+ failed plaid request-1$/,
+			),
+			expect.stringMatching(
+				/^plaid daily sync: item \d+ failed plaid request-2$/,
+			),
+			"plaid sync error request-1",
+			"plaid sync error request-2",
 		]);
 	});
 
