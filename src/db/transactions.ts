@@ -18,6 +18,7 @@ import {
 	type Edit,
 	excludedAfterSave,
 	followsPurchaseAfterSave,
+	includedTransferCredit,
 	merchantRuleChange,
 } from "../transactions/edit";
 import {
@@ -1166,13 +1167,13 @@ export type SaveEditResult =
 export async function saveEdit(
 	db: D1Database,
 	id: number,
-	edit: Edit,
+	posted: Edit,
 	actor: string,
 	splitEdit?: CashSplitEdit,
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, excluded_source AS excludedSource, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_state AS noteState, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, flag_transfer AS flagTransfer, excluded, excluded_source AS excludedSource, parent_id AS parentId, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_state AS noteState, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -1185,8 +1186,10 @@ export async function saveEdit(
 			incomeSource: string | null;
 			creditReviewed: number | null;
 			creditReviewedBy: string | null;
+			flagTransfer: number;
 			excluded: number;
 			excludedSource: string | null;
+			parentId: number | null;
 			paysBill: number;
 			paysPlan: number;
 			/** The linked purchase's exclusion (1 or 0), or null when nothing is linked. */
@@ -1202,6 +1205,19 @@ export async function saveEdit(
 		}>();
 
 	if (!current) throw new Error(`No transaction ${id}`);
+
+	// Turning Exclude off on a transfer credit counts it as income, reviewed by the person (#878). The rest of
+	// this save is checked and written from that edit.
+	const edit = includedTransferCredit(posted, {
+		amountCents: current.amountCents,
+		flagTransfer: current.flagTransfer,
+		excluded: current.excluded,
+		income: current.income,
+		isSplit: current.isSplit,
+		parentId: current.parentId,
+		refundOfId: current.refundOfId,
+		creditReviewedByUser: current.creditReviewedBy === "user",
+	});
 
 	// The split's correction, when there is one. Its gate is the edit's gate for a split cash entry (below), and its
 	// first statements run before the edit's, its new parts after them.
