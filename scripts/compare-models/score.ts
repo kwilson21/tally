@@ -161,6 +161,9 @@ export type Row = {
 
 export const SKIPPED_OUTCOME = "skipped: no JEV_API_KEY";
 
+/** Jev's answer to the payee question (#984, part two): its choice and confidence, or null when it sent none. */
+export type PayeeAnswer = { choice: string; confidence: number } | null;
+
 /** A row for a model that wasn't asked: no key, so no call. */
 export const skippedRow = (): Row => ({
 	outcome: SKIPPED_OUTCOME,
@@ -256,7 +259,8 @@ export type Summary = {
 	ms: { middle: number; slowest: number } | null;
 };
 
-function median(values: number[]): number {
+/** The middle of the values: the mean of the two middle ones when there is an even count. */
+export function median(values: number[]): number {
 	const sorted = [...values].sort((a, b) => a - b);
 	const half = Math.floor(sorted.length / 2);
 
