@@ -57,6 +57,16 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 	WHERE p.disconnected_at IS NULL AND t.plaid_transaction_id IS NOT NULL`;
 
 /**
+ * The send's test on a member, in SQL (reconnectRecipients' rule, plus the away test): ?n is the address. The address must be a
+ * member not removed and seen in the last 90 days, and its person must not be on a first-week page within `awayMs` (home_seen_at).
+ * The claim and the cut-off recovery both use it, so a send to an address is refused the same way at either point.
+ */
+function eligibleSql(address: string, awayMs: number): string {
+	return `EXISTS (SELECT 1 FROM household_members m WHERE m.email = ${address} AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')
+			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${awayMs / 1000} seconds')))`;
+}
+
+/**
  * The claim for one address, in SQL (shared with the ready push, decision 149). `listPath` is the record's list the address
  * joins: readyEmailedTo for the email, readyPushedTo for the push. ?1 is the address. It changes no row when the address is in
  * that list already, so a second claim of one address (an earlier run, or one still going) sends nothing. It changes no row
@@ -77,8 +87,7 @@ export function claimSql(
 		json_insert(COALESCE(json_extract(household_settings.value, '${listPath}'), json('[]')), '$[#]', ?1)${extraSet})
 	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL} AND NOT EXISTS (
 		SELECT 1 FROM json_each(household_settings.value, '${listPath}') AS e WHERE e.value = ?1)${extraGuard}
-		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')
-			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${awayMs / 1000} seconds')))`;
+		AND ${eligibleSql("?1", awayMs)}`;
 }
 
 // Not within EMAIL_AFTER_PUSH_MS of a ready push (decision 149). readyPushedAt is written when the push claims the person (holding the
@@ -126,11 +135,14 @@ const DROP_HELD_SQL = `UPDATE household_settings
 
 // Recovers a cut-off claim (decision 223): re-stamps it, and only while the address is still listed, a kept try is stored, and the
 // stamp is at least the lease old. Of several runs at once only the one that changes the row (meta.changes) sends. ?1 is the
-// address's hash and ?2 the address. A stamp that is missing reads NULL, so a claim with no stamp is never recovered.
-const RECOVER_SQL = `UPDATE household_settings
+// address's hash and ?2 the address. It keeps the claim's own send conditions (questions undrawn, a member still active, not on a
+// first-week page within the away window), so a cut-off email is never sent to someone the claim would now refuse. A stamp that is
+// missing reads NULL, so a claim with no stamp is never recovered.
+export const RECOVER_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.readyClaimedAt."' || ?1 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-	WHERE key = 'first_tally'
+	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL}
 		AND EXISTS (SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?2)
+		AND ${eligibleSql("?2", EMAIL_AWAY_AFTER_MS)}
 		AND json_type(household_settings.value, '$.heldReadyEmail."' || ?1 || '"') IS NOT NULL
 		AND datetime(json_extract(household_settings.value, '$.readyClaimedAt."' || ?1 || '"')) <= datetime('now', '-${READY_LEASE_MINUTES * 60} seconds')`;
 

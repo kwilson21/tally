@@ -6,6 +6,7 @@ import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import {
 	CLAIM_SQL,
+	RECOVER_SQL,
 	readLine,
 	readyEmailKey,
 	renderReadyEmail,
@@ -2024,6 +2025,135 @@ describe("the ready email's claim keeps its email, so a run cut off after the cl
 		const next = resendFake();
 		await runReadyEmail(production(), next.fetchImpl);
 		expect(next.fetchImpl).not.toHaveBeenCalled();
+		expect(await rawRecord()).toBe(before);
+	});
+
+	/**
+	 * Runs once with Dana and Riley as members, and each address in `cutOff` with its claim cut off: listed, its stored email
+	 * kept, and a stamp 11 minutes old. Dana sorts first, so `change` (SQL) runs inside her send, after the run has read its
+	 * recipients, and so lands before Riley's turn. Returns who was sent to, and Riley's entry and stamp before and after.
+	 */
+	async function racedRun(cutOff: string[], change: string) {
+		const claimed: Record<string, string> = {};
+		const held: Record<string, Json> = {};
+
+		for (const address of cutOff) {
+			const hash = await hashOf(address);
+			claimed[hash] = await stampAgo("-11 minutes");
+			held[hash] = {
+				mail: renderReadyEmail(LINE),
+				at: ago(3_600_000),
+				tried: false,
+			};
+		}
+
+		await openHousehold({
+			members: [DANA, RILEY],
+			record: {
+				strokes: { bank: STROKE_ONE },
+				budgets: {},
+				readyEmailedTo: cutOff,
+				readyClaimedAt: claimed,
+				heldReadyEmail: held,
+			},
+		});
+
+		const { fetchImpl, sent } = resendFake();
+
+		const changeInDanasSend = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				if (bodyOf(init).to === DANA) await env.DB.prepare(change).run();
+
+				return fetchImpl(url, init);
+			},
+		);
+
+		const rileyState = async () => {
+			const hash = await hashOf(RILEY);
+
+			return { held: (await heldOf())[hash], stamp: (await stampsOf())[hash] };
+		};
+
+		const before = await rileyState();
+		await runReadyEmail(production(), changeInDanasSend);
+
+		return {
+			sent: sent.map((mail) => mail.to),
+			before,
+			after: await rileyState(),
+		};
+	}
+
+	it("a member removed while an earlier send waits gets no cut-off email: no POST to her, and her entry and stamp stay as they were", async () => {
+		const run = await racedRun(
+			[RILEY],
+			`UPDATE household_members SET removed_at = datetime('now') WHERE email = '${RILEY}'`,
+		);
+
+		expect(run.sent).toEqual([DANA]);
+		expect(run.after).toEqual(run.before);
+	});
+
+	it("a member not seen in 90 days while an earlier send waits gets no cut-off email: no POST to her, and her entry and stamp stay as they were", async () => {
+		const run = await racedRun(
+			[RILEY],
+			`UPDATE household_members SET last_seen_at = '2020-01-01 00:00:00' WHERE email = '${RILEY}'`,
+		);
+
+		expect(run.sent).toEqual([DANA]);
+		expect(run.after).toEqual(run.before);
+	});
+
+	it("two cut-off members, the first removed before the second's turn: the second gets no POST, and its entry and stamp stay", async () => {
+		const run = await racedRun(
+			[DANA, RILEY],
+			`UPDATE household_members SET removed_at = datetime('now') WHERE email = '${RILEY}'`,
+		);
+
+		expect(run.sent).toEqual([DANA]);
+		expect(run.after).toEqual(run.before);
+	});
+
+	it("a cut-off address whose person is back on a first-week page within the away window is not recovered: no POST, and the record is byte-identical", async () => {
+		await seedCutOff();
+		await env.DB.prepare(
+			"UPDATE household_members SET home_seen_at = datetime('now') WHERE email = ?",
+		)
+			.bind(DANA)
+			.run();
+		const before = await rawRecord();
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.fetchImpl).not.toHaveBeenCalled();
+		expect(await rawRecord()).toBe(before);
+	});
+
+	it("once that person's home_seen_at is older than the away window, the next run recovers the cut-off email and posts it once", async () => {
+		await seedCutOff();
+		await env.DB.prepare(
+			"UPDATE household_members SET home_seen_at = datetime('now', '-11 minutes') WHERE email = ?",
+		)
+			.bind(DANA)
+			.run();
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.fetchImpl).toHaveBeenCalledTimes(1);
+		expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
+		expect(next.keys).toEqual([await keyFor(DANA, renderReadyEmail(LINE))]);
+	});
+
+	it("the recovery statement itself refuses once a question is answered: no row changes, with the stored entry and stamp left as they were", async () => {
+		await seedCutOff();
+		await env.DB.prepare(
+			"UPDATE household_settings SET value = json_set(value, '$.strokes.pay', '2026-10-14') WHERE key = 'first_tally'",
+		).run();
+		const before = await rawRecord();
+
+		const won = await env.DB.prepare(RECOVER_SQL)
+			.bind(await hashOf(DANA), DANA)
+			.run();
+
+		expect(won.meta.changes).toBe(0);
 		expect(await rawRecord()).toBe(before);
 	});
 
