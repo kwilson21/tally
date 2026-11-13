@@ -65,6 +65,8 @@ import {
 import { ownNameSql } from "../db/own-name";
 import { loadPlans } from "../db/planned-expenses";
 import { databaseRefusal, isTriggerRaised } from "../db/refused";
+import { readAtEdge } from "../edge";
+import { RowId, UndoName, WholeCentsText } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents, toCents } from "../money";
 import {
@@ -885,10 +887,45 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	return c.redirect("/bills/find", 303);
 });
 
-bills.get("/bills/:id", async (c) => billPage(c, Number(c.req.param("id"))));
+/** A bill's id from the address, read at the edge (RowId): a refused id is no bill, so the route answers 404 before any read or write. */
+function billIdOf(c: Context<App>): number | undefined {
+	const read = readAtEdge(RowId, c.req.param("id"));
+
+	return read.ok ? read.value : undefined;
+}
+
+/** Whether a form field is text, not a file part (a file is never read as a number, a name or a token). */
+const isText = (
+	posted: string | File | (string | File)[] | undefined,
+): posted is string => typeof posted === "string";
+
+/** A payment's id from a form field, read at the edge: a refused one is 0, which no payment has. */
+function paymentIdOf(
+	posted: string | File | (string | File)[] | undefined,
+): number {
+	const read = readAtEdge(RowId, isText(posted) ? posted : undefined);
+
+	return read.ok ? read.value : 0;
+}
+
+/** A price in whole cents from a form field, read at the edge: a refused one is NaN, which the rule never accepts. */
+function centsOf(
+	posted: string | File | (string | File)[] | undefined,
+): number {
+	const read = readAtEdge(WholeCentsText, isText(posted) ? posted : undefined);
+
+	return read.ok ? read.value : Number.NaN;
+}
+
+bills.get("/bills/:id", async (c) => {
+	const id = billIdOf(c);
+
+	return id === undefined ? c.notFound() : billPage(c, id);
+});
 
 bills.get("/bills/:id/edit", async (c) => {
-	const bill = await dbBill(c, Number(c.req.param("id")));
+	const id = billIdOf(c);
+	const bill = id === undefined ? null : await dbBill(c, id);
 
 	return bill ? page(c, { bill }) : c.notFound();
 });
@@ -1160,7 +1197,9 @@ async function activeChanged(c: Context<App>, message: string) {
 }
 
 bills.post("/bills/:id/deactivate", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const bill = await dbBill(c, id);
 
 	const asked = decided(
@@ -1182,7 +1221,9 @@ bills.post("/bills/:id/deactivate", async (c) => {
 });
 
 bills.post("/bills/:id/reactivate", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const bill = await dbBill(c, id);
 
 	if (!bill) return c.notFound();
@@ -1951,25 +1992,31 @@ async function billPage(
 	);
 }
 
-bills.get("/bills/:id/occurrences/:period/link", (c) =>
-	billPage(
+bills.get("/bills/:id/occurrences/:period/link", (c) => {
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
+	// A payment the address names that is not a row is none chosen, as no payment named is.
+	const chosen = readAtEdge(RowId, c.req.query("transaction_id"));
+
+	return billPage(
 		c,
-		Number(c.req.param("id")),
+		id,
 		c.req.param("period"),
 		undefined,
-		Number(c.req.query("transaction_id")) || undefined,
+		chosen.ok ? chosen.value : undefined,
 		undefined,
 		// htmx sends HX-Request on every request it makes, and only a month chip asks for this URL that way:
 		// it gets the picker back to swap in place, never a second page.
 		Boolean(c.req.header("HX-Request")),
-	),
-);
+	);
+});
 
 bills.get("/bills/:id/month-explanation", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
 	const period = c.req.query("period") ?? "";
-	const transactionId = Number(c.req.query("transaction_id"));
-	const bill = await dbBill(c, id);
+	const posted = c.req.query("transaction_id");
+	const bill = id === undefined ? null : await dbBill(c, id);
 
 	if (
 		!bill ||
@@ -1979,7 +2026,8 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 	)
 		return c.notFound();
 
-	if (!Number.isInteger(transactionId))
+	// No payment named: the explanation of a late or an early payment. A payment named that is not a row is no payment.
+	if (posted === undefined)
 		return c.html(
 			<p class="text-sm text-muted">
 				A late payment counts in its bill's month; an early one stays in the
@@ -1987,10 +2035,14 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 			</p>,
 		);
 
+	const named = readAtEdge(RowId, posted);
+
+	if (!named.ok) return c.notFound();
+
 	const payment = await c.env.DB.prepare(
 		"SELECT date FROM transactions WHERE id=?",
 	)
-		.bind(transactionId)
+		.bind(named.value)
 		.first<{ date: string }>();
 
 	if (!payment) return c.notFound();
@@ -2008,9 +2060,10 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 const unpaidSelect = `SELECT ${occurrenceUnpaidSql("?1", "?2")} AS unpaid`;
 
 bills.post("/bills/:id/link", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const form = await c.req.parseBody();
-	const transaction = Number(form.transaction_id);
 	const period = String(form.period ?? "");
 	const opened = String(form.opened_period ?? period);
 	const bill = await dbBill(c, id);
@@ -2021,8 +2074,13 @@ bills.post("/bills/:id/link", async (c) => {
 	const refusedWith = (words: string) =>
 		billPage(c, id, opened, words, undefined, today);
 
-	const chosen =
-		Number.isInteger(transaction) && transaction > 0 ? transaction : null;
+	// A payment that is not a row, or none, is none chosen.
+	const picked = readAtEdge(
+		RowId,
+		isText(form.transaction_id) ? form.transaction_id : undefined,
+	);
+
+	const chosen = picked.ok ? picked.value : null;
 
 	const periods = await billPeriods(c.env.DB, bill, today);
 	const manualWindow = manualLinkWindowDays(bill.frequency);
@@ -2137,14 +2195,17 @@ bills.post("/bills/:id/link", async (c) => {
 });
 
 bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const period = c.req.param("period");
 	// A month can hold several payments (decision 101), so the one a Not this one names is unlinked, and only it. One
 	// that names none (a page from before this change) unlinks the month's only payment, and is refused when there are more.
+	// A payment named that is not a row names none, so it is refused too: it never reads as "none named".
 	const form = await c.req.parseBody();
 
 	const named =
-		form.transaction_id === undefined ? undefined : Number(form.transaction_id);
+		form.transaction_id === undefined ? null : paymentIdOf(form.transaction_id);
 
 	const paid = (
 		await c.env.DB.prepare(
@@ -2156,7 +2217,7 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 
 	const asked = decided(
 		unlinkPayment.decide(
-			{ named: named ?? null },
+			{ named },
 			{ linked: paid.map((row) => row.transaction_id) },
 		),
 	);
@@ -2210,18 +2271,21 @@ async function unlinkUndo(db: D1Database, token: string) {
  * only within ten seconds of the dismissal, by the database's clock (see unlinkUndo for its parts).
  */
 bills.post("/bills/:id/undo-unlink", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const form = await c.req.parseBody();
-	const token = String(form.token ?? "");
-	// The token's payment, when it has the right shape: its transaction id, a dot and the random UUID saved on the Not this one.
-	const [, transactionId] = /^(\d+)\.([0-9a-f-]{36})$/i.exec(token) ?? [];
+	// The token as posted, echoed as it was; a file part is no token, so it is the empty text.
+	const token = isText(form.token) ? form.token : "";
+	// The token's payment and the whole name, when it has the right shape: a payment id, a dot and the random UUID saved on the Not this one.
+	const name = readAtEdge(UndoName, token);
 
 	// The Not this one the token names, if it is still there, and whether its ten seconds are still running.
-	const held = transactionId
+	const held = name.ok
 		? await c.env.DB.prepare(
 				"SELECT transaction_id AS transactionId, period, (julianday('now')-julianday(created_at))*86400000<? AS fresh FROM bill_payments WHERE undo_token=? AND transaction_id=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
 			)
-				.bind(UNDO_MS, token, Number(transactionId), id)
+				.bind(UNDO_MS, token, name.value.transactionId, id)
 				.first<{ transactionId: number; period: string; fresh: number }>()
 		: null;
 
@@ -2436,19 +2500,13 @@ async function currentOffer(
 // for the prices it showed, in whole cents: the occurrence's amount, the charge, and the bill's current
 // amount. Once any of them has changed, a page that has gone stale saves nothing and the person is told,
 // so no one is made to accept a price they didn't see.
-/** One form field as the browser sent it: text, a file, several of either, or absent. */
-type FormValue = string | File | (string | File)[] | undefined;
-
-const isText = (value: FormValue): value is string => typeof value === "string";
-
-const wholeCents = (value: FormValue) =>
-	isText(value) && /^\d+$/.test(value) ? Number(value) : Number.NaN;
-
 async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
-	const id = Number(c.req.param("id"));
+	const id = billIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const period = c.req.param("period") ?? "";
 	const form = await c.req.parseBody();
-	const transaction = Number(form.transaction_id);
+	const transaction = paymentIdOf(form.transaction_id);
 	const bill = await dbBill(c, id);
 
 	if (!bill) return c.notFound();
@@ -2475,9 +2533,9 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 				{
 					...asked,
 					seen: {
-						billCents: wholeCents(form.bill_cents),
-						chargeCents: wholeCents(form.charge_cents),
-						currentCents: wholeCents(form.current_cents),
+						billCents: centsOf(form.bill_cents),
+						chargeCents: centsOf(form.charge_cents),
+						currentCents: centsOf(form.current_cents),
 					},
 				},
 				facts,
