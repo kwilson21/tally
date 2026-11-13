@@ -72,11 +72,11 @@ A store is searched only when **all** of these hold. The first three are about p
    - nothing left after redaction.
 
    These text checks run on the merchant key as stored **and on the raw bank text of every one of its transactions**, before cleaning and before the 40-character cut, since the cleaner strips "PAYPAL *" and a Plaid name can hide a raw text that names a rail.
-3. **It is not only cash, hand-entered or Apple Card rows.** The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it.
+3. **Cash, hand-entered and Apple Card rows never count as the sign in rule 1.** The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it. A text that only lacks the sign is not stored as `skipped`; it has no lookup yet and is looked at again when a new row arrives.
 4. **No rule already settles it.** A merchant rule or bank-text rule on all of it leaves it not looked up; it is searched later only if the rule goes. A rule only stops the search: a line found before the rule was made is kept and still shown.
 5. **It has not been looked up**, and the day's cap has room.
 
-Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched.
+Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched; and once more immediately before each search is sent.
 
 Stores Plaid already names are searched too when they pass these rules (the owner's pick, 2026-11-12). Workers AI is only asked for names when Plaid sends none (decision 68), so for a Plaid-named store the line helps Jev's category only, not the name.
 
@@ -264,7 +264,8 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
 | JANE DOE | Jane Doe | GENERAL_SERVICES, and Jev flagged it a transfer (or "Maybe transfer") | No | a stored flag, whoever set it |
 | one ordinary row and one transfer row sharing a lookup text | | | No | one private row makes the text private |
-| only cash, hand-entered or Apple Card rows | | | No | left out, as the name run does |
+| only cash, hand-entered or Apple Card rows | | | Not yet | no sign it is a store; looked at again when a bank row arrives |
+| STORE NOV24, MEMBER1234 | none | FOOD_AND_DRINK | Yes, as "store" and "" | every word with a digit is dropped before the text is sent or used as a key |
 
 And these are the places in the app that touch the new tables or the Jev answer, each of which the plan must name: the demo's reset list, "Download everything", the merge of a pending charge into its posted row, bank-text rules (keyed by a different cleaning of the text), and stores that have transactions but no merchant row.
 
