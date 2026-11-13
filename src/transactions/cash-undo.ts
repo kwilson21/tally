@@ -1,6 +1,7 @@
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
 import type { Json } from "../json";
+import { UNDO_MS, undoLeftMs } from "../undo";
 
 type Row = { [key: string]: Json };
 
@@ -73,12 +74,10 @@ export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
 		.bind(token)
 		.first<{ created_at: number }>();
 
-	return hold
-		? Math.min(10_000, Math.max(0, hold.created_at + 10_000 - Date.now()))
-		: 0;
+	return hold ? undoLeftMs(hold.created_at, Date.now()) : 0;
 }
 
-/** Restores once, only while the token is younger than ten seconds. */
+/** Restores once, only while the token is younger than the Undo window (src/undo.ts). */
 export async function restoreCashDelete(db: D1Database, token: string) {
 	const hold = await db
 		.prepare("SELECT * FROM cash_delete_holds WHERE token=?")
@@ -100,7 +99,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		return { alreadyRestored: true as const, name: hold.display_name };
 	const now = Date.now();
 
-	if (hold.created_at <= now - 10_000 || hold.created_at > now) return null;
+	if (hold.created_at <= now - UNDO_MS || hold.created_at > now) return null;
 
 	const snapshot: Snapshot = {
 		transaction: JSON.parse(hold.transaction_row),
@@ -212,7 +211,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				.prepare(
 					"UPDATE cash_delete_holds SET restore_marker=? WHERE token=? AND restore_marker IS NULL AND created_at>? AND created_at<=?",
 				)
-				.bind(marker, token, now - 10_000, now),
+				.bind(marker, token, now - UNDO_MS, now),
 			db
 				.prepare(insertTransactions)
 				.bind(JSON.stringify(targets), token, marker),

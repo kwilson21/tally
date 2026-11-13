@@ -6,14 +6,12 @@
 
 import { cleanBankText } from "../clean-bank-text";
 import { isVague, VAGUE_TEXTS } from "../same-text-matches";
+import { UNDO_MS, UNDO_SECONDS } from "../undo";
 import { activeBankTextRules, type BankTextRule } from "./bank-text-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 
 /** How many of a text's latest answers decide its line (decision 162). */
 export const LEARNED_WINDOW = 5;
-
-/** How long an Undo of a Forget works, on the server clock as on the toast (decision 162). */
-export const FORGET_UNDO_SECONDS = 10;
 
 /** Less than this much Undo left is no Undo at all: the toast says the Forget and offers nothing to press. */
 export const FORGET_UNDO_MIN_MS = 1000;
@@ -295,14 +293,14 @@ export async function undoRemainingMs(
 		.prepare(
 			"SELECT CAST(MAX(0, MIN(?, (julianday(forgotten_at) + ? / 86400.0 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM forgotten_texts WHERE id = ?",
 		)
-		.bind(FORGET_UNDO_SECONDS * 1000, FORGET_UNDO_SECONDS, id)
+		.bind(UNDO_MS, UNDO_SECONDS, id)
 		.first<{ ms: number }>();
 
 	return row?.ms ?? 0;
 }
 
 /**
- * Undo of a Forget, only within the ten seconds, by the database's clock. A first Forget's row is deleted; a second
+ * Undo of a Forget, only within the Undo window (src/undo.ts), by the database's clock. A first Forget's row is deleted; a second
  * Forget's row gets back the time it replaced, so the line is as it was before that Forget. "gone" when the row is not
  * there (already undone, or never written).
  */
@@ -316,7 +314,7 @@ export async function undoForget(
 				previous_forgotten_at AS previous
 			FROM forgotten_texts WHERE id = ?`,
 		)
-		.bind(FORGET_UNDO_SECONDS, id)
+		.bind(UNDO_SECONDS, id)
 		.first<{ fresh: number; previous: string | null }>();
 
 	if (!row) return "gone";

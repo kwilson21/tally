@@ -18,7 +18,6 @@ import {
 	readRun,
 	STALE_MS,
 	startOrJoinRun,
-	UNDO_MS,
 	undoChangedSinceRead,
 	undoFacts,
 	undoSaveStatements,
@@ -27,6 +26,7 @@ import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { categoryAskedSql } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { type UndoFacts, undoResort } from "../src/rules/sorting";
+import { UNDO_MS } from "../src/undo";
 import { isMethod } from "./helpers/present";
 
 // The re-sort's run state (decision 160): the run and its progress in household_settings (`resort_run`), the rows it
