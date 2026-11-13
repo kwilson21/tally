@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
@@ -44,6 +45,21 @@ import {
 } from "../db/transactions";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
+import { decided } from "../rules/terms";
+import {
+	addCash,
+	addLikely as addLikelyRule,
+	alwaysUseCategory,
+	CategoryNotOnTheList,
+	deleteCashEntry,
+	editTransaction,
+	excludeSelection,
+	removeSplit as removeSplitRule,
+	type SelectionFacts,
+	setSelectionCategory,
+	splitTransaction,
+	undoCashDelete,
+} from "../rules/transactions";
 import { nameForm, parseCategory } from "../settings/category-form";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
 import {
@@ -1426,6 +1442,16 @@ async function postedSelection(
 	};
 }
 
+/** A posted selection as its rules count it (src/rules/transactions.ts). */
+const selectionFacts = (posted: {
+	ids: number[];
+	selection: Selection;
+}): SelectionFacts => ({
+	ticks: posted.selection.ticks.length,
+	unticked: posted.selection.unticked.length,
+	chosen: posted.ids.length,
+});
+
 function SelectCategorySheet({
 	ids,
 	selection,
@@ -1607,30 +1633,38 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
-	const { ids, selection, error } = await postedSelection(c, form, back, today);
-
-	if (error)
-		return categorySheet(c, today, back, {
-			ids,
-			selection,
-			error,
-			still: true,
-		});
+	const posted = await postedSelection(c, form, back, today);
+	const { ids, selection } = posted;
 	const category = Number(form.get("category"));
 
-	const cat = Number.isInteger(category)
-		? await c.env.DB.prepare(
-				"SELECT id,name FROM categories WHERE id=? AND archived=0",
-			)
-				.bind(category)
-				.first<{ id: number; name: string }>()
-		: null;
+	// The category is looked up only for a selection that can be acted on; the rule refuses the others first.
+	const cat =
+		posted.error === undefined && Number.isInteger(category)
+			? await c.env.DB.prepare(
+					"SELECT id,name FROM categories WHERE id=? AND archived=0",
+				)
+					.bind(category)
+					.first<{ id: number; name: string }>()
+			: null;
 
-	if (!cat)
+	const asked = decided(
+		setSelectionCategory.decide(
+			{ categoryId: category },
+			{
+				...selectionFacts(posted),
+				categoryListed: posted.error === undefined ? cat !== null : null,
+			},
+		),
+	);
+
+	if (asked.kind !== "write" || !cat)
 		return categorySheet(c, today, back, {
 			ids,
 			selection,
-			error: "Pick a category from the list.",
+			error:
+				asked.kind === "refuse"
+					? asked.refusal.say
+					: new CategoryNotOnTheList().say,
 			still: true,
 		});
 
@@ -1697,19 +1731,16 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 
-	const { ids, set, selection, error } = await postedSelection(
-		c,
-		form,
-		back,
-		today,
-	);
+	const posted = await postedSelection(c, form, back, today);
+	const { ids, set, selection } = posted;
+	const asked = decided(excludeSelection.decide({}, selectionFacts(posted)));
 
-	if (error)
+	if (asked.kind === "refuse")
 		return renderList(c, today, filtersFrom(c, today, back), {
 			selecting: true,
 			selection,
 			status: 422,
-			selectionError: error,
+			selectionError: asked.refusal.say,
 		});
 	// With Select all, the set's rows (held ticks included) are excluded one by one, and RETURNING names the ones
 	// this changes, so a matched split part is excluded on its own (P81 A). The ticks are rows the filters no longer
@@ -1913,6 +1944,11 @@ transactions.get("/transactions/cash/new", async (c) => {
 	});
 });
 
+/** A cash entry as the form's reader gives it. */
+type CashEntry = Extract<ReturnType<typeof parseCash>, { ok: true }>["value"];
+
+const cashRule = addCash<CashEntry>();
+
 transactions.post("/transactions/cash", async (c) => {
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
@@ -1939,7 +1975,11 @@ transactions.post("/transactions/cash", async (c) => {
 		categories.map((x) => x.id),
 	);
 
-	if (!parsed.ok)
+	const asked = decided(
+		cashRule.decide({ entry: parsed.ok ? parsed.value : null }, null),
+	);
+
+	if (asked.kind !== "write" || !parsed.ok)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			pageTitle: "Add cash · Tally",
 			status: 422,
@@ -1949,7 +1989,7 @@ transactions.post("/transactions/cash", async (c) => {
 				<CashSheet
 					categories={categories}
 					values={values}
-					errors={parsed.errors}
+					errors={parsed.ok ? {} : parsed.errors}
 					back={back}
 					selection={selection}
 					today={today}
@@ -1962,7 +2002,7 @@ transactions.post("/transactions/cash", async (c) => {
 	// reply names the entry as stored, not as the form now says, so it tells the truth about it.
 	const saved = await saveCash(
 		c.env.DB,
-		parsed.value,
+		asked.save.entry,
 		actor(c),
 		entryKeyOf(form.get("entry_key")),
 	);
@@ -2571,19 +2611,17 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const refunds = correction ? [] : await splitRefundsOf(c.env.DB, tx.id);
 	const choices = refundAnswers(refunds, form);
 
-	// Income is never split. A row that a bank change made income after the sheet opened gets the same
-	// sheet back, refused in words, as the other split refusals do. A Change the parts correction (#366) is
-	// not a new split: it keeps the entry's split, income or not, so only a new split is refused.
-	if (tx.income && !correction)
-		return renderList(c, today, filtersFrom(c, today, back), {
-			status: 422,
+	// The sheet again at the posted parts: with why the split was refused (422, nothing saved), or as it is.
+	const sheetAgain = (error?: string) =>
+		renderList(c, today, filtersFrom(c, today, back), {
+			status: error === undefined ? undefined : 422,
 			sheet: (_categories, today) => (
 				<SplitSheet
 					tx={tx}
 					back={back}
 					categories={categories}
 					values={values}
-					error="Income can't be split."
+					error={error}
 					today={today}
 					refunds={refunds}
 					choices={choices}
@@ -2592,27 +2630,6 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				/>
 			),
 		});
-
-	if (form.get("add") === "1") {
-		// Add a part: the open sheet again, with one more part.
-		values.push({ category: "", amount: "" });
-
-		return renderList(c, today, filtersFrom(c, today, back), {
-			sheet: (_categories, today) => (
-				<SplitSheet
-					tx={tx}
-					back={back}
-					categories={categories}
-					values={values}
-					today={today}
-					refunds={refunds}
-					choices={choices}
-					still
-					correction={correction}
-				/>
-			),
-		});
-	}
 
 	const parsed = parseSplit(
 		categoryValues,
@@ -2622,58 +2639,56 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		values.map((value) => value.kept?.id),
 	);
 
-	if (!parsed.ok)
-		return renderList(c, today, filtersFrom(c, today, back), {
-			status: 422,
-			sheet: (_categories, today) => (
-				<SplitSheet
-					tx={tx}
-					back={back}
-					categories={categories}
-					values={values}
-					error={parsed.error}
-					today={today}
-					refunds={refunds}
-					choices={choices}
-					still
-					correction={correction}
-				/>
-			),
-		});
-
 	// Each linked refund goes with a part or Not linked, and every part has room for what is chosen for it (decision
-	// 99). Refused in words with nothing saved, and the sheet comes back with the answers given.
+	// 99). It is read only once the parts are.
 	const partNames = (parts: { categoryId: number; amountCents: number }[]) =>
 		parts.map((part) => ({
 			name: categories.find((cat) => cat.id === part.categoryId)?.name ?? "",
 			amountCents: part.amountCents,
 		}));
 
-	const refundError = refundAnswersError(
-		refunds,
-		choices,
-		partNames(parsed.parts),
-		today,
+	const refundError = parsed.ok
+		? refundAnswersError(refunds, choices, partNames(parsed.parts), today)
+		: undefined;
+
+	// Income is never split. A row that a bank change made income after the sheet opened gets the same
+	// sheet back, refused in words, as the other split refusals do. A Change the parts correction (#366) is
+	// not a new split: it keeps the entry's split, income or not, so only a new split is refused.
+	const asked = decided(
+		splitTransaction.decide(
+			{
+				addPart: form.get("add") === "1",
+				correction: correction !== undefined,
+				pendingEdit: Boolean(correction?.pendingEdit),
+				partsRead: parsed.ok,
+				refundAnswersFit: !refundError,
+			},
+			{ income: tx.income },
+		),
 	);
 
-	if (refundError)
-		return renderList(c, today, filtersFrom(c, today, back), {
-			status: 422,
-			sheet: (_categories, today) => (
-				<SplitSheet
-					tx={tx}
-					back={back}
-					categories={categories}
-					values={values}
-					error={refundError}
-					today={today}
-					still
-					correction={correction}
-					refunds={refunds}
-					choices={choices}
-				/>
-			),
-		});
+	if (asked.kind === "nothingToDo") {
+		// Add a part: the open sheet again, with one more part.
+		values.push({ category: "", amount: "" });
+
+		return sheetAgain();
+	}
+
+	// Refused in words with nothing saved. The parts' and the refunds' sentences are the edge's, which name the part.
+	if (asked.kind === "refuse") {
+		const { refusal } = asked;
+
+		if (!parsed.ok && Predicate.isTagged(refusal, "SplitPartsNotRead"))
+			return sheetAgain(parsed.error);
+
+		if (refundError && Predicate.isTagged(refusal, "RefundAnswersWrong"))
+			return sheetAgain(refundError);
+
+		return sheetAgain(refusal.say);
+	}
+
+	// The rule refused parts the edge could not read, so they are here.
+	if (!parsed.ok) return sheetAgain(parsed.error);
 
 	if (correction) {
 		const split: CashSplitEdit = {
@@ -2693,28 +2708,12 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
 					: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
 
-			return renderList(c, today, filtersFrom(c, today, back), {
-				status: 422,
-				sheet: (_categories, today) => (
-					<SplitSheet
-						tx={tx}
-						back={back}
-						categories={categories}
-						values={values}
-						error={error}
-						today={today}
-						refunds={refunds}
-						choices={choices}
-						still
-						correction={correction}
-					/>
-				),
-			});
+			return sheetAgain(error);
 		};
 
 		// The panel's pending edit is checked first, and saved in the same batch as the parts (#365): an edit that
 		// fails its checks saves nothing, and a refused correction saves none of the edit either.
-		if (correction.pendingEdit)
+		if (asked.save.save === "correctionWithEdit" && correction.pendingEdit)
 			return savePanel(
 				c,
 				tx,
@@ -2860,7 +2859,11 @@ function unlinkedSentence(
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 
-	if (!tx?.isSplit) return c.notFound();
+	const asked = decided(
+		removeSplitRule.decide({}, { split: tx?.isSplit === true }),
+	);
+
+	if (!tx || asked.kind !== "write") return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
@@ -3217,13 +3220,9 @@ async function savePanel(
 
 	const newCategoryError = named && !named.ok ? named.errors.name : undefined;
 
-	if (
-		!parsed.ok ||
-		!refundOk ||
-		newCategoryError ||
-		(cashParsed && Object.keys(cashParsed.errors).length)
-	)
-		return showErrors(
+	// The edge's errors, all at once, under their own fields.
+	const formErrors = () =>
+		showErrors(
 			Object.assign(
 				{},
 				parsed.ok ? {} : parsed.errors,
@@ -3233,31 +3232,58 @@ async function savePanel(
 			),
 		);
 
-	// With a correction, the linked refunds and the parts are checked against the amount in the same batch (saveEdit),
-	// and a refusal draws the split sheet with the posted parts, so they are not checked here.
-	if (cashParsed && tx.isSplit && !correction) {
-		// Refunds linked to the entry and to its parts together: moving the parts can't make them fit, so this
-		// is checked first.
-		const linked = await c.env.DB.prepare(
-			`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("part.id", "0")}) FROM transactions part WHERE part.parent_id = ?1), 0) AS cents`,
-		)
-			.bind(tx.id)
-			.first<{ cents: number }>();
+	const read =
+		parsed.ok &&
+		refundOk &&
+		!newCategoryError &&
+		!(cashParsed && Object.keys(cashParsed.errors).length);
 
-		if (linked && linked.cents > cashParsed.amountCents)
+	// A split cash entry's new amount is checked against what is stored: the refunds linked to the entry and to its
+	// parts together (moving the parts can't make them fit, so the rule says this first), and the parts' total. With a
+	// correction, both are checked in the same batch as the parts (saveEdit), and a refusal draws the split sheet with
+	// the posted parts, so they are not read here. Nor are they read for a form the edge refused.
+	const cashAmountCents =
+		read && cashParsed && tx.isSplit && !correction
+			? cashParsed.amountCents
+			: undefined;
+
+	const [linked, parts] =
+		cashAmountCents === undefined
+			? []
+			: await c.env.DB.batch<{ cents: number }>([
+					c.env.DB.prepare(
+						`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("part.id", "0")}) FROM transactions part WHERE part.parent_id = ?1), 0) AS cents`,
+					).bind(tx.id),
+					c.env.DB.prepare(
+						"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
+					).bind(tx.id),
+				]);
+
+	const cashSplit =
+		cashAmountCents === undefined
+			? null
+			: {
+					amountCents: cashAmountCents,
+					linkedRefundsCents: linked?.results[0]?.cents ?? 0,
+					partsCents: parts?.results[0]?.cents ?? cashAmountCents,
+				};
+
+	const asked = decided(editTransaction.decide({ read, cashSplit }, null));
+
+	if (asked.kind === "refuse") {
+		if (cashSplit && Predicate.isTagged(asked.refusal, "RefundsExceedAmount"))
 			return showErrors({
-				amount: `Linked refunds add up to ${formatCents(linked.cents)}, so the amount can't be less than that.`,
+				amount: `Linked refunds add up to ${formatCents(cashSplit.linkedRefundsCents)}, so the amount can't be less than that.`,
 			});
 
-		const parts = await c.env.DB.prepare(
-			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM transactions WHERE parent_id = ?",
-		)
-			.bind(tx.id)
-			.first<{ cents: number }>();
+		if (cashSplit && Predicate.isTagged(asked.refusal, "PartsDontAddUp"))
+			return partsBroken(cashSplit.amountCents, cashSplit.partsCents);
 
-		if (parts && parts.cents !== cashParsed.amountCents)
-			return partsBroken(cashParsed.amountCents, parts.cents);
+		return formErrors();
 	}
+
+	// The rule refused a form the edge could not read, so it is read here.
+	if (!parsed.ok) return formErrors();
 
 	let edit: Edit = parsed.value;
 	let made: { id: number; name: string } | null = null;
@@ -3576,16 +3602,19 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	const category = await liveCategory(c.env.DB, form.get("category"));
 
 	// A category archived or renamed since the panel opened moves nothing, as when every ticked row has changed.
-	const filed = category
-		? await addLikely(c.env.DB, {
-				savedId: tx.id,
-				categoryId: category.id,
-				categoryName: form.get("category_name")?.toString() ?? "",
-				ticked: form.getAll("ids").map(Number),
-				today,
-				actor: actor(c),
-			})
-		: { moved: 0, name: null };
+	const asked = decided(addLikelyRule.decide({}, { category }));
+
+	const filed =
+		asked.kind === "write"
+			? await addLikely(c.env.DB, {
+					savedId: tx.id,
+					categoryId: asked.save.categoryId,
+					categoryName: form.get("category_name")?.toString() ?? "",
+					ticked: form.getAll("ids").map(Number),
+					today,
+					actor: actor(c),
+				})
+			: { moved: 0, name: null };
 
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 
@@ -3667,17 +3696,35 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 			? await ruleOfferForTransaction(c.env.DB, trip, categoryId)
 			: null;
 
-	const rule = offer !== null && offer.merchantKey === merchantKey;
+	// No only says the category was saved; Yes asks the rule, which saves while the question would still be asked.
+	const asked = yes
+		? decided(
+				alwaysUseCategory.decide(
+					{ merchantKey, categoryId },
+					{
+						categoryListed: validCategory !== null,
+						offeredFor: offer?.merchantKey ?? null,
+					},
+				),
+			)
+		: null;
+
+	const always = asked?.kind === "write" ? asked.save : null;
 
 	const message =
-		yes && rule && validCategory
+		always && validCategory
 			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
 			: validCategory
 				? `Saved as ${validCategory.name}.`
 				: "Saved.";
 
-	if (yes && rule && validCategory)
-		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
+	if (always)
+		await setMerchantRule(
+			c.env.DB,
+			always.merchantKey,
+			always.categoryId,
+			actor(c),
+		);
 
 	if (!c.req.header("HX-Request"))
 		return c.redirect(
@@ -3778,12 +3825,23 @@ transactions.post("/transactions/rule-offer/dismiss", (c) =>
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 
+	// Only a cash entry of its own can be deleted, so any other row is refused before the form is read.
 	if (tx?.accountType !== "cash" || tx.parentId !== null) return c.notFound();
 	const form = await c.req.formData();
 	const back = safeBack(form.get("back")?.toString());
 	const today = await householdToday(c.env.DB);
 
-	if (form.get("confirm") !== "1") {
+	const asked = decided(
+		deleteCashEntry.decide(
+			{ confirmed: form.get("confirm") === "1" },
+			{ cashEntry: true },
+		),
+	);
+
+	if (asked.kind === "refuse") return c.notFound();
+
+	// Not confirmed yet: the sheet that asks, and nothing saved.
+	if (asked.kind === "nothingToDo") {
 		const people = (
 			await c.env.DB.prepare(
 				"SELECT id, name FROM household_people ORDER BY id",
@@ -3861,9 +3919,14 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	const back = safeBack(form.get("back")?.toString());
 	const wasFirstVisit = (await firstVisitFor(c)) !== null;
 
+	const asked = decided(
+		undoCashDelete.decide({ token: isText(token) ? token : null }, null),
+	);
+
+	// Text that is not a token is not looked up, and is answered as an Undo that expired.
 	const restored =
-		isText(token) && /^[0-9a-f-]{36}$/i.test(token)
-			? await restoreCashDelete(c.env.DB, token)
+		asked.kind === "write"
+			? await restoreCashDelete(c.env.DB, asked.save.token)
 			: null;
 
 	const today = await householdToday(c.env.DB);

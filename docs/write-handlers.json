@@ -1,5 +1,5 @@
 {
-	"legacyBaseline": 15,
+	"legacyBaseline": 0,
 	"handlers": [
 		{
 			"method": "POST",
@@ -588,105 +588,140 @@
 			"path": "/transactions/:id{[0-9]+}",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/category/lock",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "exempt",
+			"reason": "draws the category choice for a linked refund and writes nothing"
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/delete",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/likely",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/likely/count",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "exempt",
+			"reason": "draws the likely panel's count and writes nothing"
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/split",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/split/line",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "exempt",
+			"reason": "draws one more line of the split sheet and writes nothing"
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/:id{[0-9]+}/split/remove",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/cash",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/rule-offer",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/rule-offer/dismiss",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "exempt",
+			"reason": "answers No to the rule question, which writes nothing"
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/select/category",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "exempt",
+			"reason": "draws the Set category sheet over the list and writes nothing"
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/select/category/save",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/select/exclude",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/undo-cash-delete",
 			"file": "transactions.tsx",
 			"area": "transactions",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/transactions.ts",
+			"stories": "test/transactions-stories.test.ts",
+			"reason": "The rule decides from one read; the save is the older function that re-checks each row in SQL as it writes (decision 209)."
 		}
 	]
 }
