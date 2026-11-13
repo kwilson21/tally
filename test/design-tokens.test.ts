@@ -947,3 +947,64 @@ describe("tabular figures (decision 128)", () => {
 		);
 	});
 });
+
+describe("DESIGN.md says the values app.css has (audit finding)", () => {
+	// app.css is the value; DESIGN.md's table and its Motion paragraph repeat it for people. Only a comment tied them.
+	const hexTokens = [
+		...css.matchAll(/--color-([\w-]+):\s*(#[0-9a-f]{6})\s*;/gi),
+	].map(([, name, hex]) => ({
+		name: name ?? "",
+		hex: (hex ?? "").toLowerCase(),
+	}));
+
+	it("lists a colour token with the hex app.css gives it, one row each", () => {
+		expect(hexTokens.length).toBeGreaterThan(10);
+
+		const wrong = hexTokens.flatMap(({ name, hex }) => {
+			if (name.startsWith("cat-")) return [];
+
+			const row = new RegExp(`^\\| ${name} \\| (#[0-9a-f]{6})\\b`, "im").exec(
+				design,
+			);
+
+			return row?.[1]?.toLowerCase() === hex ? [] : [name];
+		});
+
+		expect(wrong).toEqual([]);
+	});
+
+	it("lists the category colours in the order app.css has them, in one row", () => {
+		const categories = hexTokens.filter(({ name }) => name.startsWith("cat-"));
+
+		const row =
+			/^\| cat-blue \/ plum \/ slate \/ ochre \/ brown \| ([^|]+) \|/m.exec(
+				design,
+			);
+
+		expect(categories.length).toBe(5);
+		expect(
+			row?.[1]?.split(" / ").map((hex) => hex.trim().toLowerCase()),
+		).toEqual(categories.map(({ hex }) => hex));
+	});
+
+	it("gives each duration token its length in the Motion paragraph, as app.css has it", () => {
+		const durations = [
+			...css.matchAll(/--duration-([\w-]+):\s*([\d.]+)(ms|s)\b/g),
+		].map(([, name, amount, unit]) => ({
+			name: name ?? "",
+			written: `${amount}${unit}`,
+		}));
+
+		expect(durations.length).toBeGreaterThan(5);
+
+		const wrong = durations.flatMap(({ name, written }) => {
+			const said = new RegExp(
+				`\`--duration-${name}\` ([\\d.]+) (ms|s)\\b`,
+			).exec(design);
+
+			return said !== null && `${said[1]}${said[2]}` === written ? [] : [name];
+		});
+
+		expect(wrong).toEqual([]);
+	});
+});
