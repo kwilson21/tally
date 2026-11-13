@@ -202,6 +202,101 @@ describe("syncAllItems", () => {
 		expect(inFlight.size).toBe(4);
 	});
 
+	it("gives a merchant two banks name for the first time to one of them, never a mix of both", async () => {
+		await addItem();
+		await addItem();
+		await env.DB.prepare("DELETE FROM merchants").run();
+
+		const category = present(
+			await env.DB.prepare(
+				"SELECT id FROM categories ORDER BY id LIMIT 1",
+			).first<{ id: number }>(),
+		).id;
+
+		// What each bank's own text for the cafe already holds: one a name a person gave it, the other a category rule.
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('CAFE TEXT ONE', 'Our cafe')",
+			),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('CAFE TEXT TWO', ?)",
+			).bind(category),
+		]);
+
+		const texts = new Map<string, string>();
+		let bothAsked = () => {};
+
+		const together = new Promise<void>((resolve) => {
+			bothAsked = resolve;
+		});
+
+		// Both banks' pages name the same merchant, "Cafe", each under its own text, and arrive at the same moment.
+		const fetchImpl = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const body: { access_token: string } = JSON.parse(String(init?.body));
+				const token = body.access_token;
+
+				if (String(url).endsWith("/accounts/get"))
+					return response({
+						accounts: [
+							{
+								account_id: `account-${token}`,
+								name: "Checking",
+								type: "depository",
+								balances: { current: 10 },
+							},
+						],
+					});
+
+				if (!texts.has(token))
+					texts.set(
+						token,
+						texts.size === 0 ? "CAFE TEXT ONE" : "CAFE TEXT TWO",
+					);
+
+				if (texts.size === 2) bothAsked();
+				await together;
+
+				return response({
+					added: [
+						{
+							transaction_id: `transaction-${token}`,
+							account_id: `account-${token}`,
+							date: "2026-09-27",
+							amount: 1,
+							name: texts.get(token) ?? "",
+							merchant_name: "Cafe",
+							pending: false,
+						},
+					],
+					modified: [],
+					removed: [],
+					next_cursor: "next",
+					has_more: false,
+				});
+			},
+		);
+
+		expect(await syncAllItems(enabledEnv, fetchImpl)).toMatchObject({
+			synced: 2,
+			failed: 0,
+		});
+
+		const cafe = await env.DB.prepare(
+			"SELECT display_name, default_category_id FROM merchants WHERE raw_name = 'Cafe'",
+		).first<{
+			display_name: string | null;
+			default_category_id: number | null;
+		}>();
+
+		// The first bank to save its page starts the merchant from its own text; the other finds it started and adds
+		// nothing, as a later sync always has. So it holds the name or the rule, not both.
+		expect([
+			{ display_name: "Our cafe", default_category_id: null },
+			{ display_name: null, default_category_id: category },
+		]).toContainEqual(cafe);
+	});
+
 	it("clears a flagged Item's flag and reminder when the daily run's sync succeeds", async () => {
 		const id = await addItem("needs_attention");
 		await env.DB.prepare(

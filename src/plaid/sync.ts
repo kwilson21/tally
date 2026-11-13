@@ -543,6 +543,32 @@ async function collectChangedIds(
 	}
 }
 
+/**
+ * A turn at starting merchants, for banks that sync side by side in one run (sync-all.ts). A page that names merchants
+ * reads which of them have no row yet and then saves; a row it starts is filled only from its own bank texts. Two banks
+ * doing that at once would each find the same merchant new and both fill it, mixing one bank's name with the other's
+ * rule. So such a page waits its turn before the read and gives the turn back once it is saved: the first bank starts
+ * the merchant, and the next finds it started and adds nothing, as a later sync always has. It resolves to the
+ * function that gives the turn back.
+ */
+export type MerchantTurn = () => Promise<() => void>;
+
+/** One turn at a time, in the order asked for. */
+export function merchantTurns(): MerchantTurn {
+	let last: Promise<void> = Promise.resolve();
+
+	return () => {
+		let end = () => {};
+		const before = last;
+
+		last = new Promise<void>((resolve) => {
+			end = resolve;
+		});
+
+		return before.then(() => end);
+	};
+}
+
 /** Pulls every available page for one Item, committing each page and its cursor atomically. */
 export async function syncItem(
 	env: SyncEnv,
@@ -553,9 +579,16 @@ export async function syncItem(
 	{
 		runAfterSync = true,
 		historyComplete = false,
-	}: { runAfterSync?: boolean; historyComplete?: boolean } = {},
+		merchantTurn,
+	}: {
+		runAfterSync?: boolean;
+		historyComplete?: boolean;
+		merchantTurn?: MerchantTurn;
+	} = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
+	// Given back once the page that took it is saved, and in the cleanup below when the page fails first.
+	let endMerchantTurn: (() => void) | undefined;
 
 	const lock = await env.DB.prepare(
 		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+${SYNC_LEASE_MINUTES} minutes'), sync_lock_id = ?
@@ -1070,6 +1103,9 @@ export async function syncItem(
 				// separate run: it opens no names, and the rows an earlier run made are never filled.
 				const pairKeys = [...new Set([...pairs.values()].map(([key]) => key))];
 
+				// With other banks syncing beside this one, the read below and this page's save are one turn (MerchantTurn).
+				endMerchantTurn = await merchantTurn?.();
+
 				const fresh = await env.DB.prepare(
 					"SELECT value FROM json_each(?) WHERE value NOT IN (SELECT raw_name FROM merchants)",
 				)
@@ -1297,6 +1333,10 @@ export async function syncItem(
 			);
 			const results = await env.DB.batch(statements);
 
+			// The page is saved, so the next bank's page may read which merchants are new.
+			endMerchantTurn?.();
+			endMerchantTurn = undefined;
+
 			// The renewal changed nothing: a newer run owns the Item, and every guarded write above was a no-op.
 			if (results[0]?.meta.changes === 0) {
 				throw new Error("Plaid sync lost its lock to a newer run");
@@ -1373,6 +1413,8 @@ export async function syncItem(
 			}
 		}
 	} finally {
+		// A page that failed between taking its turn and saving gives the turn back here, so the other banks go on.
+		endMerchantTurn?.();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND sync_lock_id = ?",
 		)
