@@ -1,5 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
@@ -21,6 +23,8 @@ import {
 	type PlannedExpense,
 	planPaymentCandidates,
 } from "../db/planned-expenses";
+import { readAtEdge, readText } from "../edge";
+import { RowId, Token } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { PLAN_NAME_MAX } from "../limits";
 import { centsToAmount, formatCents, toCents } from "../money";
@@ -66,9 +70,16 @@ function monthOptions(current: string, own?: string): PlanMonthOption[] {
 }
 
 /** Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). */
-/** True for a posted value that is text (a file part is not a token). */
+/** True for a posted value that is text (a file part is not text). */
 function isText(value: unknown): value is string {
 	return typeof value === "string";
+}
+
+/** The plan's id from the address, or undefined when it is not a row id: the route answers 404 before it reads or writes. */
+function planIdOf(c: Context<App>): number | undefined {
+	const read = readAtEdge(RowId, c.req.param("id"));
+
+	return read.ok ? read.value : undefined;
 }
 
 /** A toast's words and kind, and the undo its delete or restore offers (the keys the toast listener reads). */
@@ -153,10 +164,58 @@ type PlanFormFields = {
 	[field: string]: string | File | (string | File)[] | undefined;
 };
 
+/** A plan's name, already trimmed: a name is said, and at most PLAN_NAME_MAX characters (at the edge, #1006). */
+const PlanName = Schema.String.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: readText<string>((text) => {
+			if (text === "") return { say: "Say what it's for." };
+
+			return text.length > PLAN_NAME_MAX
+				? { say: `Keep the name under ${PLAN_NAME_MAX} characters.` }
+				: { value: text };
+		}),
+		encode: SchemaGetter.passthrough(),
+	}),
+);
+
+/** A plan's amount as integer cents: toCents's dollars, above $0 and small enough to hold in cents (at the edge). */
+const PlanAmount = Schema.String.pipe(
+	Schema.decodeTo(Schema.Number, {
+		decode: readText<number>((text) => {
+			let cents = 0;
+
+			try {
+				cents = toCents(text);
+			} catch {
+				return { say: "Enter an amount greater than $0." };
+			}
+
+			if (!Number.isSafeInteger(cents))
+				return { say: "Enter a smaller amount in dollars and cents." };
+
+			return cents > 0
+				? { value: cents }
+				: { say: "Enter an amount greater than $0." };
+		}),
+		encode: SchemaGetter.transform((cents: number) => (cents / 100).toFixed(2)),
+	}),
+);
+
+/** A month the sheet offers, one of `offered` (at the edge): the list depends on the household's today, so it is passed in. */
+const planMonth = (offered: readonly string[]) =>
+	Schema.String.pipe(
+		Schema.decodeTo(Schema.String, {
+			decode: readText<string>((text) =>
+				offered.includes(text) ? { value: text } : { say: "Choose a month." },
+			),
+			encode: SchemaGetter.passthrough(),
+		}),
+	);
+
 /**
  * The fields a plan's sheet sends, checked before the write: a name, an amount above $0, and a month on offer. `own` is
  * the plan's own month when it is being saved: an earlier one stays on offer, as it is on its sheet. A new plan has none,
- * so only this month to the next eleven can be chosen.
+ * so only this month to the next eleven can be chosen. Every wrong field is reported at once, and the values echo back.
  */
 function planForm(form: PlanFormFields, month: string, own?: string) {
 	const values: PlanValues = {
@@ -166,35 +225,26 @@ function planForm(form: PlanFormFields, month: string, own?: string) {
 	};
 
 	const errors: Record<string, string> = {};
+	const name = readAtEdge(PlanName, values.name);
+	const amount = readAtEdge(PlanAmount, values.amount);
 
-	if (!values.name) errors.name = "Say what it's for.";
-	else if (values.name.length > PLAN_NAME_MAX)
-		errors.name = `Keep the name under ${PLAN_NAME_MAX} characters.`;
-	let amountCents = 0;
-
-	try {
-		amountCents = toCents(values.amount);
-
-		if (!Number.isSafeInteger(amountCents))
-			errors.amount = "Enter a smaller amount in dollars and cents.";
-		else if (amountCents <= 0)
-			errors.amount = "Enter an amount greater than $0.";
-	} catch {
-		errors.amount = "Enter an amount greater than $0.";
-	}
-
-	const offered = monthOptions(month, own).some(
-		(option) => option.value === values.month,
+	const offered = readAtEdge(
+		planMonth(monthOptions(month, own).map((option) => option.value)),
+		values.month,
 	);
 
-	if (!offered) errors.month = "Choose a month.";
+	if (!name.ok) errors.name = name.say;
+
+	if (!amount.ok) errors.amount = amount.say;
+
+	if (!offered.ok) errors.month = offered.say;
 
 	return {
 		values,
 		errors,
 		fields: {
 			name: values.name,
-			amountCents,
+			amountCents: amount.ok ? amount.value : 0,
 			month: values.month,
 		} satisfies PlanFields,
 	};
@@ -241,43 +291,49 @@ plans.post("/plans", async (c) => {
 
 plans.post("/plans/undo-delete", async (c) => {
 	const form = await c.req.parseBody();
-	const token = isText(form.token) ? form.token : undefined;
+	const posted = isText(form.token) ? form.token : undefined;
+	const read = readAtEdge(Token, posted);
 
 	// A token that is not one of Tally's names no held delete, so the rule refuses it as it refuses one that expired.
-	const restored =
-		token && /^[0-9a-f-]{36}$/i.test(token)
-			? await runWith(
-					c.env.DB,
-					decideRestorePlan(restorePlan, { token, now: Date.now() }).pipe(
-						Effect.map(({ decided }) => Option.getOrNull(decided)),
-						Effect.catchTag("PlanUndoExpired", () => Effect.succeed(null)),
-					),
-				)
-			: null;
+	const restored = read.ok
+		? await runWith(
+				c.env.DB,
+				decideRestorePlan(restorePlan, {
+					token: read.value,
+					now: Date.now(),
+				}).pipe(
+					Effect.map(({ decided }) => Option.getOrNull(decided)),
+					Effect.catchTag("PlanUndoExpired", () => Effect.succeed(null)),
+				),
+			)
+		: null;
 
 	const today = await householdToday(c.env.DB);
 
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 
-	// Every answer ends the Undo toast it answers, so undoDone names its token (toast.js).
+	// Every answer ends the Undo toast it answers, so undoDone names its token as it was posted (toast.js).
 	return withToast(
 		atBills(await billsPage(c, undefined, today)),
 		restored
 			? {
 					message: `Restored ${restored.name}.${restored.unlinked ? " Its payment is no longer linked." : ""}`,
 					type: "success",
-					undoDone: token,
+					undoDone: posted,
 				}
 			: {
 					message: new PlanUndoExpired().say,
 					type: "error",
-					undoDone: token,
+					undoDone: posted,
 				},
 	);
 });
 
 plans.get("/plans/:id/edit", async (c) => {
-	const plan = await loadPlan(c.env.DB, Number(c.req.param("id")));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
+	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
 
@@ -289,7 +345,10 @@ plans.get("/plans/:id/edit", async (c) => {
 });
 
 plans.get("/plans/:id/delete", async (c) => {
-	const plan = await loadPlan(c.env.DB, Number(c.req.param("id")));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
+	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
 
@@ -409,14 +468,22 @@ async function planPage(
 	);
 }
 
-plans.get("/plans/:id", (c) => planPage(c, Number(c.req.param("id"))));
+plans.get("/plans/:id", (c) => {
+	const id = planIdOf(c);
+
+	return id === undefined ? c.notFound() : planPage(c, id);
+});
 
 plans.post("/plans/:id/link", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
-	const transaction = Number((await c.req.parseBody()).transaction_id);
+	const posted = (await c.req.parseBody()).transaction_id;
+	// A payment's id is plain digits; any other text, or a file, is refused as 0 is, by the rule's own sentence.
+	const payment = readAtEdge(RowId, isText(posted) ? posted : undefined);
 
 	// The rule says why a link is refused, in the bill side's words (decision 82). A plan paid by the time its link is
 	// sent says so first, as a paid bill month does (#623), and the page names the plan.
@@ -424,8 +491,7 @@ plans.post("/plans/:id/link", async (c) => {
 		c.env.DB,
 		decideLinkPayment(linkPayment, {
 			id,
-			transactionId:
-				Number.isInteger(transaction) && transaction > 0 ? transaction : 0,
+			transactionId: payment.ok ? payment.value : 0,
 		}).pipe(
 			Effect.as(null),
 			Effect.catchTag("PlanAlreadyPaid", () =>
@@ -452,7 +518,9 @@ plans.post("/plans/:id/link", async (c) => {
 });
 
 plans.post("/plans/:id/unlink", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
@@ -493,7 +561,9 @@ plans.post("/plans/:id/unlink", async (c) => {
 });
 
 plans.post("/plans/:id/move", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
 	const plan = await loadPlan(c.env.DB, id);
@@ -527,7 +597,9 @@ const PLAN_GONE = new PlanGone().say;
 
 /** Deletes a plan, and offers Undo for ten seconds (decision 101), like a cash entry. */
 async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
-	const id = Number(c.req.param("id"));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
@@ -575,7 +647,9 @@ plans.post("/plans/:id/delete", (c) => deletePlan(c, "Deleted"));
 plans.post("/plans/:id/drop", (c) => deletePlan(c, "Dropped"));
 
 plans.post("/plans/:id", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = planIdOf(c);
+
+	if (id === undefined) return c.notFound();
 	const plan = await loadPlan(c.env.DB, id);
 
 	if (!plan) return c.notFound();
