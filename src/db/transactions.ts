@@ -1216,6 +1216,7 @@ export async function saveEdit(
 		isSplit: current.isSplit,
 		parentId: current.parentId,
 		refundOfId: current.refundOfId,
+		incomeSource: current.incomeSource,
 		creditReviewedByUser: current.creditReviewedBy === "user",
 	});
 

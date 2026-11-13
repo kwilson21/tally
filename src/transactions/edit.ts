@@ -433,8 +433,9 @@ export function safeBack(url: string | null | undefined): string {
  * rule in chat on 2026-11-13). The edit it returns is what saveEdit writes: the same save with the income and
  * the review ticked. It only applies when the save changes nothing else about income or review, so an explicit
  * review as not income wins, and so does a link as a refund. A split part or parent, a row that isn't a transfer
- * credit, a row that is already income or already linked (as a refund), and a credit the person already reviewed as not
- * income keep their own rules.
+ * credit, a row that is already income or already linked (as a refund), a row whose income the person already chose
+ * (income_source 'user', so unticking it and excluding it again keeps it not income), and a credit the person already
+ * reviewed as not income keep their own rules.
  */
 export function includedTransferCredit(
 	edit: Edit,
@@ -446,6 +447,7 @@ export function includedTransferCredit(
 		isSplit: number;
 		parentId: number | null;
 		refundOfId: number | null;
+		incomeSource: string | null;
 		creditReviewedByUser: boolean;
 	},
 ): Edit {
@@ -457,6 +459,7 @@ export function includedTransferCredit(
 		stored.isSplit === 0 &&
 		stored.parentId === null &&
 		stored.refundOfId === null &&
+		stored.incomeSource !== "user" &&
 		!stored.creditReviewedByUser &&
 		!edit.excluded;
 
