@@ -24,6 +24,8 @@ import {
 import { clearAttention, readConnection } from "../plaid/item-store";
 import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { decryptToken, encryptToken, isValidKey } from "../plaid/token-crypto";
+import { linkBank } from "../rules/accounts";
+import { decided } from "../rules/terms";
 
 type PlaidBindings = PlaidEnv & { DEMO?: string };
 
@@ -264,11 +266,26 @@ plaid.post("/plaid/exchange", async (c) => {
 		// Linking draws stroke one on the household's day, in the same batch as the bank (spec §8.8). The setup
 		// announcement is said only while the first week is still to do. The read sits inside the try, so a failure
 		// there removes the Item too: Plaid's token is never stored.
-		let settingUp: boolean;
+		let announceReading: boolean;
 		let itemId: number;
 
 		try {
-			settingUp = !isSetUp(await readFirstTally(c.env.DB));
+			const asked = decided(
+				linkBank.decide(
+					{
+						institution,
+						plaidItemId: exchanged.item_id,
+						who: actor(c),
+						today: await householdToday(c.env.DB),
+					},
+					{ settingUp: !isSetUp(await readFirstTally(c.env.DB)) },
+				),
+			);
+
+			// Linking has no refusal and always has something to save; the rule names what.
+			if (asked.kind !== "write") throw new Error("link refused");
+			const link = asked.save;
+			announceReading = link.announceReading;
 
 			const encrypted = await encryptToken(
 				exchanged.access_token,
@@ -279,10 +296,10 @@ plaid.post("/plaid/exchange", async (c) => {
 			const [inserted] = await c.env.DB.batch([
 				c.env.DB.prepare(
 					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, ?, ?, ?)",
-				).bind(encrypted, institution, actor(c), exchanged.item_id),
-				strokeStatement(c.env.DB, "bank", await householdToday(c.env.DB)),
+				).bind(encrypted, link.institution, link.who, link.plaidItemId),
+				strokeStatement(c.env.DB, "bank", link.today),
 				// A bank linked during setup takes the questions back (#578): the new bank's deposits and charges are asked again.
-				takeBackQuestionStrokes(c.env.DB, institution),
+				takeBackQuestionStrokes(c.env.DB, link.institution),
 			]);
 
 			itemId = Number(inserted?.meta.last_row_id);
@@ -303,7 +320,7 @@ plaid.post("/plaid/exchange", async (c) => {
 			}),
 		);
 
-		const message = settingUp
+		const message = announceReading
 			? `${institution} is linked. Tally's reading your last 90 days.`
 			: `Linked ${institution}.`;
 

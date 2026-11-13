@@ -18,23 +18,23 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 
 ## Back-end cutover (decision 187)
 
-**Back-end cutover: 32 of 70 handlers remain**
+**Back-end cutover: 25 of 70 handlers remain**
 
 Every write route is listed in [docs/write-handlers.json](docs/write-handlers.json) as `legacy`, `converted` or `exempt`. CI fails if a write route is missing from the list, if the legacy count rises, or if a `converted` route has no rule module and stories test. Run `pnpm run cutover` to print these numbers. Exempt routes (8) are not counted.
 
 | Area | Remaining | Handlers |
 |---|---|---|
-| accounts | 4 | 4 |
+| accounts | 0 | 4 |
 | bills | 10 | 10 |
 | budgets | 0 | 3 |
 | categories | 0 | 5 |
 | feedback | 0 | 1 |
 | organize | 0 | 3 |
-| plaid | 2 | 2 |
+| plaid | 0 | 2 |
 | plans | 0 | 8 |
 | push | 0 | 1 |
 | settings | 0 | 9 |
-| setup | 1 | 5 |
+| setup | 0 | 5 |
 | sorting | 0 | 1 |
 | suggestions | 0 | 3 |
 | transactions | 15 | 15 |
