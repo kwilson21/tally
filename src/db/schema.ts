@@ -78,6 +78,7 @@ export const plaidItems = sqliteTable(
 		accessTokenEncrypted: blob("access_token_encrypted").notNull(),
 		institutionName: text("institution_name").notNull(),
 		syncCursor: text("sync_cursor"),
+		syncUpdateCursor: text("sync_update_cursor"),
 		status: text({ enum: PLAID_ITEM_STATUS_VALUES }).notNull().default("ok"),
 		linkedBy: text("linked_by").notNull(),
 		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
