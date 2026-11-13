@@ -97,6 +97,23 @@ export function daysInMonth(month: string): number {
 	return Temporal.PlainYearMonth.from(month).daysInMonth;
 }
 
+/** True for exactly 'YYYY-MM' with a month from 01 to 12. Only ASCII digits, so no spaces or trailing text. */
+export function isRealMonth(text: string): boolean {
+	return /^\d{4}-(0[1-9]|1[0-2])$/.test(text);
+}
+
+/** True for exactly 'YYYY-MM-DD' that is a real calendar day (leap days only in leap years). */
+export function isRealDate(text: string): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+	const month = text.slice(0, 7);
+
+	return (
+		isRealMonth(month) &&
+		Number(text.slice(8, 10)) >= 1 &&
+		Number(text.slice(8, 10)) <= daysInMonth(month)
+	);
+}
+
 const SHORT = [
 	"Jan",
 	"Feb",

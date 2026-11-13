@@ -1,3 +1,4 @@
+import { isRealMonth } from "../dates";
 import { occurrenceAmountSql } from "../db/bill-amounts";
 import { occurrenceMonthSql } from "../db/counted-month";
 import { BILL_AMOUNT_TOLERANCE_PERCENT } from "./status";
@@ -16,7 +17,7 @@ function occurrenceWords(period: string): string {
 
 	if (/^\d{4}$/.test(period)) return period;
 
-	if (/^\d{4}-\d{2}$/.test(period))
+	if (isRealMonth(period))
 		return new Intl.DateTimeFormat("en-US", {
 			month: "long",
 			year: "numeric",

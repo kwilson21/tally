@@ -61,6 +61,15 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 	beforeEach(() => setUp());
 	afterEach(() => vi.useRealTimers());
 
+	it("skips a stored monthly payment key that is not a real month (2026-13) without a page error", async () => {
+		await env.DB.batch([charge(9650, "2026-08-15"), link("2026-13", 9650)]);
+		const res = await exports.default.fetch(PAGE);
+		const html = await res.text();
+
+		expect(res.status).toBe(200);
+		expect(html).not.toContain("2026-13");
+	});
+
 	it("draws the head as P120 B's: the name as the one headline, its amount in muted words, then the bank's text small", async () => {
 		const html = await page();
 
