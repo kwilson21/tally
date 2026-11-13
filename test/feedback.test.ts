@@ -1346,7 +1346,7 @@ it("files a report whose page has a huge number of backtick runs", async () => {
 	expect(fetchStub).toHaveBeenCalledOnce();
 });
 
-// The stored columns after one try, per status, from 0 and from 4 tries (decision 218). These pin what the machine's
+// The stored columns after one try, per status, from 0 and from 4 tries (decision 219). These pin what the machine's
 // moves say a row becomes; test/feedback-filing-machine.test.ts walks every starting state against the same machine.
 describe("a GitHub answer leaves the stored columns the machine's move says", () => {
 	type Columns = {

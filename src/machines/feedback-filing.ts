@@ -19,7 +19,7 @@ import { setup } from "xstate";
 // Not a move: a row that GitHub filed, but whose number could not be stored (the final UPDATE failed), is filed again by
 // the next try, so GitHub gets a duplicate issue. No machine can close that gap, since the number is never written.
 
-/** How many tries a row gets in all before it gives up (decision 218). */
+/** How many tries a row gets in all before it gives up (decision 219). */
 export const FILING_ATTEMPT_CAP = 5;
 
 /** How long a claim holds, in minutes: a run that has not answered by then was cut off. */

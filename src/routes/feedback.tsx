@@ -300,7 +300,7 @@ async function readIssue(
 }
 
 /**
- * The move a GitHub answer makes on a row (decision 218): 422 rejects it, 401 and 403 refuse the token, any other 2xx
+ * The move a GitHub answer makes on a row (decision 219): 422 rejects it, 401 and 403 refuse the token, any other 2xx
  * is accepted (filed when its body has a number), and anything else is a failed try.
  */
 function answerOf(
@@ -422,7 +422,7 @@ export async function fileFeedbackIssue(
 	}
 
 	// If GitHub created the issue and this write fails, the next try files it again: a duplicate. No machine can close
-	// that gap, since the number is never stored (decision 218).
+	// that gap, since the number is never stored (decision 219).
 	await db
 		.prepare(
 			"UPDATE feedback SET github_issue_number = ?, filed_at = CURRENT_TIMESTAMP, last_status = ? WHERE id = ?",
