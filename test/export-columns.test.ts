@@ -19,6 +19,10 @@ const NAMED_OMISSIONS = {
 	category_archive_periods: {
 		id: "A row number; the category and both days are exported (decision 185).",
 	},
+	merchants: {
+		started_by_sync:
+			"The lock id of the sync that started the row: internal bookkeeping, not family data (migration 0072, decision 216).",
+	},
 	plaid_items: {
 		id: "A row number; banks come out by name and status only (spec, Download your data).",
 		plaid_item_id:

@@ -144,4 +144,4 @@ Removing it means deleting all of these, and adding a decision entry that supers
 
 ## Quint
 
-Quint models a flow as events in any order and checks rules after each one. It helped once here (the Plaid sync spike) and found no bug. Use it when **designing** a new flow where order or timing matters, before the code exists. The model is a scratch aid and is not committed or run in CI unless the owner decides otherwise in a new decision.
+Quint models a flow as events in any order and checks rules after each one. It helped twice here: the Plaid sync spike, where it found no bug, and two banks naming one new merchant at the same moment (#1048, decision 216), where it broke the old design at once and passed the new one before any code changed. Use it when **designing** a new flow where order or timing matters, before the code exists. The model is a scratch aid and is not committed or run in CI unless the owner decides otherwise in a new decision.

@@ -139,6 +139,7 @@ export const merchants = sqliteTable("merchants", {
 		.default("none"),
 	namesAsked: integer("names_asked").notNull().default(0),
 	notABill: integer("not_a_bill").notNull().default(0),
+	startedBySync: text("started_by_sync"),
 });
 
 /** A merchant's suggested names, one row per name, by position (migrations/0071_merchant_suggested_names.sql). */
