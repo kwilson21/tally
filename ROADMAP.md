@@ -110,7 +110,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec ย
 
 ## Store lookup (decision 210; spec ยง7)
 
-The first time Tally sees a store, it searches the web for it once and tells Jev and the name run what it found. Design: [docs/superpowers/specs/2026-11-12-store-lookup-design.md](docs/superpowers/specs/2026-11-12-store-lookup-design.md); plan: [docs/superpowers/plans/2026-11-12-store-lookup.md](docs/superpowers/plans/2026-11-12-store-lookup.md). Built in this order.
+The first time Tally sees a store, it searches the web for it once and tells Jev and the name run what it found. Design: [docs/superpowers/specs/2026-11-12-store-lookup-design.md](docs/superpowers/specs/2026-11-12-store-lookup-design.md). Each build issue gets its plan from a state-machine and Quint model of the flow, written before its brief. Built in this order.
 
 | Part | Issue | Status |
 |---|---|---|
