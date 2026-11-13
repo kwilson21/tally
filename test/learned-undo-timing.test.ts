@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { undoRemainingMs } from "../src/db/learned-lines";
+import { forgetUndoLeftMs } from "../src/db/settings-saves";
 import { resetDemo } from "../src/demo/reset";
 
 // The Undo's remaining time is the server's own, counted from the stored forgotten_at, so a Forget written seconds ago
@@ -61,6 +62,14 @@ async function answer(raw: string, category: string) {
 		.run();
 }
 
+/** Posts a Forget and gives back its toast with how long the request took, start to answer, on this test's clock. */
+async function forget(text: string) {
+	const startedAt = Date.now();
+	const { res } = await post("/settings/learned/forget", { text });
+
+	return { toast: trigger(res).toast, tookMs: Date.now() - startedAt };
+}
+
 /** A Forget row whose time is `seconds` before now, on the database's clock (fractions allowed). */
 async function writtenAgo(seconds: number): Promise<number> {
 	const row = await db
@@ -85,6 +94,13 @@ beforeEach(async () => {
 });
 
 describe("the Undo's remaining time", () => {
+	it("counts ten seconds from the Forget's own time, in exact numbers", () => {
+		expect(forgetUndoLeftMs(50_000, 50_000)).toBe(10_000);
+		expect(forgetUndoLeftMs(50_000, 54_000)).toBe(6_000);
+		expect(forgetUndoLeftMs(50_000, 60_000)).toBe(0);
+		expect(forgetUndoLeftMs(50_000, 61_000)).toBe(0);
+	});
+
 	it("a Forget written 4 s ago has about 6 s of Undo left", async () => {
 		const ms = await undoRemainingMs(db, await writtenAgo(4));
 		expect(ms).toBeGreaterThanOrEqual(5800);
@@ -113,12 +129,11 @@ describe("the Undo's remaining time", () => {
 	it("a fresh Forget offers its Undo with about ten seconds, counted from the server", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
 
-		const toast = trigger(
-			(await post("/settings/learned/forget", { text: "netflix.com" })).res,
-		).toast;
+		const { toast, tookMs } = await forget("netflix.com");
 
+		// Ten seconds, less whatever the request itself took: no fixed margin, so a slow machine cannot fail it (#982).
 		expect(toast?.undo).toMatch(/^\d+$/);
-		expect(toast?.undoExpiresInMs).toBeGreaterThanOrEqual(9000);
+		expect(toast?.undoExpiresInMs).toBeGreaterThanOrEqual(10000 - tookMs);
 		expect(toast?.undoExpiresInMs).toBeLessThanOrEqual(10000);
 	});
 
@@ -135,12 +150,11 @@ describe("the Undo's remaining time", () => {
 			.run();
 		await answer("NETFLIX.COM", "Entertainment");
 
-		const toast = trigger(
-			(await post("/settings/learned/forget", { text: "netflix.com" })).res,
-		).toast;
+		const { toast, tookMs } = await forget("netflix.com");
 
-		// The second Forget writes a fresh time, so its Undo is about ten seconds, not the four the first had left.
-		expect(toast?.undoExpiresInMs).toBeGreaterThanOrEqual(9000);
+		// The second Forget writes a fresh time, so its Undo is ten seconds less what the request took, not the six the
+		// first had left.
+		expect(toast?.undoExpiresInMs).toBeGreaterThanOrEqual(10000 - tookMs);
 	});
 });
 

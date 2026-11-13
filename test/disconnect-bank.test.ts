@@ -189,6 +189,28 @@ describe("disconnect bank", () => {
 		expect((await post("1abc")).status).toBe(404);
 	});
 
+	it("refuses a leading-zero item id in both methods before any write, and shows the real id", async () => {
+		const id = await itemId();
+
+		expect(
+			(await accounts.request(`/accounts/0${id}/disconnect`, {}, bindings))
+				.status,
+		).toBe(404);
+		expect((await post(`0${id}`)).status).toBe(404);
+
+		const row = await env.DB.prepare(
+			"SELECT disconnected_at FROM plaid_items WHERE id = ?",
+		)
+			.bind(id)
+			.first<{ disconnected_at: string | null }>();
+
+		expect(row?.disconnected_at).toBeNull();
+		expect(
+			(await accounts.request(`/accounts/${id}/disconnect`, {}, bindings))
+				.status,
+		).toBe(200);
+	});
+
 	it("posts with htmx and says so, with a plain-post fallback", async () => {
 		const html = await (
 			await accounts.request(
