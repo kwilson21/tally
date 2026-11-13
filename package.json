@@ -20,7 +20,6 @@
 		"format": "biome check --write . && oxlint --fix",
 		"lint:slop": "oxlint",
 		"test": "vitest run",
-		"cutover": "node scripts/cutover-count.mjs",
 		"screenshots": "node scripts/screenshots.mjs",
 		"e2e": "node scripts/e2e.mjs",
 		"test:feedback-preview": "node scripts/feedback-preview-test.mjs",

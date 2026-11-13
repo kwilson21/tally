@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { addressOf } from "../address";
@@ -7,12 +8,7 @@ import {
 	latestPriceChange,
 } from "../bills/amount";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
-import {
-	BIG_BILL_CENTS,
-	duplicateBillName,
-	needsBigAmountConfirm,
-	sameBillName,
-} from "../bills/guards";
+import { BIG_BILL_CENTS, duplicateBillName } from "../bills/guards";
 import { matchBillPayments } from "../bills/match";
 import {
 	acceptPriceOffer,
@@ -68,6 +64,24 @@ import { ownNameSql } from "../db/own-name";
 import { loadPlans } from "../db/planned-expenses";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents, toCents } from "../money";
+import {
+	acceptPrice,
+	deactivateBill,
+	dismissPrice,
+	type Frequency,
+	linkPayment,
+	markNotABill,
+	nameRepeats,
+	PaysAPlannedExpense,
+	reactivateBill,
+	type SaveBillFacts,
+	type SaveBillRequest,
+	saveBill,
+	scheduleChanged,
+	undoUnlink,
+	unlinkPayment,
+} from "../rules/bills";
+import { decided, everyRefusal } from "../rules/terms";
 import { tidyName } from "../transactions/tidy-name";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
@@ -836,13 +850,17 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 	const before = await loadBillSuggestions(c.env.DB, today);
 	const dismissedIndex = before.findIndex((row) => row.rawName === merchant);
 
-	if (dismissedIndex < 0) return c.notFound();
+	const asked = decided(
+		markNotABill.decide({ merchant }, { listed: dismissedIndex >= 0 }),
+	);
+
+	if (asked.kind !== "write") return c.notFound();
 
 	const result = await c.env.DB.prepare(
 		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
 		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
 	)
-		.bind(merchant)
+		.bind(asked.save.merchant)
 		.run();
 
 	if (!result.meta.changes) return c.notFound();
@@ -875,6 +893,18 @@ bills.get("/bills/:id/edit", async (c) => {
 
 	return bill ? page(c, { bill }) : c.notFound();
 });
+
+/** The field a refused change of schedule is said under, and what the sentence says would change. */
+function scheduleError(
+	from: string,
+	to: Frequency,
+): [field: string, what: string] {
+	if (from !== to) return ["frequency", "how often it's due"];
+
+	if (to === "weekly") return ["due_day", "when it's due"];
+
+	return [to === "biweekly" ? "anchor_date" : "anchor_month", "when it's due"];
+}
 
 async function save(c: Context<App>, id?: number) {
 	const form = await c.req.parseBody();
@@ -938,15 +968,6 @@ async function save(c: Context<App>, id?: number) {
 		errors.merchant_raw_name = "Enter the bank's text.";
 
 	if (!values.category_id) errors.category_id = "Choose a category.";
-	else {
-		const category = await c.env.DB.prepare(
-			"SELECT id FROM categories WHERE id=? AND archived=0",
-		)
-			.bind(Number(values.category_id))
-			.first();
-
-		if (!category) errors.category_id = "Choose an existing category.";
-	}
 
 	const anchor = Number(values.anchor_month);
 
@@ -955,72 +976,89 @@ async function save(c: Context<App>, id?: number) {
 		(!Number.isInteger(anchor) || anchor < 1 || anchor > 12)
 	)
 		errors.anchor_month = "Choose a month.";
+	// The edge is done: what follows is the rule's (src/rules/bills.ts), asked for every refusal at once, since the
+	// form shows all of its errors together.
 	const bill = id ? await dbBill(c, id) : undefined;
 
-	if (id && !bill) return c.notFound();
+	const yearlyOrQuarterly =
+		values.frequency === "yearly" || values.frequency === "quarterly";
 
-	// Only a new name is checked: a bill that already shares its name can still be edited.
-	if (!errors.name && !(bill && sameBillName(bill.name, values.name))) {
-		const duplicate = duplicateBillName(await activeBills(c), values.name, id);
+	const request: SaveBillRequest = {
+		id: id ?? null,
+		read: Object.keys(errors).length === 0,
+		name: values.name,
+		cents: errors.amount ? null : cents,
+		confirmedCents: raw("confirm_amount"),
+		schedule: {
+			frequency: values.frequency,
+			dueDay: due,
+			anchorMonth: yearlyOrQuarterly ? anchor : null,
+			anchorDate: values.frequency === "biweekly" ? anchorDate : null,
+		},
+		categoryId: Number(values.category_id),
+		bankText: values.merchant_raw_name,
+	};
 
-		if (duplicate) errors.name = alreadyCalled(duplicate);
-	}
+	const facts: SaveBillFacts = {
+		bill: bill ?? null,
+		bills: await activeBills(c),
+		// Any category that was chosen is looked up, so one that isn't a number reads as not listed.
+		categoryListed: values.category_id
+			? Boolean(
+					await c.env.DB.prepare(
+						"SELECT id FROM categories WHERE id=? AND archived=0",
+					)
+						.bind(Number(values.category_id))
+						.first(),
+				)
+			: null,
+		// Linked payments are budget history, so a bill that has them keeps its schedule; read only when it would change.
+		hasLinkedPayments:
+			bill && scheduleChanged(bill, request.schedule)
+				? Boolean(
+						await c.env.DB.prepare(
+							"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
+						)
+							.bind(id)
+							.first(),
+					)
+				: false,
+	};
 
-	// P45 A: a very large amount, added or edited, is saved only once its own "Yes, $X is right" chip
-	// is ticked.
-	let bigAmount: BigAmount | undefined;
+	const asked = decided(saveBill.decide(request, facts));
 
-	if (!errors.amount && cents > BIG_BILL_CENTS) {
-		bigAmount = {
-			cents,
-			confirmed: !needsBigAmountConfirm(cents, raw("confirm_amount")),
-		};
+	if (asked.kind === "refuse" && Predicate.isTagged(asked.refusal, "BillGone"))
+		return c.notFound();
 
-		if (!bigAmount.confirmed)
+	// P45 A: a very large amount, added or edited, is saved only once its own "Yes, $X is right" chip is ticked. The
+	// chip is drawn whenever the amount is that large, ticked or not.
+	const refused = everyRefusal(saveBill, request, facts);
+
+	const bigAmount: BigAmount | undefined =
+		request.cents !== null && request.cents > BIG_BILL_CENTS
+			? {
+					cents: request.cents,
+					confirmed: !refused.some(Predicate.isTagged("BigAmountNotConfirmed")),
+				}
+			: undefined;
+
+	// Each refusal's sentence goes under its own field, after the edge's, so the schedule's replaces a field's own error.
+	for (const refusal of refused) {
+		if (Predicate.isTagged(refusal, "BillCategoryGone"))
+			errors.category_id = refusal.say;
+		else if (Predicate.isTagged(refusal, "BillNameTaken"))
+			errors.name = alreadyCalled(nameRepeats(request, facts) ?? values.name);
+		else if (Predicate.isTagged(refusal, "BigAmountNotConfirmed"))
 			errors.amount = `${formatCents(cents)} is a lot for a bill.`;
-	}
-
-	// Linked payments are budget history, so a bill that has them keeps its schedule. A weekly bill's
-	// due day is its weekday, which names its occurrences, so moving it is a change of schedule too.
-	const periodKeysChanged =
-		!!bill &&
-		(bill.frequency !== values.frequency ||
-			bill.anchor_month !==
-				(values.frequency === "yearly" || values.frequency === "quarterly"
-					? anchor
-					: null) ||
-			bill.anchor_date !==
-				(values.frequency === "biweekly" ? anchorDate : null) ||
-			(values.frequency === "weekly" && bill.due_day !== due));
-
-	const protectedScheduleChanged = periodKeysChanged;
-
-	if (protectedScheduleChanged) {
-		const linked = await c.env.DB.prepare(
-			"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
-		)
-			.bind(id)
-			.first();
-
-		if (linked) {
-			// The message goes under the field that changed, so it is visible on the form.
-			const field =
-				bill.frequency !== values.frequency
-					? "frequency"
-					: values.frequency === "weekly"
-						? "due_day"
-						: values.frequency === "biweekly"
-							? "anchor_date"
-							: "anchor_month";
+		else if (Predicate.isTagged(refusal, "ScheduleHasPayments") && bill) {
+			const [field, what] = scheduleError(bill.frequency, values.frequency);
 
 			errors[field] =
-				bill.frequency === values.frequency
-					? "This bill has payments linked. To change when it's due, deactivate it and add a new bill."
-					: "This bill has payments linked. To change how often it's due, deactivate it and add a new bill.";
+				`This bill has payments linked. To change ${what}, deactivate it and add a new bill.`;
 		}
 	}
 
-	if (Object.keys(errors).length)
+	if (asked.kind !== "write")
 		return page(c, {
 			bill: bill ?? undefined,
 			values,
@@ -1029,27 +1067,26 @@ async function save(c: Context<App>, id?: number) {
 			finding,
 		});
 
+	const saved = asked.save;
+
 	// Typed bank text saves its transaction's merchant key, so the bill's payments match it (spec §6.1). Only a
 	// text the bill already has keeps the bill's old bank-text flag, so an unchanged legacy bill keeps matching
 	// by bank text (write.ts).
 	const merchantRawName =
-		bill?.merchant_raw_name === values.merchant_raw_name
-			? values.merchant_raw_name
-			: await merchantKeyOfBankText(c.env.DB, values.merchant_raw_name);
+		bill?.merchant_raw_name === saved.bankText
+			? saved.bankText
+			: await merchantKeyOfBankText(c.env.DB, saved.bankText);
 
 	const fields: BillFields = {
-		name: values.name,
-		amountCents: cents,
-		dueDay: due,
-		frequency: values.frequency,
-		anchorMonth:
-			values.frequency === "yearly" || values.frequency === "quarterly"
-				? anchor
-				: null,
-		anchorDate: values.frequency === "biweekly" ? anchorDate : null,
-		categoryId: Number(values.category_id),
+		name: saved.name,
+		amountCents: saved.amountCents,
+		dueDay: saved.schedule.dueDay,
+		frequency: saved.schedule.frequency,
+		anchorMonth: saved.schedule.anchorMonth,
+		anchorDate: saved.schedule.anchorDate,
+		categoryId: saved.categoryId,
 		merchantRawName,
-		typedMerchantText: values.merchant_raw_name,
+		typedMerchantText: saved.bankText,
 	};
 
 	// Old dismissals have no meaning once the schedule changes (links can't exist here, checked above).
@@ -1058,7 +1095,7 @@ async function save(c: Context<App>, id?: number) {
 	const month = today.slice(0, 7);
 
 	const written = id
-		? await updateBill(c.env.DB, id, fields, periodKeysChanged, month)
+		? await updateBill(c.env.DB, id, fields, saved.scheduleChanged, month)
 		: await insertBill(c.env.DB, fields, today);
 
 	// Another save took the name since the check above, and the write refused it.
@@ -1124,13 +1161,23 @@ async function activeChanged(c: Context<App>, message: string) {
 }
 
 bills.post("/bills/:id/deactivate", async (c) => {
-	const { meta } = await c.env.DB.prepare(
-		"UPDATE bills SET active=0 WHERE id=?",
-	)
-		.bind(Number(c.req.param("id")))
-		.run();
+	const id = Number(c.req.param("id"));
+	const bill = await dbBill(c, id);
 
-	if (!meta.changes) return c.notFound();
+	const asked = decided(
+		deactivateBill.decide(
+			{},
+			{ bill: bill ? { active: Boolean(bill.active) } : null },
+		),
+	);
+
+	if (asked.kind === "refuse") return c.notFound();
+
+	// A bill already off has nothing to save, and the answer is the same.
+	if (asked.kind === "write")
+		await c.env.DB.prepare("UPDATE bills SET active=0 WHERE id=?")
+			.bind(id)
+			.run();
 
 	return activeChanged(c, "Bill deactivated");
 });
@@ -1150,11 +1197,21 @@ bills.post("/bills/:id/reactivate", async (c) => {
 
 	const values = { ...valuesOf(bill), name };
 
-	if (!name)
-		return page(c, { bill, values, errors: { name: "Enter a name." } });
+	const asked = decided(
+		reactivateBill.decide({ name }, { bill: { active: Boolean(bill.active) } }),
+	);
 
-	// A bill that would repeat an active bill's name comes back as the same Name error as adding.
-	if (!bill.active && !(await activateBill(c.env.DB, id, name)))
+	if (asked.kind === "refuse")
+		return Predicate.isTagged(asked.refusal, "NameBlank")
+			? page(c, { bill, values, errors: { name: asked.refusal.say } })
+			: c.notFound();
+
+	// A bill that would repeat an active bill's name comes back as the same Name error as adding. A bill already on
+	// has nothing to save.
+	if (
+		asked.kind === "write" &&
+		!(await activateBill(c.env.DB, id, asked.save.name))
+	)
 		return nameTaken(c, { bill, values });
 	// A payment that arrived while the bill was off links now, as a save does (spec §6.1).
 	await matchBillPayments(c.env.DB);
@@ -1961,74 +2018,72 @@ bills.post("/bills/:id/link", async (c) => {
 	if (!bill) return c.notFound();
 	const today = await householdToday(c.env.DB);
 
-	if (
-		!(Number.isInteger(transaction) && transaction > 0) ||
-		!(await billPeriods(c.env.DB, bill, today)).includes(period)
-	)
-		return billPage(
-			c,
-			id,
-			opened,
-			"Choose a payment and month.",
-			undefined,
-			today,
-		);
-	const due = occurrenceDate(bill, period);
+	const refusedWith = (words: string) =>
+		billPage(c, id, opened, words, undefined, today);
+
+	const chosen =
+		Number.isInteger(transaction) && transaction > 0 ? transaction : null;
+
+	const periods = await billPeriods(c.env.DB, bill, today);
 	const manualWindow = manualLinkWindowDays(bill.frequency);
-	const label = periodLabel(bill, period, today);
 
-	// A Paid month takes no more payments (decision 101): the picker lists none for it, so a request that names one is refused.
-	const unpaid = await c.env.DB.prepare(unpaidSelect)
-		.bind(id, period)
-		.first<{ unpaid: number }>();
+	// The month's due date, and so the three facts read against it, exist only for one of the bill's months: for any
+	// other request the rule refuses on the first term, before it asks for them.
+	const month =
+		chosen !== null && periods.includes(period)
+			? {
+					due: occurrenceDate(bill, period),
+					label: periodLabel(bill, period, today),
+				}
+			: null;
 
-	if (unpaid?.unpaid === 0)
-		return billPage(
-			c,
-			id,
-			opened,
-			`${label}'s bill is already paid.`,
-			undefined,
-			today,
-		);
+	const [unpaid, plannedAlready, eligible] = month
+		? await c.env.DB.batch<{ answer: number }>([
+				// A Paid month takes no more payments (decision 101): the picker lists none for it.
+				c.env.DB.prepare(
+					`SELECT ${occurrenceUnpaidSql("?1", "?2")} AS answer`,
+				).bind(id, period),
+				// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053). The payment's group is the
+				// transaction, its split parent and its parts (paysPlanGroupSql): the picker never lists one.
+				c.env.DB.prepare(
+					`SELECT 1 AS answer FROM transactions t WHERE t.id=? AND ${paysPlanGroupSql("t")}`,
+				).bind(chosen),
+				// Only money out pays a bill: a positive amount is money out, in Plaid's sign (#324).
+				c.env.DB.prepare(
+					"SELECT 1 AS answer FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?",
+				).bind(chosen, month.due, manualWindow),
+			])
+		: [];
 
-	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053). The payment's group is the
-	// transaction, its split parent and its parts (paysPlanGroupSql): the picker never lists one, and a request that
-	// names one anyway is refused here, rather than by the trigger's error.
-	const plannedAlready = await c.env.DB.prepare(
-		`SELECT 1 FROM transactions t WHERE t.id=? AND ${paysPlanGroupSql("t")}`,
-	)
-		.bind(transaction)
-		.first();
+	const asked = decided(
+		linkPayment.decide(
+			{ transactionId: chosen, period },
+			{
+				periods,
+				monthUnpaid: month ? unpaid?.results[0]?.answer !== 0 : null,
+				paysAPlan: month ? plannedAlready?.results.length !== 0 : null,
+				withinWindow: month ? eligible?.results.length !== 0 : null,
+			},
+		),
+	);
 
-	if (plannedAlready)
-		return billPage(
-			c,
-			id,
-			opened,
-			"That payment already pays a planned expense.",
-			undefined,
-			today,
-		);
+	if (asked.kind !== "write" || month === null) {
+		const refusal = asked.kind === "refuse" ? asked.refusal : null;
 
-	// Only money out pays a bill: a positive amount is money out, in Plaid's sign (#324). A credit fails here
-	// and in the INSERT below, with the same message as a payment outside the window.
-	const eligible = await c.env.DB.prepare(
-		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?",
-	)
-		.bind(transaction, due, manualWindow)
-		.first();
+		// The month's and the window's sentences name the month, so the page composes them.
+		if (month && Predicate.isTagged(refusal, "MonthAlreadyPaid"))
+			return refusedWith(`${month.label}'s bill is already paid.`);
 
-	if (!eligible) {
-		return billPage(
-			c,
-			id,
-			opened,
-			`That payment isn't within ${manualWindow} days of ${label}'s bill.`,
-			undefined,
-			today,
-		);
+		if (month && Predicate.isTagged(refusal, "NotWithinTheWindow"))
+			return refusedWith(
+				`That payment isn't within ${manualWindow} days of ${month.label}'s bill.`,
+			);
+
+		return refusedWith(refusal?.say ?? "Choose a payment and month.");
 	}
+
+	const { due, label } = month;
+	const link = asked.save;
 
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
@@ -2043,39 +2098,30 @@ bills.post("/bills/:id/link", async (c) => {
 		batch = await c.env.DB.batch<{ unpaid: number }>([
 			c.env.DB.prepare(linkPaymentSql).bind(
 				id,
-				period,
-				transaction,
+				link.period,
+				link.transactionId,
 				due,
 				manualWindow,
 			),
-			c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
-			c.env.DB.prepare(unpaidSelect).bind(id, period),
+			c.env.DB.prepare(liftNotThisOneSql).bind(
+				id,
+				link.period,
+				link.transactionId,
+			),
+			c.env.DB.prepare(unpaidSelect).bind(id, link.period),
 		]);
 	} catch (error) {
 		if (!String(error).includes("already pays a planned expense")) throw error;
 	}
 
-	if (!batch)
-		return billPage(
-			c,
-			id,
-			opened,
-			"That payment already pays a planned expense.",
-			undefined,
-			today,
-		);
+	if (!batch) return refusedWith(new PaysAPlannedExpense().say);
 	const [insert, , state] = batch;
 
 	if (!insert?.meta.changes)
-		return billPage(
-			c,
-			id,
-			opened,
+		return refusedWith(
 			state?.results[0]?.unpaid === 0
 				? `${label}'s bill is already paid.`
 				: "That payment is already linked.",
-			undefined,
-			today,
 		);
 
 	return feedbackRedirect(c, id, "Payment linked", today);
@@ -2099,14 +2145,15 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 			.all<{ transaction_id: number }>()
 	).results;
 
-	const linked =
-		named === undefined
-			? paid.length === 1
-				? paid[0]
-				: undefined
-			: paid.find((row) => row.transaction_id === named);
+	const asked = decided(
+		unlinkPayment.decide(
+			{ named: named ?? null },
+			{ linked: paid.map((row) => row.transaction_id) },
+		),
+	);
 
-	if (!linked) return c.notFound();
+	if (asked.kind !== "write") return c.notFound();
+	const linked = { transaction_id: asked.save.transactionId };
 	// The token is random and saved on this Not this one, so its Undo works once (#340). It keeps the payment's id,
 	// so a Not this one that later moves to another payment is refused, as before.
 	const undoToken = `${linked.transaction_id}.${crypto.randomUUID()}`;
@@ -2173,7 +2220,16 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	// links are the matcher's. Only a hand link's "by hand" label is lost (the export keeps the column). The guard checks
 	// the token again, since the read above and this batch don't run atomically. A plan that took the payment meanwhile
 	// keeps it unlinked: a dismissal doesn't block a plan, and the migration's trigger would refuse the bill link.
-	const restored = held?.fresh
+	const asked = decided(
+		undoUnlink.decide(
+			{ token },
+			{ held: held ? { ...held, fresh: Boolean(held.fresh) } : null },
+		),
+	);
+
+	const undone = asked.kind === "write" ? asked.save : null;
+
+	const restored = undone
 		? (
 				await c.env.DB.batch([
 					c.env.DB.prepare(
@@ -2181,11 +2237,11 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE undo_token=?4 AND transaction_id=?3 AND status='dismissed' AND matched_by='user' AND julianday('now')-julianday(created_at)<10.0/86400)
 						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE transaction_id=?3 AND status='linked')
 						 AND EXISTS(SELECT 1 FROM transactions t WHERE t.id=?3 AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT ${paysPlanGroupSql("t")})`,
-					).bind(id, held.period, held.transactionId, token),
+					).bind(id, undone.period, undone.transactionId, undone.token),
 					c.env.DB.prepare(liftNotThisOneSql).bind(
 						id,
-						held.period,
-						held.transactionId,
+						undone.period,
+						undone.transactionId,
 					),
 				])
 			)[0]?.meta.changes === 1
@@ -2217,14 +2273,8 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 			type: "success",
 			undoDone: token,
 		};
-	else if (!held)
-		toast = { message: "Undo expired.", type: "error", undoDone: token };
-	else if (!held.fresh)
-		toast = {
-			message: "Undo expired. The payment stays unlinked.",
-			type: "error",
-			undoDone: token,
-		};
+	else if (asked.kind === "refuse")
+		toast = { message: asked.refusal.say, type: "error", undoDone: token };
 	else
 		toast = {
 			message: "Couldn't undo. The payment stays unlinked.",
@@ -2381,7 +2431,7 @@ const wholeCents = (value: FormValue) =>
 
 async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	const id = Number(c.req.param("id"));
-	const period = c.req.param("period");
+	const period = c.req.param("period") ?? "";
 	const form = await c.req.parseBody();
 	const transaction = Number(form.transaction_id);
 	const bill = await dbBill(c, id);
@@ -2400,32 +2450,51 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 			today,
 		);
 
-	if (!offer || offer.period !== period || offer.transactionId !== transaction)
-		return gone();
+	const asked = { period, transactionId: transaction };
+	const facts = { offer: offer ?? null, currentCents: bill.amount_cents };
 
 	if (verb === "accept") {
 		// The prices the page showed: the occurrence's amount, the charge (decision 101) and the bill's current amount.
-		const seenBill = wholeCents(form.bill_cents);
-		const seenCurrent = wholeCents(form.current_cents);
+		const accepted = decided(
+			acceptPrice.decide(
+				{
+					...asked,
+					seen: {
+						billCents: wholeCents(form.bill_cents),
+						chargeCents: wholeCents(form.charge_cents),
+						currentCents: wholeCents(form.current_cents),
+					},
+				},
+				facts,
+			),
+		);
 
 		if (
-			seenBill !== offer.billCents ||
-			wholeCents(form.charge_cents) !== offer.amountCents ||
-			seenCurrent !== bill.amount_cents ||
+			accepted.kind !== "write" ||
+			!offer ||
 			!(await acceptPriceOffer(
 				c.env.DB,
 				id,
-				period,
+				accepted.save.period,
 				offer,
-				seenBill,
+				accepted.save.billCents,
 				offer.dueMonth,
-				seenCurrent,
+				accepted.save.currentCents,
 				today.slice(0, 7),
 			))
 		)
 			return gone();
 	} else {
-		await dismissPriceOffer(c.env.DB, id, period, transaction);
+		const dismissed = decided(dismissPrice.decide(asked, facts));
+
+		if (dismissed.kind !== "write") return gone();
+
+		await dismissPriceOffer(
+			c.env.DB,
+			id,
+			dismissed.save.period,
+			dismissed.save.transactionId,
+		);
 
 		return feedbackRedirect(
 			c,
