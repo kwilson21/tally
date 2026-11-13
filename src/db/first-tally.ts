@@ -547,8 +547,8 @@ export function payAnswerStatement(
 /**
  * The record's write of one kept bill, for keepBills' batch right after the bill's own INSERT: it adds one to the count
  * and the bill's amount to the total, and lands only when that INSERT added the bill (`WHERE changes() > 0`), so a
- * refused name adds nothing. Each kept bill lands with its bill, so a Keep that fails part-way still counts the bills
- * it kept. The sum reads what is stored when the write happens, so two Keeps add up; a first bill on a record without
+ * refused name adds nothing. The whole Keep is one batch, so the count and the bills land together or not at all.
+ * The sum reads what is stored when the write happens, so two Keeps add up; a first bill on a record without
  * `bills` starts from zero (json_extract is NULL there).
  */
 export function keptBillStatement(

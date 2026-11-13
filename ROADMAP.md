@@ -89,7 +89,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
 | Jev told each merchant's recent categories, so every guess improves (decision 90, Q69 A); built before #233 | [#265](https://github.com/kwilson21/tally/issues/265) | — |
 
-## Store lookup (decision 214; spec §7)
+## Store lookup (decision 215; spec §7)
 
 The first time Tally sees a store, it searches the web for it once and tells Jev and the name run what it found. Design: [docs/superpowers/specs/2026-11-12-store-lookup-design.md](docs/superpowers/specs/2026-11-12-store-lookup-design.md). Each build issue gets its plan from a state-machine and Quint model of the flow, written before its brief. Built in this order.
 
