@@ -565,7 +565,10 @@ export async function syncItem(
 	{
 		runAfterSync = true,
 		historyComplete = false,
-	}: { runAfterSync?: boolean; historyComplete?: boolean } = {},
+	}: {
+		runAfterSync?: boolean;
+		historyComplete?: boolean;
+	} = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 
