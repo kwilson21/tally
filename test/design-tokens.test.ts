@@ -10,6 +10,7 @@ import {
 import tokensSource from "../src/design-system/tokens.ts?raw";
 import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
+import { present } from "./helpers/present";
 
 // Every file that writes class names: the views and routes, and the scripts that build elements.
 const SOURCES = import.meta.glob<string>(
@@ -949,75 +950,115 @@ describe("tabular figures (decision 128)", () => {
 });
 
 describe("DESIGN.md says the values app.css has (audit finding)", () => {
-	// app.css is the value; DESIGN.md's table and its Motion paragraph repeat it for people. Only a comment tied them.
-	const hexTokens = [
-		...css.matchAll(/--color-([\w-]+):\s*(#[0-9a-f]{6})\s*;/gi),
-	].map(([, name, hex]) => ({
+	// app.css is the value; DESIGN.md's Tokens table and its Motion paragraph repeat it for people. Only a comment tied
+	// them. Each is read once, whole, and compared with app.css as a set in both directions, counts included: a token
+	// DESIGN.md lacks, a stale row for a token that is gone, a duplicate and a changed value all fail.
+
+	/** The Tokens section of DESIGN.md: from its heading to the next one. */
+	const tokensSection = (() => {
+		const start = design.indexOf("## Tokens");
+		const next = design.indexOf("\n## ", start + 1);
+
+		return design.slice(start, next === -1 ? undefined : next);
+	})();
+
+	/**
+	 * One entry per colour token the table names, in order. A row may name several (`cat-blue / plum / slate / ochre /
+	 * brown`, whose later names share the first's `cat-` prefix), with a hex for each in the same order.
+	 */
+	const documentedColours = tokensSection
+		.split("\n")
+		.filter((line) => line.startsWith("| "))
+		.map((line) =>
+			line
+				.split("|")
+				.slice(1, -1)
+				.map((cell) => cell.trim()),
+		)
+		.filter(([name]) => name !== "Token")
+		.flatMap(([name = "", value = ""]) => {
+			const names = name.split(" / ");
+
+			const prefix = (names[0] ?? "").slice(
+				0,
+				(names[0] ?? "").lastIndexOf("-") + 1,
+			);
+
+			const values = value.split(" / ");
+
+			return names.map((each, index) => ({
+				name: index === 0 ? each : `${prefix}${each}`,
+				hex: /#[0-9a-f]{6}\b/i
+					.exec(
+						values.length === names.length ? (values[index] ?? "") : value,
+					)?.[0]
+					?.toLowerCase(),
+			}));
+		});
+
+	/** The colour tokens app.css defines: a hex, or a colour mix (press). */
+	const cssColours = [
+		...css.matchAll(/--color-([\w-]+):\s*(#[0-9a-f]{6}|color-mix\()/gi),
+	].map(([, name, value]) => ({
 		name: name ?? "",
-		hex: (hex ?? "").toLowerCase(),
+		hex: value?.startsWith("#") ? value.toLowerCase() : undefined,
 	}));
 
-	it("lists a colour token with the hex app.css gives it, one row each", () => {
-		expect(hexTokens.length).toBeGreaterThan(10);
+	it("lists exactly the colour tokens app.css defines, one row each", () => {
+		expect(cssColours.length).toBeGreaterThan(10);
+		expect(documentedColours.map(({ name }) => name).sort()).toEqual(
+			cssColours.map(({ name }) => name).sort(),
+		);
+	});
 
-		const wrong = hexTokens.flatMap(({ name, hex }) => {
-			if (name.startsWith("cat-")) return [];
+	it("gives each hex colour token the hex app.css gives it", () => {
+		const wrong = cssColours.flatMap(({ name, hex }) => {
+			if (hex === undefined) return [];
 
-			// Every row that starts with the token's name, so a second row for it is a mistake, not a pass.
-			const rows = [
-				...design.matchAll(new RegExp(`^\\| ${name} \\|([^|]*)\\|`, "gm")),
-			];
+			const said = documentedColours.find((token) => token.name === name);
 
-			const said = /#[0-9a-f]{6}\b/i.exec(rows[0]?.[1] ?? "")?.[0];
-
-			return rows.length === 1 && said?.toLowerCase() === hex ? [] : [name];
+			return said?.hex === hex ? [] : [name];
 		});
 
 		expect(wrong).toEqual([]);
 	});
 
-	it("lists the category colours in the order app.css has them, in one row", () => {
-		const categories = hexTokens.filter(({ name }) => name.startsWith("cat-"));
+	/** The Motion paragraph: the one line that opens "Motion tokens (". */
+	const motion = present(
+		design.split("\n").find((line) => line.startsWith("Motion tokens (")),
+	);
 
-		const rows = [
-			...design.matchAll(
-				/^\| cat-blue \/ plum \/ slate \/ ochre \/ brown \| ([^|]+) \|/gm,
-			),
-		];
-
-		const row = rows[0];
-
-		expect(rows).toHaveLength(1);
-
-		expect(categories.length).toBe(5);
-		expect(
-			row?.[1]?.split(" / ").map((hex) => hex.trim().toLowerCase()),
-		).toEqual(categories.map(({ hex }) => hex));
-	});
-
-	it("gives each duration token its length in the Motion paragraph, as app.css has it", () => {
-		const durations = [
+	it("gives each duration token app.css defines its length in the Motion paragraph, once, and names no other", () => {
+		const defined = [
 			...css.matchAll(/--duration-([\w-]+):\s*([\d.]+)(ms|s)\b/g),
 		].map(([, name, amount, unit]) => ({
 			name: name ?? "",
-			written: `${amount}${unit}`,
+			length: `${amount}${unit}`,
 		}));
 
-		expect(durations.length).toBeGreaterThan(5);
+		const said = [
+			...motion.matchAll(/`--duration-([\w-]+)` ([\d.]+) (ms|s)\b/g),
+		].map(([, name, amount, unit]) => ({
+			name: name ?? "",
+			length: `${amount}${unit}`,
+		}));
 
-		const wrong = durations.flatMap(({ name, written }) => {
-			// Every place the paragraph gives the token a length, so a second, different one is a mistake, not a pass.
-			const said = [
-				...design.matchAll(
-					new RegExp(`\`--duration-${name}\` ([\\d.]+) (ms|s)\\b`, "g"),
-				),
-			];
+		expect(defined.length).toBeGreaterThan(5);
+		expect(said.map(({ name }) => name).sort()).toEqual(
+			defined.map(({ name }) => name).sort(),
+		);
 
-			return said.length === 1 && `${said[0]?.[1]}${said[0]?.[2]}` === written
+		const wrong = defined.flatMap(({ name, length }) =>
+			said.find((token) => token.name === name)?.length === length
 				? []
-				: [name];
-		});
+				: [name],
+		);
 
 		expect(wrong).toEqual([]);
+	});
+
+	it("reads the table and the paragraph it is meant to (not an empty match)", () => {
+		expect(documentedColours.length).toBeGreaterThan(10);
+		expect(motion).toContain("`--duration-confirm`");
 	});
 });
