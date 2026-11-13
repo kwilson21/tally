@@ -228,7 +228,7 @@ My calls, open to correction:
 - The Workers AI prompt for the one-line summary, and which of the existing models writes it.
 - The payment-app names in the private list, checked against the bank texts in the demo seed and tests.
 - How the lookup step is ordered inside `src/sort-workflow.ts` and the after-sync run.
-- Measuring it, in two steps, both through a never-deployed script like `scripts/compare-models/`. First, before anything else is built: Jev on the demo seed with and without hand-written lines, to see whether a correct line helps at all. Second, after the lookup code exists and before the key reaches production: real Tavily searches and real summaries, run locally with the owner's key, on 20 to 30 real store texts the owner picks, reporting how many lines are right and how Jev's answers change. Either step can stop the work.
+- Measuring it, in two steps, both through a never-deployed script like `scripts/compare-models/`. First, before anything else is built: Jev on the demo seed with and without hand-written lines, to see whether a correct line helps at all. The second step, real Tavily searches on store texts the owner picks, was dropped by decision 224 (see "After the first measurement"): the first step is done (#984), and the production key now waits only for the three build issues to merge and for Tavily's query-data setting to be off.
 
 ## The model (docs/verification.md, "Quint")
 
@@ -297,7 +297,7 @@ And these are the places in the app that touch the new tables or the Jev answer,
 
 ## Size
 
-A project, in three PRs that each stand alone: (1) the lookup module, table, machine and run, with nothing shown; (2) the line passed to Jev and the name run, with the measurement; (3) the card line, the switch and "Don't use this", after the catalog sign-off.
+A project, in three PRs that each stand alone: (1) the lookup module, table, machine and run, with nothing shown; (2) the line passed to Jev's category-only second ask and to the name run; (3) the card line, the switch and "Don't use this", after the catalog sign-off.
 
 ## After the first measurement (decision 224, 2026-11-13)
 
@@ -306,7 +306,9 @@ Issue #984 measured the best case on the demo's stores, with hand-written lines 
 The measurement cannot show how far a wrong line pushes Jev, and the family's volume is too small for a trial to show it. So the owner chose a lookup that corrects itself:
 
 - **A person's answer beats the line.** Once the household has its own answer for a bank text, the line is no longer sent to Jev for it.
+- **The line is only a second look.** A transaction's ordinary Jev call never carries the line, so flags, details and sure guesses are made and applied as today. The line goes only into the category-only second ask about a guess Jev was not sure of.
 - **A guess made with a line is never filed alone.** It is a Maybe however sure Jev is. A guess made without a line is filed as before.
+- **One answer corrects the whole store.** A person's answer clears the store's other open line-backed guesses, which are sorted again from that answer.
 - **Nothing is forced.** The line stays one short free-text line; the prompt tells Workers AI to answer "nothing found" unless the results plainly say what kind of place it is, and the three code checks (length, plain characters, not an instruction) stay behind it.
 
 Dropped: the real-search measurement (#986), a shadow trial, and a fixed list of kinds of place (#1030).
