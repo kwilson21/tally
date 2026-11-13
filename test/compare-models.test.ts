@@ -991,23 +991,28 @@ describe("the store lookup line (#984)", () => {
 		expect(instructions).not.toContain("Grocery store chain");
 	});
 
-	it("the plain asks send exactly the request askJev sends today", async () => {
-		const direct = jevFetch();
-		await askJev(
-			present(linedCases[0]).input,
-			demoCategories(buildSeed(LOOKUP_DAY)),
-			"test-key",
-			direct,
-			JEV_OPTIONS,
-		);
-
+	it("the plain asks, the first and the repeat, send exactly the request askJev sends today", async () => {
 		const viaRun = jevFetch();
 		await runLookup({ AI: fakeAi(), JEV_API_KEY: "test-key" }, viaRun);
 
-		expect(sentRaw(viaRun)[0]).toBe(sentRaw(direct)[0]);
-		expect(
-			stateOf(present(sentBodies(viaRun)[0])).store_lookup,
-		).toBeUndefined();
+		// runLookup asks each case with a line in order, three calls each: plain, plain again, then with the line.
+		for (const index of [0, 1]) {
+			const kase = present(linedCases[index]);
+			const direct = jevFetch();
+			await askJev(
+				kase.input,
+				demoCategories(buildSeed(LOOKUP_DAY)),
+				"test-key",
+				direct,
+				JEV_OPTIONS,
+			);
+
+			expect(sentRaw(viaRun)[3 * index]).toBe(sentRaw(direct)[0]);
+			expect(sentRaw(viaRun)[3 * index + 1]).toBe(sentRaw(direct)[0]);
+			expect(
+				stateOf(present(sentBodies(viaRun)[3 * index])).store_lookup,
+			).toBeUndefined();
+		}
 	});
 
 	it("asks each case with a line three times, one of them with its line, and each case without one never", async () => {
@@ -1033,6 +1038,20 @@ describe("the store lookup line (#984)", () => {
 
 			expect(asked.length).toBe(3);
 		}
+
+		// Per case, in order: plain, plain again, and then the one request with the line.
+		linedCases.forEach((kase, index) => {
+			const three = bodies.slice(3 * index, 3 * index + 3);
+
+			expect(three.map((b) => stateOf(b).store_lookup !== undefined)).toEqual([
+				false,
+				false,
+				true,
+			]);
+			expect(stateOf(present(three[2])).store_lookup).toBe(
+				lookupLine(kase.rawName),
+			);
+		});
 
 		const names = bodies.map((b) => stateOf(b).bank_description);
 
@@ -1230,7 +1249,10 @@ describe("the payee question (#984, part two)", () => {
 		await runPayee({ AI: fakeAi(), JEV_API_KEY: "test-key" }, jev);
 
 		const bodies = sentBodies(jev);
-		expect(bodies.length).toBe(PAYEE_CASES.length + linedCases.length);
+
+		// 12 hand-written rows, plus the lookup-line raw names that are not one of them: 33 names, less CITY GYM MEMBERSHIP,
+		// which is both a hand-written row and a lookup-line case. TARGET T-1432 has two cases, but is asked once.
+		expect(bodies.length).toBe(44);
 		expect(bodies.every((b) => questionOf(b, "payee") !== undefined)).toBe(
 			true,
 		);
@@ -1238,6 +1260,23 @@ describe("the payee question (#984, part two)", () => {
 		const names = bodies.map((b) => stateOf(b).bank_description);
 
 		for (const row of PAYEE_CASES) expect(names).toContain(row.rawName);
+	});
+
+	it("asks no raw name twice in ?payee=1, and keeps the hand-written row for CITY GYM MEMBERSHIP", async () => {
+		const jev = jevFetch(() => payeeReply("person", 0.9));
+		await runPayee({ AI: fakeAi(), JEV_API_KEY: "test-key" }, jev);
+
+		const bodies = sentBodies(jev);
+		const names = bodies.map((b) => stateOf(b).bank_description);
+
+		expect(new Set(names).size).toBe(names.length);
+
+		const gym = bodies.filter(
+			(b) => stateOf(b).bank_description === "CITY GYM MEMBERSHIP",
+		);
+
+		expect(gym.length).toBe(1);
+		expect(stateOf(present(gym[0])).plaid_category).toBe("PERSONAL_CARE");
 	});
 
 	it("counts the four payee outcomes, one of each, and holds back a business at 0.79", () => {
@@ -1296,7 +1335,21 @@ describe("the payee question (#984, part two)", () => {
 });
 
 describe("the lookup and payee routes (#984)", () => {
-	it("answers ?lookup=2, ?payee=2 and ?payee=1&lookup=1 with a 400 and makes no call", async () => {
+	// Jev's fetch is the global one the Worker's modes default to, so stub it: a call to Jev is then seen here.
+	const jev = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+		Response.json(modelAnswer()),
+	);
+
+	beforeEach(() => {
+		jev.mockClear();
+		vi.stubGlobal("fetch", jev);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("answers ?lookup=2, ?payee=2 and ?payee=1&lookup=1 with a 400 and makes no call to Jev or Workers AI", async () => {
 		for (const query of ["lookup=2", "payee=2", "payee=1&lookup=1"]) {
 			const ai = fakeAi();
 
@@ -1307,6 +1360,7 @@ describe("the lookup and payee routes (#984)", () => {
 
 			expect(response.status).toBe(400);
 			expect(ai.run).not.toHaveBeenCalled();
+			expect(jev).not.toHaveBeenCalled();
 		}
 	});
 
@@ -1323,6 +1377,7 @@ describe("the lookup and payee routes (#984)", () => {
 			expect(response.headers.get("content-type")).toContain("text/markdown");
 			expect(await response.text()).toContain("Jev: skipped, no JEV_API_KEY");
 			expect(ai.run).not.toHaveBeenCalled();
+			expect(jev).not.toHaveBeenCalled();
 		}
 	});
 });

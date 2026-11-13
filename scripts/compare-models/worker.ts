@@ -155,6 +155,13 @@ export function withStoreLookup(fetchImpl: FetchLike, line: string): FetchLike {
 	};
 }
 
+/** One payee call: the raw name it is keyed by, what the hand-written row or line case says it is, and Jev's input. */
+type PayeeAsk = {
+	rawName: string;
+	expected: "person" | "business";
+	input: JevInput;
+};
+
 /** The payee question (#984, part two): what the money went to, a business or a person. */
 const PAYEE_QUESTION = {
 	type: "choice",
@@ -323,8 +330,12 @@ export async function runPayee(
 	const rec: Recorder = {};
 	const rows: PayeeRow[] = [];
 
-	const asks = [
-		...PAYEE_CASES.map((row) => ({
+	// One ask per raw name: a hand-written row wins over a lookup-line case with the same name, and the first case of a
+	// name wins over its other direction (TARGET T-1432 is in both directions).
+	const asks = new Map<string, PayeeAsk>();
+
+	for (const row of PAYEE_CASES) {
+		asks.set(row.rawName, {
 			rawName: row.rawName,
 			expected: row.payee,
 			input: {
@@ -335,17 +346,22 @@ export async function runPayee(
 				accountType: "depository",
 				plaidCategory: row.plaidCategory,
 			},
-		})),
-		...buildCases(seed)
-			.filter((kase) => lookupLine(kase.rawName) !== undefined)
-			.map((kase) => ({
-				rawName: kase.rawName,
-				expected: "business" as const,
-				input: kase.input,
-			})),
-	];
+		});
+	}
 
-	for (const ask of asks) {
+	for (const kase of buildCases(seed)) {
+		if (lookupLine(kase.rawName) === undefined) continue;
+
+		if (asks.has(kase.rawName)) continue;
+
+		asks.set(kase.rawName, {
+			rawName: kase.rawName,
+			expected: "business",
+			input: kase.input,
+		});
+	}
+
+	for (const ask of asks.values()) {
 		if (!key) {
 			rows.push({
 				rawName: ask.rawName,
