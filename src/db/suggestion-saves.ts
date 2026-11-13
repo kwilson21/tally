@@ -24,6 +24,7 @@ import { decideAndSave, guardedSave } from "./guarded-save";
 import { incomeGuessSql, PERSON_INCOME_SET_SQL } from "./income";
 import { neverSuggestedSql } from "./never-suggest";
 import type { NewCategoryTarget } from "./new-category-answer";
+import { leftEmpty } from "./refused";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
@@ -189,22 +190,14 @@ export const categoryMaybeStatements = (
 		.bind(save.categoryId, save.who, save.transactionId),
 ];
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to record a NULL guess. */
-const GUARD_RAISED = /NOT NULL constraint failed: maybe_answers\.confidence/;
+/** Whether a save failed because what the rule read had changed, and not for any other reason. Only the guard can try to record a NULL guess. */
+export const maybeChangedSinceRead = leftEmpty("maybe_answers", "confidence");
 
-/** Whether a save failed because what the rule read had changed, and not for any other reason. */
-export function maybeChangedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
-}
-
-/** Only the Never suggest guard can try to keep a line with no date. */
-const NEVER_SUGGEST_GUARD_RAISED =
-	/NOT NULL constraint failed: never_suggest_rules\.decided_on/;
-
-/** Whether a save failed because what the rule read had changed, and not for any other reason. */
-export function neverSuggestChangedSinceRead(error: Error): boolean {
-	return NEVER_SUGGEST_GUARD_RAISED.test(error.message);
-}
+/** Whether a save failed because what the rule read had changed, and not for any other reason. Only the Never suggest guard can try to keep a line with no date. */
+export const neverSuggestChangedSinceRead = leftEmpty(
+	"never_suggest_rules",
+	"decided_on",
+);
 
 /** Runs a save's batch. Either guard's failure becomes ChangedSinceRead; any other failure is a defect. */
 const saveBatch = (db: D1Database, statements: D1PreparedStatement[]) =>

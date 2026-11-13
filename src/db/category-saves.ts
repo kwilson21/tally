@@ -14,6 +14,7 @@ import type { Refusal } from "../rules/terms";
 import { Database } from "./database";
 import { isUniqueViolation } from "./errors";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
+import { leftEmpty } from "./refused";
 
 /**
  * The whole list as one text, as SQL: every category's id, whether it is archived, its place and its name. Two reads
@@ -134,8 +135,8 @@ export const moveCategoryStatements = (
 	),
 ];
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a NULL name. */
-const GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
+/** Whether a save failed because its guard raised. Only the guard can try to add a NULL name. */
+const guardRaised = leftEmpty("categories", "name");
 
 /** Runs a save's batch, and says what its failure was. `whenNameTaken` makes the refusal for a save that sets a name. */
 const runBatch = <E = never>(
@@ -150,7 +151,7 @@ const runBatch = <E = never>(
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.catch((cause): Effect.Effect<never, ChangedSinceRead | E> => {
-				if (cause instanceof Error && GUARD_RAISED.test(cause.message))
+				if (cause instanceof Error && guardRaised(cause))
 					return Effect.fail(new ChangedSinceRead());
 
 				// Anything else is a defect: it is not caught, and the request fails as it would have.

@@ -9,3 +9,9 @@ import * as Schema from "effect/Schema";
 export const RowId = Schema.String.check(
 	Schema.isPattern(/^[1-9]\d{0,14}$/),
 ).pipe(Schema.decodeTo(Schema.NumberFromString));
+
+/**
+ * A held Undo's name, from a form: 36 characters of hex digits and dashes, in either case, the shape a random UUID is
+ * written in. Any other text is refused, and the route answers it as an Undo that has closed.
+ */
+export const Token = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/i));

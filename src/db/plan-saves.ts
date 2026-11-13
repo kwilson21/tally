@@ -29,6 +29,7 @@ import { paysBillGroupSql, paysPlanGroupSql } from "./counted-month";
 import { Database, runWith } from "./database";
 import { decideAndSave, guardedSave } from "./guarded-save";
 import { canPayPlanSql } from "./planned-expenses";
+import { leftEmpty } from "./refused";
 
 /** The plan ?1 as one text: its month, its payment and its name (in hex). 'none' when it is gone. */
 const PLAN_STATE = `COALESCE((SELECT month || ':' || COALESCE(transaction_id, '') || ':' || hex(name)
@@ -191,13 +192,8 @@ const guard = (
 		)
 		.bind(...binds, expectedVersion);
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a plan with no name. */
-const GUARD_RAISED = /NOT NULL constraint failed: planned_expenses\.name/;
-
-/** Whether a save failed because what the rule read had changed, and not for any other reason. */
-export function planChangedSinceRead(error: Error): boolean {
-	return GUARD_RAISED.test(error.message);
-}
+/** Whether a save failed because what the rule read had changed, and not for any other reason. Only the guard can try to add a plan with no name. */
+export const planChangedSinceRead = leftEmpty("planned_expenses", "name");
 
 export const addPlanStatements = (db: D1Database, save: AddPlanWrite) => [
 	db

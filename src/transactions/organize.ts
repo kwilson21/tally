@@ -9,6 +9,7 @@ import { decideAndSave, guardedSave } from "../db/guarded-save";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
 import { jevSaysMixedAmong } from "../db/mixed-trip";
+import { leftEmpty } from "../db/refused";
 import { applyMerchantRuleSql, NEEDS_CATEGORY } from "../db/transactions";
 import { NameTaken, type StoredCategory } from "../rules/categories";
 import type {
@@ -332,8 +333,8 @@ export async function fileGroupFacts(
 	};
 }
 
-/** The text of the guard's failure, as D1 passes SQLite's message on. Only the guard can try to add a category with no name. */
-const GROUP_GUARD_RAISED = /NOT NULL constraint failed: categories\.name/;
+/** Whether a filing's save failed because its guard raised. Only the guard can try to add a category with no name. */
+const groupGuardRaised = leftEmpty("categories", "name");
 
 /**
  * Reads the filing's facts, asks the rule and saves what it decides in one batch, asking again on fresh facts when the
@@ -397,7 +398,7 @@ export const decideFileGroup = <E>(
 
 				return guardedSave(
 					() => db.batch([...before, ...updates]),
-					(error) => GROUP_GUARD_RAISED.test(error.message),
+					groupGuardRaised,
 					() => new NameTaken(),
 				).pipe(Effect.map((results) => filedIds(results.slice(before.length))));
 			},

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readAtEdge } from "../src/edge";
-import { RowId } from "../src/edge-kinds";
+import { RowId, Token } from "../src/edge-kinds";
 
 const read = (text: string | undefined) => readAtEdge(RowId, text);
 
@@ -42,5 +42,29 @@ describe("RowId", () => {
 		const largest = read("999999999999999");
 
 		expect(largest.ok && Number.isSafeInteger(largest.value)).toBe(true);
+	});
+});
+
+describe("Token", () => {
+	const UUID = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b";
+
+	it.each([
+		["lower case", UUID],
+		["upper case", UUID.toUpperCase()],
+		["36 dashes", "-".repeat(36)],
+	])("reads a 36-character name in %s", (_label, text) => {
+		expect(readAtEdge(Token, text)).toEqual({ ok: true, value: text });
+	});
+
+	it.each([
+		["35 characters", UUID.slice(0, 35)],
+		["37 characters", `${UUID}0`],
+		["a space in place of a dash", UUID.replace("-", " ")],
+		["a trailing newline", `${UUID}\n`],
+		["non-hex letters", UUID.replace("3f2b", "zzzz")],
+		["empty", ""],
+		["missing", undefined],
+	])("refuses %s", (_label, text) => {
+		expect(readAtEdge(Token, text).ok).toBe(false);
 	});
 });

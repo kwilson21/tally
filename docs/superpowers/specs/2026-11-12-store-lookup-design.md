@@ -228,7 +228,7 @@ My calls, open to correction:
 - The Workers AI prompt for the one-line summary, and which of the existing models writes it.
 - The payment-app names in the private list, checked against the bank texts in the demo seed and tests.
 - How the lookup step is ordered inside `src/sort-workflow.ts` and the after-sync run.
-- Measuring it, in two steps, both through a never-deployed script like `scripts/compare-models/`. First, before anything else is built: Jev on the demo seed with and without hand-written lines, to see whether a correct line helps at all. The second step, real Tavily searches on store texts the owner picks, was dropped by decision 224 (see "After the first measurement"): the first step is done (#984), and the production key now waits only for the three build issues to merge and for Tavily's query-data setting to be off.
+- Measuring it, in two steps, both through a never-deployed script like `scripts/compare-models/`. First, before anything else is built: Jev on the demo seed with and without hand-written lines, to see whether a correct line helps at all. The second step, real Tavily searches on store texts the owner picks, was dropped by decision 225 (see "After the first measurement"): the first step is done (#984), and the production key now waits only for the three build issues to merge and for Tavily's query-data setting to be off.
 
 ## The model (docs/verification.md, "Quint")
 
@@ -299,7 +299,7 @@ And these are the places in the app that touch the new tables or the Jev answer,
 
 A project, in three PRs that each stand alone: (1) the lookup module, table, machine and run, with nothing shown; (2) the line passed to Jev's category-only second ask and to the name run; (3) the card line, the switch and "Don't use this", after the catalog sign-off.
 
-## After the first measurement (decision 224, 2026-11-13)
+## After the first measurement (decision 225, 2026-11-13)
 
 Issue #984 measured the best case on the demo's stores, with hand-written lines and no web search. A correct line helped a little: right answers went from 12 to 13 of 24, guesses sure enough to file from 14 to 16 of 33, and no right answer became a wrong one (one, Costco, fell just under the filing line when its line named two kinds of goods). Asked "a person or a business?", Jev let none of six people through at 0.80 and all 37 businesses. The demo's stores carry no Plaid category, so the help may look bigger there than in the app.
 
@@ -315,4 +315,4 @@ The measurement cannot show how far a wrong line pushes Jev, and the family's vo
 
 Dropped: the real-search measurement (#986), a shadow trial, and a fixed list of kinds of place (#1030).
 
-**The model was rebuilt for the merged rules** (a scratch file, not committed): 11 rules, no violation in 200,000 random orderings of up to 40 events, 11 written scenarios, and 15 planted bugs each caught (nine by the random search, six only by a written scenario). It now covers the fingerprint mark, Jev's person-or-business answer, a row Jev gave up on, a row that arrives after a claim, the checks before the search and before the Workers AI call, a claim let go with no failure counted, a found text that turns private, the name save's guard, and the step that asks Jev again about an answered row with no current mark (#1042). It found one gap in the wording merged with PR #997, fixed in this change: a fingerprint taken "of the row as that save leaves it" would have stamped new facts onto an answer about old ones when a row changed while Jev was answering. Not in the model yet: the two rules of decision 224, which are added before the first build brief.
+**The model was rebuilt for the merged rules** (a scratch file, not committed): 11 rules, no violation in 200,000 random orderings of up to 40 events, 11 written scenarios, and 15 planted bugs each caught (nine by the random search, six only by a written scenario). It now covers the fingerprint mark, Jev's person-or-business answer, a row Jev gave up on, a row that arrives after a claim, the checks before the search and before the Workers AI call, a claim let go with no failure counted, a found text that turns private, the name save's guard, and the step that asks Jev again about an answered row with no current mark (#1042). It found one gap in the wording merged with PR #997, fixed in this change: a fingerprint taken "of the row as that save leaves it" would have stamped new facts onto an answer about old ones when a row changed while Jev was answering. Not in the model yet: the two rules of decision 225, which are added before the first build brief.
