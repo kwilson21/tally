@@ -17,7 +17,6 @@ import {
 	linkPayment,
 	type MovePlanRequest,
 	type MovePlanWrite,
-	PLAN_UNDO_MS,
 	type PlanFacts,
 	type RestorePlanFacts,
 	type RestorePlanRequest,
@@ -25,6 +24,7 @@ import {
 	restorePlan,
 	type UnlinkPaymentWrite,
 } from "../rules/plans";
+import { UNDO_MS } from "../undo";
 import { paysBillGroupSql, paysPlanGroupSql } from "./counted-month";
 import { Database, runWith } from "./database";
 import { decideAndSave, guardedSave } from "./guarded-save";
@@ -236,7 +236,7 @@ export const deletePlanStatements = (db: D1Database, save: DeletePlanWrite) => [
 	guard(db, PLAN_VERSION, save.expectedVersion, save.id),
 	db
 		.prepare("DELETE FROM planned_delete_holds WHERE created_ms <= ?")
-		.bind(save.now - PLAN_UNDO_MS),
+		.bind(save.now - UNDO_MS),
 	db
 		.prepare(
 			`INSERT INTO planned_delete_holds (token, created_ms, name, amount_cents, month, transaction_id, had_payment, created_by)

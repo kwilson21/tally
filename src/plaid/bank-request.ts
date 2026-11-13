@@ -3,6 +3,7 @@
 // lands. Nothing here writes the bank's row: the caller saves the landing through src/plaid/item-store.ts.
 import { createEffectActor, send, waitFor } from "@xstate/effect";
 import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
 import {
 	type BankOutcome,
 	bankRequestMachine,
@@ -10,7 +11,12 @@ import {
 	type PlaidBank,
 	PlaidRefused,
 } from "../machines/bank-request";
-import { getItem, type PlaidEnv, PlaidError, removeItem } from "./client";
+import {
+	getItem,
+	type PlaidEnv,
+	type PlaidFailure,
+	removeItem,
+} from "./client";
 import type { ConnectionState } from "./item-store";
 import { decryptToken } from "./token-crypto";
 
@@ -74,9 +80,9 @@ const LANDINGS: readonly ConnectionState[] = [
 const landedState = (value: string, from: LiveBankState): ConnectionState =>
 	LANDINGS.find((state) => state === value) ?? from;
 
-/** What Plaid's failure may log: its request id, never a token (CLAUDE.md). */
-function logRequestId(cause: unknown) {
-	if (cause instanceof PlaidError && cause.request_id)
+/** What Plaid's refusal may log: its request id, never a token (CLAUDE.md). */
+function logRequestId(cause: PlaidFailure | PlaidRefused) {
+	if (Predicate.isTagged(cause, "PlaidRefusal") && cause.request_id)
 		console.error("Plaid request failed", { request_id: cause.request_id });
 }
 
@@ -95,37 +101,29 @@ export const plaidBankFor = (
 		catch: () => new PlaidRefused(),
 	});
 
-	const asked = <A>(call: (accessToken: string) => Promise<A>) =>
-		Effect.flatMap(token, (accessToken) =>
-			Effect.tryPromise({
-				try: () => call(accessToken),
-				catch: (cause) => cause,
-			}),
-		);
+	const refused = (cause: PlaidFailure | PlaidRefused) => {
+		logRequestId(cause);
+
+		return Effect.fail(new PlaidRefused());
+	};
 
 	return {
-		loginWorks: asked((accessToken) => getItem(env, accessToken)).pipe(
-			Effect.catch((cause) => {
-				logRequestId(cause);
-
-				return Effect.fail(new PlaidRefused());
-			}),
+		loginWorks: token.pipe(
+			Effect.flatMap((accessToken) => getItem(env, accessToken)),
+			Effect.catch(refused),
 			Effect.flatMap((result) =>
 				result.item.error ? Effect.fail(new PlaidRefused()) : Effect.void,
 			),
 		),
-		letGo: asked((accessToken) => removeItem(env, accessToken)).pipe(
+		letGo: token.pipe(
+			Effect.flatMap((accessToken) => removeItem(env, accessToken)),
 			Effect.asVoid,
-			Effect.catch((cause) => {
-				if (
-					cause instanceof PlaidError &&
-					cause.error_code === "ITEM_NOT_FOUND"
-				)
-					return Effect.void;
-				logRequestId(cause);
-
-				return Effect.fail(new PlaidRefused());
-			}),
+			Effect.catch((cause) =>
+				Predicate.isTagged(cause, "PlaidRefusal") &&
+				cause.error_code === "ITEM_NOT_FOUND"
+					? Effect.void
+					: refused(cause),
+			),
 		),
 	};
 };

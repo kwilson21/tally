@@ -5,13 +5,11 @@
 // (canPayPlanSql in src/db/planned-expenses.ts), read as a fact, so the list and the rule cannot disagree. The saves'
 // guards are in src/db/plan-saves.ts (decision 190).
 import * as Data from "effect/Data";
+import { UNDO_MS } from "../undo";
 import { rule, term, unless } from "./terms";
 
 /** The fields a person sets in a plan's sheet. */
 export type PlanFields = { name: string; amountCents: number; month: string };
-
-/** How long a deleted plan's Undo stays open, in milliseconds (decision 101: ten seconds, like a cash entry). */
-export const PLAN_UNDO_MS = 10_000;
 
 export type PlanFacts = {
 	/** The plan as it is stored, or null when it is gone. */
@@ -193,7 +191,7 @@ export const restorePlan = rule({
 		unless(
 			term<RestorePlanRequest & { hold: RestorePlanFacts["hold"] }>(
 				"the delete is held and its ten seconds have not passed",
-				(g) => g.hold !== null && g.hold.createdMs > g.now - PLAN_UNDO_MS,
+				(g) => g.hold !== null && g.hold.createdMs > g.now - UNDO_MS,
 			),
 			() => new PlanUndoExpired(),
 		),

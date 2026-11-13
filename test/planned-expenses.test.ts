@@ -17,12 +17,13 @@ import {
 	linkPlanPayment,
 	restorePlanDelete,
 } from "../src/db/plan-saves";
-import { PLAN_UNDO_MS, plansSetAsideCents } from "../src/db/planned-expenses";
+import { plansSetAsideCents } from "../src/db/planned-expenses";
 import { removeSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
+import { UNDO_MS } from "../src/undo";
 import { isMethod, present } from "./helpers/present";
 
 const BASE = "http://tally.test";
@@ -347,7 +348,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const token = await holdPlanDelete(env.DB, id, now);
 		expect(token).not.toBeNull();
 		expect(
-			await restorePlanDelete(env.DB, token ?? "", now + PLAN_UNDO_MS + 1),
+			await restorePlanDelete(env.DB, token ?? "", now + UNDO_MS + 1),
 		).toBeNull();
 
 		const gone = await env.DB.prepare(
