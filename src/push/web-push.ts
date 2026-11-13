@@ -242,13 +242,14 @@ export async function vapidAuthorization(
 	return `vapid t=${signingInput}.${toBase64Url(signature)}, k=${keys.publicKey}`;
 }
 
-/** A signed VAPID header and the exp it carries (seconds). */
-type CachedHeader = { header: string; exp: number };
+/** A VAPID header, signed or being signed, and the exp it carries (seconds). */
+type CachedHeader = { header: Promise<string>; exp: number };
 
 /**
  * The signed headers, by push origin and public key (decision 149). RFC 8292 §5 encourages reusing a token, and Apple's Web Push
  * guide asks that a VAPID JWT is not refreshed more than once an hour, so a header is reused while more than an hour is left
- * before its exp. It is only held here, in memory: never logged, and never stored in D1 or the household's settings.
+ * before its exp. It is held from the moment its signing starts, so sends to one origin that start at the same moment share
+ * one token. It is only held here, in memory: never logged, and never stored in D1 or the household's settings.
  */
 const vapidCache = new Map<string, CachedHeader>();
 
@@ -273,10 +274,20 @@ async function authorizationFor(
 	const cached = vapidCache.get(cacheKey);
 
 	if (cached && cached.exp - nowSec > REUSE_WHILE_LEFT_S) return cached.header;
-	const header = await vapidAuthorization(endpoint, keys, nowSec);
-	vapidCache.set(cacheKey, { header, exp: nowSec + VAPID_LIFETIME_S });
 
-	return header;
+	const signing = {
+		header: vapidAuthorization(endpoint, keys, nowSec),
+		exp: nowSec + VAPID_LIFETIME_S,
+	};
+
+	vapidCache.set(cacheKey, signing);
+
+	// A signing that fails is forgotten, so the next send signs anew; one that has been replaced meanwhile is left alone.
+	signing.header.catch(() => {
+		if (vapidCache.get(cacheKey) === signing) vapidCache.delete(cacheKey);
+	});
+
+	return signing.header;
 }
 
 /**

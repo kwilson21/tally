@@ -1,6 +1,8 @@
 // Dates stay as YYYY-MM-DD / YYYY-MM strings (spec §6). A transaction's own date is never
 // converted; only "today" depends on a time zone, the household's (decision 67).
 
+import { databaseRefusal, isTableMissing } from "./db/refused";
+
 const MONTHS = [
 	"January",
 	"February",
@@ -52,7 +54,7 @@ export async function householdTimeZone(db: D1Database): Promise<string> {
 	} catch (error) {
 		// Only a database not yet migrated may use the default zone. Any other failure (a dropped
 		// connection, an overloaded D1) must fail the request, not quietly give it another date.
-		if (!(error instanceof Error && /no such table/i.test(error.message)))
+		if (!(error instanceof Error && isTableMissing(databaseRefusal(error))))
 			throw error;
 	}
 
