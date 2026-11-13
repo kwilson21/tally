@@ -17,6 +17,7 @@ import {
 	getInstitutionName,
 	getItem,
 	type LinkTokenRequest,
+	orThrow,
 	type PlaidEnv,
 	PlaidError,
 	removeItem,
@@ -115,15 +116,17 @@ plaid.post("/plaid/link-token", async (c) => {
 	if (!enabled(c.env)) return c.notFound();
 
 	try {
-		const result = await createLinkToken(
-			c.env,
-			withWebhook(c.env.PLAID_WEBHOOK_URL, {
-				user: { client_user_id: await clientUserId(actor(c)) },
-				client_name: "Tally",
-				products: ["transactions"],
-				country_codes: ["US"],
-				language: "en",
-			}),
+		const result = await orThrow(
+			createLinkToken(
+				c.env,
+				withWebhook(c.env.PLAID_WEBHOOK_URL, {
+					user: { client_user_id: await clientUserId(actor(c)) },
+					client_name: "Tally",
+					products: ["transactions"],
+					country_codes: ["US"],
+					language: "en",
+				}),
+			),
 		);
 
 		return c.json({ link_token: result.link_token });
@@ -146,15 +149,17 @@ plaid.post("/plaid/items/:id/link-token", async (c) => {
 			c.env.TOKEN_ENCRYPTION_KEY ?? "",
 		);
 
-		const result = await createLinkToken(
-			c.env,
-			withWebhook(c.env.PLAID_WEBHOOK_URL, {
-				user: { client_user_id: await clientUserId(actor(c)) },
-				client_name: "Tally",
-				access_token: accessToken,
-				country_codes: ["US"],
-				language: "en",
-			}),
+		const result = await orThrow(
+			createLinkToken(
+				c.env,
+				withWebhook(c.env.PLAID_WEBHOOK_URL, {
+					user: { client_user_id: await clientUserId(actor(c)) },
+					client_name: "Tally",
+					access_token: accessToken,
+					country_codes: ["US"],
+					language: "en",
+				}),
+			),
 		);
 
 		return c.json({ link_token: result.link_token });
@@ -248,16 +253,17 @@ plaid.post("/plaid/exchange", async (c) => {
 	}
 
 	try {
-		const exchanged = await exchangePublicToken(c.env, publicToken);
+		const exchanged = await orThrow(exchangePublicToken(c.env, publicToken));
 		let institution = "Your bank";
 
 		try {
-			const item = await getItem(c.env, exchanged.access_token);
+			const item = await orThrow(getItem(c.env, exchanged.access_token));
 
 			if (item.item.institution_id) {
 				institution =
-					(await getInstitutionName(c.env, item.item.institution_id)) ||
-					institution;
+					(await orThrow(
+						getInstitutionName(c.env, item.item.institution_id),
+					)) || institution;
 			}
 		} catch (error) {
 			logPlaidRequestId(error);
@@ -305,7 +311,7 @@ plaid.post("/plaid/exchange", async (c) => {
 			itemId = Number(inserted?.meta.last_row_id);
 		} catch (error) {
 			try {
-				await removeItem(c.env, exchanged.access_token);
+				await orThrow(removeItem(c.env, exchanged.access_token));
 			} catch (removeError) {
 				logPlaidRequestId(removeError);
 			}
