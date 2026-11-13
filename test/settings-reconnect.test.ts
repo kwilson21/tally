@@ -348,6 +348,52 @@ describe("reconnect reminder schedule", () => {
 		]);
 	});
 
+	it("emails three people at once and starts the fourth as soon as one is answered", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_members (email) VALUES ('a@example.com'), ('b@example.com'), ('c@example.com'), ('d@example.com')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, institution_name, access_token_encrypted, linked_by, status) VALUES (911, 'Chase', X'', 'a@example.com', 'needs_attention')",
+		).run();
+
+		const asked: string[] = [];
+		const answer = new Map<string, () => void>();
+		let threeAsked = () => {};
+
+		const three = new Promise<void>((resolve) => {
+			threeAsked = resolve;
+		});
+
+		// Each call to Resend is held open until the test answers it, so the calls in flight can be counted.
+		const run = runReconnectReminders(
+			{ ...env, DEMO: "false", RESEND_API_KEY: "test-key" },
+			async (_url, init) => {
+				// SAFETY: deliver.ts sends Resend a JSON body whose `to` is the one recipient's address, a string.
+				const body = JSON.parse(String(init?.body)) as { to: string };
+				asked.push(body.to);
+
+				if (asked.length === 3) threeAsked();
+				await new Promise<void>((resolve) => {
+					answer.set(body.to, resolve);
+				});
+
+				return new Response("{}", { status: 200 });
+			},
+			new Date("2026-10-07T13:00:00Z"),
+		);
+
+		await three;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(asked).toEqual(["a@example.com", "b@example.com", "c@example.com"]);
+
+		answer.get("a@example.com")?.();
+		await vi.waitFor(() => expect(asked).toHaveLength(4));
+
+		for (const send of answer.values()) send();
+		await run;
+		expect(asked[3]).toBe("d@example.com");
+	});
+
 	it("times out stalled Resend for each recipient, falls back, releases a failed claim, and logs no address", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_members (email) VALUES ('dana@example.com'), ('riley@example.com')",

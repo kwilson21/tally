@@ -1,9 +1,16 @@
+import * as Effect from "effect/Effect";
 import { daysBefore, householdTimeZone, todayIn } from "../dates";
 import { readBankSignInEmails } from "../db/reconnect";
 import { type DeliveryEnv, deliver, logDeliveries } from "./deliver";
 import { renderReconnectEmail } from "./email";
 
 const REMINDER_DAYS = 3;
+
+/**
+ * How many people one bank's reminder is sent to at the same moment. Three, well inside Resend's ten requests a second
+ * for a team, so a slow answer for one person no longer holds up the next.
+ */
+const REMINDERS_AT_ONCE = 3;
 
 type ReminderEnv = DeliveryEnv & {
 	DB: D1Database;
@@ -94,15 +101,19 @@ export async function runReconnectReminders(
 		const email = renderReconnectEmail(input, zone);
 		let sent = false;
 
-		for (const { email: recipient } of recipients.results) {
-			const outcome = await deliver(
-				env,
-				recipient,
-				email,
-				fetchImpl,
-				timeoutSignal,
-			);
+		// `deliver` never throws: a failed send is an outcome. The outcomes come back in the recipients' order.
+		const outcomes = await Effect.runPromise(
+			Effect.forEach(
+				recipients.results,
+				({ email: recipient }) =>
+					Effect.promise(() =>
+						deliver(env, recipient, email, fetchImpl, timeoutSignal),
+					),
+				{ concurrency: REMINDERS_AT_ONCE },
+			),
+		);
 
+		for (const outcome of outcomes) {
 			if (outcome.delivered) {
 				sentCount += 1;
 				sent = true;
