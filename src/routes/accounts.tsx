@@ -28,6 +28,8 @@ import {
 	APPLE_CARD_SAMPLE_BALANCE_CENTS,
 	appleCardSample,
 } from "../demo/apple-card-sample";
+import { readAtEdge } from "../edge";
+import { RowId } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { PlaidBank } from "../machines/bank-request";
 import { toCents } from "../money";
@@ -783,7 +785,10 @@ function DisconnectPage({
 
 accounts.get("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
-	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
+	const itemId = readAtEdge(RowId, c.req.param("itemId"));
+
+	if (!itemId.ok) return c.notFound();
+	const item = await disconnectItem(c.env.DB, itemId.value);
 
 	if (!item || item.disconnected_at !== null) return c.notFound();
 
@@ -804,7 +809,10 @@ async function backToAccounts(c: Context<App>, message: string) {
 
 accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
-	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
+	const itemId = readAtEdge(RowId, c.req.param("itemId"));
+
+	if (!itemId.ok) return c.notFound();
+	const item = await disconnectItem(c.env.DB, itemId.value);
 
 	if (!item) return c.notFound();
 	const already = `${item.institution_name} is already disconnected.`;

@@ -243,6 +243,38 @@ describe("Plaid routes", () => {
 		},
 	);
 
+	it("refuses a leading-zero item id before calling Plaid, and answers the real id", async () => {
+		const { jwt, jwk } = await accessIdentity();
+
+		const inserted = await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (?, 'Zero Bank', 'person') RETURNING id",
+		)
+			.bind(await encryptToken("zero-token", KEY))
+			.first<{ id: number }>();
+
+		const plaidCalls: string[] = [];
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com"))
+				return Response.json({ keys: [jwk] });
+			plaidCalls.push(String(input));
+
+			return Response.json({ link_token: "zero-link" });
+		});
+
+		for (const route of ["link-token", "repaired"]) {
+			expect(
+				(await post(`/plaid/items/0${inserted?.id}/${route}`, jwt)).status,
+			).toBe(404);
+		}
+
+		expect(plaidCalls).toHaveLength(0);
+
+		const response = await post(`/plaid/items/${inserted?.id}/link-token`, jwt);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ link_token: "zero-link" });
+	});
+
 	it.each(["link-token", "repaired"])(
 		"returns 404 from the %s route for a disconnected item",
 		async (route) => {
