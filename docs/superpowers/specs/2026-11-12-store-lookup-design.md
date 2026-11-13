@@ -114,7 +114,15 @@ All search calls go through one module, `src/ai/lookup-store.ts`, with one funct
 
 A new table (one migration), kept apart from `merchants` as `merchant_name_failures` is:
 
-`merchant_lookups`: `lookup_text` (primary key: the redacted text that is sent, see "What leaves the app"), `status` (`found`, `nothing_found`, `skipped`, `gave_up`), `line` (null unless `found`), `attempts`, `failed_at`, `looked_up_at`. No row means `none`.
+`merchant_lookups`: `lookup_text` (primary key: the redacted text that is sent, see "What leaves the app"), `status` (`found`, `nothing_found`, `skipped`, `gave_up`, or `pending` for a store a run has claimed or is to try again), `line` (null unless `found`), `attempts`, `claimed_at`, `failed_at`, `looked_up_at`, `reasked_at`. No row means `none`.
+
+`lookup_answers`: `transaction_id` (primary key), `lookup_text`. One row for each transaction whose stored Jev answer was asked with the line.
+
+Four rules the review of the plan added (PR #997):
+- **Claim before calling.** A run claims a store in the table before it searches, and searches only what it claimed, so two runs at once make one search.
+- **Count every search.** The day's cap is a counter of its own, taken before the calls as Jev's is, not worked out from the rows' last timestamps.
+- **Privacy is checked on the merchant key as stored**, before cleaning and the 40-character cap (the cleaner strips "PAYPAL *"), and when several merchants share one lookup text, one private merchant makes the text private.
+- **A line is shown only under a guess that used it**, and the re-ask skips rows already asked with the line and waits while the switch is off.
 
 The key is the lookup text, not the merchant key, because an unnamed store's merchant key is its raw text with the date in it (`src/db/merchant-key.ts`): "LA COOP … 07/24" and "… 07/25" are two merchant rows and one lookup text, so the store is still searched once. A merchant finds its lookup through a stored `merchants.lookup_text` column, which the lookup run fills, since the text is computed in TypeScript and SQL cannot join without it. `merchant_lookups.reasked_at` marks a found store whose open guesses have been asked again, so the re-ask is driven by stored state, covers stores looked up on earlier nights, and gives new rows Jev's cap first. A chain Plaid names ("Target") is one lookup for every branch, so the summary says where a place is only when the results agree on one place.
 
