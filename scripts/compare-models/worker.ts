@@ -233,7 +233,27 @@ const jevNote = (rec: Recorder): ModelNote => ({
 	usage: rec.usage,
 });
 
-/** One Jev call about one case through `fetchImpl`, scored. Only the outcome is logged, never the transaction. */
+/**
+ * One call about one case, timed and scored, with its first unreadable body kept for the report. Only the outcome
+ * and the time are logged, never the transaction.
+ */
+async function scoredAsk(
+	kase: Case,
+	categories: string[],
+	rec: Recorder,
+	label: string,
+	ask: () => Promise<JevResult>,
+): Promise<Row> {
+	const started = Date.now();
+	const row = scoreCase(kase, await ask(), categories, Date.now() - started);
+
+	if (row.outcome === "unreadable") rec.unreadable ??= rec.body;
+	console.log(`compare-models ${label} ${row.outcome} ${row.ms}ms`);
+
+	return row;
+}
+
+/** One Jev call about one case through `fetchImpl`, scored; skipped with no key. */
 async function askOnce(
 	kase: Case,
 	key: string | undefined,
@@ -244,14 +264,9 @@ async function askOnce(
 ): Promise<Row> {
 	if (!key) return skippedRow();
 
-	const started = Date.now();
-	const result = await askJev(kase.input, categories, key, fetchImpl, OPTIONS);
-	const row = scoreCase(kase, result, categories, Date.now() - started);
-
-	if (row.outcome === "unreadable") rec.unreadable ??= rec.body;
-	console.log(`compare-models ${label} ${row.outcome} ${row.ms}ms`);
-
-	return row;
+	return scoredAsk(kase, categories, rec, label, () =>
+		askJev(kase.input, categories, key, fetchImpl, OPTIONS),
+	);
 }
 
 /**
@@ -410,19 +425,21 @@ async function rowsFor(
 	list: ReportList,
 	cases: Case[],
 ): Promise<Row[]> {
-	if (!run.asker) return cases.map(() => skippedRow());
+	const { asker } = run;
+
+	if (!asker) return cases.map(() => skippedRow());
 	const rows: Row[] = [];
 
 	for (const [index, kase] of cases.entries()) {
-		const started = Date.now();
-		const result = await run.asker(kase.input, list.categories);
-		const row = scoreCase(kase, result, list.categories, Date.now() - started);
-
-		if (row.outcome === "unreadable") run.rec.unreadable ??= run.rec.body;
-		console.log(
-			`compare-models ${run.model} ${list.id} case ${index + 1} ${row.outcome} ${row.ms}ms`,
+		rows.push(
+			await scoredAsk(
+				kase,
+				list.categories,
+				run.rec,
+				`${run.model} ${list.id} case ${index + 1}`,
+				() => asker(kase.input, list.categories),
+			),
 		);
-		rows.push(row);
 	}
 
 	return rows;
@@ -489,6 +506,12 @@ export async function runComparison(
 	return formatReport({ today, cases, jevStatus, lists, notes });
 }
 
+/** A report as the Worker's markdown response. */
+const markdown = (text: string) =>
+	new Response(text, {
+		headers: { "content-type": "text/markdown; charset=utf-8" },
+	});
+
 const isOneOf = <T extends string>(
 	values: readonly T[],
 	value: string,
@@ -552,8 +575,3 @@ export default {
 		return markdown(text);
 	},
 };
-
-const markdown = (text: string) =>
-	new Response(text, {
-		headers: { "content-type": "text/markdown; charset=utf-8" },
-	});
