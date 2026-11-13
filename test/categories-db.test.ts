@@ -81,6 +81,20 @@ describe("setArchived", () => {
 });
 
 describe("moveCategory", () => {
+	it("renumbers the active list 1, 2, 3 as it moves", async () => {
+		await moveCategory(db, 3, "up");
+
+		const rows = await db
+			.prepare(
+				"SELECT sort_order AS sortOrder FROM categories WHERE archived = 0 ORDER BY sort_order",
+			)
+			.all<{ sortOrder: number }>();
+
+		expect(rows.results.map((row) => row.sortOrder)).toEqual([
+			1, 2, 3, 4, 5, 6, 7,
+		]);
+	});
+
 	it("moves a category up or down one place, and does nothing past either end", async () => {
 		await moveCategory(db, 3, "up");
 		expect(await names()).toEqual([
