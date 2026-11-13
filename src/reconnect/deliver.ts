@@ -1,6 +1,9 @@
 // One email to one address (decision 86): Resend first, then Cloudflare's email as the fallback. The bank sign-in reminders
 // and the ready email (decision 134) both send through it, so they share the sender and the failure kinds.
 
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+
 export const FROM = "Tally <tally@notifs.thesuperhuman.us>";
 
 /** An email's words, the same in HTML and in plain text. */
@@ -23,6 +26,11 @@ export type DeliveryEnv = {
 /** What Cloudflare's send answers with: the message's id, which Tally never reads. */
 export type EmailSent = { messageId?: string } | void;
 
+/** Cloudflare's email did not send: it threw, or it did not answer in time. */
+class FallbackFailed extends Data.TaggedError("FallbackFailed")<{
+	readonly kind: "email fallback error" | "email fallback timeout";
+}> {}
+
 /** What a send may be told (decision 146). */
 export type DeliverOptions = {
 	/**
@@ -30,7 +38,12 @@ export type DeliverOptions = {
 	 * never used, and every answer that isn't a success, and no answer at all, comes back `held`. Without it, nothing changes.
 	 */
 	onlyResend?: boolean;
+	/** How long to wait for Cloudflare's email, in milliseconds. Ten seconds unless a test says otherwise. */
+	emailTimeoutMs?: number;
 };
+
+/** How long Cloudflare's email may take, as Resend's request may. */
+const EMAIL_TIMEOUT_MS = 10_000;
 
 /**
  * The error name Resend gives an error answer (its body's `name`, such as invalid_idempotent_request), or null when the body
@@ -132,12 +145,29 @@ export async function deliver(
 	}
 
 	if (!delivered && env.EMAIL) {
-		try {
-			await env.EMAIL.send({ to: recipient, from: FROM, ...email });
-			delivered = true;
-		} catch {
-			kinds.push("email fallback error");
-		}
+		const binding = env.EMAIL;
+
+		// Cloudflare's email takes no signal, so a send that hangs cannot be stopped: the wait is, and the try is named a
+		// timeout. Such a send may still arrive later.
+		const failed = await Effect.runPromise(
+			Effect.tryPromise({
+				try: () => binding.send({ to: recipient, from: FROM, ...email }),
+				catch: () => new FallbackFailed({ kind: "email fallback error" }),
+			}).pipe(
+				Effect.timeoutOrElse({
+					duration: options.emailTimeoutMs ?? EMAIL_TIMEOUT_MS,
+					orElse: () =>
+						Effect.fail(new FallbackFailed({ kind: "email fallback timeout" })),
+				}),
+				Effect.match({
+					onFailure: (failure) => failure.kind,
+					onSuccess: () => null,
+				}),
+			),
+		);
+
+		if (failed === null) delivered = true;
+		else kinds.push(failed);
 	}
 
 	if (!delivered && kinds.length === 0) kinds.push("no provider configured");

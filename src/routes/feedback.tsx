@@ -295,6 +295,9 @@ function diagnosticLines(item: FeedbackRow) {
 	return lines;
 }
 
+/** How long GitHub may take to file one issue. */
+const FILING_TIMEOUT_MS = 15_000;
+
 export async function fileFeedbackIssue(
 	db: D1Database,
 	token: string,
@@ -343,6 +346,8 @@ export async function fileFeedbackIssue(
 				},
 				// Workers rejects redirect: "error"; a 3xx isn't ok, so it's treated as a failure.
 				redirect: "manual",
+				// A request that hangs is a failed try: the claim is given back below, and the next run tries again.
+				signal: AbortSignal.timeout(FILING_TIMEOUT_MS),
 				body: JSON.stringify({
 					title: `${safeType}: ${titleMessage}`,
 					// Code formatting keeps #123 and @someone from becoming links or mentions.

@@ -364,3 +364,45 @@ describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", (
 		expect(email.send).not.toHaveBeenCalled();
 	});
 });
+
+describe("deliver: Cloudflare's email has a deadline", () => {
+	it("stops waiting for a send that never answers, and names the try as a timeout", async () => {
+		// Cloudflare's email takes no signal, so the send cannot be stopped; deliver stops waiting for it.
+		const send = vi.fn(() => new Promise<never>(() => {}));
+
+		const outcome = await deliver(
+			{ EMAIL: { send } },
+			"reader@example.com",
+			MAIL,
+			vi.fn(),
+			timeout,
+			undefined,
+			{ emailTimeoutMs: 20 },
+		);
+
+		expect(send).toHaveBeenCalledOnce();
+		expect(outcome).toEqual({
+			delivered: false,
+			kinds: ["email fallback timeout"],
+		});
+	});
+
+	it("still names a send that throws as an error", async () => {
+		const send = vi.fn(async () => {
+			throw new Error("refused");
+		});
+
+		const outcome = await deliver(
+			{ EMAIL: { send } },
+			"reader@example.com",
+			MAIL,
+			vi.fn(),
+			timeout,
+		);
+
+		expect(outcome).toEqual({
+			delivered: false,
+			kinds: ["email fallback error"],
+		});
+	});
+});

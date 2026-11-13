@@ -1117,6 +1117,8 @@ describe("feedback filing safeguards", () => {
 		expect(fetchStub).toHaveBeenCalledOnce();
 		const [, init] = present(fetchStub.mock.calls[0]);
 		const body = JSON.parse(String(init?.body));
+		// The request to GitHub carries a deadline, so one that hangs is a failed try and not a held run.
+		expect(init?.signal).toBeInstanceOf(AbortSignal);
 		expect(body.title).toBe(`Bug: ${"x".repeat(59)}😀`);
 		expect(body.body).toMatch(/```\n[^`]*\n```$/);
 	});

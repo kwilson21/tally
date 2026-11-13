@@ -141,8 +141,10 @@ describe("verifiedEmail", () => {
 		).toBe("family.member@example.com");
 		expect(fetch).toHaveBeenCalledTimes(1);
 		// Workers throws on redirect: "error", so a redirect is stopped and refused by status instead.
+		// It carries a deadline, so a certs fetch that hangs refuses the sign-in and does not hang the request.
 		expect(fetch).toHaveBeenCalledWith(`https://${team}/cdn-cgi/access/certs`, {
 			redirect: "manual",
+			signal: expect.any(AbortSignal),
 		});
 	});
 
