@@ -75,3 +75,26 @@ export const rule = <
 				);
 	},
 });
+
+/** A rule's answer as a plain value: what to save, nothing to do, or the refusal. */
+export type Decided<W, E> =
+	| { kind: "write"; save: W }
+	| { kind: "nothingToDo" }
+	| { kind: "refuse"; refusal: E };
+
+/**
+ * Runs what a rule's `decide` answered, which needs nothing handed in, and gives it as a plain value. For a handler
+ * whose save is one of the older functions that re-check each row in SQL as they write (decision 209).
+ */
+export const decided = <W, E extends Refusal>(
+	answer: Effect.Effect<Option.Option<W>, E>,
+): Decided<W, E> =>
+	Effect.runSync(
+		Effect.match(answer, {
+			onFailure: (refusal): Decided<W, E> => ({ kind: "refuse", refusal }),
+			onSuccess: (save): Decided<W, E> =>
+				Option.isSome(save)
+					? { kind: "write", save: save.value }
+					: { kind: "nothingToDo" },
+		}),
+	);

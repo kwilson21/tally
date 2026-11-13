@@ -1,6 +1,6 @@
 # Store lookup: a web search behind each new store
 
-Status: approved by the owner in chat on 2026-11-12, with the three choices below settled as proposed. In the spec as §7 "Store lookup" and decision 210.
+Status: approved by the owner in chat on 2026-11-12, with the three choices below settled as proposed. In the spec as §7 "Store lookup" and decision 213.
 
 ## What it is, in one sentence
 
@@ -142,7 +142,7 @@ Search results are text from the open web, so the stored line is treated as untr
 
 **Tavily** (the owner's pick, 2026-11-12; Brave was my first proposal). One `POST https://api.tavily.com/search` with a JSON body, so the query never sits in a URL, and the key in an `Authorization: Bearer` header. Reported at 1,000 free credits a month and about $0.008 a basic search after that. The price, the request fields and the rate limit (reported as 20 requests a minute) are from secondary sources; the builder confirms them on Tavily's own API reference before building (CLAUDE.md: never from memory).
 
-**Tavily's terms, read on 2026-11-12** (privacy policy last updated 2025-11-24): it collects query data, may use parts of it to improve its answers, may share a query with other search index providers when its own index can't answer, and states no retention period. Its account setting "Allow Use of Query Data", when off, means query data "will not be stored or used for improvements". The owner turns that setting off before the production key is set (decision 210). Only redacted store text is sent and private payments are skipped either way.
+**Tavily's terms, read on 2026-11-12** (privacy policy last updated 2025-11-24): it collects query data, may use parts of it to improve its answers, may share a query with other search index providers when its own index can't answer, and states no retention period. Its account setting "Allow Use of Query Data", when off, means query data "will not be stored or used for improvements". The owner turns that setting off before the production key is set (decision 213). Only redacted store text is sent and private payments are skipped either way.
 
 All search calls go through one module, `src/ai/lookup-store.ts`, with one function signature, as Jev does through `categorize.ts`. Changing services changes only that file. The Workers AI call that writes the one line lives there too, so CLAUDE.md's "Workers AI only via" list gains this file.
 
@@ -206,7 +206,7 @@ Owner, in chat on 2026-11-12:
 - Look each store up once and keep the answer.
 - No decision model as a gate; code rules instead.
 
-- Tavily is the search service, with its "Allow Use of Query Data" setting turned off before the production key is set (decision 210).
+- Tavily is the search service, with its "Allow Use of Query Data" setting turned off before the production key is set (decision 213).
 - Rows still uncategorized or an unanswered Maybe are asked again when their store's lookup lands.
 - Stores Plaid already names are searched.
 - The plan starts from two state machines and a Quint model of the whole flow ("The model", below); the owner asked for this after the first plan's review.

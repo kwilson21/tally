@@ -99,7 +99,11 @@ async function saveWith(db: D1Database, fields: Record<string, string>) {
  * The database as another save leaves it: Harbor Supply filed in category 1, just before this save's first batch.
  * With `onlyUnfiled`, only the charges still needing a category are filed, so older ones keep theirs.
  */
-function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
+function otherSaveFilesFirst(
+	onlyUnfiled = false,
+	/** True to file it later still: after this save has read its facts, just before the batch that saves. */
+	beforeTheSave = false,
+): D1Database {
 	let raced = false;
 	const filing = `UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'${onlyUnfiled ? " AND category_id IS NULL" : ""}`;
 
@@ -107,7 +111,8 @@ function otherSaveFilesFirst(onlyUnfiled = false): D1Database {
 		get(target, property) {
 			if (property === "batch")
 				return async (statements: D1PreparedStatement[]) => {
-					if (!raced) {
+					// The read of the facts is a batch of two statements (decision 209); the save's batch is longer.
+					if (!raced && (!beforeTheSave || statements.length > 2)) {
 						raced = true;
 						await env.DB.prepare(filing).run();
 					}
@@ -325,33 +330,24 @@ describe("New category in Organize", () => {
 
 	it("a group another save categorized first makes no category and says it already has one", async () => {
 		await harborCharges(2);
-		// Another save files the group after this request has read it and before this one counts it.
-		await env.DB.prepare(
-			`CREATE TRIGGER other_save_files_group AFTER INSERT ON categories WHEN NEW.name = 'Pets'
-			BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE raw_name = 'HARBOR SUPPLY'; END`,
-		).run();
 
-		try {
-			const { res } = await post({
-				group: "Harbor Supply",
-				category: "new",
-				new_category_name: "Pets",
-				name: "",
-			});
+		// Another save files the group after this one has read its facts and before its batch: the guard raises, the rule
+		// is asked again on the fresh rows, and no category is made.
+		const { res } = await saveWith(otherSaveFilesFirst(false, true), {
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
 
-			expect(res.status).toBe(200);
-			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
-			expect(trigger.toast.message).toBe(
-				"That merchant already has a category.",
-			);
-			expect(trigger.announce).toBe("That merchant already has a category.");
-			expect(
-				await env.DB.prepare(
-					"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
-				).first<{ n: number }>(),
-			).toEqual({ n: 0 });
-		} finally {
-			await env.DB.prepare("DROP TRIGGER other_save_files_group").run();
-		}
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("That merchant already has a category.");
+		expect(trigger.announce).toBe("That merchant already has a category.");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
+			).first<{ n: number }>(),
+		).toEqual({ n: 0 });
 	});
 });

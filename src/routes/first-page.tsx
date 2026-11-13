@@ -1,24 +1,22 @@
+import * as Predicate from "effect/Predicate";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
 import {
-	type BudgetAnswer,
 	type PayAnswer,
 	readFirstTally,
 	strokeStatement,
 } from "../db/first-tally";
 import { currentGoalSql, savingsGoalStatement } from "../db/savings-goals";
-import { keepHeading, keepReply, keepShown } from "../first-tally/bills";
+import { keepHeading, keepReply } from "../first-tally/bills";
 import {
 	askHeading,
 	type BudgetAsk,
 	budgetChangedWords,
-	budgetsMonthChangedWords,
 	budgetsMovedOnWords,
 	homeSavingsWords,
 	keepAllQuestion,
-	keepShownBudgets,
 	keptBudgetsWords,
 	SAVINGS_BLANK_WORDS,
 	SKIPPED_SAVINGS_WORDS,
@@ -43,9 +41,17 @@ import {
 	settleAndLoad,
 } from "../first-tally/first-page";
 import { readQuestionsGate } from "../first-tally/gate";
-import { payShown } from "../first-tally/pay";
 import { skippedNotes } from "../first-tally/skipped";
 import { hxTrigger } from "../htmx";
+import {
+	answerOneBudget,
+	answerPay as answerPayRule,
+	answerSavings,
+	keepAllBudgets,
+	keepFoundBills,
+	type QuestionsNotOpen,
+} from "../rules/setup";
+import { type Decided, decided } from "../rules/terms";
 import { Layout } from "../views/layout";
 import { SetupFinish } from "../views/setup-finish";
 import {
@@ -64,6 +70,13 @@ import {
 type App = { Bindings: Env; Variables: { actor: string } };
 
 export const firstPage = new Hono<App>();
+
+/** True when a rule refused because the setup questions are not open. */
+const isNotOpen = <W, E extends { _tag: string }>(
+	answer: Decided<W, E>,
+): answer is { kind: "refuse"; refusal: E & QuestionsNotOpen } =>
+	answer.kind === "refuse" &&
+	Predicate.isTagged(answer.refusal, "QuestionsNotOpen");
 
 /** Not open yet: an HTMX request is sent Home by HX-Redirect (a redirect would swap Home into the page). */
 function notOpen(c: Context<App>) {
@@ -303,8 +316,8 @@ for (const path of [
 firstPage.post("/setup/pay", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-
-	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
+	// The page is read only while the questions are open: reading it settles the steps that ask nothing.
+	const open = await readQuestionsGate(c.env.DB);
 	const form = await c.req.formData();
 	const key = String(form.get("merchant") ?? "");
 	const answer = String(form.get("answer") ?? "");
@@ -313,21 +326,48 @@ firstPage.post("/setup/pay", async (c) => {
 		.getAll("deposit")
 		.filter((value): value is string => typeof value === "string");
 
-	if (answer !== "yes" && answer !== "no")
+	if (open && answer !== "yes" && answer !== "no")
 		return c.text("Choose yes or no.", 400);
-	const before = await settleAndLoad(c.env.DB, today);
-	const merchant = before.pay.find((m) => m.key === key);
+	const before = open ? await settleAndLoad(c.env.DB, today) : null;
+
+	const asked = decided(
+		answerPayRule.decide(
+			{
+				merchantKey: key,
+				answer: answer === "no" ? "no" : "yes",
+				shown,
+				who: actor(c),
+			},
+			{ open, merchant: before?.pay.find((m) => m.key === key) ?? null },
+		),
+	);
+
+	if (before === null || isNotOpen(asked)) return notOpen(c);
 
 	// Nothing left to ask about this merchant: the screen as it is now, and nothing written.
-	if (!merchant) return stale(c, await settleAndLoad(c.env.DB, today));
+	if (asked.kind === "nothingToDo")
+		return stale(c, await settleAndLoad(c.env.DB, today));
 
-	if (!payShown(merchant, shown)) return payChanged(c, before, merchant.name);
+	if (asked.kind === "refuse")
+		return payChanged(
+			c,
+			before,
+			before.pay.find((m) => m.key === key)?.name ?? "",
+		);
+
+	const { merchant } = asked.save;
 
 	const hadYesLine = before.ledger.some(
 		(line) => line.id === `pay:${merchant.key}`,
 	);
 
-	const written = await answerPay(c.env.DB, merchant, answer, actor(c));
+	const written = await answerPay(
+		c.env.DB,
+		merchant,
+		asked.save.answer,
+		asked.save.who,
+	);
+
 	// The re-read is fresh, since `before` may be stale by now. With 0 rows written, a shown deposit still asked about
 	// means a sync changed it after the check above, so the question is asked again with payChanged's words. Otherwise a
 	// competing answer changed the rows first, and the screen is the screen as it is now (stale).
@@ -339,7 +379,7 @@ firstPage.post("/setup/pay", async (c) => {
 			: stale(c, after);
 	}
 
-	return answered(c, after, paySaved(answer, merchant, hadYesLine));
+	return answered(c, after, paySaved(asked.save.answer, merchant, hadYesLine));
 });
 
 /** The reply when a shown deposit changed since the screen drew: nothing saved, and the question asked again. */
@@ -373,8 +413,7 @@ function paySaved(
 firstPage.post("/setup/bills", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-
-	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
+	const open = await readQuestionsGate(c.env.DB);
 
 	// Only the charges the form showed are kept: its `keep` fields, each one re-checked against the charges now. An
 	// empty form keeps none, and a charge that is new or changed since the screen drew is asked again.
@@ -382,14 +421,17 @@ firstPage.post("/setup/bills", async (c) => {
 		.getAll("keep")
 		.filter((value): value is string => typeof value === "string");
 
-	const before = await settleAndLoad(c.env.DB, today);
+	const before = open ? await settleAndLoad(c.env.DB, today) : null;
 
-	const bills = await keepBills(
-		c.env.DB,
-		today,
-		keepShown(before.keep, values),
+	const asked = decided(
+		keepFoundBills.decide(
+			{ shown: values },
+			{ open, keep: before?.keep ?? [] },
+		),
 	);
 
+	if (asked.kind !== "write") return notOpen(c);
+	const bills = await keepBills(c.env.DB, today, asked.save.keep);
 	const after = await settleAndLoad(c.env.DB, today);
 
 	return answered(
@@ -411,8 +453,9 @@ firstPage.post("/setup/bills", async (c) => {
 firstPage.post("/setup/budgets", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
+	const open = await readQuestionsGate(c.env.DB);
 
-	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
+	if (!open) return notOpen(c);
 	const form = await c.req.formData();
 	const answer = String(form.get("answer") ?? "");
 
@@ -424,50 +467,45 @@ firstPage.post("/setup/budgets", async (c) => {
 		oneAtATime: answer !== "all",
 	});
 
-	const step = before.budgets;
-
-	if (!step || step.done) return stale(c, before);
-
-	// A form drawn in another household month writes nothing, since its amounts and 'From <month> on' were for that month.
-	if (form.get("month") !== step.month)
-		return answered(c, before, budgetsMonthChangedWords(), "info");
+	const step = before.budgets && !before.budgets.done ? before.budgets : null;
+	const month = String(form.get("month") ?? "");
 
 	if (answer === "all") {
-		const suggested = step.asks.filter((ask) => ask.suggestion !== null);
-
 		const values = form
 			.getAll("keep")
 			.filter((value): value is string => typeof value === "string");
 
-		const writes = keepShownBudgets(suggested, values).flatMap(
-			(ask): { ask: BudgetAsk; answer: BudgetAnswer }[] =>
-				ask.suggestion
-					? [
-							{
-								ask,
-								answer: {
-									kind: "suggested",
-									cents: ask.suggestion.amountCents,
-								},
-							},
-						]
-					: [],
+		const asked = decided(
+			keepAllBudgets.decide({ month, shown: values }, { open, step }),
 		);
+
+		if (asked.kind === "nothingToDo") return stale(c, before);
+
+		// A form drawn in another household month writes nothing, since its amounts and 'From <month> on' were for that month.
+		if (asked.kind === "refuse")
+			return answered(c, before, asked.refusal.say, "info");
+
+		const writes = asked.save.answers;
 
 		const landed =
 			writes.length === 0
 				? []
-				: await keepBudgetAnswers(c.env.DB, today, step.firstDate, writes);
+				: await keepBudgetAnswers(
+						c.env.DB,
+						today,
+						asked.save.firstDate,
+						writes,
+					);
 
 		const after =
 			writes.length === 0 ? before : await settleAndLoad(c.env.DB, today);
 
 		// Changed counts what the screen showed and is still asked, and that didn't land: a suggestion that moved, or one that
 		// has no suggestion now. A category a Home budget set since is no longer asked, so it is neither kept nor changed.
-		const asked = askedIds(after);
+		const stillAsked = askedIds(after);
 
 		const changed = shownBudgetIds(values).filter(
-			(id) => !landed.includes(id) && asked.has(id),
+			(id) => !landed.includes(id) && stillAsked.has(id),
 		).length;
 
 		if (landed.length === 0)
@@ -476,57 +514,81 @@ firstPage.post("/setup/budgets", async (c) => {
 		return answered(c, after, keptBudgetsWords(landed.length, changed));
 	}
 
-	const id = Number(form.get("category"));
-	const ask = step.asks.find((candidate) => candidate.id === id);
+	const typed = String(form.get("budget") ?? "");
+	const parsed = parseBudgetAmount(typed);
 
-	if (!ask) return stale(c, before);
+	const asked = decided(
+		answerOneBudget.decide(
+			{
+				month,
+				categoryId: Number(form.get("category")),
+				answer:
+					answer === "skip"
+						? { kind: "skip" }
+						: answer === "yes"
+							? { kind: "yes", shownCents: Number(form.get("shown")) }
+							: {
+									kind: "another",
+									typed: parsed.ok
+										? { cents: parsed.cents }
+										: { error: parsed.error },
+								},
+			},
+			{ open, step },
+		),
+	);
 
-	// Only the question on the screen is answered. A stale tab's answer for another category writes nothing, and the screen draws
-	// that first question again, so a refused amount's error is always the first question's own.
-	if (step.asks[0]?.id !== ask.id)
-		return answered(c, before, budgetsMovedOnWords(), "info");
+	if (asked.kind === "nothingToDo") return stale(c, before);
 
-	if (answer === "skip") {
-		const landed = await keepBudgetAnswers(c.env.DB, today, step.firstDate, [
-			{ ask, answer: { kind: "skipped", cents: null } },
-		]);
+	if (asked.kind === "refuse") {
+		const { refusal } = asked;
 
-		const after = await settleAndLoad(c.env.DB, today, { oneAtATime: true });
+		// A refused amount draws the question again with the edge's own error on its field.
+		if (Predicate.isTagged(refusal, "AmountRefused"))
+			return budgetRefused(
+				c,
+				before,
+				parsed.ok ? refusal.say : parsed.error,
+				typed,
+			);
 
-		if (landed.length === 0) return budgetNotSaved(c, after, ask);
+		// The page names the category whose suggestion moved since it drew.
+		const name = step?.asks.find(
+			(ask) => ask.id === Number(form.get("category")),
+		)?.name;
 
-		return answered(c, after, skippedBudgetWords(ask.name));
+		return answered(
+			c,
+			before,
+			Predicate.isTagged(refusal, "BudgetSuggestionChanged") && name
+				? budgetChangedWords(name)
+				: refusal.say,
+			"info",
+		);
 	}
 
-	let kind: "suggested" | "another";
-	let cents: number;
+	const [kept] = asked.save.answers;
 
-	if (answer === "yes") {
-		const suggestion = ask.suggestion;
+	if (!kept) return stale(c, before);
 
-		// The amount the screen showed is the one kept; a suggestion that moved since is asked again.
-		if (!suggestion || Number(form.get("shown")) !== suggestion.amountCents)
-			return answered(c, before, budgetChangedWords(ask.name), "info");
-		kind = "suggested";
-		cents = suggestion.amountCents;
-	} else {
-		const typed = String(form.get("budget") ?? "");
-		const parsed = parseBudgetAmount(typed);
-
-		if (!parsed.ok) return budgetRefused(c, before, parsed.error, typed);
-		kind = "another";
-		cents = parsed.cents;
-	}
-
-	const landed = await keepBudgetAnswers(c.env.DB, today, step.firstDate, [
-		{ ask, answer: { kind, cents } },
-	]);
+	const landed = await keepBudgetAnswers(
+		c.env.DB,
+		today,
+		asked.save.firstDate,
+		asked.save.answers,
+	);
 
 	const after = await settleAndLoad(c.env.DB, today, { oneAtATime: true });
 
-	if (landed.length === 0) return budgetNotSaved(c, after, ask);
+	if (landed.length === 0) return budgetNotSaved(c, after, kept.ask);
 
-	return answered(c, after, savedBudgetWords(ask.name, cents));
+	return answered(
+		c,
+		after,
+		kept.answer.cents === null
+			? skippedBudgetWords(kept.ask.name)
+			: savedBudgetWords(kept.ask.name, kept.answer.cents),
+	);
 });
 
 /**
@@ -542,42 +604,69 @@ firstPage.post("/setup/savings", async (c) => {
 	const db = c.env.DB;
 	const today = await householdToday(db);
 
-	if (!(await readQuestionsGate(db))) return notOpen(c);
+	const open = await readQuestionsGate(db);
+
+	if (!open) return notOpen(c);
 	const form = await c.req.formData();
 	const answer = String(form.get("answer") ?? "");
 
 	if (answer !== "save" && answer !== "skip")
 		return c.text("Choose an answer.", 400);
 	const month = today.slice(0, 7);
+	const typed = String(form.get("goal") ?? "");
+	// A blank amount is read before parseBudgetAmount, which reads it as a bad amount; $0 is no goal.
+	const parsed = parseBudgetAmount(typed);
 
-	// A question already answered, or a pay or bills question back on the page, gets the screen as it is now, with nothing
-	// written. A category added since the screen drew is caught by the write below, which then says so.
-	if (!(await budgetsStepShown(db, today)) || !(await savingsOpen(db)))
+	const blankOrBad =
+		typed.trim() === "" || (parsed.ok && parsed.cents === 0)
+			? SAVINGS_BLANK_WORDS
+			: parsed.ok
+				? null
+				: parsed.error;
+
+	const asked = decided(
+		answerSavings.decide(
+			{
+				formMonth: String(form.get("month") ?? ""),
+				month,
+				answer:
+					answer === "skip"
+						? { kind: "skip" }
+						: {
+								kind: "save",
+								typed:
+									parsed.ok && blankOrBad === null
+										? { cents: parsed.cents }
+										: { error: blankOrBad ?? "" },
+							},
+			},
+			{
+				open,
+				// A question already answered, or a pay or bills question back on the page. A category added since the
+				// screen drew is caught by the write below, which then says so.
+				asked: (await budgetsStepShown(db, today)) && (await savingsOpen(db)),
+			},
+		),
+	);
+
+	if (asked.kind === "nothingToDo")
 		return stale(c, await settleAndLoad(db, today));
 
-	// A form drawn in another household month writes nothing, as the budgets question's does.
-	if (form.get("month") !== month)
+	if (asked.kind === "refuse") {
+		// A refused Save it draws the question again with its error.
+		if (Predicate.isTagged(asked.refusal, "AmountRefused"))
+			return savingsRefused(c, db, today, blankOrBad ?? "", typed);
+
+		// A form drawn in another household month writes nothing, as the budgets question's does.
 		return answered(
 			c,
 			await settleAndLoad(db, today),
-			budgetsMonthChangedWords(),
+			asked.refusal.say,
 			"info",
 		);
-	const typed = String(form.get("goal") ?? "");
-	let cents = 0;
-
-	if (answer === "save") {
-		// A blank amount is checked before parseBudgetAmount, which reads it as a bad amount; $0 is no goal.
-		if (typed.trim() === "")
-			return savingsRefused(c, db, today, SAVINGS_BLANK_WORDS, typed);
-		const parsed = parseBudgetAmount(typed);
-
-		if (!parsed.ok) return savingsRefused(c, db, today, parsed.error, typed);
-
-		if (parsed.cents === 0)
-			return savingsRefused(c, db, today, SAVINGS_BLANK_WORDS, typed);
-		cents = parsed.cents;
 	}
+
+	const cents = asked.save.goal === "skipped" ? 0 : asked.save.goal;
 
 	// The goal is written only after the answer landed (changes() > 0 is the answer's own write), and only when no goal above
 	// $0 is set, so a goal Home set keeps its amount.

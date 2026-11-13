@@ -1,33 +1,43 @@
 {
-	"legacyBaseline": 56,
+	"legacyBaseline": 25,
 	"handlers": [
 		{
 			"method": "POST",
 			"path": "/accounts/:itemId{[0-9]+}/disconnect",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/machines/bank-request.ts",
+			"stories": "test/bank-request-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/accounts/apple-card",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts",
+			"reason": "The rule decides whether the upload is taken; which rows are new is decided by the import's SQL, which re-checks each row as it writes."
 		},
 		{
 			"method": "POST",
 			"path": "/accounts/apple-card/remove",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/accounts/sync",
 			"file": "accounts.tsx",
 			"area": "accounts",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts",
+			"reason": "The rule refuses nothing; the sync engine is plain TypeScript until it moves to Effect (decision 210)."
 		},
 		{
 			"method": "POST",
@@ -185,28 +195,39 @@
 			"path": "/transactions/organize",
 			"file": "organize.tsx",
 			"area": "organize",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/organize.ts",
+			"stories": "test/organize-stories.test.ts",
+			"reason": "A store's charges have no cap, so SQL files them, 90 merchant keys a statement (decision 209). The rule decides the category, the store's name and whether anything is filed."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/organize/rule",
 			"file": "organize.tsx",
 			"area": "organize",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/organize.ts",
+			"stories": "test/organize-stories.test.ts",
+			"reason": "The rule decides whether a rule is made. The SQL that writes it and applies it to the store's other charges keeps its own guards, because those charges have no cap (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/transactions/organize/suggestion",
 			"file": "organize.tsx",
 			"area": "organize",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/suggestions.ts",
+			"stories": "test/suggestions-stories.test.ts",
+			"reason": "The same rule as Settings' Create; it releases the suggestion's other purchases with SQL, because their number has no cap (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/plaid/exchange",
 			"file": "plaid.tsx",
 			"area": "plaid",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts"
 		},
 		{
 			"method": "POST",
@@ -221,7 +242,9 @@
 			"path": "/plaid/items/:id/repaired",
 			"file": "plaid.tsx",
 			"area": "plaid",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/machines/bank-request.ts",
+			"stories": "test/bank-request-stories.test.ts"
 		},
 		{
 			"method": "POST",
@@ -244,56 +267,72 @@
 			"path": "/plans",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/delete",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/drop",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/link",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/move",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/:id/unlink",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/plans/undo-delete",
 			"file": "plans.tsx",
 			"area": "plans",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/plans.ts",
+			"stories": "test/plans-stories.test.ts"
 		},
 		{
 			"method": "POST",
@@ -309,63 +348,83 @@
 			"path": "/settings/ai",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/bank-sign-in-emails",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/learned/change",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts",
+			"reason": "The rule decides whether a rule is made and for which category. The SQL that fills what nothing has filled keeps its own guards, because those rows have no cap (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/settings/learned/forget",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/learned/undo",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/merchant-rules/remove",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/never-suggest/remove",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/settings/people",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts",
+			"reason": "Removing a person clears them from their purchases with one SQL statement, because their number has no cap (decision 209). The rules decide everything else."
 		},
 		{
 			"method": "POST",
 			"path": "/settings/time-zone",
 			"file": "settings.tsx",
 			"area": "settings",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/settings.ts",
+			"stories": "test/settings-stories.test.ts"
 		},
 		{
 			"method": "POST",
@@ -404,35 +463,49 @@
 			"path": "/home/seen",
 			"file": "home.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/accounts.ts",
+			"stories": "test/accounts-stories.test.ts"
 		},
 		{
 			"method": "POST",
 			"path": "/setup/bills",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides which found charges are kept. Each bill is still its own batch, in a loop, so a Keep that fails part-way keeps and counts the bills before it (a tested behaviour); decision 209's one batch is the owner's call."
 		},
 		{
 			"method": "POST",
 			"path": "/setup/budgets",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides the answer from the question as the page reads it. The deposits, bills and budgets an answer writes have no cap, so the save's SQL writes them and re-checks each row as it does (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/setup/pay",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides the answer from the question as the page reads it. The deposits, bills and budgets an answer writes have no cap, so the save's SQL writes them and re-checks each row as it does (decision 209)."
 		},
 		{
 			"method": "POST",
 			"path": "/setup/savings",
 			"file": "first-page.tsx",
 			"area": "setup",
-			"status": "legacy"
+			"status": "converted",
+			"rule": "src/rules/setup.ts",
+			"stories": "test/setup-stories.test.ts",
+			"reason": "The rule decides the answer from the question as the page reads it. The deposits, bills and budgets an answer writes have no cap, so the save's SQL writes them and re-checks each row as it does (decision 209)."
 		},
 		{
 			"method": "POST",

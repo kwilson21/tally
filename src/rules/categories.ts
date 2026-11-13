@@ -137,7 +137,7 @@ export const noArchivedCategoryHasTheName = unless(
 	() => new NameArchived(),
 );
 
-const noOtherCategoryHasTheName = unless(
+export const noOtherCategoryHasTheName = unless(
 	term<NameChecks>(
 		"no other active category has the name",
 		(g) => !g.activeHasName,

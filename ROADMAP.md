@@ -18,23 +18,23 @@ Each phase is a GitHub milestone. A phase ends with a review of what was built a
 
 ## Back-end cutover (decision 187)
 
-**Back-end cutover: 56 of 70 handlers remain**
+**Back-end cutover: 25 of 70 handlers remain**
 
 Every write route is listed in [docs/write-handlers.json](docs/write-handlers.json) as `legacy`, `converted` or `exempt`. CI fails if a write route is missing from the list, if the legacy count rises, or if a `converted` route has no rule module and stories test. Run `pnpm run cutover` to print these numbers. Exempt routes (8) are not counted.
 
 | Area | Remaining | Handlers |
 |---|---|---|
-| accounts | 4 | 4 |
+| accounts | 0 | 4 |
 | bills | 10 | 10 |
 | budgets | 0 | 3 |
 | categories | 0 | 5 |
 | feedback | 0 | 1 |
-| organize | 3 | 3 |
-| plaid | 2 | 2 |
-| plans | 8 | 8 |
+| organize | 0 | 3 |
+| plaid | 0 | 2 |
+| plans | 0 | 8 |
 | push | 0 | 1 |
-| settings | 9 | 9 |
-| setup | 5 | 5 |
+| settings | 0 | 9 |
+| setup | 0 | 5 |
 | sorting | 0 | 1 |
 | suggestions | 0 | 3 |
 | transactions | 15 | 15 |
@@ -108,7 +108,7 @@ The owner picked every Phase 4 design on the proposals page (decision 64, spec �
 | Tally fills in a transaction's details (P89 A) | [#232](https://github.com/kwilson21/tally/issues/232) | #191, #194 |
 | Jev told each merchant's recent categories, so every guess improves (decision 90, Q69 A); built before #233 | [#265](https://github.com/kwilson21/tally/issues/265) | — |
 
-## Store lookup (decision 210; spec §7)
+## Store lookup (decision 213; spec §7)
 
 The first time Tally sees a store, it searches the web for it once and tells Jev and the name run what it found. Design: [docs/superpowers/specs/2026-11-12-store-lookup-design.md](docs/superpowers/specs/2026-11-12-store-lookup-design.md). Each build issue gets its plan from a state-machine and Quint model of the flow, written before its brief. Built in this order.
 

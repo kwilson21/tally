@@ -168,20 +168,29 @@ export async function changeBankTextRule(
 	cleanedText: string,
 	categoryId: number,
 ): Promise<boolean> {
+	const [upsert] = await db.batch(
+		await changeBankTextRuleStatements(db, cleanedText, categoryId),
+	);
+
+	return (upsert?.meta.changes ?? 0) > 0;
+}
+
+/** A Change's statements, for one batch: the rule's upsert first, then the merchant rules, then every bank-text rule's fill. */
+export async function changeBankTextRuleStatements(
+	db: D1Database,
+	cleanedText: string,
+	categoryId: number,
+): Promise<D1PreparedStatement[]> {
 	const others = (await activeBankTextRules(db)).filter(
 		(rule) => rule.cleanedText !== cleanedText,
 	);
 
-	const statements = await bankTextRuleStatements(db, [
-		...others,
-		{ cleanedText, categoryId },
-	]);
-
-	const [upsert] = await db.batch([
+	return [
 		upsertBankTextRule(db, cleanedText, categoryId),
 		merchantRuleStatement(db),
-		...statements,
-	]);
-
-	return (upsert?.meta.changes ?? 0) > 0;
+		...(await bankTextRuleStatements(db, [
+			...others,
+			{ cleanedText, categoryId },
+		])),
+	];
 }

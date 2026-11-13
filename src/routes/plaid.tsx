@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import { actor } from "../actor";
 import { householdToday } from "../dates";
@@ -8,6 +9,8 @@ import {
 	takeBackQuestionStrokes,
 } from "../db/first-tally";
 import { hxTrigger } from "../htmx";
+import { PlaidBank } from "../machines/bank-request";
+import { askBank, plaidBankFor } from "../plaid/bank-request";
 import {
 	createLinkToken,
 	exchangePublicToken,
@@ -21,6 +24,8 @@ import {
 import { clearAttention, readConnection } from "../plaid/item-store";
 import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { decryptToken, encryptToken, isValidKey } from "../plaid/token-crypto";
+import { linkBank } from "../rules/accounts";
+import { decided } from "../rules/terms";
 
 type PlaidBindings = PlaidEnv & { DEMO?: string };
 
@@ -167,16 +172,21 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 	if (!item) return c.notFound();
 
 	try {
-		const accessToken = await decryptToken(
-			item.access_token_encrypted,
-			c.env.TOKEN_ENCRYPTION_KEY ?? "",
+		// The request waits for Plaid inside the bridged machine (decision 210): the bank is fixed only once Plaid says
+		// its login works. What Plaid answered is logged where it is asked.
+		const from = await readConnection(c.env.DB, item.id);
+
+		if (from === null) return c.notFound();
+
+		const landed = await Effect.runPromise(
+			askBank(from, "FIX").pipe(
+				Effect.provideService(PlaidBank, plaidBankFor(c.env, item)),
+			),
 		);
 
-		const result = await getItem(c.env, accessToken);
+		if (landed.outcome === "waiting") return c.notFound();
 
-		if (result.item.error) {
-			return c.html(repairFailure(result.item.error), 502);
-		}
+		if (landed.outcome !== "done") return c.html(repairFailure(null), 502);
 
 		let repaired = await clearAttention(c.env.DB, item.id);
 
@@ -256,11 +266,26 @@ plaid.post("/plaid/exchange", async (c) => {
 		// Linking draws stroke one on the household's day, in the same batch as the bank (spec §8.8). The setup
 		// announcement is said only while the first week is still to do. The read sits inside the try, so a failure
 		// there removes the Item too: Plaid's token is never stored.
-		let settingUp: boolean;
+		let announceReading: boolean;
 		let itemId: number;
 
 		try {
-			settingUp = !isSetUp(await readFirstTally(c.env.DB));
+			const asked = decided(
+				linkBank.decide(
+					{
+						institution,
+						plaidItemId: exchanged.item_id,
+						who: actor(c),
+						today: await householdToday(c.env.DB),
+					},
+					{ settingUp: !isSetUp(await readFirstTally(c.env.DB)) },
+				),
+			);
+
+			// Linking has no refusal and always has something to save; the rule names what.
+			if (asked.kind !== "write") throw new Error("link refused");
+			const link = asked.save;
+			announceReading = link.announceReading;
 
 			const encrypted = await encryptToken(
 				exchanged.access_token,
@@ -271,10 +296,10 @@ plaid.post("/plaid/exchange", async (c) => {
 			const [inserted] = await c.env.DB.batch([
 				c.env.DB.prepare(
 					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, ?, ?, ?)",
-				).bind(encrypted, institution, actor(c), exchanged.item_id),
-				strokeStatement(c.env.DB, "bank", await householdToday(c.env.DB)),
+				).bind(encrypted, link.institution, link.who, link.plaidItemId),
+				strokeStatement(c.env.DB, "bank", link.today),
 				// A bank linked during setup takes the questions back (#578): the new bank's deposits and charges are asked again.
-				takeBackQuestionStrokes(c.env.DB, institution),
+				takeBackQuestionStrokes(c.env.DB, link.institution),
 			]);
 
 			itemId = Number(inserted?.meta.last_row_id);
@@ -295,7 +320,7 @@ plaid.post("/plaid/exchange", async (c) => {
 			}),
 		);
 
-		const message = settingUp
+		const message = announceReading
 			? `${institution} is linked. Tally's reading your last 90 days.`
 			: `Linked ${institution}.`;
 
