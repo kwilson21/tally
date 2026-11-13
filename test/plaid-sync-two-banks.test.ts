@@ -18,8 +18,8 @@ const response = (body: Json) =>
 		headers: { "content-type": "application/json" },
 	});
 
-/** One charge on a page: the bank's text and Plaid's name for it. */
-type Charge = { text: string; name: string };
+/** One charge on a page: the bank's text and Plaid's name for it, and its id and day when the test cares. */
+type Charge = { text: string; name: string; id?: string; date?: string };
 
 type Bank = { id: number; account: string };
 
@@ -41,6 +41,7 @@ function syncBank(
 	bank: Bank,
 	pages: Charge[],
 	before: (page: number) => Promise<void> = async () => {},
+	db: D1Database = env.DB,
 ) {
 	let served = 0;
 
@@ -64,9 +65,9 @@ function syncBank(
 		return response({
 			added: [
 				{
-					transaction_id: `${bank.account}-${index}`,
+					transaction_id: charge.id ?? `${bank.account}-${index}`,
 					account_id: bank.account,
-					date: "2026-09-27",
+					date: charge.date ?? "2026-09-27",
 					amount: 6.5,
 					name: charge.text,
 					merchant_name: charge.name,
@@ -80,7 +81,11 @@ function syncBank(
 		});
 	});
 
-	return syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, bank.id, fetchImpl);
+	return syncItem(
+		{ ...env, DB: db, TOKEN_ENCRYPTION_KEY: KEY },
+		bank.id,
+		fetchImpl,
+	);
 }
 
 const merchant = (key: string) =>
@@ -176,5 +181,71 @@ describe("two banks naming the same merchant for the first time", () => {
 			display_name: "Our cafe",
 			default_category_id: null,
 		});
+	});
+});
+
+describe("one bank's page saved while another bank adds a charge with the same Plaid name", () => {
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare("DELETE FROM merchant_suggested_names"),
+			env.DB.prepare("DELETE FROM merchants"),
+		]);
+	});
+
+	const status = async (key: string) =>
+		(
+			await env.DB.prepare(
+				"SELECT suggestion_status FROM merchants WHERE raw_name = ?",
+			)
+				.bind(key)
+				.first<{ suggestion_status: string }>()
+		)?.suggestion_status;
+
+	it("keeps a suggested name that the other bank's new charge still uses", async () => {
+		const one = await addBank("account-one");
+		const two = await addBank("account-two");
+
+		// Bank one's text came with the name Bean House, which is waiting as a suggestion.
+		await syncBank(one, [
+			{
+				text: "COFFEE TEXT ONE",
+				name: "Bean House",
+				id: "earlier",
+				date: "2026-09-01",
+			},
+		]);
+		expect(await status("Bean House")).toBe("pending");
+
+		// Bank one's next page renames its text, so Bean House is no longer its newest name. After the page has read
+		// which texts use the name, and before it saves, bank two stores a charge whose own text is named Bean House.
+		let between = true;
+
+		const db = Object.assign(Object.create(env.DB), {
+			prepare: (query: string) => env.DB.prepare(query),
+			batch: async (statements: D1PreparedStatement[]) => {
+				if (between) {
+					between = false;
+					await syncBank(two, [
+						{ text: "COFFEE TEXT TWO", name: "Bean House" },
+					]);
+				}
+
+				return env.DB.batch(statements);
+			},
+		});
+
+		await syncBank(
+			one,
+			[{ text: "COFFEE TEXT ONE", name: "Bean House Roasters" }],
+			undefined,
+			db,
+		);
+
+		// Bank two then bank one, one after the other, leaves Bean House waiting: it is the newest name of bank two's text.
+		expect(await status("Bean House Roasters")).toBe("pending");
+		expect(await status("Bean House")).toBe("pending");
 	});
 });

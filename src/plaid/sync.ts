@@ -289,6 +289,10 @@ const copyNeverSuggestSql = (ownsLock: string) =>
  * the bank's own suggestion when its names are exactly its key (bankOnlySql), and it is withdrawn only when nobody has
  * named it, it has a charge with one of these bank texts, and it is the newest Plaid name (latest date, then latest id)
  * for none of its charges' bank texts. Its names go with it in the page's last name statement (sweepStaleNamesSql).
+ *
+ * The texts are read before the page is saved, because only TypeScript can tidy one, so another bank's sync can store a
+ * charge with the same Plaid name under a text that isn't among them (#1048). The last test covers that: a name that is
+ * the newest for a text the page never looked at stays, as it would had the other bank's charge come first.
  */
 const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
@@ -302,6 +306,13 @@ const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	       AND c.merchant_name != p.tidied
 	       AND c.merchant_name = (SELECT n.merchant_name FROM transactions n
 	         WHERE n.raw_name = c.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
+	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
+	   AND NOT EXISTS (
+	     SELECT 1 FROM transactions o
+	     WHERE o.parent_id IS NULL AND o.merchant_name = merchants.raw_name
+	       AND o.raw_name NOT IN (SELECT text FROM pair)
+	       AND o.merchant_name = (SELECT n.merchant_name FROM transactions n
+	         WHERE n.raw_name = o.raw_name AND n.parent_id IS NULL AND NULLIF(n.merchant_name, '') IS NOT NULL
 	         ORDER BY n.date DESC, n.id DESC LIMIT 1))
 	   AND ${ownsLock}`;
 
