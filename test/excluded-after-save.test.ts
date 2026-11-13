@@ -26,23 +26,28 @@ const EXCLUSIONS: Stored[] = [
 	{ label: "excluded by Jev", excluded: 1, source: "jev" },
 ];
 
-let purchaseId = 0;
 let counter = 0;
 
 beforeAll(async () => {
 	await resetDemo(db, TODAY);
-	purchaseId = present(
+});
+
+/** A purchase no refund has used yet: a credit that links to it refunds all of it, so each link case needs its own. */
+async function newPurchase() {
+	counter += 1;
+
+	return present(
 		(
 			await db
 				.prepare(
 					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, updated_by)
-					 VALUES (1, ?, 650, 'THE PURCHASE', 'purchase-1', 0, 'test') RETURNING id`,
+					 VALUES (1, ?, 650, 'THE PURCHASE', ?, 0, 'test') RETURNING id`,
 				)
-				.bind(TODAY)
+				.bind(TODAY, `purchase-${counter}`)
 				.first<{ id: number }>()
 		)?.id,
 	);
-});
+}
 
 /** Seeds one row as stored, saves the edit through saveEdit, and returns what excludedAfterSave said and what is stored. */
 async function saveAndRead(
@@ -86,8 +91,7 @@ async function saveAndRead(
 		edit,
 	);
 
-	// A refused save (a link the row can't take) writes nothing, and excludedAfterSave describes what a save that
-	// lands leaves, so only a save that happened is compared.
+	// excludedAfterSave describes what a save that lands leaves, so the caller checks the save landed.
 	const result = await saveEdit(db, id, edit, "test");
 
 	const after = present(
@@ -105,6 +109,7 @@ describe("excludedAfterSave agrees with the exclusion saveEdit leaves", () => {
 		const wrong: string[] = [];
 		let compared = 0;
 		let linksCompared = 0;
+		const refused: string[] = [];
 
 		for (const stored of EXCLUSIONS)
 			for (const cents of [-650, 650])
@@ -127,7 +132,7 @@ describe("excludedAfterSave agrees with the exclusion saveEdit leaves", () => {
 											creditReviewed: reviewed,
 											creditReviewedWas: reviewedByUser,
 											creditReviewedProvided: true,
-											refundOfId: link ? purchaseId : null,
+											refundOfId: link ? await newPurchase() : null,
 										};
 
 										const outcome = await saveAndRead(
@@ -136,7 +141,14 @@ describe("excludedAfterSave agrees with the exclusion saveEdit leaves", () => {
 											edit,
 										);
 
-										if (!outcome.saved) continue;
+										// Every case lands. A refused save writes nothing and would leave the case uncompared, so it is a
+										// failure of this test's setup, not a pass.
+										if (!outcome.saved) {
+											refused.push(
+												`${stored.label}, ${cents} cents, link ${link}`,
+											);
+											continue;
+										}
 
 										compared += 1;
 
@@ -148,9 +160,13 @@ describe("excludedAfterSave agrees with the exclusion saveEdit leaves", () => {
 											);
 									}
 
-		// Every pair a save actually lands on, links among them: a refused link writes nothing and is skipped above.
-		expect(compared).toBeGreaterThan(250);
-		expect(linksCompared).toBeGreaterThan(0);
+		// 4 stored exclusions x 2 amounts x 2 incomes x 2 reviews x 2 chips x 2 incomes x 2 reviews, plus the 128 of them
+		// that are credits, once more with a refund link.
+		expect(refused.slice(0, 6), `${refused.length} saves were refused`).toEqual(
+			[],
+		);
+		expect(compared).toBe(384);
+		expect(linksCompared).toBe(128);
 		expect(wrong.slice(0, 12), `${wrong.length} cases differ`).toEqual([]);
 	}, 300_000);
 });
