@@ -275,7 +275,7 @@ const STATEMENTS = [
 	// Runs before the income statement below, so the posted row's income is still its own (a copied 'user' would look like a choice).
 	// A pending credit a person reviewed copies its review: as the person's (credit_reviewed_by 'user'), or, for a credit
 	// included by the transfer rule (#878), as income they chose with its review left unset. The second only where the
-	// posted row has no income choice of its own, as the income statement above.
+	// posted row has no income choice of its own, as the income statement below.
 	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = p.credit_reviewed_by
 	 ${FROM_PENDING} AND COALESCE(transactions.credit_reviewed_by, '') != 'user'
 	 AND (p.credit_reviewed_by = 'user' OR (p.income_source = 'user' AND p.credit_reviewed = 1
