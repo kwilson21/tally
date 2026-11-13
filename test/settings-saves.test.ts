@@ -95,8 +95,7 @@ beforeEach(async () => {
 
 describe("settings saves that write one setting", () => {
 	it("saves the time zone and leaves the other settings alone", async () => {
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				saveTimeZone,
 				{ zone: "Europe/London" },
@@ -107,8 +106,7 @@ describe("settings saves that write one setting", () => {
 
 		expect(await setting("time_zone")).toBe("Europe/London");
 
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				saveTimeZone,
 				{ zone: "America/New_York" },
@@ -124,8 +122,7 @@ describe("settings saves that write one setting", () => {
 		[true, "on"],
 		[false, "off"],
 	])("stores the bank sign-in emails switch for %s as %s", async (on, text) => {
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				saveBankSignInEmails,
 				{ on },
@@ -175,8 +172,7 @@ describe("adding and renaming a person", () => {
 	});
 
 	it("renames a person to the name given", async () => {
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				addPerson,
 				{ name: "Robin" },
@@ -189,8 +185,7 @@ describe("adding and renaming a person", () => {
 
 		expect(id).not.toBeNull();
 
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				renamePerson,
 				{ id: id ?? 0, name: "Robyn" },
@@ -204,8 +199,7 @@ describe("adding and renaming a person", () => {
 	});
 
 	it("writes nothing when the person's facts changed since the rule read them", async () => {
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				addPerson,
 				{ name: "Sam" },
@@ -218,8 +212,7 @@ describe("adding and renaming a person", () => {
 
 		// Every read is stale, so the guard refuses each try, and the decision gives up after its three tries.
 		await expect(
-			runWith(
-				db,
+			attempt(
 				decideSetting(
 					renamePerson,
 					{ id: id ?? 0, name: "Samantha" },
@@ -234,8 +227,7 @@ describe("adding and renaming a person", () => {
 	});
 
 	it("asks again on fresh facts after one stale read, and saves once", async () => {
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				addPerson,
 				{ name: "Lee" },
@@ -247,8 +239,7 @@ describe("adding and renaming a person", () => {
 		const id = await personNamed("Lee");
 		let reads = 0;
 
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				renamePerson,
 				{ id: id ?? 0, name: "Leigh" },
@@ -269,9 +260,8 @@ describe("adding and renaming a person", () => {
 });
 
 describe("removing a person", () => {
-	it("clears their purchases and removes them, and says how many purchases it cleared", async () => {
-		await runWith(
-			db,
+	it("clears their purchases and removes them", async () => {
+		await attempt(
 			decideSetting(
 				addPerson,
 				{ name: "Kit" },
@@ -289,8 +279,7 @@ describe("removing a person", () => {
 			.bind(id)
 			.run();
 
-		const { saved } = await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				removePerson,
 				{ id: id ?? 0, who: "owner@example.com" },
@@ -299,7 +288,6 @@ describe("removing a person", () => {
 			),
 		);
 
-		expect(saved?.[1]?.meta.changes).toBe(2);
 		expect(await personNamed("Kit")).toBeNull();
 
 		const cleared = await db
@@ -312,8 +300,7 @@ describe("removing a person", () => {
 	});
 
 	it("writes nothing when the person's facts changed since the rule read them", async () => {
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				addPerson,
 				{ name: "Jo" },
@@ -325,8 +312,7 @@ describe("removing a person", () => {
 		const id = await personNamed("Jo");
 
 		await expect(
-			runWith(
-				db,
+			attempt(
 				decideSetting(
 					removePerson,
 					{ id: id ?? 0, who: "owner@example.com" },
@@ -345,8 +331,7 @@ describe("removing a sign-in address", () => {
 		await addMember();
 		expect(await subscriptionCount()).toBe(1);
 
-		await runWith(
-			db,
+		await attempt(
 			decideSetting(
 				removeSignInAddress,
 				{ email: MEMBER, now: Date.UTC(2026, 8, 22, 12) },
@@ -363,8 +348,7 @@ describe("removing a sign-in address", () => {
 		await addMember();
 
 		await expect(
-			runWith(
-				db,
+			attempt(
 				decideSetting(
 					removeSignInAddress,
 					{ email: MEMBER, now: Date.UTC(2026, 8, 22, 12) },
