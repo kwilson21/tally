@@ -186,6 +186,47 @@ describe("the pending-to-posted merge carries a transfer credit's income and rev
 		});
 	});
 
+	it("a pending income a person chose is not copied onto a posted row they reviewed as a refund", async () => {
+		await insertCredit("pend-refund-income", 1, {
+			excluded: 0,
+			excludedSource: "user",
+			flagIncome: 1,
+			incomeSource: "user",
+		});
+		await insertCredit("post-refund", 0, {
+			creditReviewed: 1,
+			creditReviewedBy: "user",
+		});
+
+		expect(await merge("pend-refund-income", "post-refund")).toEqual({
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+	});
+
+	it("guard, passes before the change too: a pending person's review copies even when the posted row has its own income choice", async () => {
+		await insertCredit("pend-review-only", 1, {
+			excluded: 0,
+			excludedSource: "user",
+			flagIncome: 0,
+			creditReviewed: 1,
+			creditReviewedBy: "user",
+		});
+		await insertCredit("post-choice-only", 0, {
+			flagIncome: 0,
+			incomeSource: "user",
+		});
+
+		expect(await merge("pend-review-only", "post-choice-only")).toEqual({
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+	});
+
 	it("guard, passes before the change too: a pending row with no review of its own leaves the posted review alone", async () => {
 		await insertCredit("pend-none", 1);
 		await insertCredit("post-none", 0, { creditReviewed: 1 });
