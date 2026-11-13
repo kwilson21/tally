@@ -73,7 +73,7 @@ describe("the Undo window", () => {
 				);
 
 				if (
-					(aboutUndo && /\b10_?000\b/.test(line)) ||
+					(aboutUndo && /\b10(?:_?000|\.0)\b/.test(line)) ||
 					/Undo for \d+ seconds/i.test(line) ||
 					(undoConstant && !undoConstant[1]?.includes("MIN"))
 				)
