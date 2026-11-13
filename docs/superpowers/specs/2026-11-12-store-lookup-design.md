@@ -251,7 +251,7 @@ Each rule was shown to bite. With one guard removed at a time, the matching rule
 - **No mark on the store.** The earlier plan marked a store once its open guesses had been asked again. The model needs no such mark: "owed a re-ask" can be read from each row. That removes a column and two of the review's findings with it, and it also covers a case the mark got wrong: guesses made while the switch was off are asked again when it comes back on.
 - **A re-ask takes its Jev call in the same save that clears the old guess.** The existing "ask again" clears first and reserves later, so the lookup's re-ask cannot simply call it. Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
 
-**Not in the model yet** (added to it before the first build brief is written): a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, and the name save's guard. They are stated in spec §7 and in the privacy table below.
+**Not in the model yet** (added to it before the first build brief is written): a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, the name save's guard, and a row whose bank text a sync corrected after Jev answered it (its answer no longer counts; how the row records the text Jev was asked about is settled with the model). They are stated in spec §7 and in the privacy table below.
 
 **What a model like this does not cover**, and so has its own checklist:
 
@@ -270,6 +270,7 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
 | JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered its rows |
 | JANE DOE | none | GENERAL_SERVICES, one row answered, another Jev gave up on | Not yet | a row Jev gave up on has no privacy answer |
+| CORNER CAFE, corrected by Plaid to JANE DOE | none | GENERAL_SERVICES, Jev answered the old text | Not yet | Jev's answer counts only for the text it was asked about; the row is asked again first |
 | JANE DOE | none | GENERAL_SERVICES, a new row arrives after the claim | Not yet | the whole test is made again just before the search is sent |
 | JANE DOE | none | GENERAL_SERVICES, a person filed it under Kids, Jev never asked | No | a person's category choice is not Jev's privacy answer |
 | JANE DOE | none | GENERAL_SERVICES, Jev asked for details only ("Guess categories" or "Spot paychecks" off) | No | Jev's transfer and income answers were not kept |
