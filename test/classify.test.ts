@@ -263,6 +263,42 @@ const NAMED: Seed[] = [
 		category_confidence: 0.5,
 		jev_category_id: ACTIVE_CAT,
 	},
+	// Reviews made by a person without credit_reviewed_by (decision 217, and a hand-marked income credit)
+	{
+		name: "included transfer credit, Exclude turned off by the user (decision 217)",
+		amount_cents: -500,
+		flag_transfer: 1,
+		excluded: 0,
+		excluded_source: "user",
+		flag_income: 1,
+		income_source: "user",
+		credit_reviewed: 1,
+		credit_reviewed_by: null,
+	},
+	{
+		name: "credit marked as income by hand, no credit_reviewed_by",
+		amount_cents: -500,
+		flag_income: 1,
+		income_source: "user",
+		credit_reviewed: 1,
+		credit_reviewed_by: null,
+	},
+	{
+		name: "credit reviewed as income by Jev, no credit_reviewed_by",
+		amount_cents: -500,
+		flag_income: 1,
+		income_source: "jev",
+		credit_reviewed: 1,
+		credit_reviewed_by: null,
+	},
+	{
+		name: "credit reviewed by sync, no income choice",
+		amount_cents: -500,
+		flag_income: 1,
+		income_source: null,
+		credit_reviewed: 1,
+		credit_reviewed_by: null,
+	},
 	// Income
 	{
 		name: "income by user",
@@ -727,6 +763,45 @@ describe("named rows come out as the readable answers", () => {
 		expect(of("credit reviewed, refund of an excluded purchase").money).toEqual(
 			{ kind: "credit", state: { kind: "reviewed", by: "other" } },
 		);
+	});
+
+	// Decision 217: Exclude turned off on a transfer credit is an income the person reviewed.
+	it("money: an included transfer credit the user turned Exclude off on is reviewed by the user", () => {
+		const name =
+			"included transfer credit, Exclude turned off by the user (decision 217)";
+
+		expect(of(name).income).toEqual({ kind: "income", setBy: "user" });
+		expect(of(name).money).toEqual({
+			kind: "credit",
+			state: { kind: "reviewed", by: "user" },
+		});
+	});
+
+	it("money: a credit the user marked as income by hand is reviewed by the user", () => {
+		const name = "credit marked as income by hand, no credit_reviewed_by";
+
+		expect(of(name).income).toEqual({ kind: "income", setBy: "user" });
+		expect(of(name).money).toEqual({
+			kind: "credit",
+			state: { kind: "reviewed", by: "user" },
+		});
+	});
+
+	it("money: a credit reviewed by Jev or by sync is still reviewed by other", () => {
+		expect(
+			of("credit reviewed as income by Jev, no credit_reviewed_by").money,
+		).toEqual({ kind: "credit", state: { kind: "reviewed", by: "other" } });
+		expect(of("credit reviewed by sync, no income choice").money).toEqual({
+			kind: "credit",
+			state: { kind: "reviewed", by: "other" },
+		});
+	});
+
+	it("money: credit_reviewed_by 'user' is still reviewed by the user", () => {
+		expect(of("credit reviewed by user, no category").money).toEqual({
+			kind: "credit",
+			state: { kind: "reviewed", by: "user" },
+		});
 	});
 
 	it("income and category guesses", () => {

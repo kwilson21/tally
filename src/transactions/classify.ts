@@ -215,7 +215,11 @@ function moneyOf(
 		kind: "credit",
 		state: {
 			kind: "reviewed",
-			by: r.credit_reviewed_by === "user" ? "user" : "other",
+			// A person's income choice is their review too (decision 217 writes one without credit_reviewed_by).
+			by:
+				r.credit_reviewed_by === "user" || r.income_source === "user"
+					? "user"
+					: "other",
 		},
 	};
 }
