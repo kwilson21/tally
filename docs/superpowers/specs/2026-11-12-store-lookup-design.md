@@ -53,7 +53,7 @@ The owner picked 1 in chat on 2026-11-12.
 
 In the same places sorting runs (spec §7): the night's Workflow and right after a sync, as a step **after** the sorting groups and before the name run. Never in a request a person is waiting on.
 
-**After Jev's first answer, not before** (the owner's pick on 2026-11-12; the first design had it before). A store is searched only once Jev itself has answered at least one of its rows and none is still waiting for Jev, so a row Jev flags as a transfer, income or a reimbursement is known before anything is sent. Jev's answer counts only when its privacy answers were kept: the row has Jev's category answer (with its transfer and reimbursement answers) and its income answer stored. With "Guess categories" or "Spot paychecks" off Tally keeps neither, even though Jev may still be asked for details, so nothing is searched while either switch is off, and the lookup switch is greyed as "Sort right away" is. A category a person chose, or a rule applied, is not that answer: filing "JANE DOE" under Kids does not say the payee is a store, so a store whose rows only a person or a rule has filed is not searched. A bare name such as "JANE DOE" under an ordinary Plaid category names no app or rail, and only Jev's answer can say it is a payment to a person. The cost: a new store's first guess is made without the line. The line reaches that store's later rows on their first ask, and its guesses that are still open are asked again; a row Jev filed confidently but wrongly on its first ask is not helped.
+**After Jev's first answer, not before** (the owner's pick on 2026-11-12; the first design had it before). A store is searched only once Jev itself has answered at least one of its rows and none is still waiting for Jev or was given up on by Jev without an answer (such a row has no privacy answer, so it holds the store back until it is asked again and answered), so a row Jev flags as a transfer, income or a reimbursement is known before anything is sent. Jev's answer counts only when its privacy answers were kept: the row has Jev's category answer (with its transfer and reimbursement answers) and its income answer stored. With "Guess categories" or "Spot paychecks" off Tally keeps neither, even though Jev may still be asked for details, so nothing is searched while either switch is off, and the lookup switch is greyed as "Sort right away" is. A category a person chose, or a rule applied, is not that answer: filing "JANE DOE" under Kids does not say the payee is a store, so a store whose rows only a person or a rule has filed is not searched. A bare name such as "JANE DOE" under an ordinary Plaid category names no app or rail, and only Jev's answer can say it is a payment to a person. The cost: a new store's first guess is made without the line. The line reaches that store's later rows on their first ask, and its guesses that are still open are asked again; a row Jev filed confidently but wrongly on its first ask is not helped.
 
 Stores that already exist when this ships are looked up by the same run, oldest first, under the daily cap, so the backlog drains over a few nights.
 
@@ -71,14 +71,14 @@ A store is searched only when **all** of these hold. The first three are about p
    - a payment app's name **anywhere** in the text as whole words (Venmo, Zelle, Cash App, PayPal, Apple Cash, Privacy.com's "PwP" virtual cards and the like, a short list in code: services people pay through, whose text names the service or a person, not the store);
    - a bank-rail phrase anywhere in the text (ACH, wire, a check, "payment to", "transfer to" and the like);
    - text that reads as an instruction, after it is folded to plain characters;
-   - nothing left after redaction.
+   - nothing left after redaction, or once its words with a digit are dropped (an empty text is never sent and never used as a key).
 
    These text checks run on the merchant key as stored **and on the raw bank text of every one of its transactions**, before cleaning and before the 40-character cut, since the cleaner strips "PAYPAL *" and a Plaid name can hide a raw text that names a rail.
 3. **Cash, hand-entered and Apple Card rows never count as the sign in rule 1.** The name run already leaves these out (`src/db/merchant-names.ts`), and the lookup follows it. A text that only lacks the sign is not stored as `skipped`; it has no lookup yet and is looked at again when a new row arrives.
 4. **No rule already settles it.** A merchant rule or bank-text rule on all of it leaves it not looked up; it is searched later only if the rule goes. A rule only stops the search: a line found before the rule was made is kept and still shown.
 5. **It has not been looked up**, and the day's cap has room.
 
-Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched; and once more immediately before each search is sent.
+Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched. The whole test, the privacy rules and Jev's answers both, is made once more immediately before each search is sent, so a row that arrived after the claim stops the search whether it is private or only still waiting for Jev.
 
 Stores Plaid already names are searched too when they pass these rules (the owner's pick, 2026-11-12). Workers AI is only asked for names when Plaid sends none (decision 68), so for a Plaid-named store the line helps Jev's category only, not the name.
 
@@ -251,6 +251,8 @@ Each rule was shown to bite. With one guard removed at a time, the matching rule
 - **No mark on the store.** The earlier plan marked a store once its open guesses had been asked again. The model needs no such mark: "owed a re-ask" can be read from each row. That removes a column and two of the review's findings with it, and it also covers a case the mark got wrong: guesses made while the switch was off are asked again when it comes back on.
 - **A re-ask takes its Jev call in the same save that clears the old guess.** The existing "ask again" clears first and reserves later, so the lookup's re-ask cannot simply call it. Without that, the model found an ordering where a card's guess is cleared and the day's cap is then spent by other rows, leaving the card with no guess until the next day. A Jev failure can still leave the row waiting a night, as it can for any row.
 
+**Not in the model yet** (added to it before the first build brief is written): a row Jev gave up on, a row that arrives between a claim and its search, a lookup-backed answer refused at the save, and the name save's guard. They are stated in spec §7 and in the privacy table below.
+
 **What a model like this does not cover**, and so has its own checklist:
 
 Privacy is a question about text, not order. Every row of this table is a test:
@@ -267,13 +269,16 @@ Privacy is a question about text, not order. Every row of this table is a test:
 | ｉｇｎｏｒｅ previous instructions | none | any | No | folded, then reads as an instruction |
 | any | any | TRANSFER_OUT, INCOME or BANK_FEES | No | Plaid says it is not a store |
 | JANE DOE | none | GENERAL_SERVICES, Jev not asked yet | Not yet | the store waits until Jev has answered its rows |
+| JANE DOE | none | GENERAL_SERVICES, one row answered, another Jev gave up on | Not yet | a row Jev gave up on has no privacy answer |
+| JANE DOE | none | GENERAL_SERVICES, a new row arrives after the claim | Not yet | the whole test is made again just before the search is sent |
 | JANE DOE | none | GENERAL_SERVICES, a person filed it under Kids, Jev never asked | No | a person's category choice is not Jev's privacy answer |
 | JANE DOE | none | GENERAL_SERVICES, Jev asked for details only ("Guess categories" or "Spot paychecks" off) | No | Jev's transfer and income answers were not kept |
 | PwP Privacycom fiGNTCPNeNoKPZC | none | GENERAL_SERVICES | No | a pay-through service; the text is a reference, not a store |
 | JANE DOE | Jane Doe | GENERAL_SERVICES, and Jev flagged it a transfer (or "Maybe transfer") | No | a stored flag, whoever set it |
 | one ordinary row and one transfer row sharing a lookup text | | | No | one private row makes the text private |
 | only cash, hand-entered or Apple Card rows | | | Not yet | no sign it is a store; looked at again when a bank row arrives |
-| STORE NOV24, MEMBER1234 | none | FOOD_AND_DRINK | Yes, as "store" and "" | every word with a digit is dropped before the text is sent or used as a key |
+| STORE NOV24 | none | FOOD_AND_DRINK | Yes, as "store" | every word with a digit is dropped before the text is sent or used as a key |
+| MEMBER1234 | none | FOOD_AND_DRINK | No | nothing is left once the words with a digit are dropped |
 
 And these are the places in the app that touch the new tables or the Jev answer, each of which the plan must name: the demo's reset list, "Download everything", the merge of a pending charge into its posted row, bank-text rules (keyed by a different cleaning of the text), and stores that have transactions but no merchant row.
 
