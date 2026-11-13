@@ -298,3 +298,17 @@ And these are the places in the app that touch the new tables or the Jev answer,
 ## Size
 
 A project, in three PRs that each stand alone: (1) the lookup module, table, machine and run, with nothing shown; (2) the line passed to Jev and the name run, with the measurement; (3) the card line, the switch and "Don't use this", after the catalog sign-off.
+
+## After the first measurement (decision 224, 2026-11-13)
+
+Issue #984 measured the best case on the demo's stores, with hand-written lines and no web search. A correct line helped a little: right answers went from 12 to 13 of 24, guesses sure enough to file from 14 to 16 of 33, and no right answer became a wrong one (one, Costco, fell just under the filing line when its line named two kinds of goods). Asked "a person or a business?", Jev let none of six people through at 0.80 and all 37 businesses. The demo's stores carry no Plaid category, so the help may look bigger there than in the app.
+
+The measurement cannot show how far a wrong line pushes Jev, and the family's volume is too small for a trial to show it. So the owner chose a lookup that corrects itself:
+
+- **A person's answer beats the line.** Once the household has its own answer for a bank text, the line is no longer sent to Jev for it.
+- **A guess made with a line is never filed alone.** It is a Maybe however sure Jev is. A guess made without a line is filed as before.
+- **Nothing is forced.** The line stays one short free-text line; the prompt tells Workers AI to answer "nothing found" unless the results plainly say what kind of place it is, and the three code checks (length, plain characters, not an instruction) stay behind it.
+
+Dropped: the real-search measurement (#986), a shadow trial, and a fixed list of kinds of place (#1030).
+
+**The model was rebuilt for the merged rules** (a scratch file, not committed): 11 rules, no violation in 200,000 random orderings of up to 40 events, 11 written scenarios, and 15 planted bugs each caught (nine by the random search, six only by a written scenario). It now covers the fingerprint mark, Jev's person-or-business answer, a row Jev gave up on, a row that arrives after a claim, the checks before the search and before the Workers AI call, a claim let go with no failure counted, a found text that turns private, the name save's guard, and the step that asks Jev again about an answered row with no current mark (#1042). It found one gap in the wording merged with PR #997, fixed in this change: a fingerprint taken "of the row as that save leaves it" would have stamped new facts onto an answer about old ones when a row changed while Jev was answering. Not in the model yet: the two rules of decision 224, which are added before the first build brief.

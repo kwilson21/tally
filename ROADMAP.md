@@ -98,7 +98,7 @@ The first time Tally sees a store, it searches the web for it once and tells Jev
 | The spec and the decision | [#983](https://github.com/kwilson21/tally/issues/983) | Open |
 | Does a correct line help Jev? (hand-written lines, no search) | [#984](https://github.com/kwilson21/tally/issues/984) | Open |
 | The table, the machine, the search and the night step, nothing shown | [#985](https://github.com/kwilson21/tally/issues/985) | Open |
-| Are the real lines right? (real searches on store texts the owner approves) | [#986](https://github.com/kwilson21/tally/issues/986) | Open |
+| Are the real lines right? (real searches on store texts the owner approves) | [#986](https://github.com/kwilson21/tally/issues/986) | Dropped (decision 224) |
 | The line to Jev and the name run, and asking again about open guesses | [#987](https://github.com/kwilson21/tally/issues/987) | Open |
 | The line on the card, "Don't use this", the Settings switch and the demo's lookups | [#988](https://github.com/kwilson21/tally/issues/988) | Open |
 
