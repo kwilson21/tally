@@ -5,7 +5,7 @@ import { setup } from "xstate";
 // changes. Jev's answer ends a waiting row's category question: a row with a category (filed) is never reopened, and an
 // unsure row (Jev stored a confidence and set no category) is still asked about its income question, so its failures
 // count too. This machine is the one place that says so. The SQL writers keep the database's columns in step with it
-// (the SQL forms below are the same rules), and the tests walk every writer from every state against the machine.
+// (the SQL forms below are the same rules), and test/jev-attempt-cap.test.ts walks every writer from every state against the machine.
 
 /** How many failures in a row Jev may have on one transaction before it gives up (decision 182). */
 export const JEV_ATTEMPT_CAP = 5;
