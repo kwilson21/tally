@@ -330,6 +330,33 @@ describe("the ready push: who gets it, and when", () => {
 		expect(await pushedList()).toEqual([DANA]);
 	});
 
+	it("sends to a person's devices at the same moment, not one after another", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		await addDevice(DANA, LAPTOP);
+		let asked = 0;
+		let bothAsked = () => {};
+
+		const together = new Promise<void>((resolve) => {
+			bothAsked = resolve;
+		});
+
+		// Neither push service answers until both have been asked, so one device waiting for the other would never finish.
+		const { fetchImpl, pushed } = fakeFetch({
+			beforeAnswer: async () => {
+				asked += 1;
+
+				if (asked === 2) bothAsked();
+				await together;
+			},
+		});
+
+		await runReadyPush(pushing(), { fetchImpl });
+		expect([...pushed].sort()).toEqual([LAPTOP, PHONE]);
+		expect(await pushedList()).toEqual([DANA]);
+	});
+
 	it("pushes to a person who has never checked in on a first-week page", async () => {
 		await openHousehold();
 		await addMember(DANA, { seen: null });
