@@ -430,18 +430,21 @@ export function safeBack(url: string | null | undefined): string {
 
 /**
  * A transfer credit a person turns Exclude off on counts as income, reviewed by that person (#878; the owner's
- * rule in chat on 2026-11-13). The edit it returns is what saveEdit writes: the same save with the income and
- * the review ticked. It only applies when the save changes nothing else about income or review, so an explicit
- * review as not income wins, and so does a link as a refund. A split part or parent, a row that isn't a transfer
- * credit, a row that is already income or already linked (as a refund), a row whose income the person already chose
- * (income_source 'user', so unticking it and excluding it again keeps it not income), and a credit the person already
- * reviewed as not income keep their own rules.
+ * rule in chat on 2026-11-13, decision 217). A transfer credit is one Tally marked as a transfer or one whose Plaid
+ * category is a transfer one (decision 227). The edit it returns is what saveEdit writes: the same save with the
+ * income and the review ticked. It only applies when the save changes nothing else about income or review, so an
+ * explicit review as not income wins, and so does a link as a refund. A split part or parent, a row that isn't a
+ * transfer credit, a row that is already income or already linked (as a refund), a row whose income the person already
+ * chose (income_source 'user', so unticking it and excluding it again keeps it not income), and a credit the person
+ * already reviewed as not income keep their own rules.
  */
 export function includedTransferCredit(
 	edit: Edit,
 	stored: {
 		amountCents: number;
 		flagTransfer: number;
+		/** True when Plaid's category marks the row as a transfer (decision 227), whatever flagTransfer says. */
+		plaidTransfer: boolean;
 		excluded: number;
 		income: number;
 		isSplit: number;
@@ -453,7 +456,7 @@ export function includedTransferCredit(
 ): Edit {
 	const turnedOffTransferCredit =
 		stored.amountCents < 0 &&
-		stored.flagTransfer === 1 &&
+		(stored.flagTransfer === 1 || stored.plaidTransfer) &&
 		stored.excluded === 1 &&
 		stored.income === 0 &&
 		stored.isSplit === 0 &&

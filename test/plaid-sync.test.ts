@@ -3562,10 +3562,12 @@ describe("syncItem", () => {
 				const id = await addItem();
 				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
 				await person(false);
+
 				const incomeState = () =>
 					env.DB.prepare(
 						"SELECT excluded, excluded_source, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
 					).first();
+
 				const included = {
 					excluded: 0,
 					excluded_source: "user",
@@ -3574,9 +3576,11 @@ describe("syncItem", () => {
 					credit_reviewed: 1,
 					credit_reviewed_by: null,
 				};
+
 				expect(await incomeState()).toEqual(included);
 				await syncAs(id, kind, inCategory("TRANSFER_IN", { amount: -50 }));
 				expect(await incomeState()).toEqual(included);
+
 				await syncAs(id, kind, inCategory("FOOD_AND_DRINK", { amount: -50 }));
 				expect(await incomeState()).toEqual(included);
 			},

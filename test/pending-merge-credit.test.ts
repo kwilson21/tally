@@ -155,6 +155,7 @@ describe("the pending-to-posted merge carries a transfer credit's income and rev
 			plaidCategory: "TRANSFER_IN",
 			excludedSource: "plaid",
 		});
+
 		await saveEdit(
 			db,
 			pendingId,

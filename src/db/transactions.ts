@@ -73,6 +73,7 @@ import { jevSaysMixedSql } from "./mixed-trip";
 import { neverSuggestedSql } from "./never-suggest";
 import { afterNoteEvent, type NoteState, QUEUED_NOTE_SQL } from "./note-state";
 import { ownNameSql } from "./own-name";
+import { isPlaidTransferSql } from "./plaid-transfers";
 import { unlinkUnfitCashPlanPaymentsSql } from "./planned-expenses";
 import {
 	movingSql,
@@ -1174,7 +1175,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, flag_transfer AS flagTransfer, excluded, excluded_source AS excludedSource, parent_id AS parentId, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_state AS noteState, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, flag_transfer AS flagTransfer, COALESCE(${isPlaidTransferSql("transactions.plaid_category")}, 0) AS plaidTransfer, excluded, excluded_source AS excludedSource, parent_id AS parentId, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_state AS noteState, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -1188,6 +1189,8 @@ export async function saveEdit(
 			creditReviewed: number | null;
 			creditReviewedBy: string | null;
 			flagTransfer: number;
+			/** 1 when Plaid's category is a transfer one (isPlaidTransferSql), whatever Tally's own mark says. */
+			plaidTransfer: number;
 			excluded: number;
 			excludedSource: string | null;
 			parentId: number | null;
@@ -1212,6 +1215,7 @@ export async function saveEdit(
 	const edit = includedTransferCredit(posted, {
 		amountCents: current.amountCents,
 		flagTransfer: current.flagTransfer,
+		plaidTransfer: current.plaidTransfer === 1,
 		excluded: current.excluded,
 		income: current.income,
 		isSplit: current.isSplit,
