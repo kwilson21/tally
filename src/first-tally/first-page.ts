@@ -835,23 +835,21 @@ export async function settleAndLoad(
 }
 
 /**
- * Keeps the found charges, one tap (spec §8.8). Each bill is the Add bill write (insertBillStatements, which checks that
- * no active bill already has the name), with the record of what the step kept (keptBillStatement) between its bill
- * and its amount row, in one batch: a bill and its count land together, so a Keep that fails part-way keeps the bills
- * before it, counted, and a retry counts the rest. Then the charges those bills already paid this period are linked
- * (matchBillPayments, as the Add bill route does), so that occurrence isn't due. It runs on every Keep, not only one
- * that kept a bill: it fills only the occurrences not yet linked, so a retry after a failed link still links them
- * (after-sync also runs it). Returns how many were added and their monthly total in cents.
+ * Keeps the found charges, one tap (spec §8.8), in one batch (decision 209): the found charges are one for each
+ * repeating merchant, so the whole Keep lands together or not at all, and a Keep that fails keeps nothing and counts
+ * nothing. Each bill is the Add bill write (insertBillStatements, which checks that no active bill already has the
+ * name), with the record of what the step kept (keptBillStatement) between its bill and its amount row, so the count
+ * reads that bill's own INSERT. Then the charges those bills already paid this period are linked (matchBillPayments,
+ * as the Add bill route does), so that occurrence isn't due. It runs on every Keep, not only one that kept a bill: it
+ * fills only the occurrences not yet linked, so a retry after a failed link still links them (after-sync also runs
+ * it). Returns how many were added and their monthly total in cents.
  */
 export async function keepBills(
 	db: D1Database,
 	today: string,
 	keep: BillSuggestion[],
 ): Promise<{ kept: number; cents: number }> {
-	let kept = 0;
-	let cents = 0;
-
-	for (const suggestion of keep) {
+	const statements = keep.flatMap((suggestion) => {
 		const [bill, amounts] = insertBillStatements(
 			db,
 			{
@@ -867,17 +865,19 @@ export async function keepBills(
 			today,
 		);
 
-		const [added] = await db.batch([
-			bill,
-			keptBillStatement(db, suggestion.amountCents),
-			amounts,
-		]);
+		return [bill, keptBillStatement(db, suggestion.amountCents), amounts];
+	});
 
-		if ((added?.meta.changes ?? 0) > 0) {
-			kept += 1;
-			cents += suggestion.amountCents;
-		}
-	}
+	// D1 refuses an empty batch, and a Keep with nothing to keep still links what is already paid.
+	const results = statements.length > 0 ? await db.batch(statements) : [];
+
+	// Each charge's bill is the first of its three statements; a name another bill already has adds nothing.
+	const added = keep.filter(
+		(_suggestion, index) => (results[index * 3]?.meta.changes ?? 0) > 0,
+	);
+
+	const kept = added.length;
+	const cents = added.reduce((sum, bill) => sum + bill.amountCents, 0);
 
 	await matchBillPayments(db, today);
 

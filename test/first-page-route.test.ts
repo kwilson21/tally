@@ -1431,11 +1431,11 @@ describe("keeping bills links the charges they paid", () => {
 });
 
 describe("a Keep that fails part-way", () => {
-	it("still counts the bill it kept, and a retry counts the rest", async () => {
+	it("keeps nothing and counts nothing, and a retry keeps them all", async () => {
 		await charge("NETFLIX", 1549);
 		await charge("SPOTIFY", 1199);
 		const shown = keepFields((await get("/setup")).html);
-		// The first bill goes in; the second is refused by the database, so the Keep errors after one bill.
+		// The second bill is refused by the database. The Keep is one batch (decision 209), so the first goes with it.
 		await db
 			.prepare(
 				"CREATE TRIGGER fail_keep BEFORE INSERT ON bills WHEN (SELECT COUNT(*) FROM bills) > 0 BEGIN SELECT RAISE(ABORT, 'forced'); END",
@@ -1450,17 +1450,14 @@ describe("a Keep that fails part-way", () => {
 		}
 
 		const kept = await db
-			.prepare("SELECT amount_cents FROM bills")
-			.all<{ amount_cents: number }>();
+			.prepare("SELECT COUNT(*) AS bills FROM bills")
+			.first<{ bills: number }>();
 
-		expect(kept.results).toHaveLength(1);
-		expect((await readFirstTally(db))?.bills).toEqual({
-			kept: 1,
-			cents: kept.results[0]?.amount_cents,
-		});
+		expect(kept?.bills).toBe(0);
+		expect((await readFirstTally(db))?.bills).toBeUndefined();
 
 		const { res } = await post("/setup/bills", shown, true);
-		expect(trigger(res).toast?.message).toBe("Kept 1 bill.");
+		expect(trigger(res).toast?.message).toBe("Kept 2 bills.");
 		expect((await readFirstTally(db))?.bills).toEqual({
 			kept: 2,
 			cents: 2748,
