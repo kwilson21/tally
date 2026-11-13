@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getTableName, is, SQL, sql } from "drizzle-orm";
 import {
+	type AnySQLiteColumn,
 	getTableConfig,
 	type Index,
 	index,
@@ -25,12 +26,17 @@ import {
 	merchantSuggestedNames,
 	merchants,
 	plaidItems,
+	TRANSACTION_KIND_VALUES,
+	transactions,
 } from "../src/db/schema";
 
 // The drift test: src/db/schema.ts (hand-written, see its top comment) must say what the live database says.
 // It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
 // database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
+// The described tables are the ones src/db/schema.ts exports (today: accounts, categories, category_suggestions,
+// household_people, merchant_suggested_names, merchants, plaid_items, transactions). Every other live application
+// table is listed by name in NOT_YET_DESCRIBED below, with its reason, until a later PR describes it.
 
 type Lists = Record<string, Record<string, readonly string[]>>;
 
@@ -62,7 +68,6 @@ const NOT_YET_DESCRIBED = {
 	planned_expenses: "described in a later #963 PR",
 	push_subscriptions: "described in a later #963 PR",
 	savings_goal_amounts: "described in a later #963 PR",
-	transactions: "described in a later #963 PR",
 } satisfies Record<string, string>;
 
 interface LiveForeignKey {
@@ -571,6 +576,10 @@ describe("the schema file matches the live database", () => {
 		expect(await drift(accounts, CHECK_LISTS)).toEqual([]);
 	});
 
+	it("transactions matches the live table, its self-references, expression and partial indexes and CHECK lists included", async () => {
+		expect(await drift(transactions, CHECK_LISTS)).toEqual([]);
+	});
+
 	it("every live application table is described in the schema or listed as not yet described", async () => {
 		const described = schemaTables().map((table) => getTableConfig(table).name);
 
@@ -1056,6 +1065,109 @@ describe("the drift check fails on a wrong unique constraint", () => {
 	});
 });
 
+describe("the drift check fails on a wrong transactions table", () => {
+	it("a self-reference with the wrong ON DELETE", async () => {
+		const wrong = sqliteTable("transactions", {
+			id: integer().primaryKey(),
+			parentId: integer("parent_id").references(
+				(): AnySQLiteColumn => wrong.id,
+				{ onDelete: "set null" },
+			), // the database: ON DELETE CASCADE
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"transactions.parent_id ON DELETE differs: schema SET NULL, database CASCADE",
+		);
+	});
+
+	it("one of the three categories foreign keys missing", async () => {
+		const wrong = sqliteTable("transactions", {
+			id: integer().primaryKey(),
+			categoryId: integer("category_id").references(() => categories.id, {
+				onDelete: "set null",
+			}),
+			jevCategoryId: integer("jev_category_id").references(
+				() => categories.id,
+				{ onDelete: "set null" },
+			),
+			jevAlsoCategoryId: integer("jev_also_category_id"), // the database: REFERENCES categories(id) ON DELETE SET NULL
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"transactions.jev_also_category_id is a foreign key in the database, not in the schema",
+		);
+	});
+
+	it("the merchant-history index with a changed expression", async () => {
+		const wrong = sqliteTable(
+			"transactions",
+			{
+				id: integer().primaryKey(),
+				merchantName: text("merchant_name"),
+				rawName: text("raw_name").notNull(),
+				date: text().notNull(),
+			},
+			(t) => [
+				index("transactions_merchant_history").on(
+					sql`COALESCE(${t.merchantName}, ${t.rawName}), ${t.date} DESC, ${t.id} DESC`,
+				), // the database: COALESCE(NULLIF(merchant_name, ''), raw_name)
+			],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index transactions_merchant_history expression differs",
+		);
+	});
+
+	it("the upload-twin unique index made non-partial", async () => {
+		const wrong = sqliteTable(
+			"transactions",
+			{
+				id: integer().primaryKey(),
+				accountId: integer("account_id").notNull(),
+				uploadKey: text("upload_key"),
+				uploadTwin: integer("upload_twin"),
+			},
+			(t) => [
+				uniqueIndex("transactions_upload_twin").on(
+					t.accountId,
+					t.uploadKey,
+					t.uploadTwin,
+				), // the database: WHERE upload_key IS NOT NULL
+			],
+		);
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"index transactions_upload_twin partial-ness differs",
+		);
+	});
+
+	it("a *_VALUES list with an extra word", async () => {
+		const lists = {
+			...CHECK_LISTS,
+			transactions: {
+				...CHECK_LISTS.transactions,
+				kind: [...TRANSACTION_KIND_VALUES, "gift"],
+			},
+		};
+
+		expect((await drift(transactions, lists)).join("\n")).toContain(
+			"transactions.kind CHECK differs",
+		);
+	});
+
+	it("a REAL column declared as INTEGER", async () => {
+		const wrong = sqliteTable("transactions", {
+			id: integer().primaryKey(),
+			categoryConfidence: integer("category_confidence"), // the database: REAL
+		});
+
+		expect((await drift(wrong, CHECK_LISTS)).join("\n")).toContain(
+			"transactions.category_confidence type differs: schema INTEGER, database REAL",
+		);
+	});
+});
+
 describe("the table-set check fails on a wrong list", () => {
 	const described = ["a"];
 
@@ -1100,6 +1212,7 @@ describe("the table-set check fails on a wrong list", () => {
 			"merchant_suggested_names",
 			"merchants",
 			"plaid_items",
+			"transactions",
 		]);
 	});
 });
