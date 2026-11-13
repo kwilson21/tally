@@ -78,7 +78,7 @@ A store is searched only when **all** of these hold. The first three are about p
 4. **No rule already settles it.** A merchant rule or bank-text rule on all of it leaves it not looked up; it is searched later only if the rule goes. A rule only stops the search: a line found before the rule was made is kept and still shown.
 5. **It has not been looked up**, and the day's cap has room.
 
-Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched. The whole test, the privacy rules and Jev's answers both, is made once more immediately before each search is sent, so a row that arrived after the claim stops the search whether it is private or only still waiting for Jev.
+Privacy is checked again every time a run is about to claim a store, including one waiting to be tried again, so a store that became private since its last try is skipped, not searched. The whole test, the privacy rules, Jev's answers and the three switches ("Look up new stores on the web", "Guess categories" and "Spot paychecks"), is made once more immediately before each search is sent, so a row that arrived after the claim stops the search whether it is private or only still waiting for Jev, and a switch turned off after the claim stops it too; the claim is let go.
 
 Stores Plaid already names are searched too when they pass these rules (the owner's pick, 2026-11-12). Workers AI is only asked for names when Plaid sends none (decision 68), so for a Plaid-named store the line helps Jev's category only, not the name.
 
