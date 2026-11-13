@@ -1064,6 +1064,62 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 		});
 	});
 
+	it("a credit whose income the person unticked stays not income when Exclude is turned off", async () => {
+		await seedRow(CREDIT, { excludedSource: "user" });
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(CREDIT)
+			.run();
+
+		expect(await saveEdit(db, CREDIT, panelPost(), "test")).toEqual({
+			saved: true,
+		});
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+			refund_of_id: null,
+		});
+	});
+
+	it("a person's income choice stands through include, untick, exclude and include again (no seeding)", async () => {
+		await seedRow(CREDIT, { excludedSource: "jev" });
+
+		await saveEdit(db, CREDIT, panelPost(), "test");
+		await saveEdit(
+			db,
+			CREDIT,
+			panelPost({ income: false, incomeWas: true }),
+			"test",
+		);
+		await saveEdit(
+			db,
+			CREDIT,
+			panelPost({ income: false, incomeWas: false, excluded: true }),
+			"test",
+		);
+		await saveEdit(
+			db,
+			CREDIT,
+			panelPost({ income: false, incomeWas: false, excluded: false }),
+			"test",
+		);
+		expect(await creditRow(CREDIT)).toEqual({
+			excluded: 0,
+			excluded_source: "user",
+			flag_income: 0,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+			refund_of_id: null,
+		});
+	});
+
 	it("include, exclude, include again: the income columns stay, and only Exclude moves", async () => {
 		await seedRow(CREDIT, { excludedSource: "jev" });
 
