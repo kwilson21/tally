@@ -657,7 +657,7 @@ export async function syncItem(
 
 		// The run goes on from the saved position. An update that changed while it was being paged starts again from its
 		// first page's cursor (Plaid's rule), which an earlier run saved if it stored part of this update and stopped
-		// (sync_update_cursor, decision 221); otherwise the saved position is itself where this update begins.
+		// (sync_update_cursor, decision 222); otherwise the saved position is itself where this update begins.
 		const firstCursor =
 			item.sync_update_cursor === null
 				? item.sync_cursor

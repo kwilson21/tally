@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 //
 //   asking_plaid      Tally asks Plaid for the page at its position. A page goes on to be saved. If Plaid says the
 //                     update changed while it was being paged, the run starts again from the update's first cursor
-//                     (Plaid's rule, decision 221), up to three times. Anything else Plaid refuses ends the run.
+//                     (Plaid's rule, decision 222), up to three times. Anything else Plaid refuses ends the run.
 //   saving_the_page   The page's rows and its position are saved together. Then the next page is asked for, or, after
 //                     the last page, the run is done. A save that fails ends the run.
 //

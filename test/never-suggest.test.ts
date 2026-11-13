@@ -4,6 +4,7 @@ import { noneFitTransactions } from "../src/db/category-suggestions";
 import {
 	addNeverSuggest,
 	neverSuggestedSql,
+	neverSuggestLine,
 	neverSuggestRuleLine,
 	neverSuggestRules,
 } from "../src/db/never-suggest";
@@ -94,6 +95,26 @@ describe("never_suggest_rules table", () => {
 		expect(chewy && neverSuggestRuleLine(chewy)).toBe(
 			"Never suggest a new category for Chewy",
 		);
+	});
+
+	it("a line read for its Remove names the store by its display name", async () => {
+		await db
+			.prepare(
+				"UPDATE merchants SET display_name = 'Venmo Business' WHERE raw_name = 'VENMO'",
+			)
+			.run();
+		await addNeverSuggest(db, {
+			merchantKey: "VENMO",
+			kind: "transfer",
+			decidedOn: "2026-10-03",
+		});
+		const [rule] = await neverSuggestRules(db);
+		expect(
+			rule ? await neverSuggestLine(db, lineKey(rule)) : null,
+		).toMatchObject({
+			merchantKey: "VENMO",
+			merchant: "Venmo Business",
+		});
 	});
 
 	it("removes one line and returns it, and a stale Remove removes nothing", async () => {

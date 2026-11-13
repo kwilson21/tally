@@ -13,6 +13,11 @@ import {
 	sanitizeFeedbackRoute,
 } from "../src/feedback/privacy";
 import {
+	FILING_ATTEMPT_CAP,
+	filingStateOf,
+	giveUpReason,
+} from "../src/machines/feedback-filing";
+import {
 	feedback,
 	fileFeedbackIssue,
 	retryFeedback,
@@ -1339,4 +1344,202 @@ it("files a report whose page has a huge number of backtick runs", async () => {
 
 	await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
 	expect(fetchStub).toHaveBeenCalledOnce();
+});
+
+// The stored columns after one try, per status, from 0 and from 4 tries (decision 219). These pin what the machine's
+// moves say a row becomes; test/feedback-filing-machine.test.ts walks every starting state against the same machine.
+describe("a GitHub answer leaves the stored columns the machine's move says", () => {
+	type Columns = {
+		attempts: number;
+		filingAt: string | null;
+		lastStatus: number | null;
+		issue: number | null;
+	};
+
+	const COLUMNS =
+		"SELECT attempts, filing_at AS filingAt, last_status AS lastStatus, github_issue_number AS issue FROM feedback WHERE id = ?";
+
+	beforeEach(() => {
+		vi.spyOn(console, "info").mockImplementation(() => {});
+	});
+
+	async function seedWith(attempts: number, extra = "NULL"): Promise<number> {
+		const row = await env.DB.prepare(
+			`INSERT INTO feedback (created_at, actor, type, feeling, message, page, device, attempts, filing_at) VALUES (datetime('now', '-11 minutes'), 'person', 'Bug', 'Okay', 'Broken', '/', 'Desktop Chrome', ?, ${extra}) RETURNING id`,
+		)
+			.bind(attempts)
+			.first<{ id: number }>();
+
+		return present(row).id;
+	}
+
+	async function fileOnce(id: number, fetchImpl: typeof fetch) {
+		const row = await env.DB.prepare("SELECT * FROM feedback WHERE id = ?")
+			.bind(id)
+			.first<FiledRow>();
+
+		await fileFeedbackIssue(env.DB, "token", present(row), fetchImpl).catch(
+			() => {},
+		);
+	}
+
+	async function columnsOf(id: number): Promise<Columns> {
+		return present(await env.DB.prepare(COLUMNS).bind(id).first<Columns>());
+	}
+
+	const reply = (status: number, body = "{}") =>
+		fakeFetch(vi.fn(async () => new Response(body, { status })));
+
+	it.each([0, 4])(
+		"a 201 with an issue number files the row and keeps its count, from %i tries",
+		async (before) => {
+			const id = await seedWith(before);
+			await fileOnce(id, reply(201, '{"number":7}'));
+
+			expect(await columnsOf(id)).toEqual({
+				attempts: before + 1,
+				filingAt: expect.any(String),
+				lastStatus: 201,
+				issue: 7,
+			});
+		},
+	);
+
+	const refusals: [number, (before: number) => number][] = [
+		[422, () => FILING_ATTEMPT_CAP],
+		[401, (before) => before],
+		[403, (before) => before],
+		[429, (before) => before + 1],
+		[500, (before) => before + 1],
+		[302, (before) => before + 1],
+	];
+
+	for (const [status, attemptsAfter] of refusals) {
+		it.each([0, 4])(
+			`a ${status} gives the claim back and writes its status, from %i tries`,
+			async (before) => {
+				const id = await seedWith(before);
+				await fileOnce(id, reply(status));
+
+				expect(await columnsOf(id)).toEqual({
+					attempts: attemptsAfter(before),
+					filingAt: null,
+					lastStatus: status,
+					issue: null,
+				});
+			},
+		);
+	}
+
+	// A 2xx answer with no issue number is a failed try: the claim is given back and its status is written.
+	it.each([0, 4])(
+		"a 2xx with no issue number gives the claim back, from %i tries",
+		async (before) => {
+			const id = await seedWith(before);
+			await fileOnce(id, reply(201, "{}"));
+
+			expect(await columnsOf(id)).toEqual({
+				attempts: before + 1,
+				filingAt: null,
+				lastStatus: 201,
+				issue: null,
+			});
+		},
+	);
+
+	// A 2xx whose body is JSON null has no issue number either; it throws today, after the claim is made.
+	it.each([0, 4])(
+		"a 2xx whose body is null gives the claim back, from %i tries",
+		async (before) => {
+			const id = await seedWith(before);
+			await fileOnce(id, reply(201, "null"));
+
+			expect(await columnsOf(id)).toEqual({
+				attempts: before + 1,
+				filingAt: null,
+				lastStatus: 201,
+				issue: null,
+			});
+		},
+	);
+
+	// A failed try that never got an answer keeps the status it had, which here is none.
+	it.each([0, 4])(
+		"a timeout gives the claim back and writes no status, from %i tries",
+		async (before) => {
+			const id = await seedWith(before);
+			await fileOnce(
+				id,
+				fakeFetch(
+					vi.fn(async () => {
+						throw new Error("timed out");
+					}),
+				),
+			);
+
+			expect(await columnsOf(id)).toEqual({
+				attempts: before + 1,
+				filingAt: null,
+				lastStatus: null,
+				issue: null,
+			});
+		},
+	);
+
+	// GitHub answered 201, so the status is written even though the body cannot be read; only a fetch with no answer writes none.
+	it.each([0, 4])(
+		"an unreadable body gives the claim back and writes its status, from %i tries",
+		async (before) => {
+			const id = await seedWith(before);
+			await fileOnce(id, reply(201, "not json"));
+
+			expect(await columnsOf(id)).toEqual({
+				attempts: before + 1,
+				filingAt: null,
+				lastStatus: 201,
+				issue: null,
+			});
+		},
+	);
+
+	// Case 2: five tries are five tries. A fifth try whose claim ran out is given up as exhausted, and it is not picked up.
+	it("a cut-off fifth try is given up as exhausted, and the retry does not pick it up", async () => {
+		const id = await seedWith(
+			FILING_ATTEMPT_CAP,
+			"datetime('now', '-11 minutes')",
+		);
+
+		const fetchStub = reply(201, '{"number":9}');
+
+		await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+		expect(fetchStub).not.toHaveBeenCalled();
+
+		const stored = await columnsOf(id);
+		expect(
+			filingStateOf({ ...stored, githubIssueNumber: stored.issue }, Date.now()),
+		).toBe("gave_up");
+		expect(giveUpReason(stored.lastStatus)).toBe("exhausted");
+	});
+
+	// Case 2 at four tries: a cut-off fourth try is ready again, and its failed fifth try is the last.
+	it("a cut-off fourth try is ready again, and a failed fifth try is the last", async () => {
+		const id = await seedWith(
+			FILING_ATTEMPT_CAP - 1,
+			"datetime('now', '-11 minutes')",
+		);
+
+		const fetchStub = reply(500);
+
+		await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+		expect(fetchStub).toHaveBeenCalledOnce();
+		expect(await columnsOf(id)).toEqual({
+			attempts: FILING_ATTEMPT_CAP,
+			filingAt: null,
+			lastStatus: 500,
+			issue: null,
+		});
+
+		await retryFeedback({ DB: env.DB, FEEDBACK_GITHUB_TOKEN: "t" }, fetchStub);
+		expect(fetchStub).toHaveBeenCalledOnce();
+	});
 });
