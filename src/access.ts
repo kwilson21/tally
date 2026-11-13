@@ -21,6 +21,9 @@ type Certs = { keys?: AccessKey[] };
 type CachedCerts = { fetchedAt: number; keys: AccessKey[] };
 
 const CERT_TTL_MS = 60 * 60 * 1000;
+
+/** How long the certs fetch may take; past it the sign-in is refused, where a hung fetch would hang the request. */
+const CERT_FETCH_TIMEOUT_MS = 10_000;
 const UNKNOWN_KID_REFRESH_COOLDOWN_MS = 30 * 1000;
 const LEEWAY_SECONDS = 60;
 const certCache = new Map<string, CachedCerts>();
@@ -72,6 +75,7 @@ async function certs(domain: string, force = false): Promise<AccessKey[]> {
 		// Workers rejects redirect: "error", so stop at a redirect and refuse it: a 3xx isn't ok.
 		const response = await fetch(`https://${domain}/cdn-cgi/access/certs`, {
 			redirect: "manual",
+			signal: AbortSignal.timeout(CERT_FETCH_TIMEOUT_MS),
 		});
 
 		if (!response.ok)

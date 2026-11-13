@@ -141,8 +141,10 @@ describe("verifiedEmail", () => {
 		).toBe("family.member@example.com");
 		expect(fetch).toHaveBeenCalledTimes(1);
 		// Workers throws on redirect: "error", so a redirect is stopped and refused by status instead.
+		// It carries a deadline, so a certs fetch that hangs refuses the sign-in and does not hang the request.
 		expect(fetch).toHaveBeenCalledWith(`https://${team}/cdn-cgi/access/certs`, {
 			redirect: "manual",
+			signal: expect.any(AbortSignal),
 		});
 	});
 
@@ -681,6 +683,24 @@ describe("verifiedEmail explains a refusal in the log", () => {
 			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
 		).toBe(
 			"Access sign-in refused: couldn't fetch the signing keys from https://log-certs.cloudflareaccess.com/cdn-cgi/access/certs (TypeError: Network connection lost.)",
+		);
+	});
+
+	it("refuses the sign-in when the signing keys take too long to fetch", async () => {
+		const team = "log-slow.cloudflareaccess.com";
+		const { privateKey } = await keys();
+		// What a deadline does: the request is aborted, and fetch rejects with a TimeoutError.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new DOMException("The operation timed out.", "TimeoutError");
+			}),
+		);
+		const jwt = await token(privateKey, team);
+		expect(
+			await refusal({ ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "test-aud" }, jwt),
+		).toBe(
+			"Access sign-in refused: couldn't fetch the signing keys from https://log-slow.cloudflareaccess.com/cdn-cgi/access/certs (TimeoutError: The operation timed out.)",
 		);
 	});
 

@@ -215,8 +215,8 @@ export type RenameFacts = {
  * control the save reads blocks that guess: the save then keeps the person's category, or Jev isn't asked. A ticked
  * checkbox hides it whether it was drawn ticked or not, so unticking it shows the note again. The category hides it while
  * any other choice is ticked, and a purchase hides it once it is picked over the one drawn. Each hook is a literal class,
- * so Tailwind compiles it; LINKED_PURCHASE_CLASS and TALLY_CATEGORY_CLASS are written into the hooks by their literal text,
- * which must stay in step with those constants. Where :has() isn't supported the hooks do nothing, so the note stays as
+ * so Tailwind compiles it; the hook classes and EDIT_FORM_GROUP's name are written into the hooks by their literal text,
+ * and test/name-choices-hooks.test.ts fails where a hook names a class or a group that is not one of the constants. Where :has() isn't supported the hooks do nothing, so the note stays as
  * it was drawn; that is never seen, since the Rename list itself needs :has() to open.
  *
  * Every posted field the re-guess reads at save time (oneOffGuessesAgain, the route's `row`, followsPurchaseAfterSave

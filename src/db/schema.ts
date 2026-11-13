@@ -10,9 +10,12 @@
 // compares those to the database and they could drift silently.
 import { sql } from "drizzle-orm";
 import {
+	type AnySQLiteColumn,
 	blob,
+	index,
 	integer,
 	primaryKey,
+	real,
 	sqliteTable,
 	text,
 	uniqueIndex,
@@ -165,6 +168,188 @@ export const categorySuggestions = sqliteTable(
 	],
 );
 
+/** transactions.category_source: the CHECK in migrations/0026_bill_category.sql (0001 wrote it, 0026 added 'bill'). */
+export const TRANSACTION_CATEGORY_SOURCE_VALUES = [
+	"user",
+	"merchant_rule",
+	"jev",
+	"bill",
+] as const;
+
+/**
+ * transactions.excluded_source: the CHECK in migrations/0017_merchant_name_pending.sql (0004 wrote it, 0017 added
+ * 'plaid'; 0026 rebuilt the table with the same list).
+ */
+export const TRANSACTION_EXCLUDED_SOURCE_VALUES = [
+	"user",
+	"jev",
+	"plaid",
+] as const;
+
+/** transactions.income_source: the CHECK in migrations/0016_income_source.sql (kept by 0017 and 0026). */
+export const TRANSACTION_INCOME_SOURCE_VALUES = ["user", "jev"] as const;
+
+/** transactions.credit_reviewed_by: the CHECK in migrations/0016_income_source.sql (kept by 0017 and 0026). */
+export const TRANSACTION_CREDIT_REVIEWED_BY_VALUES = ["user"] as const;
+
+/** transactions.kind: the CHECK in migrations/0030_transaction_details.sql. */
+export const TRANSACTION_KIND_VALUES = [
+	"subscription",
+	"one_off",
+	"bill",
+	"transfer",
+] as const;
+
+/** transactions.note_state: the CHECK in migrations/0068_note_state.sql. */
+export const TRANSACTION_NOTE_STATE_VALUES = [
+	"unasked",
+	"unanswered",
+	"no_call",
+	"queued",
+	"failed",
+	"tried_empty",
+	"emptied_by_person",
+	"guessed",
+	"written",
+	"dismissed",
+] as const;
+
+/**
+ * A bank transaction, a split part of one, or a refund's link to its purchase. 59 columns, grouped below by what they
+ * are for. Nothing is renamed: each column is the database's name, and each group is a reading aid only.
+ */
+export const transactions = sqliteTable(
+	"transactions",
+	{
+		// Identity and bank fields: what the bank sent, and the row's own id.
+		id: integer().primaryKey(),
+		plaidTransactionId: text("plaid_transaction_id").unique(),
+		accountId: integer("account_id")
+			.notNull()
+			.references(() => accounts.id),
+		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		date: text().notNull(),
+		// The migration's CHECK here is (typeof(amount_cents) = 'integer'), not an IN list, so the drift test does not
+		// read it.
+		amountCents: integer("amount_cents").notNull(),
+		rawName: text("raw_name").notNull(),
+		merchantName: text("merchant_name"),
+		pending: integer().notNull().default(0),
+		plaidCategory: text("plaid_category"),
+		plaidDetailedCategory: text("plaid_detailed_category"),
+		appleCategory: text("apple_category"),
+		entryKey: text("entry_key"),
+		ownName: text("own_name"),
+
+		// Categorisation and Jev fields: which category a row has, where it came from, and Jev's attempts at it.
+		categoryId: integer("category_id").references(() => categories.id, {
+			onDelete: "set null",
+		}),
+		categorySource: text("category_source", {
+			enum: TRANSACTION_CATEGORY_SOURCE_VALUES,
+		}),
+		categoryConfidence: real("category_confidence"),
+		categorySuggestionId: integer("category_suggestion_id").references(
+			() => categorySuggestions.id,
+		),
+		jevCategoryId: integer("jev_category_id").references(() => categories.id, {
+			onDelete: "set null",
+		}),
+		jevAlsoCategoryId: integer("jev_also_category_id").references(
+			() => categories.id,
+			{ onDelete: "set null" },
+		),
+		jevMixed: real("jev_mixed"),
+		jevFailedAt: text("jev_failed_at"),
+		jevAttempts: integer("jev_attempts").notNull().default(0),
+		jevNoneFit: integer("jev_none_fit").notNull().default(0),
+		updatedBy: text("updated_by"),
+		updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+
+		// Flags and the sources of them: transfers, reimbursements, income, exclusions and the credit review.
+		flagTransfer: integer("flag_transfer").notNull().default(0),
+		flagReimbursement: integer("flag_reimbursement").notNull().default(0),
+		flagIncome: integer("flag_income").notNull().default(0),
+		excluded: integer().notNull().default(0),
+		excludedSource: text("excluded_source", {
+			enum: TRANSACTION_EXCLUDED_SOURCE_VALUES,
+		}),
+		incomeSource: text("income_source", {
+			enum: TRANSACTION_INCOME_SOURCE_VALUES,
+		}),
+		// The migration's CHECK here is (income_confidence IS NULL OR ... BETWEEN 0 AND 1), not an IN list, so the drift
+		// test does not read it.
+		incomeConfidence: real("income_confidence"),
+		incomeMaybeDeclined: integer("income_maybe_declined").notNull().default(0),
+		// The migration's CHECK here is (transfer_confidence IS NULL OR ... BETWEEN 0 AND 1), not an IN list, so the
+		// drift test does not read it.
+		transferConfidence: real("transfer_confidence"),
+		transferMaybeDeclined: integer("transfer_maybe_declined")
+			.notNull()
+			.default(0),
+		creditReviewed: integer("credit_reviewed"),
+		creditReviewedBy: text("credit_reviewed_by", {
+			enum: TRANSACTION_CREDIT_REVIEWED_BY_VALUES,
+		}),
+
+		// Note, kind and for-person fields: the question asked about a row, and the answers and guesses behind it.
+		note: text(),
+		noteState: text("note_state", { enum: TRANSACTION_NOTE_STATE_VALUES })
+			.notNull()
+			.default("unasked"),
+		noteGuessed: integer("note_guessed").notNull().default(0),
+		noteTriedAt: text("note_tried_at"),
+		noteFailedAt: text("note_failed_at"),
+		noteDismissed: integer("note_dismissed").notNull().default(0),
+		noteWorthWriting: integer("note_worth_writing"),
+		detailsAsked: integer("details_asked").notNull().default(0),
+		kind: text({ enum: TRANSACTION_KIND_VALUES }),
+		kindGuessed: integer("kind_guessed").notNull().default(0),
+		kindCleared: integer("kind_cleared").notNull().default(0),
+		forPersonId: integer("for_person_id").references(() => householdPeople.id, {
+			onDelete: "set null",
+		}),
+		forPersonGuessed: integer("for_person_guessed").notNull().default(0),
+		forPersonCleared: integer("for_person_cleared").notNull().default(0),
+
+		// Split and refund links: a split part points at its parent, a refund at the purchase it returns.
+		isSplit: integer("is_split").notNull().default(0),
+		parentId: integer("parent_id").references(
+			(): AnySQLiteColumn => transactions.id,
+			{ onDelete: "cascade" },
+		),
+		splitRemovedFromCents: integer("split_removed_from_cents"),
+		splitRemovedBills: text("split_removed_bills"),
+		refundOfId: integer("refund_of_id").references(
+			(): AnySQLiteColumn => transactions.id,
+			{ onDelete: "set null" },
+		),
+		refundUnlinkedPurchaseDate: text("refund_unlinked_purchase_date"),
+
+		// Upload fields: the key and twin number that stop a file's rows being imported twice.
+		uploadKey: text("upload_key"),
+		uploadTwin: integer("upload_twin"),
+	},
+	(t) => [
+		index("transactions_date").on(t.date),
+		index("transactions_category").on(t.categoryId),
+		index("transactions_raw_name").on(t.rawName),
+		index("transactions_parent").on(t.parentId),
+		index("transactions_refund_of_id_idx").on(t.refundOfId),
+		index("transactions_category_suggestion_id").on(t.categorySuggestionId),
+		uniqueIndex("transactions_entry_key")
+			.on(t.entryKey)
+			.where(sql`${t.entryKey} IS NOT NULL`),
+		uniqueIndex("transactions_upload_twin")
+			.on(t.accountId, t.uploadKey, t.uploadTwin)
+			.where(sql`${t.uploadKey} IS NOT NULL`),
+		// The merchant's history is keyed by its name, or the raw name when there is none (the empty string counts as none).
+		index("transactions_merchant_history").on(
+			sql`COALESCE(NULLIF(${t.merchantName}, ''), ${t.rawName}), ${t.date} DESC, ${t.id} DESC`,
+		),
+	],
+);
+
 /**
  * Every `col IN (...)` CHECK the described tables have in the live database, by table and column, as text. The drift
  * test reads each one from the live CREATE TABLE and compares it both ways with this list.
@@ -191,6 +376,32 @@ export const CHECK_LISTS = {
 	},
 	category_suggestions: {
 		status: CATEGORY_SUGGESTION_STATUS_VALUES,
+	},
+	transactions: {
+		category_source: TRANSACTION_CATEGORY_SOURCE_VALUES,
+		excluded_source: TRANSACTION_EXCLUDED_SOURCE_VALUES,
+		income_source: TRANSACTION_INCOME_SOURCE_VALUES,
+		credit_reviewed_by: TRANSACTION_CREDIT_REVIEWED_BY_VALUES,
+		kind: TRANSACTION_KIND_VALUES,
+		note_state: TRANSACTION_NOTE_STATE_VALUES,
+		flag_transfer: ["0", "1"],
+		flag_reimbursement: ["0", "1"],
+		flag_income: ["0", "1"],
+		excluded: ["0", "1"],
+		is_split: ["0", "1"],
+		credit_reviewed: ["0", "1"],
+		note_worth_writing: ["0", "1"],
+		pending: ["0", "1"],
+		jev_none_fit: ["0", "1"],
+		note_guessed: ["0", "1"],
+		kind_guessed: ["0", "1"],
+		for_person_guessed: ["0", "1"],
+		details_asked: ["0", "1"],
+		note_dismissed: ["0", "1"],
+		kind_cleared: ["0", "1"],
+		for_person_cleared: ["0", "1"],
+		income_maybe_declined: ["0", "1"],
+		transfer_maybe_declined: ["0", "1"],
 	},
 } as const;
 
