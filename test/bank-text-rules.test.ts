@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanBankText } from "../src/clean-bank-text";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import {
+	activeBankTextRules,
 	applyBankTextRules,
 	bankTextRuleStatements,
 	changeBankTextRule,
@@ -510,6 +511,33 @@ describe("saving a rule", () => {
 			.first<{ categoryId: number }>();
 
 		expect(row?.categoryId).toBe(eating);
+	});
+});
+
+describe("activeBankTextRules lists the active rules in cleaned-text order", () => {
+	it("orders by cleaned text, and leaves out a rule whose category is archived", async () => {
+		await db.prepare("DELETE FROM bank_text_rules").run();
+		const books = await categoryId("Books & audio");
+		const eating = await categoryId("Eating Out");
+		const groceries = await categoryId("Groceries");
+		await addRule("zeta shop", eating);
+		await addRule("alpha cafe", books);
+		await addRule("middle store", groceries);
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(groceries)
+			.run();
+
+		const rules = await activeBankTextRules(db);
+
+		expect(rules.map((rule) => rule.cleanedText)).toEqual([
+			"alpha cafe",
+			"zeta shop",
+		]);
+		expect(rules[1]).toMatchObject({
+			categoryId: eating,
+			categoryName: "Eating Out",
+		});
 	});
 });
 
