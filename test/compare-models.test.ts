@@ -1679,6 +1679,81 @@ describe("the payee question (#984, part two)", () => {
 	});
 });
 
+describe("the payee reimbursement, the warnings, and the hand-written names (#984)", () => {
+	/** A business payee answer whose reimbursement answer is `reimbursement`. */
+	const businessWithReimbursement = (reimbursement: number) => {
+		const reply = payeeReply("business", 0.95);
+
+		return {
+			...reply,
+			answers: {
+				...reply.answers,
+				reimbursement: { type: "noul", noul: reimbursement },
+			},
+		};
+	};
+
+	it("holds back a business whose reimbursement answer is unsure, and counts it under the summary", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(() => businessWithReimbursement(0.6)),
+		);
+
+		expect(text).toContain("reimbursement unsure");
+		expect(text).not.toMatch(/\| yes \|/);
+		expect(text).toContain(
+			"Rows held back because Jev's reimbursement answer was unsure: 43.",
+		);
+	});
+
+	it("lets a business through when its reimbursement answer is below the unsure range", async () => {
+		const text = await runPayee(
+			{ AI: fakeAi(), JEV_API_KEY: "test-key" },
+			jevFetch(() => businessWithReimbursement(0.3)),
+		);
+
+		expect(text).not.toContain("reimbursement unsure");
+		expect(text).toMatch(/\| yes \|/);
+		expect(text).toContain(
+			"Rows held back because Jev's reimbursement answer was unsure: 0.",
+		);
+	});
+
+	it("warns in the lookup report that the bank's category hint is not sent", () => {
+		const text = formatLookupReport({
+			jevStatus: "ran",
+			entries: [],
+			noLine: [],
+			notes: [],
+		});
+
+		expect(text).toContain("carry no Plaid category, which real rows do");
+		expect(text).toContain(
+			"the bank's category hint is not sent in this measurement",
+		);
+	});
+
+	it("says in the payee report which rows send a Plaid category", () => {
+		const text = formatPayeeReport({ jevStatus: "ran", rows: [], notes: [] });
+
+		expect(text).toContain(
+			"The hand-written rows send their Plaid category; the demo's stores do not.",
+		);
+	});
+
+	it("names the person row EMILY CHEN, with no TUTORING suffix", () => {
+		expect(PAYEE_CASES.find((c) => c.rawName === "EMILY CHEN")).toMatchObject({
+			rawName: "EMILY CHEN",
+			payee: "person",
+			amountCents: 8000,
+			plaidCategory: "GENERAL_SERVICES",
+		});
+		expect(PAYEE_CASES.map((c) => c.rawName)).not.toContain(
+			"EMILY CHEN TUTORING",
+		);
+	});
+});
+
 describe("the lookup and payee routes (#984)", () => {
 	// Jev's fetch is the global one the Worker's modes default to, so stub it: a call to Jev is then seen here.
 	const jev = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>

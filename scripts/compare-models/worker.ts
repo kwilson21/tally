@@ -6,7 +6,13 @@
 //   curl -s http://localhost:8799/
 // The env file path must be absolute, since Wrangler resolves it from the config's folder. Add ?model=clef&list=demo
 // (model: jev, clef or clef-flash; list: demo or fifty) to run one slice.
-import { askJev, type JevInput, type JevResult } from "../../src/ai/categorize";
+import {
+	askJev,
+	JEV_THRESHOLD,
+	type JevInput,
+	type JevResult,
+} from "../../src/ai/categorize";
+import { isUnsure } from "../../src/ai/maybe";
 import { DEFAULT_TIME_ZONE, todayIn } from "../../src/dates";
 import { buildSeed } from "../../src/demo/seed";
 import { lookupLine, PAYEE_CASES } from "./lookup-lines";
@@ -330,7 +336,18 @@ function payeeOutcome(result: JevResult, answer: PayeeAnswer): string {
 			: `Jev call failed (HTTP ${result.status})`;
 	}
 
-	return answer ? "answered" : "no payee answer";
+	if (!answer) return "no payee answer";
+
+	// A business Jev is sure of would be searched, unless its reimbursement answer is in the transfer Maybe range: the
+	// app writes no lookup mark then (spec §5, lookup_cleared), so the row is held back.
+	const businessSure =
+		answer.choice === "business" && answer.confidence >= JEV_THRESHOLD;
+
+	if (businessSure && isUnsure(result.answer.flags.reimbursement, "transfer")) {
+		return "reimbursement unsure";
+	}
+
+	return "answered";
 }
 
 /** The payee measurement (#984, part two): the hand-written rows, then the lookup-line cases as businesses. */
@@ -421,7 +438,8 @@ export async function runPayee(
 		rows.push({
 			rawName: ask.rawName,
 			expected: ask.expected,
-			answer,
+			// A held-back reimbursement row shows its outcome, not the payee answer it would otherwise have been searched on.
+			answer: outcome === "reimbursement unsure" ? null : answer,
 			outcome,
 		});
 	}

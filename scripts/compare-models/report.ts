@@ -141,6 +141,10 @@ function notesSection(notes: ModelNote[]): string[] {
 	return lines;
 }
 
+/** Said at the top of every report: the demo's rows carry no bank category, which real rows do. */
+const DEMO_HAS_NO_PLAID_CATEGORY =
+	"The demo's rows carry no Plaid category, which real rows do.";
+
 export function formatReport(input: ReportInput): string {
 	const lines = [
 		"# Clef and Jev on the demo seed",
@@ -148,7 +152,7 @@ export function formatReport(input: ReportInput): string {
 		`Date: ${input.today}. Cases: ${input.cases.length}, one per raw name and direction.`,
 		`Jev: ${input.jevStatus}.`,
 		"",
-		"The demo's rows carry no Plaid category, which real rows do.",
+		DEMO_HAS_NO_PLAID_CATEGORY,
 		"Times are measured from this machine through wrangler dev.",
 		"",
 	];
@@ -303,6 +307,7 @@ export function formatLookupReport(input: LookupReportInput): string {
 		'These lines are hand-written, and some name a category outright ("groceries and household goods"), as a real lookup line might. Nothing here searches the web, so this is the best case a real lookup can reach, not a forecast.',
 		"",
 		"Each case is asked once per condition, so small moves are within the noise floor shown.",
+		`${DEMO_HAS_NO_PLAID_CATEGORY} So the bank's category hint is not sent in this measurement, and a line's help may look bigger here than in the app.`,
 		"",
 		`Jev: ${input.jevStatus}. Cases with a line: ${c.cases}. Cases with no line: ${input.noLine.length}.`,
 		"",
@@ -402,6 +407,10 @@ export type PayeeReportInput = {
 export const payeeFailedCalls = (rows: PayeeRow[]): number =>
 	rows.filter((r) => r.outcome.startsWith("Jev call failed")).length;
 
+/** The rows held back because Jev's reimbursement answer was in the unsure range (spec §5: no mark for a Maybe). */
+const payeeReimbursementHeld = (rows: PayeeRow[]): number =>
+	rows.filter((r) => r.outcome === "reimbursement unsure").length;
+
 export function formatPayeeReport(input: PayeeReportInput): string {
 	const c = payeeCounts(input.rows);
 
@@ -409,6 +418,7 @@ export function formatPayeeReport(input: PayeeReportInput): string {
 		"# Can Jev tell a person from a business?",
 		"",
 		"These names are hand-written, not from the bank, so this is a best case for the question.",
+		"The hand-written rows send their Plaid category; the demo's stores do not.",
 		"",
 		`Jev: ${input.jevStatus}. Rows: ${input.rows.length}.`,
 		"",
@@ -420,6 +430,7 @@ export function formatPayeeReport(input: PayeeReportInput): string {
 		`- Businesses held back: ${c.businessesHeldBack}`,
 		"",
 		`Rows where a Jev call failed (counted as held back): ${payeeFailedCalls(input.rows)}.`,
+		`Rows held back because Jev's reimbursement answer was unsure: ${payeeReimbursementHeld(input.rows)}.`,
 		"",
 		"A business is let through only at the threshold or more. Anything else is held back, including no answer.",
 		"",

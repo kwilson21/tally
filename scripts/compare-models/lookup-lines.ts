@@ -72,7 +72,7 @@ export const PAYEE_CASES: PayeeCase[] = [
 		payee: "person",
 	},
 	{
-		rawName: "EMILY CHEN TUTORING",
+		rawName: "EMILY CHEN",
 		plaidCategory: "GENERAL_SERVICES",
 		amountCents: 8000,
 		payee: "person",
