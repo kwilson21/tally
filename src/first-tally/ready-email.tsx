@@ -115,7 +115,7 @@ const HELD_SQL = `SELECT json_extract(value, '$.heldReadyEmail') AS held FROM ho
 // Turns one legacy kept try into the whole email its line builds, with its own time. ?1 is the address's hash and ?2 the kept
 // try as JSON ({"mail", "at"}). Only an entry that is still a line when the write lands changes, so a release that replaced
 // it meanwhile is never overwritten, and the other paths of the record are left as they are.
-const KEEP_LEGACY_SQL = `UPDATE household_settings
+const UPGRADE_LEGACY_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.heldReadyEmail."' || ?1 || '"', json(?2))
 	WHERE key = 'first_tally'
 		AND json_type(household_settings.value, '$.heldReadyEmail."' || ?1 || '".line') = 'text'
@@ -129,7 +129,7 @@ type KeptTry = { mail: Mail; at: string };
 
 /**
  * A kept try the merged code stored before the whole email was kept (c5577a5): its read line and the time of its first try,
- * and no email. keepLegacyTries turns each into the email its line builds.
+ * and no email. upgradeLegacyTries turns each into the email its line builds.
  */
 type LegacyTry = { line: string; at: string };
 
@@ -166,7 +166,7 @@ function legacyTriesOf(record: FirstTally | null): [string, LegacyTry][] {
  * the start of each minute that reads the record, whether or not that address can be claimed this minute, so each kept try's
  * words, and so its key, are fixed from then on. A record with no such entry writes nothing.
  */
-async function keepLegacyTries(
+async function upgradeLegacyTries(
 	db: D1Database,
 	record: FirstTally | null,
 ): Promise<void> {
@@ -176,7 +176,7 @@ async function keepLegacyTries(
 	await db.batch(
 		tries.map(([hash, { line, at }]) =>
 			db
-				.prepare(KEEP_LEGACY_SQL)
+				.prepare(UPGRADE_LEGACY_SQL)
 				.bind(hash, JSON.stringify({ mail: renderReadyEmail(line), at })),
 		),
 	);
@@ -229,7 +229,7 @@ export const addressHashOf = (address: string) =>
 
 /**
  * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its stored email, so that try is
- * the same email under the same key (decision 146). keepLegacyTries has already turned an entry the merged code kept as only
+ * the same email under the same key (decision 146). upgradeLegacyTries has already turned an entry the merged code kept as only
  * its read line (c5577a5) into its email, at the start of this minute; a line-only entry still here is read as the email its
  * line builds, the same way. An entry that is neither a stored email nor a line, with a time, is no kept try.
  */
@@ -381,7 +381,7 @@ export async function runReadyEmail(
 	// The minute's first read. A kept try stored as only its read line (c5577a5) becomes its whole email first, so its words are
 	// fixed whatever this minute does (decision 147); a record without one writes nothing here.
 	const record = await readFirstTally(env.DB);
-	await keepLegacyTries(env.DB, record);
+	await upgradeLegacyTries(env.DB, record);
 
 	// A family whose questions are answered (or set up before this shipped), or with no stroke one day (which questionsOpen
 	// needs, so nothing could be sent), stops here. Everyone else costs one read each minute.
