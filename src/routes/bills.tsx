@@ -64,6 +64,7 @@ import {
 } from "../db/merchant-key";
 import { ownNameSql } from "../db/own-name";
 import { loadPlans } from "../db/planned-expenses";
+import { databaseRefusal, isTriggerRaised } from "../db/refused";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents, toCents } from "../money";
 import {
@@ -2110,7 +2111,16 @@ bills.post("/bills/:id/link", async (c) => {
 			c.env.DB.prepare(unpaidSelect).bind(id, link.period),
 		]);
 	} catch (error) {
-		if (!String(error).includes("already pays a planned expense")) throw error;
+		// The trigger of migration 0053 stops a link to a payment that already pays a plan, in the rule's own words.
+		const refusal = error instanceof Error ? databaseRefusal(error) : null;
+
+		if (
+			!(
+				isTriggerRaised(refusal) &&
+				refusal.words === new PaysAPlannedExpense().say
+			)
+		)
+			throw error;
 	}
 
 	if (!batch) return refusedWith(new PaysAPlannedExpense().say);
