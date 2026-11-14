@@ -93,7 +93,7 @@ describe("P144, the sorting turn's picture with its context", () => {
 
 	it("has a state table with one row per state of the machine, under a caption and header cells", async () => {
 		const block = await proposal();
-		const states = Object.keys(sortingTurnMachine.config.states);
+		const states = Object.keys(sortingTurnMachine.config.states ?? {});
 
 		expect(Object.keys(SORTING_TURN_LABELS).sort()).toEqual([...states].sort());
 		expect(block).toMatch(/<table[^>]*>/);
