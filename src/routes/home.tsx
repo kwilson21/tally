@@ -38,6 +38,7 @@ import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
 import { readAtEdge } from "../edge";
+import { numberOfPosted } from "../edge-kinds";
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
@@ -688,7 +689,7 @@ home.get("/", async (c) => {
 		}
 	}
 
-	const focus = Number(c.req.query("focus"));
+	const focus = numberOfPosted(c.req.query("focus"));
 
 	if (c.req.query("focus") === "savings-goal" && c.req.header("HX-Request")) {
 		const message = "Savings goal editing cancelled.";
