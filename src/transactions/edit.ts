@@ -1,6 +1,7 @@
 // What the edit panel's form may change, checked before anything is saved.
 
 import { followsPurchase } from "../db/counted-month";
+import { numberOf, numberOfPosted } from "../edge-kinds";
 import { DISPLAY_NAME_MAX, NOTE_MAX } from "../limits";
 import { isTransactionKind, type TransactionKind } from "./kind";
 
@@ -318,11 +319,11 @@ export function parseEdit(
 	const newCategory = rawCategory === "new";
 
 	const categoryId =
-		rawCategory === "" || newCategory ? null : Number(rawCategory);
+		rawCategory === "" || newCategory ? null : numberOf(rawCategory);
 
 	const alwaysForMerchant = form.get("always") === "1";
 	const alwaysWas = form.get("always_was") === "1";
-	const ruleCategoryWas = Number(form.get("rule_category_was")) || null;
+	const ruleCategoryWas = numberOfPosted(form.get("rule_category_was")) || null;
 	// The Name row is one choice (decision 101), posted as `name_pick`: "s:" and a suggested name, "store" for
 	// the store's own name (the bank's text tidied, which clears a name), or "own" for the name typed in the
 	// field. Only the ticked choice counts, and nothing is ticked at rest, so a save for another reason never
@@ -342,7 +343,7 @@ export function parseEdit(
 	const rawKind = text(form, "kind");
 	const kind = isTransactionKind(rawKind) ? rawKind : null;
 	const rawPerson = text(form, "for_person_id");
-	const forPersonId = rawPerson ? Number(rawPerson) : null;
+	const forPersonId = rawPerson ? numberOf(rawPerson) : null;
 	const keepDetails = form.get("details_action") === "keep";
 
 	// "Rename" (decision 101): this transaction alone, unless the scope says all the merchant's. A ticked name
@@ -364,7 +365,7 @@ export function parseEdit(
 	const noteWas = text(form, "note_was");
 	const kindWas = text(form, "kind_was") || null;
 	const personWasRaw = text(form, "for_person_id_was");
-	const personWas = personWasRaw ? Number(personWasRaw) : null;
+	const personWas = personWasRaw ? numberOf(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";
 
 	const excludedWas = form.has("excluded_was")
