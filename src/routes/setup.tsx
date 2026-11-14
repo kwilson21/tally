@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { addressOf } from "../address";
 import { householdToday } from "../dates";
 import { bankSyncs } from "../db/accounts";
+import { numberOf } from "../edge-kinds";
 import { readFinish, settleAndLoad } from "../first-tally/first-page";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import {
@@ -49,7 +50,7 @@ const idsIn = (raw: string | undefined) =>
 		(raw ?? "")
 			.split(",")
 			.filter((part) => /^[1-9]\d*$/.test(part))
-			.map(Number),
+			.map((part) => numberOf(part)),
 	);
 
 /** "Chase is in: 412 transactions.", the sentence a bank that came in is announced with. */

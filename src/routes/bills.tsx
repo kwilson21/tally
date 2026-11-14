@@ -466,7 +466,7 @@ function valuesOf(b?: DbBill): Values {
 }
 
 function quarterlyMonths(anchorMonth: string) {
-	const first = Math.min(12, Math.max(1, Number(anchorMonth) || 1)) - 1;
+	const first = Math.min(12, Math.max(1, numberOf(anchorMonth) || 1)) - 1;
 
 	return [0, 3, 6, 9].map((offset) =>
 		new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(

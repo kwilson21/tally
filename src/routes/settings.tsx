@@ -1397,7 +1397,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const form = await c.req.formData();
 
 	// The question's own answer, posted from the question drawn in the card's place (decision 101). A refused id is 0 here,
-	// as Number() gave 0 before; answerQuestion's own checks refuse it, with the answers it always gave.
+	// as the old number read gave 0; answerQuestion's own checks refuse it, with the answers it always gave.
 	if (form.get("answer")) return answerQuestion(c, id ?? 0, form);
 
 	// A refused id is no suggestion: the changed list answers, before anything is written.
@@ -1470,12 +1470,10 @@ const gone = (c: Context<App>) =>
 		status: 404,
 	});
 
-const idOf = (c: Context<App>) => Number(c.req.param("id"));
-
-async function find(c: Context<App>) {
+async function find(c: Context<App>, id: number) {
 	const all = await categoryNames(c.env.DB);
 
-	return { all, category: all.find((x) => x.id === idOf(c)) };
+	return { all, category: all.find((x) => x.id === id) };
 }
 
 // More → Settings (spec §8): the contents page, then one page for each section (decision 120). Budgets are set on
@@ -1923,7 +1921,7 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 
 	if (!typed.ok) {
 		// A category that is no longer in the list has no row to show the sentence on.
-		const { category } = await find(c);
+		const { category } = await find(c, id.value);
 
 		return category && !category.archived
 			? retry(c, id.value, form, { name: typed.say })
