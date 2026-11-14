@@ -50,6 +50,8 @@ export type Edit = {
 	detailsFieldChanged?: boolean;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
+	/** The Exclude value the panel showed when opened, so a stale panel's unchanged Exclude is not a new answer. */
+	excludedWas?: boolean;
 	/** Whether this transaction is income; a person can correct Jev's suggestion. */
 	income: boolean;
 	/** The value shown when the person opened the form, so an unchanged post is not a new answer. */
@@ -340,6 +342,11 @@ export function parseEdit(
 	const personWasRaw = text(form, "for_person_id_was");
 	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";
+
+	const excludedWas = form.has("excluded_was")
+		? form.get("excluded_was") === "1"
+		: undefined;
+
 	const credit = postedCredit(form);
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
@@ -384,6 +391,7 @@ export function parseEdit(
 		keepBankName,
 		note: note || null,
 		excluded,
+		excludedWas,
 		...credit,
 		kind:
 			form.has("kind") &&
@@ -430,18 +438,21 @@ export function safeBack(url: string | null | undefined): string {
 
 /**
  * A transfer credit a person turns Exclude off on counts as income, reviewed by that person (#878; the owner's
- * rule in chat on 2026-11-13). The edit it returns is what saveEdit writes: the same save with the income and
- * the review ticked. It only applies when the save changes nothing else about income or review, so an explicit
- * review as not income wins, and so does a link as a refund. A split part or parent, a row that isn't a transfer
- * credit, a row that is already income or already linked (as a refund), a row whose income the person already chose
- * (income_source 'user', so unticking it and excluding it again keeps it not income), and a credit the person already
- * reviewed as not income keep their own rules.
+ * rule in chat on 2026-11-13, decision 217). A transfer credit is one Tally marked as a transfer or one whose Plaid
+ * category is a transfer one (decision 227). The edit it returns is what saveEdit writes: the same save with the
+ * income and the review ticked. It only applies when the save changes nothing else about income or review, so an
+ * explicit review as not income wins, and so does a link as a refund. A split part or parent, a row that isn't a
+ * transfer credit, a row that is already income or already linked (as a refund), a row whose income the person already
+ * chose (income_source 'user', so unticking it and excluding it again keeps it not income), and a credit the person
+ * already reviewed as not income keep their own rules.
  */
 export function includedTransferCredit(
 	edit: Edit,
 	stored: {
 		amountCents: number;
 		flagTransfer: number;
+		/** True when Plaid's category marks the row as a transfer (decision 227), whatever flagTransfer says. */
+		plaidTransfer: boolean;
 		excluded: number;
 		income: number;
 		isSplit: number;
@@ -451,9 +462,12 @@ export function includedTransferCredit(
 		creditReviewedByUser: boolean;
 	},
 ): Edit {
+	// Exclude must have been on in the panel the person saw (excludedWas), so a stale panel whose Exclude was
+	// already off when drawn cannot turn a credit a sync excluded after the page loaded into income. Without
+	// excludedWas (older callers) only the posted Exclude counts.
 	const turnedOffTransferCredit =
 		stored.amountCents < 0 &&
-		stored.flagTransfer === 1 &&
+		(stored.flagTransfer === 1 || stored.plaidTransfer) &&
 		stored.excluded === 1 &&
 		stored.income === 0 &&
 		stored.isSplit === 0 &&
@@ -461,6 +475,7 @@ export function includedTransferCredit(
 		stored.refundOfId === null &&
 		stored.incomeSource !== "user" &&
 		!stored.creditReviewedByUser &&
+		(edit.excludedWas ?? true) &&
 		!edit.excluded;
 
 	const linking =

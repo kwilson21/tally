@@ -48,6 +48,9 @@ async function insertCredit(
 		incomeSource?: string | null;
 		creditReviewed?: number;
 		creditReviewedBy?: string | null;
+		/** Tally's own transfer mark (1 by default); 0 with a Plaid transfer category is a credit only Plaid marked. */
+		flagTransfer?: 0 | 1;
+		plaidCategory?: string | null;
 	} = {},
 ): Promise<number> {
 	const s = {
@@ -57,14 +60,16 @@ async function insertCredit(
 		incomeSource: null,
 		creditReviewed: 0,
 		creditReviewedBy: null,
+		flagTransfer: 1,
+		plaidCategory: null,
 		...over,
 	};
 
 	const result = await db
 		.prepare(
 			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, pending, updated_by,
-				flag_transfer, excluded, excluded_source, flag_income, income_source, credit_reviewed, credit_reviewed_by)
-			 VALUES (?, ?, ?, 'ONLINE TRANSFER FROM SAV', ?, ?, 'test', 1, ?, ?, ?, ?, ?, ?)`,
+				flag_transfer, excluded, excluded_source, flag_income, income_source, credit_reviewed, credit_reviewed_by, plaid_category)
+			 VALUES (?, ?, ?, 'ONLINE TRANSFER FROM SAV', ?, ?, 'test', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			bank,
@@ -72,12 +77,14 @@ async function insertCredit(
 			CREDIT_CENTS,
 			plaidId,
 			pending,
+			s.flagTransfer,
 			s.excluded,
 			s.excludedSource,
 			s.flagIncome,
 			s.incomeSource,
 			s.creditReviewed,
 			s.creditReviewedBy,
+			s.plaidCategory,
 		)
 		.run();
 
@@ -135,6 +142,44 @@ describe("the pending-to-posted merge carries a transfer credit's income and rev
 		await insertCredit("post-included", 0);
 
 		expect(await merge("pend-included", "post-included")).toEqual({
+			flag_income: 1,
+			income_source: "user",
+			credit_reviewed: 1,
+			credit_reviewed_by: null,
+		});
+	});
+
+	it("a pending credit only Plaid marked as a transfer, included by this rule, keeps its review once it posts", async () => {
+		const pendingId = await insertCredit("pend-plaid", 1, {
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_IN",
+			excludedSource: "plaid",
+		});
+
+		await saveEdit(
+			db,
+			pendingId,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				incomeWas: false,
+				creditReviewed: false,
+				creditReviewedWas: false,
+				creditReviewedProvided: true,
+			},
+			"test",
+		);
+		await insertCredit("post-plaid", 0, {
+			flagTransfer: 0,
+			plaidCategory: "TRANSFER_IN",
+			excludedSource: "plaid",
+		});
+
+		expect(await merge("pend-plaid", "post-plaid")).toEqual({
 			flag_income: 1,
 			income_source: "user",
 			credit_reviewed: 1,

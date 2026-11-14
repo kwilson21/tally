@@ -265,7 +265,7 @@ describe("every transaction of a month lands in exactly one How Tally bucket", (
 
 	it("the transfer line holds only the plaid-excluded transfer, so an included transfer credit is not in it", async () => {
 		const breakdown = await excludedBreakdown(db, MONTH);
-		// Only the plaid-excluded transfer purchase is in the transfer line: included transfer credits are held.
+		// Only the plaid-excluded transfer purchase is in the transfer line: an included transfer credit is income (decisions 217, 226), not held.
 		expect(breakdown.transfer).toBe(1);
 		expect(breakdown.reimbursement).toBe(1);
 		expect(breakdown.byPerson).toBe(3);

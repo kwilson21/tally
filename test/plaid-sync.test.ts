@@ -3556,6 +3556,36 @@ describe("syncItem", () => {
 			},
 		);
 
+		it.each(["added", "modified"] as const)(
+			"keeps a credit Plaid marked as a transfer, included by a person, as income through a later sync (%s)",
+			async (kind) => {
+				const id = await addItem();
+				await syncAs(id, "added", inCategory("TRANSFER_IN", { amount: -50 }));
+				await person(false);
+
+				const incomeState = () =>
+					env.DB.prepare(
+						"SELECT excluded, excluded_source, flag_income, income_source, credit_reviewed, credit_reviewed_by FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+					).first();
+
+				const included = {
+					excluded: 0,
+					excluded_source: "user",
+					flag_income: 1,
+					income_source: "user",
+					credit_reviewed: 1,
+					credit_reviewed_by: null,
+				};
+
+				expect(await incomeState()).toEqual(included);
+				await syncAs(id, kind, inCategory("TRANSFER_IN", { amount: -50 }));
+				expect(await incomeState()).toEqual(included);
+
+				await syncAs(id, kind, inCategory("FOOD_AND_DRINK", { amount: -50 }));
+				expect(await incomeState()).toEqual(included);
+			},
+		);
+
 		it("keeps a person's include when Jev later flags the transfer", async () => {
 			const id = await addItem();
 			await syncAs(id, "added", inCategory("TRANSFER_OUT"));
