@@ -3603,7 +3603,7 @@ function pendingEditForm(pendingEdit: string, totalCents: number): FormData {
 
 /** A live category a likely-transactions form names, or null. */
 async function liveCategory(db: D1Database, value: string | File | null) {
-	const id = Number(value);
+	const id = numberOfPosted(value);
 
 	if (!Number.isInteger(id) || id <= 0) return null;
 
@@ -3615,7 +3615,7 @@ async function liveCategory(db: D1Database, value: string | File | null) {
 
 // The likely transactions after a new category (decision 76): Add files the ticked ones, and only them.
 transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
@@ -3633,7 +3633,7 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 					savedId: tx.id,
 					categoryId: asked.save.categoryId,
 					categoryName: form.get("category_name")?.toString() ?? "",
-					ticked: form.getAll("ids").map(Number),
+					ticked: form.getAll("ids").map((value) => numberOfPosted(value)),
 					today,
 					actor: actor(c),
 				})
@@ -3663,7 +3663,7 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 // A tick on the likely panel redraws only its Add count, so the number follows the ticks: the ticked rows Add
 // would file now, not the six the panel lists.
 transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
@@ -3678,7 +3678,7 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 			categoryId: category.id,
 			categoryName: form.get("category_name")?.toString() ?? "",
 			today,
-			ticked: form.getAll("ids").map(Number),
+			ticked: form.getAll("ids").map((value) => numberOfPosted(value)),
 		})
 	).length;
 
@@ -3688,14 +3688,14 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const form = await c.req.formData();
 	const merchantKey = form.get("merchant_key")?.toString() ?? "";
-	const categoryId = Number(form.get("category"));
+	const categoryId = numberOfPosted(form.get("category"));
 	const back = safeBack(form.get("back")?.toString());
 	// The row that was saved, when a save named one: its answer returns focus to that row (#87).
-	const saved = Number(form.get("saved"));
+	const saved = numberOfPosted(form.get("saved"));
 	const savedId = Number.isInteger(saved) && saved > 0 ? saved : undefined;
 	// The trip the question was asked about (decision 113): Yes makes the rule only while it still counts as this store's
 	// pick of this category and doesn't look mixed, the test that asked the question.
-	const trip = Number(form.get("trip"));
+	const trip = numberOfPosted(form.get("trip"));
 	const today = await householdToday(c.env.DB);
 
 	const validCategory = await c.env.DB.prepare(
