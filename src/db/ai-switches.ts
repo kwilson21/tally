@@ -13,6 +13,8 @@ export type AiSwitches = {
 	income: boolean;
 	/** Jev sorts a sync's new transactions right after it, not only overnight. */
 	sortOnArrival: boolean;
+	/** The store lookup searches the web for a new store once, and Jev is asked whether its payee is a business (spec §7). */
+	lookupStores: boolean;
 };
 
 export const AI_SWITCHES_ALL_ON: AiSwitches = {
@@ -21,6 +23,7 @@ export const AI_SWITCHES_ALL_ON: AiSwitches = {
 	categories: true,
 	income: true,
 	sortOnArrival: true,
+	lookupStores: true,
 };
 
 const KEYS: Record<keyof AiSwitches, string> = {
@@ -29,6 +32,7 @@ const KEYS: Record<keyof AiSwitches, string> = {
 	categories: "ai_categories",
 	income: "ai_income",
 	sortOnArrival: "ai_sort_on_arrival",
+	lookupStores: "ai_lookup_stores",
 };
 
 const isSwitchName = (key: string): key is keyof AiSwitches =>
@@ -65,17 +69,13 @@ export function stillOnKeys(switches: Partial<AiSwitches>): string {
  * around, so a run can't call an AI the household turned off.
  */
 export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
+	const keys = Object.values(KEYS);
+
 	const { results } = await db
 		.prepare(
-			"SELECT key, value FROM household_settings WHERE key IN (?, ?, ?, ?, ?)",
+			`SELECT key, value FROM household_settings WHERE key IN (${keys.map(() => "?").join(", ")})`,
 		)
-		.bind(
-			KEYS.names,
-			KEYS.details,
-			KEYS.categories,
-			KEYS.income,
-			KEYS.sortOnArrival,
-		)
+		.bind(...keys)
 		.all<{ key: string; value: string }>();
 
 	const off = new Set(
@@ -88,6 +88,7 @@ export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
 		categories: !off.has(KEYS.categories),
 		income: !off.has(KEYS.income),
 		sortOnArrival: !off.has(KEYS.sortOnArrival),
+		lookupStores: !off.has(KEYS.lookupStores),
 	};
 }
 
@@ -126,6 +127,11 @@ export const AI_SWITCHES_VERSION = `(SELECT COALESCE(group_concat(key || '=' || 
 		.map((key) => `'${key}'`)
 		.join(", ")}) ORDER BY key))`;
 
-/** The name of a switch from what a form posts, or undefined. */
-export const switchNamed = (text: string): keyof AiSwitches | undefined =>
-	SWITCH_NAMES.find((name) => name === text);
+/** The switches a Settings form shows and posts: every switch but the store lookup's, which has no Settings page yet. */
+export type FormSwitch = Exclude<keyof AiSwitches, "lookupStores">;
+
+/** The name of a form switch from what a form posts, or undefined. */
+export const switchNamed = (text: string): FormSwitch | undefined =>
+	SWITCH_NAMES.find(
+		(name): name is FormSwitch => name !== "lookupStores" && name === text,
+	);

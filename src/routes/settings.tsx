@@ -10,6 +10,7 @@ import { householdTimeZone, householdToday, todayIn } from "../dates";
 import { type AiTallyCounts, readAiTally } from "../db/ai-log";
 import {
 	type AiSwitches,
+	type FormSwitch,
 	readAiSwitches,
 	switchNamed,
 } from "../db/ai-switches";
@@ -281,7 +282,7 @@ type Done = View & { page: Page };
  * changes a switch it doesn't list.
  */
 const AI_FEATURES: {
-	key: keyof AiSwitches;
+	key: FormSwitch;
 	id: string;
 	label: string;
 	line: string;

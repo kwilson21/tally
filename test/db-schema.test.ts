@@ -41,6 +41,7 @@ import {
 	householdMembers,
 	householdPeople,
 	householdSettings,
+	lookupCleared,
 	MAYBE_ANSWER_ANSWER_VALUES,
 	MAYBE_ANSWER_KIND_VALUES,
 	MERCHANT_STATUS_VALUES,
@@ -553,6 +554,10 @@ describe("the schema file matches the live database", () => {
 
 	it("merchant_suggested_names matches the live table, its composite key included", async () => {
 		expect(await drift(merchantSuggestedNames, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("lookup_cleared matches the live table, its primary key and 0/1 CHECK included", async () => {
+		expect(await drift(lookupCleared, CHECK_LISTS)).toEqual([]);
 	});
 
 	it("merchant_lookups matches the live table, its status CHECK included", async () => {
@@ -1639,7 +1644,7 @@ describe("the table-set check fails on a wrong list", () => {
 		expect(tableSetProblems(["a"], described)).toEqual([]);
 	});
 
-	it("the exports the drift test enumerates are all 30 application tables", () => {
+	it("the exports the drift test enumerates are all 31 application tables", () => {
 		expect(
 			schemaTables()
 				.map((table) => getTableConfig(table).name)
@@ -1663,6 +1668,7 @@ describe("the table-set check fails on a wrong list", () => {
 			"household_members",
 			"household_people",
 			"household_settings",
+			"lookup_cleared",
 			"maybe_answers",
 			"maybe_names",
 			"merchant_lookup_texts",

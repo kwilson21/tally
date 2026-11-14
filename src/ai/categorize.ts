@@ -83,6 +83,20 @@ const MIXED_QUESTION =
 const ALSO_CATEGORY_QUESTION =
 	"If this trip spans more than one of these categories, which other one is it, besides the category you picked? Choose none if the trip is all one category.";
 
+/**
+ * Asked only while the store lookup can run (spec §7, "When it runs"): whether the money went to a business or a person.
+ * Its answer files nothing and shows nowhere; it only marks the row for the lookup (src/lookup/input-mark.ts).
+ */
+export const PAYEE_QUESTION = {
+	type: "choice",
+	instructions:
+		"Who the money went to, or came from, in this transaction: a business, or a person? Choose a person only for a private individual, not a business that trades under someone's name.",
+	criteria: {
+		business: "A shop, company, organisation or service.",
+		person: "A private individual.",
+	},
+} as const;
+
 const FLAG_QUESTIONS: Record<Flag, string> = {
 	transfer:
 		"Is this a transfer between the household's own accounts, rather than spending?",
@@ -96,7 +110,11 @@ export async function askJev(
 	categories: string[],
 	apiKey: string,
 	fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = fetch,
-	options: { details?: boolean; people?: { id: number; name: string }[] } = {},
+	options: {
+		details?: boolean;
+		people?: { id: number; name: string }[];
+		payee?: boolean;
+	} = {},
 ): Promise<JevResult> {
 	const categoryInstructions = [
 		"Which of this household's budget categories does this bank transaction belong to?",
@@ -205,6 +223,7 @@ export async function askJev(
 						instructions: NOTE_WORTH_QUESTION,
 					}
 				: undefined,
+			payee: options.payee ? PAYEE_QUESTION : undefined,
 		},
 	};
 
@@ -244,6 +263,7 @@ export async function askJev(
 			? [...options.people.map((person) => `person:${person.id}`), "none"]
 			: [],
 		Boolean(options.details),
+		Boolean(options.payee),
 	);
 
 	return answer
@@ -265,6 +285,7 @@ function parseAnswer(
 	kinds: string[],
 	people: string[],
 	asksNote: boolean,
+	asksPayee: boolean,
 ): JevAnswer | null {
 	// SAFETY: Jev's documented reply is an object whose answers, when present, is an object; every field read below is checked before use.
 	const answers = (data as { answers?: JevObject } | null)?.answers;
@@ -351,6 +372,11 @@ function parseAnswer(
 	if (mixed) answer.mixed = mixed;
 
 	if (asksNote && isProbability(noteWorth)) answer.noteWorthWriting = noteWorth;
+
+	// The payee answer is kept only when it is a readable choice; a missing or malformed one never fails the rest.
+	const payee = asksPayee ? choice("payee", ["business", "person"]) : undefined;
+
+	if (payee) answer.payee = payee;
 
 	return answer;
 }

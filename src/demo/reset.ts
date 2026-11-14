@@ -35,6 +35,7 @@ export const TABLES_CHILD_FIRST = [
 	"bill_amounts",
 	"documents",
 	"balance_history",
+	"lookup_cleared",
 	"transactions",
 	"household_people",
 	"category_suggestions",
