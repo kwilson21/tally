@@ -389,3 +389,55 @@ describe("the mark's row", () => {
 		expect((await seenOf(db, [id])).get(id)).toEqual(pending?.seen);
 	});
 });
+
+describe("a category filed while Jev is being asked never clears the row (write-time check)", () => {
+	/** Files the row's category in flight, between Jev's read and the save, as a person or a rule would. */
+	async function fileDuringAsk(id: number, source: string) {
+		const category = await db
+			.prepare("SELECT id FROM categories ORDER BY id LIMIT 1")
+			.first<{ id: number }>();
+
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = ? WHERE id = ?",
+			)
+			.bind(category?.id ?? null, source, id)
+			.run();
+	}
+
+	it.each(["user", "merchant_rule", "bill"])(
+		"a credit whose category a %s files during the ask is never cleared",
+		async (source) => {
+			const id = await addRow("EMPLOYER DEPOSIT IN FLIGHT", -400000);
+
+			const fetchImpl = vi.fn(async () => {
+				await fileDuringAsk(id, source);
+
+				return jevReply();
+			});
+
+			await sortRows([id], fetchImpl);
+
+			// Jev's category answer is not stored for this row, so the row must not clear for the lookup.
+			expect(await rowOf(id)).toMatchObject({ categorySource: source });
+			expect(
+				(await markOf(id))?.cleared ?? 0,
+				"cleared must be 0 when the category was filed in flight",
+			).toBe(0);
+		},
+	);
+
+	it("a purchase whose category a person files during the ask gets no cleared mark", async () => {
+		const id = await addRow("LOCAL BAKERY IN FLIGHT", 1200);
+
+		const fetchImpl = vi.fn(async () => {
+			await fileDuringAsk(id, "user");
+
+			return jevReply();
+		});
+
+		await sortRows([id], fetchImpl);
+
+		expect((await markOf(id))?.cleared ?? 0).toBe(0);
+	});
+});

@@ -825,6 +825,10 @@ function seenAfterDetails(
 /**
  * The lookup's mark for one answered row (spec §5, lookup_cleared), saved right after the row's answer update so it lands
  * only when that update did (changes() > 0), and only while the lookup switch is still on.
+ * `cleared` is the decision made when the row was read, and it is written as 1 only if the row, as the update just left
+ * it, still stores Jev's category answer: a confidence is set, and the category source is none (a Maybe, with no category
+ * filed) or 'jev' (a filed guess). A person's ('user'), a rule's ('merchant_rule') or a bill's ('bill') category, filed
+ * while Jev was asked, means Jev's answer was never stored, so the row is never cleared.
  */
 function lookupMarkStatement(
 	db: D1Database,
@@ -834,10 +838,13 @@ function lookupMarkStatement(
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`INSERT INTO lookup_cleared (transaction_id, input_mark, cleared) SELECT ?, ?, ? WHERE changes() > 0 AND ${STILL_ON_SQL}
+			`INSERT INTO lookup_cleared (transaction_id, input_mark, cleared)
+			SELECT ?, ?, CASE WHEN ? = 1 AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?
+				AND t.category_confidence IS NOT NULL AND (t.category_source IS NULL OR t.category_source = 'jev')) THEN 1 ELSE 0 END
+			WHERE changes() > 0 AND ${STILL_ON_SQL}
 			ON CONFLICT(transaction_id) DO UPDATE SET input_mark = excluded.input_mark, cleared = excluded.cleared`,
 		)
-		.bind(id, mark.inputMark, mark.cleared ? 1 : 0, stillOn);
+		.bind(id, mark.inputMark, mark.cleared ? 1 : 0, id, stillOn);
 }
 
 /**
