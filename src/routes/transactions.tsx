@@ -2993,7 +2993,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	if (!tx) return c.notFound();
 
@@ -3171,12 +3171,12 @@ async function savePanel(
 		shownPeople: HouseholdPerson[] = people,
 	) => {
 		const values: Edit = {
-			categoryId: Number(postedCategory) || null,
+			categoryId: numberOfPosted(postedCategory) || null,
 			newCategory: postedCategory === "new",
 			newCategoryName: postedNewCategoryName,
 			alwaysForMerchant: form.get("always") === "1",
 			alwaysWas: form.get("always_was") === "1",
-			merchantRuleWas: Number(form.get("rule_category_was")) || null,
+			merchantRuleWas: numberOfPosted(form.get("rule_category_was")) || null,
 			displayName: form.get("merchant")?.toString() ?? null,
 			note: form.get("note")?.toString() ?? null,
 			noteWas: form.get("note_was")?.toString() ?? null,
@@ -3198,9 +3198,9 @@ async function savePanel(
 			// SAFETY: kind_was is the panel's hidden copy of the kind it drew, a TRANSACTION_KINDS value or empty for a row with none (edit-panel.tsx).
 			kindWas: form.get("kind_was")?.toString() as Edit["kindWas"],
 			forPersonId: form.has("for_person_id")
-				? Number(form.get("for_person_id")) || null
+				? numberOfPosted(form.get("for_person_id")) || null
 				: tx.forPersonId,
-			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
+			forPersonIdWas: numberOfPosted(form.get("for_person_id_was")) || null,
 		};
 
 		// The rule the panel posted, named as it was: another tab may have set the store's rule since, and the
