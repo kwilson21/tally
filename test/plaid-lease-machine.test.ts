@@ -103,11 +103,12 @@ describe("leaseStateOf", () => {
 		expect(state).toBe("expired");
 	});
 
-	it("truncates now to the whole second, as datetime('now') does: 999 ms after a lease's second is still held", () => {
+	it("truncates now to the whole second, as datetime('now') does: a lease ending at 11:59:59 is held through 11:59:59.999 and expired from 12:00:00.000", () => {
 		const lease = row({ lockId: HOLDER, lockedUntil: "2026-11-14 11:59:59" });
 
+		expect(leaseStateOf(lease, NOW - 1000)).toBe("held");
 		expect(leaseStateOf(lease, NOW - 1)).toBe("held");
-		expect(leaseStateOf(lease, NOW - 1000)).toBe("expired");
+		expect(leaseStateOf(lease, NOW)).toBe("expired");
 	});
 
 	it("reads a lease 1 ms past its second as expired only once the clock reaches the next second", () => {
@@ -284,6 +285,30 @@ describe("OWNS, the guard every page write carries", () => {
 			}
 		});
 	}
+});
+
+describe("a disconnected bank that still stores a lock id", () => {
+	// Not reachable from production: DISCONNECT clears both columns, and TAKE refuses a disconnected bank. The guard still
+	// has to refuse, because the machine says disconnected refuses every event.
+	it("fails OWNS and EXTEND for its old holder", async () => {
+		const id = await seed({
+			label: "disconnected with a lock",
+			state: "disconnected",
+			lockId: HOLDER,
+			lockedUntil: FUTURE,
+			disconnected: true,
+		});
+
+		expect(
+			present(
+				await db
+					.prepare(`SELECT ${ownsLeaseSql("?1", "?2")} AS owns`)
+					.bind(id, HOLDER)
+					.first<{ owns: number }>(),
+			).owns,
+		).toBe(0);
+		expect(await write("EXTEND", id, HOLDER)).toBe(0);
+	});
 });
 
 describe("two runs over one bank", () => {
