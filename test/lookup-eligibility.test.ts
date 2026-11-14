@@ -13,8 +13,10 @@ import {
 	type Eligibility,
 	type EligibilityRow,
 	eligibility,
+	type ReadRow,
 	readEligibility,
 	readEligibilityRows,
+	readRowFacts,
 } from "../src/lookup/eligibility";
 import { inputMark } from "../src/lookup/input-mark";
 import { lookupTextOf } from "../src/lookup/lookup-text";
@@ -692,19 +694,67 @@ describe("readEligibility: a person's answer keeps the mark", () => {
 	});
 });
 
-describe("readEligibility: a row with no account", () => {
-	// Skipped: D1 enforces the account foreign key and ignores PRAGMA foreign_keys, so no row without an account can be
-	// written in the test database. The LEFT JOIN in the read is what keeps such a row; it is unreachable here.
-	it.skip("a transfer-flagged row whose account row is missing is still private", async () => {
-		await clearedRow();
-		await db
-			.prepare(
-				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, plaid_category, flag_transfer) VALUES (999999, ?, -100, ?, 'orphan-1', 'FOOD_AND_DRINK', 1)",
-			)
-			.bind(TODAY, STORE)
-			.run();
+/** One read row with an ordinary, sign-bearing store purchase; each test changes the one field it is about. */
+function readRow(
+	overrides: Partial<Omit<ReadRow, "accountType">> & {
+		accountType?: string | null;
+	} = {},
+): ReadRow {
+	// SAFETY: a null accountType is the LEFT JOIN's row with no account, which readRowFacts takes as the ReadRow it is; every other
+	// field is a value of its ReadRow type.
+	return {
+		id: 1,
+		merchantKey: STORE,
+		rawName: STORE,
+		plaidColumn: "FOOD_AND_DRINK",
+		plaidTransactionId: "read-row-1",
+		flagTransfer: 0,
+		flagIncome: 0,
+		flagReimbursement: 0,
+		excluded: 0,
+		transferKind: 0,
+		maybe: 0,
+		parentId: null,
+		isSplit: 0,
+		accountType: "depository",
+		accountSubtype: null,
+		categoryId: food,
+		categorySource: "jev",
+		categoryConfidence: null,
+		attempts: 0,
+		holdsAnswer: 1,
+		storedPrivate: null,
+		merchantRule: 0,
+		markInput: null,
+		markCleared: null,
+		...overrides,
+	} as ReadRow;
+}
 
-		expect(await decided()).toEqual({ kind: "private" });
+const noPrivateText = () => false;
+
+describe("readRowFacts: the account guard and the flags, pure", () => {
+	// The database cannot hold a transaction whose account is missing (its foreign key refuses it), so the guard is
+	// tested on the read row itself: a row with no account is never a sign, and its privacy facts still apply.
+	it("a row with no account (accountType null) is not a sign, even with an ordinary Plaid category", () => {
+		expect(
+			readRowFacts(readRow({ accountType: null }), noPrivateText).sign,
+		).toBe(false);
+	});
+
+	it("a row with no account and a transfer flag is still private", () => {
+		expect(
+			readRowFacts(
+				readRow({ accountType: null, flagTransfer: 1 }),
+				noPrivateText,
+			).private,
+		).toBe(true);
+	});
+
+	it("the same row on a depository account is a sign (pins the guard, not just the default)", () => {
+		expect(
+			readRowFacts(readRow({ accountType: "depository" }), noPrivateText).sign,
+		).toBe(true);
 	});
 });
 

@@ -100,8 +100,40 @@ export function holdsJevAnswerSql(alias: string): string {
 		OR (${alias}.credit_reviewed = 1 AND ${alias}.credit_reviewed_by IS NULL))`;
 }
 
+/**
+ * A read row's privacy and sign, pure: `privateText` judges a text (privateTextReason) and is passed in so each distinct text is
+ * judged once. A row with no account is never a sign (the LEFT JOIN leaves its account empty), but its privacy facts still apply.
+ */
+export function readRowFacts(
+	row: ReadRow,
+	privateText: (text: string) => boolean,
+) {
+	const isPrivate =
+		row.flagTransfer === 1 ||
+		row.flagIncome === 1 ||
+		row.flagReimbursement === 1 ||
+		row.excluded === 1 ||
+		row.transferKind === 1 ||
+		row.maybe === 1 ||
+		isPrivatePlaidCategory(row.plaidColumn) ||
+		row.storedPrivate === 1 ||
+		privateText(row.merchantKey) ||
+		privateText(row.rawName);
+
+	const sign =
+		row.accountType !== null &&
+		row.parentId === null &&
+		row.accountType !== "cash" &&
+		row.accountSubtype !== "apple_card" &&
+		row.plaidTransactionId !== null &&
+		row.plaidColumn !== null &&
+		!isPrivatePlaidCategory(row.plaidColumn);
+
+	return { private: isPrivate, sign };
+}
+
 /** One transaction's columns for the read: its live facts, its stored mark, and what Jev is told (jevSeenColumnsSql). */
-type ReadRow = JevSeenColumns & {
+export type ReadRow = JevSeenColumns & {
 	id: number;
 	rawName: string;
 	plaidColumn: string | null;
@@ -212,26 +244,7 @@ export async function readEligibilityRows(
 
 			if (wanted && !wanted.has(lookupText)) return null;
 
-			const isPrivate =
-				row.flagTransfer === 1 ||
-				row.flagIncome === 1 ||
-				row.flagReimbursement === 1 ||
-				row.excluded === 1 ||
-				row.transferKind === 1 ||
-				row.maybe === 1 ||
-				isPrivatePlaidCategory(row.plaidColumn) ||
-				row.storedPrivate === 1 ||
-				privateText(merchantKey) ||
-				privateText(row.rawName);
-
-			const sign =
-				row.accountType !== null &&
-				row.parentId === null &&
-				row.accountType !== "cash" &&
-				row.accountSubtype !== "apple_card" &&
-				row.plaidTransactionId !== null &&
-				row.plaidColumn !== null &&
-				!isPrivatePlaidCategory(row.plaidColumn);
+			const { private: isPrivate, sign } = readRowFacts(row, privateText);
 
 			const stored =
 				row.markInput === null
