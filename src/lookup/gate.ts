@@ -7,6 +7,12 @@ import type { AiSwitches } from "../db/ai-switches";
 export const storeLookupDailyCap = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 300 : 0;
 
+/** The half of the gate that is set in the environment: a Tavily key is set and the day's cap is above 0. */
+export const lookupEnvOpen = (env: {
+	DEMO?: string;
+	TAVILY_API_KEY?: string;
+}) => Boolean(env.TAVILY_API_KEY) && storeLookupDailyCap(env) > 0;
+
 /**
  * True only while the lookup's switch is on (strictly: a plan cached before the switch existed has no such field),
  * Jev's category and income answers are kept, a Tavily key is set and the day's cap is above 0.
@@ -21,7 +27,6 @@ export function lookupAsks(
 		switches.lookupStores === true &&
 		switches.categories &&
 		switches.income &&
-		Boolean(env.TAVILY_API_KEY) &&
-		storeLookupDailyCap(env) > 0
+		lookupEnvOpen(env)
 	);
 }

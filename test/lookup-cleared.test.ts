@@ -486,3 +486,25 @@ describe("a category filed while Jev is being asked never clears the row (write-
 		expect((await markOf(id))?.cleared ?? 0).toBe(0);
 	});
 });
+
+describe("with no active category, nothing is saved, so no mark is written", () => {
+	// Not a test of the mark's category_confidence check: with no active category the answer's update changes nothing
+	// (changes() is 0), so the mark's own changes() > 0 guard stops the write first. That check is a second guard, unreached today.
+	it("a sure business answer saves no category confidence and writes no mark", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		const id = await addRow("LOCAL BAKERY NO CATEGORY", 1200);
+		const fetchImpl = vi.fn(async () => jevReply());
+
+		await sortRows([id], fetchImpl);
+
+		const stored = await db
+			.prepare(
+				"SELECT category_confidence AS confidence FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ confidence: number | null }>();
+
+		expect(stored?.confidence ?? null).toBeNull();
+		expect((await markOf(id))?.cleared ?? 0).toBe(0);
+	});
+});
