@@ -611,6 +611,103 @@ describe("readEligibility: each column Jev's answer writes counts as an answer",
 	);
 });
 
+describe("readEligibility: split parents keep their mark", () => {
+	it("a split parent whose mark says Jev was asked and did not clear it holds the text back (fails open before the fix)", async () => {
+		await clearedRow();
+		const parent = await addRow({ is_split: 1 });
+		await markCleared(parent, 0);
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a split parent with a cleared mark that still matches does not block", async () => {
+		await clearedRow();
+		const parent = await addRow({ is_split: 1 });
+		await markCleared(parent, 1);
+
+		await expectMaySearch();
+	});
+
+	it("a split parent whose mark no longer matches is owed, and its id is in owed", async () => {
+		await clearedRow();
+		const parent = await addRow({ is_split: 1 });
+		await markCleared(parent, 1);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET note = 'Changed after the answer' WHERE id = ?",
+			)
+			.bind(parent)
+			.run();
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [parent],
+		});
+	});
+});
+
+describe("readEligibility: a key's privacy does not depend on insertion order", () => {
+	it("a private key inserted first makes the shared text private", async () => {
+		await addRow({ raw_name: "HARBOR BAKERY", flag_transfer: 1 });
+		await clearedRow();
+
+		expect(await decided()).toEqual({ kind: "private" });
+	});
+
+	it("a private key inserted last makes the shared text private", async () => {
+		await clearedRow();
+		await addRow({ raw_name: "HARBOR BAKERY", flag_transfer: 1 });
+
+		expect(await decided()).toEqual({ kind: "private" });
+	});
+});
+
+describe("readEligibility: a person's answer keeps the mark", () => {
+	it("a row a person re-filed after Jev answered, with a mark Jev did not clear, is answered and blocks its text", async () => {
+		const id = await addRow({
+			category_id: food,
+			category_source: "jev",
+			jev_category_id: food,
+		});
+
+		await markCleared(id, 0);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(other, id)
+			.run();
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a row a person filed with no mark and no Jev answer does not block (keep today's rule)", async () => {
+		await clearedRow();
+		await addRow({ category_id: other, category_source: "user" });
+
+		await expectMaySearch();
+	});
+});
+
+describe("readEligibility: a row with no account", () => {
+	// Skipped: D1 enforces the account foreign key and ignores PRAGMA foreign_keys, so no row without an account can be
+	// written in the test database. The LEFT JOIN in the read is what keeps such a row; it is unreachable here.
+	it.skip("a transfer-flagged row whose account row is missing is still private", async () => {
+		await clearedRow();
+		await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id, plaid_category, flag_transfer) VALUES (999999, ?, -100, ?, 'orphan-1', 'FOOD_AND_DRINK', 1)",
+			)
+			.bind(TODAY, STORE)
+			.run();
+
+		expect(await decided()).toEqual({ kind: "private" });
+	});
+});
+
 describe("readEligibility: rules that settle a text", () => {
 	it("a merchant rule on the key settles the text", async () => {
 		await clearedRow();

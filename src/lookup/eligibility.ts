@@ -139,7 +139,7 @@ const READ_SQL = `SELECT t.id AS id, t.raw_name AS rawName, t.plaid_category AS 
 		lc.input_mark AS markInput, lc.cleared AS markCleared,
 		${jevSeenColumnsSql()}
 	FROM transactions t
-	JOIN accounts a ON a.id = t.account_id
+	LEFT JOIN accounts a ON a.id = t.account_id
 	LEFT JOIN household_people hp ON hp.id = t.for_person_id
 	LEFT JOIN merchant_lookup_texts mlt ON mlt.merchant_key = ${merchantKeySql("t")}
 	LEFT JOIN lookup_cleared lc ON lc.transaction_id = t.id`;
@@ -150,7 +150,12 @@ const RULES_SQL = `SELECT r.cleaned_text AS cleanedText FROM bank_text_rules r
 
 /** The jev state of a row, from its retry columns (retryStateOf), a split parent is never asked, and a filed row counts as answered only when it holds an answer or a mark. */
 function jevOf(row: ReadRow): EligibilityRow["jev"] {
-	if (row.isSplit === 1) return "never";
+	// A split parent has no category of its own and Jev is not asked about it again, so it is never waiting. It still keeps
+	// its mark: answered when it has a lookup_cleared row or holds a Jev answer, otherwise never.
+	if (row.isSplit === 1)
+		return row.holdsAnswer === 1 || row.markInput !== null
+			? "answered"
+			: "never";
 
 	const state = retryStateOf({
 		attempts: row.attempts,
@@ -220,6 +225,7 @@ export async function readEligibilityRows(
 				privateText(row.rawName);
 
 			const sign =
+				row.accountType !== null &&
 				row.parentId === null &&
 				row.accountType !== "cash" &&
 				row.accountSubtype !== "apple_card" &&
