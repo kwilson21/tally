@@ -160,6 +160,10 @@ async function exchange(jwt: string, body: string) {
 }
 
 describe("Plaid routes", () => {
+	// Background work a route starts in waitUntil (a repaired bank's first sync). afterEach drains it while the fetch
+	// stub is still in place, so a sync cannot reach Plaid during a later test and log its errors there.
+	const background: Promise<unknown>[] = [];
+
 	beforeEach(async () => {
 		await env.DB.prepare("DELETE FROM plaid_items").run();
 		await saveAiSwitches(env.DB, { details: false });
@@ -175,7 +179,8 @@ describe("Plaid routes", () => {
 		});
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		await Promise.allSettled(background.splice(0));
 		Object.assign(env, {
 			DEMO: "true",
 			PLAID_CLIENT_ID: undefined,
@@ -351,7 +356,7 @@ describe("Plaid routes", () => {
 
 		async function relinkWith(db: D1Database, id: number) {
 			const waitUntil = vi.fn((promise: Promise<unknown>) => {
-				void promise.catch(() => {});
+				background.push(promise);
 			});
 
 			vi.stubGlobal("fetch", async () =>
@@ -429,7 +434,7 @@ describe("Plaid routes", () => {
 			.first<{ id: number }>();
 
 		const waitUntil = vi.fn((promise: Promise<unknown>) => {
-			void promise.catch(() => {});
+			background.push(promise);
 		});
 
 		vi.stubGlobal("fetch", async () =>
@@ -572,7 +577,7 @@ describe("Plaid routes", () => {
 			.first<{ id: number }>();
 
 		const waitUntil = vi.fn((promise: Promise<unknown>) => {
-			void promise.catch(() => {});
+			background.push(promise);
 		});
 
 		vi.stubGlobal("fetch", async () =>
