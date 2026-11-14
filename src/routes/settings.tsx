@@ -1006,7 +1006,7 @@ const removeNeverSuggest = removeNeverSuggestLine<NeverSuggestRule>();
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	// A refused id is 0, which no line has: the rule finds no line, as for a number that is no line's.
-	const id = rowIdOf(textOf(form.get("id"))) ?? 0;
+	const id = rowIdOrZero(textOf(form.get("id")));
 	const merchantKey = String(form.get("merchant_key") ?? "");
 	const kind = String(form.get("kind") ?? "");
 	const search = String(form.get("rules_search") ?? "");
@@ -1144,7 +1144,7 @@ settings.post("/settings/learned/undo", async (c) => {
 	// The token as posted, echoed as it was; a file part is no token, so it is the empty text.
 	const token = textOf(form.get("token"));
 	// A token that is no Forget's number finds no row, so the rule refuses it as it refuses one already undone.
-	const id = rowIdOf(token) ?? 0;
+	const id = rowIdOrZero(token);
 
 	const refusal = await runWith(
 		c.env.DB,
