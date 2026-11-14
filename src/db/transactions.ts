@@ -3140,7 +3140,7 @@ export type JevSeen = {
 };
 
 /** The columns that make up what Jev is told about a transaction (JevSeen), read the same way wherever a row is read for Jev. */
-function jevSeenColumnsSql(): string {
+export function jevSeenColumnsSql(): string {
 	return `${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "display_name")} AS merchantName,
 		${merchantNamesJsonSql(merchantKeySql("t"))} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
 		t.amount_cents AS amountCents, t.account_id AS accountId, a.type AS accountType,
@@ -3148,7 +3148,7 @@ function jevSeenColumnsSql(): string {
 }
 
 /** The columns jevSeenColumnsSql reads, by their names. */
-type JevSeenColumns = {
+export type JevSeenColumns = {
 	rawName: string;
 	ownName: string | null;
 	merchantKey: string;
@@ -3166,7 +3166,7 @@ type JevSeenColumns = {
 };
 
 /** What Jev is told of a row, from its jevSeenColumnsSql columns: the one reading of it. */
-function jevSeenOf(row: JevSeenColumns): JevSeen {
+export function jevSeenOf(row: JevSeenColumns): JevSeen {
 	return {
 		rawName: row.rawName,
 		ownName: row.ownName,

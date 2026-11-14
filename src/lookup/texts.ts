@@ -66,7 +66,7 @@ export function lookupTextRow(
  * said No to it does not count: a No may be about an older amount, which sync does not clear (src/plaid/sync.ts), so a fresh
  * Maybe in range stays private. A Yes clears the confidence or sets a flag, so it leaves the range.
  */
-const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR ${askedSql("income", "t.income_confidence")})`;
+export const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR ${askedSql("income", "t.income_confidence")})`;
 
 /**
  * The facts the decision reads, one row per merchant key over every one of its transactions (cash, hand-entered, Apple Card and
