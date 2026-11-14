@@ -44,6 +44,8 @@ export const TABLES_CHILD_FIRST = [
 	"savings_goal_amounts",
 	"merchant_name_failures",
 	"merchant_suggested_names",
+	"merchant_lookup_texts",
+	"merchant_lookups",
 	"merchants",
 	"categories",
 	"accounts",

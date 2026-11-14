@@ -5,7 +5,11 @@
 // this rule needs no exception for bill payments, and removing a link leaves the exclusion as it was.
 
 /** Plaid categories for money that only moves between a family's own accounts or pays down a loan or card. */
-const TRANSFER_CATEGORIES = ["TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS"];
+export const TRANSFER_CATEGORIES = [
+	"TRANSFER_IN",
+	"TRANSFER_OUT",
+	"LOAN_PAYMENTS",
+];
 
 /** SQL that is true when a Plaid category (a column or a bound value) is one of those. The names are constants, never input. */
 export const isPlaidTransferSql = (category: string) =>

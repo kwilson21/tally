@@ -52,7 +52,7 @@ const isRecord = (value: AiAnswer): value is Record<string, Json> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The text an answer carries: the answer itself, or its response field. Any other answer carries none. */
-function answerText(answer: AiAnswer): string | undefined {
+export function answerText(answer: AiAnswer): string | undefined {
 	if (isText(answer)) return answer;
 
 	const response = isRecord(answer) ? answer.response : undefined;
@@ -311,12 +311,12 @@ const COMPACT_INSTRUCTION =
  * spaces and joiners, bidi marks) become spaces, and full-width and other compatibility forms are folded (NFKC), so
  * a full-width digit is an ASCII one. Other characters are kept as they are, so a short alphanumeric is sent as it was.
  */
-function foldBankText(text: string): string {
+export function foldBankText(text: string): string {
 	return text.replace(/\p{Cf}/gu, " ").normalize("NFKC");
 }
 
 /** True when the folded text reads as an instruction, with its spaces or without them (INSTRUCTION_LIKE). */
-function readsAsInstruction(folded: string): boolean {
+export function readsAsInstruction(folded: string): boolean {
 	const compact = folded.replace(/[^\p{L}]/gu, "").toLowerCase();
 
 	return INSTRUCTION_LIKE.test(folded) || COMPACT_INSTRUCTION.test(compact);
@@ -408,7 +408,8 @@ export function bankTextToSend(
  * The bank text as the data inside the model's boundary: quotes and marker characters taken out, so the value cannot
  * close the quotes around it or open a tag (decision 164).
  */
-const boundaryValue = (text: string) => text.replace(/["'`“”‘’<>[\]{}\\]/g, "");
+export const boundaryValue = (text: string) =>
+	text.replace(/["'`“”‘’<>[\]{}\\]/g, "");
 
 /** A name as one line: format characters and every run of whitespace or control characters become one space. */
 const oneLine = (text: string) =>
