@@ -501,6 +501,7 @@ export function EditSheet({
 			excludedAfterSave(tx, {
 				...values,
 				excluded: true,
+				excludedWas: undefined,
 				income: false,
 				refundOfId: tx.refundOfId ?? null,
 				creditReviewed,

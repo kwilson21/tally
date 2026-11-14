@@ -2759,4 +2759,49 @@ describe("the edit panel posts whether Exclude was on when drawn (excluded_was)"
 			credit_reviewed: 1,
 		});
 	});
+
+	it("a stale panel that drew Exclude off, saved after a sync excluded the credit, says nothing about Exclude and leaves it excluded (#1086)", async () => {
+		await plaidCredit(1);
+
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "stale note",
+			back: "/transactions",
+			excluded_was: "0",
+		});
+
+		expect(res.status).toBeLessThan(400);
+		const announce = JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce;
+		expect(announce).not.toMatch(/exclud|counts in the budget/i);
+		expect(
+			await env.DB.prepare(
+				"SELECT excluded, excluded_source FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({ excluded: 1, excluded_source: "plaid" });
+	});
+
+	it("a stale panel that drew Exclude on, saved after a sync included the credit, says nothing about Exclude and leaves it included (#1086)", async () => {
+		await plaidCredit(0);
+
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "stale note",
+			back: "/transactions",
+			excluded: "1",
+			excluded_was: "1",
+		});
+
+		expect(res.status).toBeLessThan(400);
+		const announce = JSON.parse(res.headers.get("HX-Trigger") ?? "{}").announce;
+		expect(announce).not.toMatch(/exclud|counts in the budget/i);
+		expect(
+			await env.DB.prepare(
+				"SELECT excluded, excluded_source FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toEqual({ excluded: 0, excluded_source: null });
+	});
 });

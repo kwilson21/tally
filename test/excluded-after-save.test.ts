@@ -118,55 +118,74 @@ describe("excludedAfterSave agrees with the exclusion saveEdit leaves", () => {
 						for (const chip of [false, true])
 							for (const editIncome of [false, true])
 								for (const reviewed of [false, true])
-									for (const link of [false, true]) {
-										if (link && cents > 0) continue;
+									for (const link of [false, true])
+										for (const drawn of [undefined, false, true]) {
+											if (link && cents > 0) continue;
 
-										const edit: Edit = {
-											categoryId: null,
-											alwaysForMerchant: false,
-											displayName: null,
-											note: null,
-											excluded: chip,
-											income: editIncome,
-											incomeWas: income,
-											creditReviewed: reviewed,
-											creditReviewedWas: reviewedByUser,
-											creditReviewedProvided: true,
-											refundOfId: link ? await newPurchase() : null,
-										};
+											const edit: Edit = {
+												categoryId: null,
+												alwaysForMerchant: false,
+												displayName: null,
+												note: null,
+												excluded: chip,
+												excludedWas: drawn,
+												income: editIncome,
+												incomeWas: income,
+												creditReviewed: reviewed,
+												creditReviewedWas: reviewedByUser,
+												creditReviewedProvided: true,
+												refundOfId: link ? await newPurchase() : null,
+											};
 
-										const outcome = await saveAndRead(
-											stored,
-											{ cents, income, reviewedByUser },
-											edit,
-										);
-
-										// Every case lands. A refused save writes nothing and would leave the case uncompared, so it is a
-										// failure of this test's setup, not a pass.
-										if (!outcome.saved) {
-											refused.push(
-												`${stored.label}, ${cents} cents, link ${link}`,
+											const outcome = await saveAndRead(
+												stored,
+												{ cents, income, reviewedByUser },
+												edit,
 											);
-											continue;
+
+											// Every case lands. A refused save writes nothing and would leave the case uncompared, so it is a
+											// failure of this test's setup, not a pass.
+											if (!outcome.saved) {
+												refused.push(
+													`${stored.label}, ${cents} cents, link ${link}, drawn ${drawn}`,
+												);
+												continue;
+											}
+
+											compared += 1;
+
+											if (link) linksCompared += 1;
+
+											if (outcome.predicted !== outcome.stored)
+												wrong.push(
+													`${stored.label}, ${cents} cents, income ${income}, reviewed ${reviewedByUser} -> chip ${chip}, drawn ${drawn}, income ${editIncome}, reviewed ${reviewed}, link ${link}: predicted ${outcome.predicted}, stored ${outcome.stored}`,
+												);
+
+											// A save whose Exclude is the one the panel drew leaves the stored exclusion alone, except
+											// where the review lifts Plaid's exclusion off a credit (the lift is the one write that can change it).
+											const leftAlone =
+												drawn !== undefined && drawn === chip && !link;
+
+											const liftable = stored.source === "plaid" && cents < 0;
+
+											if (
+												leftAlone &&
+												!liftable &&
+												outcome.stored !== (stored.excluded === 1)
+											)
+												wrong.push(
+													`${stored.label}, ${cents} cents, drawn ${drawn}, chip ${chip}: left Exclude as drawn, but stored ${outcome.stored}`,
+												);
 										}
 
-										compared += 1;
-
-										if (link) linksCompared += 1;
-
-										if (outcome.predicted !== outcome.stored)
-											wrong.push(
-												`${stored.label}, ${cents} cents, income ${income}, reviewed ${reviewedByUser} -> chip ${chip}, income ${editIncome}, reviewed ${reviewed}, link ${link}: predicted ${outcome.predicted}, stored ${outcome.stored}`,
-											);
-									}
-
-		// 4 stored exclusions x 2 amounts x 2 incomes x 2 reviews x 2 chips x 2 incomes x 2 reviews, plus the 128 of them
-		// that are credits, once more with a refund link.
+		// The matrix: 4 stored exclusions x 2 amounts x 2 incomes x 2 reviews x 2 chips x 2 incomes x 2 reviews x 2 links,
+		// less the 128 links on a purchase (a refund link is only for a credit), so 384 cases; each once for every answer
+		// the panel can post for excluded_was (not posted, drawn off, drawn on): 1152. The links on a credit are 384.
 		expect(refused.slice(0, 6), `${refused.length} saves were refused`).toEqual(
 			[],
 		);
-		expect(compared).toBe(384);
-		expect(linksCompared).toBe(128);
+		expect(compared).toBe(1152);
+		expect(linksCompared).toBe(384);
 		expect(wrong.slice(0, 12), `${wrong.length} cases differ`).toEqual([]);
 	}, 300_000);
 });

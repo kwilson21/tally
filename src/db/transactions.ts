@@ -17,6 +17,7 @@ import { gaveUpSql, openSql } from "../machines/jev-retry";
 import {
 	type Edit,
 	excludedAfterSave,
+	excludeKept,
 	followsPurchaseAfterSave,
 	includedTransferCredit,
 	merchantRuleChange,
@@ -1096,9 +1097,13 @@ export async function getTransaction(
 	};
 }
 
-/** Sets `excluded`, recording a person as its source only when the value changes. */
+/**
+ * Sets `excluded`, recording a person as its source only when the value changes. Binds the kept flag (1 when the
+ * save leaves Exclude as stored, excludeKept), the posted value, the kept flag again, then the posted value: kept
+ * leaves both columns alone.
+ */
 const EXCLUDE =
-	"excluded_source = CASE WHEN excluded = ? THEN excluded_source ELSE 'user' END, excluded = ?";
+	"excluded_source = CASE WHEN ? = 1 OR excluded = ? THEN excluded_source ELSE 'user' END, excluded = CASE WHEN ? = 1 THEN excluded ELSE ? END";
 
 /**
  * Gives a merchant's rule category to every transaction a person hasn't chosen (§7), except a split
@@ -1391,7 +1396,8 @@ export async function saveEdit(
 	// Changing the exclusion makes it a person's choice, which Jev never overrides. A refund being
 	// linked counts, whatever the panel's Exclude chip held (it was drawn from the old state).
 	const excluded = edit.excluded && !linking ? 1 : 0;
-	const excludeArgs = [excluded, excluded];
+	const kept = excludeKept(edit, linking);
+	const excludeArgs = [kept ? 1 : 0, excluded, kept ? 1 : 0, excluded];
 
 	// The review and income parameters the panel's own UPDATE shares between its two forms.
 	const reviewArgs = [
@@ -1730,7 +1736,7 @@ export async function saveEdit(
 		);
 	}
 
-	if (excluded !== current.excluded)
+	if (!kept && excluded !== current.excluded)
 		statements.push(
 			gated(
 				`UPDATE transactions SET excluded = ?1, excluded_source = 'user', updated_by = ?2, updated_at = datetime('now')
