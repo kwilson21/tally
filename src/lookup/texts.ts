@@ -79,7 +79,7 @@ const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR
  * The order comes from the ORDER BY inside the subquery, not from the query plan, so the same rows always give the same text.
  */
 const sortedDistinctSql = (column: string) =>
-	`SELECT k, json_group_array(v) AS list FROM (SELECT DISTINCT ${merchantKeySql("t")} AS k, ${column} AS v FROM transactions t ORDER BY k, v) GROUP BY k`;
+	`SELECT k, json_group_array(v ORDER BY v) AS list FROM (SELECT DISTINCT ${merchantKeySql("t")} AS k, ${column} AS v FROM transactions t) GROUP BY k`;
 
 /**
  * The version is the decision's facts as one text, with the two lists in sorted order (sortedDistinctSql). The read and the

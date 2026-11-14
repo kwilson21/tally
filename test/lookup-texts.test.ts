@@ -462,6 +462,54 @@ describe("a save only clears a key whose facts are still the ones it read", () =
 	});
 });
 
+describe("each part of the version makes the save refuse to clear", () => {
+	it("a Plaid category changed to TRANSFER_OUT between the read and the save leaves its key private", async () => {
+		await addRow({
+			merchant_name: "Part Category Co",
+			raw_name: "PART CATEGORY CO",
+			plaid_category: "FOOD_AND_DRINK",
+		});
+		const read = await readLookupTexts(db);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET plaid_category = 'TRANSFER_OUT' WHERE merchant_name = 'Part Category Co'",
+			)
+			.run();
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Part Category Co")).toBe(1);
+	});
+
+	it("a transfer guess moved into the Maybe range between the read and the save leaves its key private", async () => {
+		await addRow({ merchant_name: "Part Maybe Co", raw_name: "PART MAYBE CO" });
+		const read = await readLookupTexts(db);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET transfer_confidence = 0.6 WHERE merchant_name = 'Part Maybe Co'",
+			)
+			.run();
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Part Maybe Co")).toBe(1);
+	});
+
+	it("a row's kind changed to transfer between the read and the save leaves its key private", async () => {
+		await addRow({ merchant_name: "Part Kind Co", raw_name: "PART KIND CO" });
+		const read = await readLookupTexts(db);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'transfer' WHERE merchant_name = 'Part Kind Co'",
+			)
+			.run();
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Part Kind Co")).toBe(1);
+	});
+});
+
 describe("the version does not depend on the order the rows came in", () => {
 	/** An ordinary store's six purchases: clean texts in no sorted order, three categories and one NULL, unsorted. */
 	const SHOP = "Ordered Shop Co";
