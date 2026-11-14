@@ -18,7 +18,7 @@ export type LookupTextFacts = {
 	categories: (string | null)[];
 	/** True when any of its transactions has flag_transfer, flag_income or flag_reimbursement set. */
 	flagged: boolean;
-	/** True when any of its transactions has an unanswered Maybe transfer or Maybe income. */
+	/** True when any of its transactions has a transfer or income guess in the Maybe range, whether or not a person said No. */
 	maybe: boolean;
 	/** True when any of its transactions has the transfer kind. */
 	transfer: boolean;
@@ -61,13 +61,11 @@ export function lookupTextRow(
 }
 
 /**
- * An unanswered Maybe is a row whose transfer or income guess is still in the Maybe range (askedSql, the same range the
- * review asks in) and that the person has not said No to. A Yes leaves the range (its confidence is cleared, or the flag
- * is set), so only a No needs its own check. Income is read from the stored confidence, not the masked guess, so a
- * person's own income answer that left the guess in place still counts as a Maybe: the fail-closed choice.
+ * A Maybe is a row whose transfer or income guess is in the Maybe range (askedSql, the review's own range). Whether a person
+ * said No to it does not count: a No may be about an older amount, which sync does not clear (src/plaid/sync.ts), so a fresh
+ * Maybe in range stays private. A Yes clears the confidence or sets a flag, so it leaves the range.
  */
-const MAYBE_UNANSWERED_SQL = `((${askedSql("transfer", "t.transfer_confidence")} AND t.transfer_maybe_declined = 0)
-	OR (${askedSql("income", "t.income_confidence")} AND t.income_maybe_declined = 0))`;
+const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR ${askedSql("income", "t.income_confidence")})`;
 
 /** How many keys one upsert statement writes (the JSON rows it binds). */
 const KEYS_PER_STATEMENT = 500;
@@ -86,7 +84,7 @@ export async function fillLookupTexts(
 				json_group_array(DISTINCT t.raw_name) AS rawTexts,
 				json_group_array(DISTINCT t.plaid_category) AS categories,
 				MAX(t.flag_transfer = 1 OR t.flag_income = 1 OR t.flag_reimbursement = 1) AS flagged,
-				MAX(${MAYBE_UNANSWERED_SQL}) AS maybe,
+				MAX(${MAYBE_IN_RANGE_SQL}) AS maybe,
 				MAX(t.kind = 'transfer') AS transfer,
 				MAX(t.excluded = 1) AS excluded
 			FROM transactions t

@@ -177,7 +177,7 @@ describe("fillLookupTexts: what makes a key private", () => {
 		expect(await privateOf("Sure Guess Co")).toBe(0);
 	});
 
-	it("a Maybe a person said No to is answered, so it is not private", async () => {
+	it("a Maybe in range is private even after a No, since the No may be about an older amount", async () => {
 		await addRow({
 			merchant_name: "Declined Transfer Co",
 			transfer_confidence: 0.6,
@@ -191,8 +191,8 @@ describe("fillLookupTexts: what makes a key private", () => {
 
 		await fillLookupTexts(db);
 
-		expect(await privateOf("Declined Transfer Co")).toBe(0);
-		expect(await privateOf("Declined Income Co")).toBe(0);
+		expect(await privateOf("Declined Transfer Co")).toBe(1);
+		expect(await privateOf("Declined Income Co")).toBe(1);
 	});
 
 	it("a cash row with a flag, a hand-entered row with a transfer kind, an Apple Card row and a split part with a transfer flag each make their key private", async () => {
@@ -278,6 +278,81 @@ describe("fillLookupTexts: what makes a key private", () => {
 		await fillLookupTexts(db);
 
 		expect(await privateOf("Returning Co")).toBe(0);
+	});
+});
+
+describe("fillLookupTexts: the bank texts and Plaid categories it reads", () => {
+	it("a key whose own text is clean is private when one of its raw bank texts names a bank rail", async () => {
+		await addRow({
+			merchant_name: "Jane Payments Co",
+			raw_name: "JANE PAYMENTS CO",
+		});
+		await addRow({
+			merchant_name: "Jane Payments Co",
+			raw_name: "ACH PAYMENT TO JANE DOE",
+		});
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Jane Payments Co")).toBe(1);
+	});
+
+	it("a key is private when one of its raw bank texts names a payment app", async () => {
+		await addRow({ merchant_name: "Pay App Co", raw_name: "PAY APP CO" });
+		await addRow({ merchant_name: "Pay App Co", raw_name: "VENMO *J RIVERA" });
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Pay App Co")).toBe(1);
+	});
+
+	it.each(["TRANSFER_OUT", "INCOME", "BANK_FEES"])(
+		"a key with a transaction in the Plaid category %s is private",
+		async (category) => {
+			await addRow({
+				merchant_name: `Category ${category} Co`,
+				raw_name: "CATEGORY CO",
+				plaid_category: category,
+			});
+
+			await fillLookupTexts(db);
+
+			expect(await privateOf(`Category ${category} Co`)).toBe(1);
+		},
+	);
+
+	it("a key with one ordinary category and one private category is private", async () => {
+		await addRow({
+			merchant_name: "Mixed Category Co",
+			raw_name: "MIXED CATEGORY CO",
+			plaid_category: "FOOD_AND_DRINK",
+		});
+		await addRow({
+			merchant_name: "Mixed Category Co",
+			raw_name: "MIXED CATEGORY CO",
+			plaid_category: "TRANSFER_OUT",
+		});
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Mixed Category Co")).toBe(1);
+	});
+
+	it("a key with only ordinary categories and clean texts is not private", async () => {
+		await addRow({
+			merchant_name: "Ordinary Shop Co",
+			raw_name: "ORDINARY SHOP CO",
+			plaid_category: "FOOD_AND_DRINK",
+		});
+		await addRow({
+			merchant_name: "Ordinary Shop Co",
+			raw_name: "ORDINARY SHOP CO",
+			plaid_category: "GENERAL_MERCHANDISE",
+		});
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Ordinary Shop Co")).toBe(0);
 	});
 });
 
