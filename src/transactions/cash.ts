@@ -1,4 +1,5 @@
 import { isRealDate } from "../dates";
+import { numberOf } from "../edge-kinds";
 import { CASH_MERCHANT_MAX, NOTE_MAX } from "../limits";
 import { toCents } from "../money";
 
@@ -60,7 +61,7 @@ export function parseCash(
 	if (!merchant) errors.merchant = "Enter where you spent it.";
 	else if (merchant.length > CASH_MERCHANT_MAX)
 		errors.merchant = `Use ${CASH_MERCHANT_MAX} characters or fewer.`;
-	const categoryId = Number(values.category);
+	const categoryId = numberOf(values.category);
 
 	if (!categoryIds.includes(categoryId))
 		errors.category = "Pick a category from the list.";

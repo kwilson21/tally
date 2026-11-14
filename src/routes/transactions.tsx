@@ -43,6 +43,8 @@ import {
 	setMerchantRule,
 	type TransactionDetail,
 } from "../db/transactions";
+import { readAtEdge } from "../edge";
+import { DigitsUpTo15, numberOfPosted, rowIdOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { decided } from "../rules/terms";
@@ -1111,7 +1113,7 @@ async function renderList(
 // Cancelling the edit panel asks for ?focus=<id> so focus returns to that row (the pushed URL stays clean).
 transactions.get("/transactions", async (c) => {
 	const params = new URL(c.req.url).searchParams;
-	const focus = Number(params.get("focus"));
+	const focus = numberOfPosted(params.get("focus"));
 	const selecting = params.get("select") === "1";
 	const today = await householdToday(c.env.DB);
 	const thisMonth = today.slice(0, 7);
@@ -1138,8 +1140,8 @@ transactions.get("/transactions", async (c) => {
 	// The row a Likely sheet's close names, while its toast can still be up (P119 A, #71). Both times are the server's
 	// Date.now(), so the window overstates the toast's real age by the round trip, and the tick can only end early,
 	// never late. Don't "fix" this with client time.
-	const savedAt = Number(params.get("saved-at"));
-	const saved = Number(params.get("saved"));
+	const savedAt = numberOfPosted(params.get("saved-at"));
+	const saved = numberOfPosted(params.get("saved"));
 	const age = Date.now() - savedAt;
 
 	const savedId =
@@ -1233,9 +1235,10 @@ function parseIds(values: (string | File)[]) {
 		if (!isText(value)) continue;
 
 		for (const part of value.split(",")) {
-			const id = /^\d{1,15}$/.test(part.trim()) ? Number(part) : 0;
+			// Digits only once the blanks around them are gone; a leading zero reads as its number (DigitsUpTo15).
+			const read = readAtEdge(DigitsUpTo15, part.trim());
 
-			if (id > 0) ids.add(id);
+			if (read.ok && read.value > 0) ids.add(read.value);
 		}
 	}
 
@@ -1636,7 +1639,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const posted = await postedSelection(c, form, back, today);
 	const { ids, selection } = posted;
-	const category = Number(form.get("category"));
+	const category = numberOfPosted(form.get("category"));
 
 	// The category is looked up only for a selection that can be acted on; the rule refuses the others first.
 	const cat =
@@ -2104,9 +2107,21 @@ function ruleMatches(tx: TransactionDetail) {
 	);
 }
 
+/**
+ * The transaction an address names (RowId, #1006). A padded id ("007", a 16-digit one) is no transaction: the page
+ * answers as a missing one, and nothing is read or written for it (a cash delete must not reach a row by a padded id).
+ */
+async function transactionAt(
+	c: Context<App>,
+): Promise<TransactionDetail | null> {
+	const id = rowIdOf(c.req.param("id"));
+
+	return id === undefined ? null : getTransaction(c.env.DB, id);
+}
+
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	if (!tx) return c.notFound();
 	const today = await householdToday(c.env.DB);
@@ -3831,7 +3846,7 @@ transactions.post("/transactions/rule-offer/dismiss", (c) =>
 );
 
 transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	// Only a cash entry of its own can be deleted, so any other row is refused before the form is read.
 	if (tx?.accountType !== "cash" || tx.parentId !== null) return c.notFound();

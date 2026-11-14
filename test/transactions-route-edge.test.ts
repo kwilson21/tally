@@ -49,16 +49,21 @@ const sha = async (text: string) => {
 		.slice(0, 16);
 };
 
+/** A database row: the columns a route's answer can change, as text, numbers or nothing. */
+type Row = Record<string, string | number | null>;
+
 /** A row without its timestamps: the answers stamp `updated_at` from the database's own clock. */
-const withoutStamps = (row: Record<string, unknown>) =>
-	Object.fromEntries(Object.entries(row).filter(([key]) => !key.endsWith("_at")));
+const withoutStamps = (row: Row) =>
+	Object.fromEntries(
+		Object.entries(row).filter(([key]) => !key.endsWith("_at")),
+	);
 
 /** Every row the answers can change: the transactions, the categories and the accounts. */
 async function stateHash() {
 	const [transactions, categories, accounts] = await Promise.all([
-		db.prepare("SELECT * FROM transactions ORDER BY id").all(),
-		db.prepare("SELECT * FROM categories ORDER BY id").all(),
-		db.prepare("SELECT id, type FROM accounts ORDER BY id").all(),
+		db.prepare("SELECT * FROM transactions ORDER BY id").all<Row>(),
+		db.prepare("SELECT * FROM categories ORDER BY id").all<Row>(),
+		db.prepare("SELECT id, type FROM accounts ORDER BY id").all<Row>(),
 	]);
 
 	return sha(
@@ -78,8 +83,10 @@ async function seedIds(): Promise<Ids> {
 
 		return row.id;
 	};
+
 	const purchases =
 		"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type<>'cash' AND t.parent_id IS NULL AND t.refund_of_id IS NULL ORDER BY t.id";
+
 	const archived = await db
 		.prepare("SELECT id FROM categories WHERE archived=1 ORDER BY id LIMIT 1")
 		.first<{ id: number }>();
@@ -125,6 +132,7 @@ async function run(step: Step, ids: Ids, token: string) {
 	const query = (step.query ?? [])
 		.filter(([, value]) => value !== ABSENT)
 		.map(([key, value]) => [key, fill(value, ids, token)] as const);
+
 	const url = `${BASE}${fill(step.path, ids, token)}${query.length ? `?${new URLSearchParams(query)}` : ""}`;
 
 	if (step.method === "GET") {
@@ -139,10 +147,7 @@ async function run(step: Step, ids: Ids, token: string) {
 	for (const [key, value] of step.form ?? []) {
 		if (value === ABSENT) continue;
 
-		body.append(
-			key,
-			value === FILE ? file() : fill(value, ids, token),
-		);
+		body.append(key, value === FILE ? file() : fill(value, ids, token));
 	}
 
 	const res = await exports.default.fetch(url, {
@@ -183,9 +188,10 @@ async function undoToken(ids: Ids): Promise<string> {
 			body: new URLSearchParams({ confirm: "1", back: LIST }),
 		},
 	);
-	const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
-		toast?: { undo?: string };
-	};
+
+	const trigger: { toast?: { undo?: string } } = JSON.parse(
+		res.headers.get("HX-Trigger") ?? "{}",
+	);
 
 	if (!trigger.toast?.undo) throw new Error("seed: no Undo token");
 
@@ -214,7 +220,7 @@ const QUERY_NUMBERS = [
 	"123456789012345",
 	ABSENT,
 ];
-const FORM_NUMBERS = [...QUERY_NUMBERS.filter((v) => v !== ABSENT), FILE, ABSENT];
+
 const ID_LISTS = [
 	"$ID",
 	"0$ID",
@@ -233,6 +239,7 @@ const ID_LISTS = [
 	ABSENT,
 	FILE,
 ];
+
 const CATEGORIES = [
 	"$CAT",
 	"0$CAT",
@@ -254,6 +261,7 @@ const CATEGORIES = [
 	FILE,
 	ABSENT,
 ];
+
 /** The address ids the route pattern admits (digits only); the handler reads the number of each. */
 const PATH_IDS = [
 	"$CASH",
@@ -266,6 +274,7 @@ const PATH_IDS = [
 	"123456789012345",
 	"000000000000000000$CASH",
 ];
+
 const TOKENS = [
 	"$TOKEN",
 	"$TOKEN_UP",
@@ -282,10 +291,12 @@ const TOKENS = [
 /** The steps, one per label. A label is written with the values as the template has them, so it names each case. */
 function buildSteps(): Step[] {
 	const steps: Step[] = [];
+
 	const add = (step: Omit<Step, "label">) => {
 		const fields = [...(step.query ?? []), ...(step.form ?? [])]
 			.map(([key, value]) => `${key}=${JSON.stringify(value)}`)
 			.join(" ");
+
 		const hx = step.hx === false ? " (no HX-Request)" : "";
 
 		const number = steps.length + 1;
@@ -305,7 +316,16 @@ function buildSteps(): Step[] {
 
 	// The Likely close's saved row and its time: both must be whole numbers, and the time must be inside the toast.
 	for (const saved of ["$ID", "0$ID", "1e3", "abc", "", "-1"]) {
-		for (const savedAt of ["$NOW", "$PAST", "$FUTURE", "0$NOW", "1e3", "abc", "", " $NOW"]) {
+		for (const savedAt of [
+			"$NOW",
+			"$PAST",
+			"$FUTURE",
+			"0$NOW",
+			"1e3",
+			"abc",
+			"",
+			" $NOW",
+		]) {
 			add({
 				method: "GET",
 				path: LIST_PATH,
@@ -318,61 +338,195 @@ function buildSteps(): Step[] {
 	}
 
 	add({ method: "GET", path: LIST_PATH, query: [["focus", "$ID"]], hx: false });
-	add({ method: "GET", path: LIST_PATH, query: [["saved", "$ID"], ["saved-at", "$NOW"]], hx: false });
-	add({ method: "GET", path: LIST_PATH, query: [["category", "$CAT"], ["account", "0$CAT"]], hx: false });
+	add({
+		method: "GET",
+		path: LIST_PATH,
+		query: [
+			["saved", "$ID"],
+			["saved-at", "$NOW"],
+		],
+		hx: false,
+	});
+	add({
+		method: "GET",
+		path: LIST_PATH,
+		query: [
+			["category", "$CAT"],
+			["account", "0$CAT"],
+		],
+		hx: false,
+	});
 
 	// The Select bar's count, the selection's posts, and the cash sheet opened from a selection.
 	for (const ids of ID_LISTS) {
-		add({ method: "GET", path: "/transactions/select/count", query: [["ids", ids], ["back", LIST], ["select", "1"]] });
+		add({
+			method: "GET",
+			path: "/transactions/select/count",
+			query: [
+				["ids", ids],
+				["back", LIST],
+				["select", "1"],
+			],
+		});
 	}
+
 	for (const ids of ID_LISTS) {
-		add({ method: "POST", path: "/transactions/select/category", form: [["ids", ids], ["back", LIST]] });
+		add({
+			method: "POST",
+			path: "/transactions/select/category",
+			form: [
+				["ids", ids],
+				["back", LIST],
+			],
+		});
 	}
+
 	for (const ids of ID_LISTS) {
-		add({ method: "POST", path: "/transactions/select/exclude", form: [["ids", ids], ["back", LIST]] });
+		add({
+			method: "POST",
+			path: "/transactions/select/exclude",
+			form: [
+				["ids", ids],
+				["back", LIST],
+			],
+		});
 	}
+
 	for (const ids of ID_LISTS) {
-		add({ method: "GET", path: "/transactions/cash/new", query: [["ids", ids], ["back", LIST], ["select", "1"]] });
+		add({
+			method: "GET",
+			path: "/transactions/cash/new",
+			query: [
+				["ids", ids],
+				["back", LIST],
+				["select", "1"],
+			],
+		});
 	}
-	add({ method: "POST", path: "/transactions/select/count", form: [["ids", "$ID"], ["all", "1"]] });
+
+	add({
+		method: "POST",
+		path: "/transactions/select/count",
+		form: [
+			["ids", "$ID"],
+			["all", "1"],
+		],
+	});
 
 	// The category a selection is set to: every category text, with a row that is ticked.
 	for (const category of CATEGORIES) {
-		add({ method: "POST", path: "/transactions/select/category/save", form: [["ids", "$ID"], ["back", LIST], ["category", category]] });
+		add({
+			method: "POST",
+			path: "/transactions/select/category/save",
+			form: [
+				["ids", "$ID"],
+				["back", LIST],
+				["category", category],
+			],
+		});
 	}
+
 	for (const ids of ID_LISTS) {
-		add({ method: "POST", path: "/transactions/select/category/save", form: [["ids", ids], ["back", LIST], ["category", "$CAT"]] });
+		add({
+			method: "POST",
+			path: "/transactions/select/category/save",
+			form: [
+				["ids", ids],
+				["back", LIST],
+				["category", "$CAT"],
+			],
+		});
 	}
 
 	// The Add cash form: its category, and the amount and date it is checked with.
 	for (const category of CATEGORIES) {
-		add({ method: "POST", path: "/transactions/cash", form: cashForm({ category }) });
+		add({
+			method: "POST",
+			path: "/transactions/cash",
+			form: cashForm({ category }),
+		});
 	}
+
 	for (const amount of ["5", "abc", "1e3", "0", "", "-5", "12.345"]) {
-		add({ method: "POST", path: "/transactions/cash", form: cashForm({ amount }) });
+		add({
+			method: "POST",
+			path: "/transactions/cash",
+			form: cashForm({ amount }),
+		});
 	}
+
 	for (const date of ["2026-02-30", "", "2030-01-01", "2026-10-11"]) {
-		add({ method: "POST", path: "/transactions/cash", form: cashForm({ date }) });
+		add({
+			method: "POST",
+			path: "/transactions/cash",
+			form: cashForm({ date }),
+		});
 	}
-	add({ method: "POST", path: "/transactions/cash", form: cashForm({ category: "$CAT" }), hx: false });
+
+	add({
+		method: "POST",
+		path: "/transactions/cash",
+		form: cashForm({ category: "$CAT" }),
+		hx: false,
+	});
 
 	// An address id: the transaction's edit panel, and the delete of a cash entry (sheet first, then the delete).
 	for (const id of PATH_IDS) {
 		add({ method: "GET", path: `/transactions/${id}` });
 	}
+
 	for (const id of PATH_IDS) {
-		add({ method: "POST", path: `/transactions/${id}/delete`, form: [["confirm", "1"], ["back", LIST]] });
+		add({
+			method: "POST",
+			path: `/transactions/${id}/delete`,
+			form: [
+				["confirm", "1"],
+				["back", LIST],
+			],
+		});
 	}
+
 	for (const id of ["$CASH", "0$CASH", "00$CASH"]) {
-		add({ method: "POST", path: `/transactions/${id}/delete`, form: [["back", LIST]] });
+		add({
+			method: "POST",
+			path: `/transactions/${id}/delete`,
+			form: [["back", LIST]],
+		});
 	}
-	add({ method: "POST", path: "/transactions/$CASH/delete", form: [["confirm", "1"], ["back", LIST]], hx: false });
+
+	add({
+		method: "POST",
+		path: "/transactions/$CASH/delete",
+		form: [
+			["confirm", "1"],
+			["back", LIST],
+		],
+		hx: false,
+	});
 
 	// The Undo of a cash delete: the token every answer names back.
 	for (const token of TOKENS) {
-		add({ method: "POST", path: "/transactions/undo-cash-delete", form: [["token", token], ["back", LIST]], token: true });
+		add({
+			method: "POST",
+			path: "/transactions/undo-cash-delete",
+			form: [
+				["token", token],
+				["back", LIST],
+			],
+			token: true,
+		});
 	}
-	add({ method: "POST", path: "/transactions/undo-cash-delete", form: [["token", "$TOKEN"], ["back", LIST]], hx: false, token: true });
+
+	add({
+		method: "POST",
+		path: "/transactions/undo-cash-delete",
+		form: [
+			["token", "$TOKEN"],
+			["back", LIST],
+		],
+		hx: false,
+		token: true,
+	});
 
 	return steps;
 }
@@ -380,7 +534,9 @@ function buildSteps(): Step[] {
 const LIST_PATH = "/transactions";
 
 /** The Add cash form with the valid values of the other fields, and the one field this case changes. */
-function cashForm(change: Partial<Record<"date" | "amount" | "category", string>>): [string, string][] {
+function cashForm(
+	change: Partial<Record<"date" | "amount" | "category", string>>,
+): [string, string][] {
 	const values = {
 		date: "2026-10-11",
 		amount: "5",
@@ -454,4 +610,56 @@ describe("the transactions routes' answers, read at the edge (#1006, PR 9)", () 
 			expect(line).toBe(recorded[label]);
 		},
 	);
+
+	// The intended difference, on its own: a padded address id reached a real cash entry and deleted it before the edge.
+	it("a padded cash id answers 404 and keeps the entry (intended difference, #1006)", async () => {
+		const ids = await seedIds();
+
+		const padded = await run(
+			{
+				label: "padded",
+				method: "POST",
+				path: "/transactions/00$CASH/delete",
+				form: [
+					["confirm", "1"],
+					["back", LIST],
+				],
+			},
+			ids,
+			"",
+		);
+
+		expect(padded.res.status).toBe(404);
+
+		const kept = await db
+			.prepare("SELECT id FROM transactions WHERE id=?")
+			.bind(ids.cash)
+			.first<{ id: number }>();
+
+		expect(kept?.id).toBe(ids.cash);
+	});
+
+	it("a padded purchase id on the edit panel answers 404 (intended difference, #1006)", async () => {
+		const ids = await seedIds();
+
+		const padded = await run(
+			{ label: "padded", method: "GET", path: "/transactions/0$ID" },
+			ids,
+			"",
+		);
+
+		expect(padded.res.status).toBe(404);
+	});
+
+	it("an unpadded id on the edit panel still opens the row", async () => {
+		const ids = await seedIds();
+
+		const open = await run(
+			{ label: "plain", method: "GET", path: "/transactions/$ID" },
+			ids,
+			"",
+		);
+
+		expect(open.res.status).toBe(200);
+	});
 });

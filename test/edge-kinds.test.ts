@@ -5,6 +5,7 @@ import {
 	CardPlace,
 	DigitsUpTo15,
 	numberOf,
+	numberOfPosted,
 	PersonName,
 	RowId,
 	rowIdOrZero,
@@ -358,5 +359,31 @@ describe("BillAmount: a dollar amount typed on the bill sheet, as cents (bills, 
 		["99999999999", "Enter an amount of $100,000,000 or less."],
 	])("refuses %j with %j", (text, say) => {
 		expect(amountOf(text)).toEqual({ ok: false, say });
+	});
+});
+
+describe("numberOfPosted: a posted value read as Number reads it (transactions, #1006)", () => {
+	// A missing field is null and a file part is a File: Number() reads null as 0 and a File as NaN ("[object File]"),
+	// and the Select and Add cash routes' answers depend on both.
+	it.each([
+		[null, 0],
+		["", 0],
+		["007", 7],
+		[" 7", 7],
+		["7 ", 7],
+		["1e3", 1000],
+		["0x7", 7],
+		["-1", -1],
+		["1.5", 1.5],
+	] as const)("reads %j as Number(%j)", (posted, expected) => {
+		expect(numberOfPosted(posted)).toBe(expected);
+	});
+
+	it("reads text that is no number, and a file part, as NaN", () => {
+		const file = new File(["x"], "x.txt", { type: "text/plain" });
+
+		expect(Number.isNaN(numberOfPosted("abc"))).toBe(true);
+		expect(Number.isNaN(numberOfPosted(file))).toBe(true);
+		expect(Number.isNaN(Number(file))).toBe(true);
 	});
 });

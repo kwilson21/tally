@@ -89,6 +89,16 @@ export function numberOf(text: string): number {
 }
 
 /**
+ * A posted field or a query parameter read as Number reads it (transactions, #1006): a missing field is 0, as
+ * Number(null) is, and a file part is NaN, as Number(File) is ("[object File]"). The same answers as before the edge.
+ */
+export function numberOfPosted(
+	posted: string | File | null | undefined,
+): number {
+	return numberOf(String(posted ?? ""));
+}
+
+/**
  * A held Not this one's Undo name, from a form (bills, #340): the payment's id written in digits as RowId reads them, a
  * dot, then a UUID in the shape Token takes. Decoded to the payment's id and the whole name, which is the token the Not
  * this one saved.
