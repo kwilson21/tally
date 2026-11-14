@@ -44,7 +44,14 @@ import {
 	type TransactionDetail,
 } from "../db/transactions";
 import { readAtEdge } from "../edge";
-import { DigitsUpTo15, numberOfPosted, rowIdOf } from "../edge-kinds";
+import {
+	DigitsUpTo15,
+	numberOfPosted,
+	PartIdText,
+	rowIdOf,
+	SafeCentsText,
+	SheetToken,
+} from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { decided } from "../rules/terms";
@@ -1819,7 +1826,11 @@ function postedRefundOf(tx: TransactionDetail, form: FormData): number | null {
 	const current = tx.refundOfId ?? null;
 	const posted = form.get("refund_of");
 
-	return posted === null ? current : posted === "" ? null : Number(posted);
+	return posted === null
+		? current
+		: posted === ""
+			? null
+			: numberOfPosted(posted);
 }
 
 /**
@@ -2275,15 +2286,16 @@ function SplitSheet({
 
 /** The token a split sheet posts with its line requests (SplitForm's sheet), or null when it isn't one a sheet drew. */
 function sheetToken(raw: string | null): string | null {
-	return raw !== null && /^[0-9a-f-]{36}$/.test(raw) ? raw : null;
+	const read = readAtEdge(SheetToken, raw ?? undefined);
+
+	return read.ok ? read.value : null;
 }
 
 /** A posted amount in cents: a whole, positive number of cents, or null. */
 function wholeCents(raw: string | null): number | null {
-	if (raw === null || !/^[1-9]\d*$/.test(raw)) return null;
-	const cents = Number(raw);
+	const read = readAtEdge(SafeCentsText, raw ?? undefined);
 
-	return Number.isSafeInteger(cents) ? cents : null;
+	return read.ok ? read.value : null;
 }
 
 /**
@@ -2312,9 +2324,15 @@ function partIdsOf(raw: string[]): (number | undefined)[] | null {
 	const ids: (number | undefined)[] = [];
 
 	for (const value of raw) {
-		if (value === "") ids.push(undefined);
-		else if (/^[1-9]\d*$/.test(value)) ids.push(Number(value));
-		else return null;
+		if (value === "") {
+			ids.push(undefined);
+			continue;
+		}
+
+		const read = readAtEdge(PartIdText, value);
+
+		if (!read.ok) return null;
+		ids.push(read.value);
 	}
 
 	return ids;
@@ -2388,7 +2406,7 @@ function refundAnswers(
 }
 
 async function splitContext(c: Context<App>) {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	const categories = await c.env.DB.prepare(
 		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
@@ -2874,7 +2892,7 @@ function unlinkedSentence(
 }
 
 transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	const asked = decided(
 		removeSplitRule.decide({}, { split: tx?.isSplit === true }),
@@ -2912,7 +2930,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
  * keeps focus, and the lock is announced in words.
  */
 transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const tx = await transactionAt(c);
 
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
@@ -2946,7 +2964,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 		form.get("always_was") === "1"
 			? ((await postedRuleCategoryName(
 					c.env.DB,
-					Number(form.get("rule_category_was")) || null,
+					numberOfPosted(form.get("rule_category_was")) || null,
 				)) ??
 				tx.merchantRuleCategoryName ??
 				undefined)
@@ -2957,7 +2975,8 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 			tx={tx}
 			categories={categories}
 			values={{
-				categoryId: posted === null ? tx.categoryId : Number(posted) || null,
+				categoryId:
+					posted === null ? tx.categoryId : numberOfPosted(posted) || null,
 				newCategory: posted === "new",
 				newCategoryName: form.get("new_category_name")?.toString() ?? "",
 			}}

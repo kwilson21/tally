@@ -46,6 +46,38 @@ export const WholeCentsText = Schema.String.check(
 	Schema.isPattern(/^\d{1,15}$/),
 ).pipe(Schema.decodeTo(Schema.NumberFromString));
 
+/**
+ * A whole amount of cents above zero from a split sheet (#1006): digits only, no leading zero, and at most the largest
+ * safe integer, so the value is exact. A Change the parts total and its amount were read this way. Any other text is
+ * refused, and so is a longer number, which is no safe integer.
+ */
+export const SafeCentsText = Schema.String.check(
+	Schema.isPattern(/^[1-9]\d*$/),
+).pipe(
+	Schema.decodeTo(
+		Schema.NumberFromString.check(
+			Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+		),
+	),
+);
+
+/**
+ * A saved split part's id as the split sheet posts it (#1006): digits only, no leading zero. There is no cap on the
+ * length, as before: a long one is a float that matches no part, and the route reads it so.
+ */
+export const PartIdText = Schema.String.check(
+	Schema.isPattern(/^[1-9]\d*$/),
+).pipe(Schema.decodeTo(Schema.NumberFromString));
+
+/**
+ * The split sheet's token (#1006): 36 characters of lower-case hex digits and dashes, the shape the sheet's random UUID
+ * is drawn in. Upper case is refused, as the sheet has always refused it, so the check stays case-sensitive (Token is
+ * not).
+ */
+export const SheetToken = Schema.String.check(
+	Schema.isPattern(/^[0-9a-f-]{36}$/),
+);
+
 const NOT_ABOVE_ZERO = "Enter an amount greater than $0.";
 
 /**
