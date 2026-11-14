@@ -73,6 +73,7 @@ import {
 } from "../db/settings-saves";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { readAtEdge } from "../edge";
+import { CardPlace, RowId } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
 import { reconnectRecipients } from "../reconnect/reminders";
@@ -330,9 +331,28 @@ const DRAWN_ON = "drawnOn";
 const FLIPPED = "flipped";
 
 /** True for a posted value that is text (a file part is not a place). */
-function isText(value: unknown): value is string {
+function isText(value: string | File | null | undefined): value is string {
 	return typeof value === "string";
 }
+
+/** A posted field as text: "" when it is missing or a file part, so no id, token or place is read from a file. */
+const textOf = (posted: string | File | null | undefined): string =>
+	isText(posted) ? posted : "";
+
+/** A row id read at the edge (RowId), or undefined when the text is no row id. */
+function rowIdOf(text: string | undefined): number | undefined {
+	const read = readAtEdge(RowId, text);
+
+	return read.ok ? read.value : undefined;
+}
+
+/** The row ids in a list of posted values, in the order posted: each one RowId reads, and every other entry is dropped. */
+const rowIdsOf = (posted: (string | File)[]): number[] =>
+	posted.flatMap((value) => {
+		const id = rowIdOf(textOf(value));
+
+		return id === undefined ? [] : [id];
+	});
 
 /** The DRAWN_ON value for these switches: the keys that are On, separated by spaces. */
 const drawnOnOf = (switches: AiSwitches) =>
@@ -1001,7 +1021,8 @@ const removeNeverSuggest = removeNeverSuggestLine<NeverSuggestRule>();
 
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
-	const id = Number(form.get("id")?.toString() ?? "");
+	// A refused id is 0, which no line has: the rule finds no line, as for a number that is no line's.
+	const id = rowIdOf(textOf(form.get("id"))) ?? 0;
 	const merchantKey = String(form.get("merchant_key") ?? "");
 	const kind = String(form.get("kind") ?? "");
 	const search = String(form.get("rules_search") ?? "");
@@ -1136,16 +1157,17 @@ settings.post("/settings/learned/forget", async (c) => {
 // Undo of a Forget: the line comes back if the Undo is within its ten seconds. Its answer ends the Undo's toast.
 settings.post("/settings/learned/undo", async (c) => {
 	const form = await c.req.formData();
-	const token = String(form.get("token") ?? "");
-	const id = Number(token);
-
+	// The token as posted, echoed as it was; a file part is no token, so it is the empty text.
+	const token = textOf(form.get("token"));
 	// A token that is no Forget's number finds no row, so the rule refuses it as it refuses one already undone.
+	const id = rowIdOf(token) ?? 0;
+
 	const refusal = await runWith(
 		c.env.DB,
 		decideSetting(
 			undoForget,
-			{ id: Number.isInteger(id) && id > 0 ? id : 0, now: Date.now() },
-			(db) => undoForgetFacts(db, Number.isInteger(id) && id > 0 ? id : 0),
+			{ id, now: Date.now() },
+			(db) => undoForgetFacts(db, id),
 			undoForgetStatements,
 		).pipe(
 			Effect.as(null),
@@ -1175,7 +1197,7 @@ settings.post("/settings/learned/undo", async (c) => {
 settings.post("/settings/learned/change", async (c) => {
 	const form = await c.req.formData();
 	const text = String(form.get("text") ?? "");
-	const categoryId = Number(form.get("category") ?? "");
+	const category = readAtEdge(CategoryId, textOf(form.get("category")));
 	const htmx = Boolean(c.req.header("HX-Request"));
 
 	const line =
@@ -1191,8 +1213,8 @@ settings.post("/settings/learned/change", async (c) => {
 		return renderPage(c, "learned", { learnedError: message, status: 400 });
 	};
 
-	const chosen =
-		Number.isInteger(categoryId) && categoryId > 0 ? categoryId : 0;
+	// A category that is no category is 0, which no category has: the rule refuses it beside its line.
+	const chosen = category.ok ? category.value : 0;
 
 	// The rule decides; the rule and its immediate apply are one batch (review of #838), so a failure leaves no rule,
 	// and says so.
@@ -1257,19 +1279,22 @@ settings.post("/settings/learned/change", async (c) => {
 	return renderPage(c, "learned");
 });
 
+/** The categories page with the changed-suggestion list, at 404: a suggestion that is gone, or an id that is no row id. */
+const changedSuggestion = (c: Context<App>) =>
+	renderPage(c, "categories", {
+		listError: CHANGED_SUGGESTION,
+		status: 404,
+	});
+
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
-	const id = Number(c.req.param("id"));
+	const id = rowIdOf(c.req.param("id"));
+
+	// An id that is no row id is no suggestion: the changed list answers, before anything is read or written.
+	if (id === undefined) return changedSuggestion(c);
 	const form = await c.req.formData();
 
-	const ids = form
-		.getAll("ids")
-		.map(Number)
-		.filter((n) => Number.isInteger(n) && n > 0);
-
-	const shown = form
-		.getAll("shown")
-		.map(Number)
-		.filter((n) => Number.isInteger(n) && n > 0);
+	const ids = rowIdsOf(form.getAll("ids"));
+	const shown = rowIdsOf(form.getAll("shown"));
 
 	const notes = Object.fromEntries(
 		shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
@@ -1352,11 +1377,7 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 		),
 	];
 
-	const stale = () =>
-		renderPage(c, "categories", {
-			listError: CHANGED_SUGGESTION,
-			status: 404,
-		});
+	const stale = () => changedSuggestion(c);
 
 	if (
 		form.get("id")?.toString() !== `new-${id}` ||
@@ -1387,11 +1408,15 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 
 settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const db = c.env.DB;
-	const id = Number(c.req.param("id"));
+	const id = rowIdOf(c.req.param("id"));
 	const form = await c.req.formData();
 
-	// The question's own answer, posted from the question drawn in the card's place (decision 101).
-	if (form.get("answer")) return answerQuestion(c, id, form);
+	// The question's own answer, posted from the question drawn in the card's place (decision 101). A refused id is 0 here,
+	// as Number() gave 0 before; answerQuestion's own checks refuse it, with the answers it always gave.
+	if (form.get("answer")) return answerQuestion(c, id ?? 0, form);
+
+	// A refused id is no suggestion: the changed list answers, before anything is written.
+	if (id === undefined) return changedSuggestion(c);
 
 	// The No retires the suggestion, and the question asks in the card's place (decisions 101, 120).
 	const result = await runWith(
@@ -1401,19 +1426,13 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 		),
 	);
 
-	if (!result)
-		return renderPage(c, "categories", {
-			listError: CHANGED_SUGGESTION,
-			status: 404,
-		});
+	if (!result) return changedSuggestion(c);
 	const name = tidyName(result.name);
 	const stores = await askedStores(db, id);
 	// The No sends its card's place, so the question is drawn where the card was. A missing or non-numeric place
-	// (Number(null) is 0, so the raw text is checked first) leaves the question after every card.
-	const posted = form.get("place");
-
-	const place =
-		isText(posted) && /^\d+$/.test(posted) ? Number(posted) : undefined;
+	// leaves the question after every card.
+	const placed = readAtEdge(CardPlace, textOf(form.get("place")));
+	const place = placed.ok ? placed.value : undefined;
 
 	if (stores.length > 0)
 		return renderPage(c, "categories", {
