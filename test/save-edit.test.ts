@@ -1185,6 +1185,179 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 				expect(await creditRow(id)).toEqual(incomeColumns);
 			},
 		);
+
+		describe("a stale income chip cannot lift a Plaid exclusion (#1090)", () => {
+			const STALE_CHIP = 9522;
+			const REAL_MARK = 9523;
+			const NO_WAS = 9524;
+			const JEV_CREDIT = 9525;
+			const USER_CREDIT = 9526;
+			const REVIEW_PATH = 9527;
+			const ALREADY_INCOME = 9528;
+
+			const plaidCredit = {
+				flagTransfer: 0,
+				plaidCategory: "TRANSFER_IN",
+				excludedSource: "plaid" as const,
+			};
+
+			it("a stale chip: a Plaid-excluded credit the panel drew as income on, now stored not income, stays excluded and not income, and the note is saved", async () => {
+				await seedRow(STALE_CHIP, plaidCredit);
+
+				expect(
+					await saveEdit(
+						db,
+						STALE_CHIP,
+						panelPost({
+							income: true,
+							incomeWas: true,
+							excluded: true,
+							excludedWas: true,
+							note: "Saved from a stale panel",
+						}),
+						"test",
+					),
+				).toEqual({ saved: true });
+				expect(await creditRow(STALE_CHIP)).toMatchObject({
+					excluded: 1,
+					excluded_source: "plaid",
+					flag_income: 0,
+					income_source: null,
+				});
+				expect(
+					await db
+						.prepare("SELECT note FROM transactions WHERE id = ?")
+						.bind(STALE_CHIP)
+						.first<{ note: string | null }>(),
+				).toEqual({ note: "Saved from a stale panel" });
+			});
+
+			it("a real mark: the panel drew income off and the person ticks it, so the Plaid exclusion is lifted and the credit is income", async () => {
+				await seedRow(REAL_MARK, plaidCredit);
+
+				expect(
+					await saveEdit(
+						db,
+						REAL_MARK,
+						panelPost({
+							income: true,
+							incomeWas: false,
+							excluded: true,
+							excludedWas: true,
+						}),
+						"test",
+					),
+				).toEqual({ saved: true });
+				expect(await creditRow(REAL_MARK)).toMatchObject({
+					excluded: 0,
+					excluded_source: null,
+					flag_income: 1,
+					income_source: "user",
+				});
+			});
+
+			it("no incomeWas posted, income on over a stored income 0: the Plaid exclusion is lifted as before", async () => {
+				await seedRow(NO_WAS, plaidCredit);
+
+				expect(
+					await saveEdit(
+						db,
+						NO_WAS,
+						panelPost({
+							income: true,
+							incomeWas: undefined,
+							excluded: true,
+						}),
+						"test",
+					),
+				).toEqual({ saved: true });
+				expect(await creditRow(NO_WAS)).toMatchObject({
+					excluded: 0,
+					excluded_source: null,
+					flag_income: 1,
+					income_source: "user",
+				});
+			});
+
+			it.each([
+				{ source: "jev" as const, id: JEV_CREDIT },
+				{ source: "user" as const, id: USER_CREDIT },
+			])(
+				"a $source exclusion on a credit is never lifted, even when the person ticks income",
+				async ({ source, id }) => {
+					await seedRow(id, {
+						flagTransfer: 0,
+						plaidCategory: "TRANSFER_IN",
+						excludedSource: source,
+					});
+
+					await saveEdit(
+						db,
+						id,
+						panelPost({
+							income: true,
+							incomeWas: false,
+							excluded: true,
+							excludedWas: true,
+						}),
+						"test",
+					);
+					expect(await creditRow(id)).toMatchObject({
+						excluded: 1,
+						excluded_source: source,
+					});
+				},
+			);
+
+			it("a review as not income still lifts the Plaid exclusion when the panel drew income off", async () => {
+				await seedRow(REVIEW_PATH, plaidCredit);
+
+				expect(
+					await saveEdit(
+						db,
+						REVIEW_PATH,
+						panelPost({
+							creditReviewed: true,
+							creditReviewedWas: false,
+							incomeWas: false,
+							excluded: true,
+							excludedWas: true,
+						}),
+						"test",
+					),
+				).toEqual({ saved: true });
+				expect(await creditRow(REVIEW_PATH)).toMatchObject({
+					excluded: 0,
+					excluded_source: null,
+					flag_income: 0,
+					credit_reviewed: 1,
+					credit_reviewed_by: "user",
+				});
+			});
+
+			it("a credit already income, which the panel drew off, lifts its Plaid exclusion when the person ticks income again", async () => {
+				await seedRow(ALREADY_INCOME, { ...plaidCredit, flagIncome: 1 });
+
+				expect(
+					await saveEdit(
+						db,
+						ALREADY_INCOME,
+						panelPost({
+							income: true,
+							incomeWas: false,
+							excluded: true,
+							excludedWas: true,
+						}),
+						"test",
+					),
+				).toEqual({ saved: true });
+				expect(await creditRow(ALREADY_INCOME)).toMatchObject({
+					excluded: 0,
+					excluded_source: null,
+					flag_income: 1,
+				});
+			});
+		});
 	});
 
 	describe("a stale panel leaves Exclude as the sync or Jev left it (excluded_was, #1086)", () => {

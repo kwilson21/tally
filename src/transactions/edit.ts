@@ -268,6 +268,7 @@ export function excludedAfterSave(
 		| "excludedWas"
 		| "refundOfId"
 		| "income"
+		| "incomeWas"
 		| "creditReviewed"
 		| "creditReviewedWas"
 		| "creditReviewedProvided"
@@ -285,7 +286,9 @@ export function excludedAfterSave(
 	const reviewedAsNotIncome =
 		reviewWasChanged(stored, edit) && edit.creditReviewed && !edit.income;
 
-	const incomeTurnedOn = edit.income && !stored.income;
+	// Income turned on against what the panel showed (saveEdit's incomeChanged), not against the stored row (#1090).
+	const incomeTurnedOn =
+		edit.income && edit.income !== (edit.incomeWas ?? stored.income);
 
 	const lifted =
 		stored.excluded &&
