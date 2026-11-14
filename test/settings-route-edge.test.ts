@@ -589,3 +589,86 @@ describe("intended differences: an id that Number() accepted is refused as junk 
 		expect(await createdPetCare()).toBe(0);
 	});
 });
+
+// A posted answer goes to answerQuestion even when the address id is refused: a refused id is 0 there, as Number()
+// gave 0 for "0". The answer's own checks decide what the person sees. "007" is intended difference 1: it is refused
+// as 0 now, where it acted as suggestion 7 before.
+
+describe("a posted answer with an address id that is refused", () => {
+	const answerTo = (address: string, formId: string, word: string) =>
+		seen(`/settings/suggestions/${address}/dismiss`, [
+			["answer", word],
+			["id", formId],
+			["kind", "new_category"],
+			["store", "CHEWY.COM"],
+		]);
+
+	const NOTHING_WRITTEN = () =>
+		count(
+			"SELECT COUNT(*) AS n FROM never_suggest_rules WHERE kind = 'new_category'",
+		);
+
+	it("id 0 with Not now and the form's new-0 keeps the question and says so", async () => {
+		expect(await answerTo("0", "new-0", "ask_not_now")).toEqual({
+			status: 200,
+			toast: "Kept it as it is.",
+			undoDone: null,
+			announce: "Kept it as it is.",
+			changed: false,
+		});
+		expect(await NOTHING_WRITTEN()).toBe(0);
+	});
+
+	it("id 0 with Yes and the form's new-0 writes no line and answers the changed list", async () => {
+		expect(await answerTo("0", "new-0", "ask_yes")).toMatchObject({
+			status: 404,
+			changed: true,
+		});
+		expect(await NOTHING_WRITTEN()).toBe(0);
+	});
+
+	it("id 0 with an answer word that is neither Yes nor Not now answers the changed list", async () => {
+		expect(await answerTo("0", "new-0", "bogus")).toMatchObject({
+			status: 404,
+			changed: true,
+		});
+	});
+
+	it("a 20-digit id with Not now, against the form's own id, answers the changed list", async () => {
+		const big = "99999999999999999999";
+
+		expect(await answerTo(big, `new-${big}`, "ask_not_now")).toMatchObject({
+			status: 404,
+			changed: true,
+		});
+		expect(await answerTo(big, `new-${big}`, "ask_yes")).toMatchObject({
+			status: 404,
+			changed: true,
+		});
+		expect(await NOTHING_WRITTEN()).toBe(0);
+	});
+
+	it("the real suggestion's id with a refused address id answers the changed list, as the form's id no longer matches", async () => {
+		expect(
+			await answerTo("0", `new-${suggestion}`, "ask_not_now"),
+		).toMatchObject({
+			status: 404,
+			changed: true,
+		});
+	});
+
+	it("intended difference 1: a leading zero on the suggestion's id with its own form id no longer acts on it", async () => {
+		expect(
+			await answerTo(`00${suggestion}`, `new-${suggestion}`, "ask_not_now"),
+		).toMatchObject({ status: 404, changed: true });
+	});
+
+	it("intended difference 1: a leading zero on the suggestion's id acts as id 0 now, so the form's new-0 keeps the question", async () => {
+		expect(
+			await answerTo(`00${suggestion}`, "new-0", "ask_not_now"),
+		).toMatchObject({
+			status: 200,
+			toast: "Kept it as it is.",
+		});
+	});
+});

@@ -1409,13 +1409,14 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const db = c.env.DB;
 	const id = rowIdOf(c.req.param("id"));
-
-	// An id that is no row id is no suggestion: the changed list answers, before anything is read or written.
-	if (id === undefined) return changedSuggestion(c);
 	const form = await c.req.formData();
 
-	// The question's own answer, posted from the question drawn in the card's place (decision 101).
-	if (form.get("answer")) return answerQuestion(c, id, form);
+	// The question's own answer, posted from the question drawn in the card's place (decision 101). A refused id is 0 here,
+	// as Number() gave 0 before; answerQuestion's own checks refuse it, with the answers it always gave.
+	if (form.get("answer")) return answerQuestion(c, id ?? 0, form);
+
+	// A refused id is no suggestion: the changed list answers, before anything is written.
+	if (id === undefined) return changedSuggestion(c);
 
 	// The No retires the suggestion, and the question asks in the card's place (decisions 101, 120).
 	const result = await runWith(
