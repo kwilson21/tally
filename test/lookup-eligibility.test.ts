@@ -456,6 +456,20 @@ describe("readEligibility: whether a row is a sign of a store", () => {
 		});
 	});
 
+	it("the row's Plaid category decides the sign, not the Apple category Jev is told as a hint", async () => {
+		const id = await clearedRow();
+		await expectMaySearch();
+
+		await db
+			.prepare(
+				"UPDATE transactions SET plaid_category = NULL, apple_category = 'FOOD_AND_DRINK' WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "no_sign", owed: [] });
+	});
+
 	it("a pending row with an ordinary Plaid category is a sign", async () => {
 		const id = await addRow({
 			pending: 1,
