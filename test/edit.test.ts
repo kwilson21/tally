@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	excludedAfterSave,
+	excludeKept,
 	followsPurchaseAfterSave,
 	parseEdit,
 	safeBack,
@@ -445,5 +446,82 @@ describe("excludedAfterSave: whether a row is excluded once saved, with a review
 		expect(excludedAfterSave(stored, { ...unchanged, refundOfId: 9001 })).toBe(
 			false,
 		);
+	});
+});
+
+describe("excludeKept: whether a save leaves Exclude as stored (excluded_was, #1086)", () => {
+	it("keeps Exclude when the posted value is the one the panel drew", () => {
+		expect(excludeKept({ excluded: false, excludedWas: false }, false)).toBe(
+			true,
+		);
+		expect(excludeKept({ excluded: true, excludedWas: true }, false)).toBe(
+			true,
+		);
+	});
+
+	it("does not keep Exclude when the person toggled it", () => {
+		expect(excludeKept({ excluded: true, excludedWas: false }, false)).toBe(
+			false,
+		);
+		expect(excludeKept({ excluded: false, excludedWas: true }, false)).toBe(
+			false,
+		);
+	});
+
+	it("does not keep Exclude when the panel did not say what it drew, or a refund is linked", () => {
+		expect(excludeKept({ excluded: false }, false)).toBe(false);
+		expect(excludeKept({ excluded: false, excludedWas: false }, true)).toBe(
+			false,
+		);
+	});
+});
+
+describe("excludedAfterSave reads the stored Exclude a stale panel left alone (excluded_was, #1086)", () => {
+	it("keeps a Plaid exclusion the sync made after the panel drew the credit included", () => {
+		expect(
+			excludedAfterSave(
+				{
+					amountCents: -650,
+					excluded: true,
+					excludedSource: "plaid",
+					refundOfId: null,
+					income: false,
+					creditReviewedByUser: false,
+				},
+				{
+					excluded: false,
+					excludedWas: false,
+					refundOfId: null,
+					income: false,
+					creditReviewed: false,
+					creditReviewedWas: false,
+					creditReviewedProvided: true,
+				},
+			),
+		).toBe(true);
+	});
+
+	it("keeps a row included when a sync included it after the panel drew it excluded", () => {
+		expect(
+			excludedAfterSave(
+				{
+					amountCents: -650,
+					excluded: false,
+					excludedSource: null,
+					refundOfId: null,
+					income: false,
+					creditReviewedByUser: false,
+				},
+				{
+					excluded: true,
+					excludedWas: true,
+					refundOfId: null,
+					income: false,
+					creditReviewed: false,
+					creditReviewedWas: false,
+					creditReviewedProvided: true,
+				},
+			),
+		).toBe(false);
 	});
 });

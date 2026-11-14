@@ -1187,6 +1187,260 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 		);
 	});
 
+	describe("a stale panel leaves Exclude as the sync or Jev left it (excluded_was, #1086)", () => {
+		const STALE_SYNC_OFF = 9540;
+		const STALE_SYNC_ON = 9541;
+		const STALE_JEV = 9542;
+		const TOGGLE_ON = 9543;
+		const TOGGLE_OFF = 9544;
+		const STALE_OWN = 9545;
+		const PLAIN_DEBIT = 9546;
+		const STALE_LINK = 9547;
+		const STALE_LINK_PURCHASE = 9548;
+
+		const exclusionOf = (id: number) =>
+			db
+				.prepare(
+					"SELECT excluded, excluded_source, flag_income, income_source, refund_of_id, note FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first<{
+					excluded: number;
+					excluded_source: string | null;
+					flag_income: number;
+					income_source: string | null;
+					refund_of_id: number | null;
+					note: string | null;
+				}>();
+
+		it("a stale panel that drew a credit included does not exclude-undo a Plaid exclusion a sync made after it loaded", async () => {
+			await seedRow(STALE_SYNC_OFF, {
+				flagTransfer: 0,
+				plaidCategory: "TRANSFER_IN",
+				excluded: 1,
+				excludedSource: "plaid",
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_SYNC_OFF,
+					panelPost({ note: "Saved from a stale panel", excludedWas: false }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(STALE_SYNC_OFF)).toMatchObject({
+				excluded: 1,
+				excluded_source: "plaid",
+				flag_income: 0,
+				note: "Saved from a stale panel",
+			});
+		});
+
+		it("a stale panel that drew a credit included does not undo an exclusion Jev made after it loaded", async () => {
+			await seedRow(STALE_JEV, { excluded: 1, excludedSource: "jev" });
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_JEV,
+					panelPost({ note: "Saved from a stale panel", excludedWas: false }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(STALE_JEV)).toMatchObject({
+				excluded: 1,
+				excluded_source: "jev",
+				note: "Saved from a stale panel",
+			});
+		});
+
+		it("a stale panel that drew a row excluded does not exclude it again after a sync included it", async () => {
+			await seedRow(STALE_SYNC_ON, {
+				amountCents: 5000,
+				flagTransfer: 0,
+				excluded: 0,
+				excludedSource: null,
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_SYNC_ON,
+					panelPost({
+						excluded: true,
+						excludedWas: true,
+						note: "Saved from a stale panel",
+					}),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(STALE_SYNC_ON)).toMatchObject({
+				excluded: 0,
+				excluded_source: null,
+				note: "Saved from a stale panel",
+			});
+		});
+
+		it("a stale panel does not take a person's own exclusion off", async () => {
+			await seedRow(STALE_OWN, { amountCents: 5000, excludedSource: "user" });
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_OWN,
+					panelPost({ excluded: true, excludedWas: true, note: "kept" }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(STALE_OWN)).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+				note: "kept",
+			});
+		});
+
+		it("a real toggle off of a Plaid exclusion, drawn on, writes it as the person's choice", async () => {
+			await seedRow(TOGGLE_OFF, {
+				amountCents: 5000,
+				flagTransfer: 0,
+				excluded: 1,
+				excludedSource: "plaid",
+				plaidCategory: "TRANSFER_OUT",
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					TOGGLE_OFF,
+					panelPost({ excludedWas: true }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(TOGGLE_OFF)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+		});
+
+		it("a real toggle on, drawn off, writes the exclusion as the person's choice", async () => {
+			await seedRow(TOGGLE_ON, {
+				amountCents: 5000,
+				flagTransfer: 0,
+				excluded: 0,
+				excludedSource: null,
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					TOGGLE_ON,
+					panelPost({ excluded: true, excludedWas: false }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(TOGGLE_ON)).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+			});
+		});
+
+		it("with no excluded_was posted, a save writes the posted Exclude as before", async () => {
+			await seedRow(PLAIN_DEBIT, {
+				amountCents: 5000,
+				flagTransfer: 0,
+				excluded: 1,
+				excludedSource: "plaid",
+			});
+
+			expect(
+				await saveEdit(db, PLAIN_DEBIT, panelPost({ excluded: false }), "test"),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(PLAIN_DEBIT)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+			});
+		});
+
+		it("linking a refund on a stale panel still includes the credit as a person's choice", async () => {
+			await seedRow(STALE_LINK_PURCHASE, {
+				amountCents: 5000,
+				flagTransfer: 0,
+				excluded: 0,
+				excludedSource: null,
+				categoryId: 1,
+			});
+			await seedRow(STALE_LINK, {
+				amountCents: -2000,
+				flagTransfer: 0,
+				excluded: 1,
+				excludedSource: "plaid",
+				plaidCategory: "TRANSFER_IN",
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_LINK,
+					panelPost({
+						refundOfId: STALE_LINK_PURCHASE,
+						excluded: true,
+						excludedWas: true,
+					}),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await exclusionOf(STALE_LINK)).toMatchObject({
+				excluded: 0,
+				excluded_source: "user",
+				refund_of_id: STALE_LINK_PURCHASE,
+			});
+		});
+
+		it("a stale part panel does not write its exclusion to the split's other parts", async () => {
+			const parent = present(
+				await db
+					.prepare(
+						"SELECT id FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
+					)
+					.first<{ id: number }>(),
+			).id;
+			const part = present(
+				await db
+					.prepare("SELECT id FROM transactions WHERE parent_id = ? LIMIT 1")
+					.bind(parent)
+					.first<{ id: number }>(),
+			).id;
+
+			// The sync excluded the whole split after the stale panel loaded with its part included.
+			await db
+				.prepare(
+					"UPDATE transactions SET excluded = 1, excluded_source = 'plaid' WHERE id = ?1 OR parent_id = ?1",
+				)
+				.bind(parent)
+				.run();
+
+			expect(
+				await saveEdit(
+					db,
+					part,
+					panelPost({ note: "stale", excludedWas: false }),
+					"test",
+				),
+			).toEqual({ saved: true });
+
+			const states = (
+				await db
+					.prepare(
+						"SELECT DISTINCT excluded, excluded_source FROM transactions WHERE id = ?1 OR parent_id = ?1",
+					)
+					.bind(parent)
+					.all<{ excluded: number; excluded_source: string | null }>()
+			).results;
+			expect(states).toEqual([{ excluded: 1, excluded_source: "plaid" }]);
+		});
+	});
+
 	it("the month's buckets move the Plaid-only credit from excluded to counted, and it is not held for review", async () => {
 		await seedRow(PLAID_CREDIT, {
 			flagTransfer: 0,
