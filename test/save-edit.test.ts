@@ -1097,6 +1097,96 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 		});
 	});
 
+	describe("a stale panel cannot make a credit income (the panel's Exclude was off when drawn)", () => {
+		const STALE_PLAID = 9520;
+		const STALE_TALLY = 9521;
+
+		const noteOf = (id: number) =>
+			db
+				.prepare("SELECT note FROM transactions WHERE id = ?")
+				.bind(id)
+				.first<{ note: string | null }>();
+
+		it("a Plaid-only transfer credit the panel drew included stays not income, and the unrelated note is saved", async () => {
+			await seedRow(STALE_PLAID, {
+				flagTransfer: 0,
+				plaidCategory: "TRANSFER_IN",
+				excludedSource: "plaid",
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_PLAID,
+					panelPost({ note: "Saved from a stale panel", excludedWas: false }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await creditRow(STALE_PLAID)).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+				credit_reviewed: null,
+			});
+			expect(await noteOf(STALE_PLAID)).toEqual({
+				note: "Saved from a stale panel",
+			});
+		});
+
+		it("a Tally-marked transfer credit the panel drew included stays not income, and the unrelated note is saved", async () => {
+			await seedRow(STALE_TALLY, {
+				flagTransfer: 1,
+				excludedSource: "plaid",
+				plaidCategory: null,
+			});
+
+			expect(
+				await saveEdit(
+					db,
+					STALE_TALLY,
+					panelPost({ note: "Saved from a stale panel", excludedWas: false }),
+					"test",
+				),
+			).toEqual({ saved: true });
+			expect(await creditRow(STALE_TALLY)).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+				credit_reviewed: null,
+			});
+			expect(await noteOf(STALE_TALLY)).toEqual({
+				note: "Saved from a stale panel",
+			});
+		});
+
+		it.each([
+			{
+				kind: "Plaid-only",
+				id: STALE_PLAID,
+				flagTransfer: 0,
+				plaidCategory: "TRANSFER_IN",
+			},
+			{
+				kind: "Tally-marked",
+				id: STALE_TALLY,
+				flagTransfer: 1,
+				plaidCategory: null,
+			},
+		])(
+			"a real toggle still counts a $kind transfer credit as income when the panel drew Exclude on",
+			async ({ id, flagTransfer, plaidCategory }) => {
+				await seedRow(id, {
+					flagTransfer,
+					plaidCategory,
+					excludedSource: "plaid",
+				});
+
+				expect(
+					await saveEdit(db, id, panelPost({ excludedWas: true }), "test"),
+				).toEqual({ saved: true });
+				expect(await creditRow(id)).toEqual(incomeColumns);
+			},
+		);
+	});
+
 	it("the month's buckets move the Plaid-only credit from excluded to counted, and it is not held for review", async () => {
 		await seedRow(PLAID_CREDIT, {
 			flagTransfer: 0,

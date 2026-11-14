@@ -2129,6 +2129,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		displayName: null,
 		note: tx.note,
 		excluded: tx.excluded,
+		excludedWas: tx.excluded,
 		income: tx.income,
 		incomeWas: tx.income,
 		creditReviewed: tx.creditReviewedByUser,
@@ -3146,6 +3147,9 @@ async function savePanel(
 			note: form.get("note")?.toString() ?? null,
 			noteWas: form.get("note_was")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
+			excludedWas: form.has("excluded_was")
+				? form.get("excluded_was") === "1"
+				: undefined,
 			income: form.get("income") === "1",
 			incomeWas: form.get("income_was") === "1",
 			creditReviewed: form.get("creditReviewed") === "1",

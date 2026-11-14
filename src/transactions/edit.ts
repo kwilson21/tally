@@ -50,6 +50,8 @@ export type Edit = {
 	detailsFieldChanged?: boolean;
 	/** Left out of the budget (spec §6). A person can always toggle it. */
 	excluded: boolean;
+	/** The Exclude value the panel showed when opened, so a stale panel's unchanged Exclude is not a new answer. */
+	excludedWas?: boolean;
 	/** Whether this transaction is income; a person can correct Jev's suggestion. */
 	income: boolean;
 	/** The value shown when the person opened the form, so an unchanged post is not a new answer. */
@@ -340,6 +342,11 @@ export function parseEdit(
 	const personWasRaw = text(form, "for_person_id_was");
 	const personWas = personWasRaw ? Number(personWasRaw) : null;
 	const excluded = form.get("excluded") === "1";
+
+	const excludedWas = form.has("excluded_was")
+		? form.get("excluded_was") === "1"
+		: undefined;
+
 	const credit = postedCredit(form);
 
 	if (categoryId !== null && !categoryIds.includes(categoryId)) {
@@ -384,6 +391,7 @@ export function parseEdit(
 		keepBankName,
 		note: note || null,
 		excluded,
+		excludedWas,
 		...credit,
 		kind:
 			form.has("kind") &&
@@ -454,6 +462,9 @@ export function includedTransferCredit(
 		creditReviewedByUser: boolean;
 	},
 ): Edit {
+	// Exclude must have been on in the panel the person saw (excludedWas), so a stale panel whose Exclude was
+	// already off when drawn cannot turn a credit a sync excluded after the page loaded into income. Without
+	// excludedWas (older callers) only the posted Exclude counts.
 	const turnedOffTransferCredit =
 		stored.amountCents < 0 &&
 		(stored.flagTransfer === 1 || stored.plaidTransfer) &&
@@ -464,6 +475,7 @@ export function includedTransferCredit(
 		stored.refundOfId === null &&
 		stored.incomeSource !== "user" &&
 		!stored.creditReviewedByUser &&
+		(edit.excludedWas ?? true) &&
 		!edit.excluded;
 
 	const linking =

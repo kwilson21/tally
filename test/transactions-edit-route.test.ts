@@ -2697,3 +2697,66 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		);
 	});
 });
+
+describe("the edit panel posts whether Exclude was on when drawn (excluded_was)", () => {
+	const plaidCredit = async (excluded: 0 | 1) =>
+		env.DB.prepare(
+			`UPDATE transactions SET amount_cents=-500, flag_transfer=0, plaid_category='TRANSFER_IN', excluded=?, excluded_source=?, flag_income=0, income_source=NULL, credit_reviewed=NULL, credit_reviewed_by=NULL, refund_of_id=NULL, is_split=0, parent_id=NULL WHERE id=?`,
+		)
+			.bind(excluded, excluded ? "plaid" : null, bakery)
+			.run();
+
+	const storedCredit = () =>
+		env.DB.prepare(
+			"SELECT flag_income, income_source, credit_reviewed, note FROM transactions WHERE id=?",
+		)
+			.bind(bakery)
+			.first();
+
+	it("draws excluded_was with the Exclude value the panel shows", async () => {
+		await plaidCredit(1);
+		const excludedPanel = (await get(`/transactions/${bakery}`)).html;
+		expect(excludedPanel).toMatch(/name="excluded_was"[^>]*value="1"/);
+
+		await plaidCredit(0);
+		const includedPanel = (await get(`/transactions/${bakery}`)).html;
+		expect(includedPanel).toMatch(/name="excluded_was"[^>]*value="0"/);
+	});
+
+	it("a stale panel that drew Exclude off saves its note and leaves a Plaid-excluded credit not income", async () => {
+		await plaidCredit(1);
+
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "stale note",
+			back: "/transactions",
+			excluded_was: "0",
+		});
+
+		expect(res.status).toBeLessThan(400);
+		expect(await storedCredit()).toMatchObject({
+			flag_income: 0,
+			income_source: null,
+			credit_reviewed: null,
+			note: "stale note",
+		});
+	});
+
+	it("a real Exclude toggle, drawn on, still counts the Plaid-only credit as income", async () => {
+		await plaidCredit(1);
+
+		const { res } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			excluded_was: "1",
+		});
+
+		expect(res.status).toBeLessThan(400);
+		expect(await storedCredit()).toMatchObject({
+			flag_income: 1,
+			income_source: "user",
+			credit_reviewed: 1,
+		});
+	});
+});
