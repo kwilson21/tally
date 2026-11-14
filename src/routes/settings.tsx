@@ -1279,15 +1279,18 @@ settings.post("/settings/learned/change", async (c) => {
 	return renderPage(c, "learned");
 });
 
+/** The categories page with the changed-suggestion list, at 404: a suggestion that is gone, or an id that is no row id. */
+const changedSuggestion = (c: Context<App>) =>
+	renderPage(c, "categories", {
+		listError: CHANGED_SUGGESTION,
+		status: 404,
+	});
+
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	const id = rowIdOf(c.req.param("id"));
 
 	// An id that is no row id is no suggestion: the changed list answers, before anything is read or written.
-	if (id === undefined)
-		return renderPage(c, "categories", {
-			listError: CHANGED_SUGGESTION,
-			status: 404,
-		});
+	if (id === undefined) return changedSuggestion(c);
 	const form = await c.req.formData();
 
 	const ids = rowIdsOf(form.getAll("ids"));
@@ -1374,11 +1377,7 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 		),
 	];
 
-	const stale = () =>
-		renderPage(c, "categories", {
-			listError: CHANGED_SUGGESTION,
-			status: 404,
-		});
+	const stale = () => changedSuggestion(c);
 
 	if (
 		form.get("id")?.toString() !== `new-${id}` ||
@@ -1412,11 +1411,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const id = rowIdOf(c.req.param("id"));
 
 	// An id that is no row id is no suggestion: the changed list answers, before anything is read or written.
-	if (id === undefined)
-		return renderPage(c, "categories", {
-			listError: CHANGED_SUGGESTION,
-			status: 404,
-		});
+	if (id === undefined) return changedSuggestion(c);
 	const form = await c.req.formData();
 
 	// The question's own answer, posted from the question drawn in the card's place (decision 101).
@@ -1430,11 +1425,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 		),
 	);
 
-	if (!result)
-		return renderPage(c, "categories", {
-			listError: CHANGED_SUGGESTION,
-			status: 404,
-		});
+	if (!result) return changedSuggestion(c);
 	const name = tidyName(result.name);
 	const stores = await askedStores(db, id);
 	// The No sends its card's place, so the question is drawn where the card was. A missing or non-numeric place
