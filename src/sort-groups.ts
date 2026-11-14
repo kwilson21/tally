@@ -224,10 +224,17 @@ export type SortPlan = ReadPlan & {
 
 /**
  * Whether a row's answer asks the payee question for the store lookup (spec §7). The ask and the lookup's mark save
- * both read this one test, so a mark is never written for a question that was not asked.
+ * both read this one test, so a mark is never written for a question that was not asked. A row whose category is
+ * already answered gets none: its save stores no category answer, so the row cannot clear here. The privacy re-ask
+ * (#1087) asks such rows instead.
  */
 function payeeAsked(plan: SortPlan, row: SortRow): boolean {
-	return plan.payee === true && !plan.reask && !row.categoryOnly;
+	return (
+		plan.payee === true &&
+		!plan.reask &&
+		!row.categoryOnly &&
+		!row.categoryAnswered
+	);
 }
 
 /** A failed ask. Its fields carry the status and request id, never the key or any transaction detail. */

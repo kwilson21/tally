@@ -281,7 +281,7 @@ describe("the mark is never written for what a person decided or for a question 
 		expect(await markOf(id)).toBeNull();
 	});
 
-	it("a credit whose category was answered earlier is written for its income only, so its mark is cleared 0", async () => {
+	it("a credit whose category was answered earlier is asked its income only: no payee question and no mark", async () => {
 		const id = await addRow("EMPLOYER DEPOSIT", -400000);
 
 		const category = await db
@@ -295,12 +295,11 @@ describe("the mark is never written for what a person decided or for a question 
 			.bind(category?.id ?? null, id)
 			.run();
 
-		await sortRows(
-			[id],
-			vi.fn(async () => jevReply()),
-		);
+		const fetchImpl = vi.fn(async () => jevReply());
+		await sortRows([id], fetchImpl);
 
-		expect((await markOf(id))?.cleared).toBe(0);
+		expect(bodyOf(fetchImpl).questions.payee).toBeUndefined();
+		expect(await markOf(id)).toBeNull();
 	});
 
 	it("a payee answer that is missing is kept as a row that does not clear (one row per row Jev was asked)", async () => {
@@ -387,6 +386,52 @@ describe("the mark's row", () => {
 
 		expect(pending).toBeDefined();
 		expect((await seenOf(db, [id])).get(id)).toEqual(pending?.seen);
+	});
+});
+
+describe("a row whose category is already answered is not asked the payee question", () => {
+	it("a purchase Jev already classified, whose details are unasked: no payee question, no mark, details still saved", async () => {
+		const id = await addRow("LOCAL BAKERY CLASSIFIED", 1200);
+
+		const category = await db
+			.prepare("SELECT id FROM categories ORDER BY id LIMIT 1")
+			.first<{ id: number }>();
+
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE id = ?",
+			)
+			.bind(category?.id ?? null, id)
+			.run();
+
+		const person = await db
+			.prepare("SELECT id FROM household_people ORDER BY id LIMIT 1")
+			.first<{ id: number }>();
+
+		expect(person).toBeTruthy();
+
+		const fetchImpl = vi.fn(async () =>
+			jevReply({ forPerson: `person:${person?.id}` }),
+		);
+
+		await sortRows([id], fetchImpl);
+
+		expect(bodyOf(fetchImpl).questions.payee).toBeUndefined();
+		expect(await markOf(id)).toBeNull();
+		expect(await rowOf(id)).toMatchObject({
+			kind: "one_off",
+			forPersonId: person?.id,
+			detailsAsked: 1,
+		});
+	});
+
+	it("an unclassified purchase is still asked the payee question and writes its mark", async () => {
+		const id = await addRow("LOCAL BAKERY UNCLASSIFIED", 1200);
+		const fetchImpl = vi.fn(async () => jevReply());
+		await sortRows([id], fetchImpl);
+
+		expect(bodyOf(fetchImpl).questions.payee).toBeDefined();
+		expect((await markOf(id))?.cleared).toBe(1);
 	});
 });
 
