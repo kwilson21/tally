@@ -6,6 +6,7 @@ import { saveEdit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import {
 	fillLookupTexts,
+	KEY_VERSIONS_SQL,
 	type LookupTextFacts,
 	lookupTextRow,
 	readLookupTexts,
@@ -458,6 +459,74 @@ describe("a save only clears a key whose facts are still the ones it read", () =
 		await saveLookupTexts(db, read);
 
 		expect(await privateOf("Hook Clean Co")).toBe(0);
+	});
+});
+
+describe("the version does not depend on the order the rows came in", () => {
+	/** An ordinary store's six purchases: clean texts in no sorted order, three categories and one NULL, unsorted. */
+	const SHOP = "Ordered Shop Co";
+
+	const PURCHASES: [string, string | null][] = [
+		["ORDERED SHOP ZETA", "GENERAL_MERCHANDISE"],
+		["ORDERED SHOP ALPHA", null],
+		["ORDERED SHOP MU", "FOOD_AND_DRINK"],
+		["ORDERED SHOP BETA", "ENTERTAINMENT"],
+		["ORDERED SHOP OMEGA", "GENERAL_MERCHANDISE"],
+		["ORDERED SHOP GAMMA", "FOOD_AND_DRINK"],
+	];
+
+	async function insertPurchases(order: [string, string | null][]) {
+		for (const [raw, category] of order) {
+			await addRow({
+				merchant_name: SHOP,
+				raw_name: raw,
+				plaid_category: category,
+			});
+		}
+	}
+
+	it("an ordinary key with six clean texts and a NULL category, inserted unsorted, stays not private across two fills", async () => {
+		await insertPurchases(PURCHASES);
+
+		await fillLookupTexts(db);
+		expect(await privateOf(SHOP)).toBe(0);
+
+		await fillLookupTexts(db);
+		expect(await privateOf(SHOP)).toBe(0);
+	});
+
+	it("the same set of purchases, deleted and re-inserted in the reverse order, stays not private", async () => {
+		await insertPurchases(PURCHASES);
+		await fillLookupTexts(db);
+
+		await db
+			.prepare("DELETE FROM transactions WHERE merchant_name = ?")
+			.bind(SHOP)
+			.run();
+		await insertPurchases([...PURCHASES].reverse());
+		await fillLookupTexts(db);
+
+		expect(await privateOf(SHOP)).toBe(0);
+	});
+
+	it("the read and the save's subquery compute the same version text for the key", async () => {
+		await insertPurchases(PURCHASES);
+
+		const read = await readLookupTexts(db);
+
+		const viaRead = read.keys.find(
+			({ row }) => row.merchantKey === SHOP,
+		)?.version;
+
+		const viaSave = await db
+			.prepare(
+				`WITH facts AS (${KEY_VERSIONS_SQL}) SELECT version FROM facts WHERE merchantKey = ?`,
+			)
+			.bind(SHOP)
+			.first<{ version: string }>();
+
+		expect(viaRead).toBeDefined();
+		expect(viaSave?.version).toBe(viaRead);
 	});
 });
 

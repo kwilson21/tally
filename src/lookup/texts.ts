@@ -74,8 +74,19 @@ const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR
  * compare the version it read with the version as it stands when it writes (saveLookupTexts). Nothing else is read, so the
  * version is built from exactly the facts the decision uses, and needs no assumption about updated_at.
  */
-const KEY_VERSIONS_SQL = `SELECT merchantKey, rawTexts, categories, flagged, maybe, transfer, excluded,
-	json_array(flagged, maybe, transfer, excluded, rawTexts, categories) AS version
+/**
+ * One row per merchant key: the distinct values of `column` over the key's rows, as a JSON array in value order (NULL first).
+ * The order comes from the ORDER BY inside the subquery, not from the query plan, so the same rows always give the same text.
+ */
+const sortedDistinctSql = (column: string) =>
+	`SELECT k, json_group_array(v) AS list FROM (SELECT DISTINCT ${merchantKeySql("t")} AS k, ${column} AS v FROM transactions t ORDER BY k, v) GROUP BY k`;
+
+/**
+ * The version is the decision's facts as one text, with the two lists in sorted order (sortedDistinctSql). The read and the
+ * save both run this one fragment, so they cannot drift apart. Exported so a test can check the two paths produce the same text.
+ */
+export const KEY_VERSIONS_SQL = `SELECT f.merchantKey, f.rawTexts, f.categories, f.flagged, f.maybe, f.transfer, f.excluded,
+	json_array(f.flagged, f.maybe, f.transfer, f.excluded, raws.list, cats.list) AS version
 FROM (SELECT ${merchantKeySql("t")} AS merchantKey,
 		json_group_array(DISTINCT t.raw_name) AS rawTexts,
 		json_group_array(DISTINCT t.plaid_category) AS categories,
@@ -84,7 +95,9 @@ FROM (SELECT ${merchantKeySql("t")} AS merchantKey,
 		MAX(t.kind = 'transfer') AS transfer,
 		MAX(t.excluded = 1) AS excluded
 	FROM transactions t
-	GROUP BY ${merchantKeySql("t")})`;
+	GROUP BY ${merchantKeySql("t")}) f
+JOIN (${sortedDistinctSql("t.raw_name")}) raws ON raws.k = f.merchantKey
+JOIN (${sortedDistinctSql("t.plaid_category")}) cats ON cats.k = f.merchantKey`;
 
 /** How many keys one upsert statement writes (the JSON rows it binds). */
 const KEYS_PER_STATEMENT = 500;
