@@ -16,6 +16,12 @@ import {
 } from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import {
+	extendLeaseSql,
+	ownsLeaseSql,
+	releaseLeaseSql,
+	takeLeaseSql,
+} from "../machines/plaid-lease";
+import {
 	type Asked,
 	RESTARTS,
 	type Saved,
@@ -35,7 +41,6 @@ import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { markNeedsAttention, markSyncSucceeded, readSeen } from "./item-store";
 import { loginStillBroken } from "./login-broken";
 import { mergePendingIntoPosted } from "./pending-merge";
-import { SYNC_LEASE_MINUTES } from "./timing";
 import { decryptToken } from "./token-crypto";
 
 type SyncEnv = PlaidEnv & {
@@ -367,8 +372,7 @@ const sweepStaleNamesSql = (ownsLock: string) =>
 /** How many times a page settles its names again when another bank's charge lands while it does (#1054). */
 const SETTLE_TRIES = 3;
 
-const OWNS_LOCK =
-	"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL)";
+const OWNS_LOCK = ownsLeaseSql("?", "?");
 
 /**
  * Before a bank change removes a split (its amount changed), the bills its parts paid are kept on the
@@ -394,11 +398,7 @@ function splitBillStatements(
 		// A person's own Not this one on a part moves onto the purchase before the parts go, which takes the rest of
 		// their payments with them (decision 105).
 		env.DB.prepare(
-			movePartDismissalsSql(
-				purchase,
-				purchase,
-				"EXISTS (SELECT 1 FROM plaid_items WHERE id = ?3 AND sync_lock_id = ?4 AND disconnected_at IS NULL)",
-			),
+			movePartDismissalsSql(purchase, purchase, ownsLeaseSql("?3", "?4")),
 		).bind(plaidTransactionId, cents, itemRowId, lockId),
 	];
 }
@@ -586,10 +586,7 @@ export async function syncItem(
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 
-	const lock = await env.DB.prepare(
-		`UPDATE plaid_items SET sync_locked_until = datetime('now', '+${SYNC_LEASE_MINUTES} minutes'), sync_lock_id = ?
-		 WHERE id = ? AND disconnected_at IS NULL AND (sync_locked_until IS NULL OR sync_locked_until < datetime('now'))`,
-	)
+	const lock = await env.DB.prepare(takeLeaseSql("?", "?"))
 		.bind(lockId, itemRowId)
 		.run();
 
@@ -703,10 +700,7 @@ export async function syncItem(
 			}
 
 			const statements: D1PreparedStatement[] = [
-				env.DB.prepare(
-					`UPDATE plaid_items SET sync_locked_until = datetime('now', '+${SYNC_LEASE_MINUTES} minutes')
-					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
-				).bind(itemRowId, lockId),
+				env.DB.prepare(extendLeaseSql("?", "?")).bind(itemRowId, lockId),
 			];
 
 			const existingTransactionIds = new Set<string>();
@@ -1517,9 +1511,7 @@ export async function syncItem(
 
 		throw failure?.error ?? new Error("Plaid sync stopped without a reason");
 	} finally {
-		await env.DB.prepare(
-			"UPDATE plaid_items SET sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND sync_lock_id = ?",
-		)
+		await env.DB.prepare(releaseLeaseSql("?", "?"))
 			.bind(itemRowId, lockId)
 			.run();
 	}

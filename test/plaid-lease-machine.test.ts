@@ -1,19 +1,19 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
-import { disconnectStatement } from "../src/plaid/item-store";
 import { resetDemo } from "../src/demo/reset";
-import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { next } from "../src/machines/next";
 import {
 	extendLeaseSql,
 	leaseStateOf,
+	ownsLeaseSql,
 	type PlaidLeaseState,
 	plaidLeaseMachine,
 	releaseLeaseSql,
 	type StoredLease,
 	takeLeaseSql,
-	ownsLeaseSql,
 } from "../src/machines/plaid-lease";
+import { disconnectStatement } from "../src/plaid/item-store";
+import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { present } from "./helpers/present";
 
 // The bank sync lease as a machine (issue #1100): four states, derived from the three columns a sync reads. The tests
@@ -120,9 +120,9 @@ describe("leaseStateOf", () => {
 
 	it("reads a lock id with no lease as expired, and a lease with no lock id as held (no production write makes that row)", () => {
 		expect(leaseStateOf(row({ lockId: HOLDER }), NOW)).toBe("expired");
-		expect(
-			leaseStateOf(row({ lockedUntil: "2026-11-14 13:00:00" }), NOW),
-		).toBe("held");
+		expect(leaseStateOf(row({ lockedUntil: "2026-11-14 13:00:00" }), NOW)).toBe(
+			"held",
+		);
 	});
 
 	it("reads no lock and no live lease as free, even with a past lease left behind", () => {
@@ -155,13 +155,55 @@ type Seed = {
 };
 
 const SEEDS: Seed[] = [
-	{ label: "free with no lease", state: "free", lockId: null, lockedUntil: null, disconnected: false },
-	{ label: "free with a lease that has passed", state: "free", lockId: null, lockedUntil: PAST, disconnected: false },
-	{ label: "held", state: "held", lockId: HOLDER, lockedUntil: FUTURE, disconnected: false },
-	{ label: "held with no lock id (no production write makes it)", state: "held", lockId: null, lockedUntil: FUTURE, disconnected: false },
-	{ label: "expired with a lease that has passed", state: "expired", lockId: HOLDER, lockedUntil: PAST, disconnected: false },
-	{ label: "expired with no lease", state: "expired", lockId: HOLDER, lockedUntil: null, disconnected: false },
-	{ label: "disconnected", state: "disconnected", lockId: null, lockedUntil: null, disconnected: true },
+	{
+		label: "free with no lease",
+		state: "free",
+		lockId: null,
+		lockedUntil: null,
+		disconnected: false,
+	},
+	{
+		label: "free with a lease that has passed",
+		state: "free",
+		lockId: null,
+		lockedUntil: PAST,
+		disconnected: false,
+	},
+	{
+		label: "held",
+		state: "held",
+		lockId: HOLDER,
+		lockedUntil: FUTURE,
+		disconnected: false,
+	},
+	{
+		label: "held with no lock id (no production write makes it)",
+		state: "held",
+		lockId: null,
+		lockedUntil: FUTURE,
+		disconnected: false,
+	},
+	{
+		label: "expired with a lease that has passed",
+		state: "expired",
+		lockId: HOLDER,
+		lockedUntil: PAST,
+		disconnected: false,
+	},
+	{
+		label: "expired with no lease",
+		state: "expired",
+		lockId: HOLDER,
+		lockedUntil: null,
+		disconnected: false,
+	},
+	{
+		label: "disconnected",
+		state: "disconnected",
+		lockId: null,
+		lockedUntil: null,
+		disconnected: true,
+	},
 ];
 
 async function seed(item: Seed): Promise<number> {
@@ -233,16 +275,24 @@ describe("every writer from every state, against the machine", () => {
 				if (!moves) {
 					expect(changes).toBe(0);
 					expect(after).toEqual(before);
+
 					return;
 				}
 
 				expect(changes).toBe(1);
 				expect(leaseStateOf(after, Date.now())).toBe(expected);
 
-				if (event === "TAKE") expect(after.lockId).toBe(NEW);
-				if (event === "EXTEND") expect(after.lockId).toBe(HOLDER);
-				if (event === "RELEASE")
+				if (event === "TAKE") {
+					expect(after.lockId).toBe(NEW);
+				}
+
+				if (event === "EXTEND") {
+					expect(after.lockId).toBe(HOLDER);
+				}
+
+				if (event === "RELEASE") {
 					expect(after).toMatchObject({ lockId: null, lockedUntil: null });
+				}
 			});
 		}
 	}
@@ -279,7 +329,8 @@ describe("OWNS, the guard every page write carries", () => {
 
 			// The holder owns the lock while the machine lets it extend: held, or expired and not yet taken by anyone.
 			if (item.lockId !== null) {
-				const holderMayExtend = next(plaidLeaseMachine, item.state, "EXTEND") !== null;
+				const holderMayExtend =
+					next(plaidLeaseMachine, item.state, "EXTEND") !== null;
 
 				expect(await owns(id, item.lockId)).toBe(holderMayExtend);
 			}
@@ -317,10 +368,17 @@ describe("two runs over one bank", () => {
 	});
 
 	const bank = async (): Promise<number> =>
-		seed({ label: "a free bank", state: "free", lockId: null, lockedUntil: null, disconnected: false });
+		seed({
+			label: "a free bank",
+			state: "free",
+			lockId: null,
+			lockedUntil: null,
+			disconnected: false,
+		});
 
 	const take = async (id: number, lock: string) =>
-		(await db.prepare(takeLeaseSql("?", "?")).bind(lock, id).run()).meta.changes;
+		(await db.prepare(takeLeaseSql("?", "?")).bind(lock, id).run()).meta
+			.changes;
 
 	const expire = (id: number) =>
 		db
