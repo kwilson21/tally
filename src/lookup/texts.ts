@@ -1,6 +1,7 @@
 // The store lookup's text for each merchant key, and whether the key is private (spec §7, "Store lookup": "The lookup text",
-// "Never searched"). The decision is pure; fillLookupTexts gathers what it needs in one read and saves it in one batch, so a
-// later step can join a transaction to its lookup text and its private mark in SQL (merchant_lookup_texts, migration 0074).
+// "Never searched"). The decision is pure; the fill reads what it needs in one read, decides in TypeScript, and saves in one
+// batch, so a later step can join a transaction to its lookup text and its private mark in SQL (merchant_lookup_texts,
+// migration 0074).
 
 import { merchantKeySql } from "../db/merchant-key";
 import { askedSql } from "../db/suggestions-queue";
@@ -67,65 +68,100 @@ export function lookupTextRow(
  */
 const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR ${askedSql("income", "t.income_confidence")})`;
 
+/**
+ * The facts the decision reads, one row per merchant key over every one of its transactions (cash, hand-entered, Apple Card and
+ * split rows included), and `version`: those same facts as JSON text. The read and the save both run this SQL, so a save can
+ * compare the version it read with the version as it stands when it writes (saveLookupTexts). Nothing else is read, so the
+ * version is built from exactly the facts the decision uses, and needs no assumption about updated_at.
+ */
+const KEY_VERSIONS_SQL = `SELECT merchantKey, rawTexts, categories, flagged, maybe, transfer, excluded,
+	json_array(flagged, maybe, transfer, excluded, rawTexts, categories) AS version
+FROM (SELECT ${merchantKeySql("t")} AS merchantKey,
+		json_group_array(DISTINCT t.raw_name) AS rawTexts,
+		json_group_array(DISTINCT t.plaid_category) AS categories,
+		MAX(t.flag_transfer = 1 OR t.flag_income = 1 OR t.flag_reimbursement = 1) AS flagged,
+		MAX(${MAYBE_IN_RANGE_SQL}) AS maybe,
+		MAX(t.kind = 'transfer') AS transfer,
+		MAX(t.excluded = 1) AS excluded
+	FROM transactions t
+	GROUP BY ${merchantKeySql("t")})`;
+
 /** How many keys one upsert statement writes (the JSON rows it binds). */
 const KEYS_PER_STATEMENT = 500;
 
+/** What a read decided for each merchant key, with the version it read the key's facts at. */
+export type PendingLookupTexts = {
+	keys: { row: LookupTextRow; version: string }[];
+};
+
 /**
- * Fills merchant_lookup_texts from every transaction (cash, hand-entered, Apple Card and split rows included): one read
- * grouped by merchant key, decided in TypeScript, and saved in one batch of upserts, KEYS_PER_STATEMENT keys to a statement.
- * A key with no transaction left is not touched (nothing is deleted here). Returns counts only.
+ * One read of every key's facts, decided in TypeScript. Nothing is written. A save (saveLookupTexts) writes what this decided,
+ * but only while the key's facts are still the ones it read, so a change in between is never overwritten by an older answer.
  */
-export async function fillLookupTexts(
+export async function readLookupTexts(
 	db: D1Database,
-): Promise<{ keys: number; private: number }> {
-	const { results } = await db
-		.prepare(
-			`SELECT ${merchantKeySql("t")} AS merchantKey,
-				json_group_array(DISTINCT t.raw_name) AS rawTexts,
-				json_group_array(DISTINCT t.plaid_category) AS categories,
-				MAX(t.flag_transfer = 1 OR t.flag_income = 1 OR t.flag_reimbursement = 1) AS flagged,
-				MAX(${MAYBE_IN_RANGE_SQL}) AS maybe,
-				MAX(t.kind = 'transfer') AS transfer,
-				MAX(t.excluded = 1) AS excluded
-			FROM transactions t
-			GROUP BY ${merchantKeySql("t")}`,
-		)
-		.all<{
-			merchantKey: string;
-			rawTexts: string;
-			categories: string;
-			flagged: number | null;
-			maybe: number | null;
-			transfer: number | null;
-			excluded: number | null;
-		}>();
+): Promise<PendingLookupTexts> {
+	const { results } = await db.prepare(KEY_VERSIONS_SQL).all<{
+		merchantKey: string;
+		rawTexts: string;
+		categories: string;
+		flagged: number | null;
+		maybe: number | null;
+		transfer: number | null;
+		excluded: number | null;
+		version: string;
+	}>();
 
 	// SAFETY: json_group_array always returns a JSON array of the column's values, so each parse below is an array of strings or nulls.
-	const rows = results.map((row) =>
-		lookupTextRow(row.merchantKey, {
-			rawTexts: JSON.parse(row.rawTexts) as string[],
-			categories: JSON.parse(row.categories) as (string | null)[],
-			flagged: row.flagged === 1,
-			maybe: row.maybe === 1,
-			transfer: row.transfer === 1,
-			excluded: row.excluded === 1,
-		}),
-	);
+	return {
+		keys: results.map((row) => ({
+			row: lookupTextRow(row.merchantKey, {
+				rawTexts: JSON.parse(row.rawTexts) as string[],
+				categories: JSON.parse(row.categories) as (string | null)[],
+				flagged: row.flagged === 1,
+				maybe: row.maybe === 1,
+				transfer: row.transfer === 1,
+				excluded: row.excluded === 1,
+			}),
+			version: row.version,
+		})),
+	};
+}
 
+/**
+ * Saves a read's decisions in one batch of upserts, KEYS_PER_STATEMENT keys to a statement. A key is written private when the
+ * read decided so, and otherwise private only if its facts have changed since the read (the version in the same statement, computed
+ * again over the key's current rows): fail closed, so an older read never clears a store a newer change made private. A key
+ * with no transaction left is not touched (nothing is deleted here). Returns counts only.
+ */
+export async function saveLookupTexts(
+	db: D1Database,
+	pending: PendingLookupTexts,
+): Promise<{ keys: number; private: number }> {
 	const statements: D1PreparedStatement[] = [];
 
-	for (let start = 0; start < rows.length; start += KEYS_PER_STATEMENT) {
-		const chunk = rows.slice(start, start + KEYS_PER_STATEMENT).map((row) => ({
-			k: row.merchantKey,
-			t: row.lookupText,
-			p: row.private,
-		}));
+	for (
+		let start = 0;
+		start < pending.keys.length;
+		start += KEYS_PER_STATEMENT
+	) {
+		const chunk = pending.keys
+			.slice(start, start + KEYS_PER_STATEMENT)
+			.map(({ row, version }) => ({
+				k: row.merchantKey,
+				t: row.lookupText,
+				p: row.private,
+				v: version,
+			}));
 
 		statements.push(
 			db
 				.prepare(
-					`INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private)
-					SELECT json_extract(value, '$.k'), json_extract(value, '$.t'), json_extract(value, '$.p') FROM json_each(?)
+					`WITH facts AS (${KEY_VERSIONS_SQL})
+					INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private)
+					SELECT json_extract(j.value, '$.k'), json_extract(j.value, '$.t'),
+						CASE WHEN json_extract(j.value, '$.p') = 1 OR facts.version IS NOT json_extract(j.value, '$.v') THEN 1 ELSE 0 END
+					FROM json_each(?) AS j JOIN facts ON facts.merchantKey = json_extract(j.value, '$.k')
 					WHERE true
 					ON CONFLICT(merchant_key) DO UPDATE SET lookup_text = excluded.lookup_text, private = excluded.private`,
 				)
@@ -136,7 +172,14 @@ export async function fillLookupTexts(
 	if (statements.length > 0) await db.batch(statements);
 
 	return {
-		keys: rows.length,
-		private: rows.filter((row) => row.private === 1).length,
+		keys: pending.keys.length,
+		private: pending.keys.filter(({ row }) => row.private === 1).length,
 	};
+}
+
+/** The whole fill: one read, then the fenced save. */
+export async function fillLookupTexts(
+	db: D1Database,
+): Promise<{ keys: number; private: number }> {
+	return saveLookupTexts(db, await readLookupTexts(db));
 }

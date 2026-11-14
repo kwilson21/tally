@@ -8,6 +8,8 @@ import {
 	fillLookupTexts,
 	type LookupTextFacts,
 	lookupTextRow,
+	readLookupTexts,
+	saveLookupTexts,
 } from "../src/lookup/texts";
 import { runSortInstance } from "../src/sort-instance";
 import { fakeSteps } from "./fake-sort-steps";
@@ -353,6 +355,109 @@ describe("fillLookupTexts: the bank texts and Plaid categories it reads", () => 
 		await fillLookupTexts(db);
 
 		expect(await privateOf("Ordinary Shop Co")).toBe(0);
+	});
+});
+
+describe("a save only clears a key whose facts are still the ones it read", () => {
+	// The hook: the read runs first, then the test writes (as a sync, a person or Jev would), then the save runs. The
+	// fill is exactly these two calls in order.
+
+	it("a transaction of the key excluded between the read and the save leaves it private", async () => {
+		await addRow({
+			merchant_name: "Hook Excluded Co",
+			raw_name: "HOOK EXCLUDED CO",
+		});
+		const read = await readLookupTexts(db);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE merchant_name = 'Hook Excluded Co'",
+			)
+			.run();
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Hook Excluded Co")).toBe(1);
+	});
+
+	it("a new transaction with a transfer flag inserted between the read and the save leaves its key private", async () => {
+		await addRow({
+			merchant_name: "Hook Insert Co",
+			raw_name: "HOOK INSERT CO",
+		});
+		const read = await readLookupTexts(db);
+
+		await addRow({
+			merchant_name: "Hook Insert Co",
+			raw_name: "HOOK INSERT CO",
+			flag_transfer: 1,
+		});
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Hook Insert Co")).toBe(1);
+	});
+
+	it("a raw bank text changed to name a bank rail between the read and the save leaves its key private", async () => {
+		await addRow({ merchant_name: "Hook Raw Co", raw_name: "HOOK RAW CO" });
+		const read = await readLookupTexts(db);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET raw_name = 'ACH PAYMENT TO JANE DOE' WHERE merchant_name = 'Hook Raw Co'",
+			)
+			.run();
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Hook Raw Co")).toBe(1);
+	});
+
+	it("another fill that already wrote private from newer facts is not undone by an older save", async () => {
+		await addRow({ merchant_name: "Hook Newer Co", raw_name: "HOOK NEWER CO" });
+		const older = await readLookupTexts(db);
+
+		await addRow({
+			merchant_name: "Hook Newer Co",
+			raw_name: "HOOK NEWER CO",
+			flag_income: 1,
+		});
+		await fillLookupTexts(db);
+		expect(await privateOf("Hook Newer Co")).toBe(1);
+
+		await saveLookupTexts(db, older);
+
+		expect(await privateOf("Hook Newer Co")).toBe(1);
+	});
+
+	it("an ordinary key whose facts did not change between the read and the save is not private", async () => {
+		await addRow({
+			merchant_name: "Hook Ordinary Co",
+			raw_name: "HOOK ORDINARY CO",
+		});
+		const read = await readLookupTexts(db);
+
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Hook Ordinary Co")).toBe(0);
+	});
+
+	it("a key that was private, whose facts are clean and unchanged across the read and the save, returns to not private", async () => {
+		const id = await insertedId({
+			merchant_name: "Hook Clean Co",
+			raw_name: "HOOK CLEAN CO",
+			flag_transfer: 1,
+		});
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Hook Clean Co")).toBe(1);
+
+		await db
+			.prepare("UPDATE transactions SET flag_transfer = 0 WHERE id = ?")
+			.bind(id)
+			.run();
+		const read = await readLookupTexts(db);
+		await saveLookupTexts(db, read);
+
+		expect(await privateOf("Hook Clean Co")).toBe(0);
 	});
 });
 
