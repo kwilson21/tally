@@ -42,6 +42,7 @@ import {
 	suggestionQueue,
 } from "../db/suggestions-queue";
 import { readAtEdge } from "../edge";
+import { DigitsUpTo15, numberOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
@@ -122,11 +123,11 @@ export function reviewAddress(
 	return query.size ? `${PATH}?${query}` : PATH;
 }
 
-/** The `more` address key as a purchase id, or undefined when it isn't one (an id only, never bank text). */
+/** The `more` address key, or a posted purchase or category number, as a number, or undefined when it isn't one (never bank text). */
 function moreFrom(value: string | undefined): number | undefined {
-	if (value === undefined || !/^\d{1,15}$/.test(value)) return undefined;
+	const read = readAtEdge(DigitsUpTo15, value);
 
-	return Number(value);
+	return read.ok ? read.value : undefined;
 }
 
 /** The skip keys of one address key, kept only when the queue still has them (never bank text). */
@@ -704,7 +705,8 @@ suggestions.post(PATH, async (c) => {
 
 		const labels = await writeNeverSuggest(db, {
 			kind: knownKind,
-			itemId: Number(found[2]),
+			// The digits group always matches when `found` is set, so the empty text is never read.
+			itemId: numberOf(found[2] ?? ""),
 			stores,
 			today,
 		});
@@ -742,7 +744,7 @@ suggestions.post(PATH, async (c) => {
 						category,
 						ticked: form
 							.getAll("ticked")
-							.map((value) => Number(value.toString()))
+							.map((value) => numberOf(value.toString()))
 							.filter(Number.isSafeInteger),
 						who,
 					});
@@ -1054,12 +1056,12 @@ suggestions.post(PATH, async (c) => {
 
 				const shown = form
 					.getAll("shown")
-					.map((value) => Number(value.toString()))
+					.map((value) => numberOf(value.toString()))
 					.filter((n) => Number.isInteger(n) && asked.has(n));
 
 				const ticked = form
 					.getAll("ticked")
-					.map((value) => Number(value.toString()))
+					.map((value) => numberOf(value.toString()))
 					.filter((n) => Number.isInteger(n) && asked.has(n));
 
 				// The note under an unticked purchase is kept with the answer, as Settings keeps it (decision 120).

@@ -3,6 +3,7 @@ import { readAtEdge } from "../src/edge";
 import {
 	BillAmount,
 	CardPlace,
+	DigitsUpTo15,
 	numberOf,
 	PersonName,
 	RowId,
@@ -266,6 +267,31 @@ describe("rowIdOrZero and rowIdsOf: a refused id is 0, and a list drops what it 
 		expect(textOf(new File(["x"], "x.txt"))).toBe("");
 		expect(textOf(null)).toBe("");
 		expect(textOf("text")).toBe("text");
+	});
+});
+
+describe("DigitsUpTo15: a purchase or category number in digits, zeros in front kept (suggestions, #1006)", () => {
+	it.each([
+		["one digit", "7", 7],
+		["a leading zero, as the More card always read it", "007", 7],
+		["zero", "0", 0],
+		["fifteen digits", "999999999999999", 999_999_999_999_999],
+	])("reads %s, %j, as %d", (_label, text, value) => {
+		expect(readAtEdge(DigitsUpTo15, text)).toEqual({ ok: true, value });
+	});
+
+	it.each([
+		["the empty text", ""],
+		["sixteen digits", "1234567890123456"],
+		["an exponent", "1e3"],
+		["a space", " 7"],
+		["a decimal point", "7.0"],
+		["a sign", "-7"],
+		["a plus sign", "+7"],
+		["hex", "0x7"],
+		["a newline", "7\n"],
+	])("refuses %s, %j", (_label, text) => {
+		expect(readAtEdge(DigitsUpTo15, text).ok).toBe(false);
 	});
 });
 

@@ -24,6 +24,15 @@ export const CardPlace = Schema.String.check(Schema.isPattern(/^\d+$/)).pipe(
 );
 
 /**
+ * A purchase's or a category's number from an address or a form (Suggestions, #1006): digits only, at most fifteen, so
+ * the value is a safe integer. Zeros in front are read as they always were ("007" is 7). Any other text is refused, as
+ * the More card has always refused it.
+ */
+export const DigitsUpTo15 = Schema.String.check(
+	Schema.isPattern(/^\d{1,15}$/),
+).pipe(Schema.decodeTo(Schema.NumberFromString));
+
+/**
  * A held Undo's name, from a form: 36 characters of hex digits and dashes, in either case, the shape a random UUID is
  * written in. Any other text is refused, and the route answers it as an Undo that has closed.
  */
@@ -70,8 +79,8 @@ export const BillAmount = Schema.String.pipe(
 /**
  * A number typed in a form, read the way Number() reads it: Schema's NumberFromString is Number() (effect 4.1.4,
  * SchemaGetter.Number is transform(globalThis.Number)), so "07" is 7, "5.0" is 5, "1e1" is 10, "" is 0, and text that
- * is no number is NaN. For the bill form's day, month and category, whose answers must not change; the id in an
- * address reads RowId instead.
+ * is no number is NaN. For the places whose answers must not change: the bill form's day, month and category, and the
+ * Suggestions lists and queue id (#1006). The id in an address reads RowId instead.
  */
 export function numberOf(text: string): number {
 	const read = readAtEdge(Schema.NumberFromString, text);
