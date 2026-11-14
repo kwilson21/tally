@@ -439,7 +439,9 @@ async function insertedId(values: Record<string, string | number | null>) {
 		raw_name: "ORDINARY STORE",
 		...values,
 	};
+
 	const columns = Object.keys(row);
+
 	const inserted = await db
 		.prepare(
 			`INSERT INTO transactions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) RETURNING id`,
@@ -486,6 +488,7 @@ describe("a transfer, income or reimbursement said about any row makes its key p
 			.prepare("SELECT excluded FROM transactions WHERE id = ?")
 			.bind(id)
 			.first<{ excluded: number }>();
+
 		expect(stored?.excluded).toBe(1);
 
 		await fillLookupTexts(db);
