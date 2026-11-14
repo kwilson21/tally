@@ -33,23 +33,13 @@ type InstanceEnv = SortEnv & { AI?: Ai };
  */
 export const INSTANCE_MAX_CALLS = 5000;
 
-// The re-ask's finish is a D1 write, so a failed one may run again; finishRun is idempotent.
-const REASK_STEPS = {
-	finish: {
-		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
-		timeout: "1 minute",
-		sensitive: "output",
-	},
-} satisfies Record<string, StepConfig>;
-
-// The lookup texts' step is D1 only, so a failed save may run again. The fill itself never throws out of its step (see runSortInstance).
-const LOOKUP_STEPS = {
-	texts: {
-		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
-		timeout: "1 minute",
-		sensitive: "output",
-	},
-} satisfies Record<string, StepConfig>;
+// A step that only writes D1 may run again after a failed save: the re-ask's finish (finishRun is idempotent), the night's
+// wait mark, and the lookup texts (whose fill never throws out of its step, see runSortInstance).
+const D1_STEP = {
+	retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
+	timeout: "1 minute",
+	sensitive: "output",
+} satisfies StepConfig;
 
 const NIGHT_STEPS = {
 	// Workers AI steps never retry, so no request is made twice. Each starts no request after 13 minutes from its own
@@ -57,12 +47,6 @@ const NIGHT_STEPS = {
 	ai: {
 		retries: { limit: 0, delay: 0 },
 		timeout: "15 minutes",
-		sensitive: "output",
-	},
-	// Configures only the night-run-wait step, the clear of the daily run's wait mark (decision 150). D1 only, so a failed save may run again.
-	counts: {
-		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
-		timeout: "1 minute",
 		sensitive: "output",
 	},
 } satisfies Record<string, StepConfig>;
@@ -114,7 +98,7 @@ export async function runSortInstance(
 	// gate's environment half is open (a Tavily key and a cap above 0), so with the gate closed the step list is as before.
 	if (lookupEnvOpen(env)) {
 		try {
-			await runStep("lookup-texts", LOOKUP_STEPS.texts, async () => {
+			await runStep("lookup-texts", D1_STEP, async () => {
 				const switches = await readAiSwitches(env.DB);
 
 				if (!lookupAsks(env, switches))
@@ -157,7 +141,7 @@ export async function runSortInstance(
 
 	if (reask) {
 		try {
-			await runStep("reask-finish", REASK_STEPS.finish, async () => {
+			await runStep("reask-finish", D1_STEP, async () => {
 				await finishRun(env.DB, {
 					runId: reask.runId,
 					now: Date.now(),
@@ -179,7 +163,7 @@ export async function runSortInstance(
 	// daily run's mark goes (decision 150), so setup's reading screen stops saying the import waits for the run.
 	if (env.DEMO === "false") {
 		try {
-			await runStep("night-run-wait", NIGHT_STEPS.counts, async () => {
+			await runStep("night-run-wait", D1_STEP, async () => {
 				const switches = await readAiSwitches(env.DB);
 				await clearWaitsForRunStatement(
 					env.DB,
