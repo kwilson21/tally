@@ -758,6 +758,85 @@ describe("readRowFacts: the account guard and the flags, pure", () => {
 	});
 });
 
+describe("readEligibility: a refund linked to its purchase follows it", () => {
+	/** A person links a refund credit to a purchase through the edit panel's own save (saveEdit's refundOfId). */
+	const linkRefund = (refund: number, purchase: number) =>
+		saveEdit(
+			db,
+			refund,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: false,
+				refundOfId: purchase,
+			},
+			WHO,
+		);
+
+	/**
+	 * Linking a refund changes the store's merchant row (the save creates it), which is a fact Jev is told about the
+	 * purchase, so the purchase's mark goes owed until it is re-marked. The purchase is re-marked after each link here.
+	 */
+	const linkAndRemark = async (refund: number, purchase: number) => {
+		await linkRefund(refund, purchase);
+		await db
+			.prepare("DELETE FROM lookup_cleared WHERE transaction_id = ?")
+			.bind(purchase)
+			.run();
+		await markCleared(purchase, 1);
+	};
+
+	it("a linked refund credit with no category and no mark does not hold its store back: may_search", async () => {
+		const purchase = await clearedRow({ amount_cents: 1200 });
+		const refund = await addRow({ amount_cents: -1200 });
+		await linkAndRemark(refund, purchase);
+
+		const link = await db
+			.prepare(
+				"SELECT refund_of_id AS linked, credit_reviewed AS reviewed FROM transactions WHERE id = ?",
+			)
+			.bind(refund)
+			.first<{ linked: number | null; reviewed: number }>();
+
+		expect(link).toEqual({ linked: purchase, reviewed: 1 });
+
+		// RED before the fix: the refund reads waiting, and waiting holds the store back as rows.
+		await expectMaySearch();
+	});
+
+	it("the same credit, not linked to a purchase, is still waiting for Jev and holds the store back", async () => {
+		await clearedRow({ amount_cents: 1200 });
+		await addRow({ amount_cents: -1200 });
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a linked refund with a mark Jev did not clear is answered and blocks its text", async () => {
+		const purchase = await clearedRow({ amount_cents: 1200 });
+		const refund = await addRow({ amount_cents: -1200 });
+		await linkAndRemark(refund, purchase);
+		await markCleared(refund, 0);
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a linked refund with a transfer flag still makes its text private", async () => {
+		const purchase = await clearedRow({ amount_cents: 1200 });
+		const refund = await addRow({ amount_cents: -1200 });
+		await linkAndRemark(refund, purchase);
+		await db
+			.prepare("UPDATE transactions SET flag_transfer = 1 WHERE id = ?")
+			.bind(refund)
+			.run();
+
+		expect(await decided()).toEqual({ kind: "private" });
+	});
+});
+
 describe("readEligibility: rules that settle a text", () => {
 	it("a merchant rule on the key settles the text", async () => {
 		await clearedRow();

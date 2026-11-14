@@ -2,6 +2,7 @@
 // row per transaction in one batch and decides each row's facts in TypeScript. Nothing here writes, asks Jev or searches.
 
 import { cleanBankText } from "../clean-bank-text";
+import { FOLLOWS_PURCHASE } from "../db/counted-month";
 import { merchantKeySql } from "../db/merchant-key";
 import {
 	type JevSeenColumns,
@@ -146,6 +147,8 @@ export type ReadRow = JevSeenColumns & {
 	maybe: number | null;
 	parentId: number | null;
 	isSplit: number;
+	/** FOLLOWS_PURCHASE: a refund that follows its linked purchase, which pendingForJev never selects. */
+	followsPurchase: number;
 	accountSubtype: string | null;
 	categoryId: number | null;
 	categorySource: string | null;
@@ -162,7 +165,7 @@ const READ_SQL = `SELECT t.id AS id, t.raw_name AS rawName, t.plaid_category AS 
 		t.plaid_transaction_id AS plaidTransactionId, t.flag_transfer AS flagTransfer,
 		t.flag_income AS flagIncome, t.flag_reimbursement AS flagReimbursement, t.excluded AS excluded,
 		(t.kind = 'transfer') AS transferKind, (${MAYBE_IN_RANGE_SQL}) AS maybe,
-		t.parent_id AS parentId, t.is_split AS isSplit, a.subtype AS accountSubtype,
+		t.parent_id AS parentId, t.is_split AS isSplit, (${FOLLOWS_PURCHASE}) AS followsPurchase, a.subtype AS accountSubtype,
 		t.category_id AS categoryId, t.category_source AS categorySource,
 		t.category_confidence AS categoryConfidence, t.jev_attempts AS attempts,
 		${holdsJevAnswerSql("t")} AS holdsAnswer, mlt.private AS storedPrivate,
@@ -173,6 +176,7 @@ const READ_SQL = `SELECT t.id AS id, t.raw_name AS rawName, t.plaid_category AS 
 	FROM transactions t
 	LEFT JOIN accounts a ON a.id = t.account_id
 	LEFT JOIN household_people hp ON hp.id = t.for_person_id
+	LEFT JOIN transactions rp ON rp.id = t.refund_of_id
 	LEFT JOIN merchant_lookup_texts mlt ON mlt.merchant_key = ${merchantKeySql("t")}
 	LEFT JOIN lookup_cleared lc ON lc.transaction_id = t.id`;
 
@@ -184,7 +188,9 @@ const RULES_SQL = `SELECT r.cleaned_text AS cleanedText FROM bank_text_rules r
 function jevOf(row: ReadRow): EligibilityRow["jev"] {
 	// A split parent has no category of its own and Jev is not asked about it again, so it is never waiting. It still keeps
 	// its mark: answered when it has a lookup_cleared row or holds a Jev answer, otherwise never.
-	if (row.isSplit === 1)
+	// A refund that follows its purchase is never asked (pendingForJev leaves it out), so it is never waiting either: it is
+	// answered when it has a lookup_cleared row or holds a Jev answer, otherwise never, as a split parent is.
+	if (row.isSplit === 1 || row.followsPurchase === 1)
 		return row.holdsAnswer === 1 || row.markInput !== null
 			? "answered"
 			: "never";
