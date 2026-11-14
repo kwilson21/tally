@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import { readAtEdge } from "../src/edge";
 import {
 	CardPlace,
+	PersonName,
 	RowId,
+	rowIdOrZero,
+	rowIdsOf,
+	SignInAddress,
 	Token,
+	textOf,
 	UndoName,
 	WholeCentsText,
 } from "../src/edge-kinds";
@@ -166,5 +171,98 @@ describe("CardPlace", () => {
 		["missing", undefined],
 	])("refuses %s", (_label, text) => {
 		expect(readAtEdge(CardPlace, text).ok).toBe(false);
+	});
+});
+
+describe("SignInAddress: a bank sign-in address the form names to remove", () => {
+	it.each([
+		["lower case", "pat@example.com", "pat@example.com"],
+		["capitals", "PAT@Example.COM", "pat@example.com"],
+		["padded with spaces", "  pat@example.com  ", "pat@example.com"],
+		["a dot in the name", "pat.s@ex.co.uk", "pat.s@ex.co.uk"],
+	])(
+		"reads %s, as the address lower-cased and trimmed",
+		(_label, text, value) => {
+			expect(readAtEdge(SignInAddress, text)).toEqual({ ok: true, value });
+		},
+	);
+
+	it.each([
+		["empty", ""],
+		["only spaces", "   "],
+		["no at sign", "nobody"],
+		["no dot after the at sign", "a@b"],
+		["a space inside", "a b@c.com"],
+		["nothing before the at sign", "@c.com"],
+		["a dot straight after the at sign", "a@.com"],
+		["255 characters", `${"a".repeat(250)}@b.co`],
+	])("refuses %s with the sentence", (_label, text) => {
+		expect(readAtEdge(SignInAddress, text)).toEqual({
+			ok: false,
+			say: "Choose an address to remove.",
+		});
+	});
+
+	it("reads an address of 254 characters", () => {
+		const text = `${"a".repeat(249)}@b.co`;
+
+		expect(readAtEdge(SignInAddress, text)).toEqual({ ok: true, value: text });
+	});
+});
+
+describe("PersonName: a person's name from a form", () => {
+	it("reads the name trimmed", () => {
+		expect(readAtEdge(PersonName, "  Sam  ")).toEqual({
+			ok: true,
+			value: "Sam",
+		});
+	});
+
+	it("reads a name of exactly 40 characters", () => {
+		const name = "x".repeat(40);
+
+		expect(readAtEdge(PersonName, name)).toEqual({ ok: true, value: name });
+	});
+
+	it.each([
+		["empty", ""],
+		["only spaces", "   "],
+		["41 characters", "x".repeat(41)],
+	])("refuses %s with the sentence", (_label, text) => {
+		expect(readAtEdge(PersonName, text)).toEqual({
+			ok: false,
+			say: "Enter a name up to 40 characters.",
+		});
+	});
+});
+
+describe("rowIdOrZero and rowIdsOf: a refused id is 0, and a list drops what it refuses", () => {
+	it("gives the id for a row id, and 0 for anything RowId refuses", () => {
+		expect(rowIdOrZero("12")).toBe(12);
+		expect(rowIdOrZero("0")).toBe(0);
+		expect(rowIdOrZero("007")).toBe(0);
+		expect(rowIdOrZero("abc")).toBe(0);
+		expect(rowIdOrZero(undefined)).toBe(0);
+	});
+
+	it("keeps the row ids of a list in order, and drops every other entry, a file part included", () => {
+		expect(
+			rowIdsOf([
+				"3",
+				"abc",
+				"0",
+				"-1",
+				"1e3",
+				"12",
+				new File(["9"], "n.txt"),
+				"3",
+			]),
+		).toEqual([3, 12, 3]);
+	});
+
+	it("reads a file part as the empty text", () => {
+		expect(textOf(new File(["x"], "x.txt"))).toBe("");
+		expect(textOf(null)).toBe("");
+		expect(textOf("text")).toBe("text");
 	});
 });

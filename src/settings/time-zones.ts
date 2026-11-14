@@ -1,6 +1,10 @@
 // The time zones Settings offers for the household (spec §8.5, decision 72, P35 A): the six US zones
 // by their everyday names, then the other zones the drawing lists. A zone is saved as its IANA name
 // ("America/Chicago"), which is what src/dates.ts hands to Intl; the name people read is the label.
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
+import { readAtEdge, readText } from "../edge";
+import { textOf } from "../edge-kinds";
 
 type Zone = readonly [zone: string, label: string];
 
@@ -40,16 +44,21 @@ export const TIME_ZONE_ERROR = "Choose a time zone from the list.";
 
 type Parsed = { ok: true; zone: string } | { ok: false; error: string };
 
-/** True for a posted value that is text (a file part is not a zone). */
-function isText(value: ReturnType<FormData["get"]>): value is string {
-	return typeof value === "string";
-}
+/** A zone the select offers, from a form: the match is exact, so no other spelling is saved. */
+export const OfferedZone = Schema.String.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: readText<string>((text) =>
+			isSupportedZone(text) ? { value: text } : { say: TIME_ZONE_ERROR },
+		),
+		encode: SchemaGetter.passthrough(),
+	}),
+);
 
 /** The posted `time_zone`, if it is one the select offers. */
 export function parseTimeZone(form: FormData): Parsed {
-	const zone = form.get("time_zone");
+	const read = readAtEdge(OfferedZone, textOf(form.get("time_zone")));
 
-	return isText(zone) && isSupportedZone(zone)
-		? { ok: true, zone }
-		: { ok: false, error: TIME_ZONE_ERROR };
+	return read.ok
+		? { ok: true, zone: read.value }
+		: { ok: false, error: read.say };
 }
