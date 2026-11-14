@@ -1456,7 +1456,7 @@ export async function saveEdit(
 						note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 						income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
-						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+						credit_reviewed_by = CASE WHEN ? = 1 AND amount_cents < 0 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[
 						edit.categoryId,
@@ -1474,7 +1474,7 @@ export async function saveEdit(
 					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL, split_removed_bills = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 				income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
-					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+					credit_reviewed_by = CASE WHEN ? = 1 AND amount_cents < 0 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[
 						noteChanged ? 1 : 0,
