@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import { NONE_FIT } from "../ai/decide";
 import { readAtEdge, readText } from "../edge";
+import { textOf } from "../edge-kinds";
 import { CATEGORY_NAME_MAX } from "../limits";
 
 /** New categories take the next color in turn, so neighbors differ. */
@@ -95,7 +96,7 @@ const activeCount = (existing: Existing) =>
 /** A form that holds one category name, as parseCategory reads it (a New category name typed in a panel). */
 export function nameForm(name: string | File | null): FormData {
 	const form = new FormData();
-	form.set("name", String(name ?? ""));
+	form.set("name", textOf(name));
 
 	return form;
 }

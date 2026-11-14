@@ -24,7 +24,7 @@ import {
 	planPaymentCandidates,
 } from "../db/planned-expenses";
 import { readAtEdge, readText } from "../edge";
-import { RowId, Token } from "../edge-kinds";
+import { RowId, Token, textOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { PLAN_NAME_MAX } from "../limits";
 import { centsToAmount, formatCents, toCents } from "../money";
@@ -219,7 +219,7 @@ const planMonth = (offered: readonly string[]) =>
  */
 function planForm(form: PlanFormFields, month: string, own?: string) {
 	const values: PlanValues = {
-		name: String(form.name ?? "").trim(),
+		name: textOf(form.name).trim(),
 		amount: String(form.amount ?? "").trim(),
 		month: String(form.month ?? "").trim(),
 	};

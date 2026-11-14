@@ -1,7 +1,7 @@
 // What the edit panel's form may change, checked before anything is saved.
 
 import { followsPurchase } from "../db/counted-month";
-import { numberOf, numberOfPosted } from "../edge-kinds";
+import { numberOf, numberOfPosted, textOf } from "../edge-kinds";
 import { DISPLAY_NAME_MAX, NOTE_MAX } from "../limits";
 import { isTransactionKind, type TransactionKind } from "./kind";
 
@@ -329,7 +329,7 @@ export function parseEdit(
 	// field. Only the ticked choice counts, and nothing is ticked at rest, so a save for another reason never
 	// renames anything.
 	const pick = text(form, "name_pick");
-	const typedName = pick === "own" ? text(form, "merchant") : "";
+	const typedName = pick === "own" ? textOf(form.get("merchant")).trim() : "";
 	const pickedName = pick.startsWith("s:") ? pick.slice(2).trim() : "";
 	const keepBankName = pick === "store";
 	const displayName = pick === "own" ? typedName : pickedName;

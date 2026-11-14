@@ -382,17 +382,16 @@ describe("the plan sheet's fields, checked before the write", () => {
 		expect(html).toContain('value="abc"');
 	});
 
-	it("keeps a file part posted as the name as its text, as it does today", async () => {
+	// A file part is no text: it is read as a missing name, so nothing is planned (#1109).
+	it("reads a file part posted as the name as a missing name, planning nothing", async () => {
 		const res = await postForm("/plans", {
 			name: new File(["Gym"], "name.txt"),
 			amount: "12",
 			month: MONTH,
 		});
 
-		expect(toastOf(res)).toEqual({
-			message: "Planned [object File], $12.00.",
-			type: "success",
-		});
+		expect(toastOf(res)).toBeUndefined();
+		expect(await countPlans()).toBe(0);
 	});
 
 	it("refuses a file part posted as the amount with the amount sentence", async () => {

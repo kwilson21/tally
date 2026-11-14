@@ -19,6 +19,8 @@ describe("the text fields the write routes read (#1109)", () => {
 		);
 	});
 
+	// A file in a changed field is read as the missing field is: its row must equal the missing field's recorded row.
+	// Every other row keeps the answer recorded before the change.
 	it.each(STEPS.map((step) => [step.label, step] as const))(
 		"%s keeps its answer",
 		async (label, step) => {
@@ -26,7 +28,11 @@ describe("the text fields the write routes read (#1109)", () => {
 
 			console.log(`@@CORPUS@@ ${JSON.stringify([label, line])}`);
 
-			expect(line).toBe(recorded[label]);
+			const want = step.missingSibling
+				? recorded[step.missingSibling.label]
+				: recorded[label];
+
+			expect(line).toBe(want);
 		},
 	);
 });
