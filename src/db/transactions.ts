@@ -2941,17 +2941,19 @@ export async function pendingForJev(
 		incomeSource: string | null;
 		/** The fields Jev's question was built from, which a save checks before it applies the answer (decision 143). */
 		seen: JevSeen;
+		/** The row's kind and person were cleared by a person, so Jev's details never fill them (#304). */
+		kindCleared: boolean;
+		forPersonCleared: boolean;
+		/** A category, its source or its confidence is already stored, so Jev's category answer is not stored for it. */
+		categoryAnswered: boolean;
 	})[]
 > {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName,
-				${merchantNamesJsonSql(merchantKeySql("t"))} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
-				t.amount_cents AS amountCents, a.type AS accountType,
-				${jevCategoryHintSql("t")} AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
-				${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "display_name")} AS merchantName,
-				t.account_id AS accountId, t.for_person_id AS forPersonId,
+			`SELECT t.id, ${jevSeenColumnsSql()}, COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName,
 				t.details_asked AS detailsAsked,
+				t.kind_cleared AS kindCleared, t.for_person_cleared AS forPersonCleared,
+				(t.category_id IS NOT NULL OR t.category_source IS NOT NULL OR t.category_confidence IS NOT NULL) AS categoryAnswered,
 				t.category_source AS categorySource, t.income_source AS incomeSource,
 				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
@@ -2990,6 +2992,9 @@ export async function pendingForJev(
 			JevInput & {
 				id: number;
 				categoryOnly: number;
+				kindCleared: number;
+				forPersonCleared: number;
+				categoryAnswered: number;
 				merchantKey: string;
 				detailsAsked: number;
 				categorySource: string | null;
@@ -3026,22 +3031,18 @@ export async function pendingForJev(
 				null,
 			categoryOnly: transaction.categoryOnly === 1,
 			detailsAsked: transaction.detailsAsked === 1,
-			seen: {
-				rawName: transaction.rawName,
-				ownName,
-				merchantKey: transaction.merchantKey,
-				merchantName,
+			kindCleared: transaction.kindCleared === 1,
+			forPersonCleared: transaction.forPersonCleared === 1,
+			categoryAnswered: transaction.categoryAnswered === 1,
+			seen: jevSeenOf({
+				...transaction,
 				suggestedNames,
 				suggestionStatus,
-				amountCents: transaction.amountCents,
+				ownName,
+				merchantName,
 				accountId,
-				accountType: transaction.accountType,
-				plaidCategory: transaction.plaidCategory ?? null,
-				note: transaction.note ?? null,
-				kind: transaction.kind ?? null,
 				forPersonId,
-				forPersonName: transaction.forPerson ?? null,
-			},
+			}),
 		}),
 	);
 }
@@ -3126,6 +3127,73 @@ export type JevSeen = {
 	/** The name of that person, which Jev is told as `for_person`: a rename since the read changes the question. */
 	forPersonName: string | null;
 };
+
+/** The columns that make up what Jev is told about a transaction (JevSeen), read the same way wherever a row is read for Jev. */
+function jevSeenColumnsSql(): string {
+	return `${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, ${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "display_name")} AS merchantName,
+		${merchantNamesJsonSql(merchantKeySql("t"))} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
+		t.amount_cents AS amountCents, t.account_id AS accountId, a.type AS accountType,
+		${jevCategoryHintSql("t")} AS plaidCategory, t.note, t.kind, hp.name AS forPerson, t.for_person_id AS forPersonId`;
+}
+
+/** The columns jevSeenColumnsSql reads, by their names. */
+type JevSeenColumns = {
+	rawName: string;
+	ownName: string | null;
+	merchantKey: string;
+	merchantName: string | null;
+	suggestedNames: string | null;
+	suggestionStatus: string | null;
+	amountCents: number;
+	accountId: number;
+	accountType: string;
+	plaidCategory?: string | null;
+	note?: string | null;
+	kind?: string | null;
+	forPerson?: string | null;
+	forPersonId: number | null;
+};
+
+/** What Jev is told of a row, from its jevSeenColumnsSql columns: the one reading of it. */
+function jevSeenOf(row: JevSeenColumns): JevSeen {
+	return {
+		rawName: row.rawName,
+		ownName: row.ownName,
+		merchantKey: row.merchantKey,
+		merchantName: row.merchantName,
+		suggestedNames: row.suggestedNames,
+		suggestionStatus: row.suggestionStatus,
+		amountCents: row.amountCents,
+		accountId: row.accountId,
+		accountType: row.accountType,
+		plaidCategory: row.plaidCategory ?? null,
+		note: row.note ?? null,
+		kind: row.kind ?? null,
+		forPersonId: row.forPersonId,
+		forPersonName: row.forPerson ?? null,
+	};
+}
+
+/**
+ * What Jev is told of each of these transactions, read the way pendingForJev reads it. The store lookup's mark is
+ * fingerprinted from this, and the tests compare it with what Jev was sent.
+ */
+export async function seenOf(
+	db: D1Database,
+	ids: number[],
+): Promise<Map<number, JevSeen>> {
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, ${jevSeenColumnsSql()} FROM transactions t
+				JOIN accounts a ON a.id = t.account_id
+				LEFT JOIN household_people hp ON hp.id = t.for_person_id
+				WHERE t.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify(ids))
+		.all<JevSeenColumns & { id: number }>();
+
+	return new Map(results.map((row) => [row.id, jevSeenOf(row)]));
+}
 
 /**
  * The guard that holds while a transaction still reads as Jev was asked (decision 143), for an UPDATE of `transactions`.

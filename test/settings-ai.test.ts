@@ -144,8 +144,9 @@ describe("GET /settings: the AI suggestions group", () => {
 
 	it("has a row for every switch that is stored", async () => {
 		const { html } = await get("/settings/ai");
+		// The store lookup's switch has no row on this page until its Settings screen exists (decision 216).
 		expect(inputs(html).map((i) => i.name)).toEqual(
-			Object.keys(AI_SWITCHES_ALL_ON),
+			Object.keys(AI_SWITCHES_ALL_ON).filter((name) => name !== "lookupStores"),
 		);
 	});
 
@@ -517,6 +518,7 @@ describe("POST /settings/ai: a save writes only what this page changed", () => {
 			categories: true,
 			income: false,
 			sortOnArrival: true,
+			lookupStores: true,
 		});
 		expect(html).toMatch(/<input[^>]*name="income"[^>]*autofocus/);
 	});
@@ -538,6 +540,7 @@ describe("POST /settings/ai: a save writes only what this page changed", () => {
 			categories: true,
 			income: false,
 			sortOnArrival: true,
+			lookupStores: true,
 		});
 	});
 

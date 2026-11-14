@@ -11,6 +11,7 @@ import {
 	JEV_THRESHOLD,
 	type JevInput,
 	type JevResult,
+	PAYEE_QUESTION,
 } from "../../src/ai/categorize";
 import { isUnsure } from "../../src/ai/maybe";
 import { DEFAULT_TIME_ZONE, todayIn } from "../../src/dates";
@@ -166,17 +167,6 @@ type PayeeAsk = {
 	rawName: string;
 	expected: "person" | "business";
 	input: JevInput;
-};
-
-/** The payee question (#984, part two): what the money went to, a business or a person. */
-const PAYEE_QUESTION = {
-	type: "choice",
-	instructions:
-		"Who the money went to, or came from, in this transaction: a business, or a person? Choose a person only for a private individual, not a business that trades under someone's name.",
-	criteria: {
-		business: "A shop, company, organisation or service.",
-		person: "A private individual.",
-	},
 };
 
 // True for a value that is a string, such as a choice Jev made (categorize.ts reads its answers the same way).

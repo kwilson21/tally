@@ -186,6 +186,15 @@ export const merchantLookupTexts = sqliteTable(
 	(t) => [index("merchant_lookup_texts_lookup_text").on(t.lookupText)],
 );
 
+/** The store lookup's privacy mark for a transaction Jev was asked the payee question about (migrations/0075_lookup_cleared.sql). */
+export const lookupCleared = sqliteTable("lookup_cleared", {
+	transactionId: integer("transaction_id")
+		.primaryKey()
+		.references(() => transactions.id, { onDelete: "cascade" }),
+	inputMark: text("input_mark").notNull(),
+	cleared: integer().notNull(),
+});
+
 export const categorySuggestions = sqliteTable(
 	"category_suggestions",
 	{
@@ -914,6 +923,9 @@ export const CHECK_LISTS = {
 	},
 	merchant_lookup_texts: {
 		private: ["0", "1"],
+	},
+	lookup_cleared: {
+		cleared: ["0", "1"],
 	},
 	planned_delete_holds: {
 		had_payment: ["0", "1"],

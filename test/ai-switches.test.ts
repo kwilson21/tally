@@ -63,7 +63,17 @@ describe("readAiSwitches", () => {
 			categories: true,
 			income: true,
 			sortOnArrival: true,
+			lookupStores: true,
 		});
+	});
+
+	it("reads the store lookup switch on with no row, and off only when stored off", async () => {
+		expect((await readAiSwitches(db)).lookupStores).toBe(true);
+		await saveAiSwitches(db, { lookupStores: false });
+		expect(await stored()).toEqual([{ key: "ai_lookup_stores", value: "off" }]);
+		expect((await readAiSwitches(db)).lookupStores).toBe(false);
+		await saveAiSwitches(db, { lookupStores: true });
+		expect((await readAiSwitches(db)).lookupStores).toBe(true);
 	});
 
 	it("reads each switch from its own row, and only off turns one off", async () => {
@@ -78,6 +88,7 @@ describe("readAiSwitches", () => {
 			categories: true,
 			income: true,
 			sortOnArrival: false,
+			lookupStores: true,
 		});
 	});
 
@@ -115,6 +126,7 @@ describe("saveAiSwitches", () => {
 			categories: true,
 			income: false,
 			sortOnArrival: true,
+			lookupStores: true,
 		});
 	});
 
@@ -127,6 +139,7 @@ describe("saveAiSwitches", () => {
 			categories: true,
 			income: false,
 			sortOnArrival: false,
+			lookupStores: true,
 		});
 		// Nothing given saves nothing.
 		await saveAiSwitches(db, {});
@@ -137,6 +150,7 @@ describe("saveAiSwitches", () => {
 		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, income: false });
 		await saveAiSwitches(db, AI_SWITCHES_ALL_ON);
 		expect((await stored()).map((row) => row.value)).toEqual([
+			"on",
 			"on",
 			"on",
 			"on",
@@ -176,7 +190,14 @@ describe("asksJev", () => {
 				for (const sortOnArrival of [true, false])
 					for (const details of [true, false])
 						expect(
-							asksJev({ names, details, categories, income, sortOnArrival }),
+							asksJev({
+								names,
+								details,
+								categories,
+								income,
+								sortOnArrival,
+								lookupStores: true,
+							}),
 						).toBe(asked || details);
 		},
 	);

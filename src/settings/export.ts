@@ -15,6 +15,8 @@ export const EXPORT_COLUMNS = {
 	merchant_lookups:
 		"lookup_text, status, line, attempts, claimed_at, claimed_by, failed_at, looked_up_at",
 	merchant_lookup_texts: "merchant_key, lookup_text, private",
+	// The store lookup's payee mark, one row per transaction Jev was asked about (migration 0075, spec §5).
+	lookup_cleared: "transaction_id, input_mark, cleared",
 	merchant_name_failures: "raw_name, failed_at",
 	// Each account names its bank and says whether it's disconnected, since bank rows carry no id. An uploaded Apple Card
 	// has no bank connection: its bank is Apple Card, and it can't be disconnected (spec §8.10).

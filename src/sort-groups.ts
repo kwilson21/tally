@@ -16,6 +16,7 @@ import {
 	type AiSwitches,
 	asksJev,
 	readAiSwitches,
+	STILL_ON_SQL,
 	stillOnKeys,
 } from "./db/ai-switches";
 import { applyBankTextRules } from "./db/bank-text-rules";
@@ -52,6 +53,8 @@ import {
 	saveJevDetailsStatement,
 	saveJevResultStatements,
 } from "./db/transactions";
+import { lookupAsks } from "./lookup/gate";
+import { clearsForLookup, inputMark } from "./lookup/input-mark";
 import { buildClusters } from "./resort-clusters";
 import { type Deadline, pastDeadline } from "./run-budget";
 import type { ReaskParams } from "./sort-start";
@@ -100,7 +103,13 @@ const ASK_BUDGET_MS = 2 * 60_000;
 /** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
 export const MAX_FAILURES_IN_A_ROW = 3;
 
-export type SortEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
+export type SortEnv = {
+	DB: D1Database;
+	JEV_API_KEY?: string;
+	DEMO?: string;
+	/** The store lookup's search key (spec §7): with it unset the lookup's payee question is never asked. */
+	TAVILY_API_KEY?: string;
+};
 
 type Duration = `${number} ${"second" | "seconds" | "minute" | "minutes"}`;
 
@@ -193,6 +202,8 @@ type ReadPlan = {
 	people: { id: number; name: string }[];
 	/** Every waiting row the read found, at most GROUP_SIZE. */
 	rows: SortRow[];
+	/** Jev is asked the store lookup's payee question, and each answer's mark is saved (src/lookup/gate.ts). */
+	payee?: boolean;
 	/**
 	 * The group's learned lines (decisions 156 and 162) as [cleaned bank text, line] pairs: only texts a row of this group
 	 * has, and only lines that are not vague. Pairs, not an object, so a text named like an inherited key (`constructor`)
@@ -210,6 +221,14 @@ type ReadPlan = {
 export type SortPlan = ReadPlan & {
 	granted: number;
 };
+
+/**
+ * Whether a row's answer asks the payee question for the store lookup (spec §7). The ask and the lookup's mark save
+ * both read this one test, so a mark is never written for a question that was not asked.
+ */
+function payeeAsked(plan: SortPlan, row: SortRow): boolean {
+	return plan.payee === true && !plan.reask && !row.categoryOnly;
+}
 
 /** A failed ask. Its fields carry the status and request id, never the key or any transaction detail. */
 type FailedAsk = {
@@ -675,6 +694,7 @@ async function readGroup(
 			people,
 			rows,
 			learned,
+			payee: lookupAsks(env, switches),
 		};
 
 		if (reask) plan.reask = reask;
@@ -727,6 +747,99 @@ async function reserveCalls(
 	return { granted };
 }
 
+/** One row's details save (saveJevDetailsStatement): the kind and person Jev chose, and its what-it-was answer. */
+type DetailsEntry = {
+	id: number;
+	seen: JevSeen;
+	kind: string | null;
+	forPersonId: number | null;
+	noteWorthWriting: number;
+};
+
+/**
+ * The details entry for an answered row, or none when the row gets no details in this run. The details save and the
+ * lookup's mark both read it, so the mark can predict the kind and the person the save fills.
+ */
+function detailsEntryFor(
+	plan: SortPlan,
+	row: SortRow,
+	answer: JevAnswer,
+): DetailsEntry | undefined {
+	if (!plan.switches.details || row.detailsAsked || plan.reask)
+		return undefined;
+
+	const kind = answer.kind;
+
+	const kindValue =
+		kind && kind.confidence >= JEV_THRESHOLD && kind.label !== "None of these"
+			? kind.label
+			: null;
+
+	const person = answer.forPerson;
+
+	const personValue =
+		person &&
+		person.confidence >= JEV_THRESHOLD &&
+		person.label.startsWith("person:")
+			? Number(person.label.slice("person:".length)) || null
+			: null;
+
+	// Jev's yes is kept only when it's likely (the same threshold as the other answers); a missing or unclear answer is a no (decision 103).
+	const worth = answer.noteWorthWriting;
+
+	return {
+		id: row.id,
+		seen: row.seen,
+		kind: kindValue,
+		forPersonId: personValue,
+		noteWorthWriting: worth !== undefined && worth >= JEV_THRESHOLD ? 1 : 0,
+	};
+}
+
+/**
+ * What a row reads as once its details save has run: the kind and the person it fills where empty and not cleared, as
+ * saveJevDetailsStatement does. A row with no details entry reads as it did.
+ */
+function seenAfterDetails(
+	row: SortRow,
+	entry: DetailsEntry | undefined,
+	people: { id: number; name: string }[],
+): JevSeen {
+	if (!entry) return row.seen;
+
+	const seen = { ...row.seen };
+
+	if (seen.kind === null && !row.kindCleared && entry.kind !== null)
+		seen.kind = entry.kind;
+
+	const person = people.find((p) => p.id === entry.forPersonId);
+
+	if (seen.forPersonId === null && !row.forPersonCleared && person) {
+		seen.forPersonId = person.id;
+		seen.forPersonName = person.name;
+	}
+
+	return seen;
+}
+
+/**
+ * The lookup's mark for one answered row (spec §5, lookup_cleared), saved right after the row's answer update so it lands
+ * only when that update did (changes() > 0), and only while the lookup switch is still on.
+ */
+function lookupMarkStatement(
+	db: D1Database,
+	id: number,
+	mark: { inputMark: string; cleared: boolean },
+	stillOn: string,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO lookup_cleared (transaction_id, input_mark, cleared) SELECT ?, ?, ? WHERE changes() > 0 AND ${STILL_ON_SQL}
+			ON CONFLICT(transaction_id) DO UPDATE SET input_mark = excluded.input_mark, cleared = excluded.cleared`,
+		)
+		.bind(id, mark.inputMark, mark.cleared ? 1 : 0, stillOn);
+}
+
 /**
  * Asks Jev about one row (decision 139). It never throws: any failure is a `failed` answer that counts against the
  * day, and a busy one carries the wait Jev asked for, when it sent one (decision 145). A retried ask (attempt > 1) makes
@@ -767,6 +880,7 @@ async function askOne(
 			{
 				details: detailRequested,
 				people: detailRequested ? plan.people : undefined,
+				payee: payeeAsked(plan, row),
 			},
 		);
 
@@ -838,6 +952,7 @@ export async function writeGroup(
 	const saveDay = todayIn(await householdTimeZone(db));
 	const byId = new Map(plan.rows.map((row) => [row.id, row]));
 	const reservedKey = reservedKeyFor(plan.day, turn);
+	const lookupStillOn = stillOnKeys({ lookupStores: true });
 
 	// The turn is taken back first, while the group's record exists (decision 143): a save that already went through
 	// finds no record and takes nothing.
@@ -856,6 +971,8 @@ export async function writeGroup(
 
 		if (result.outcome === "answered") {
 			asked += 1;
+
+			const entry = detailsEntryFor(plan, row, result.answer);
 
 			// A re-ask takes its category answer only, and never a flag, exclusion, income or details (decision 160).
 			// A re-ask row with no mark (never read with one) is not written at all (#831).
@@ -901,6 +1018,27 @@ export async function writeGroup(
 				});
 
 				statements.push(answer.update);
+
+				// The mark follows the answer's own update and comes before its log, so changes() is that update's (the
+				// batch reads back only the update indexes in `applies` and the last statement, so this shifts nothing).
+				if (payeeAsked(plan, row))
+					statements.push(
+						lookupMarkStatement(
+							db,
+							row.id,
+							{
+								inputMark: await inputMark(
+									seenAfterDetails(row, entry, plan.people),
+								),
+								cleared:
+									clearsForLookup(result.answer) &&
+									!row.categoryAnswered &&
+									sw.categories &&
+									sw.income,
+							},
+							lookupStillOn,
+						),
+					);
 
 				if (answer.log) statements.push(answer.log);
 				// A confident answer for a real category applies to each follower of this leader as a category only (decision
@@ -974,36 +1112,7 @@ export async function writeGroup(
 					}
 			}
 
-			if (sw.details && !row.detailsAsked && !reask) {
-				const kind = result.answer.kind;
-
-				const kindValue =
-					kind &&
-					kind.confidence >= JEV_THRESHOLD &&
-					kind.label !== "None of these"
-						? kind.label
-						: null;
-
-				const person = result.answer.forPerson;
-
-				const personValue =
-					person &&
-					person.confidence >= JEV_THRESHOLD &&
-					person.label.startsWith("person:")
-						? Number(person.label.slice("person:".length)) || null
-						: null;
-
-				// Jev's yes is kept only when it's likely (the same threshold as the other answers); a missing or unclear answer is a no (decision 103).
-				const worth = result.answer.noteWorthWriting;
-				details.push({
-					id: row.id,
-					seen: row.seen,
-					kind: kindValue,
-					forPersonId: personValue,
-					noteWorthWriting:
-						worth !== undefined && worth >= JEV_THRESHOLD ? 1 : 0,
-				});
-			}
+			if (entry) details.push(entry);
 		} else if (result.outcome === "failed") {
 			asked += 1;
 

@@ -19,6 +19,11 @@ export type JevAnswer = {
 	 * category label, or NONE_FIT when it named none. Absent when Jev wasn't asked (no categories).
 	 */
 	mixed?: { probability: number; also: string };
+	/**
+	 * Jev's payee answer (the store lookup's question, spec §7): whether the money went to a business or a person, with its
+	 * confidence. Absent when Jev wasn't asked or its answer was missing or unreadable. It files nothing; it only marks the lookup.
+	 */
+	payee?: { label: string; confidence: number };
 };
 
 export type Decision = {
