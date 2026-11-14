@@ -505,7 +505,7 @@ organize.post("/transactions/organize", async (c) => {
 	// A category is read as CategoryId reads it: a refused one is 0, so it is no category and gives null below.
 	const category = readAtEdge(CategoryId, textOf(form.get("category")));
 	const categoryId = category.ok ? category.value : 0;
-	const name = form.get("name")?.toString().trim() ?? "";
+	const name = textOf(form.get("name")).trim();
 	const groupName = form.get("group")?.toString() ?? "";
 	const groups = await organizeGroups(c.env.DB);
 	const group = groups.find((item) => item.name === groupName);
@@ -532,7 +532,7 @@ organize.post("/transactions/organize", async (c) => {
 	const choseNew = form.get("category") === "new";
 
 	const typedNew = choseNew
-		? readAtEdge(CategoryName, String(form.get("new_category_name") ?? ""))
+		? readAtEdge(CategoryName, textOf(form.get("new_category_name")))
 		: null;
 
 	const values: Values = {
@@ -540,7 +540,7 @@ organize.post("/transactions/organize", async (c) => {
 		name,
 		groupName,
 		newCategory: choseNew,
-		newCategoryName: String(form.get("new_category_name") ?? ""),
+		newCategoryName: textOf(form.get("new_category_name")),
 	};
 
 	if (typedNew && !typedNew.ok) values.newCategoryError = typedNew.say;

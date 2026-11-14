@@ -70,6 +70,7 @@ import {
 	BillAmount,
 	numberOf,
 	RowId,
+	textOf,
 	UndoName,
 	WholeCentsText,
 } from "../edge-kinds";
@@ -956,14 +957,14 @@ async function save(c: Context<App>, id?: number) {
 	const frequency = raw("frequency");
 
 	const values: Values = {
-		name: raw("name"),
+		name: textOf(form.name).trim(),
 		amount: raw("amount"),
 		due_day: raw(raw("frequency") === "weekly" ? "weekly_day" : "due_day"),
 		frequency: isFrequency(frequency) ? frequency : "monthly",
 		anchor_month: raw("anchor_month"),
 		anchor_date: raw("anchor_date"),
 		category_id: raw("category_id"),
-		merchant_raw_name: raw("merchant_raw_name"),
+		merchant_raw_name: textOf(form.merchant_raw_name).trim(),
 	};
 
 	const errors: Record<string, string> = {};
@@ -1236,7 +1237,7 @@ bills.post("/bills/:id/reactivate", async (c) => {
 	// what it holds is the name the bill comes back under. Otherwise the bill keeps its own name.
 	const name =
 		c.req.query("rename") === "1"
-			? String((await c.req.parseBody()).name ?? "").trim()
+			? textOf((await c.req.parseBody()).name).trim()
 			: bill.name;
 
 	const values = { ...valuesOf(bill), name };
