@@ -1397,7 +1397,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const form = await c.req.formData();
 
 	// The question's own answer, posted from the question drawn in the card's place (decision 101). A refused id is 0 here,
-	// as Number() gave 0 before; answerQuestion's own checks refuse it, with the answers it always gave.
+	// as the old number read gave 0; answerQuestion's own checks refuse it, with the answers it always gave.
 	if (form.get("answer")) return answerQuestion(c, id ?? 0, form);
 
 	// A refused id is no suggestion: the changed list answers, before anything is written.
