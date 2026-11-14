@@ -22,6 +22,12 @@ export type LookupTextFacts = {
 	maybe: boolean;
 	/** True when any of its transactions has the transfer kind. */
 	transfer: boolean;
+	/**
+	 * True when any of its transactions is excluded from the budget, whoever or whatever excluded it: a person's Yes on a Maybe
+	 * transfer (which sets no flag), an exclusion in the edit panel or in bulk, a Plaid transfer category, or Jev's sure transfer.
+	 * Not told apart on purpose: a store wrongly called private is simply not looked up.
+	 */
+	excluded: boolean;
 };
 
 export type LookupTextRow = {
@@ -44,7 +50,8 @@ export function lookupTextRow(
 		facts.categories.some(isPrivatePlaidCategory) ||
 		facts.flagged ||
 		facts.maybe ||
-		facts.transfer;
+		facts.transfer ||
+		facts.excluded;
 
 	return {
 		merchantKey,
@@ -80,7 +87,8 @@ export async function fillLookupTexts(
 				json_group_array(DISTINCT t.plaid_category) AS categories,
 				MAX(t.flag_transfer = 1 OR t.flag_income = 1 OR t.flag_reimbursement = 1) AS flagged,
 				MAX(${MAYBE_UNANSWERED_SQL}) AS maybe,
-				MAX(t.kind = 'transfer') AS transfer
+				MAX(t.kind = 'transfer') AS transfer,
+				MAX(t.excluded = 1) AS excluded
 			FROM transactions t
 			GROUP BY ${merchantKeySql("t")}`,
 		)
@@ -91,6 +99,7 @@ export async function fillLookupTexts(
 			flagged: number | null;
 			maybe: number | null;
 			transfer: number | null;
+			excluded: number | null;
 		}>();
 
 	// SAFETY: json_group_array always returns a JSON array of the column's values, so each parse below is an array of strings or nulls.
@@ -101,6 +110,7 @@ export async function fillLookupTexts(
 			flagged: row.flagged === 1,
 			maybe: row.maybe === 1,
 			transfer: row.transfer === 1,
+			excluded: row.excluded === 1,
 		}),
 	);
 

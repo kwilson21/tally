@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { maybeFacts, moneyMaybeStatements } from "../src/db/suggestion-saves";
+import { saveEdit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import {
 	fillLookupTexts,
@@ -22,6 +24,7 @@ const ordinary: LookupTextFacts = {
 	flagged: false,
 	maybe: false,
 	transfer: false,
+	excluded: false,
 };
 
 describe("lookupTextRow", () => {
@@ -424,5 +427,172 @@ describe("the lookup-texts step, through the sorting instance", () => {
 			.join(" ");
 
 		expect(logged).not.toContain("SECRET");
+	});
+});
+
+/** Inserts one transaction and returns its id (the defaults are an ordinary purchase on account 1). */
+async function insertedId(values: Record<string, string | number | null>) {
+	const row = {
+		account_id: 1,
+		date: TODAY,
+		amount_cents: -1200,
+		raw_name: "ORDINARY STORE",
+		...values,
+	};
+	const columns = Object.keys(row);
+	const inserted = await db
+		.prepare(
+			`INSERT INTO transactions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) RETURNING id`,
+		)
+		.bind(...Object.values(row))
+		.first<{ id: number }>();
+
+	if (!inserted) throw new Error("the row was not inserted");
+
+	return inserted.id;
+}
+
+const WHO = "person@example.com";
+
+/** A person's Yes or No on a Maybe, through the app's own save (moneyMaybeStatements), read against its current version. */
+async function answerMaybe(id: number, kind: "transfer" | "income") {
+	const facts = await maybeFacts(db, kind, id);
+
+	await db.batch(
+		moneyMaybeStatements(db, {
+			kind,
+			answer: "yes",
+			transactionId: id,
+			today: TODAY,
+			who: WHO,
+			confidence: facts.confidence ?? 0,
+			expectedVersion: facts.version,
+		}),
+	);
+}
+
+describe("a transfer, income or reimbursement said about any row makes its key private", () => {
+	it("a person's Yes on a Maybe transfer, through the app's save, makes its key private", async () => {
+		const id = await insertedId({
+			merchant_name: "Quiet Mover Co",
+			raw_name: "QUIET MOVER CO",
+			amount_cents: 4000,
+			transfer_confidence: 0.6,
+		});
+
+		await answerMaybe(id, "transfer");
+
+		const stored = await db
+			.prepare("SELECT excluded FROM transactions WHERE id = ?")
+			.bind(id)
+			.first<{ excluded: number }>();
+		expect(stored?.excluded).toBe(1);
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Quiet Mover Co")).toBe(1);
+	});
+
+	it("a person's Yes on a Maybe income, through the app's save, makes its key private", async () => {
+		const id = await insertedId({
+			merchant_name: "Quiet Payer Co",
+			raw_name: "QUIET PAYER CO",
+			amount_cents: -50000,
+			income_confidence: 0.5,
+		});
+
+		await answerMaybe(id, "income");
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Quiet Payer Co")).toBe(1);
+	});
+
+	it("a row a person marked as income in the edit panel makes its key private", async () => {
+		const id = await insertedId({
+			merchant_name: "Quiet Refund Co",
+			raw_name: "QUIET REFUND CO",
+			amount_cents: -7000,
+		});
+
+		await saveEdit(
+			db,
+			id,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: true,
+				creditReviewed: true,
+			},
+			WHO,
+		);
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Quiet Refund Co")).toBe(1);
+	});
+
+	it("a row a person excluded in the edit panel, for any reason, makes its key private", async () => {
+		const id = await insertedId({
+			merchant_name: "Quiet Stop Co",
+			raw_name: "QUIET STOP CO",
+		});
+
+		await saveEdit(
+			db,
+			id,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: true,
+				income: false,
+				creditReviewed: true,
+			},
+			WHO,
+		);
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Quiet Stop Co")).toBe(1);
+	});
+
+	it("a row Plaid excluded makes its key private", async () => {
+		await insertedId({
+			merchant_name: "Plaid Stop Co",
+			raw_name: "PLAID STOP CO",
+			excluded: 1,
+			excluded_source: "plaid",
+		});
+
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Plaid Stop Co")).toBe(1);
+	});
+
+	it("an excluded row, once un-excluded and the fill run again, returns its key to not private", async () => {
+		const id = await insertedId({
+			merchant_name: "Unexcluded Co",
+			raw_name: "UNEXCLUDED CO",
+			excluded: 1,
+			excluded_source: "user",
+		});
+
+		await fillLookupTexts(db);
+		expect(await privateOf("Unexcluded Co")).toBe(1);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 0, excluded_source = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		await fillLookupTexts(db);
+
+		expect(await privateOf("Unexcluded Co")).toBe(0);
 	});
 });

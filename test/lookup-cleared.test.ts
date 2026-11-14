@@ -487,8 +487,10 @@ describe("a category filed while Jev is being asked never clears the row (write-
 	});
 });
 
-describe("the mark needs Jev's category answer to be stored, not only a sure business answer", () => {
-	it("with no active category, the category question is not asked, the save stores no confidence, and a sure business answer writes cleared 0", async () => {
+describe("with no active category, nothing is saved, so no mark is written", () => {
+	// Not a test of the mark's category_confidence check: with no active category the answer's update changes nothing
+	// (changes() is 0), so the mark's own changes() > 0 guard stops the write first. That check is a second guard, unreached today.
+	it("a sure business answer saves no category confidence and writes no mark", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
 		const id = await addRow("LOCAL BAKERY NO CATEGORY", 1200);
 		const fetchImpl = vi.fn(async () => jevReply());
