@@ -109,11 +109,19 @@ type NumberRead = { call: string; line: number };
  */
 function numberReads(src: string): NumberRead[] {
 	const reads: NumberRead[] = [];
-	const pattern = /(?<![\w$.])(Number|parseInt|parseFloat)(?![\w$])/g;
+	// A name after a dot is a read too (globalThis.Number, window.parseInt): only the identifier's own edge counts.
+	const pattern = /(?<![\w$])(Number|parseInt|parseFloat)(?![\w$])/g;
 
 	for (const match of src.matchAll(pattern)) {
 		const start = match.index ?? 0;
 		let end = start + match[0].length;
+		const before = src.slice(Math.max(0, start - 40), start);
+
+		// Schema.Number is a schema, not the global Number.
+		if (match[0] === "Number" && /\bSchema\s*\.\s*$/.test(before)) continue;
+
+		// Number.parseInt is read once, at its Number.
+		if (match[0] !== "Number" && /\bNumber\s*\.\s*$/.test(before)) continue;
 
 		if (match[0] === "Number" && src[end] === ".") {
 			const member = /^\.(parseInt|parseFloat)\b/.exec(src.slice(end));
@@ -180,6 +188,26 @@ describe("the number-read scanner (#1105)", () => {
 
 	it("does not report a longer name that contains Number", () => {
 		expect(numberReads("toNumber(x); isNumber(x); myparseInt(x)")).toEqual([]);
+	});
+
+	it("reports a Number or parseInt reached through an object (globalThis, window, self, global)", () => {
+		for (const probe of [
+			"globalThis.Number(x)",
+			"window.parseInt(x)",
+			"self.Number(x)",
+			"global.parseFloat(x)",
+			"globalThis . Number (x)",
+		])
+			expect(numberReads(probe), probe).toHaveLength(1);
+	});
+
+	it("does not report Schema.Number, Number.isInteger or Number.MAX_SAFE_INTEGER", () => {
+		for (const probe of [
+			"Schema.Number",
+			"Number.isInteger(x)",
+			"Number.MAX_SAFE_INTEGER",
+		])
+			expect(numberReads(probe), probe).toEqual([]);
 	});
 });
 
