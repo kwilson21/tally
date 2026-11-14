@@ -1,5 +1,7 @@
 // The list's filters live in the URL, so every filtered view is a link that can be shared and reloaded.
+
 import { isRealMonth } from "../dates";
+import { numberOfPosted } from "../edge-kinds";
 import { toCents } from "../money";
 
 /** The Show choice's options, in the order it lists them (spec §8.4). */
@@ -172,10 +174,10 @@ export function parseFilters(
 	allowRaw = false,
 ): Filters {
 	const month = params.get("month") ?? "";
-	const category = Number(params.get("category"));
-	const account = Number(params.get("account"));
+	const category = numberOfPosted(params.get("category"));
+	const account = numberOfPosted(params.get("account"));
 	const show = params.get("show");
-	const page = Number(params.get("page"));
+	const page = numberOfPosted(params.get("page"));
 
 	return {
 		q: searchText(params.get("q")),
