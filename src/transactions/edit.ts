@@ -228,11 +228,29 @@ export function followsPurchaseAfterSave(
 }
 
 /**
+ * Whether a save leaves Exclude as the row is stored. The panel says what Exclude looked like when it loaded
+ * (excludedWas); when the posted value is that same one, the person did not change it, so a sync or Jev may have
+ * changed the row since, and the save must not write the old value back (#1086). A refund link is never kept: it
+ * includes the row whatever the chip held (saveEdit). Without excludedWas (older callers) Exclude is always written.
+ */
+export function excludeKept(
+	edit: Pick<Edit, "excluded" | "excludedWas">,
+	linking: boolean,
+): boolean {
+	return (
+		!linking &&
+		edit.excludedWas !== undefined &&
+		edit.excluded === edit.excludedWas
+	);
+}
+
+/**
  * Whether a row is excluded from the budget once this edit is saved. The panel posts its Exclude chip as it was drawn,
  * so this is what the save leaves, not what was posted: a new link includes the row (saveEdit writes excluded = 0),
- * and a save lifts Plaid's exclusion off a credit it reviews as not income or marks as income (saveEdit's lift,
- * decision 70). A person's or Jev's exclusion is never lifted. test/excluded-after-save.test.ts runs saveEdit for every
- * stored exclusion and every answer the panel can post, and fails where this and the row it leaves disagree.
+ * a save that leaves Exclude alone keeps the stored one (excludeKept), and a save lifts Plaid's exclusion off a credit
+ * it reviews as not income or marks as income (saveEdit's lift, decision 70). A person's or Jev's exclusion is never
+ * lifted. test/excluded-after-save.test.ts runs saveEdit for every stored exclusion and every answer the panel can
+ * post, and fails where this and the row it leaves disagree.
  * A bill payment counts whatever its exclusion, which isIncluded (src/db/counted-month.ts) reads.
  */
 export function excludedAfterSave(
@@ -247,6 +265,7 @@ export function excludedAfterSave(
 	edit: Pick<
 		Edit,
 		| "excluded"
+		| "excludedWas"
 		| "refundOfId"
 		| "income"
 		| "creditReviewed"
@@ -258,7 +277,9 @@ export function excludedAfterSave(
 		isIdNumber(edit.refundOfId) &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
 
-	if (linking || !edit.excluded) return false;
+	const kept = excludeKept(edit, linking);
+
+	if (linking || !(kept ? stored.excluded : edit.excluded)) return false;
 
 	// The lift's two triggers, as saveEdit writes them: a review ticked as not income, or income turned on.
 	const reviewedAsNotIncome =

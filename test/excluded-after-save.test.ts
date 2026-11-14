@@ -165,6 +165,7 @@ describe("excludedAfterSave agrees with the exclusion saveEdit leaves", () => {
 											// where the review lifts Plaid's exclusion off a credit (the lift is the one write that can change it).
 											const leftAlone =
 												drawn !== undefined && drawn === chip && !link;
+
 											const liftable = stored.source === "plaid" && cents < 0;
 
 											if (

@@ -1405,6 +1405,7 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 					)
 					.first<{ id: number }>(),
 			).id;
+
 			const part = present(
 				await db
 					.prepare("SELECT id FROM transactions WHERE parent_id = ? LIMIT 1")
@@ -1437,6 +1438,7 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 					.bind(parent)
 					.all<{ excluded: number; excluded_source: string | null }>()
 			).results;
+
 			expect(states).toEqual([{ excluded: 1, excluded_source: "plaid" }]);
 		});
 	});
