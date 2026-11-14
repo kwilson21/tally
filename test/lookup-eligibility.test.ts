@@ -545,6 +545,45 @@ describe("readEligibility: what a row's Jev state holds back", () => {
 	});
 });
 
+/** Each column Jev's answer writes (holdsJevAnswerSql), with a value that says Jev answered. FOOD stands for the store's category. */
+const JEV_ANSWER_COLUMNS: [string, string | number][] = [
+	["category_confidence", 0.1],
+	["jev_category_id", "FOOD"],
+	["jev_also_category_id", "FOOD"],
+	["income_confidence", 0.1],
+	["transfer_confidence", 0.1],
+	["category_source", "jev"],
+	["income_source", "jev"],
+	["excluded_source", "jev"],
+	["jev_none_fit", 1],
+	["jev_mixed", 0.3],
+	["details_asked", 1],
+	["credit_reviewed", 1],
+];
+
+describe("readEligibility: each column Jev's answer writes counts as an answer", () => {
+	it.each(JEV_ANSWER_COLUMNS)(
+		"a row a person filed, with %s set by Jev and no mark, is answered and owed",
+		async (column, value) => {
+			await clearedRow();
+			await expectMaySearch();
+
+			const id = await addRow({ category_id: other, category_source: "user" });
+
+			await db
+				.prepare(`UPDATE transactions SET ${column} = ? WHERE id = ?`)
+				.bind(value === "FOOD" ? food : value, id)
+				.run();
+
+			expect(await decided()).toEqual({
+				kind: "not_yet",
+				why: "rows",
+				owed: [id],
+			});
+		},
+	);
+});
+
 describe("readEligibility: rules that settle a text", () => {
 	it("a merchant rule on the key settles the text", async () => {
 		await clearedRow();
