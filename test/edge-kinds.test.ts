@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readAtEdge } from "../src/edge";
-import { RowId, Token, UndoName, WholeCentsText } from "../src/edge-kinds";
+import {
+	CardPlace,
+	RowId,
+	Token,
+	UndoName,
+	WholeCentsText,
+} from "../src/edge-kinds";
 
 const read = (text: string | undefined) => readAtEdge(RowId, text);
 
@@ -132,5 +138,33 @@ describe("Token", () => {
 		["missing", undefined],
 	])("refuses %s", (_label, text) => {
 		expect(readAtEdge(Token, text).ok).toBe(false);
+	});
+});
+
+describe("CardPlace", () => {
+	it.each([
+		["zero", "0", 0],
+		["a place", "3", 3],
+		["a leading zero, as the place always read it", "007", 7],
+		[
+			"a huge place, which splice draws after the last card",
+			"99999999999999999999",
+			1e20,
+		],
+	])("reads %s, %j, as %d", (_label, text, value) => {
+		expect(readAtEdge(CardPlace, text)).toEqual({ ok: true, value });
+	});
+
+	it.each([
+		["empty", ""],
+		["padded with spaces", " 3"],
+		["minus one", "-1"],
+		["a point", "1.5"],
+		["an exponent", "1e3"],
+		["hex", "0x1f"],
+		["non-numeric", "abc"],
+		["missing", undefined],
+	])("refuses %s", (_label, text) => {
+		expect(readAtEdge(CardPlace, text).ok).toBe(false);
 	});
 });

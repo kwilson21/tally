@@ -13,6 +13,14 @@ export const RowId = Schema.String.check(
 ).pipe(Schema.decodeTo(Schema.NumberFromString));
 
 /**
+ * The place of a card on a page, from a form (Settings, a No's answer): digits only, leading zeros read as they always
+ * were ("007" is 7). A place past the last card is drawn after it, so a huge one needs no cap. Other text is refused.
+ */
+export const CardPlace = Schema.String.check(Schema.isPattern(/^\d+$/)).pipe(
+	Schema.decodeTo(Schema.NumberFromString),
+);
+
+/**
  * A held Undo's name, from a form: 36 characters of hex digits and dashes, in either case, the shape a random UUID is
  * written in. Any other text is refused, and the route answers it as an Undo that has closed.
  */

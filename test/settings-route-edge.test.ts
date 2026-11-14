@@ -507,3 +507,85 @@ describe("suggestion dismiss: the place of the question is a number of digits or
 		},
 	);
 });
+
+// The intended differences (#1006, plan 5): an id with a leading zero, a space or an exponent, which Number() read as a
+// number and RowId refuses. A refused id gets the answer junk gets. A file part posted as the Undo's token is no token.
+
+describe("intended differences: an id that Number() accepted is refused as junk is", () => {
+	let line: number;
+
+	// The suggestion and its transactions come from the file's own setup above; this block adds only the line.
+	beforeEach(async () => {
+		line = present(
+			await db
+				.prepare(
+					"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', 'income', '2026-10-03') RETURNING id",
+				)
+				.first<{ id: number }>(),
+		).id;
+	});
+
+	it.each([
+		["a leading zero", (n: number) => `00${n}`],
+		["a space on each side", (n: number) => ` ${n} `],
+		["an exponent", (n: number) => `${n}e0`],
+	])("never-suggest remove keeps the line for %s", async (_label, spell) => {
+		const got = await remove(spell(line));
+
+		expect(got.toast).toBeNull();
+		expect(await count("SELECT COUNT(*) AS n FROM never_suggest_rules")).toBe(
+			1,
+		);
+	});
+
+	it.each([
+		["a leading zero", (n: number) => `00${n}`],
+		["a space on each side", (n: number) => ` ${n} `],
+	])(
+		"learned undo refuses the Forget for %s, and keeps it",
+		async (_label, spell) => {
+			const id = await freshForget();
+			const got = await undo(spell(id));
+
+			expect(got.toast).toBe("Nothing to undo.");
+			expect(await forgotten()).toBe(1);
+		},
+	);
+
+	it("learned undo echoes a file part as the empty token, not as its type", async () => {
+		await freshForget();
+		const got = await undo(new File(["5"], "token.txt"));
+
+		expect(got.undoDone).toBe("");
+	});
+
+	it("suggestion dismiss answers the changed list for a suggestion's id with a leading zero", async () => {
+		const { res } = await post(`/settings/suggestions/00${suggestion}/dismiss`);
+
+		expect(res.status).toBe(404);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM category_suggestions WHERE id = ${suggestion} AND status = 'pending'`,
+			),
+		).toBe(1);
+	});
+
+	it("suggestion create answers the changed list for a suggestion's id with a leading zero", async () => {
+		const got = await create(`/settings/suggestions/00${suggestion}/create`);
+
+		expect(got).toMatchObject({ status: 404, changed: true });
+		expect(await createdPetCare()).toBe(0);
+	});
+
+	it("suggestion create drops a ticked id with a leading zero, so the card is not ticked", async () => {
+		const { res } = await post(`/settings/suggestions/${suggestion}/create`, [
+			["ids", `00${chewy}`],
+			["shown", String(chewy)],
+			["shown", String(petsmart)],
+		]);
+
+		// Nothing is ticked, so the form asks again and no category is made.
+		expect(res.status).toBe(422);
+		expect(await createdPetCare()).toBe(0);
+	});
+});
