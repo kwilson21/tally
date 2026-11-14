@@ -35,7 +35,7 @@ import {
 	manualLinkWindowDays,
 	partPaidSentence,
 } from "../bills/status";
-import { billTotalsForRows, MAX_OCCURRENCE_CENTS } from "../bills/totals";
+import { billTotalsForRows } from "../bills/totals";
 import { linkPaymentSql, occurrenceUnpaidSql } from "../bills/unpaid";
 import {
 	activateBill,
@@ -66,9 +66,15 @@ import { ownNameSql } from "../db/own-name";
 import { loadPlans } from "../db/planned-expenses";
 import { databaseRefusal, isTriggerRaised } from "../db/refused";
 import { readAtEdge } from "../edge";
-import { RowId, UndoName, WholeCentsText } from "../edge-kinds";
+import {
+	BillAmount,
+	numberOf,
+	RowId,
+	UndoName,
+	WholeCentsText,
+} from "../edge-kinds";
 import { hxTrigger } from "../htmx";
-import { centsToAmount, formatCents, toCents } from "../money";
+import { centsToAmount, formatCents } from "../money";
 import {
 	acceptPrice,
 	deactivateBill,
@@ -961,19 +967,12 @@ async function save(c: Context<App>, id?: number) {
 	};
 
 	const errors: Record<string, string> = {};
-	let cents = 0;
+	// The amount is read at the edge: its cents, or the sentence the sheet shows under the field. The cap keeps a bill
+	// from holding an occurrence the set-aside refuses (docs/verification.md, "Numbers").
+	const amount = readAtEdge(BillAmount, values.amount);
+	const cents = amount.ok ? amount.value : 0;
 
-	try {
-		cents = toCents(values.amount);
-
-		if (cents <= 0) throw new Error();
-	} catch {
-		errors.amount = "Enter an amount greater than $0.";
-	}
-
-	// The set-aside refuses an occurrence past this (docs/verification.md, "Numbers"), so a bill never holds one.
-	if (!errors.amount && cents > MAX_OCCURRENCE_CENTS)
-		errors.amount = `Enter an amount of ${formatCents(MAX_OCCURRENCE_CENTS, { wholeDollars: true })} or less.`;
+	if (!amount.ok) errors.amount = amount.say;
 
 	const anchorDate = values.anchor_date;
 	const validAnchorDate = isRealDate(anchorDate);
@@ -981,7 +980,7 @@ async function save(c: Context<App>, id?: number) {
 	const due =
 		values.frequency === "biweekly" && validAnchorDate
 			? ((new Date(`${anchorDate}T00:00:00Z`).getUTCDay() + 6) % 7) + 1
-			: Number(values.due_day);
+			: numberOf(values.due_day);
 
 	// A biweekly bill has no due day field: its weekday comes from its date, so only that date is checked.
 	if (
@@ -1005,7 +1004,7 @@ async function save(c: Context<App>, id?: number) {
 
 	if (!values.category_id) errors.category_id = "Choose a category.";
 
-	const anchor = Number(values.anchor_month);
+	const anchor = numberOf(values.anchor_month);
 
 	if (
 		(values.frequency === "yearly" || values.frequency === "quarterly") &&
@@ -1031,7 +1030,7 @@ async function save(c: Context<App>, id?: number) {
 			anchorMonth: yearlyOrQuarterly ? anchor : null,
 			anchorDate: values.frequency === "biweekly" ? anchorDate : null,
 		},
-		categoryId: Number(values.category_id),
+		categoryId: numberOf(values.category_id),
 		bankText: values.merchant_raw_name,
 	};
 
@@ -1044,7 +1043,7 @@ async function save(c: Context<App>, id?: number) {
 					await c.env.DB.prepare(
 						"SELECT id FROM categories WHERE id=? AND archived=0",
 					)
-						.bind(Number(values.category_id))
+						.bind(numberOf(values.category_id))
 						.first(),
 				)
 			: null,
@@ -1178,7 +1177,12 @@ async function save(c: Context<App>, id?: number) {
 
 bills.post("/bills", (c) => save(c));
 
-bills.post("/bills/:id", (c) => save(c, Number(c.req.param("id"))));
+// A refused id is no bill: 404 before save, which would insert a new bill for an undefined id.
+bills.post("/bills/:id", (c) => {
+	const id = billIdOf(c);
+
+	return id === undefined ? c.notFound() : save(c, id);
+});
 
 /** What a person gets after a bill is switched on or off: Bills again, with the toast. */
 async function activeChanged(c: Context<App>, message: string) {

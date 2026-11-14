@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { readAtEdge } from "../src/edge";
 import {
+	BillAmount,
 	CardPlace,
+	numberOf,
 	PersonName,
 	RowId,
 	rowIdOrZero,
@@ -264,5 +266,71 @@ describe("rowIdOrZero and rowIdsOf: a refused id is 0, and a list drops what it 
 		expect(textOf(new File(["x"], "x.txt"))).toBe("");
 		expect(textOf(null)).toBe("");
 		expect(textOf("text")).toBe("text");
+	});
+});
+
+describe("numberOf: a number typed in a form, read as Number reads it (bills, #1006)", () => {
+	// Every text here must read exactly as Number(text) does, NaN and 0 included: the money form's day, month and
+	// category answers depend on it.
+	it.each([
+		"",
+		" ",
+		"0",
+		"07",
+		"5",
+		"5.0",
+		"5.",
+		"+5",
+		"-1",
+		"1e1",
+		"0x5",
+		"0b101",
+		"1.0",
+		"Infinity",
+		"NaN",
+		"abc",
+		"1 000",
+		"99999999999999999999",
+	])("reads %j as Number(%j)", (text) => {
+		expect(numberOf(text)).toBe(Number(text));
+	});
+
+	it("reads text that is no number as NaN", () => {
+		expect(Number.isNaN(numberOf("abc"))).toBe(true);
+	});
+});
+
+describe("BillAmount: a dollar amount typed on the bill sheet, as cents (bills, #1006)", () => {
+	const amountOf = (text: string) => readAtEdge(BillAmount, text);
+
+	it.each([
+		["5", 500],
+		["0005", 500],
+		["$5", 500],
+		[" 5 ", 500],
+		["1,240.18", 124018],
+		["1,000,000", 100000000],
+		["100000", 10000000],
+		["100000000", 10000000000],
+	])("reads %j as %d cents when it is no more than the cap", (text, cents) => {
+		expect(amountOf(text)).toEqual({ ok: true, value: cents });
+	});
+
+	it.each([
+		["", "Enter an amount greater than $0."],
+		["0", "Enter an amount greater than $0."],
+		["0.00", "Enter an amount greater than $0."],
+		["-0", "Enter an amount greater than $0."],
+		["abc", "Enter an amount greater than $0."],
+		["0x5", "Enter an amount greater than $0."],
+		["1e3", "Enter an amount greater than $0."],
+		["5.", "Enter an amount greater than $0."],
+		["12.345", "Enter an amount greater than $0."],
+		["1,2345", "Enter an amount greater than $0."],
+		["Infinity", "Enter an amount greater than $0."],
+		["100000000.01", "Enter an amount of $100,000,000 or less."],
+		["99999999999", "Enter an amount of $100,000,000 or less."],
+	])("refuses %j with %j", (text, say) => {
+		expect(amountOf(text)).toEqual({ ok: false, say });
 	});
 });

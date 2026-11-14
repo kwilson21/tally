@@ -1,8 +1,10 @@
 // Typed kinds shared by the edge readers (decision 206): the words the app reads from an address or a form, once, for every route.
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
+import { MAX_OCCURRENCE_CENTS } from "./bills/totals";
 import { readAtEdge, readText } from "./edge";
 import { PERSON_NAME_MAX } from "./limits";
+import { formatCents, toCents } from "./money";
 
 /**
  * A row id from the address or a form: a whole number above zero, written with digits only. Fifteen digits at most, so
@@ -34,6 +36,48 @@ export const Token = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/i));
 export const WholeCentsText = Schema.String.check(
 	Schema.isPattern(/^\d{1,15}$/),
 ).pipe(Schema.decodeTo(Schema.NumberFromString));
+
+const NOT_ABOVE_ZERO = "Enter an amount greater than $0.";
+
+/**
+ * A bill's amount typed on the bill sheet (bills, #1006), read into integer cents: a dollar amount above $0 and no more
+ * than one occurrence can hold. Any other text is refused with one of the two sentences the sheet shows under the
+ * field. The route keeps the text as typed for the echo.
+ */
+export const BillAmount = Schema.String.pipe(
+	Schema.decodeTo(Schema.Number, {
+		decode: readText<number>((text) => {
+			let cents: number;
+
+			try {
+				cents = toCents(text);
+			} catch {
+				return { say: NOT_ABOVE_ZERO };
+			}
+
+			if (cents <= 0) return { say: NOT_ABOVE_ZERO };
+
+			return cents <= MAX_OCCURRENCE_CENTS
+				? { value: cents }
+				: {
+						say: `Enter an amount of ${formatCents(MAX_OCCURRENCE_CENTS, { wholeDollars: true })} or less.`,
+					};
+		}),
+		encode: SchemaGetter.transform((cents: number) => (cents / 100).toFixed(2)),
+	}),
+);
+
+/**
+ * A number typed in a form, read the way Number() reads it: Schema's NumberFromString is Number() (effect 4.1.4,
+ * SchemaGetter.Number is transform(globalThis.Number)), so "07" is 7, "5.0" is 5, "1e1" is 10, "" is 0, and text that
+ * is no number is NaN. For the bill form's day, month and category, whose answers must not change; the id in an
+ * address reads RowId instead.
+ */
+export function numberOf(text: string): number {
+	const read = readAtEdge(Schema.NumberFromString, text);
+
+	return read.ok ? read.value : Number.NaN;
+}
 
 /**
  * A held Not this one's Undo name, from a form (bills, #340): the payment's id written in digits as RowId reads them, a
