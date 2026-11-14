@@ -1,0 +1,39 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import baseline from "./fixtures/transactions-edit-edge-baseline.json";
+import { isIntended, recordCase, STEPS } from "./transactions-edit-edge-corpus";
+
+// The edit panel's save, read at the edge (#1006, PR 12). Each case posts one input a person's browser can send and
+// records the answer, the rows it can touch and the page. The lines in fixtures/transactions-edit-edge-baseline.json
+// were recorded on the code before the edge: every answer must stay the same, except a padded address id on a real
+// transaction (a leading zero), which now answers as a missing transaction and writes nothing (intended difference 1).
+
+const recorded: Record<string, string> = baseline;
+
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+describe("the edit panel's save, read at the edge (#1006, PR 12)", () => {
+	it("has a baseline line for every case", () => {
+		expect(Object.keys(recorded).sort()).toEqual(
+			STEPS.map((step) => step.label).sort(),
+		);
+	});
+
+	it.each(STEPS.map((step) => [step.label, step] as const))(
+		"%s keeps its answer",
+		async (label, step) => {
+			const { line, changed } = await recordCase(step);
+
+			if (isIntended(step)) {
+				// A padded address id is a missing transaction: a 404, and no row changed.
+				expect(line.split(" | ")[0]).toBe("404");
+				expect(changed).toBe(false);
+
+				return;
+			}
+
+			expect(line).toBe(recorded[label]);
+		},
+	);
+});
