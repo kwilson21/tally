@@ -73,9 +73,17 @@ import {
 } from "../db/settings-saves";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { readAtEdge } from "../edge";
-import { CardPlace, RowId } from "../edge-kinds";
+import {
+	CardPlace,
+	PersonName,
+	rowIdOf,
+	rowIdOrZero,
+	rowIdsOf,
+	SignInAddress,
+	textOf,
+} from "../edge-kinds";
 import { hxTrigger } from "../htmx";
-import { MERCHANT_KEY_MAX, PERSON_NAME_MAX } from "../limits";
+import { MERCHANT_KEY_MAX } from "../limits";
 import { reconnectRecipients } from "../reconnect/reminders";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import {
@@ -329,30 +337,6 @@ const DRAWN_ON = "drawnOn";
 
 /** The switch a flip posted, sent with that switch's own request (its hx-vals): the one that takes focus after the save. */
 const FLIPPED = "flipped";
-
-/** True for a posted value that is text (a file part is not a place). */
-function isText(value: string | File | null | undefined): value is string {
-	return typeof value === "string";
-}
-
-/** A posted field as text: "" when it is missing or a file part, so no id, token or place is read from a file. */
-const textOf = (posted: string | File | null | undefined): string =>
-	isText(posted) ? posted : "";
-
-/** A row id read at the edge (RowId), or undefined when the text is no row id. */
-function rowIdOf(text: string | undefined): number | undefined {
-	const read = readAtEdge(RowId, text);
-
-	return read.ok ? read.value : undefined;
-}
-
-/** The row ids in a list of posted values, in the order posted: each one RowId reads, and every other entry is dropped. */
-const rowIdsOf = (posted: (string | File)[]): number[] =>
-	posted.flatMap((value) => {
-		const id = rowIdOf(textOf(value));
-
-		return id === undefined ? [] : [id];
-	});
 
 /** The DRAWN_ON value for these switches: the keys that are On, separated by spaces. */
 const drawnOnOf = (switches: AiSwitches) =>
@@ -1022,7 +1006,7 @@ const removeNeverSuggest = removeNeverSuggestLine<NeverSuggestRule>();
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	// A refused id is 0, which no line has: the rule finds no line, as for a number that is no line's.
-	const id = rowIdOf(textOf(form.get("id"))) ?? 0;
+	const id = rowIdOrZero(textOf(form.get("id")));
 	const merchantKey = String(form.get("merchant_key") ?? "");
 	const kind = String(form.get("kind") ?? "");
 	const search = String(form.get("rules_search") ?? "");
@@ -1160,7 +1144,7 @@ settings.post("/settings/learned/undo", async (c) => {
 	// The token as posted, echoed as it was; a file part is no token, so it is the empty text.
 	const token = textOf(form.get("token"));
 	// A token that is no Forget's number finds no row, so the rule refuses it as it refuses one already undone.
-	const id = rowIdOf(token) ?? 0;
+	const id = rowIdOrZero(token);
 
 	const refusal = await runWith(
 		c.env.DB,
@@ -1498,9 +1482,9 @@ async function find(c: Context<App>) {
 // ?focus=<id> puts focus on that row after Cancel. Household: ?focus=zone focuses the Time zone row. People:
 // ?peopleFocus=1 focuses the page's title after Cancel.
 const numberParam = (c: Context<App>, key: string) => {
-	const n = Number(c.req.query(key));
+	const read = readAtEdge(CategoryId, c.req.query(key));
 
-	return Number.isInteger(n) && n > 0 ? n : undefined;
+	return read.ok ? read.value : undefined;
 };
 
 settings.get("/settings", (c) => renderContents(c));
@@ -1627,7 +1611,7 @@ settings.post("/settings/bank-sign-in-emails", async (c) => {
 
 	// A Remove button posts its address as `remove`; a Remove never changes the switch.
 	if (form.has("remove"))
-		return removeBankSignInEmail(c, String(form.get("remove") ?? ""));
+		return removeBankSignInEmail(c, textOf(form.get("remove")));
 	const on = form.get("enabled") === "on";
 	await runWith(
 		c.env.DB,
@@ -1652,10 +1636,10 @@ settings.post("/settings/bank-sign-in-emails", async (c) => {
 });
 
 async function removeBankSignInEmail(c: Context<App>, posted: string) {
-	const email = posted.trim().toLowerCase();
+	const read = readAtEdge(SignInAddress, posted);
 
-	if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-		return bankSignInEmailError(c, "Choose an address to remove.", 400);
+	if (!read.ok) return bankSignInEmailError(c, read.say, 400);
+	const email = read.value;
 
 	const refused = await runWith(
 		c.env.DB,
@@ -1733,11 +1717,11 @@ settings.post("/settings/people", async (c) => {
 		: String(form.get("action") ?? "");
 
 	const nameValue = String(form.get("name") ?? "");
-	const name = nameValue.trim();
-	const id = Number(form.get("person_id"));
+	// A refused id is 0: no row opens and nothing is removed or renamed, as a NaN gave before.
+	const id = rowIdOrZero(textOf(form.get("person_id")));
 
 	if (action === "remove") {
-		if (!Number.isInteger(id) || id <= 1) return c.text("Not found", 404);
+		if (id <= 1) return c.text("Not found", 404);
 
 		const removed = await runWith(
 			c.env.DB,
@@ -1768,15 +1752,18 @@ settings.post("/settings/people", async (c) => {
 		);
 	}
 
-	if (!name || name.length > PERSON_NAME_MAX)
+	const typed = readAtEdge(PersonName, nameValue);
+
+	if (!typed.ok)
 		return renderPage(c, "people", {
 			peopleOpen: action === "rename" ? id : undefined,
 			peopleErrorPersonId: action === "rename" ? id : undefined,
 			peopleAddOpen: action !== "rename",
-			peopleError: `Enter a name up to ${PERSON_NAME_MAX} characters.`,
+			peopleError: typed.say,
 			peopleValue: nameValue,
 			status: 422,
 		});
+	const name = typed.value;
 
 	if (action === "add") {
 		const result = await runWith(
@@ -1814,7 +1801,7 @@ settings.post("/settings/people", async (c) => {
 		});
 	}
 
-	if (action === "rename" && Number.isInteger(id) && id > 1) {
+	if (action === "rename" && id > 1) {
 		const refused = await runWith(
 			c.env.DB,
 			decideSetting(

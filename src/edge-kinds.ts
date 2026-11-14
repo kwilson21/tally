@@ -1,7 +1,8 @@
 // Typed kinds shared by the edge readers (decision 206): the words the app reads from an address or a form, once, for every route.
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
-import { readText } from "./edge";
+import { readAtEdge, readText } from "./edge";
+import { PERSON_NAME_MAX } from "./limits";
 
 /**
  * A row id from the address or a form: a whole number above zero, written with digits only. Fifteen digits at most, so
@@ -53,4 +54,72 @@ export const UndoName = Schema.String.pipe(
 			encode: SchemaGetter.transform((name: { token: string }) => name.token),
 		},
 	),
+);
+
+/** True for a posted value that is text (a file part is not text). */
+function isText(value: string | File | null | undefined): value is string {
+	return typeof value === "string";
+}
+
+/** A posted field as text: "" when it is missing or a file part, so no id, token, name or address is read from a file. */
+export const textOf = (posted: string | File | null | undefined): string =>
+	isText(posted) ? posted : "";
+
+/** A row id read at the edge (RowId), or undefined when the text is no row id. */
+export function rowIdOf(text: string | undefined): number | undefined {
+	const read = readAtEdge(RowId, text);
+
+	return read.ok ? read.value : undefined;
+}
+
+/**
+ * A row id read at the edge, or 0 when the text is no row id. No row has id 0, so a rule or a query given it finds
+ * nothing, as it found nothing for a NaN.
+ */
+export function rowIdOrZero(text: string | undefined): number {
+	return rowIdOf(text) ?? 0;
+}
+
+/** The row ids in a list of posted values, in the order posted: each one RowId reads, and every other entry is dropped. */
+export const rowIdsOf = (posted: (string | File)[]): number[] =>
+	posted.flatMap((value) => {
+		const id = rowIdOf(textOf(value));
+
+		return id === undefined ? [] : [id];
+	});
+
+/**
+ * A bank sign-in address the form names to remove (Settings): trimmed and lower-cased, at most 254 characters, with one
+ * @ and a dot after it, and no spaces. Any other text is refused with the sentence the page shows.
+ */
+export const SignInAddress = Schema.String.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: readText<string>((text) => {
+			const email = text.trim().toLowerCase();
+
+			return email &&
+				email.length <= 254 &&
+				/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+				? { value: email }
+				: { say: "Choose an address to remove." };
+		}),
+		encode: SchemaGetter.passthrough(),
+	}),
+);
+
+/**
+ * A person's name from a form (Settings): trimmed, not empty, at most PERSON_NAME_MAX characters. The page keeps the
+ * text as typed; only the name the rule saves is this trimmed one.
+ */
+export const PersonName = Schema.String.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: readText<string>((text) => {
+			const name = text.trim();
+
+			return name && name.length <= PERSON_NAME_MAX
+				? { value: name }
+				: { say: `Enter a name up to ${PERSON_NAME_MAX} characters.` };
+		}),
+		encode: SchemaGetter.passthrough(),
+	}),
 );

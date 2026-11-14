@@ -11,13 +11,14 @@ import {
 	newCategoryItem,
 } from "../db/suggestions-queue";
 import { readAtEdge } from "../edge";
+import { rowIdOrZero, rowIdsOf, textOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX } from "../limits";
 import { formatCents } from "../money";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { fileGroup, makeStoreRule } from "../rules/organize";
 import { createFromSuggestion } from "../rules/suggestions";
-import { CategoryName } from "../settings/category-form";
+import { CategoryId, CategoryName } from "../settings/category-form";
 import {
 	decideFileGroup,
 	decideStoreRule,
@@ -362,10 +363,11 @@ function questionAddress(
 organize.get("/transactions/organize", async (c) => {
 	const params = new URL(c.req.url).searchParams;
 
+	// A refused store or category is 0, which storeOffer answers with no offer, as it did for NaN.
 	const offer = await storeOffer(
 		c.env.DB,
-		Number(params.get("store")),
-		Number(params.get("category")),
+		rowIdOrZero(params.get("store") ?? undefined),
+		rowIdOrZero(params.get("category") ?? undefined),
 	);
 
 	return offer
@@ -382,12 +384,13 @@ organize.get("/transactions/organize", async (c) => {
  */
 organize.post("/transactions/organize/suggestion", async (c) => {
 	const form = await c.req.formData();
-	const suggestionId = Number(form.get("suggestion"));
+	// A refused id is 0: no suggestion has it, so the changed list answers.
+	const suggestionId = rowIdOrZero(textOf(form.get("suggestion")));
 	const url = new URL(c.req.url);
 	const next = `/transactions/organize${url.search}`;
 
 	const item =
-		Number.isInteger(suggestionId) && suggestionId > 0
+		suggestionId > 0
 			? await newCategoryItem(c.env.DB, { id: suggestionId })
 			: undefined;
 
@@ -421,12 +424,7 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	if (!item) return changed();
 	const ids = item.rows.map((row) => row.transactionId);
 
-	const shown = new Set(
-		form
-			.getAll("shown")
-			.map(Number)
-			.filter((n) => Number.isInteger(n) && n > 0),
-	);
+	const shown = new Set(rowIdsOf(form.getAll("shown")));
 
 	if (shown.size !== ids.length || !ids.every((id) => shown.has(id)))
 		return changed();
@@ -504,7 +502,9 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 
 organize.post("/transactions/organize", async (c) => {
 	const form = await c.req.formData();
-	const categoryId = Number(form.get("category"));
+	// A category is read as CategoryId reads it: a refused one is 0, so it is no category and gives null below.
+	const category = readAtEdge(CategoryId, textOf(form.get("category")));
+	const categoryId = category.ok ? category.value : 0;
 	const name = form.get("name")?.toString().trim() ?? "";
 	const groupName = form.get("group")?.toString() ?? "";
 	const groups = await organizeGroups(c.env.DB);
@@ -544,7 +544,7 @@ organize.post("/transactions/organize", async (c) => {
 	};
 
 	if (typedNew && !typedNew.ok) values.newCategoryError = typedNew.say;
-	else if (!choseNew && !(Number.isInteger(categoryId) && categoryId > 0))
+	else if (!choseNew && !category.ok)
 		values.categoryError = "Pick a category from the list.";
 
 	if (name.length > DISPLAY_NAME_MAX)
@@ -649,8 +649,8 @@ organize.post("/transactions/organize/rule", async (c) => {
 				answer: form.get("answer") === "yes" ? "yes" : "not_now",
 				who: actor(c),
 			},
-			Number(form.get("store")),
-			Number(form.get("category")),
+			rowIdOrZero(textOf(form.get("store"))),
+			rowIdOrZero(textOf(form.get("category"))),
 		),
 	);
 
