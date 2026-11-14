@@ -69,18 +69,13 @@ export function stillOnKeys(switches: Partial<AiSwitches>): string {
  * around, so a run can't call an AI the household turned off.
  */
 export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
+	const keys = Object.values(KEYS);
+
 	const { results } = await db
 		.prepare(
-			"SELECT key, value FROM household_settings WHERE key IN (?, ?, ?, ?, ?, ?)",
+			`SELECT key, value FROM household_settings WHERE key IN (${keys.map(() => "?").join(", ")})`,
 		)
-		.bind(
-			KEYS.names,
-			KEYS.details,
-			KEYS.categories,
-			KEYS.income,
-			KEYS.sortOnArrival,
-			KEYS.lookupStores,
-		)
+		.bind(...keys)
 		.all<{ key: string; value: string }>();
 
 	const off = new Set(
