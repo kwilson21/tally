@@ -18,6 +18,7 @@ const AUDIBLE = "AUDIBLE*TE3E10I7 WA";
 type Ctx = Record<string, number>;
 
 type Value = string | string[] | File;
+
 type Field = [string, Value];
 
 type Scenario = "more" | "new" | "ask";
@@ -409,6 +410,7 @@ async function seed(scenario: Scenario): Promise<Ctx> {
 			categoryConfidence: 0.58,
 			jevCategoryId: await categoryId("Eating Out"),
 		});
+
 		await post(PATH, [
 			["id", `category-${filed}`],
 			["answer", "create"],
@@ -425,6 +427,7 @@ async function seed(scenario: Scenario): Promise<Ctx> {
 				`INSERT INTO merchants (raw_name, display_name) VALUES ('CHEWY.COM 1', 'Chewy'), ('PETSMART 22', 'Petsmart'), ('BANFIELD 5', 'Banfield')`,
 			)
 			.run();
+
 		const sid =
 			(
 				await db
@@ -433,16 +436,19 @@ async function seed(scenario: Scenario): Promise<Ctx> {
 					)
 					.first<{ id: number }>()
 			)?.id ?? 0;
+
 		const pet0 = await insertTx({
 			raw: "CHEWY.COM 1",
 			amount: 4500,
 			suggestionId: sid,
 		});
+
 		const pet1 = await insertTx({
 			raw: "PETSMART 22",
 			amount: 3100,
 			suggestionId: sid,
 		});
+
 		const pet2 = await insertTx({
 			raw: "BANFIELD 5",
 			amount: 8900,
@@ -458,12 +464,14 @@ async function seed(scenario: Scenario): Promise<Ctx> {
 		)
 		.bind(VENMO)
 		.run();
+
 	const inc = await insertTx({
 		raw: VENMO,
 		amount: -250000,
 		incomeConfidence: 0.5,
 	});
 	// The question is asked after a No on the item (decision 101), as the screen asks it.
+
 	await post(PATH, [
 		["id", `income-${inc}`],
 		["answer", "no"],
@@ -567,6 +575,7 @@ describe("the Suggestions screen's answers, read at the edge (#1006, PR 8)", () 
 		"%s keeps its answer",
 		async (label, kase) => {
 			const ctx = await seed(kase.scenario);
+
 			const { res, html } =
 				"query" in kase
 					? await get(`${PATH}?more=${encodeURIComponent(kase.query(ctx))}`)
