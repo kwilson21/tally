@@ -10,7 +10,7 @@ import { pinClock } from "./pinned-clock";
 // person's browser can send to a freshly seeded demo and records what comes back: the status, the type, the Location,
 // the HX-Trigger and HX-Push-Url headers, a hash of the page's body and a hash of every row the answer can touch. The
 // lines in fixtures/transactions-likely-edge-baseline.json were recorded on the code before the edge: every answer must
-// stay the same.
+// stay the same, except the padded address ids listed in INTENDED, which are checked on their own.
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -479,6 +479,13 @@ function buildSteps(): Step[] {
 	return steps;
 }
 
+/**
+ * Cases whose answer is meant to change (the intended difference in the PR notes): a padded address id on the likely
+ * routes now answers as a missing transaction, with no write. Each is checked below against its own expectation.
+ */
+const INTENDED = (step: Step) =>
+	/^\/transactions\/0+\$(CASH|ID|ID2)\/likely/.test(step.path);
+
 const STEPS = buildSteps();
 
 const labels = STEPS.map((step) => step.label);
@@ -502,6 +509,7 @@ describe("the likely panel and the rule offer, read at the edge (#1006, PR 10)",
 		async (label, step) => {
 			const ids = await seedIds();
 			await prepareLikely(ids);
+			const before = await stateHash();
 			let line: string;
 
 			try {
@@ -510,6 +518,14 @@ describe("the likely panel and the rule offer, read at the edge (#1006, PR 10)",
 				line = await recordLine(res, html);
 			} catch (error) {
 				line = `threw ${error instanceof Error ? error.name : "value"}`;
+			}
+
+			if (INTENDED(step)) {
+				// The padded id is a missing transaction: a 404 and no row changed.
+				expect(line.split(" | ")[0]).toBe("404");
+				expect(await stateHash()).toBe(before);
+
+				return;
 			}
 
 			const recorded: Record<string, string> = baseline;
