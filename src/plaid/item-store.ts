@@ -1,5 +1,6 @@
 import { next } from "../machines/next";
 import { plaidConnectionMachine } from "../machines/plaid-connection";
+import { ownsLeaseSql } from "../machines/plaid-lease";
 
 // The only file that writes plaid_items.status, the attention flags, connection_revision or disconnected_at. Routes
 // and sync code call the named operations below; none of them writes those columns itself
@@ -322,9 +323,7 @@ async function leaseHeld(
 	lockId: string,
 ): Promise<boolean> {
 	const row = await db
-		.prepare(
-			"SELECT 1 AS held FROM plaid_items WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL",
-		)
+		.prepare(`SELECT 1 AS held WHERE ${ownsLeaseSql("?", "?")}`)
 		.bind(itemId, lockId)
 		.first();
 

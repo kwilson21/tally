@@ -60,6 +60,7 @@ import {
 } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 import { mergedFlagsSql, pendingNoteWinsSql } from "../machines/note-state";
+import { ownsLeaseSql } from "../machines/plaid-lease";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
 function hasAnswerSql(personChoice: string, jevAnswer: string) {
@@ -74,8 +75,7 @@ const POSTED = "(SELECT id FROM transactions WHERE plaid_transaction_id = ?2)";
 /** The posted row's payment group (decision 82): the row, its split parent and its parts, as the triggers read it. */
 const POSTED_GROUP = `(SELECT g.id FROM transactions g WHERE g.id IN (${POSTED}, (SELECT parent_id FROM transactions WHERE id = ${POSTED})) OR g.parent_id = ${POSTED})`;
 
-const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
-	SELECT 1 FROM plaid_items WHERE id = ?4 AND sync_lock_id = ?5 AND disconnected_at IS NULL)`;
+const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND ${ownsLeaseSql("?4", "?5")}`;
 
 /** Whether the pending row's note is strictly later than the posted row's (laterNoteState in the note machine). */
 const PENDING_NOTE_WINS = pendingNoteWinsSql(
