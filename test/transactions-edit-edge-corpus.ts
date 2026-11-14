@@ -20,6 +20,7 @@ const LIST = "/transactions?month=all";
 /** The rows a case is written from, read from the seeded demo. */
 type Ids = {
 	id: number;
+	id2: number;
 	cash: number;
 	cat: number;
 	arch: number;
@@ -38,6 +39,8 @@ export type Step = {
 	/** The panel's pending edit, as the Change the parts sheet carries it: built per case from its fields. */
 	pending?: Form;
 	hx?: boolean;
+	/** Seeds the second purchase ($PERSON) and the cash entry ($CASH) with household person 1: they already have one. */
+	person?: boolean;
 };
 
 const sha = async (text: string) => {
@@ -141,6 +144,7 @@ async function prepare(): Promise<Ids> {
 
 	return {
 		id: await first(`${purchases} LIMIT 1`),
+		id2: await first(`${purchases} DESC LIMIT 1`),
 		cash,
 		cat,
 		arch,
@@ -152,6 +156,7 @@ async function prepare(): Promise<Ids> {
 /** Puts a case's row numbers into its text. Longer names go first, so a prefix never matches. */
 function fill(text: string, ids: Ids): string {
 	return text
+		.replaceAll("$PERSON", String(ids.id2))
 		.replaceAll("$PARTA", String(ids.partA))
 		.replaceAll("$PARTB", String(ids.partB))
 		.replaceAll("$CASH", String(ids.cash))
@@ -222,6 +227,13 @@ export async function recordCase(step: Step) {
 	pinClock();
 	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
 	const ids = await prepare();
+
+	if (step.person)
+		await db
+			.prepare("UPDATE transactions SET for_person_id=1 WHERE id IN (?, ?)")
+			.bind(ids.id2, ids.cash)
+			.run();
+
 	const before = await stateHash();
 	let line: string;
 	let changed = false;
@@ -469,6 +481,66 @@ function buildSteps(): Step[] {
 				pending: edit,
 			});
 		}
+	}
+
+	// A transaction that already has a person (household person 1): the For person field keeps, clears or refuses it
+	// against the guess it was drawn with. These cases come after the others, so their labels keep the earlier numbers.
+	const PERSON_NOW: Value[] = ["", "1", "001", " 1", "abc", "1.5", ABSENT];
+	const PERSON_WAS_NOW: Value[] = [ABSENT, "", "1", "abc", "1e0", FILE];
+
+	for (const details of ["0", "1"]) {
+		for (const now of PERSON_NOW) {
+			for (const was of PERSON_WAS_NOW) {
+				add({
+					path: "/transactions/$PERSON",
+					form: withFields(EDIT, [
+						["details_visible", details],
+						["for_person_id", now],
+						["for_person_id_was", was],
+					]),
+					person: true,
+				});
+			}
+		}
+	}
+
+	for (const now of PERSON_NOW) {
+		for (const was of PERSON_WAS_NOW) {
+			add({
+				path: "/transactions/$PERSON",
+				form: withFields(EDIT, [
+					["details_visible", "0"],
+					["for_person_id", now],
+					["for_person_id_was", was],
+				]),
+				person: true,
+				hx: false,
+			});
+		}
+	}
+
+	// The pending edit on a cash entry that has a person: the sheet's save, then its replay through the split route.
+	for (const now of ["", "abc", "1.5", "001"]) {
+		const edit = withFields(EDIT, [
+			["details_visible", "0"],
+			["for_person_id", now],
+			["for_person_id_was", "abc"],
+		]);
+
+		add({
+			path: "/transactions/$CASH",
+			form: withFields(edit, [
+				["change_parts", "1"],
+				["amount", "100.00"],
+			]),
+			person: true,
+		});
+		add({
+			path: "/transactions/$CASH/split",
+			form: CORRECTION,
+			pending: edit,
+			person: true,
+		});
 	}
 
 	return steps;
