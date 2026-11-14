@@ -12,6 +12,8 @@ import { readAiSwitches } from "./db/ai-switches";
 import { clearWaitsForRunStatement } from "./db/first-tally";
 import { finishRun } from "./db/resort-run";
 import { waitingForJevSql } from "./db/transactions";
+import { lookupAsks, lookupEnvOpen } from "./lookup/gate";
+import { fillLookupTexts } from "./lookup/texts";
 import { runTimeBudgetMs } from "./run-budget";
 import {
 	type SortEnv,
@@ -34,6 +36,15 @@ export const INSTANCE_MAX_CALLS = 5000;
 // The re-ask's finish is a D1 write, so a failed one may run again; finishRun is idempotent.
 const REASK_STEPS = {
 	finish: {
+		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
+		timeout: "1 minute",
+		sensitive: "output",
+	},
+} satisfies Record<string, StepConfig>;
+
+// The lookup texts' step is D1 only, so a failed save may run again. The fill itself never throws out of its step (see runSortInstance).
+const LOOKUP_STEPS = {
+	texts: {
 		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 		timeout: "1 minute",
 		sensitive: "output",
@@ -99,6 +110,34 @@ export async function runSortInstance(
 		sleep?: (name: string, ms: number) => Promise<void>;
 	},
 ): Promise<void> {
+	// The store lookup's privacy marks (spec §7), first, so the groups and the rules read them. Registered only while the
+	// gate's environment half is open (a Tavily key and a cap above 0), so with the gate closed the step list is as before.
+	if (lookupEnvOpen(env)) {
+		try {
+			await runStep("lookup-texts", LOOKUP_STEPS.texts, async () => {
+				const switches = await readAiSwitches(env.DB);
+
+				if (!lookupAsks(env, switches))
+					return { keys: 0, private: 0, failed: false };
+
+				try {
+					return { ...(await fillLookupTexts(env.DB)), failed: false };
+				} catch (error) {
+					// Logged by name only: no key or bank text reaches the log. Returning, not throwing, keeps a replay from retrying it.
+					console.error(
+						`lookup texts: stopped ${error instanceof Error ? error.name : "unknown"}`,
+					);
+
+					return { keys: 0, private: 0, failed: true };
+				}
+			});
+		} catch (error) {
+			console.error(
+				`lookup texts: step failed ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
+
 	try {
 		await sortGroups(
 			env,
