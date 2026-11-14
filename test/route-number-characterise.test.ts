@@ -2,10 +2,10 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
-import baseline from "./fixtures/route-number-baseline.json";
-import { pinClock } from "./pinned-clock";
 import { setupRoute } from "../src/routes/setup";
+import baseline from "./fixtures/route-number-baseline.json";
 import { envWith } from "./helpers/doubles";
+import { pinClock } from "./pinned-clock";
 
 // The three routes and one helper that read a typed or posted number with Number() (#1105): the category rename's
 // invalid-name branch, the bill form's quarter sentence, the home page's focus, and the Your banks list's `in` list.
@@ -63,7 +63,9 @@ type Case = {
 
 /** Fills the cases' category ids into their text; "$ARCH" goes first is not needed, the names differ. */
 const fill = (text: string, ids: Ids) =>
-	text.replaceAll("$ARCH", String(ids.arch)).replaceAll("$CAT", String(ids.cat));
+	text
+		.replaceAll("$ARCH", String(ids.arch))
+		.replaceAll("$CAT", String(ids.cat));
 
 /** Runs one case and returns its line: the status, the HX-* headers, the Location and a hash of the page. */
 async function line(step: Case, ids: Ids): Promise<string> {
@@ -74,6 +76,7 @@ async function line(step: Case, ids: Ids): Promise<string> {
 	const query = (step.query ?? [])
 		.filter(([, value]) => value !== ABSENT)
 		.map(([key, value]) => [key, fill(value, ids)] as const);
+
 	const url = `${BASE}${fill(step.path, ids)}${query.length ? `?${new URLSearchParams(query)}` : ""}`;
 
 	let res: Response;
@@ -82,6 +85,7 @@ async function line(step: Case, ids: Ids): Promise<string> {
 		res = await exports.default.fetch(url, { headers });
 	} else {
 		headers.set("Origin", BASE);
+
 		const body = new URLSearchParams(
 			(step.form ?? [])
 				.filter(([, value]) => value !== ABSENT)
@@ -95,26 +99,14 @@ async function line(step: Case, ids: Ids): Promise<string> {
 		});
 	}
 
-	const html = await res.text();
-	const hx = [...res.headers.entries()]
-		.filter(([name]) => name.startsWith("hx-"))
-		.sort(([a], [b]) => a.localeCompare(b))
-		.map(([name, value]) => `${name}=${plain(value)}`);
-	const autofocus = html.split("autofocus").length - 1;
-
-	return [
-		res.status,
-		res.headers.get("content-type") ?? "-",
-		res.headers.get("location") ?? "-",
-		...hx,
-		`autofocus ${autofocus}`,
-		`body ${await sha(plain(html))}`,
-	].join(" | ");
+	return lineOf(res, await res.text());
 }
 
 /** A readable name for the case, so the fixture's keys say what was posted. */
 const q = (pairs: [string, string][] | undefined) =>
-	(pairs ?? []).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(" ");
+	(pairs ?? [])
+		.map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+		.join(" ");
 
 const cases = (): Case[] => {
 	const renameNames = ["", "   "];
@@ -155,21 +147,24 @@ const cases = (): Case[] => {
 		ABSENT,
 	];
 
-	return [
-		...renameIds.flatMap((id) =>
-			renameNames.flatMap((name) =>
-				[true, false].map((hx) => ({
+	const rename = renameIds.flatMap((id) =>
+		renameNames.flatMap((name) =>
+			[true, false].map(
+				(hx): Case => ({
 					label: `settings rename id=${id} name=${JSON.stringify(name)} hx=${hx}`,
-					method: "POST" as const,
+					method: "POST",
 					path: `/settings/categories/${id}`,
 					hx,
-					form: [["name", name]] as [string, string][],
-				})),
+					form: [["name", name]],
+				}),
 			),
 		),
-		...quarterMonths.map((month) => ({
+	);
+
+	const bills = quarterMonths.map(
+		(month): Case => ({
 			label: `bills quarter anchor_month=${JSON.stringify(month)}`,
-			method: "POST" as const,
+			method: "POST",
 			path: "/bills",
 			hx: false,
 			form: [
@@ -180,23 +175,26 @@ const cases = (): Case[] => {
 				["anchor_month", month],
 				["merchant_raw_name", "COFFEE SHOP"],
 				["category_id", "$CAT"],
-			] as [string, string][],
-		})),
-		...focusValues.flatMap((focus) =>
-			[false, true].map((hx) => {
-				const query: [string, string][] =
-					focus === ABSENT ? [] : [["focus", focus]];
+			],
+		}),
+	);
 
-				return {
-					label: `home ${q(query) || "no query"} hx=${hx}`,
-					method: "GET" as const,
-					path: "/",
-					hx,
-					query,
-				};
-			}),
-		),
-	];
+	const home = focusValues.flatMap((focus) =>
+		[false, true].map((hx): Case => {
+			const query: [string, string][] =
+				focus === ABSENT ? [] : [["focus", focus]];
+
+			return {
+				label: `home ${q(query) || "no query"} hx=${hx}`,
+				method: "GET",
+				path: "/",
+				hx,
+				query,
+			};
+		}),
+	);
+
+	return [...rename, ...bills, ...home];
 };
 
 const IN_VALUES = [
@@ -216,9 +214,7 @@ const IN_VALUES = [
 
 /** A bank that has come in, with one transaction: the Solo Card the Your banks test seeds. */
 async function seedArrivedBank() {
-	await db
-		.prepare("UPDATE plaid_items SET disconnected_at = NULL")
-		.run();
+	await db.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 	await db
 		.prepare(
 			"INSERT INTO plaid_items (id, access_token_encrypted, institution_name, linked_by, history_complete_at) VALUES (902, X'', 'Solo Card', 'test', datetime('now'))",
@@ -242,6 +238,7 @@ async function lineOf(res: Response, html: string): Promise<string> {
 		.filter(([name]) => name.startsWith("hx-"))
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([name, value]) => `${name}=${plain(value)}`);
+
 	const autofocus = html.split("autofocus").length - 1;
 
 	return [
@@ -267,11 +264,13 @@ describe("routes that read a typed number at the edge (#1105)", () => {
 	it("answers every recorded case the same as before the edge", async () => {
 		const ids = await seedIds();
 		const problems: string[] = [];
+		const expected: Record<string, string> = baseline;
 
 		const check = (label: string, got: string) => {
-			const want = baseline[label as keyof typeof baseline];
+			const want = expected[label];
 
-			if (want !== got) problems.push(`${label}\n  want ${want}\n  got  ${got}`);
+			if (want !== got)
+				problems.push(`${label}\n  want ${want}\n  got  ${got}`);
 		};
 
 		for (const step of cases()) check(step.label, await line(step, ids));
@@ -281,11 +280,13 @@ describe("routes that read a typed number at the edge (#1105)", () => {
 
 		for (const value of IN_VALUES) {
 			const query = value === ABSENT ? "" : `?in=${encodeURIComponent(value)}`;
+
 			const res = await setupRoute.request(
 				`/setup/banks${query}`,
 				{ headers: { "HX-Request": "true" } },
 				envWith(env, { DEMO: "false" }),
 			);
+
 			const html = await res.text();
 
 			check(`setup banks in=${JSON.stringify(value)}`, await lineOf(res, html));
@@ -310,6 +311,7 @@ async function quarterSentence(anchor: string): Promise<string> {
 			["category_id", String((await seedIds()).cat)],
 		]),
 	});
+
 	const html = await res.text();
 
 	return html.match(/bill-quarter-hint[^>]*>([^<]*)</)?.[1] ?? "<no hint>";
