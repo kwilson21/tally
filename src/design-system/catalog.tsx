@@ -30,6 +30,10 @@ import {
 	MERCHANT_SUGGESTION_LABELS,
 	merchantSuggestionMachine,
 } from "../machines/merchant-suggestion";
+import {
+	SORTING_TURN_LABELS,
+	sortingTurnMachine,
+} from "../machines/sorting-turn";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { closingToast, FINISHED_ANNOUNCEMENT } from "../resort-toast";
@@ -6738,6 +6742,14 @@ function Diagrams() {
 						title="How a suggested store name is decided"
 						machine={merchantSuggestionMachine}
 						labels={MERCHANT_SUGGESTION_LABELS}
+					/>
+				</State>
+				<State label="The sorting turn (four ways in and out, one state that runs out on its own)">
+					<MachineDiagram
+						id="machine-diagram-sorting-turn"
+						title="How the sorting turn is held and given back"
+						machine={sortingTurnMachine}
+						labels={SORTING_TURN_LABELS}
 					/>
 				</State>
 			</Specimen>
