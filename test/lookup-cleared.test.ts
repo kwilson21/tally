@@ -486,3 +486,23 @@ describe("a category filed while Jev is being asked never clears the row (write-
 		expect((await markOf(id))?.cleared ?? 0).toBe(0);
 	});
 });
+
+describe("the mark needs Jev's category answer to be stored, not only a sure business answer", () => {
+	it("with no active category, the category question is not asked, the save stores no confidence, and a sure business answer writes cleared 0", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		const id = await addRow("LOCAL BAKERY NO CATEGORY", 1200);
+		const fetchImpl = vi.fn(async () => jevReply());
+
+		await sortRows([id], fetchImpl);
+
+		const stored = await db
+			.prepare(
+				"SELECT category_confidence AS confidence FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ confidence: number | null }>();
+
+		expect(stored?.confidence ?? null).toBeNull();
+		expect((await markOf(id))?.cleared ?? 0).toBe(0);
+	});
+});
