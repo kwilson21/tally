@@ -467,7 +467,11 @@ describe("readEligibility: whether a row is a sign of a store", () => {
 			.bind(id)
 			.run();
 
-		expect(await decided()).toEqual({ kind: "not_yet", why: "no_sign", owed: [] });
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "no_sign",
+			owed: [],
+		});
 	});
 
 	it("a pending row with an ordinary Plaid category is a sign", async () => {
@@ -501,6 +505,15 @@ describe("readEligibility: what a row's Jev state holds back", () => {
 		await addRow({ jev_attempts: 5 });
 
 		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a split parent with no category blocks nothing: Jev is never asked about it", async () => {
+		await clearedRow();
+		await expectMaySearch();
+
+		await addRow({ is_split: 1 });
+
+		await expectMaySearch();
 	});
 
 	it("a second row Jev answered with no lookup mark is owed, and holds the text back", async () => {
