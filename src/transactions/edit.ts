@@ -339,7 +339,13 @@ export function parseEdit(
 	// name counts as a change too; savePanel sets that once it knows the row has one.)
 	const shown = form.get("merchant_was");
 	const fieldChanged = shown === null || typedName !== String(shown).trim();
-	const note = text(form, "note");
+
+	// A file in the note is not a note the person posted: the saved note stays as it is (no clear, no "[object File]").
+	// A Change the parts sheet carries that as `note_not_posted` (pendingEditOf), since the sheet holds only text.
+	const notePosted =
+		!(form.get("note") instanceof File) && form.get("note_not_posted") !== "1";
+
+	const note = notePosted ? textOf(form.get("note")).trim() : "";
 	const rawKind = text(form, "kind");
 	const kind = isTransactionKind(rawKind) ? rawKind : null;
 	const rawPerson = text(form, "for_person_id");
@@ -362,7 +368,13 @@ export function parseEdit(
 		: undefined;
 
 	const hiddenUntouched = detailsVisible === false;
-	const noteWas = text(form, "note_was");
+
+	// A file in note_was is a note that was not drawn: read as missing, like the note above.
+	const noteWasPosted =
+		form.has("note_was") && !(form.get("note_was") instanceof File);
+
+	const noteWas = noteWasPosted ? textOf(form.get("note_was")).trim() : "";
+
 	const kindWas = text(form, "kind_was") || null;
 	const personWasRaw = text(form, "for_person_id_was");
 	const personWas = personWasRaw ? numberOf(personWasRaw) : null;
@@ -440,14 +452,15 @@ export function parseEdit(
 	if (form.has("details_visible")) {
 		value.noteProvided = !(
 			hiddenUntouched &&
-			((!form.has("note_was") && note === "") ||
-				(form.has("note_was") && note === noteWas))
+			((!noteWasPosted && note === "") || (noteWasPosted && note === noteWas))
 		);
 		value.detailsFieldChanged =
 			hiddenUntouched &&
 			((form.has("kind_was") && kind !== kindWas) ||
 				(form.has("for_person_id_was") && forPersonId !== personWas));
 	}
+
+	if (!notePosted) value.noteProvided = false;
 
 	if (detailsVisible !== undefined) value.detailsVisible = detailsVisible;
 
