@@ -1,6 +1,14 @@
 // Reads the CSV Apple exports for Apple Card (spec §8.10, decision 138): a small RFC 4180 reader of its own, so no
-// dependency. It returns the rows as they are read; planning and storing them is in plan.ts and import.ts.
+// dependency. It returns the rows as they are read; planning and storing them is in plan.ts and import.ts. Each row's
+// cells are read into typed values with Effect Schema at the edge (decision 206); the tokenizer and the header check
+// stay plain code.
 
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
+import * as SchemaIssue from "effect/SchemaIssue";
+import { readAtEdge, readText } from "../edge";
 import { toCents } from "../money";
 
 /** Apple's columns, in order. The header is these, with or without `Purchased By` at the end (Apple adds it for some cards). */
@@ -159,14 +167,75 @@ function unreadableWords(line: number): string {
 	return `Row ${line} can't be read. Nothing was added.`;
 }
 
-function readRow(fields: string[], line: number, width: number): RowResult {
-	const unreadable = { ok: false as const, error: unreadableWords(line) };
+const amountSentence = (line: number) =>
+	`Row ${line}'s amount can't be read. Nothing was added.`;
 
-	if (fields.length !== width) return unreadable;
+const dateSentence = (line: number) =>
+	`Row ${line}'s date can't be read. Nothing was added.`;
 
-	// A U+FFFD means the file was re-saved in another encoding; a field over the cap can't be stored safely.
-	if (fields.some((field) => field.includes("�"))) return unreadable;
+/** A money cell: Apple's amount text as integer cents, or the amount sentence for its row. */
+const AmountCell = (line: number) =>
+	Schema.String.pipe(
+		Schema.decodeTo(Schema.Number, {
+			decode: readText<number>((text) => {
+				const cents = centsOf(text);
 
+				return cents === null
+					? { say: amountSentence(line) }
+					: { value: cents };
+			}),
+			encode: SchemaGetter.passthrough({ strict: false }),
+		}),
+	);
+
+/** A date cell: Apple's M/D/YYYY as YYYY-MM-DD, or the date sentence for its row. */
+const DateCell = (line: number) =>
+	Schema.String.pipe(
+		Schema.decodeTo(Schema.String, {
+			decode: readText<string>((text) => {
+				const iso = isoDate(text);
+
+				return iso === null ? { say: dateSentence(line) } : { value: iso };
+			}),
+			encode: SchemaGetter.passthrough({ strict: false }),
+		}),
+	);
+
+/** The clearing date cell: blank is null (the row hasn't cleared), otherwise a date as DateCell reads it. */
+const ClearingCell = (line: number) =>
+	Schema.String.pipe(
+		Schema.decodeTo(Schema.NullOr(Schema.String), {
+			decode: readText<string | null>((text) => {
+				if (text === "") return { value: null };
+
+				const iso = isoDate(text);
+
+				return iso === null ? { say: dateSentence(line) } : { value: iso };
+			}),
+			encode: SchemaGetter.passthrough({ strict: false }),
+		}),
+	);
+
+/** The typed row without its line number: what a row's cells decode to. */
+const AppleRowFields = Schema.Struct({
+	transactionDate: Schema.String,
+	clearingDate: Schema.NullOr(Schema.String),
+	description: Schema.String,
+	merchant: Schema.NullOr(Schema.String),
+	category: Schema.NullOr(Schema.String),
+	type: Schema.String,
+	amountCents: Schema.Number,
+});
+
+/**
+ * Reads one record's cleaned cells (in Apple's column order) into a transaction, for the row numbered `line`. The cells are
+ * read in this order, and the first that can't be read refuses the row with its sentence: the amount, the transaction
+ * date, the clearing date, then a blank description or type. The cells must already be cleaned and checked for width.
+ */
+function readRowCells(
+	cells: readonly string[],
+	line: number,
+): { value: Omit<AppleRow, "line"> } | { say: string } {
 	const [
 		transactionText = "",
 		clearingText = "",
@@ -175,51 +244,83 @@ function readRow(fields: string[], line: number, width: number): RowResult {
 		categoryText = "",
 		typeText = "",
 		amountText = "",
-	] = fields.map(cleanText);
+	] = cells;
 
-	if (fields.some((field) => cleanText(field).length > MAX_FIELD))
-		return unreadable;
+	const amount = readAtEdge(AmountCell(line), amountText);
 
-	const amountCents = centsOf(amountText);
+	if (!amount.ok) return { say: amount.say };
 
-	const amountError = {
-		ok: false as const,
-		error: `Row ${line}'s amount can't be read. Nothing was added.`,
-	};
+	const transactionDate = readAtEdge(DateCell(line), transactionText);
 
-	if (amountCents === null) return amountError;
+	if (!transactionDate.ok) return { say: transactionDate.say };
 
-	const dateError = {
-		ok: false as const,
-		error: `Row ${line}'s date can't be read. Nothing was added.`,
-	};
+	const clearingDate = readAtEdge(ClearingCell(line), clearingText);
 
-	const transactionDate = isoDate(transactionText);
+	if (!clearingDate.ok) return { say: clearingDate.say };
 
-	if (transactionDate === null) return dateError;
-	let clearingDate: string | null = null;
-
-	if (clearingText !== "") {
-		clearingDate = isoDate(clearingText);
-
-		if (clearingDate === null) return dateError;
-	}
-
-	if (descriptionText === "" || typeText === "") return unreadable;
+	if (descriptionText === "" || typeText === "")
+		return { say: unreadableWords(line) };
 
 	return {
-		ok: true,
-		row: {
-			line,
-			transactionDate,
-			clearingDate,
+		value: {
+			transactionDate: transactionDate.value,
+			clearingDate: clearingDate.value,
 			description: descriptionText,
 			merchant: merchantText || null,
 			category: categoryText || null,
 			type: typeText,
-			amountCents,
+			amountCents: amount.value,
 		},
 	};
+}
+
+/**
+ * A record's cleaned cells read into the typed row, without its line number (decision 206). The cells are an array of
+ * text; the row's refusal is the sentence readRowCells gives. Built per row, since each sentence names the row's number.
+ */
+export function appleRowCells(line: number) {
+	return Schema.Array(Schema.String).pipe(
+		Schema.decodeTo(AppleRowFields, {
+			// Like readText, for a row's cells: the value, or the sentence that refuses the row.
+			decode: SchemaGetter.transformEffect<
+				Omit<AppleRow, "line">,
+				readonly string[]
+			>((cells, options) => {
+				const answer = readRowCells(cells, line);
+
+				return "value" in answer
+					? Effect.succeed(answer.value)
+					: Effect.fail(
+							new SchemaIssue.InvalidValue(
+								{ message: answer.say },
+								cells,
+								options,
+							),
+						);
+			}),
+			encode: SchemaGetter.passthrough({ strict: false }),
+		}),
+	);
+}
+
+function readRow(fields: string[], line: number, width: number): RowResult {
+	if (fields.length !== width)
+		return { ok: false, error: unreadableWords(line) };
+
+	// A U+FFFD means the file was re-saved in another encoding; a field over the cap can't be stored safely.
+	if (fields.some((field) => field.includes("�")))
+		return { ok: false, error: unreadableWords(line) };
+
+	const cells = fields.map(cleanText);
+
+	if (cells.some((cell) => cell.length > MAX_FIELD))
+		return { ok: false, error: unreadableWords(line) };
+
+	const read = Schema.decodeUnknownResult(appleRowCells(line))(cells);
+
+	return Result.isSuccess(read)
+		? { ok: true, row: { line, ...read.success } }
+		: { ok: false, error: read.failure.message };
 }
 
 /**
