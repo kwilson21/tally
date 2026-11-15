@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveCategory } from "../src/db/categories";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
@@ -19,6 +18,7 @@ import { newCategoryItem } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { archiveOn, restoreOn } from "./archive-category";
+import { renameOn } from "./category-changes";
 import { forwardMember, present } from "./helpers/present";
 
 // Which transactions count as "Jev was sure none of the categories fit" (spec §7, #51), where a
@@ -1870,7 +1870,7 @@ describe("createFromSuggestion", () => {
 		it("makes a new Pet Care when the archived one was renamed after the page was drawn, as Create would", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
-			await saveCategory(db, archived, { name: "Pets" });
+			await renameOn(db, archived, "Pets");
 
 			const result = await createFromSuggestion(
 				db,
@@ -1904,8 +1904,7 @@ describe("createFromSuggestion", () => {
 			const result = await createFromSuggestion(
 				racingSave(
 					() => restoreOn(db, archived, "2026-09-01"),
-					() =>
-						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
+					() => renameOn(db, archived, "Pets").then(() => undefined),
 				),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
@@ -1982,8 +1981,7 @@ describe("createFromSuggestion", () => {
 			const result = await createFromSuggestion(
 				racingSave(
 					() => restoreOn(db, archived, "2026-09-01"),
-					() =>
-						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
+					() => renameOn(db, archived, "Pets").then(() => undefined),
 					() => archiveOn(db, archived, "2026-09-02"),
 				),
 				id,
@@ -2051,9 +2049,7 @@ describe("createFromSuggestion", () => {
 			const today = await householdToday(db);
 
 			const result = await createFromSuggestion(
-				racingSave(() =>
-					saveCategory(db, archived, { name: "école" }).then(() => undefined),
-				),
+				racingSave(() => renameOn(db, archived, "école").then(() => undefined)),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person@example.com",
@@ -2092,9 +2088,7 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racingSave(() =>
-					saveCategory(db, archived, { name: "Ecole" }).then(() => undefined),
-				),
+				racingSave(() => renameOn(db, archived, "Ecole").then(() => undefined)),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person",
@@ -2434,7 +2428,7 @@ describe("createFromSuggestion", () => {
 				between: (s) => [
 					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 					() =>
-						saveCategory(db, present(s.cats.archived), { name: "Pets" }).then(
+						renameOn(db, present(s.cats.archived), "Pets").then(
 							() => undefined,
 						),
 				],
@@ -2521,7 +2515,7 @@ describe("createFromSuggestion", () => {
 				between: (s) => [
 					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 					() =>
-						saveCategory(db, present(s.cats.archived), { name: "Pets" }).then(
+						renameOn(db, present(s.cats.archived), "Pets").then(
 							() => undefined,
 						),
 				],

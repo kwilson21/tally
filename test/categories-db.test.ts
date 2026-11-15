@@ -10,6 +10,7 @@ import {
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { archiveOn, restoreOn } from "./archive-category";
+import { moveOn } from "./category-changes";
 import { present } from "./helpers/present";
 
 const db = env.DB;
@@ -114,7 +115,7 @@ describe("moveCategory", () => {
 describe("restoring after a move", () => {
 	it("puts a restored category at the end, never sharing a place with another", async () => {
 		await archiveOn(db, 2, "2026-09-22");
-		await moveCategory(db, 5, "up");
+		await moveOn(db, 5, "up");
 		await restoreOn(db, 2, "2026-09-22");
 		expect(await names()).toEqual([
 			"Groceries",
