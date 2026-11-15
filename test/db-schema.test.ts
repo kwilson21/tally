@@ -31,6 +31,8 @@ import {
 	budgetAmounts,
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	CHECK_LISTS,
+	CHECKS,
+	COLLATIONS,
 	cashDeleteHolds,
 	categories,
 	categoryArchivePeriods,
@@ -59,13 +61,21 @@ import {
 	plannedExpenses,
 	pushSubscriptions,
 	savingsGoalAmounts,
+	TABLE_CHECKS,
 	TRANSACTION_KIND_VALUES,
 	transactions,
 } from "../src/db/schema";
+import {
+	autoIncrementProblems,
+	checkProblems,
+	collationProblems,
+	liveCheckClauses,
+} from "./schema-text";
 
 // The drift test: src/db/schema.ts (hand-written, see its top comment) must say what the live database says.
 // It reads the live tables with PRAGMA and sqlite_master, so it runs in the Workers runtime against the migrated
-// database. It compares columns, CHECK lists, indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
+// database. It compares columns, CHECK lists, the other CHECKs (CHECKS and TABLE_CHECKS, read by test/schema-text.ts),
+// AUTOINCREMENT keys, COLLATE names (COLLATIONS), indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
 // Every one of the 32 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
 // bank_text_rules, bill_amounts, bill_payments, bills, budget_amounts, cash_delete_holds, categories,
@@ -317,6 +327,24 @@ async function drift(table: SQLiteTable, lists: Lists): Promise<string[]> {
 				`CHECK_LISTS has ${tableName}.${column}, but the database has no such CHECK`,
 			);
 
+	// The other CHECKs (not IN lists), the AUTOINCREMENT keys and the COLLATE names, read from the same statement.
+	const tableSql = tableRow[0]?.sql ?? "";
+
+	const autoIncrementColumns = config.columns
+		.filter(
+			(column) => "autoIncrement" in column && column.autoIncrement === true,
+		)
+		.map((column) => column.name);
+
+	problems.push(
+		...checkProblems(tableSql, tableName, {
+			columns: checkRecords[tableName] ?? {},
+			tables: tableCheckRecords[tableName] ?? [],
+		}),
+		...autoIncrementProblems(tableSql, tableName, autoIncrementColumns),
+		...collationProblems(tableSql, tableName, collationsOf(tableName)),
+	);
+
 	const { results: indexes } = await env.DB.prepare(
 		"SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
 	)
@@ -467,7 +495,7 @@ async function liveForeignKeys(
 
 /**
  * The unique constraints a table declares: .unique() on a column and unique() in the table config, as a sorted
- * list of column lists. Drizzle cannot say a collation, so a COLLATE NOCASE in the database is not compared.
+ * list of column lists. A COLLATE name is not a unique constraint; it is compared with COLLATIONS.
  */
 function schemaUniqueConstraints(table: SQLiteTable): string[] {
 	const config = getTableConfig(table);
@@ -537,6 +565,22 @@ function tableSetProblems(
 			);
 
 	return problems;
+}
+
+// The records indexed by a table name read as text, which the object literal types of schema.ts do not allow.
+const checkRecords: Readonly<Record<string, Readonly<Record<string, string>>>> =
+	CHECKS;
+
+const tableCheckRecords: Readonly<Record<string, readonly string[]>> =
+	TABLE_CHECKS;
+
+/** The COLLATIONS entries of one table, keyed by column. */
+function collationsOf(tableName: string): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(COLLATIONS)
+			.filter(([key]) => key.startsWith(`${tableName}.`))
+			.map(([key, value]) => [key.slice(tableName.length + 1), value]),
+	);
 }
 
 async function appTableNames(): Promise<string[]> {
@@ -678,6 +722,18 @@ describe("the schema file matches the live database", () => {
 
 	it("push_subscriptions matches the live table, its inline unique and index included", async () => {
 		expect(await drift(pushSubscriptions, CHECK_LISTS)).toEqual([]);
+	});
+
+	it("the CHECKS, TABLE_CHECKS and COLLATIONS records name only described tables", () => {
+		const described = schemaTables().map((table) => getTableConfig(table).name);
+
+		const named = [
+			...Object.keys(CHECKS),
+			...Object.keys(TABLE_CHECKS),
+			...Object.keys(COLLATIONS).map((key) => key.split(".")[0] ?? ""),
+		];
+
+		expect(named.filter((name) => !described.includes(name))).toEqual([]);
 	});
 
 	it("every live application table is described in the schema", async () => {
@@ -1625,6 +1681,227 @@ describe("the drift check fails on a wrong household, feedback, AI or push table
 	});
 });
 
+describe("the drift check reads the CHECKs, AUTOINCREMENT keys and collations the schema does not state", () => {
+	const checkTable = `CREATE TABLE t (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents > 0),
+	due_day INTEGER CHECK (due_day BETWEEN 1 AND 31),
+	day TEXT CHECK (day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'), name TEXT COLLATE NOCASE,
+	quarter TEXT CHECK (quarter GLOB 'Q[1-4]'),
+	code TEXT CHECK (code <> ')' AND code <> '('),
+	CHECK (amount_cents >= due_day OR due_day IS NULL)
+)`;
+
+	const checks = {
+		columns: {
+			amount_cents: "typeof(amount_cents) = 'integer' AND amount_cents > 0",
+			due_day: "due_day BETWEEN 1 AND 31",
+			day: "day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+			quarter: "quarter GLOB 'Q[1-4]'",
+			code: "code <> ')' AND code <> '('",
+		},
+		tables: ["amount_cents >= due_day OR due_day IS NULL"],
+	};
+
+	it("passes when the record states every CHECK as the database has it", () => {
+		expect(checkProblems(checkTable, "t", checks)).toEqual([]);
+	});
+
+	it("reads each CHECK to its own closing parenthesis, parentheses inside literals included", () => {
+		expect(liveCheckClauses(checkTable)).toContainEqual({
+			column: "code",
+			expression: "code <> ')' AND code <> '('",
+		});
+	});
+
+	it("a wrong range, on a column", () => {
+		const wrong = {
+			...checks,
+			columns: { ...checks.columns, due_day: "due_day BETWEEN 0 AND 2" },
+		};
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"t.due_day CHECK differs",
+		);
+	});
+
+	it("a wrong type word, on a column", () => {
+		const wrong = {
+			...checks,
+			columns: {
+				...checks.columns,
+				amount_cents: "typeof(amount_cents) = 'text' AND amount_cents > 0",
+			},
+		};
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"t.amount_cents CHECK differs",
+		);
+	});
+
+	it("a wrong GLOB pattern, on a column", () => {
+		const wrong = {
+			...checks,
+			columns: {
+				...checks.columns,
+				day: "day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'",
+			},
+		};
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"t.day CHECK differs",
+		);
+	});
+
+	it("a CHECK the record leaves out", () => {
+		const { due_day: _left, ...rest } = checks.columns;
+		const wrong = { ...checks, columns: rest };
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"t.due_day has a CHECK in the database and no entry in CHECKS",
+		);
+	});
+
+	it("an invented CHECK the database does not have", () => {
+		const wrong = {
+			...checks,
+			columns: { ...checks.columns, ghost: "ghost > 0" },
+		};
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"CHECKS has t.ghost, but the database has no such CHECK",
+		);
+	});
+
+	it("a changed table-level CHECK", () => {
+		const wrong = { ...checks, tables: ["amount_cents >= due_day"] };
+		const problems = checkProblems(checkTable, "t", wrong).join("\n");
+
+		expect(problems).toContain("t has a table-level CHECK");
+		expect(problems).toContain("TABLE_CHECKS lists");
+	});
+
+	it("a CHECK whose literal differs only by case fails: 'integer' is not 'INTEGER'", () => {
+		const wrong = {
+			...checks,
+			columns: {
+				...checks.columns,
+				amount_cents: "typeof(amount_cents) = 'INTEGER' AND amount_cents > 0",
+			},
+		};
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"t.amount_cents CHECK differs",
+		);
+	});
+
+	it("a GLOB pattern whose literal differs only by case fails: 'Q[1-4]' is not 'q[1-4]'", () => {
+		const wrong = {
+			...checks,
+			columns: { ...checks.columns, quarter: "quarter GLOB 'q[1-4]'" },
+		};
+
+		expect(checkProblems(checkTable, "t", wrong).join("\n")).toContain(
+			"t.quarter CHECK differs",
+		);
+	});
+
+	it("whitespace, keyword case, identifier quoting and redundant parentheses differ only in spelling and pass", () => {
+		const respelled = {
+			columns: {
+				amount_cents: `(TYPEOF( "amount_cents" )='integer'   and amount_cents>0)`,
+				due_day: "`due_day`  between 1 AND 31",
+				day: "day   glob   '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+				quarter: "[quarter] GLOB 'Q[1-4]'",
+				code: "code<>')' and code<>'('",
+			},
+			tables: ["(amount_cents >= due_day  OR due_day is null)"],
+		};
+
+		expect(checkProblems(checkTable, "t", respelled)).toEqual([]);
+	});
+
+	it("a CHECK spread over several lines is read whole", () => {
+		const multi =
+			"CREATE TABLE t (\n\tid INTEGER PRIMARY KEY,\n\tpct INTEGER CHECK (\n\t\tpct >= 0\n\t\tAND pct <= 100\n\t))";
+
+		expect(liveCheckClauses(multi)).toEqual([
+			{ column: "pct", expression: "\n\t\tpct >= 0\n\t\tAND pct <= 100\n\t" },
+		]);
+		expect(
+			checkProblems(multi, "t", {
+				columns: { pct: "pct >= 0 AND pct <= 100" },
+				tables: [],
+			}),
+		).toEqual([]);
+	});
+
+	it("two CHECKs on one line, and a CHECK in the last column, are both read", () => {
+		const altered =
+			"CREATE TABLE t (a INTEGER CHECK (a > 0) CHECK (a < 9), id INTEGER PRIMARY KEY, b TEXT CHECK (b GLOB 'x*'))";
+
+		expect(liveCheckClauses(altered).map((check) => check.column)).toEqual([
+			"a",
+			"a",
+			"b",
+		]);
+	});
+
+	it("a CONSTRAINT-named table-level CHECK is read as a table-level CHECK", () => {
+		const named = "CREATE TABLE t (a INTEGER, CONSTRAINT a_pos CHECK (a > 0))";
+
+		expect(
+			checkProblems(named, "t", { columns: {}, tables: ["a > 0"] }),
+		).toEqual([]);
+	});
+
+	it("an IN list is left to CHECK_LISTS and not reported here", () => {
+		const inList =
+			"CREATE TABLE t (k TEXT CHECK (k IN ('a', 'b')), j TEXT CHECK (j NOT IN ('a')))";
+
+		expect(
+			checkProblems(inList, "t", {
+				columns: { j: "j NOT IN ('a')" },
+				tables: [],
+			}),
+		).toEqual([]);
+	});
+
+	it("AUTOINCREMENT in the database and absent from the schema fails, and the reverse too", () => {
+		const bare = "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)";
+
+		expect(autoIncrementProblems(checkTable, "t", ["id"])).toEqual([]);
+		expect(autoIncrementProblems(checkTable, "t", [])).toEqual([
+			"t.id is AUTOINCREMENT in the database, but the schema does not say so",
+		]);
+		expect(autoIncrementProblems(bare, "t", ["id"])).toEqual([
+			"t.id is AUTOINCREMENT in the schema, but the database has no AUTOINCREMENT",
+		]);
+	});
+
+	it("the word AUTOINCREMENT inside a string literal is not the keyword", () => {
+		const literal =
+			"CREATE TABLE t (id INTEGER PRIMARY KEY, label TEXT DEFAULT 'AUTOINCREMENT')";
+
+		expect(autoIncrementProblems(literal, "t", [])).toEqual([]);
+	});
+
+	it("a collation added, removed and changed", () => {
+		const bare = "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT UNIQUE)";
+
+		expect(collationProblems(checkTable, "t", { name: "NOCASE" })).toEqual([]);
+		expect(collationProblems(checkTable, "t", {})).toEqual([
+			"t.name has COLLATE NOCASE in the database, but COLLATIONS does not list it",
+		]);
+		expect(collationProblems(bare, "t", { name: "NOCASE" })).toEqual([
+			"COLLATIONS lists t.name COLLATE NOCASE, but the database has no COLLATE on it",
+		]);
+		expect(collationProblems(checkTable, "t", { name: "RTRIM" })).toEqual([
+			"t.name COLLATE differs: COLLATIONS RTRIM, database NOCASE",
+		]);
+	});
+});
+
 describe("the table-set check fails on a wrong list", () => {
 	const described = ["a"];
 
@@ -1644,7 +1921,7 @@ describe("the table-set check fails on a wrong list", () => {
 		expect(tableSetProblems(["a"], described)).toEqual([]);
 	});
 
-	it("the exports the drift test enumerates are all 31 application tables", () => {
+	it("the exports the drift test enumerates are all 32 application tables", () => {
 		expect(
 			schemaTables()
 				.map((table) => getTableConfig(table).name)
