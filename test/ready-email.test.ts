@@ -1734,6 +1734,16 @@ describe("the ready email: the words", () => {
 		await runReadyEmail(production(), fetchImpl);
 		expect(sent[0]?.text).toContain("from Chase and sorted 1 transaction.");
 	});
+
+	it("the sort count leaves out a disconnected bank's transactions, even when its history is kept", async () => {
+		const accountId = await openHousehold();
+		await addTransactions(accountId, 2);
+		const gone = await addBank(2, "American Express", { disconnected: true });
+		await addTransactions(gone, 5);
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent[0]?.text).toContain("from Chase and sorted all 2 transactions.");
+	});
 });
 
 describe("the ready email: the log", () => {
