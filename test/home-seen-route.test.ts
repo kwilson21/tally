@@ -188,23 +188,21 @@ describe("POST /home/seen: the presence check-in", () => {
 			if (!/^select\b/i.test(sql) || !sql.includes("home_seen_at"))
 				return statement;
 
-			const thenOtherTab =
-				(bound: D1PreparedStatement, method: "first" | "raw" | "all") =>
-				async () => {
-					const result = await bound[method]();
-					await setSeen(PERSON, "+5 seconds");
+			const thenOtherTab = (read: () => Promise<unknown>) => async () => {
+				const result = await read();
+				await setSeen(PERSON, "+5 seconds");
 
-					return result;
-				};
+				return result;
+			};
 
 			return {
 				bind: (...values: (string | number)[]) => {
 					const bound = statement.bind(...values);
 
 					return {
-						first: thenOtherTab(bound, "first"),
-						raw: thenOtherTab(bound, "raw"),
-						all: thenOtherTab(bound, "all"),
+						first: thenOtherTab(() => bound.first()),
+						raw: thenOtherTab(() => bound.raw()),
+						all: thenOtherTab(() => bound.all()),
 					};
 				},
 			};
