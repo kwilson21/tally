@@ -588,6 +588,50 @@ describe("the re-ask in the instance's run (#1113)", () => {
 		expect((await markOf(id))?.cleared).toBe(1);
 	});
 
+	it("registers no re-ask step when a group's reserve step fails, and the night's steps still run (#1113)", async () => {
+		await answeredRow();
+		const id = await waitingRow("Reserve Store");
+
+		const steps = await runInstance(okFetch(), {
+			runParams: { ...params, ids: [id], night: "2026-10-13" },
+			fails: ["group-1-reserve"],
+		});
+
+		expect(steps.names().some((name) => name.startsWith("lookup-reask"))).toBe(
+			false,
+		);
+		expect(steps.names()).toContain("night-names");
+	});
+
+	it("registers no re-ask step when a group's write step fails, and the night's steps still run (#1113)", async () => {
+		await answeredRow();
+		const id = await waitingRow("Write Store");
+
+		const steps = await runInstance(okFetch(), {
+			runParams: { ...params, ids: [id], night: "2026-10-13" },
+			fails: ["group-1-write"],
+			limits: { "group-1-write": 2 },
+		});
+
+		expect(steps.names().some((name) => name.startsWith("lookup-reask"))).toBe(
+			false,
+		);
+		expect(steps.names()).toContain("night-names");
+	});
+
+	it("the re-ask still runs when only one row's ask step fails (#1113)", async () => {
+		const id = await answeredRow();
+		const failing = await waitingRow("Lost Store");
+
+		const steps = await runInstance(okFetch(), {
+			runParams: { ...params, ids: [failing] },
+			fails: [`group-1-ask-${failing}`],
+		});
+
+		expect(steps.names()).toContain("lookup-reask-read");
+		expect((await markOf(id))?.cleared).toBe(1);
+	});
+
 	it("a re-sort instance runs the re-ask after reask-finish", async () => {
 		await answeredRow();
 

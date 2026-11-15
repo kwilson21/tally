@@ -123,7 +123,7 @@ export async function runSortInstance(
 		}
 	}
 
-	// The privacy re-ask runs only after the groups finished without a busy Jev (#1113).
+	// The privacy re-ask runs only after the groups finished without a busy Jev or a failed group (#1113).
 	let sorted = false;
 
 	try {
@@ -134,7 +134,7 @@ export async function runSortInstance(
 			instanceSortOptions(params, options),
 		);
 
-		sorted = !done.jevBusy;
+		sorted = !done.jevBusy && !done.failed;
 	} catch (error) {
 		// A step that ran out of retries ends the sort quietly; the rows it didn't save wait for the next sort.
 		console.error(

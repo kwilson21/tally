@@ -1299,7 +1299,8 @@ export async function writeGroup(
  * step of its own), and write (one batch, the turn released). The run ends when a group reads nothing, when a write
  * says so, when a write fails for good (its tries ran out, logged by name), or when the calls or (in-process) the
  * deadline run out. In the Workflow, a busy Jev (a 429, a 5xx or no response) waits and asks again, until nextWait
- * says stop (decision 145). In-process, a throw releases the turn this run still holds.
+ * says stop (decision 145). In-process, a throw releases the turn this run still holds. `failed` is true when a group's
+ * reserve or write step threw after its tries and was caught here (#1113); a row whose ask step rejected is not a failed group.
  */
 export async function sortGroups(
 	env: SortEnv,
@@ -1308,8 +1309,13 @@ export async function sortGroups(
 		| ((url: string, init?: RequestInit) => Promise<Response>)
 		| undefined,
 	options: SortOptions,
-): Promise<{ asked: number; applied: number; jevBusy: boolean }> {
-	const done = { asked: 0, applied: 0, jevBusy: false };
+): Promise<{
+	asked: number;
+	applied: number;
+	jevBusy: boolean;
+	failed: boolean;
+}> {
+	const done = { asked: 0, applied: 0, jevBusy: false, failed: false };
 	// A re-ask asks only its own rows, and never by the sync switch (decision 160).
 	const onlyIds = options.reask ? options.reask.ids : options.onlyIds;
 	const bySync = options.reask ? false : (options.bySync ?? false);
@@ -1384,6 +1390,8 @@ export async function sortGroups(
 					)
 				).granted;
 			} catch (error) {
+				// A failed group: the re-ask does not follow it (#1113).
+				done.failed = true;
 				console.error(
 					`sorting: reserve step ${error instanceof Error ? error.name : "unknown"}`,
 				);
@@ -1441,7 +1449,8 @@ export async function sortGroups(
 			} catch (error) {
 				// The save ran out of its tries (about a day). Its rows wait for the next run, and the calls it reserved stay
 				// in its record until the cleanup two days on clears it (decision 143). `held` stays set, so the in-process
-				// finally below releases the turn.
+				// finally below releases the turn. A failed group, so the re-ask does not follow it (#1113).
+				done.failed = true;
 				console.error(
 					`sorting: save step ${error instanceof Error ? error.name : "unknown"}`,
 				);
