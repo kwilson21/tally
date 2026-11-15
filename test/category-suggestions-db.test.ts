@@ -2959,6 +2959,7 @@ describe("dismissSuggestion", () => {
 		);
 
 		const seen: (string | null)[] = [];
+
 		const rule = {
 			decide: (request: { suggestionId: number }, facts: SuggestionState) =>
 				Effect.promise(async () => {

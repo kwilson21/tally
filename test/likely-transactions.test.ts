@@ -769,20 +769,26 @@ function editedAfterRead(change: string, id: number): D1Database {
 					return (...values: unknown[]) => afterRead(target.bind(...values));
 
 				// Drizzle reads a select with fields through raw(), and one without through all().
-				if (property === "all" || property === "raw") {
-					const read = Reflect.get(target, property) as () => Promise<unknown>;
+				const editAfter = async () =>
+					env.DB.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
+						.bind(id)
+						.run();
 
-					return async () => {
-						const result = await read.call(target);
-						await env.DB.prepare(
-							`UPDATE transactions SET ${change} WHERE id = ?`,
-						)
-							.bind(id)
-							.run();
+				if (property === "all")
+					return async (): Promise<D1Result> => {
+						const result = await target.all();
+						await editAfter();
 
 						return result;
 					};
-				}
+
+				if (property === "raw")
+					return async (): Promise<unknown[][]> => {
+						const result = await target.raw();
+						await editAfter();
+
+						return result;
+					};
 
 				const value: unknown = Object(target)[property];
 
