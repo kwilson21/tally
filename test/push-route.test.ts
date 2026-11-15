@@ -118,17 +118,18 @@ function removedRightAfterItsCheck(): D1Database {
 			}
 
 			return (sql: string) => {
-				if (!sql.includes("SELECT 1 AS present FROM household_members"))
+				// Drizzle writes the membership check as `select 1 from "household_members" ...` and reads it with raw() under .get().
+				if (!sql.includes('select 1 from "household_members"'))
 					return target.prepare(sql);
 
-				// SAFETY: the stub has only the bind(...).first() path the route takes for this SQL; the route calls no other statement member.
+				// SAFETY: the stub has only the bind(...).raw() path the route takes for this SQL (Drizzle's .get()); the route calls no other statement member.
 				return {
 					bind: (...values: unknown[]) => ({
-						first: async () => {
+						raw: async () => {
 							const row = await target
 								.prepare(sql)
 								.bind(...values)
-								.first();
+								.raw();
 
 							await target
 								.prepare(

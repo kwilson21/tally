@@ -155,7 +155,9 @@ describe("the demo's Apple Card sample (#766)", () => {
 			get(target, prop) {
 				if (prop === "prepare")
 					return (sql: string) => {
-						if (sql.includes("GROUP BY h.date")) throw new Error("D1 is down");
+						// Drizzle writes the months' statement with its own quoted, lower-case text (the test's expectation is unchanged).
+						if (sql.includes('group by "h"."date"'))
+							throw new Error("D1 is down");
 
 						return target.prepare(sql);
 					};

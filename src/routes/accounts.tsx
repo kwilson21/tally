@@ -1,3 +1,6 @@
+import { eq, isNotNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
@@ -26,6 +29,12 @@ import {
 	forgetPayDeposits,
 	takeBackBankStrokes,
 } from "../db/first-tally";
+import {
+	accounts as accountsTable,
+	balanceHistory,
+	plaidItems,
+	transactions,
+} from "../db/schema";
 import {
 	APPLE_CARD_SAMPLE_BALANCE_CENTS,
 	appleCardSample,
@@ -438,9 +447,12 @@ function uploadDone(c: Context<App>, message: string, isHtmx: boolean) {
 async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 	const today = await householdToday(c.env.DB);
 
-	const latest = await c.env.DB.prepare(
-		"SELECT MAX(t.date) AS date FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id IS NOT NULL",
-	).first<{ date: string | null }>();
+	const latest = await drizzle(c.env.DB)
+		.select({ date: sql<string | null>`max(${transactions.date})` })
+		.from(transactions)
+		.innerJoin(accountsTable, eq(accountsTable.id, transactions.accountId))
+		.where(isNotNull(accountsTable.plaidItemId))
+		.get();
 
 	const anchor = latest?.date ?? today;
 	const read = parseAppleCsv(appleCardSample(anchor));
@@ -504,24 +516,45 @@ async function afterUpload(c: Context<App>, addedIds: number[]) {
  * anchor. Without this the demo's line would start on the day of the sample instead of six months back.
  */
 async function demoCardMonths(db: D1Database, anchor: string) {
-	await db.batch([
-		db
-			.prepare(
-				`INSERT INTO balance_history (account_id, date, balance_cents)
-				SELECT (SELECT id FROM accounts WHERE subtype = 'apple_card'), h.date, ?
-				FROM balance_history h JOIN accounts a ON a.id = h.account_id
-				WHERE a.plaid_item_id IS NOT NULL
-				GROUP BY h.date
-				ON CONFLICT(account_id, date) DO UPDATE SET balance_cents = excluded.balance_cents`,
+	const orm = drizzle(db);
+	const seeded = alias(balanceHistory, "h");
+	const seededBank = alias(accountsTable, "a");
+
+	await orm.batch([
+		orm
+			.insert(balanceHistory)
+			.select(
+				orm
+					.select({
+						accountId:
+							sql<number>`(SELECT id FROM accounts WHERE subtype = 'apple_card')`.as(
+								"account_id",
+							),
+						date: seeded.date,
+						balanceCents: sql<number>`${APPLE_CARD_SAMPLE_BALANCE_CENTS}`.as(
+							"balance_cents",
+						),
+					})
+					.from(seeded)
+					.innerJoin(seededBank, eq(seededBank.id, seeded.accountId))
+					.where(isNotNull(seededBank.plaidItemId))
+					.groupBy(seeded.date),
 			)
-			.bind(APPLE_CARD_SAMPLE_BALANCE_CENTS),
-		db
-			.prepare(
-				`UPDATE accounts SET balance_on = ?, counted_from = (
-					SELECT MIN(h.date) FROM balance_history h JOIN accounts b ON b.id = h.account_id WHERE b.plaid_item_id IS NOT NULL
-				) WHERE subtype = 'apple_card'`,
-			)
-			.bind(anchor),
+			.onConflictDoUpdate({
+				target: [balanceHistory.accountId, balanceHistory.date],
+				set: { balanceCents: sql`excluded.balance_cents` },
+			}),
+		orm
+			.update(accountsTable)
+			.set({
+				balanceOn: anchor,
+				countedFrom: sql`(${orm
+					.select({ earliest: sql<string>`MIN(${seeded.date})` })
+					.from(seeded)
+					.innerJoin(seededBank, eq(seededBank.id, seeded.accountId))
+					.where(isNotNull(seededBank.plaidItemId))})`,
+			})
+			.where(eq(accountsTable.subtype, "apple_card")),
 	]);
 }
 
@@ -710,18 +743,27 @@ type DisconnectItem = {
 	transaction_count: number;
 };
 
-async function disconnectItem(db: D1Database, id: number) {
-	return db
-		.prepare(
-			`SELECT p.id, p.institution_name, p.access_token_encrypted, p.status, p.disconnected_at,
-				COUNT(DISTINCT a.id) AS account_count, COUNT(CASE WHEN t.is_split = 0 THEN 1 END) AS transaction_count
-			FROM plaid_items p
-			LEFT JOIN accounts a ON a.plaid_item_id = p.id
-			LEFT JOIN transactions t ON t.account_id = a.id
-			WHERE p.id = ? GROUP BY p.id`,
-		)
-		.bind(id)
-		.first<DisconnectItem>();
+async function disconnectItem(
+	db: D1Database,
+	id: number,
+): Promise<DisconnectItem | undefined> {
+	return drizzle(db)
+		.select({
+			id: plaidItems.id,
+			institution_name: plaidItems.institutionName,
+			// The token is read as the raw blob (ArrayBuffer), not as Drizzle's Buffer.
+			access_token_encrypted: sql<ArrayBuffer>`${plaidItems.accessTokenEncrypted}`,
+			status: plaidItems.status,
+			disconnected_at: plaidItems.disconnectedAt,
+			account_count: sql<number>`COUNT(DISTINCT ${accountsTable.id})`,
+			transaction_count: sql<number>`COUNT(CASE WHEN ${transactions.isSplit} = 0 THEN 1 END)`,
+		})
+		.from(plaidItems)
+		.leftJoin(accountsTable, eq(accountsTable.plaidItemId, plaidItems.id))
+		.leftJoin(transactions, eq(transactions.accountId, accountsTable.id))
+		.where(eq(plaidItems.id, id))
+		.groupBy(plaidItems.id)
+		.get();
 }
 
 function DisconnectPage({
@@ -907,12 +949,13 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 
 /** The card's transactions a person can see: split parts don't count (as Disconnect's page counts them). */
 async function cardTransactionCount(db: D1Database, accountId: number) {
-	const row = await db
-		.prepare(
-			"SELECT COUNT(CASE WHEN t.is_split = 0 THEN 1 END) AS n FROM transactions t WHERE t.account_id = ?",
-		)
-		.bind(accountId)
-		.first<{ n: number }>();
+	const row = await drizzle(db)
+		.select({
+			n: sql<number>`COUNT(CASE WHEN ${transactions.isSplit} = 0 THEN 1 END)`,
+		})
+		.from(transactions)
+		.where(eq(transactions.accountId, accountId))
+		.get();
 
 	return row?.n ?? 0;
 }
