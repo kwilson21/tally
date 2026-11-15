@@ -1,5 +1,4 @@
 import { env, exports } from "cloudflare:workers";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { pinClock } from "./pinned-clock";
 
@@ -14,6 +13,10 @@ const BASE = "http://tally.test";
 const ABSENT = "<absent>";
 const FILE = "<file>";
 const MISSING_ROW = 999999;
+
+// The demo's day and the clock are fixed, so the seeded rows and the pages that show dates are the same on every run.
+const DEMO_DAY = "2026-10-15";
+const CLOCK = "2026-10-15T12:00:00Z";
 const FILE_TEXT = "x";
 const AUDIBLE = "AUDIBLE*TE3E10I7 WA";
 const VENMO_ROW = "NETFLIX.COM";
@@ -148,7 +151,7 @@ async function stateOf(): Promise<string> {
 
 /** The demo, with the two categories the cases file rows under (the default list has them, the demo does not). */
 async function reset(): Promise<void> {
-	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
+	await resetDemo(db, DEMO_DAY);
 	await db.batch([
 		db.prepare(
 			"INSERT OR IGNORE INTO categories (name, name_key, icon, color, sort_order) VALUES ('Entertainment', 'entertainment', 'entertainment', 'cat-blue', 90)",
@@ -250,7 +253,7 @@ async function lineOf(res: Response): Promise<string> {
 
 /** Runs one case on a freshly reset demo and returns its line. */
 export async function runCase(req: Req): Promise<string> {
-	pinClock();
+	pinClock(CLOCK);
 	await reset();
 	await prepare(req.prep);
 
@@ -299,13 +302,19 @@ export async function runCase(req: Req): Promise<string> {
 
 /** Every case, in the order the fixture lists them. Ids come from the seeded demo, so they are read after the reset. */
 export async function cases(): Promise<Req[]> {
-	pinClock();
+	pinClock(CLOCK);
 	await reset();
 	const ids = await idsOf();
 	const out: Req[] = [];
 
-	const pathValues = (id: number) =>
-		PATH_VALUE_NAMES.map((name) => [name, inputText(name, id)] as const);
+	// The address values, then a category row that no category has (the answer a refused id is compared with).
+	const pathValues = (id: number): [string, string][] => [
+		...PATH_VALUE_NAMES.map((name): [string, string] => [
+			name,
+			String(inputText(name, id)),
+		]),
+		["missing-row", String(MISSING_ROW)],
+	];
 
 	// The budget sheet's address (home.tsx activeCategory), its save and its nudge.
 	for (const [name, text] of pathValues(ids.live))
@@ -330,14 +339,6 @@ export async function cases(): Promise<Req[]> {
 				hx,
 			});
 		}
-
-	for (const hx of [false, true])
-		out.push({
-			label: `budget GET id=missing-row hx=${hx}`,
-			method: "GET",
-			path: `/budget/${MISSING_ROW}`,
-			hx,
-		});
 
 	// The organize page's category (organize.tsx): a refused one is no category, and the page says so.
 	for (const name of VALUE_NAMES) {
