@@ -25,11 +25,9 @@ import {
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
-import {
-	organizeGroups,
-	saveOrganizeGroup,
-} from "../src/transactions/organize";
+import { organizeGroups } from "../src/transactions/organize";
 import { itemAt, present } from "./helpers/present";
+import { fileOrganizeGroup } from "./organize-group";
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -649,7 +647,14 @@ describe("linking a refund", () => {
 			)
 			.bind(PURCHASE)
 			.run();
-		await saveOrganizeGroup(db, ["REFUND SHOP"], EATING_OUT, null, "test");
+		await fileOrganizeGroup(
+			db,
+			["REFUND SHOP"],
+			EATING_OUT,
+			null,
+			"Refund Shop",
+			"test",
+		);
 		expect(await ownCategory(PURCHASE)).toBe(EATING_OUT);
 		const august = await loadMonth(db, "2026-08");
 		expect(

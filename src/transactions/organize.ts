@@ -1,6 +1,7 @@
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { householdToday } from "../dates";
 import { KEPT_NAMES_LOG_SQL } from "../db/ai-log";
 import { LIST, LIST_VERSION } from "../db/category-saves";
 import { COUNTED_JOINS, INCLUDED_ROW } from "../db/counted-month";
@@ -10,6 +11,7 @@ import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
 import { jevSaysMixedAmong } from "../db/mixed-trip";
 import { leftEmpty } from "../db/refused";
+import { categories } from "../db/schema";
 import { applyMerchantRuleSql, NEEDS_CATEGORY } from "../db/transactions";
 import { NameTaken, type StoredCategory } from "../rules/categories";
 import type {
@@ -20,7 +22,6 @@ import type {
 	StoreRuleRequest,
 	StoreRuleWrite,
 } from "../rules/organize";
-import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
 const NEEDS_CATEGORY_UPDATE = `category_id IS NULL AND ${INCLUDED_ROW} AND is_split = 0 AND flag_income = 0 AND (amount_cents >= 0 OR credit_reviewed = 1) AND (refund_of_id IS NULL OR refund_of_id IN (SELECT id FROM transactions WHERE excluded = 1))`;
@@ -79,6 +80,7 @@ const byCountThenName = (a: [string, number], b: [string, number]) =>
  * every charge with the key shows.
  */
 export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
+	// Stays raw: the query shares the KEY and merchantColumnSql fragments and the COUNTED_JOINS list.
 	const { results } = await db
 		.prepare(
 			`SELECT ${KEY} AS merchantKey, t.raw_name AS rawName, COUNT(*) AS count, SUM(t.amount_cents) AS totalCents,
@@ -200,6 +202,7 @@ function groupStatements(
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
 		const marks = chunk.map(() => "?").join(", ");
 		updates.push(
+			// Stays raw: the file rows share the KEY_UPDATE and NEEDS_CATEGORY_UPDATE fragments and an IN list of marks.
 			db
 				.prepare(
 					`UPDATE transactions SET category_id = COALESCE(?, (SELECT id FROM categories WHERE name_key = ? AND archived = 0)), category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
@@ -220,6 +223,7 @@ function groupStatements(
 
 	if (kept.length > 0)
 		settles.push(
+			// Stays raw: the names log shares KEPT_NAMES_LOG_SQL and the update fragments with the batch it runs in.
 			db
 				.prepare(
 					`${KEPT_NAMES_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = m.raw_name)`,
@@ -229,6 +233,7 @@ function groupStatements(
 
 	for (const merchantKey of names) {
 		settles.push(
+			// Stays raw: the merchant upsert shares the update fragments and SETTLE_SUGGESTION_SQL with its batch.
 			db
 				.prepare(
 					`INSERT INTO merchants (raw_name, display_name)
@@ -242,61 +247,6 @@ function groupStatements(
 	}
 
 	return { settles, updates };
-}
-
-/**
- * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
- * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
- * Returns the ids of the charges it filed. The question's address names their store by a merchant row (`storeRowOf`,
- * #532), and nothing carries these ids back.
- */
-export async function saveOrganizeGroup(
-	db: D1Database,
-	merchantKeys: string[],
-	categoryId: number,
-	displayName: string | null,
-	updatedBy: string,
-): Promise<number[]> {
-	const names = [...new Set(merchantKeys)];
-
-	if (names.length === 0) return [];
-	let saved = 0;
-
-	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
-		const chunk = names.slice(offset, offset + CHUNK_SIZE);
-		const marks = chunk.map(() => "?").join(", ");
-
-		const count = await db
-			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND ${KEY} IN (${marks})`,
-			)
-			.bind(...chunk)
-			.first<{ n: number }>();
-
-		saved += count?.n ?? 0;
-	}
-
-	// A stale form files nothing after another request categorized the group.
-	if (saved === 0) return [];
-
-	const { settles, updates } = groupStatements(
-		db,
-		names,
-		{ id: categoryId },
-		displayName,
-		displayName
-			? names.filter(
-					(merchantKey) => nameSource([displayName], merchantKey) === "tally",
-				)
-			: [],
-		displayName ? await householdToday(db) : null,
-		updatedBy,
-	);
-
-	const results = await db.batch([...settles, ...updates]);
-
-	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
-	return filedIds(results.slice(settles.length));
 }
 
 /** How many charges of the merchant keys ?1 (a JSON list) still need a category, as SQL. */
@@ -315,7 +265,9 @@ export async function fileGroupFacts(
 	// SAFETY: the batch below lists exactly two statements, so its results are the two D1Results typed here. A batch is
 	// one transaction, so the version is of the very rows read beside it.
 	const [list, state] = (await db.batch([
+		// Stays raw: LIST is the shared category list from category-saves, read in one batch with the version below.
 		db.prepare(LIST),
+		// Stays raw: the waiting count and group version share the WAITING_COUNT and GROUP_VERSION fragments.
 		db
 			.prepare(
 				`SELECT ${WAITING_COUNT} AS waiting, ${GROUP_VERSION} AS version`,
@@ -374,6 +326,7 @@ export const decideFileGroup = <E>(
 				);
 
 				const before = [
+					// Stays raw: the guard shares the GROUP_VERSION fragment and batches with raw statements.
 					db
 						.prepare(
 							`INSERT INTO categories (name, icon, color) SELECT NULL, 'tag', 'cat-blue' WHERE ${GROUP_VERSION} IS NOT ?2`,
@@ -381,6 +334,7 @@ export const decideFileGroup = <E>(
 						.bind(JSON.stringify(write.merchantKeys), write.expectedVersion),
 					...(write.create
 						? [
+								// Stays raw: the category insert batches with the raw guard above, which a builder query cannot join.
 								db
 									.prepare(
 										"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', ?, ?)",
@@ -410,10 +364,11 @@ export const decideFileGroup = <E>(
 		// A category made in the batch has its number only once the batch has run.
 		const made = write.create
 			? yield* Effect.promise(() =>
-					db
-						.prepare("SELECT id FROM categories WHERE name_key = ?")
-						.bind(write.create?.nameKey ?? "")
-						.first<{ id: number }>(),
+					drizzle(db)
+						.select({ id: categories.id })
+						.from(categories)
+						.where(eq(categories.nameKey, write.create?.nameKey ?? ""))
+						.get(),
 				)
 			: null;
 
@@ -479,23 +434,18 @@ export async function groupHasRule(
 	categoryId: number,
 ): Promise<boolean> {
 	const names = [...new Set(merchantKeys)];
-	let ruled = 0;
 
-	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
-		const chunk = names.slice(offset, offset + CHUNK_SIZE);
-		const marks = chunk.map(() => "?").join(", ");
+	if (names.length === 0) return true;
 
-		const row = await db
-			.prepare(
-				`SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (${marks})`,
-			)
-			.bind(categoryId, ...chunk)
-			.first<{ n: number }>();
+	// One statement: the key list has no cap, and json_each takes the whole list in one bind (decision 209).
+	const row = await db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (SELECT value FROM json_each(?))",
+		)
+		.bind(categoryId, JSON.stringify(names))
+		.first<{ n: number }>();
 
-		ruled += row?.n ?? 0;
-	}
-
-	return ruled === names.length;
+	return (row?.n ?? 0) === names.length;
 }
 
 /**
@@ -526,6 +476,7 @@ export async function setOrganizeRule(
 
 	// SQL can't tidy a name, so the saved keys that tidy to the offered name are read here, once, and the guard that
 	// uses them stays inside both statements below. An empty list (no saved key tidies to it) fails a cleared key.
+	// Stays raw: the keys use the merchantKeySql fragment and a json_each over the bound ids.
 	const { results: keyRows } = await db
 		.prepare(
 			`SELECT DISTINCT ${merchantKeySql("s")} AS merchantKey FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?))`,
@@ -541,6 +492,7 @@ export async function setOrganizeRule(
 
 	// Two statements whatever the group's size, and both carry the guard, so the rules and the charges they name
 	// move together or not at all.
+	// Stays raw: the rule statement shares the merchantKeySql and saved-row fragments, and upserts.
 	const rule = db
 		.prepare(
 			`INSERT INTO merchants (raw_name, default_category_id)
@@ -556,6 +508,7 @@ export async function setOrganizeRule(
 			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
 		);
 
+	// Stays raw: the apply statement shares the applyMerchantRuleSql and saved-row fragments.
 	const apply = db
 		.prepare(
 			`${applyMerchantRuleSql(`IN (SELECT ${merchantKeySql("s")} FROM ${savedRows})`)} AND ${SAVED_STILL_HOLD_SQL} AND ${SAVED_STILL_NAMED_SQL}`,
@@ -613,10 +566,11 @@ export async function organizeOffer(
 
 	if (ids.length === 0) return null;
 
-	const category = await db
-		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
-		.bind(categoryId)
-		.first<{ id: number; name: string }>();
+	const category = await drizzle(db)
+		.select({ id: categories.id, name: categories.name })
+		.from(categories)
+		.where(and(eq(categories.id, categoryId), eq(categories.archived, 0)))
+		.get();
 
 	if (!category) return null;
 
@@ -625,6 +579,7 @@ export async function organizeOffer(
 	const savedJson = JSON.stringify(ids);
 
 	// No rows come back unless every saved charge still holds the category, so one query decides both.
+	// Stays raw: the names query shares the KEY and SAVED_STILL_HOLD_SQL fragments over a json_each of the bound ids.
 	const { results } = await db
 		.prepare(
 			`SELECT DISTINCT ${KEY} AS merchantKey, ${merchantColumnSql("t", "display_name")} AS shownName
@@ -664,6 +619,7 @@ export async function storeRowOf(
 	db: D1Database,
 	savedIds: number[],
 ): Promise<number | null> {
+	// Stays raw: the row reads the KEY fragment and a json_each over the bound ids.
 	const row = await db
 		.prepare(
 			`SELECT m.rowid AS id FROM transactions t JOIN merchants m ON m.raw_name = ${KEY} WHERE t.id IN (SELECT value FROM json_each(?)) ORDER BY t.id LIMIT 1`,
@@ -686,6 +642,7 @@ export async function storeChargeIds(
 	storeRow: number,
 	categoryId: number,
 ): Promise<number[]> {
+	// Stays raw: it reads rowid, which is not a column of the merchants table, so an inline sql`rowid` would add no clarity.
 	const seed = await db
 		.prepare(
 			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE rowid = ?",
@@ -696,6 +653,7 @@ export async function storeChargeIds(
 	if (!seed) return [];
 	const name = storeNameOf(seed.displayName, seed.key);
 
+	// Stays raw: the keys use the KEY fragment and a json_each over the bound ids.
 	const { results: keyRows } = await db
 		.prepare(
 			`SELECT DISTINCT ${KEY} AS merchantKey, ${merchantColumnSql("t", "display_name")} AS shownName
@@ -710,6 +668,7 @@ export async function storeChargeIds(
 
 	if (merchantKeys.length === 0) return [];
 
+	// Stays raw: the ids use the KEY fragment and a json_each over the bound ids.
 	const { results } = await db
 		.prepare(
 			`SELECT t.id AS id FROM transactions t WHERE ${KEY} IN (SELECT value FROM json_each(?)) AND t.category_id = ? AND t.category_source = 'user' ORDER BY t.id`,

@@ -9,7 +9,7 @@
 
 import { asc, count, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { askJev, JEV_THRESHOLD } from "./ai/categorize";
+import { askJev, JEV_THRESHOLD, type JevResult } from "./ai/categorize";
 import { meetsConfidenceThreshold } from "./ai/confidence";
 import { decide, type JevAnswer } from "./ai/decide";
 import { cleanBankText } from "./clean-bank-text";
@@ -106,7 +106,7 @@ export async function dailyJevCap(
 export const GROUP_SIZE = 25;
 
 /** How long one group may keep asking Jev; what it doesn't reach waits for the next group (decision 139). */
-const ASK_BUDGET_MS = 2 * 60_000;
+export const ASK_BUDGET_MS = 2 * 60_000;
 
 /** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
 export const MAX_FAILURES_IN_A_ROW = 3;
@@ -265,7 +265,7 @@ export type AskResult =
 			outcome: "lost" | "date-changed" | "out-of-time";
 	  };
 
-const STEP_SETTINGS = {
+export const STEP_SETTINGS = {
 	read: {
 		retries: { limit: 50, delay: "20 seconds", backoff: "constant" },
 		timeout: "1 minute",
@@ -738,24 +738,24 @@ async function readGroup(
  * Reserves the group's calls from the day's cap, for the day its read used (decision 139). A group's grant is kept under
  * its name (decision 143): a reserve that runs again gets that grant back, and reserves nothing more.
  */
-async function reserveCalls(
+export async function reserveCalls(
 	env: SortEnv,
-	plan: ReadPlan,
+	{ day, turnId, wanted }: { day: string; turnId: string; wanted: number },
 ): Promise<{ granted: number }> {
 	const kept = await drizzle(env.DB)
 		.select({ value: householdSettings.value })
 		.from(householdSettings)
-		.where(eq(householdSettings.key, reservedKeyFor(plan.day, plan.turnId)))
+		.where(eq(householdSettings.key, reservedKeyFor(day, turnId)))
 		.get();
 
 	if (kept) return { granted: Number(kept.value) };
 
 	const granted = await reserveJevCalls(
 		env.DB,
-		plan.day,
+		day,
 		await dailyJevCap(env.DB, env),
-		plan.rows.length,
-		plan.turnId,
+		wanted,
+		turnId,
 	);
 
 	return { granted };
@@ -881,12 +881,9 @@ async function askOne(
 	const id = row.id;
 
 	try {
-		if (attempt > 1) return { id, outcome: "lost" };
+		const blocked = askBlocked(id, { attempt }, plan);
 
-		if (todayIn(plan.timeZone) !== plan.day)
-			return { id, outcome: "date-changed" };
-
-		if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
+		if (blocked) return blocked;
 
 		// A re-ask asks for its category only, never details (decision 160).
 		const detailRequested =
@@ -908,26 +905,7 @@ async function askOne(
 			},
 		);
 
-		if (!result.ok) {
-			// Status and request id only: never the key or anything about the transaction.
-			console.error(
-				`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
-			);
-
-			const failure: FailedAsk = {
-				id,
-				outcome: "failed",
-				status: result.status,
-				requestId: result.requestId,
-				serviceWide: serviceWide(result.status),
-			};
-
-			if (result.retryAfterMs !== undefined) {
-				failure.retryAfterMs = result.retryAfterMs;
-			}
-
-			return failure;
-		}
+		if (!result.ok) return failedAsk(id, result);
 
 		return { id, outcome: "answered", answer: result.answer };
 	} catch (error) {
@@ -943,6 +921,50 @@ async function askOne(
 			serviceWide: true,
 		};
 	}
+}
+
+/**
+ * The guards an ask makes before it calls Jev (decision 139), shared with the privacy re-ask: a retried ask (attempt > 1)
+ * is `lost` since its first attempt may have called, a changed household day is `date-changed`, and a time past the
+ * ask budget is `out-of-time`. Null when the ask may go ahead.
+ */
+export function askBlocked(
+	id: number,
+	{ attempt }: { attempt: number },
+	plan: { day: string; timeZone: string; askUntil: number },
+): AskResult | null {
+	if (attempt > 1) return { id, outcome: "lost" };
+
+	if (todayIn(plan.timeZone) !== plan.day)
+		return { id, outcome: "date-changed" };
+
+	if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
+
+	return null;
+}
+
+/** A failed Jev call as a failure answer, logged by status and request id only (never the key or the transaction). */
+export function failedAsk(
+	id: number,
+	result: Extract<JevResult, { ok: false }>,
+): FailedAsk {
+	console.error(
+		`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
+	);
+
+	const failure: FailedAsk = {
+		id,
+		outcome: "failed",
+		status: result.status,
+		requestId: result.requestId,
+		serviceWide: serviceWide(result.status),
+	};
+
+	if (result.retryAfterMs !== undefined) {
+		failure.retryAfterMs = result.retryAfterMs;
+	}
+
+	return failure;
 }
 
 /**
@@ -1277,7 +1299,8 @@ export async function writeGroup(
  * step of its own), and write (one batch, the turn released). The run ends when a group reads nothing, when a write
  * says so, when a write fails for good (its tries ran out, logged by name), or when the calls or (in-process) the
  * deadline run out. In the Workflow, a busy Jev (a 429, a 5xx or no response) waits and asks again, until nextWait
- * says stop (decision 145). In-process, a throw releases the turn this run still holds.
+ * says stop (decision 145). In-process, a throw releases the turn this run still holds. `failed` is true when a group's
+ * reserve or write step threw after its tries and was caught here (#1113); a row whose ask step rejected is not a failed group.
  */
 export async function sortGroups(
 	env: SortEnv,
@@ -1286,8 +1309,13 @@ export async function sortGroups(
 		| ((url: string, init?: RequestInit) => Promise<Response>)
 		| undefined,
 	options: SortOptions,
-): Promise<{ asked: number; applied: number }> {
-	const done = { asked: 0, applied: 0 };
+): Promise<{
+	asked: number;
+	applied: number;
+	jevBusy: boolean;
+	failed: boolean;
+}> {
+	const done = { asked: 0, applied: 0, jevBusy: false, failed: false };
 	// A re-ask asks only its own rows, and never by the sync switch (decision 160).
 	const onlyIds = options.reask ? options.reask.ids : options.onlyIds;
 	const bySync = options.reask ? false : (options.bySync ?? false);
@@ -1354,10 +1382,16 @@ export async function sortGroups(
 			try {
 				granted = (
 					await runStep(`group-${n}-reserve`, STEP_SETTINGS.reserve, () =>
-						reserveCalls(env, readPlan),
+						reserveCalls(env, {
+							day: readPlan.day,
+							turnId: readPlan.turnId,
+							wanted: readPlan.rows.length,
+						}),
 					)
 				).granted;
 			} catch (error) {
+				// A failed group: the re-ask does not follow it (#1113).
+				done.failed = true;
 				console.error(
 					`sorting: reserve step ${error instanceof Error ? error.name : "unknown"}`,
 				);
@@ -1415,7 +1449,8 @@ export async function sortGroups(
 			} catch (error) {
 				// The save ran out of its tries (about a day). Its rows wait for the next run, and the calls it reserved stay
 				// in its record until the cleanup two days on clears it (decision 143). `held` stays set, so the in-process
-				// finally below releases the turn.
+				// finally below releases the turn. A failed group, so the re-ask does not follow it (#1113).
+				done.failed = true;
 				console.error(
 					`sorting: save step ${error instanceof Error ? error.name : "unknown"}`,
 				);
@@ -1438,7 +1473,15 @@ export async function sortGroups(
 					askedIds.add(result.id);
 			groups.push(results);
 
-			if (written.stop || outOfTime) break;
+			if (written.stop || outOfTime) {
+				// The run stopped because nextWait said stop on a busy Jev (decision 145), so the re-ask does not follow it.
+				done.jevBusy =
+					options.sleep !== undefined &&
+					wait === null &&
+					retryable(results.at(-1));
+
+				break;
+			}
 
 			if (wait !== null && options.sleep)
 				await options.sleep(`wait-${n}`, wait);

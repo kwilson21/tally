@@ -119,6 +119,23 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		expect(announce).toBe("Payment unlinked. Undo for 10 seconds.");
 	});
 
+	it("refuses a Not this one that names a payment already turned away, and saves nothing", async () => {
+		const first = await unlink();
+
+		const again = await post(`/bills/${BILL}/occurrences/${PERIOD}/unlink`, {
+			transaction_id: "9401",
+		});
+
+		expect(again.status).toBe(404);
+		expect(
+			await env.DB.prepare(
+				"SELECT undo_token AS undoToken FROM bill_payments WHERE bill_id=? AND period=? AND status='dismissed'",
+			)
+				.bind(BILL, PERIOD)
+				.all<{ undoToken: string }>(),
+		).toMatchObject({ results: [{ undoToken: token(first) }] });
+	});
+
 	it("relinks the payment to its month within ten seconds, and the page shows the month Paid", async () => {
 		const unlinked = await unlink();
 		expect(await linkedTo()).toBeNull();

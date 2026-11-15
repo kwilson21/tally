@@ -3,6 +3,8 @@
 export const MACHINE_PURPOSE = {
 	category:
 		'When Jev finds three or more purchases it could not sort and a usable name comes back for them (say "Pet Care"), Tally suggests a new category. A person makes it or says no. If no usable name comes back, or no purchase backs the suggestion any more, it quietly goes away.',
+	feedbackFiling:
+		"Each feedback message is filed once as a GitHub issue, and gets up to five tries. A try holds the message for 10 minutes; a failed or cut-off try makes it ready again until the fifth, and a message GitHub rejects gives up at once. A refused token gives its try back.",
 	name: 'Tally suggests a plain name for a store whose text on the statement is cryptic ("AMZN Mktp US*2K4" becomes "Amazon"), from the bank or a guess. A person picks one, types their own, or keeps the bank\'s text. A suggestion that goes stale is withdrawn.',
 	plaidLease:
 		"Before a bank is read, its sync takes the bank's lease, so two syncs never read the same bank at once. A sync gives the lease back when it finishes; if a sync is cut off, the lease runs out by itself when its time passes, and the next sync may take it. Once a bank is disconnected, nothing may take it or write to it again.",

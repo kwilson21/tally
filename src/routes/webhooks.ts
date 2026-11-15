@@ -7,29 +7,11 @@ import { connectionOf, markNeedsAttention } from "../plaid/item-store";
 import { loginStillBroken } from "../plaid/login-broken";
 import { syncItemAndSort } from "../plaid/sort-after-sync";
 import { TRANSIENT_ITEM_ERROR_CODES } from "../plaid/sync";
+import { readWebhookBody } from "../plaid/webhook-body";
 import { verifyPlaidWebhook } from "../plaid/webhook-verify";
 import { enabled } from "./plaid";
 
 type App = { Bindings: Env & PlaidEnv };
-
-// True for a parsed JSON value that is an object: not null, not a number or string, and not an array.
-function isWebhookObject(value: unknown): value is Webhook {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-// True for a value that is a string: a Plaid field that is only used when it holds text.
-function isText(value: unknown): value is string {
-	return typeof value === "string";
-}
-
-type Webhook = {
-	item_id?: unknown;
-	webhook_type?: unknown;
-	webhook_code?: unknown;
-	error?: { error_code?: unknown };
-	/** On SYNC_UPDATES_AVAILABLE: Plaid's 90-day history is available (#581). */
-	historical_update_complete?: unknown;
-};
 
 // What each webhook this file handles needs, checked against plaid.com/docs/api/items (decision 173):
 //
@@ -67,21 +49,15 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	if (verification === "unavailable") return c.body(null, 503);
 
 	if (verification === "invalid") return c.body(null, 401);
-	let parsed: unknown;
+	const read = readWebhookBody(rawBody);
 
-	try {
-		parsed = JSON.parse(rawBody);
-	} catch {
-		return c.body(null, 400);
-	}
+	if (read.kind === "not-json") return c.body(null, 400);
 
-	if (!isWebhookObject(parsed)) {
-		return c.body(null, 200);
-	}
+	if (read.kind === "not-object") return c.body(null, 200);
 
-	const body = parsed;
+	const { body } = read;
 
-	if (!isText(body.item_id)) return c.body(null, 200);
+	if (body.item_id === undefined) return c.body(null, 200);
 
 	const item = await drizzle(c.env.DB)
 		.select({
@@ -127,11 +103,11 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const isItemError =
 		body.webhook_type === "ITEM" &&
 		body.webhook_code === "ERROR" &&
-		!(isText(itemError) && transientErrors.has(itemError));
+		!(itemError !== undefined && transientErrors.has(itemError));
 
 	const isRelinkWarning =
 		body.webhook_type === "ITEM" &&
-		isText(body.webhook_code) &&
+		body.webhook_code !== undefined &&
 		relinkCodes.has(body.webhook_code);
 
 	if (isRelinkWarning) {

@@ -15,16 +15,14 @@ import { buildSeed } from "../src/demo/seed";
 import { app } from "../src/index";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { tallyExport } from "../src/settings/export";
-import {
-	saveOrganizeGroup,
-	setOrganizeRule,
-} from "../src/transactions/organize";
+import { setOrganizeRule } from "../src/transactions/organize";
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
 import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { present } from "./helpers/present";
+import { fileOrganizeGroup } from "./organize-group";
 import { pinClock } from "./pinned-clock";
 
 // What AI did this month (spec §8.6, decisions 91 and 101): a small log of what Tally's AI applied,
@@ -1133,12 +1131,26 @@ describe("what the Jev run and the names write", () => {
 
 		const groupId = present(category?.id);
 		expect(
-			await saveOrganizeGroup(db, ["ORG*BANK"], groupId, "ORG*BANK", "test"),
+			await fileOrganizeGroup(
+				db,
+				["ORG*BANK"],
+				groupId,
+				"ORG*BANK",
+				"Bank group",
+				"test",
+			),
 		).toHaveLength(1);
 		expect(await logNames()).toEqual([]);
 
 		expect(
-			await saveOrganizeGroup(db, ["ORG*SHOP"], groupId, "Org Shop", "test"),
+			await fileOrganizeGroup(
+				db,
+				["ORG*SHOP"],
+				groupId,
+				"Org Shop",
+				"Shop group",
+				"test",
+			),
 		).toHaveLength(1);
 		expect(await logNames()).toEqual(["ORG*SHOP"]);
 	});
@@ -1166,16 +1178,24 @@ describe("what the Jev run and the names write", () => {
 		const groupId = present(category?.id);
 		// A first save files ORG*FIRST with no name, so its suggestion stays pending.
 		expect(
-			await saveOrganizeGroup(db, ["ORG*FIRST"], groupId, null, "test"),
+			await fileOrganizeGroup(
+				db,
+				["ORG*FIRST"],
+				groupId,
+				null,
+				"First group",
+				"test",
+			),
 		).toHaveLength(1);
 
 		// ORG*FIRST's charge is filed already, so only ORG*SECOND's is changed and only it is named and logged.
 		expect(
-			await saveOrganizeGroup(
+			await fileOrganizeGroup(
 				db,
 				["ORG*FIRST", "ORG*SECOND"],
 				groupId,
 				"Org Pick",
+				"Pick group",
 				"test",
 			),
 		).toHaveLength(1);
@@ -1222,11 +1242,12 @@ describe("what the Jev run and the names write", () => {
 			.first<{ id: number }>();
 
 		expect(
-			await saveOrganizeGroup(
+			await fileOrganizeGroup(
 				db,
 				keys,
 				present(category?.id),
 				"Group Shop",
+				"Group list",
 				"test",
 			),
 		).toHaveLength(5);
@@ -1276,11 +1297,12 @@ describe("what the Jev run and the names write", () => {
 		const prepare = vi.spyOn(db, "prepare");
 
 		expect(
-			await saveOrganizeGroup(
+			await fileOrganizeGroup(
 				db,
 				keys,
 				present(category?.id),
 				"Big Shop",
+				"Big group",
 				"test",
 			),
 		).toHaveLength(600);
@@ -1329,11 +1351,12 @@ describe("what the Jev run and the names write", () => {
 		const categoryId = present(category?.id);
 		const keys = Array.from({ length: 600 }, (_, i) => `RULE SHOP ${i + 101}`);
 
-		const savedIds = await saveOrganizeGroup(
+		const savedIds = await fileOrganizeGroup(
 			db,
 			keys,
 			categoryId,
 			null,
+			"Rule group",
 			"test",
 		);
 

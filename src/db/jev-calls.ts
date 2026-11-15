@@ -10,7 +10,10 @@
 // allowance (decision 146: dailyJevCap in sort-groups.ts). A run cut off before it gives back loses the unused part for
 // that day, which only ever leaves the day with fewer calls, never more.
 
+import { and, lt, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { daysBefore } from "../dates";
+import { householdSettings } from "./schema";
 import { withTurnGuard } from "./sorting-turn";
 
 const keyFor = (day: string) => `jev_calls_${day}`;
@@ -34,40 +37,52 @@ export async function reserveJevCalls(
 ): Promise<number> {
 	if (cap < 1 || wanted < 1) return 0;
 	const key = keyFor(day);
+	const orm = drizzle(db);
 
-	const [recorded] = await db.batch<{ value: string }>([
+	const [recorded] = await orm.batch([
 		// A plain INSERT, never an upsert: a second reserve for the same group must fail whole.
-		db
-			.prepare(
-				`INSERT INTO household_settings (key, value) VALUES (?1,
-					CAST(CAST(MAX(0, MIN(?2, ?3 - COALESCE((SELECT CAST(value AS INTEGER) FROM household_settings WHERE key = ?4), 0))) AS INTEGER) AS TEXT))
-				 RETURNING value`,
-			)
-			.bind(reservedKeyFor(day, turnId), wanted, cap, key),
-		// ?2 is what's wanted and ?3 the cap. A new day's row starts at what's granted; an existing
+		orm
+			.insert(householdSettings)
+			.values({
+				key: reservedKeyFor(day, turnId),
+				value: sql`CAST(CAST(MAX(0, MIN(${wanted}, ${cap} - COALESCE((SELECT CAST(value AS INTEGER) FROM household_settings WHERE key = ${key}), 0))) AS INTEGER) AS TEXT)`,
+			})
+			.returning({ value: householdSettings.value }),
+		// `wanted` is what's wanted and `cap` the cap. A new day's row starts at what's granted; an existing
 		// one takes what fits, and `MAX(0, …)` keeps a count past the cap (a smaller cap than before)
 		// from going backwards. D1 binds numbers as reals, so the count is cast back to a whole
 		// number before it's stored as text.
-		db
-			.prepare(
-				`INSERT INTO household_settings (key, value) VALUES (?1, CAST(CAST(MIN(?2, ?3) AS INTEGER) AS TEXT))
-				 ON CONFLICT(key) DO UPDATE SET
-					value = CAST(CAST(CAST(value AS INTEGER) + MAX(0, MIN(?2, ?3 - CAST(value AS INTEGER))) AS INTEGER) AS TEXT)`,
-			)
-			.bind(key, wanted, cap),
-		db
-			.prepare(
-				"DELETE FROM household_settings WHERE key GLOB 'jev_calls_*' AND key < ?",
-			)
-			.bind(key),
-		db
-			.prepare(
-				"DELETE FROM household_settings WHERE key GLOB 'jev_reserved_*' AND key < ?",
-			)
-			.bind(`jev_reserved_${daysBefore(day, 2)}`),
+		orm
+			.insert(householdSettings)
+			.values({
+				key,
+				value: sql`CAST(CAST(MIN(${wanted}, ${cap}) AS INTEGER) AS TEXT)`,
+			})
+			.onConflictDoUpdate({
+				target: householdSettings.key,
+				set: {
+					value: sql`CAST(CAST(CAST(value AS INTEGER) + MAX(0, MIN(${wanted}, ${cap} - CAST(value AS INTEGER))) AS INTEGER) AS TEXT)`,
+				},
+			}),
+		orm
+			.delete(householdSettings)
+			.where(
+				and(
+					sql`${householdSettings.key} GLOB 'jev_calls_*'`,
+					lt(householdSettings.key, key),
+				),
+			),
+		orm
+			.delete(householdSettings)
+			.where(
+				and(
+					sql`${householdSettings.key} GLOB 'jev_reserved_*'`,
+					lt(householdSettings.key, `jev_reserved_${daysBefore(day, 2)}`),
+				),
+			),
 	]);
 
-	return Number(recorded?.results[0]?.value ?? 0);
+	return Number(recorded[0]?.value ?? 0);
 }
 
 /**
@@ -76,6 +91,7 @@ export async function reserveJevCalls(
  * when there is no record. Never below zero. It changes only while the group holds the turn, and it must run before
  * the record is dropped (dropReservedJevCallsStatement).
  */
+// Stays raw SQL: its guard is withTurnGuard's shared SQL text, batched with other raw statements in sort-groups.ts (decision 179).
 export function giveBackReservedJevCallsStatement(
 	db: D1Database,
 	{
@@ -104,6 +120,7 @@ export function giveBackReservedJevCallsStatement(
 }
 
 /** Removes a group's reservation record once its save has given the calls back; only while it holds the turn. */
+// Stays raw SQL: its guard is withTurnGuard's shared SQL text, batched with other raw statements in sort-groups.ts (decision 179).
 export function dropReservedJevCallsStatement(
 	db: D1Database,
 	day: string,
