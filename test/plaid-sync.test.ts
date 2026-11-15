@@ -157,6 +157,58 @@ describe("syncItem", () => {
 		await saveAiSwitches(env.DB, { details: false });
 	});
 
+	it("sends the stored token's plaintext to Plaid, read back from its stored bytes", async () => {
+		const id = await addItem();
+		const fetchImpl = plaidFetch(() => response(page()));
+
+		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
+
+		const accountsCall = fetchImpl.mock.calls.find(([url]) =>
+			String(url).endsWith("/accounts/get"),
+		);
+		expect(JSON.parse(String(accountsCall?.[1]?.body)).access_token).toBe(
+			"secret-access-token",
+		);
+	});
+
+	it("throws Plaid Item not found, and calls Plaid for nothing, when the id has no row", async () => {
+		const fetchImpl = plaidFetch(() => response(page()));
+
+		await expect(
+			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, 999_999, fetchImpl),
+		).rejects.toThrow("Plaid Item not found");
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("counts only this Item's stored accounts, so another Item's account is unknown here", async () => {
+		const mine = await addItem();
+		const other = await addItem();
+		await env.DB.prepare(
+			"INSERT INTO accounts (plaid_item_id, plaid_account_id, name, type) VALUES (?, 'other-account', 'Other', 'depository')",
+		)
+			.bind(other)
+			.run();
+
+		await expect(
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				mine,
+				plaidFetch(
+					() =>
+						response(
+							page({
+								added: [transaction({ account_id: "other-account" })],
+							}),
+						),
+					[],
+				),
+			),
+		).rejects.toThrow("unknown account");
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) n FROM transactions").first(),
+		).toEqual({ n: 0 });
+	});
+
 	it("sets last_synced_at only after a successful sync", async () => {
 		const successful = await addItem();
 		await syncItem(
