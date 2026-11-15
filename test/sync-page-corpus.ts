@@ -4,6 +4,13 @@
 // code before the page and the accounts were read with Effect Schema. An `undefined` field is left out of the JSON, as
 // Plaid leaves a field out. Every id and name here is made up.
 
+import type { Json } from "../src/json";
+
+/** A JSON value, or `undefined` for a field Plaid leaves out. */
+type Field = Json | undefined | Fields | Field[];
+
+type Fields = { [key: string]: Field };
+
 export type SyncCase = {
 	label: string;
 	/** The accounts answer's JSON text, or absent for one good account. */
@@ -11,7 +18,7 @@ export type SyncCase = {
 	/** The page's JSON text, or absent for the good page with `transaction` as its one added charge. */
 	page?: string;
 	/** The one added charge; absent is a good one. */
-	transaction?: Record<string, unknown>;
+	transaction?: Fields;
 	/** The charge goes in `modified` (after an earlier sync stored it) instead of `added`. */
 	modified?: boolean;
 };
@@ -26,7 +33,7 @@ export const GOOD_ACCOUNT = {
 	type: "depository",
 	subtype: "checking",
 	balances: { current: 12.34 },
-};
+} satisfies Fields;
 
 export const GOOD_TRANSACTION = {
 	transaction_id: "transaction-1",
@@ -38,7 +45,7 @@ export const GOOD_TRANSACTION = {
 	pending: false,
 	pending_transaction_id: null,
 	personal_finance_category: { primary: "GENERAL_MERCHANDISE", detailed: "X" },
-};
+} satisfies Fields;
 
 export const GOOD_PAGE = {
 	added: [GOOD_TRANSACTION],
@@ -47,10 +54,10 @@ export const GOOD_PAGE = {
 	next_cursor: "cursor-1",
 	has_more: false,
 	transactions_update_status: "HISTORICAL_UPDATE_COMPLETE",
-};
+} satisfies Fields;
 
 /** The odd values one field takes. `undefined` leaves the field out. */
-const ODD: [string, unknown][] = [
+const ODD: [string, Field][] = [
 	["missing", undefined],
 	["null", null],
 	["number", 5],
@@ -64,14 +71,13 @@ const ODD: [string, unknown][] = [
 	["deep array", "DEEP"],
 ];
 
-const oddValue = (value: unknown) =>
+const oddValue = (value: Field): Field =>
 	value === "DEEP" ? JSON.parse(nest(150, "[", "]")) : value;
 
-const withField = (
-	base: Record<string, unknown>,
-	field: string,
-	value: unknown,
-) => ({ ...base, [field]: oddValue(value) });
+const withField = (base: Fields, field: string, value: Field) => ({
+	...base,
+	[field]: oddValue(value),
+});
 
 const TRANSACTION_FIELDS = [
 	"transaction_id",
@@ -105,10 +111,10 @@ const PAGE_FIELDS = [
 	"transactions_update_status",
 ];
 
-const pageWith = (field: string, value: unknown) =>
+const pageWith = (field: string, value: Field) =>
 	JSON.stringify(withField(GOOD_PAGE, field, value));
 
-const accountsWith = (account: unknown) =>
+const accountsWith = (account: Field) =>
 	JSON.stringify({ accounts: [account] });
 
 export const syncCases = (): SyncCase[] => {

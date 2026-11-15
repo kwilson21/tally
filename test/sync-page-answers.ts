@@ -58,13 +58,15 @@ export async function answerOf(item: SyncCase): Promise<string> {
 	const { accounts, page } = bodies(item);
 	let pageAsks = 0;
 
-	const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
-		if (String(url).endsWith("/accounts/get")) return new Response(accounts);
+	const fetchImpl = vi.fn(
+		async (url: RequestInfo | URL, _init?: RequestInit) => {
+			if (String(url).endsWith("/accounts/get")) return new Response(accounts);
 
-		pageAsks += 1;
+			pageAsks += 1;
 
-		return new Response(page);
-	});
+			return new Response(page);
+		},
+	);
 
 	const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
 	const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -72,12 +74,9 @@ export async function answerOf(item: SyncCase): Promise<string> {
 
 	try {
 		await Promise.race([
-			syncItem(
-				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
-				id,
-				fetchImpl as unknown as typeof fetch,
-				{ runAfterSync: false },
-			),
+			syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl, {
+				runAfterSync: false,
+			}),
 			new Promise((_resolve, reject) =>
 				setTimeout(() => reject(new Error("hangs")), SECONDS),
 			),
