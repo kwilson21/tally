@@ -837,6 +837,56 @@ describe("readEligibility: a refund linked to its purchase follows it", () => {
 	});
 });
 
+describe("readEligibility: a row Jev gave up on after a privacy answer", () => {
+	/**
+	 * A row Jev was unsure about (a stored category confidence, no category) and then failed five times on its details: it
+	 * reads gave_up. Its privacy mark is written by the answer it did give; the failures do not undo it.
+	 */
+	const failedRow = async (cleared: 0 | 1 | null) => {
+		const id = await addRow({
+			category_confidence: 0.5,
+			jev_category_id: food,
+			jev_attempts: 5,
+		});
+
+		if (cleared !== null) await markCleared(id, cleared);
+
+		return id;
+	};
+
+	it("a gave-up row whose mark says Jev cleared it, and still matches, does not block (red before the fix)", async () => {
+		await clearedRow();
+		await failedRow(1);
+
+		expect(await decided()).toEqual({ kind: "may_search" });
+	});
+
+	it("a gave-up row whose mark says Jev did not clear it holds the text back, as asked", async () => {
+		await clearedRow();
+		await failedRow(0);
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a gave-up row whose mark no longer matches is owed, and its id is in owed", async () => {
+		await clearedRow();
+		const failed = await failedRow(1);
+
+		await db
+			.prepare(
+				"UPDATE transactions SET note = 'Changed after the answer' WHERE id = ?",
+			)
+			.bind(failed)
+			.run();
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [failed],
+		});
+	});
+});
+
 describe("readEligibility: rules that settle a text", () => {
 	it("a merchant rule on the key settles the text", async () => {
 		await clearedRow();

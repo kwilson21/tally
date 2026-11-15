@@ -204,7 +204,10 @@ function jevOf(row: ReadRow): EligibilityRow["jev"] {
 
 	if (state === "waiting") return "waiting";
 
-	if (state === "gave_up") return "gave_up";
+	// A row Jev gave up on after a privacy answer keeps that answer: its mark decides, as for any answered row. Without a mark,
+	// it is still gave_up, and holds its store back (BUG_GAVE_UP_OK).
+	if (state === "gave_up")
+		return row.markInput !== null ? "answered" : "gave_up";
 
 	if (state === "unsure") return "answered";
 
