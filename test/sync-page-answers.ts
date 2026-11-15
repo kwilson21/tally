@@ -38,6 +38,10 @@ function bodies(item: SyncCase) {
 	return { accounts, page };
 }
 
+/** A stored text over 200 characters is told by its length and start, so the fixture stays small. */
+const short = (column: string) =>
+	`CASE WHEN LENGTH(${column}) > 200 THEN 'long ' || LENGTH(${column}) || ' ' || SUBSTR(${column}, 1, 20) ELSE ${column} END AS ${column}`;
+
 export async function answerOf(item: SyncCase): Promise<string> {
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM transactions"),
@@ -96,11 +100,11 @@ export async function answerOf(item: SyncCase): Promise<string> {
 		.first();
 
 	const stored = await env.DB.prepare(
-		"SELECT plaid_account_id, name, mask, type, subtype, is_liability, balance_cents FROM accounts ORDER BY id",
+		`SELECT plaid_account_id, ${short("name")}, ${short("mask")}, type, subtype, is_liability, balance_cents FROM accounts ORDER BY id`,
 	).all();
 
 	const charges = await env.DB.prepare(
-		"SELECT plaid_transaction_id, date, amount_cents, raw_name, merchant_name, pending, plaid_category, plaid_detailed_category FROM transactions ORDER BY id",
+		`SELECT plaid_transaction_id, date, amount_cents, ${short("raw_name")}, ${short("merchant_name")}, pending, plaid_category, plaid_detailed_category FROM transactions ORDER BY id`,
 	).all();
 
 	return `${ended} | ${JSON.stringify(bank)} | accounts ${JSON.stringify(stored.results)} | charges ${JSON.stringify(charges.results)} | page asks ${pageAsks}`;

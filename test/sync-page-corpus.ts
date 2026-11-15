@@ -152,6 +152,33 @@ export const syncCases = (): SyncCase[] => {
 			});
 		}
 
+	// A charge whose merchant is null, left out or blank never reaches the name tidier, so a name of the wrong type that fails
+	// beside a merchant ends beside none. Every field is tried with a null merchant; the name with each of the three.
+	const NO_MERCHANT: [string, Field][] = [
+		["merchant null", null],
+		["merchant missing", undefined],
+		["merchant blank", "  "],
+	];
+
+	for (const [place, merchant] of NO_MERCHANT)
+		for (const field of TRANSACTION_FIELDS) {
+			if (field === "merchant_name") continue;
+
+			if (place !== "merchant null" && field !== "name") continue;
+
+			for (const [name, value] of ODD)
+				for (const modified of [false, true])
+					out.push({
+						label: `${modified ? "modified" : "added"} | ${place} | ${field} | ${name}`,
+						transaction: withField(
+							{ ...GOOD_TRANSACTION, merchant_name: merchant },
+							field,
+							value,
+						),
+						modified,
+					});
+		}
+
 	for (const field of ACCOUNT_FIELDS)
 		for (const [name, value] of ODD)
 			out.push({
