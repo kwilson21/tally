@@ -73,6 +73,7 @@ describe("schema", () => {
 			"household_members",
 			"household_people",
 			"household_settings",
+			"lookup_answers",
 			"lookup_cleared",
 			"maybe_answers",
 			"maybe_names",

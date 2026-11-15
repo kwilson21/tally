@@ -593,6 +593,7 @@ describe("data exports", () => {
 				answer: "yes",
 				household_day: "2026-10-03",
 				created_at: expect.any(String),
+				with_line: 0,
 			},
 		]);
 	});

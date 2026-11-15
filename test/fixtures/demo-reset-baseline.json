@@ -3601,6 +3601,7 @@
 			}
 		],
 		"lookup_cleared": [],
+		"lookup_answers": [],
 		"transactions": [
 			{
 				"id": 1,
@@ -16073,6 +16074,7 @@
 			}
 		],
 		"lookup_cleared": [],
+		"lookup_answers": [],
 		"transactions": [
 			{
 				"id": 1,

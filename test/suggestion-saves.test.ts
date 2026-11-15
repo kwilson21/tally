@@ -6,6 +6,7 @@ import { decideName, nameFacts } from "../src/db/merchant-names";
 import {
 	categoryMaybeStatements,
 	fileFacts,
+	fileInNewCategory,
 	fileStatements,
 	maybeChangedSinceRead,
 	maybeFacts,
@@ -233,6 +234,274 @@ describe("the filing's guard", () => {
 			source: "user",
 		});
 		expect(await answers()).toBe(1);
+	});
+});
+
+// with_line (migration 0078, decision 225): a Maybe answer records 1 only when it answered a kept line-backed guess, as
+// read in the answer's own batch, and 0 for every other answer, always 0 for income and transfer.
+describe("with_line: a Maybe answer says whether it answered a kept line-backed guess", () => {
+	/** A purchase Tally guessed Eating Out at `confidence`, half of the review's asked range or above it. */
+	const guessed = async (confidence: number, transferConfidence?: number) =>
+		(
+			await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, jev_category_id, category_confidence, transfer_confidence)
+					VALUES ((SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 2300, 'SQ *LUPITAS TAQ', ?, ?, ?)
+					RETURNING id`,
+				)
+				.bind(
+					await categoryId("Eating Out"),
+					confidence,
+					transferConfidence ?? null,
+				)
+				.first<{ id: number }>()
+		)?.id ?? 0;
+
+	/** The store lookup's line row for `id`: kept or not, and the copies it holds. */
+	const keepLine = (
+		id: number,
+		kept: 0 | 1,
+		category: number | null,
+		confidence: number | null,
+	) =>
+		db
+			.prepare(
+				"INSERT INTO lookup_answers (transaction_id, lookup_text, kept, kept_category_id, kept_confidence) VALUES (?, 'LUPITAS', ?, ?, ?)",
+			)
+			.bind(id, kept, category, confidence)
+			.run();
+
+	/** The category answer's save, as the route makes it: the record and the category the person set. */
+	const saveCategory = async (
+		id: number,
+		category: number,
+		record: string,
+		confidence: number,
+	) => {
+		const { version } = await maybeFacts(db, "category", id, category);
+
+		await db.batch(
+			categoryMaybeStatements(db, {
+				transactionId: id,
+				categoryId: category,
+				today: TODAY,
+				who: WHO,
+				record,
+				confidence,
+				expectedVersion: version,
+			}),
+		);
+	};
+
+	const lastAnswer = (kind: string) =>
+		db
+			.prepare(
+				"SELECT with_line AS withLine, answer, confidence FROM maybe_answers WHERE kind = ? ORDER BY id DESC LIMIT 1",
+			)
+			.bind(kind)
+			.first<{ withLine: number; answer: string; confidence: number }>();
+
+	it.each([
+		[
+			"a Yes on a kept line guess at 95%",
+			"category",
+			async () => {
+				const id = await guessed(0.95);
+				await keepLine(id, 1, await categoryId("Eating Out"), 0.95);
+				await saveCategory(id, await categoryId("Eating Out"), "yes", 0.95);
+			},
+			{ withLine: 1, answer: "yes", confidence: 0.95 },
+		],
+		[
+			"a Something else on a kept line guess (Groceries)",
+			"category",
+			async () => {
+				const id = await guessed(0.95);
+				await keepLine(id, 1, await categoryId("Eating Out"), 0.95);
+				await saveCategory(
+					id,
+					await categoryId("Groceries"),
+					"something_else",
+					0.95,
+				);
+			},
+			{ withLine: 1, answer: "something_else", confidence: 0.95 },
+		],
+		[
+			"a filing into an existing category, on a kept line guess",
+			"category",
+			async () => {
+				const id = await guessed(0.95);
+				await keepLine(id, 1, await categoryId("Eating Out"), 0.95);
+				await fileInNewCategory(db, {
+					transactionId: id,
+					target: {
+						ok: true,
+						kind: "existing",
+						id: await categoryId("Groceries"),
+						name: "Groceries",
+					},
+					today: TODAY,
+					who: WHO,
+				});
+			},
+			{ withLine: 1 },
+		],
+		[
+			"a filing into a new category, on a kept line guess",
+			"category",
+			async () => {
+				const id = await guessed(0.95);
+				await keepLine(id, 1, await categoryId("Eating Out"), 0.95);
+				await fileInNewCategory(db, {
+					transactionId: id,
+					target: {
+						ok: true,
+						kind: "create",
+						name: "Books and audio",
+						color: "#334455",
+					},
+					today: TODAY,
+					who: WHO,
+				});
+			},
+			{ withLine: 1 },
+		],
+		[
+			"a Yes with no line row, at 60%",
+			"category",
+			async () => {
+				const id = await guessed(0.6);
+				await saveCategory(id, await categoryId("Eating Out"), "yes", 0.6);
+			},
+			{ withLine: 0, answer: "yes", confidence: 0.6 },
+		],
+		[
+			"a Yes on a line row that kept 0",
+			"category",
+			async () => {
+				const id = await guessed(0.95);
+				await keepLine(id, 0, null, null);
+				await saveCategory(id, await categoryId("Eating Out"), "yes", 0.95);
+			},
+			{ withLine: 0, answer: "yes", confidence: 0.95 },
+		],
+		[
+			"a Yes on a kept line whose confidence copy is 5 points lower",
+			"category",
+			async () => {
+				const id = await guessed(0.95);
+				await keepLine(id, 1, await categoryId("Eating Out"), 0.9);
+				await saveCategory(id, await categoryId("Eating Out"), "yes", 0.95);
+			},
+			{ withLine: 0, answer: "yes", confidence: 0.95 },
+		],
+		[
+			"an income Yes",
+			"income",
+			async () => {
+				const id = (
+					await db
+						.prepare(
+							`INSERT INTO transactions (account_id, date, amount_cents, raw_name, income_confidence)
+							VALUES ((SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', -500000, 'PAYROLL', 0.5)
+							RETURNING id`,
+						)
+						.first<{ id: number }>()
+				)?.id ?? 0;
+				const { version } = await maybeFacts(db, "income", id);
+
+				await db.batch(
+					moneyMaybeStatements(db, {
+						kind: "income",
+						answer: "yes",
+						transactionId: id,
+						today: TODAY,
+						who: WHO,
+						confidence: 0.5,
+						expectedVersion: version,
+					}),
+				);
+			},
+			{ withLine: 0, answer: "yes", confidence: 0.5 },
+		],
+		[
+			"a transfer Yes",
+			"transfer",
+			async () => {
+				const id = await guessed(0.95, 0.5);
+				const { version } = await maybeFacts(db, "transfer", id);
+
+				await db.batch(
+					moneyMaybeStatements(db, {
+						kind: "transfer",
+						answer: "yes",
+						transactionId: id,
+						today: TODAY,
+						who: WHO,
+						confidence: 0.5,
+						expectedVersion: version,
+					}),
+				);
+			},
+			{ withLine: 0, answer: "yes", confidence: 0.5 },
+		],
+	])(
+		"%s records with_line as the batch reads it",
+		async (_name, kind, act, expected) => {
+			await act();
+
+			expect(await lastAnswer(kind)).toMatchObject(expected);
+		},
+	);
+});
+
+// A stale card writes nothing (decision 190): a Yes saved on the version the card was drawn with raises, and the
+// with_line record is not written either, since it sits in the same guarded batch as the answer.
+describe("a stale line-backed card writes nothing", () => {
+	it("raises for a Yes on the old version, and records no answer", async () => {
+		const id = await (async () => {
+			const row = await db
+				.prepare(
+					`INSERT INTO transactions (account_id, date, amount_cents, raw_name, jev_category_id, category_confidence)
+					VALUES ((SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 2300, 'SQ *LUPITAS TAQ', ?, 0.95)
+					RETURNING id`,
+				)
+				.bind(await categoryId("Eating Out"))
+				.first<{ id: number }>();
+
+			return row?.id ?? 0;
+		})();
+		const eatingOut = await categoryId("Eating Out");
+
+		await db
+			.prepare(
+				"INSERT INTO lookup_answers (transaction_id, lookup_text, kept, kept_category_id, kept_confidence) VALUES (?, 'LUPITAS', 1, ?, 0.95)",
+			)
+			.bind(id, eatingOut)
+			.run();
+
+		const { version } = await maybeFacts(db, "category", id, eatingOut);
+
+		await db
+			.prepare("UPDATE transactions SET category_confidence = 0.9 WHERE id = ?")
+			.bind(id)
+			.run();
+
+		const error = await raised(
+			categoryMaybeStatements(db, {
+				transactionId: id,
+				categoryId: eatingOut,
+				today: TODAY,
+				who: WHO,
+				record: "yes",
+				confidence: 0.95,
+				expectedVersion: version,
+			}),
+		);
+
+		expect(error !== null && maybeChangedSinceRead(error)).toBe(true);
+		expect(await answers()).toBe(0);
 	});
 });
 
