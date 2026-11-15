@@ -1043,6 +1043,57 @@ describe("readEligibility: a row Jev was asked about holds its store until clear
 		await expectMaySearch();
 	});
 
+	// Sync inserts every Plaid charge with credit_reviewed = 1 and credit_reviewed_by NULL (src/plaid/sync.ts, the INSERT
+	// CASE WHEN amount < 0 THEN 0 ELSE 1): an outgoing charge (positive) is marked reviewed before Jev sees it. The columns
+	// below mirror that insert; the test database has no helper for sync's insert path itself.
+	it("an outgoing Plaid charge marked reviewed by sync, then filed by a person with no Jev answer, does not block (red before the fix)", async () => {
+		const charge = await addRow({
+			amount_cents: 1200,
+			credit_reviewed: 1,
+			flag_income: 0,
+			excluded: 0,
+			pending: 0,
+		});
+
+		await personFiles(charge);
+		await clearedRow();
+
+		const reviewed = await db
+			.prepare(
+				"SELECT credit_reviewed AS reviewed, credit_reviewed_by AS reviewedBy FROM transactions WHERE id = ?",
+			)
+			.bind(charge)
+			.first<{ reviewed: number; reviewedBy: string | null }>();
+
+		expect(reviewed).toEqual({ reviewed: 1, reviewedBy: null });
+
+		await expectMaySearch();
+	});
+
+	it("a credit (negative) with credit_reviewed = 1, no other answer and no mark is answered and owed, and blocks", async () => {
+		const credit = await addRow({
+			amount_cents: -1200,
+			credit_reviewed: 1,
+			flag_income: 0,
+			excluded: 0,
+			pending: 0,
+		});
+
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(other, credit)
+			.run();
+		await clearedRow();
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [credit],
+		});
+	});
+
 	it("an unsure row with no mark is answered and owed, and blocks its store", async () => {
 		await clearedRow();
 

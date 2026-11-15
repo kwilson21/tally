@@ -98,7 +98,7 @@ export function holdsJevAnswerSql(alias: string): string {
 		OR ${alias}.transfer_confidence IS NOT NULL OR ${alias}.category_source = 'jev'
 		OR ${alias}.income_source = 'jev' OR ${alias}.excluded_source = 'jev'
 		OR ${alias}.jev_none_fit = 1 OR ${alias}.jev_mixed IS NOT NULL OR ${alias}.details_asked = 1
-		OR (${alias}.credit_reviewed = 1 AND ${alias}.credit_reviewed_by IS NULL))`;
+		OR (${alias}.credit_reviewed = 1 AND ${alias}.credit_reviewed_by IS NULL AND ${alias}.amount_cents < 0))`;
 }
 
 /**
