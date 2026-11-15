@@ -201,6 +201,7 @@ import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 import { YourBanks } from "../views/your-banks";
 import { DEMO_MONTH_RESULTS } from "./demo-month-results";
+import { MACHINE_PURPOSE } from "./machine-purpose";
 import {
 	ADJUST_ROWS,
 	APPLE_LINE,
@@ -6728,7 +6729,8 @@ function Diagrams() {
 				components={["MachineDiagram"]}
 				sentence="A state machine drawn by Pele from its own definition (decisions 175 and 181): one box for each state, top to bottom, finished states shaded, a dot and arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
 			>
-				<State label="A suggested new category (one state, three ways out)">
+				<State label="A suggested new category">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.category}</p>
 					<MachineDiagram
 						id="machine-diagram-category"
 						title="How a suggested new category is decided"
@@ -6736,7 +6738,8 @@ function Diagrams() {
 						labels={CATEGORY_SUGGESTION_LABELS}
 					/>
 				</State>
-				<State label="A suggested store name (a loop on one state, an arrow back, two ways out)">
+				<State label="A suggested store name">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.name}</p>
 					<MachineDiagram
 						id="machine-diagram-name"
 						title="How a suggested store name is decided"
@@ -6744,7 +6747,8 @@ function Diagrams() {
 						labels={MERCHANT_SUGGESTION_LABELS}
 					/>
 				</State>
-				<State label="The sorting turn (four ways in and out, one state that runs out on its own)">
+				<State label="The sorting turn">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.sortingTurn}</p>
 					<MachineDiagram
 						id="machine-diagram-sorting-turn"
 						title="How the sorting turn is held and given back"
