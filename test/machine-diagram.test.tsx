@@ -11,6 +11,14 @@ import {
 	merchantSuggestionMachine,
 } from "../src/machines/merchant-suggestion";
 import {
+	PLAID_LEASE_LABELS,
+	plaidLeaseMachine,
+} from "../src/machines/plaid-lease";
+import {
+	READY_CLAIM_LABELS,
+	readyClaimMachine,
+} from "../src/machines/ready-claim";
+import {
 	SORTING_TURN_LABELS,
 	sortingTurnMachine,
 } from "../src/machines/sorting-turn";
@@ -25,6 +33,8 @@ const MACHINES = [
 	[categorySuggestionMachine, CATEGORY_SUGGESTION_LABELS],
 	[merchantSuggestionMachine, MERCHANT_SUGGESTION_LABELS],
 	[sortingTurnMachine, SORTING_TURN_LABELS],
+	[plaidLeaseMachine, PLAID_LEASE_LABELS],
+	[readyClaimMachine, READY_CLAIM_LABELS],
 ] as const;
 
 // The machine's definition as written, read straight from `config` and not through machineGraph, so these checks can
@@ -182,6 +192,19 @@ describe("MachineDiagram", () => {
 			for (const [key, state] of Object.entries(configStates(machine))) {
 				expect(state.description, `${machine.id}.${key}`).toBeTruthy();
 
+				for (const [event, raw] of Object.entries(state.on ?? {}))
+					for (const transition of Array.isArray(raw) ? raw : [raw])
+						expect(
+							transition.description,
+							`${machine.id}.${key}.${event}`,
+						).toBeTruthy();
+			}
+		}
+	});
+
+	it("says every arrow of the plaid lease and the ready claim in plain words, read from each transition", () => {
+		for (const machine of [plaidLeaseMachine, readyClaimMachine]) {
+			for (const [key, state] of Object.entries(configStates(machine))) {
 				for (const [event, raw] of Object.entries(state.on ?? {}))
 					for (const transition of Array.isArray(raw) ? raw : [raw])
 						expect(

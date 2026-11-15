@@ -30,6 +30,8 @@ import {
 	MERCHANT_SUGGESTION_LABELS,
 	merchantSuggestionMachine,
 } from "../machines/merchant-suggestion";
+import { PLAID_LEASE_LABELS, plaidLeaseMachine } from "../machines/plaid-lease";
+import { READY_CLAIM_LABELS, readyClaimMachine } from "../machines/ready-claim";
 import {
 	SORTING_TURN_LABELS,
 	sortingTurnMachine,
@@ -6754,6 +6756,24 @@ function Diagrams() {
 						title="How the sorting turn is held and given back"
 						machine={sortingTurnMachine}
 						labels={SORTING_TURN_LABELS}
+					/>
+				</State>
+				<State label="The Plaid lease">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.plaidLease}</p>
+					<MachineDiagram
+						id="machine-diagram-plaid-lease"
+						title="How a bank's sync lease is taken and given back"
+						machine={plaidLeaseMachine}
+						labels={PLAID_LEASE_LABELS}
+					/>
+				</State>
+				<State label="The ready-email claim">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.readyClaim}</p>
+					<MachineDiagram
+						id="machine-diagram-ready-claim"
+						title="How a ready email is claimed and sent"
+						machine={readyClaimMachine}
+						labels={READY_CLAIM_LABELS}
 					/>
 				</State>
 			</Specimen>

@@ -115,6 +115,18 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("shows the Plaid lease and the ready-email claim with their purpose sentences and state labels (#865)", async () => {
+		const { html } = await get("/design-system");
+		const text = html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+		expect(text).toContain(MACHINE_PURPOSE.plaidLease);
+		expect(text).toContain(MACHINE_PURPOSE.readyClaim);
+		expect(text).toContain("The Plaid lease");
+		expect(text).toContain("The ready-email claim");
+		expect(text).toContain("How a bank's sync lease is taken and given back");
+		expect(text).toContain("How a ready email is claimed and sent");
+	});
+
 	it("quotes in NetWorthChart's words the examples its states draw: the card and the bank, both on Oct 1 (#780)", async () => {
 		const { html } = await get("/design-system");
 		const start = html.indexOf('<section id="net-worth-chart"');
