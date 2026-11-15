@@ -2,7 +2,7 @@
 // −$1 button, a big amount field with ▲▼ cent arrows inside its right edge, and a round +$1 button;
 // under it the Round-to and Last-month chips. public/js/money.js runs the buttons; the server draws
 // their starting state, and without the script they stay hidden and the field works on its own.
-import { formatCents, toCents } from "../money";
+import { ceilToDollars, formatCents, toCents } from "../money";
 import { Icon } from "./icons";
 
 type Props = {
@@ -106,8 +106,11 @@ export function MoneyInput({
 			.filter(Boolean)
 			.join(" ") || undefined;
 
-	const hasCents = cents !== null && cents % 100 !== 0;
-	const roundedCents = cents === null ? 0 : Math.ceil(cents / 100) * 100;
+	// An amount past the safe integer range (a typed 20-digit balance) has no round-up: it is refused on save, and
+	// ceilToDollars only takes safe integers.
+	const roundable = cents !== null && Number.isSafeInteger(cents);
+	const hasCents = roundable && cents % 100 !== 0;
+	const roundedCents = roundable ? ceilToDollars(cents) : 0;
 
 	return (
 		<div data-money class="flex flex-col gap-2">

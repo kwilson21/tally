@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveCategory, setArchived } from "../src/db/categories";
+import { saveCategory } from "../src/db/categories";
 import {
 	createFromSuggestion,
 	decideDismiss,
@@ -23,6 +23,7 @@ import { newCategoryItem } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import type { SuggestionState } from "../src/rules/suggestions";
+import { archiveOn, restoreOn } from "./archive-category";
 import { forwardMember, present } from "./helpers/present";
 
 // Which transactions count as "Jev was sure none of the categories fit" (spec §7, #51), where a
@@ -1646,7 +1647,7 @@ describe("createFromSuggestion", () => {
 				)
 				.bind(id)
 				.run();
-			await setArchived(db, id, true, "2026-07-15");
+			await archiveOn(db, id, "2026-07-15");
 
 			return id;
 		}
@@ -1867,7 +1868,7 @@ describe("createFromSuggestion", () => {
 		it("files the ticks into it without a second restore when someone restored it after the page was drawn", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
-			await setArchived(db, archived, false, "2026-09-01");
+			await restoreOn(db, archived, "2026-09-01");
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
@@ -1931,7 +1932,7 @@ describe("createFromSuggestion", () => {
 
 			const result = await createFromSuggestion(
 				racingSave(
-					() => setArchived(db, archived, false, "2026-09-01"),
+					() => restoreOn(db, archived, "2026-09-01"),
 					() =>
 						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
 				),
@@ -1978,7 +1979,7 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racingSave(() => setArchived(db, archived, false, "2026-09-01")),
+				racingSave(() => restoreOn(db, archived, "2026-09-01")),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person",
@@ -2009,10 +2010,10 @@ describe("createFromSuggestion", () => {
 
 			const result = await createFromSuggestion(
 				racingSave(
-					() => setArchived(db, archived, false, "2026-09-01"),
+					() => restoreOn(db, archived, "2026-09-01"),
 					() =>
 						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
-					() => setArchived(db, archived, true, "2026-09-02"),
+					() => archiveOn(db, archived, "2026-09-02"),
 				),
 				id,
 				{ ticked: made, shown: made, notes: {} },
@@ -2067,7 +2068,7 @@ describe("createFromSuggestion", () => {
 				)?.id,
 			);
 
-			await setArchived(db, id, true, "2026-07-15");
+			await archiveOn(db, id, "2026-07-15");
 
 			return id;
 		}
@@ -2416,7 +2417,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { pet } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.pet), true, "2026-09-01"),
+					() => archiveOn(db, present(s.cats.pet), "2026-09-01"),
 				],
 				result: (s) => filed(s, "Pet Care", { restored: true }),
 				ticksIn: "Pet Care",
@@ -2438,7 +2439,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.archived), false, "2026-09-01"),
+					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 				],
 				result: (s) => filed(s, "Pet Care", { attached: true }),
 				ticksIn: "Pet Care",
@@ -2460,7 +2461,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.archived), false, "2026-09-01"),
+					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 					() =>
 						saveCategory(db, present(s.cats.archived), { name: "Pets" }).then(
 							() => undefined,
@@ -2525,7 +2526,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { pet } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.pet), true, "2026-09-01"),
+					() => archiveOn(db, present(s.cats.pet), "2026-09-01"),
 					() => insertCategory("Replacement", "replacement", 999),
 				],
 				result: () => refused(FULL_RESTORE),
@@ -2547,7 +2548,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.archived), false, "2026-09-01"),
+					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 					() =>
 						saveCategory(db, present(s.cats.archived), { name: "Pets" }).then(
 							() => undefined,

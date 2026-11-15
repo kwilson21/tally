@@ -1,3 +1,5 @@
+import { ceilToDollars, floorToDollars } from "./money";
+
 export type ForecastInput = {
 	day: number;
 	daysInMonth: number;
@@ -11,7 +13,11 @@ export type ForecastInput = {
 
 export const FORECAST_START_DAY = 7;
 
-/** The month-end estimate in integer cents; signed refunds reduce spending and never repeat in the projection. */
+/**
+ * The month-end estimate in integer cents; signed refunds reduce spending and never repeat in the projection.
+ * An under amount rounds down and an over amount rounds up on purpose, so the forecast never understates overspend
+ * or overstates room; the two directions are not one rule.
+ */
 export function forecastMonth(input: ForecastInput) {
 	const projectedCents = Math.round(
 		(input.everydayCents * (input.daysInMonth - input.day)) / input.day,
@@ -24,12 +30,12 @@ export function forecastMonth(input: ForecastInput) {
 	return differenceCents >= 0
 		? {
 				endCents,
-				underCents: Math.floor(differenceCents / 100) * 100,
+				underCents: floorToDollars(differenceCents),
 				visible,
 			}
 		: {
 				endCents,
-				overCents: Math.ceil(-differenceCents / 100) * 100,
+				overCents: ceilToDollars(-differenceCents),
 				visible,
 			};
 }

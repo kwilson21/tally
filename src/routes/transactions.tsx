@@ -2741,9 +2741,11 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		// The sheet again at the posted parts, with why the correction was refused (nothing saved).
 		const refused = (refusal: CashSplitRefusal) => {
 			const error =
-				"refundPart" in refusal
-					? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
-					: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
+				"changed" in refusal
+					? "This split changed while you were editing it, so nothing was saved. Close this sheet and open it again to see it as it is now."
+					: "refundPart" in refusal
+						? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
+						: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
 
 			return sheetAgain(error);
 		};
