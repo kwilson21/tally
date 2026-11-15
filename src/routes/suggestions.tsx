@@ -1,11 +1,10 @@
-import { asc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
+import { activeCategories } from "../db/active-categories";
 import { categoryNames } from "../db/categories";
 import {
 	createFromSuggestion,
@@ -32,7 +31,6 @@ import {
 	suggestedCategoryName,
 } from "../db/new-category-answer";
 import { runningRecheck, startResortFor } from "../db/resort-start";
-import { categories as categoriesTable } from "../db/schema";
 import {
 	decideCategoryMaybe,
 	decideFile,
@@ -472,13 +470,7 @@ async function renderScreen(
 	const more =
 		options.more === undefined ? null : await moreLikeThis(db, options.more);
 
-	// Active categories only: categoryNames also lists the archived ones, so it is not used here (decision 179).
-	const categories = await drizzle(db)
-		.select({ id: categoriesTable.id, name: categoriesTable.name })
-		.from(categoriesTable)
-		.where(eq(categoriesTable.archived, 0))
-		.orderBy(asc(categoriesTable.sortOrder), asc(categoriesTable.name))
-		.all();
+	const categories = await activeCategories(db);
 
 	if (options.toast) {
 		c.header(

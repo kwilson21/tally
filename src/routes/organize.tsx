@@ -1,14 +1,12 @@
-import { asc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
+import { activeCategories } from "../db/active-categories";
 import { decideCreate } from "../db/category-suggestions";
 import { runWith } from "../db/database";
 import { runningRecheck, startResortFor } from "../db/resort-start";
-import { categories as categoriesTable } from "../db/schema";
 import {
 	type NewCategorySuggestion,
 	newCategoryItem,
@@ -120,18 +118,7 @@ async function renderOrganize(
 
 	const [allGroups, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
-		// Active categories only: categoryNames also lists the archived ones, so it is not used here (decision 179).
-		drizzle(c.env.DB)
-			.select({
-				id: categoriesTable.id,
-				name: categoriesTable.name,
-				icon: categoriesTable.icon,
-				color: categoriesTable.color,
-			})
-			.from(categoriesTable)
-			.where(eq(categoriesTable.archived, 0))
-			.orderBy(asc(categoriesTable.sortOrder), asc(categoriesTable.name))
-			.all(),
+		activeCategories(c.env.DB),
 	]);
 
 	const currentNames = new Set(allGroups.map((group) => group.name));
