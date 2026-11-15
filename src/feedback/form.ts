@@ -2,6 +2,7 @@
 // field Tally does not know falls back to its plain value, and whether the message may be sent is for the rule
 // (src/rules/feedback.ts).
 import * as Schema from "effect/Schema";
+import { readStoredWith } from "../db/stored-shape";
 import { readAtEdge } from "../edge";
 import { textOf, textOrNull } from "../edge-kinds";
 import { normalizeFeedbackContext } from "./diagnostics";
@@ -55,7 +56,10 @@ export function safePath(value: string | null, navigation = false) {
 /** The opted-in technical context, kept to its allowlisted fields, or null for anything that is not a JSON object. */
 function contextOf(text: string, from: string) {
 	try {
-		return normalizeFeedbackContext(JSON.parse(text), from);
+		return normalizeFeedbackContext(
+			readStoredWith(Schema.MutableJson, text),
+			from,
+		);
 	} catch {
 		return null;
 	}
