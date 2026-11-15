@@ -121,6 +121,7 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 
 	it("refuses a Not this one that names a payment already turned away, and saves nothing", async () => {
 		const first = await unlink();
+
 		const again = await post(`/bills/${BILL}/occurrences/${PERIOD}/unlink`, {
 			transaction_id: "9401",
 		});
