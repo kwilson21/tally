@@ -5,11 +5,11 @@ import {
 	categoryNames,
 	moveCategory,
 	saveCategory,
-	setArchived,
 	settingsCategories,
 } from "../src/db/categories";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { archiveOn, restoreOn } from "./archive-category";
 import { present } from "./helpers/present";
 
 const db = env.DB;
@@ -24,7 +24,7 @@ const names = async () =>
 
 describe("settingsCategories", () => {
 	it("lists active categories in order with this month's budget, and archived ones apart", async () => {
-		await setArchived(db, 5, true);
+		await archiveOn(db, 5, "2026-09-22");
 		const { active, archived } = await settingsCategories(db, MONTH);
 		expect(active.map((c) => [c.name, c.budgetCents])).toEqual([
 			["Groceries", 95000],
@@ -67,9 +67,9 @@ describe("setArchived", () => {
 			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = 2")
 			.first<{ n: number }>();
 
-		await setArchived(db, 2, true);
+		await archiveOn(db, 2, "2026-09-22");
 		expect(await names()).not.toContain("Eating Out");
-		await setArchived(db, 2, false);
+		await restoreOn(db, 2, "2026-09-22");
 		expect(await names()).toContain("Eating Out");
 
 		const after = await db
@@ -132,9 +132,9 @@ describe("moveCategory", () => {
 
 describe("restoring after a move", () => {
 	it("puts a restored category at the end, never sharing a place with another", async () => {
-		await setArchived(db, 2, true);
+		await archiveOn(db, 2, "2026-09-22");
 		await moveCategory(db, 5, "up");
-		await setArchived(db, 2, false);
+		await restoreOn(db, 2, "2026-09-22");
 		expect(await names()).toEqual([
 			"Groceries",
 			"Gas",
@@ -166,7 +166,7 @@ describe("names that differ only in capitals", () => {
 
 describe("categoryNames", () => {
 	it("lists every category, archived too, for the form's checks", async () => {
-		await setArchived(db, 5, true);
+		await archiveOn(db, 5, "2026-09-22");
 		expect(await categoryNames(db)).toContainEqual({
 			id: 5,
 			name: "Household",
@@ -186,7 +186,7 @@ describe("categoryNames", () => {
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 		await db
 			.prepare(
 				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('école', 'école', 'tag', 'cat-blue', 1)",
@@ -203,8 +203,8 @@ describe("categoryNames", () => {
 
 describe("category archive dates", () => {
 	it("keeps the first archive date when an overlapping archive request finishes later", async () => {
-		await setArchived(db, 5, true, "2026-09-30");
-		await setArchived(db, 5, true, "2026-10-01");
+		await archiveOn(db, 5, "2026-09-30");
+		await archiveOn(db, 5, "2026-10-01");
 		expect(
 			(
 				await db
@@ -215,7 +215,7 @@ describe("category archive dates", () => {
 	});
 
 	it("sets the archive date and clears it when the category is restored", async () => {
-		await setArchived(db, 5, true, "2026-09-15");
+		await archiveOn(db, 5, "2026-09-15");
 		expect(
 			(
 				await db
@@ -223,7 +223,7 @@ describe("category archive dates", () => {
 					.first<{ archived_on: string }>()
 			)?.archived_on,
 		).toBe("2026-09-15");
-		await setArchived(db, 5, false, "2026-10-01");
+		await restoreOn(db, 5, "2026-10-01");
 		expect(
 			(
 				await db
@@ -239,7 +239,7 @@ describe("an archived category on Home", () => {
 		(await loadMonth(db, month)).categories.map((c) => c.name);
 
 	it("drops its budget after the archive month and keeps counted spending", async () => {
-		await setArchived(db, 2, true, "2026-09-15");
+		await archiveOn(db, 2, "2026-09-15");
 		expect(await onHome(MONTH)).toContain("Eating Out");
 		expect(await onHome("2026-10")).not.toContain("Eating Out");
 	});
@@ -251,7 +251,7 @@ describe("an archived category on Home", () => {
 			)
 			.bind(MONTH)
 			.run();
-		await setArchived(db, 2, true, "2026-09-15");
+		await archiveOn(db, 2, "2026-09-15");
 		expect(await onHome(MONTH)).toContain("Eating Out");
 	});
 });
@@ -268,28 +268,28 @@ describe("category archive periods", () => {
 		).results;
 
 	it("opens a period on archive and closes it on restore, keeping the dates", async () => {
-		await setArchived(db, 5, true, "2026-09-15");
+		await archiveOn(db, 5, "2026-09-15");
 		expect(await periods(5)).toEqual([
 			{ archived_on: "2026-09-15", restored_on: null },
 		]);
-		await setArchived(db, 5, false, "2026-10-01");
+		await restoreOn(db, 5, "2026-10-01");
 		expect(await periods(5)).toEqual([
 			{ archived_on: "2026-09-15", restored_on: "2026-10-01" },
 		]);
 	});
 
 	it("keeps one open period, so an overlapping archive adds none", async () => {
-		await setArchived(db, 5, true, "2026-09-30");
-		await setArchived(db, 5, true, "2026-10-01");
+		await archiveOn(db, 5, "2026-09-30");
+		await archiveOn(db, 5, "2026-10-01");
 		expect(await periods(5)).toEqual([
 			{ archived_on: "2026-09-30", restored_on: null },
 		]);
 	});
 
 	it("starts a new period on each later archive", async () => {
-		await setArchived(db, 5, true, "2026-08-20");
-		await setArchived(db, 5, false, "2026-10-05");
-		await setArchived(db, 5, true, "2026-10-20");
+		await archiveOn(db, 5, "2026-08-20");
+		await restoreOn(db, 5, "2026-10-05");
+		await archiveOn(db, 5, "2026-10-20");
 		expect(await periods(5)).toEqual([
 			{ archived_on: "2026-08-20", restored_on: "2026-10-05" },
 			{ archived_on: "2026-10-20", restored_on: null },
@@ -297,14 +297,14 @@ describe("category archive periods", () => {
 	});
 
 	it("leaves the period open when a restore is refused because the list is full", async () => {
-		await setArchived(db, 2, true, "2026-09-15");
+		await archiveOn(db, 2, "2026-09-15");
 		await db
 			.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 46)
 				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
 			)
 			.run();
-		expect(await setArchived(db, 2, false, "2026-10-01")).toBe(false);
+		expect(await restoreOn(db, 2, "2026-10-01")).toBe(false);
 		expect(await periods(2)).toEqual([
 			{ archived_on: "2026-09-15", restored_on: null },
 		]);
@@ -333,19 +333,19 @@ describe("the 50-category limit, checked in the same write", () => {
 	});
 
 	it("doesn't restore a category that's already active, so it keeps its place", async () => {
-		expect(await setArchived(db, 2, false)).toBe(false);
+		expect(await restoreOn(db, 2, "2026-09-22")).toBe(false);
 		expect((await names())[1]).toBe("Eating Out");
 	});
 
 	it("restores nothing once 50 are active", async () => {
-		await setArchived(db, 2, true);
+		await archiveOn(db, 2, "2026-09-22");
 		await fill();
 		await db
 			.prepare(
 				"INSERT INTO categories (name, icon, color) VALUES ('Extra 46', 'tag', 'cat-blue')",
 			)
 			.run();
-		expect(await setArchived(db, 2, false)).toBe(false);
+		expect(await restoreOn(db, 2, "2026-09-22")).toBe(false);
 		expect(
 			await count("SELECT COUNT(*) AS n FROM categories WHERE archived = 0"),
 		).toBe(50);

@@ -15,7 +15,6 @@ import {
 } from "../src/db/category-saves";
 import { Database } from "../src/db/database";
 import { resetDemo } from "../src/demo/reset";
-import { MAX_ACTIVE } from "../src/settings/category-form";
 import {
 	addCategory,
 	archiveCategory,
@@ -24,6 +23,7 @@ import {
 	restoreCategory,
 } from "../src/rules/categories";
 import type { Refusal } from "../src/rules/terms";
+import { MAX_ACTIVE } from "../src/settings/category-form";
 
 // The categories area's guard (decision 190): a save lands only while the list the rule read is still the list, and a
 // miss raises an error the save loop recognises, so nothing is saved on a stale list and the rule is asked again.
@@ -327,9 +327,7 @@ describe("archive and restore through the rules", () => {
 	const transactionsOf = async (id: number) =>
 		(
 			await db
-				.prepare(
-					"SELECT COUNT(*) AS n FROM transactions WHERE category_id = ?",
-				)
+				.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = ?")
 				.bind(id)
 				.first<{ n: number }>()
 		)?.n;
