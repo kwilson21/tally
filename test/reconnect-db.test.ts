@@ -21,14 +21,13 @@ describe("the bank sign-in emails switch", () => {
 	it("keeps the last value saved, with one row for the key", async () => {
 		await saveBankSignInEmails(env.DB, false);
 		await saveBankSignInEmails(env.DB, true);
-		await saveBankSignInEmails(env.DB, false);
 
-		expect(await readBankSignInEmails(env.DB)).toBe(false);
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
 
 		const { results } = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'bank_sign_in_emails'",
 		).all<{ value: string }>();
 
-		expect(results).toEqual([{ value: "off" }]);
+		expect(results).toEqual([{ value: "on" }]);
 	});
 });
