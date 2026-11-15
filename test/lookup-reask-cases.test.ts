@@ -158,12 +158,14 @@ async function runInstance(
 		replayAfter?: string[];
 		beforeAttempt?: (name: string, attempt: number) => Promise<void>;
 		sleep?: (name: string, ms: number) => Promise<void>;
+		limits?: Record<string, number>;
 	} = {},
 ) {
 	const steps = fakeSteps({
 		fails: options.fails,
 		replayAfter: options.replayAfter,
 		beforeAttempt: options.beforeAttempt,
+		limits: options.limits,
 	});
 
 	await runSortInstance(
@@ -197,6 +199,123 @@ beforeEach(async () => {
 		.all<{ id: number }>();
 
 	food = Number(categories.results[0]?.id);
+});
+
+/** Every column of a transaction row, as it reads now. */
+const rowOf = (id: number) =>
+	db.prepare("SELECT * FROM transactions WHERE id = ?").bind(id).first();
+
+const logCountOf = (id: number) =>
+	db
+		.prepare("SELECT COUNT(*) AS n FROM ai_log WHERE transaction_id = ?")
+		.bind(id)
+		.first<{ n: number }>()
+		.then((row) => Number(row?.n));
+
+describe("the request and the turn (#1113)", () => {
+	it("the re-ask's request state is the literal facts of one row, with no learned line", async () => {
+		await answeredRow();
+		const fetchImpl = okFetch();
+		await runInstance(fetchImpl);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		const body = bodyOf(fetchImpl);
+		expect(body.state).toEqual({
+			bank_description: "Harbor Bakery 42",
+			merchant: null,
+			amount_cents: 1200,
+			direction: "money in",
+			account_type: "depository",
+			plaid_category: "FOOD_AND_DRINK",
+		});
+	});
+
+	it("a write whose turn another turn took writes no mark, and keeps its reserved calls in the record as writeGroup does", async () => {
+		const id = await answeredRow();
+		const day = todayIn(await householdTimeZone(db));
+		const before = await callCount();
+		const fetchImpl = okFetch();
+		await runInstance(fetchImpl, {
+			limits: { "lookup-reask-write": 1 },
+			beforeAttempt: async (name) => {
+				if (name !== "lookup-reask-write") return;
+				await db
+					.prepare(
+						"UPDATE household_settings SET value = ? WHERE key = 'sorting_turn'",
+					)
+					.bind(
+						JSON.stringify({ id: "other-turn", until: Date.now() + 60_000 }),
+					)
+					.run();
+			},
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(await markOf(id)).toBeNull();
+		// The call was made and stays counted: the record still holds the grant until the cleanup clears it.
+		expect((await callCount()) - before).toBe(1);
+
+		const record = await db
+			.prepare("SELECT key FROM household_settings WHERE key GLOB ?")
+			.bind(`jev_reserved_${day}_*`)
+			.first();
+
+		expect(record).not.toBeNull();
+	});
+});
+
+describe("the row is unchanged by the re-ask's outcome (#1113)", () => {
+	const unchanged = async (
+		fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+	) => {
+		const id = await answeredRow();
+		const before = await rowOf(id);
+		const logsBefore = await logCountOf(id);
+		await runInstance(fetchImpl);
+		const after = await rowOf(id);
+		expect(after).toEqual(before);
+		expect(await logCountOf(id)).toBe(logsBefore);
+
+		return id;
+	};
+
+	it("after an HTTP 500, the row keeps every column and its ai_log count", async () => {
+		await unchanged(vi.fn(async () => new Response("{}", { status: 500 })));
+	});
+
+	it("after a lost ask (an ask step that fails), the row keeps every column and its ai_log count", async () => {
+		const id = await answeredRow();
+		const before = await rowOf(id);
+		const logsBefore = await logCountOf(id);
+		await runInstance(okFetch(), { fails: [`lookup-reask-row-${id}`] });
+		expect(await rowOf(id)).toEqual(before);
+		expect(await logCountOf(id)).toBe(logsBefore);
+	});
+
+	it("after an answered call, the row keeps every column and its ai_log count", async () => {
+		await unchanged(okFetch());
+	});
+});
+
+describe("the instance's other paths (#1113)", () => {
+	it("an instance started by a sync, with sort as they arrive off, asks nothing", async () => {
+		const id = await answeredRow();
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, sortOnArrival: false });
+		const fetchImpl = okFetch();
+		await runInstance(fetchImpl, { runParams: { ...params, bySync: true } });
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(await markOf(id)).toBeNull();
+	});
+
+	it("in the demo, with a Tavily key set, no lookup-reask step is registered", async () => {
+		await answeredRow();
+
+		const steps = await runInstance(okFetch(), {
+			instanceEnv: { ...gateOpen, DEMO: "true" },
+		});
+
+		expect(steps.names().some((name) => name.startsWith("lookup-reask"))).toBe(
+			false,
+		);
+	});
 });
 
 describe("cleared, each reason through the re-ask (#1113)", () => {

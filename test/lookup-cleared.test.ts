@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { jevInputOf, pendingForJev, seenOf } from "../src/db/transactions";
+import { pendingForJev, seenOf } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { inputMark } from "../src/lookup/input-mark";
 import { type SortEnv, sortGroups } from "../src/sort-groups";
@@ -117,29 +117,6 @@ beforeEach(async () => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
-});
-
-describe("what Jev is told (#1113)", () => {
-	it("pendingForJev's told fields are jevInputOf(seen), for a row with no name chosen and one with a name", async () => {
-		const plain = await addRow("PLAIN STORE 1");
-		const named = await addRow("NAMED STORE 2");
-		await db
-			.prepare("UPDATE transactions SET own_name = 'Corner Shop' WHERE id = ?")
-			.bind(named)
-			.run();
-
-		const rows = await pendingForJev(db, 10, { ids: [plain, named] });
-
-		expect(rows).toHaveLength(2);
-
-		for (const row of rows) {
-			expect(row).toMatchObject(jevInputOf(row.seen));
-		}
-
-		expect(rows.find((row) => row.id === named)?.displayName).toBe(
-			"Corner Shop",
-		);
-	});
 });
 
 describe("the mark a sure business answer writes", () => {
