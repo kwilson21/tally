@@ -344,6 +344,75 @@ describe("removing a sign-in address", () => {
 		expect(await subscriptionCount()).toBe(0);
 	});
 
+	it("leaves other members' push subscriptions when one address is removed", async () => {
+		const OTHER = "riley@example.com";
+		await addMember();
+		await db.batch([
+			db
+				.prepare(
+					"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES (?, ?, 'p', 'a')",
+				)
+				.bind(MEMBER, "https://push.example.test/guard-check-laptop"),
+			db
+				.prepare("INSERT INTO household_members (email) VALUES (?)")
+				.bind(OTHER),
+			db
+				.prepare(
+					"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES (?, ?, 'p', 'a')",
+				)
+				.bind(OTHER, "https://push.example.test/riley-phone"),
+		]);
+
+		await attempt(
+			decideSetting(
+				removeSignInAddress,
+				{ email: MEMBER, now: Date.UTC(2026, 8, 22, 12) },
+				(d) => addressFacts(d, MEMBER),
+				removeAddressStatements,
+			),
+		);
+
+		expect(await subscriptionCount()).toBe(0);
+		const others = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM push_subscriptions WHERE member_email = ?",
+			)
+			.bind(OTHER)
+			.first<{ n: number }>();
+		const otherRow = await db
+			.prepare(
+				"SELECT removed_at AS removedAt FROM household_members WHERE email = ?",
+			)
+			.bind(OTHER)
+			.first<{ removedAt: string | null }>();
+		expect(others?.n).toBe(1);
+		expect(otherRow?.removedAt).toBeNull();
+	});
+
+	it("refuses an address that is not a member and changes no member or subscription", async () => {
+		const UNKNOWN = "nobody@example.com";
+		await addMember();
+
+		const refused = await attempt(
+			decideSetting(
+				removeSignInAddress,
+				{ email: UNKNOWN, now: Date.UTC(2026, 8, 22, 12) },
+				(d) => addressFacts(d, UNKNOWN),
+				removeAddressStatements,
+			),
+		);
+
+		expect(refused).toMatchObject({ _tag: "AddressNotFound" });
+		expect((await memberRow())?.removedAt).toBeNull();
+		expect(await subscriptionCount()).toBe(1);
+		const removedAny = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM household_members WHERE removed_at IS NOT NULL",
+			)
+			.first<{ n: number }>();
+		expect(removedAny?.n).toBe(0);
+	});
+
 	it("writes nothing when the address's facts changed since the rule read them", async () => {
 		await addMember();
 
