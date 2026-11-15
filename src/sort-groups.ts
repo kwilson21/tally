@@ -98,7 +98,7 @@ export async function dailyJevCap(
 export const GROUP_SIZE = 25;
 
 /** How long one group may keep asking Jev; what it doesn't reach waits for the next group (decision 139). */
-const ASK_BUDGET_MS = 2 * 60_000;
+export const ASK_BUDGET_MS = 2 * 60_000;
 
 /** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
 export const MAX_FAILURES_IN_A_ROW = 3;
@@ -257,7 +257,7 @@ export type AskResult =
 			outcome: "lost" | "date-changed" | "out-of-time";
 	  };
 
-const STEP_SETTINGS = {
+export const STEP_SETTINGS = {
 	read: {
 		retries: { limit: 50, delay: "20 seconds", backoff: "constant" },
 		timeout: "1 minute",
@@ -731,24 +731,24 @@ async function readGroup(
  * Reserves the group's calls from the day's cap, for the day its read used (decision 139). A group's grant is kept under
  * its name (decision 143): a reserve that runs again gets that grant back, and reserves nothing more.
  */
-async function reserveCalls(
+export async function reserveCalls(
 	env: SortEnv,
-	plan: ReadPlan,
+	{ day, turnId, wanted }: { day: string; turnId: string; wanted: number },
 ): Promise<{ granted: number }> {
 	const kept = await env.DB.prepare(
 		"SELECT value FROM household_settings WHERE key = ?",
 	)
-		.bind(reservedKeyFor(plan.day, plan.turnId))
+		.bind(reservedKeyFor(day, turnId))
 		.first<{ value: string }>();
 
 	if (kept) return { granted: Number(kept.value) };
 
 	const granted = await reserveJevCalls(
 		env.DB,
-		plan.day,
+		day,
 		await dailyJevCap(env.DB, env),
-		plan.rows.length,
-		plan.turnId,
+		wanted,
+		turnId,
 	);
 
 	return { granted };
@@ -871,12 +871,9 @@ async function askOne(
 	const id = row.id;
 
 	try {
-		if (attempt > 1) return { id, outcome: "lost" };
+		const blocked = askBlocked(id, { attempt }, plan);
 
-		if (todayIn(plan.timeZone) !== plan.day)
-			return { id, outcome: "date-changed" };
-
-		if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
+		if (blocked) return blocked;
 
 		// A re-ask asks for its category only, never details (decision 160).
 		const detailRequested =
@@ -898,26 +895,7 @@ async function askOne(
 			},
 		);
 
-		if (!result.ok) {
-			// Status and request id only: never the key or anything about the transaction.
-			console.error(
-				`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
-			);
-
-			const failure: FailedAsk = {
-				id,
-				outcome: "failed",
-				status: result.status,
-				requestId: result.requestId,
-				serviceWide: serviceWide(result.status),
-			};
-
-			if (result.retryAfterMs !== undefined) {
-				failure.retryAfterMs = result.retryAfterMs;
-			}
-
-			return failure;
-		}
+		if (!result.ok) return failedAsk(id, result);
 
 		return { id, outcome: "answered", answer: result.answer };
 	} catch (error) {
@@ -933,6 +911,49 @@ async function askOne(
 			serviceWide: true,
 		};
 	}
+}
+
+/**
+ * The guards an ask makes before it calls Jev (decision 139), shared with the privacy re-ask: a retried ask (attempt > 1)
+ * is `lost` since its first attempt may have called, a changed household day is `date-changed`, and a time past the
+ * ask budget is `out-of-time`. Null when the ask may go ahead.
+ */
+export function askBlocked(
+	id: number,
+	{ attempt }: { attempt: number },
+	plan: { day: string; timeZone: string; askUntil: number },
+): AskResult | null {
+	if (attempt > 1) return { id, outcome: "lost" };
+
+	if (todayIn(plan.timeZone) !== plan.day) return { id, outcome: "date-changed" };
+
+	if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
+
+	return null;
+}
+
+/** A failed Jev call as a failure answer, logged by status and request id only (never the key or the transaction). */
+export function failedAsk(
+	id: number,
+	result: Extract<JevResult, { ok: false }>,
+): FailedAsk {
+	console.error(
+		`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
+	);
+
+	const failure: FailedAsk = {
+		id,
+		outcome: "failed",
+		status: result.status,
+		requestId: result.requestId,
+		serviceWide: serviceWide(result.status),
+	};
+
+	if (result.retryAfterMs !== undefined) {
+		failure.retryAfterMs = result.retryAfterMs;
+	}
+
+	return failure;
 }
 
 /**
@@ -1275,8 +1296,8 @@ export async function sortGroups(
 		| ((url: string, init?: RequestInit) => Promise<Response>)
 		| undefined,
 	options: SortOptions,
-): Promise<{ asked: number; applied: number }> {
-	const done = { asked: 0, applied: 0 };
+): Promise<{ asked: number; applied: number; jevBusy: boolean }> {
+	const done = { asked: 0, applied: 0, jevBusy: false };
 	// A re-ask asks only its own rows, and never by the sync switch (decision 160).
 	const onlyIds = options.reask ? options.reask.ids : options.onlyIds;
 	const bySync = options.reask ? false : (options.bySync ?? false);
@@ -1343,7 +1364,11 @@ export async function sortGroups(
 			try {
 				granted = (
 					await runStep(`group-${n}-reserve`, STEP_SETTINGS.reserve, () =>
-						reserveCalls(env, readPlan),
+						reserveCalls(env, {
+							day: readPlan.day,
+							turnId: readPlan.turnId,
+							wanted: readPlan.rows.length,
+						}),
 					)
 				).granted;
 			} catch (error) {
@@ -1427,7 +1452,15 @@ export async function sortGroups(
 					askedIds.add(result.id);
 			groups.push(results);
 
-			if (written.stop || outOfTime) break;
+			if (written.stop || outOfTime) {
+				// The run stopped because nextWait said stop on a busy Jev (decision 145), so the re-ask does not follow it.
+				done.jevBusy =
+					options.sleep !== undefined &&
+					wait === null &&
+					retryable(results.at(-1));
+
+				break;
+			}
 
 			if (wait !== null && options.sleep)
 				await options.sleep(`wait-${n}`, wait);

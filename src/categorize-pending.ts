@@ -85,7 +85,8 @@ export async function categorizePending(
 	if (done.asked > 0)
 		console.log(`jev: asked ${done.asked}, applied ${done.applied}`);
 
-	return done;
+	// sortGroups also says whether Jev stayed busy; this in-process pass never waits, so its result is the count alone.
+	return { asked: done.asked, applied: done.applied };
 }
 
 /** The step runner in-process: a step just runs, since nothing retries it here. */
