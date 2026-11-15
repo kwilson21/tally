@@ -3,7 +3,9 @@
 // batch, so a later step can join a transaction to its lookup text and its private mark in SQL (merchant_lookup_texts,
 // migration 0074).
 
+import * as Schema from "effect/Schema";
 import { merchantKeySql } from "../db/merchant-key";
+import { parseStoredWith } from "../db/stored-shape";
 import { askedSql } from "../db/suggestions-queue";
 import {
 	isPrivatePlaidCategory,
@@ -47,12 +49,27 @@ export type LookupTextsRow = {
 	excluded: number | null;
 };
 
-/** The facts one read row gives: its two lists parsed as they are stored, its flags as booleans. */
+/**
+ * The two lists json_group_array builds: the distinct bank texts (raw_name is NOT NULL) and the distinct Plaid categories
+ * (plaid_category is nullable, and a row Plaid did not categorize is null).
+ */
+const RawTexts = Schema.mutable(Schema.Array(Schema.String));
+const Categories = Schema.mutable(Schema.Array(Schema.NullOr(Schema.String)));
+
+/**
+ * The facts one read row gives: its two lists parsed as they are stored, its flags as booleans. Text that is not JSON throws
+ * its SyntaxError (JSON.parse, as before). A list of the wrong shape throws a fixed message, which carries no stored value.
+ */
 export function lookupFactsOf(row: LookupTextsRow): LookupTextFacts {
-	// SAFETY: json_group_array always returns a JSON array of the column's values, so each parse below is an array of strings or nulls.
+	const rawTexts = parseStoredWith(RawTexts, row.rawTexts);
+	const categories = parseStoredWith(Categories, row.categories);
+
+	if (rawTexts === null || categories === null)
+		throw new Error("lookup texts: stored facts unreadable");
+
 	return {
-		rawTexts: JSON.parse(row.rawTexts) as string[],
-		categories: JSON.parse(row.categories) as (string | null)[],
+		rawTexts,
+		categories,
 		flagged: row.flagged === 1,
 		maybe: row.maybe === 1,
 		transfer: row.transfer === 1,
@@ -92,12 +109,6 @@ export function lookupTextRow(
 export const MAYBE_IN_RANGE_SQL = `(${askedSql("transfer", "t.transfer_confidence")} OR ${askedSql("income", "t.income_confidence")})`;
 
 /**
- * The facts the decision reads, one row per merchant key over every one of its transactions (cash, hand-entered, Apple Card and
- * split rows included), and `version`: those same facts as JSON text. The read and the save both run this SQL, so a save can
- * compare the version it read with the version as it stands when it writes (saveLookupTexts). Nothing else is read, so the
- * version is built from exactly the facts the decision uses, and needs no assumption about updated_at.
- */
-/**
  * One row per merchant key: the distinct values of `column` over the key's rows, as a JSON array in value order (NULL first).
  * The order comes from the ORDER BY inside the subquery, not from the query plan, so the same rows always give the same text.
  */
@@ -105,8 +116,11 @@ const sortedDistinctSql = (column: string) =>
 	`SELECT k, json_group_array(v ORDER BY v) AS list FROM (SELECT DISTINCT ${merchantKeySql("t")} AS k, ${column} AS v FROM transactions t) GROUP BY k`;
 
 /**
- * The version is the decision's facts as one text, with the two lists in sorted order (sortedDistinctSql). The read and the
- * save both run this one fragment, so they cannot drift apart. Exported so a test can check the two paths produce the same text.
+ * The facts the decision reads, one row per merchant key over every one of its transactions (cash, hand-entered, Apple Card and
+ * split rows included), and `version`: those same facts as JSON text, with the two lists in sorted order (sortedDistinctSql).
+ * The read and the save both run this one fragment, so they cannot drift apart, and a save can compare the version it read with
+ * the version as it stands when it writes (saveLookupTexts). Nothing else is read, so the version is built from exactly the facts
+ * the decision uses, and needs no assumption about updated_at. Exported so a test can check the two paths produce the same text.
  */
 export const KEY_VERSIONS_SQL = `SELECT f.merchantKey, f.rawTexts, f.categories, f.flagged, f.maybe, f.transfer, f.excluded,
 	json_array(f.flagged, f.maybe, f.transfer, f.excluded, raws.list, cats.list) AS version

@@ -9,6 +9,75 @@ import { cases } from "./held-json-corpus";
 
 const recorded: Record<string, string> = baseline;
 
+// The answers the conversions moved on purpose (decision 233). Each is named here and nowhere else; every other case keeps
+// its recorded answer. A list the Schema refuses now throws a fixed Error, as a list of the wrong shape (lookupFactsOf).
+const TEXTS_REFUSED_IN_RAW = [
+	"10k element array",
+	"2MB string",
+	"Infinity element",
+	"JSON null",
+	"JSON number",
+	"JSON string",
+	"JSON true",
+	"__proto__ key",
+	"array of null",
+	"array of number",
+	"array of object",
+	"depth 1000 array",
+	"depth 200 array",
+	"depth 2000 array",
+	"depth 2000 object",
+	"depth 5000 array",
+	"duplicate keys",
+	"empty object",
+	"minus Infinity element",
+	"nested array",
+	"string and null",
+];
+
+const TEXTS_REFUSED_IN_CATEGORIES = [
+	"10k element array",
+	"2MB string",
+	"Infinity element",
+	"JSON null",
+	"JSON number",
+	"JSON string",
+	"JSON true",
+	"__proto__ key",
+	"array of number",
+	"array of object",
+	"depth 1000 array",
+	"depth 200 array",
+	"depth 2000 array",
+	"depth 2000 object",
+	"depth 5000 array",
+	"duplicate keys",
+	"empty object",
+	"minus Infinity element",
+	"nested array",
+];
+
+/** The answer the code gives now for a case: the recorded one, unless the conversion moved it on purpose. */
+function expectedAnswer(label: string): string {
+	const [site = "", column = "", name = ""] = label.split(" | ");
+
+	if (
+		site === "texts" &&
+		column === "rawTexts" &&
+		TEXTS_REFUSED_IN_RAW.includes(name)
+	)
+		return "throws Error";
+
+	if (
+		site === "texts" &&
+		column === "categories" &&
+		TEXTS_REFUSED_IN_CATEGORIES.includes(name)
+	)
+		return "throws Error";
+
+	return recorded[label] ?? "";
+}
+
 describe("the held stored JSON reads answer as they did before (#1120)", () => {
 	it("gives every corpus case the answer recorded for it", () => {
 		const list = cases();
@@ -21,11 +90,10 @@ describe("the held stored JSON reads answer as they did before (#1120)", () => {
 
 		for (const item of list) {
 			const got = answerOf(item);
+			const want = expectedAnswer(item.label);
 
-			if (got !== recorded[item.label])
-				problems.push(
-					`${item.label}\n  want ${recorded[item.label]}\n  got  ${got}`,
-				);
+			if (got !== want)
+				problems.push(`${item.label}\n  want ${want}\n  got  ${got}`);
 		}
 
 		expect(problems).toEqual([]);
