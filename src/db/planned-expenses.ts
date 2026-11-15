@@ -5,10 +5,13 @@
  * Every write here is one statement or one batch, so the never-both triggers (migration 0053) are the only guard
  * a link needs beyond these checks, and the link reports which one fired.
  */
+import { and, isNull, lte, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { tidyName } from "../transactions/tidy-name";
 import { paysBillGroupSql, paysPlanGroupSql } from "./counted-month";
 import { merchantColumnSql } from "./merchant-key";
 import { ownNameSql } from "./own-name";
+import { plannedExpenses } from "./schema";
 
 export type PlannedExpense = {
 	id: number;
@@ -105,18 +108,25 @@ export async function plansSetAsideCents(
 	db: D1Database,
 	month: string,
 ): Promise<number> {
-	const row = await db
-		.prepare(
-			"SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM planned_expenses WHERE transaction_id IS NULL AND month <= ?",
+	const row = await drizzle(db)
+		.select({
+			cents: sql<number>`COALESCE(SUM(${plannedExpenses.amountCents}), 0)`,
+		})
+		.from(plannedExpenses)
+		.where(
+			and(
+				isNull(plannedExpenses.transactionId),
+				lte(plannedExpenses.month, month),
+			),
 		)
-		.bind(month)
-		.first<{ cents: number }>();
+		.get();
 
 	return row?.cents ?? 0;
 }
 
 /** Every plan, in month order, with its payment's date and name when paid. */
 export async function loadPlans(db: D1Database): Promise<PlannedExpense[]> {
+	// Stays raw: the PAYER_NAME fragment is shared by the plan reads (decision 179).
 	const { results } = await db
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
@@ -135,6 +145,7 @@ export async function loadPlan(
 	db: D1Database,
 	id: number,
 ): Promise<PlannedExpense | null> {
+	// Stays raw: the PAYER_NAME fragment is shared by the plan reads (decision 179).
 	const row = await db
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
@@ -154,6 +165,7 @@ export async function planPaymentCandidates(
 	db: D1Database,
 	plan: Pick<PlannedExpense, "month" | "amountCents">,
 ): Promise<PlanPaymentCandidate[]> {
+	// Stays raw: the canPayPlanSql and PAYER_NAME fragments are shared (decision 179).
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS name, t.raw_name AS rawName, t.excluded AS excluded

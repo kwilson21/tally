@@ -1,7 +1,10 @@
+import { eq, min } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { dateOfDayNumber, dayNumber, householdToday } from "../dates";
 import { amountRowsByBill } from "../db/bill-amounts";
 import { paysPlanGroupSql, paysPlanSql } from "../db/counted-month";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
+import { billPayments, bills as billsTable, transactions } from "../db/schema";
 import { type AmountRow, amountForMonth } from "./amount";
 import {
 	BILL_AMOUNT_TOLERANCE_PERCENT,
@@ -105,19 +108,28 @@ export async function matchBillPayments(
 ): Promise<number> {
 	const today = given ?? (await householdToday(db));
 
-	const first = await db
-		.prepare("SELECT MIN(date) AS date FROM transactions")
-		.first<{ date: string | null }>();
+	const first = await drizzle(db)
+		.select({ date: min(transactions.date) })
+		.from(transactions)
+		.get();
 
 	if (!first?.date) return 0;
 
-	const bills = (
-		await db
-			.prepare(
-				"SELECT id,amount_cents,due_day,frequency,anchor_month,anchor_date,merchant_raw_name,merchant_raw_text FROM bills WHERE active=1",
-			)
-			.all<Bill>()
-	).results;
+	// The keys are snake_case, as the Bill type and merchantTextArgs read them.
+	const bills: Bill[] = await drizzle(db)
+		.select({
+			id: billsTable.id,
+			amount_cents: billsTable.amountCents,
+			due_day: billsTable.dueDay,
+			frequency: billsTable.frequency,
+			anchor_month: billsTable.anchorMonth,
+			anchor_date: billsTable.anchorDate,
+			merchant_raw_name: billsTable.merchantRawName,
+			merchant_raw_text: billsTable.merchantRawText,
+		})
+		.from(billsTable)
+		.where(eq(billsTable.active, 1))
+		.all();
 
 	const endDay = dayNumber(today) + 7;
 	// Each occurrence is matched at its own month's amount (decision 101, src/bills/amount.ts).
@@ -134,23 +146,25 @@ export async function matchBillPayments(
 	const pairs: Pair[] = [];
 	const firstDay = dayNumber(first.date);
 
-	const linkedRows = (
-		await db
-			.prepare("SELECT bill_id,period FROM bill_payments WHERE status='linked'")
-			.all<{ bill_id: number; period: string }>()
-	).results;
+	const linkedRows = await drizzle(db)
+		.select({ bill_id: billPayments.billId, period: billPayments.period })
+		.from(billPayments)
+		.where(eq(billPayments.status, "linked"))
+		.all();
 
 	const linked = new Set(
 		linkedRows.map((row) => `${row.bill_id}:${row.period}`),
 	);
 
-	const dismissedRows = (
-		await db
-			.prepare(
-				"SELECT bill_id,period,transaction_id FROM bill_payments WHERE status='dismissed'",
-			)
-			.all<{ bill_id: number; period: string; transaction_id: number }>()
-	).results;
+	const dismissedRows = await drizzle(db)
+		.select({
+			bill_id: billPayments.billId,
+			period: billPayments.period,
+			transaction_id: billPayments.transactionId,
+		})
+		.from(billPayments)
+		.where(eq(billPayments.status, "dismissed"))
+		.all();
 
 	const dismissed = new Set(
 		dismissedRows.map(

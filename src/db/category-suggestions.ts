@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { union } from "drizzle-orm/sqlite-core";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { JEV_THRESHOLD } from "../ai/categorize";
@@ -23,7 +24,11 @@ import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
 import { leftEmpty } from "./refused";
-import { categorySuggestions } from "./schema";
+import {
+	type CATEGORY_SUGGESTION_STATUS_VALUES,
+	categories,
+	categorySuggestions,
+} from "./schema";
 import type { ListRow } from "./transactions";
 
 export type NoneFitTransaction = {
@@ -45,6 +50,7 @@ export async function noneFitTransactions(
 		AND t.is_split = 0 AND t.parent_id IS NULL
 		AND NOT ${neverSuggestedSql("t", "new_category")}`;
 
+	// Stays raw: the theme and merchant-key fragments are shared SQL strings (decision 179).
 	const { results: groups } = await db
 		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3
@@ -54,6 +60,7 @@ export async function noneFitTransactions(
 
 	if (!groups.length) return [];
 
+	// Stays raw: the theme, merchant-key and own-name fragments are shared SQL strings (decision 179).
 	const { results } = await db
 		.prepare(`SELECT t.id, ${theme} theme, ${merchantKeySql("t")} merchantKey,
 			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant, ${ownNameSql("t")} ownName
@@ -112,6 +119,7 @@ export async function saveSuggestion(
 		const existing = await pendingSuggestionIdByName(db, safeName);
 
 		if (existing) {
+			// Stays raw: the eligible fragment and a placeholders() list, in the saveSuggestion batch (decision 179).
 			await db
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id = ? WHERE id IN (${placeholders()}) AND category_confidence >= ? AND jev_none_fit=1 AND jev_category_id IS NULL AND amount_cents>0 AND pending=0 AND excluded=0 AND flag_income=0 AND is_split=0 AND parent_id IS NULL AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`,
@@ -128,16 +136,19 @@ export async function saveSuggestion(
 
 	try {
 		const results = await db.batch<{ id: number }>([
+			// Stays raw: the placeholders() fragment with json_each, in the saveSuggestion batch (decision 179).
 			db
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id=NULL WHERE id IN (${placeholders()}) AND category_suggestion_id IN (SELECT id FROM category_suggestions WHERE status='none')`,
 				)
 				.bind(JSON.stringify(ids)),
+			// Stays raw: the eligible fragment, in a batch whose RETURNING id feeds the next statement (decision 179).
 			db
 				.prepare(
 					`INSERT INTO category_suggestions (name,status) SELECT ?,? WHERE (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 RETURNING id`,
 				)
 				.bind(safeName, status, JSON.stringify(ids), JEV_THRESHOLD),
+			// Stays raw: the eligible fragment, in the saveSuggestion batch (decision 179).
 			db
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id=(SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=? ORDER BY id DESC LIMIT 1) WHERE ${eligible} AND (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 AND EXISTS (SELECT 1 FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=?)`,
@@ -166,6 +177,7 @@ export async function saveSuggestion(
 		const existing = await pendingSuggestionIdByName(db, safeName);
 
 		if (!existing) throw error;
+		// Stays raw: the shared eligible fragment (decision 179).
 		await db
 			.prepare(
 				`UPDATE transactions SET category_suggestion_id=? WHERE ${eligible}`,
@@ -177,14 +189,20 @@ export async function saveSuggestion(
 	}
 }
 
-export async function namesToAvoid(db: D1Database): Promise<string[]> {
-	const { results } = await db
-		.prepare(
-			"SELECT name FROM categories UNION SELECT name FROM category_suggestions WHERE status = 'dismissed'",
-		)
-		.all<{ name: string }>();
+type SuggestionStatus = (typeof CATEGORY_SUGGESTION_STATUS_VALUES)[number];
 
-	return results.map((row) => row.name);
+export async function namesToAvoid(db: D1Database): Promise<string[]> {
+	const orm = drizzle(db);
+
+	const rows = await union(
+		orm.select({ name: categories.name }).from(categories),
+		orm
+			.select({ name: categorySuggestions.name })
+			.from(categorySuggestions)
+			.where(eq(categorySuggestions.status, "dismissed")),
+	).all();
+
+	return rows.map((row) => row.name);
 }
 
 /**
@@ -193,13 +211,20 @@ export async function namesToAvoid(db: D1Database): Promise<string[]> {
  * instead, so it can name one that fits. The nightly naming keeps namesToAvoid.
  */
 export async function purchaseNamesToAvoid(db: D1Database): Promise<string[]> {
-	const { results } = await db
-		.prepare(
-			"SELECT name FROM categories WHERE archived = 1 UNION SELECT name FROM category_suggestions WHERE status = 'dismissed'",
-		)
-		.all<{ name: string }>();
+	const orm = drizzle(db);
 
-	return results.map((row) => row.name);
+	const rows = await union(
+		orm
+			.select({ name: categories.name })
+			.from(categories)
+			.where(eq(categories.archived, 1)),
+		orm
+			.select({ name: categorySuggestions.name })
+			.from(categorySuggestions)
+			.where(eq(categorySuggestions.status, "dismissed")),
+	).all();
+
+	return rows.map((row) => row.name);
 }
 
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
@@ -259,9 +284,11 @@ export async function pendingSuggestionPage(
 	only?: SuggestionFilter,
 ): Promise<PendingSuggestionPage> {
 	await db.batch([
+		// Stays raw: the suggestedRowSql fragment, in the pendingSuggestionPage batch (decision 179).
 		db.prepare(
 			`UPDATE transactions SET category_suggestion_id=NULL WHERE category_suggestion_id IN (SELECT cs.id FROM category_suggestions cs WHERE cs.status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=cs.id AND ${suggestedRowSql("t")}))`,
 		),
+		// Stays raw: the suggestedRowSql fragment, in the pendingSuggestionPage batch (decision 179).
 		db.prepare(
 			`UPDATE category_suggestions SET status='none' WHERE status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=category_suggestions.id AND ${suggestedRowSql("t")})`,
 		),
@@ -269,6 +296,7 @@ export async function pendingSuggestionPage(
 	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
 	const [onlyClause, onlyBinds] = filterClause(only);
 
+	// Stays raw: the suggestedRowSql and neverSuggestedSql fragments, with window functions (decision 179).
 	const { results: suggestions } = await db
 		.prepare(
 			`WITH candidates AS (
@@ -285,6 +313,7 @@ export async function pendingSuggestionPage(
 
 	if (!suggestions.length) return { suggestions: [], more: 0 };
 
+	// Stays raw: json_each over bound ids, with the shared fragments (decision 179).
 	const { results } = await db
 		.prepare(`WITH pending AS (
 			SELECT value AS id FROM json_each(?)
@@ -391,11 +420,15 @@ export async function createFacts(
 	// SAFETY: the batch below lists exactly four statements, so its results are the four D1Results typed here. A batch
 	// is one transaction, so the version is of the very rows read beside it.
 	const [suggestion, list, suggested, version] = (await db.batch([
+		// Stays raw: a plain read, but createFacts' batch holds raw fragment statements (decision 179).
 		db
 			.prepare("SELECT status, name FROM category_suggestions WHERE id = ?1")
 			.bind(id),
+		// Stays raw: the LIST constant is built from shared fragments (decision 179).
 		db.prepare(LIST),
+		// Stays raw: STILL_SUGGESTED is built from shared fragments with json_each (decision 179).
 		db.prepare(STILL_SUGGESTED).bind(id, shownJson(shown)),
+		// Stays raw: the CREATE_VERSION fragment (decision 179).
 		db
 			.prepare(`SELECT ${CREATE_VERSION} AS version`)
 			.bind(id, shownJson(shown)),
@@ -417,13 +450,14 @@ export async function createFacts(
 	};
 }
 
-/** What makes the category, or brings it back with its archive period closed (as setArchived's restore does); an Add to changes none. */
+/** What makes the category, or brings it back with its archive period closed (as restoreCategoryStatements in category-saves.ts does); an Add to changes none. */
 const categoryStatements = (
 	db: D1Database,
 	category: CreateWrite["category"],
 ) =>
 	category.kind === "create"
 		? [
+				// Stays raw: a batch statement returned into createStatements, which has raw siblings (decision 179).
 				db
 					.prepare(
 						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', ?, ?)",
@@ -437,11 +471,13 @@ const categoryStatements = (
 			]
 		: category.kind === "restore"
 			? [
+					// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 					db
 						.prepare(
 							"UPDATE categories SET archived = 0, archived_on = NULL, sort_order = ? WHERE id = ?",
 						)
 						.bind(category.sortOrder, category.id),
+					// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 					db
 						.prepare(
 							"UPDATE category_archive_periods SET restored_on = ? WHERE category_id = ? AND restored_on IS NULL",
@@ -463,17 +499,20 @@ export const createStatements = (
 	save: CreateWrite,
 	shown: number[],
 ) => [
+	// Stays raw: the CREATE_VERSION fragment (decision 179).
 	db
 		.prepare(
 			`INSERT INTO categories (name, icon, color) SELECT NULL, 'tag', 'cat-blue' WHERE ${CREATE_VERSION} IS NOT ?3`,
 		)
 		.bind(save.suggestionId, shownJson(shown), save.expectedVersion),
 	...categoryStatements(db, save.category),
+	// Stays raw: the createStatements batch has raw siblings (decision 179).
 	db
 		.prepare(
 			"UPDATE category_suggestions SET status = ?, decided_at = datetime('now') WHERE id = ?",
 		)
 		.bind(save.status, save.suggestionId),
+	// Stays raw: shared fragments, in the createStatements batch with raw siblings (decision 179).
 	db
 		.prepare(
 			`UPDATE transactions SET category_id = COALESCE(?1, (SELECT id FROM categories WHERE name_key = ?2 AND archived = 0)),
@@ -487,6 +526,7 @@ export const createStatements = (
 			save.who,
 			JSON.stringify(save.file),
 		),
+	// Stays raw: json_each over bound note JSON (decision 179).
 	db
 		.prepare(
 			`UPDATE transactions SET note = json_extract(note.value, '$.note'), note_guessed = 0, note_state = 'written',
@@ -494,12 +534,14 @@ export const createStatements = (
 			FROM json_each(?2) AS note WHERE transactions.id = json_extract(note.value, '$.id')`,
 		)
 		.bind(save.who, JSON.stringify(save.notes)),
+	// Stays raw: the suggestedRowSql fragment (decision 179).
 	db
 		.prepare(
 			`UPDATE transactions SET category_suggestion_id = NULL, category_confidence = NULL, jev_none_fit = 0
 			WHERE category_suggestion_id = ? AND ${suggestedRowSql("transactions")}`,
 		)
 		.bind(save.suggestionId),
+	// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 	db
 		.prepare(
 			"UPDATE transactions SET category_suggestion_id = NULL WHERE category_suggestion_id = ?",
@@ -634,11 +676,23 @@ export const decideDismiss = <E>(
 			decide: (facts) => dismissRule.decide(request, facts),
 			save: (write) =>
 				Effect.promise(() =>
-					db
-						.prepare(
-							"UPDATE category_suggestions SET status = ?1, decided_at = datetime('now') WHERE id = ?2 AND status = ?3",
+					drizzle(db)
+						.update(categorySuggestions)
+						.set({
+							// SAFETY: the rule's machine moves a suggestion only to a status the CHECK allows (schema.ts).
+							status: write.status as SuggestionStatus,
+							decidedAt: sql`datetime('now')`,
+						})
+						.where(
+							and(
+								eq(categorySuggestions.id, write.suggestionId),
+								// SAFETY: as above, for the status the rule read.
+								eq(
+									categorySuggestions.status,
+									write.expectedStatus as SuggestionStatus,
+								),
+							),
 						)
-						.bind(write.status, write.suggestionId, write.expectedStatus)
 						.run(),
 				).pipe(
 					Effect.filterOrFail(

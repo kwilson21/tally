@@ -246,6 +246,25 @@ describe("the edge", () => {
 			expect(readAtEdge(CategoryId, text).ok).toBe(false);
 	});
 
+	it("reads a category's id only as plain digits, so a padded, signed, spaced, decimal, exponent or hex id is refused (#1111)", () => {
+		for (const text of [
+			"02",
+			" 2",
+			"+2",
+			"2.0",
+			"1e0",
+			"0x2",
+			"1234567890123456",
+		])
+			expect(readAtEdge(CategoryId, text)).toEqual({
+				ok: false,
+				say: "That is not a category.",
+			});
+
+		for (const text of ["1", "12", "999999999999999"])
+			expect(readAtEdge(CategoryId, text).ok).toBe(true);
+	});
+
 	it("reads a move's direction, and nothing else", () => {
 		expect(readAtEdge(MoveDirection, "up")).toEqual({ ok: true, value: "up" });
 		expect(readAtEdge(MoveDirection, "sideways").ok).toBe(false);

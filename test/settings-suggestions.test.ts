@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveCategory, setArchived } from "../src/db/categories";
 import {
 	pendingSuggestionPage,
 	pendingSuggestions,
@@ -11,6 +10,8 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { settings } from "../src/routes/settings";
+import { archiveOn, restoreOn } from "./archive-category";
+import { renameOn } from "./category-changes";
 import { envWith } from "./helpers/doubles";
 import { isMethod, itemAt, present } from "./helpers/present";
 import { recordSorting } from "./record-sorting";
@@ -514,12 +515,12 @@ describe("creating the category", () => {
 				.first<{ id: number }>(),
 		).id;
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 
 		// Another member restores and renames it once, between this save's read and its write.
 		const racing = racedOnce(
-			() => setArchived(db, archived, false, "2026-09-01"),
-			() => saveCategory(db, archived, { name: "Pets" }),
+			() => restoreOn(db, archived, "2026-09-01"),
+			() => renameOn(db, archived, "Pets"),
 		);
 
 		const { res, html } = await post(
@@ -559,7 +560,7 @@ describe("creating the category", () => {
 		).id;
 
 		// Another member archives it once, between this save's read and its write.
-		const racing = racedOnce(() => setArchived(db, active, true, "2026-09-01"));
+		const racing = racedOnce(() => archiveOn(db, active, "2026-09-01"));
 
 		const { res, html } = await post(
 			`/settings/suggestions/${id}/create`,

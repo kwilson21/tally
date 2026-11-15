@@ -1,6 +1,8 @@
 // The Maybe card's "New category" answer (decision 156): Tally's suggested name, opened in place, becomes an active
 // category with no budget amount, and the card's purchase is filed in it. Naming goes through the one AI path
 // (src/ai/suggest-name.ts), and only when the categories switch is on and an AI binding exists.
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { suggestCategoryName } from "../ai/suggest-name";
 import { cleanBankText } from "../clean-bank-text";
 import {
@@ -15,6 +17,7 @@ import { COLORS, categoryNames } from "./categories";
 import { purchaseNamesToAvoid } from "./category-suggestions";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
+import { maybeNames } from "./schema";
 
 /**
  * The limit's words on the Maybe card: the category form's full message, and the offer to add to one the family has
@@ -73,6 +76,7 @@ export async function pendingCategoryNames(
 
 	if (merchantKeys.length === 0) return names;
 
+	// Stays raw: the merchantKeySql and neverSuggestedSql fragments, with json_each (decision 179).
 	const { results } = await db
 		.prepare(
 			`SELECT ${merchantKeySql("t")} AS key, cs.name AS name FROM category_suggestions cs
@@ -106,6 +110,7 @@ export async function suggestedCategoryName(
 	item: { transactionId: number; merchantKey: string; merchant: string },
 ): Promise<string | null> {
 	// The purchase's raw bank text comes with the same read that checks the Never suggest, so no extra query per card.
+	// Stays raw: the neverSuggestedSql fragment is shared (decision 179).
 	const allowed = await db
 		.prepare(
 			`SELECT (SELECT t.raw_name FROM transactions t WHERE t.id = ?) AS raw
@@ -139,6 +144,7 @@ export async function suggestedCategoryName(
 	// purchase's row.
 	const token = crypto.randomUUID();
 
+	// Stays raw: an INSERT ... SELECT with a conditional ON CONFLICT ... WHERE upsert (decision 179).
 	const claim = await db
 		.prepare(
 			`INSERT INTO maybe_names (transaction_id, name, claim, categories_key)
@@ -167,11 +173,15 @@ export async function suggestedCategoryName(
 	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
 
-	const done = await db
-		.prepare(
-			"UPDATE maybe_names SET name = ?, categories_key = ? WHERE transaction_id = ? AND claim = ?",
+	const done = await drizzle(db)
+		.update(maybeNames)
+		.set({ name, categoriesKey: key })
+		.where(
+			and(
+				eq(maybeNames.transactionId, item.transactionId),
+				eq(maybeNames.claim, token),
+			),
 		)
-		.bind(name, key, item.transactionId, token)
 		.run();
 
 	// Nothing changed when the row was replaced meanwhile: the answer is for a purchase that is gone, so it is dropped.
@@ -219,10 +229,11 @@ async function keptRow(
 	db: D1Database,
 	transactionId: number,
 ): Promise<{ name: string | null; key: string | null } | null> {
-	return db
-		.prepare(
-			"SELECT name, categories_key AS key FROM maybe_names WHERE transaction_id = ?",
-		)
-		.bind(transactionId)
-		.first<{ name: string | null; key: string | null }>();
+	const row = await drizzle(db)
+		.select({ name: maybeNames.name, key: maybeNames.categoriesKey })
+		.from(maybeNames)
+		.where(eq(maybeNames.transactionId, transactionId))
+		.get();
+
+	return row ?? null;
 }

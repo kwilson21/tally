@@ -1,6 +1,8 @@
 // A merchant's suggested names (spec §5, §7, decision 64). They are rows of `merchant_suggested_names`, up to three
 // per merchant, and read here as the JSON text merchantNamesJsonSql gives. They show only while `suggestion_status` is
 // `pending`: nothing is renamed until a person chooses, and a name a person chose, or turned down, is never suggested again.
+import * as Schema from "effect/Schema";
+import { readStoredWith } from "../db/stored-shape";
 import { MERCHANT_SUGGESTION_WAITING } from "../machines/merchant-suggestion";
 import { tidyName } from "./tidy-name";
 
@@ -13,15 +15,9 @@ export const MAX_SUGGESTED_NAMES = 3;
 export function parseSuggestedNames(
 	stored: string | null | undefined,
 ): string[] {
-	let rows: unknown;
+	const rows = readStoredWith(Schema.Array(Schema.Unknown), stored ?? "[]");
 
-	try {
-		rows = JSON.parse(stored ?? "[]");
-	} catch {
-		return [];
-	}
-
-	if (!Array.isArray(rows)) return [];
+	if (!rows) return [];
 	const named: [number, string][] = [];
 
 	for (const row of rows) {
@@ -35,14 +31,13 @@ export function parseSuggestedNames(
 		.slice(0, MAX_SUGGESTED_NAMES);
 }
 
-// True for one stored `[position, name]` pair: an array whose first item is a number and second a string.
-function isNamedRow(row: unknown): row is [number, string] {
-	return (
-		Array.isArray(row) &&
-		typeof row[0] === "number" &&
-		typeof row[1] === "string"
-	);
-}
+// True for one stored `[position, name]` pair: an array whose first item is a number and second a string. Items past
+// the second are allowed, as they always were.
+const isNamedRow = Schema.is(
+	Schema.TupleWithRest(Schema.Tuple([Schema.Number, Schema.String]), [
+		Schema.Unknown,
+	]),
+);
 
 /**
  * The names to store for one merchant (the write rule of merchant_suggested_names): each trimmed, blank ones dropped, the

@@ -18,7 +18,7 @@ import {
 	update,
 } from "../public/js/money.js";
 // The browser script's pure parts and its DOM steps: integer cents in, the field's text out.
-import { formatCents } from "../src/money";
+import { ceilToDollars, formatCents } from "../src/money";
 
 describe("fieldCents (the field's text → cents, or null)", () => {
 	it.each([
@@ -784,5 +784,22 @@ describe("credit balances (allowCredit: a leading minus, and no floor at $0)", (
 		expect(() => update(root)).not.toThrow();
 		expect(minus.disabled).toBe(false);
 		expect(plus.disabled).toBe(false);
+	});
+});
+
+// The money input's round-up chip (roundedUp) and the server's rounding rule (ceilToDollars, src/money.ts) must give
+// the same whole dollar for every amount the field can hold, so the chip and the saved amount never disagree.
+describe("roundedUp agrees with ceilToDollars (the same rule on both sides)", () => {
+	const values = [0, 1, 49, 50, 99, 100, 101, 199, 200, 12345, 99999, 1234567];
+
+	it.each(values)("%i cents", (cents) => {
+		const text = showCents(cents);
+		const up = roundedUp(text);
+
+		if (cents % 100 === 0) {
+			expect(up).toBeNull();
+		} else {
+			expect(up).toBe(showCents(ceilToDollars(cents)));
+		}
 	});
 });

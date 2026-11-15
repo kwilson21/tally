@@ -1,13 +1,15 @@
 // Hand-kept Drizzle description of the application's tables, one table at a time (decision 213). The migrations in
 // migrations/*.sql are the only thing that changes the database; this file is written to match them, and
 // test/db-schema.test.ts fails when they disagree: columns, SQLite types, not-null, defaults, primary keys, CHECK
-// value lists, indexes (unique and partial), foreign keys (target, ON UPDATE and ON DELETE), and the unique
-// constraints a CREATE TABLE writes inline. The same test fails for any live application table this file does not
-// describe.
+// value lists and the other CHECKs, AUTOINCREMENT keys, COLLATE names, indexes (unique and partial), foreign keys
+// (target, ON UPDATE and ON DELETE), and the unique constraints a CREATE TABLE writes inline. The same test fails for
+// any live application table this file does not describe.
 //
-// The CHECK value lists are CHECK_LISTS at the bottom of this file: the drift test compares them both ways with the
-// live CREATE TABLE statements, so they are the verified record. No CHECK() is declared here, because nothing
-// compares those to the database and they could drift silently.
+// The CHECK value lists are CHECK_LISTS at the bottom of this file. The other CHECKs (the ones that are not IN lists)
+// are CHECKS, and a table's table-level CHECKs are TABLE_CHECKS; COLLATIONS holds the COLLATE names a CREATE TABLE
+// writes. The drift test compares each of these with the live CREATE TABLE statements, both ways, so they are the
+// verified record. No Drizzle check() is declared on a table: the record is the one copy the drift test verifies.
+// An AUTOINCREMENT key is the autoIncrement flag on its column, and the drift test compares that flag too.
 import { sql } from "drizzle-orm";
 import {
 	type AnySQLiteColumn,
@@ -61,9 +63,9 @@ export const categories = sqliteTable(
 );
 
 /**
- * A name in the household. The migration declares it UNIQUE COLLATE NOCASE; Drizzle cannot say a collation on a
- * unique column, so the drift test compares the column list only. The id is AUTOINCREMENT in the database, which
- * PRAGMA table_info does not report, so that part is not compared.
+ * A name in the household. The migration declares it UNIQUE COLLATE NOCASE: Drizzle cannot say a collation on a
+ * unique column, so the collation is named in COLLATIONS instead. The id is AUTOINCREMENT, which the autoIncrement
+ * flag states and the drift test compares.
  */
 export const householdPeople = sqliteTable("household_people", {
 	id: integer().primaryKey({ autoIncrement: true }),
@@ -109,8 +111,7 @@ export const accounts = sqliteTable(
 		type: text().notNull(),
 		subtype: text(),
 		isLiability: integer("is_liability").notNull().default(0),
-		// The migration's CHECK here is (typeof(balance_cents) = 'integer'), not an IN list, so the drift test does not
-		// read it. Reading it would mean parsing CHECK text in general; that is a follow-up, not part of this check.
+		// The migration's CHECK here is (typeof(balance_cents) = 'integer'), not an IN list, so it is compared in CHECKS.
 		balanceCents: integer("balance_cents").notNull().default(0),
 		updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 		uploadedOn: text("uploaded_on"),
@@ -270,10 +271,9 @@ export const transactions = sqliteTable(
 		accountId: integer("account_id")
 			.notNull()
 			.references(() => accounts.id),
-		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so it is compared in CHECKS.
 		date: text().notNull(),
-		// The migration's CHECK here is (typeof(amount_cents) = 'integer'), not an IN list, so the drift test does not
-		// read it.
+		// The migration's CHECK here is (typeof(amount_cents) = 'integer'), not an IN list, so it is compared in CHECKS.
 		amountCents: integer("amount_cents").notNull(),
 		rawName: text("raw_name").notNull(),
 		merchantName: text("merchant_name"),
@@ -320,12 +320,10 @@ export const transactions = sqliteTable(
 		incomeSource: text("income_source", {
 			enum: TRANSACTION_INCOME_SOURCE_VALUES,
 		}),
-		// The migration's CHECK here is (income_confidence IS NULL OR ... BETWEEN 0 AND 1), not an IN list, so the drift
-		// test does not read it.
+		// The migration's CHECK here is (income_confidence IS NULL OR ... BETWEEN 0 AND 1), not an IN list, so it is compared in CHECKS.
 		incomeConfidence: real("income_confidence"),
 		incomeMaybeDeclined: integer("income_maybe_declined").notNull().default(0),
-		// The migration's CHECK here is (transfer_confidence IS NULL OR ... BETWEEN 0 AND 1), not an IN list, so the
-		// drift test does not read it.
+		// The migration's CHECK here is (transfer_confidence IS NULL OR ... BETWEEN 0 AND 1), not an IN list, so it is compared in CHECKS.
 		transferConfidence: real("transfer_confidence"),
 		transferMaybeDeclined: integer("transfer_maybe_declined")
 			.notNull()
@@ -420,22 +418,20 @@ export const BILL_PAYMENT_STATUS_VALUES = ["linked", "dismissed"] as const;
 /**
  * A recurring bill, matched to bank transactions by its merchant. The table has 12 columns, grouped below by what they
  * are for. Its three table-level CHECKs (frequency against anchor_month and against anchor_date, and a weekly or
- * biweekly bill's due_day of 1 to 7) are not IN lists, so the drift test does not read them.
+ * biweekly bill's due_day of 1 to 7) are not IN lists: they are TABLE_CHECKS, compared by the drift test.
  */
 export const bills = sqliteTable("bills", {
 	// What the bill is, its amount, and when it falls due.
 	id: integer().primaryKey(),
 	name: text().notNull(),
-	// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents > 0), not an IN list, so the drift
-	// test does not read it.
+	// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents > 0), not an IN list, so it is compared in CHECKS.
 	amountCents: integer("amount_cents").notNull(),
-	// The migration's CHECK here is (due_day BETWEEN 1 AND 31), not an IN list, so the drift test does not read it.
+	// The migration's CHECK here is (due_day BETWEEN 1 AND 31), not an IN list, so it is compared in CHECKS.
 	dueDay: integer("due_day").notNull(),
 	frequency: text({ enum: BILL_FREQUENCY_VALUES }).notNull(),
-	// The migration's CHECK here is (anchor_month BETWEEN 1 AND 12), not an IN list, so the drift test does not read it.
+	// The migration's CHECK here is (anchor_month BETWEEN 1 AND 12), not an IN list, so it is compared in CHECKS.
 	anchorMonth: integer("anchor_month"),
-	// The migration's CHECK here is (anchor_date IS NULL OR anchor_date GLOB 'YYYY-MM-DD'), not an IN list, so the drift
-	// test does not read it.
+	// The migration's CHECK here is (anchor_date IS NULL OR anchor_date GLOB 'YYYY-MM-DD'), not an IN list, so it is compared in CHECKS.
 	anchorDate: text("anchor_date"),
 
 	// Where the bill is filed and how its merchant was known when it was saved.
@@ -447,8 +443,8 @@ export const bills = sqliteTable("bills", {
 
 	// Whether the bill is still active, and the day it was added.
 	active: integer().notNull().default(1),
-	// The migration's CHECK here is (added_on IS NULL OR added_on GLOB 'YYYY-MM-DD'), not an IN list, so the drift test
-	// does not read it.
+	// The migration's CHECK here is (added_on IS NULL OR added_on GLOB 'YYYY-MM-DD'), not an IN list, so it is compared
+	// in CHECKS.
 	addedOn: text("added_on"),
 });
 
@@ -462,11 +458,9 @@ export const billAmounts = sqliteTable(
 		billId: integer("bill_id")
 			.notNull()
 			.references(() => bills.id, { onDelete: "cascade" }),
-		// The migration's CHECK here is (effective_month GLOB 'YYYY-MM' AND the month is 01 to 12), not an IN list, so the
-		// drift test does not read it.
+		// The migration's CHECK here is (effective_month GLOB 'YYYY-MM' AND the month is 01 to 12), not an IN list, so it is compared in CHECKS.
 		effectiveMonth: text("effective_month").notNull(),
-		// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents > 0), not an IN list, so the
-		// drift test does not read it.
+		// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents > 0), not an IN list, so it is compared in CHECKS.
 		amountCents: integer("amount_cents").notNull(),
 	},
 	(t) => [primaryKey({ columns: [t.billId, t.effectiveMonth] })],
@@ -484,7 +478,7 @@ export const billPayments = sqliteTable(
 			.notNull()
 			.references(() => bills.id, { onDelete: "cascade" }),
 		// The migration's CHECK here is four GLOB alternatives (YYYY, YYYY-MM, YYYY-MM-DD and YYYY-Qn), not an IN list, so
-		// the drift test does not read it.
+		// it is compared in CHECKS.
 		period: text().notNull(),
 		transactionId: integer("transaction_id")
 			.notNull()
@@ -514,10 +508,9 @@ export const budgetAmounts = sqliteTable(
 		categoryId: integer("category_id")
 			.notNull()
 			.references(() => categories.id, { onDelete: "cascade" }),
-		// The migration's CHECK here is (effective_month GLOB 'YYYY-MM'), not an IN list, so the drift test does not read it.
+		// The migration's CHECK here is (effective_month GLOB 'YYYY-MM'), not an IN list, so it is compared in CHECKS.
 		effectiveMonth: text("effective_month").notNull(),
-		// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents >= 0), not an IN list, so the
-		// drift test does not read it.
+		// The migration's CHECK here is (typeof(amount_cents) = 'integer' AND amount_cents >= 0), not an IN list, so it is compared in CHECKS.
 		amountCents: integer("amount_cents").notNull(),
 	},
 	(t) => [primaryKey({ columns: [t.categoryId, t.effectiveMonth] })],
@@ -525,11 +518,9 @@ export const budgetAmounts = sqliteTable(
 
 /** The savings goal for each month, one row per month (migrations/0029_savings_goal_amounts.sql). */
 export const savingsGoalAmounts = sqliteTable("savings_goal_amounts", {
-	// The migration's CHECK here is (effective_month GLOB 'YYYY-MM' AND the month is 01 to 12), not an IN list, so the
-	// drift test does not read it. The month is unique: the migration's table-level UNIQUE is written here as .unique().
+	// The migration's CHECK here is (effective_month GLOB 'YYYY-MM' AND the month is 01 to 12), not an IN list, so it is compared in CHECKS. The month is unique: the migration's table-level UNIQUE is written here as .unique().
 	effectiveMonth: text("effective_month").notNull().unique(),
-	// The migration's CHECK here is (amount_cents >= 0 AND typeof(amount_cents) = 'integer'), not an IN list, so the
-	// drift test does not read it.
+	// The migration's CHECK here is (amount_cents >= 0 AND typeof(amount_cents) = 'integer'), not an IN list, so it is compared in CHECKS.
 	amountCents: integer("amount_cents").notNull(),
 });
 
@@ -561,9 +552,9 @@ export const categoryArchivePeriods = sqliteTable(
 export const plannedExpenses = sqliteTable("planned_expenses", {
 	id: integer().primaryKey({ autoIncrement: true }),
 	name: text().notNull(),
-	// The migration's CHECK here is (amount_cents > 0), not an IN list, so the drift test does not read it.
+	// The migration's CHECK here is (amount_cents > 0), not an IN list, so it is compared in CHECKS.
 	amountCents: integer("amount_cents").notNull(),
-	// The migration's CHECK here is (month GLOB 'YYYY-MM'), not an IN list, so the drift test does not read it.
+	// The migration's CHECK here is (month GLOB 'YYYY-MM'), not an IN list, so it is compared in CHECKS.
 	month: text().notNull(),
 	// The payment linked to the plan. One payment pays at most one plan.
 	transactionId: integer("transaction_id")
@@ -641,10 +632,9 @@ export const balanceHistory = sqliteTable(
 		accountId: integer("account_id")
 			.notNull()
 			.references(() => accounts.id, { onDelete: "cascade" }),
-		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		// The migration's CHECK here is (date GLOB 'YYYY-MM-DD'), not an IN list, so it is compared in CHECKS.
 		date: text().notNull(),
-		// The migration's CHECK here is (typeof(balance_cents) = 'integer'), not an IN list, so the drift test does not
-		// read it.
+		// The migration's CHECK here is (typeof(balance_cents) = 'integer'), not an IN list, so it is compared in CHECKS.
 		balanceCents: integer("balance_cents").notNull(),
 	},
 	(t) => [primaryKey({ columns: [t.accountId, t.date] })],
@@ -700,7 +690,7 @@ export const aiLog = sqliteTable(
 		transactionId: integer("transaction_id"),
 		// The merchant's raw name, for name rows.
 		merchantRawName: text("merchant_raw_name"),
-		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so it is compared in CHECKS.
 		householdDay: text("household_day").notNull(),
 		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 	},
@@ -722,7 +712,7 @@ export const documents = sqliteTable("documents", {
 	id: integer().primaryKey(),
 	r2Key: text("r2_key").notNull().unique(),
 	filename: text().notNull(),
-	// The migration's CHECK here is (size_bytes >= 0), not an IN list, so the drift test does not read it.
+	// The migration's CHECK here is (size_bytes >= 0), not an IN list, so it is compared in CHECKS.
 	sizeBytes: integer("size_bytes").notNull(),
 	uploadedBy: text("uploaded_by").notNull(),
 	uploadedAt: text("uploaded_at").notNull().default(sql`(datetime('now'))`),
@@ -817,7 +807,7 @@ export const maybeAnswers = sqliteTable(
 		// The guess's stored confidence when the person answered.
 		confidence: real().notNull(),
 		answer: text({ enum: MAYBE_ANSWER_ANSWER_VALUES }).notNull(),
-		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so the drift test does not read it.
+		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so it is compared in CHECKS.
 		householdDay: text("household_day").notNull(),
 		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 	},
@@ -960,6 +950,95 @@ export const CHECK_LISTS = {
 		transfer_maybe_declined: ["0", "1"],
 	},
 } as const;
+
+/**
+ * Every CHECK the described tables have in the live database that is not a `col IN (...)` list, by table and
+ * column, as the migration wrote it (spacing tidied, identifier quotes and outer parentheses dropped; literals
+ * exact). The drift test reads each one from the live CREATE TABLE and compares it both ways with this record,
+ * with the comparison in test/schema-text.ts. Generated from the live database; a CHECK edited in a migration
+ * shows here as a drift failure.
+ */
+export const CHECKS = {
+	accounts: {
+		balance_cents: "typeof(balance_cents) = 'integer'",
+	},
+	ai_log: {
+		household_day:
+			"household_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+	},
+	balance_history: {
+		date: "date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+		balance_cents: "typeof(balance_cents) = 'integer'",
+	},
+	bill_amounts: {
+		effective_month:
+			"effective_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND substr(effective_month, 6, 2) BETWEEN '01' AND '12'",
+		amount_cents: "typeof(amount_cents) = 'integer' AND amount_cents > 0",
+	},
+	bill_payments: {
+		period:
+			"period GLOB '[0-9][0-9][0-9][0-9]' OR period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' OR period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR period GLOB '[0-9][0-9][0-9][0-9]-Q[1-4]'",
+	},
+	bills: {
+		amount_cents: "typeof(amount_cents) = 'integer' AND amount_cents > 0",
+		due_day: "due_day BETWEEN 1 AND 31",
+		anchor_month: "anchor_month BETWEEN 1 AND 12",
+		anchor_date:
+			"anchor_date IS NULL OR anchor_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+		added_on:
+			"added_on IS NULL OR added_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+	},
+	budget_amounts: {
+		effective_month: "effective_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'",
+		amount_cents: "typeof(amount_cents) = 'integer' AND amount_cents >= 0",
+	},
+	documents: {
+		size_bytes: "size_bytes >= 0",
+	},
+	maybe_answers: {
+		household_day:
+			"household_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+	},
+	merchant_suggested_names: {
+		name: "name <> '' AND name = trim(name, ' ' || char(9) || char(13))",
+	},
+	planned_expenses: {
+		amount_cents: "amount_cents > 0",
+		month: "month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'",
+	},
+	savings_goal_amounts: {
+		effective_month:
+			"effective_month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' AND substr(effective_month, 6, 2) BETWEEN '01' AND '12'",
+		amount_cents: "amount_cents >= 0 AND typeof(amount_cents) = 'integer'",
+	},
+	transactions: {
+		date: "date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+		amount_cents: "typeof(amount_cents) = 'integer'",
+		income_confidence:
+			"income_confidence IS NULL OR income_confidence BETWEEN 0 AND 1",
+		transfer_confidence:
+			"transfer_confidence IS NULL OR transfer_confidence BETWEEN 0 AND 1",
+	},
+} satisfies Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+/** The table-level CHECKs (they name more than one column), by table, as a list. Compared as a set. */
+export const TABLE_CHECKS = {
+	bills: [
+		"(frequency IN ('yearly', 'quarterly') AND anchor_month IS NOT NULL) OR (frequency NOT IN ('yearly', 'quarterly') AND anchor_month IS NULL)",
+		"(frequency = 'biweekly' AND anchor_date IS NOT NULL) OR (frequency <> 'biweekly' AND anchor_date IS NULL)",
+		"frequency NOT IN ('weekly', 'biweekly') OR due_day BETWEEN 1 AND 7",
+	],
+} satisfies Readonly<Record<string, readonly string[]>>;
+
+/**
+ * The COLLATE names on CREATE TABLE columns and constraints, keyed table.column. A unique column takes no collation
+ * option in Drizzle, so the collation is stated here instead: household_people.name is UNIQUE COLLATE NOCASE. The
+ * index collation on categories_name_nocase is not listed: it is in the index's expression text, which the drift
+ * test compares (see categories above).
+ */
+export const COLLATIONS = {
+	"household_people.name": "NOCASE",
+} satisfies Readonly<Record<string, string>>;
 
 export type MerchantRow = typeof merchants.$inferSelect;
 

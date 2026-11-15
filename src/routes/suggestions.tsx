@@ -4,6 +4,7 @@ import { actor } from "../actor";
 import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
+import { activeCategories } from "../db/active-categories";
 import { categoryNames } from "../db/categories";
 import {
 	createFromSuggestion,
@@ -469,11 +470,7 @@ async function renderScreen(
 	const more =
 		options.more === undefined ? null : await moreLikeThis(db, options.more);
 
-	const categories = await db
-		.prepare(
-			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		)
-		.all<{ id: number; name: string }>();
+	const categories = await activeCategories(db);
 
 	if (options.toast) {
 		c.header(
@@ -501,7 +498,7 @@ async function renderScreen(
 				error: options.error,
 				focus: options.focus,
 				today: await householdToday(db),
-				categories: categories.results,
+				categories,
 				pendingNames: await pendingCategoryNames(
 					db,
 					queue.flatMap((item) =>

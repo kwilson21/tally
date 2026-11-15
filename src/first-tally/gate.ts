@@ -3,8 +3,11 @@
 // is no wait for a later day while Sort right away is on; with it off, a sync asks Jev nothing, so the import waits for the
 // daily run's sorting (decision 150). Nothing here polls; the pages that show it do. Once the first week is set up they stay shut
 // (readQuestionsGate).
+import { asc, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { readAiSwitches } from "../db/ai-switches";
 import { isSetUp, readFirstTally } from "../db/first-tally";
+import { plaidItems } from "../db/schema";
 import { countWaitingForJev } from "../db/transactions";
 
 export type QuestionsFacts = {
@@ -73,11 +76,18 @@ export async function readGateInputs(db: D1Database): Promise<{
 	/** Sort right away (the switch the sync's sort follows, decision 150). */
 	sortOnArrival: boolean;
 }> {
-	const { results: banks } = await db
-		.prepare(
-			"SELECT id, institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
-		)
-		.all<GateBank>();
+	const banks = await drizzle(db)
+		.select({
+			id: plaidItems.id,
+			name: plaidItems.institutionName,
+			linkedAt: plaidItems.createdAt,
+			lastSyncedAt: plaidItems.lastSyncedAt,
+			historyCompleteAt: plaidItems.historyCompleteAt,
+		})
+		.from(plaidItems)
+		.where(isNull(plaidItems.disconnectedAt))
+		.orderBy(asc(plaidItems.id))
+		.all();
 
 	const switches = await readAiSwitches(db);
 

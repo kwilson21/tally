@@ -276,13 +276,18 @@ describe("learned change: a category that is no category is refused", () => {
 		},
 	);
 
-	it("accepts a category written with a leading zero, a space or an exponent as Number did", async () => {
-		expect((await change(`00${entertainment}`)).toast).toBe(
-			"Netflix.com now goes to Entertainment every time.",
-		);
-		expect((await change(` ${entertainment} `)).toast).toBe(
-			"Netflix.com now goes to Entertainment every time.",
-		);
+	// Intended difference (#1111): a category id is digits only, so these were accepted by Number and are refused now.
+	it("refuses a category written with a leading zero, a space or a decimal point, as junk is", async () => {
+		for (const text of [
+			`00${entertainment}`,
+			` ${entertainment} `,
+			`${entertainment}.0`,
+		]) {
+			const got = await change(text);
+
+			expect(got.status).toBe(400);
+			expect(got.toast).toBeNull();
+		}
 	});
 });
 

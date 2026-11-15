@@ -46,6 +46,7 @@ function previousMonth(today: string) {
 
 /** Every bill with its status, as of `today`: the household's date, read once by the request. */
 export async function loadBillRows(db: D1Database, today: string) {
+	// stays SQL: b.* with aliased joins must match the exported snake_case DbBill, which would need ~25 aliased keys (decision 179).
 	const rows = await db
 		.prepare(
 			`SELECT b.*, c.icon, c.color, bp.period AS payment_period, t.date AS payment_date, t.amount_cents AS payment_amount_cents

@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveCategory, setArchived } from "../src/db/categories";
 import {
 	createFromSuggestion,
+	decideDismiss,
 	dismissSuggestion,
 	namesToAvoid,
 	noneFitTransactions,
@@ -14,10 +16,14 @@ import {
 	purchaseNamesToAvoid,
 	saveSuggestion,
 } from "../src/db/category-suggestions";
+import { runWith } from "../src/db/database";
 import { addNeverSuggest } from "../src/db/never-suggest";
 import { newCategoryItem } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import type { SuggestionState } from "../src/rules/suggestions";
+import { archiveOn, restoreOn } from "./archive-category";
+import { renameOn } from "./category-changes";
 import { forwardMember, present } from "./helpers/present";
 
 // Which transactions count as "Jev was sure none of the categories fit" (spec §7, #51), where a
@@ -774,6 +780,30 @@ describe("namesToAvoid", () => {
 		);
 		expect(avoid).not.toContain("Subscriptions");
 		expect(pending).not.toBeNull();
+	});
+});
+
+// The two avoid lists are SQL UNIONs, so a name that is both a category and a dismissed suggestion comes once (#963).
+describe("namesToAvoid and purchaseNamesToAvoid list a name once", () => {
+	it("holds a name that is both a category and a dismissed suggestion once, in each list", async () => {
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
+			.run();
+
+		for (const name of ["Groceries", "Gas"])
+			await db
+				.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'dismissed')",
+				)
+				.bind(name)
+				.run();
+
+		const all = await namesToAvoid(db);
+		const purchase = await purchaseNamesToAvoid(db);
+
+		expect(all.filter((name) => name === "Groceries")).toHaveLength(1);
+		expect(all.filter((name) => name === "Gas")).toHaveLength(1);
+		expect(purchase.filter((name) => name === "Gas")).toHaveLength(1);
 	});
 });
 
@@ -1617,7 +1647,7 @@ describe("createFromSuggestion", () => {
 				)
 				.bind(id)
 				.run();
-			await setArchived(db, id, true, "2026-07-15");
+			await archiveOn(db, id, "2026-07-15");
 
 			return id;
 		}
@@ -1838,7 +1868,7 @@ describe("createFromSuggestion", () => {
 		it("files the ticks into it without a second restore when someone restored it after the page was drawn", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
-			await setArchived(db, archived, false, "2026-09-01");
+			await restoreOn(db, archived, "2026-09-01");
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
@@ -1869,7 +1899,7 @@ describe("createFromSuggestion", () => {
 		it("makes a new Pet Care when the archived one was renamed after the page was drawn, as Create would", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
-			await saveCategory(db, archived, { name: "Pets" });
+			await renameOn(db, archived, "Pets");
 
 			const result = await createFromSuggestion(
 				db,
@@ -1902,9 +1932,8 @@ describe("createFromSuggestion", () => {
 
 			const result = await createFromSuggestion(
 				racingSave(
-					() => setArchived(db, archived, false, "2026-09-01"),
-					() =>
-						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
+					() => restoreOn(db, archived, "2026-09-01"),
+					() => renameOn(db, archived, "Pets").then(() => undefined),
 				),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
@@ -1949,7 +1978,7 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racingSave(() => setArchived(db, archived, false, "2026-09-01")),
+				racingSave(() => restoreOn(db, archived, "2026-09-01")),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person",
@@ -1980,10 +2009,9 @@ describe("createFromSuggestion", () => {
 
 			const result = await createFromSuggestion(
 				racingSave(
-					() => setArchived(db, archived, false, "2026-09-01"),
-					() =>
-						saveCategory(db, archived, { name: "Pets" }).then(() => undefined),
-					() => setArchived(db, archived, true, "2026-09-02"),
+					() => restoreOn(db, archived, "2026-09-01"),
+					() => renameOn(db, archived, "Pets").then(() => undefined),
+					() => archiveOn(db, archived, "2026-09-02"),
 				),
 				id,
 				{ ticked: made, shown: made, notes: {} },
@@ -2038,7 +2066,7 @@ describe("createFromSuggestion", () => {
 				)?.id,
 			);
 
-			await setArchived(db, id, true, "2026-07-15");
+			await archiveOn(db, id, "2026-07-15");
 
 			return id;
 		}
@@ -2050,9 +2078,7 @@ describe("createFromSuggestion", () => {
 			const today = await householdToday(db);
 
 			const result = await createFromSuggestion(
-				racingSave(() =>
-					saveCategory(db, archived, { name: "école" }).then(() => undefined),
-				),
+				racingSave(() => renameOn(db, archived, "école").then(() => undefined)),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person@example.com",
@@ -2091,9 +2117,7 @@ describe("createFromSuggestion", () => {
 			const count = (await categories()).length;
 
 			const result = await createFromSuggestion(
-				racingSave(() =>
-					saveCategory(db, archived, { name: "Ecole" }).then(() => undefined),
-				),
+				racingSave(() => renameOn(db, archived, "Ecole").then(() => undefined)),
 				id,
 				{ ticked: made.slice(0, 2), shown: made, notes: {} },
 				"person",
@@ -2387,7 +2411,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { pet } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.pet), true, "2026-09-01"),
+					() => archiveOn(db, present(s.cats.pet), "2026-09-01"),
 				],
 				result: (s) => filed(s, "Pet Care", { restored: true }),
 				ticksIn: "Pet Care",
@@ -2409,7 +2433,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.archived), false, "2026-09-01"),
+					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 				],
 				result: (s) => filed(s, "Pet Care", { attached: true }),
 				ticksIn: "Pet Care",
@@ -2431,9 +2455,9 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.archived), false, "2026-09-01"),
+					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 					() =>
-						saveCategory(db, present(s.cats.archived), { name: "Pets" }).then(
+						renameOn(db, present(s.cats.archived), "Pets").then(
 							() => undefined,
 						),
 				],
@@ -2496,7 +2520,7 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { pet } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.pet), true, "2026-09-01"),
+					() => archiveOn(db, present(s.cats.pet), "2026-09-01"),
 					() => insertCategory("Replacement", "replacement", 999),
 				],
 				result: () => refused(FULL_RESTORE),
@@ -2518,9 +2542,9 @@ describe("createFromSuggestion", () => {
 					return { ...s, cats: { archived } };
 				},
 				between: (s) => [
-					() => setArchived(db, present(s.cats.archived), false, "2026-09-01"),
+					() => restoreOn(db, present(s.cats.archived), "2026-09-01"),
 					() =>
-						saveCategory(db, present(s.cats.archived), { name: "Pets" }).then(
+						renameOn(db, present(s.cats.archived), "Pets").then(
 							() => undefined,
 						),
 				],
@@ -2918,5 +2942,45 @@ describe("dismissSuggestion", () => {
 		await dismissSuggestion(db, id);
 		expect(await dismissSuggestion(db, id)).toBeNull();
 		expect(await dismissSuggestion(db, 9999)).toBeNull();
+	});
+
+	it("does not turn down a suggestion that changed after it was read: the save lands on nothing and the rule is asked again", async () => {
+		const id = present(
+			await saveSuggestion(db, "Subscriptions", [
+				await add(),
+				await add({ rawName: "HULU" }),
+				await add({ rawName: "SPOTIFY" }),
+			]),
+		);
+
+		const seen: (string | null)[] = [];
+
+		const rule = {
+			decide: (request: { suggestionId: number }, facts: SuggestionState) =>
+				Effect.promise(async () => {
+					seen.push(facts.status);
+
+					if (facts.status !== "pending") return Option.none();
+
+					// Another request files the suggestion between this read and the save.
+					await db
+						.prepare(
+							"UPDATE category_suggestions SET status = 'created' WHERE id = ?",
+						)
+						.bind(request.suggestionId)
+						.run();
+
+					return Option.some({
+						suggestionId: request.suggestionId,
+						status: "dismissed",
+						expectedStatus: "pending",
+					});
+				}),
+		};
+
+		await runWith(db, decideDismiss(rule, { suggestionId: id }));
+
+		expect(seen).toEqual(["pending", "created"]);
+		expect(await suggestion(id)).toMatchObject({ status: "created" });
 	});
 });

@@ -9,7 +9,7 @@
 import type { Child } from "hono/jsx";
 import type { BillStatus } from "../bills/status";
 import { type CategorySummary, statusSentence } from "../budget";
-import { formatCents } from "../money";
+import { ceilToDollars, floorToDollars, formatCents } from "../money";
 import { AdjustLink } from "../views/adjust-link";
 import { Band } from "../views/band";
 import { barGeometry } from "../views/bar";
@@ -736,9 +736,7 @@ function Forecast({ pace }: { pace: Pace }) {
 	const diff = BUDGET_CENTS - end;
 	const under = diff >= 0;
 
-	const shown = under
-		? Math.floor(diff / 100) * 100
-		: Math.ceil(-diff / 100) * 100;
+	const shown = under ? floorToDollars(diff) : ceilToDollars(-diff);
 
 	const left = 10;
 	const right = 340;

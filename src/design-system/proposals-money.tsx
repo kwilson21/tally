@@ -7,7 +7,7 @@
 
 import type { Child } from "hono/jsx";
 import { parseBudgetAmount } from "../budgets/amount";
-import { formatCents, toCents } from "../money";
+import { ceilToDollars, formatCents, toCents } from "../money";
 import { BudgetSheet } from "../views/budget-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
@@ -98,8 +98,7 @@ function ProposedMoney({
 	const roundTo =
 		cents !== null && cents % 100 !== 0 ? (
 			<button type="button" class={moneyChip}>
-				Round to{" "}
-				{formatCents(Math.ceil(cents / 100) * 100, { wholeDollars: true })}
+				Round to {formatCents(ceilToDollars(cents), { wholeDollars: true })}
 			</button>
 		) : null;
 

@@ -830,10 +830,8 @@ describe("GET / with the demo seed", () => {
 
 			const difference = summary.totalBudgetCents - forecast.endCents;
 
-			const shown =
-				difference >= 0
-					? Math.floor(difference / 100) * 100
-					: Math.ceil(-difference / 100) * 100;
+			// The forecast's own rounded amounts (the under and over results), not a copy of the rule.
+			const shown = forecast.underCents ?? forecast.overCents;
 
 			const descriptor = `${formatCents(shown, { wholeDollars: true })} ${difference >= 0 ? "under" : "over"}`;
 			const homeHtml = (await home()).html;
