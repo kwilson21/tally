@@ -267,7 +267,10 @@ describe("routes that read a typed number at the edge (#1105)", () => {
 		const expected: Record<string, string> = baseline;
 
 		const check = (label: string, got: string) => {
-			const want = expected[label];
+			// Intended difference (#1111): a padded category id (0<id>, 00<id>) is refused on the rename route, so its
+			// blank-name answer is the answer a missing category gets (the 999999 row), not the old retry page.
+			const key = label.replace(/id=0+\$CAT /, "id=999999 ");
+			const want = expected[key];
 
 			if (want !== got)
 				problems.push(`${label}\n  want ${want}\n  got  ${got}`);
