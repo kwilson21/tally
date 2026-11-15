@@ -1,5 +1,8 @@
 // The household's accounts, grouped by the bank they were linked from, as Accounts shows them (spec §5, §8).
+import { asc, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import type { BankSync } from "../stale-bank";
+import { accounts, plaidItems } from "./schema";
 
 export type Account = {
 	id: number;
@@ -124,21 +127,25 @@ export type AccountChoice = {
  * disconnected bank's accounts are included and marked, since their transactions stay.
  */
 export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT a.id, a.name, a.mask, a.type, a.subtype, p.institution_name AS bank, p.disconnected_at
-			FROM accounts a LEFT JOIN plaid_items p ON p.id = a.plaid_item_id
-			ORDER BY a.type = 'cash', a.plaid_item_id IS NULL, a.plaid_item_id, a.id`,
+	const results = await drizzle(db)
+		.select({
+			id: accounts.id,
+			name: accounts.name,
+			mask: accounts.mask,
+			type: accounts.type,
+			subtype: accounts.subtype,
+			bank: plaidItems.institutionName,
+			disconnected_at: plaidItems.disconnectedAt,
+		})
+		.from(accounts)
+		.leftJoin(plaidItems, eq(plaidItems.id, accounts.plaidItemId))
+		.orderBy(
+			sql`${accounts.type} = 'cash'`,
+			sql`${accounts.plaidItemId} IS NULL`,
+			accounts.plaidItemId,
+			accounts.id,
 		)
-		.all<{
-			id: number;
-			name: string;
-			mask: string | null;
-			type: string;
-			subtype: string | null;
-			bank: string | null;
-			disconnected_at: string | null;
-		}>();
+		.all();
 
 	const labels = uniqueAccountLabels(results);
 
@@ -245,24 +252,24 @@ export function netWorthTo(accounts: NetWorthAccount[], n: number): number {
  * (spec §8.5). It reads `plaid_items` alone, so Home needn't load accounts to ask.
  */
 export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
-	const { results } = await db
-		.prepare(
-			"SELECT id, institution_name, status, last_synced_at, disconnected_at FROM plaid_items ORDER BY id",
-		)
-		.all<{
-			id: number;
-			institution_name: string;
-			status: string;
-			last_synced_at: string | null;
-			disconnected_at: string | null;
-		}>();
+	const results = await drizzle(db)
+		.select({
+			id: plaidItems.id,
+			name: plaidItems.institutionName,
+			status: plaidItems.status,
+			lastSyncedAt: plaidItems.lastSyncedAt,
+			disconnectedAt: plaidItems.disconnectedAt,
+		})
+		.from(plaidItems)
+		.orderBy(asc(plaidItems.id))
+		.all();
 
 	return results.map((row) => ({
 		id: row.id,
-		name: row.institution_name,
+		name: row.name,
 		needsAttention: row.status === "needs_attention",
-		lastSyncedAt: row.last_synced_at,
-		disconnected: row.disconnected_at !== null,
+		lastSyncedAt: row.lastSyncedAt,
+		disconnected: row.disconnectedAt !== null,
 	}));
 }
 
@@ -281,6 +288,7 @@ export async function accountsByBank(db: D1Database): Promise<Bank[]> {
  * reads that must agree with it (Accounts' headline and its net-worth line); batch results go to
  * `banksFromRows`.
  */
+// Stays raw SQL: returned unrun for other pages' db.batch; converts with that batch (#963 PR 12).
 export function banksStatement(db: D1Database): D1PreparedStatement {
 	return db.prepare(
 		`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status, p.last_synced_at, p.disconnected_at,
@@ -363,6 +371,7 @@ export type AppleCardRow = {
 };
 
 /** The household's Apple Card account, unrun, so a page can read it in the same `db.batch` as its other reads. */
+// Stays raw SQL: returned unrun for other pages' db.batch; converts with that batch (#963 PR 12).
 export function appleCardStatement(db: D1Database): D1PreparedStatement {
 	return db.prepare(
 		`SELECT id, balance_cents, balance_on, uploaded_on, removed_at, counted_from,
@@ -403,15 +412,13 @@ export async function appleCardAccount(
 export async function appleCardUpload(
 	db: D1Database,
 ): Promise<Pick<AppleCardAccount, "uploadedOn" | "removedAt"> | null> {
-	const row = await db
-		.prepare(
-			"SELECT uploaded_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
-		)
-		.first<{ uploaded_on: string | null; removed_at: string | null }>();
+	const row = await drizzle(db)
+		.select({ uploadedOn: accounts.uploadedOn, removedAt: accounts.removedAt })
+		.from(accounts)
+		.where(eq(accounts.subtype, "apple_card"))
+		.get();
 
-	return row
-		? { uploadedOn: row.uploaded_on, removedAt: row.removed_at }
-		: null;
+	return row ?? null;
 }
 
 /**
