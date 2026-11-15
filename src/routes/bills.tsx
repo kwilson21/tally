@@ -417,6 +417,10 @@ async function earlierPrice(db: D1Database, billId: number, today: string) {
 	return earlierAmount(history, today.slice(0, 7));
 }
 
+/** A bill's linked payments: the rows that say which month the bill was paid in. */
+const linkedPaymentsOf = (billId: number) =>
+	and(eq(billPayments.billId, billId), eq(billPayments.status, "linked"));
+
 async function categories(c: Context<App>) {
 	return drizzle(c.env.DB)
 		.select({
@@ -1080,12 +1084,7 @@ async function save(c: Context<App>, id?: number) {
 						await drizzle(c.env.DB)
 							.select({ one: sql<number>`1` })
 							.from(billPayments)
-							.where(
-								and(
-									eq(billPayments.billId, bill.id),
-									eq(billPayments.status, "linked"),
-								),
-							)
+							.where(linkedPaymentsOf(bill.id))
 							.limit(1)
 							.get(),
 					)
@@ -1413,9 +1412,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 	const linked = await drizzle(db)
 		.select({ period: billPayments.period })
 		.from(billPayments)
-		.where(
-			and(eq(billPayments.billId, bill.id), eq(billPayments.status, "linked")),
-		)
+		.where(linkedPaymentsOf(bill.id))
 		.all();
 
 	let start = addMonths(today.slice(0, 7), -6);
@@ -2502,9 +2499,7 @@ async function currentOffer(
 			transactionsTable,
 			eq(transactionsTable.id, billPayments.transactionId),
 		)
-		.where(
-			and(eq(billPayments.billId, bill.id), eq(billPayments.status, "linked")),
-		)
+		.where(linkedPaymentsOf(bill.id))
 		.all();
 
 	const paidByPeriod = paidByPeriodOf(linked);
