@@ -2,6 +2,8 @@
 // words its view uses. `setupView` is pure over what it's given, so the rules are tested without a database; `readSetup`
 // reads the household. Setup is done at the budgets stroke (decision 148): from then on there is no setup view, and Home
 // is plain Home. The caller shows it in the family app only: the demo never shows setup.
+import { count, isNotNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { DAY_MS, householdTimeZone } from "../dates";
 import {
 	type FirstTally,
@@ -9,6 +11,7 @@ import {
 	markStroke,
 	readFirstTally,
 } from "../db/first-tally";
+import { transactions } from "../db/schema";
 import type { FlaggedBank } from "../stale-bank";
 import {
 	BANK_CONNECTED_SQL,
@@ -264,11 +267,11 @@ export async function readSetup(
 
 	const total =
 		(
-			await db
-				.prepare(
-					"SELECT COUNT(*) AS total FROM transactions WHERE plaid_transaction_id IS NOT NULL",
-				)
-				.first<{ total: number }>()
+			await drizzle(db)
+				.select({ total: count() })
+				.from(transactions)
+				.where(isNotNull(transactions.plaidTransactionId))
+				.get()
 		)?.total ?? 0;
 
 	return setupView({

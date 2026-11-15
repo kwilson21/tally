@@ -1134,3 +1134,80 @@ describe("the re-check, round 2 of the #842 review", () => {
 		expect(drawnCategories.html).toContain('id="categories"');
 	});
 });
+
+// Characterisation for #963: startResortFor's early returns, called directly. Each one ends with no run and no instance.
+describe("startResortFor's early returns: nothing starts, and no run is written", () => {
+	/** A filed row in a category (or none), with its related waiting rows, ready to start a run. */
+	async function filedInCategory(categoryName: string | null) {
+		const { filed, related } = await maybeFixture();
+
+		if (categoryName !== null)
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+				)
+				.bind(await categoryId(categoryName), filed)
+				.run();
+
+		return { filed, related };
+	}
+
+	it("starts the run when the key, the switch and a filed category are all there (the control)", async () => {
+		const { filed, related } = await filedInCategory("Eating Out");
+
+		const runId = await startResortFor(
+			{ JEV_API_KEY: "test-key", SORT: env.SORT },
+			db,
+			{ filedId: filed },
+		);
+
+		expect(runId).not.toBeNull();
+		expect(create).toHaveBeenCalledTimes(1);
+		expect([...(reaskOf(0)?.ids ?? [])].sort()).toEqual([...related].sort());
+	});
+
+	it("starts nothing without the Jev key", async () => {
+		const { filed } = await filedInCategory("Eating Out");
+
+		expect(
+			await startResortFor({ SORT: env.SORT }, db, { filedId: filed }),
+		).toBeNull();
+		expect(create).not.toHaveBeenCalled();
+		expect(await readRun(db)).toBeNull();
+	});
+
+	it("starts nothing while the categories switch is off", async () => {
+		const { filed } = await filedInCategory("Eating Out");
+		await saveAiSwitches(db, { categories: false });
+
+		expect(
+			await startResortFor({ JEV_API_KEY: "test-key", SORT: env.SORT }, db, {
+				filedId: filed,
+			}),
+		).toBeNull();
+		expect(create).not.toHaveBeenCalled();
+		expect(await readRun(db)).toBeNull();
+	});
+
+	it("starts nothing for a filed id that is not a transaction", async () => {
+		expect(
+			await startResortFor({ JEV_API_KEY: "test-key", SORT: env.SORT }, db, {
+				filedId: 999999,
+			}),
+		).toBeNull();
+		expect(create).not.toHaveBeenCalled();
+		expect(await readRun(db)).toBeNull();
+	});
+
+	it("starts nothing for a filed row with no category, though its related rows wait", async () => {
+		const { filed } = await filedInCategory(null);
+
+		expect(
+			await startResortFor({ JEV_API_KEY: "test-key", SORT: env.SORT }, db, {
+				filedId: filed,
+			}),
+		).toBeNull();
+		expect(create).not.toHaveBeenCalled();
+		expect(await readRun(db)).toBeNull();
+	});
+});
