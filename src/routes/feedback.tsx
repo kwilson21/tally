@@ -1,9 +1,8 @@
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import { Hono } from "hono";
 import { runWith } from "../db/database";
 import { decideFeedback } from "../db/feedback-saves";
-import { readStoredWith } from "../db/stored-shape";
+import { readStoredWith, StoredJson } from "../db/stored-shape";
 import {
 	diagnosticsEnabled,
 	normalizeFeedbackContext,
@@ -282,7 +281,7 @@ export function diagnosticLinesOf(clientContext: string | null, page: string) {
 	if (clientContext) {
 		try {
 			const context = normalizeFeedbackContext(
-				readStoredWith(Schema.MutableJson, clientContext),
+				readStoredWith(StoredJson, clientContext),
 				page,
 			);
 
