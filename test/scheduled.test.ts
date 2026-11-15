@@ -854,7 +854,8 @@ describe("scheduled handler: merchant names", () => {
 			get(target, property) {
 				if (property === "prepare")
 					return (sql: string) => {
-						if (/FROM categories WHERE archived = 0/.test(sql))
+						// Drizzle writes the sort's categories read as "categories"."archived" (#963), so that is what it matches.
+						if (/from "categories" where "categories"\."archived"/.test(sql))
 							throw new Error("D1 is down for the secret text");
 
 						return target.prepare(sql);
