@@ -10,17 +10,13 @@ import {
 	saveBankTextRule,
 } from "../src/db/bank-text-rules";
 import { unmakeCategory } from "../src/db/categories";
-import {
-	forgetText,
-	loadLearnedLines,
-	undoForget,
-	withBankTextRules,
-} from "../src/db/learned-lines";
+import { loadLearnedLines, withBankTextRules } from "../src/db/learned-lines";
 import { applyMerchantRules } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { afterSync } from "../src/plaid/after-sync";
 import { runSortInstance } from "../src/sort-instance";
 import { fakeSteps } from "./fake-sort-steps";
+import { forgetOn, undoOn } from "./learned-forget";
 
 // Change on a learned line (decision 163): a rule on the cleaned bank text files a matching transaction in a chosen
 // category before Jev is asked. It fills only what nothing has filled (or a bill's category), like a merchant rule,
@@ -446,9 +442,9 @@ describe("Forget and its Undo with a rule", () => {
 		const books = await categoryId("Books & audio");
 		await addRule(CLEANED, books);
 		await txn(RAW_A);
-		const id = await forgetText(db, CLEANED);
+		const id = await forgetOn(db, CLEANED, Date.now());
 		expect(await ruleCount()).toBe(0);
-		expect(await undoForget(db, id)).toBe("undone");
+		expect(await undoOn(db, id, Date.now())).toBe("undone");
 
 		const back = await db
 			.prepare(
@@ -470,9 +466,9 @@ describe("Forget and its Undo with a rule", () => {
 		const books = await categoryId("Books & audio");
 		const eating = await categoryId("Eating Out");
 		await addRule(CLEANED, books);
-		const id = await forgetText(db, CLEANED);
+		const id = await forgetOn(db, CLEANED, Date.now());
 		await addRule(CLEANED, eating);
-		expect(await undoForget(db, id)).toBe("undone");
+		expect(await undoOn(db, id, Date.now())).toBe("undone");
 
 		const rule = await db
 			.prepare(
@@ -489,8 +485,8 @@ describe("Forget and its Undo with a rule", () => {
 			category: await categoryId("Groceries"),
 			source: "user",
 		});
-		const id = await forgetText(db, CLEANED);
-		expect(await undoForget(db, id)).toBe("undone");
+		const id = await forgetOn(db, CLEANED, Date.now());
+		expect(await undoOn(db, id, Date.now())).toBe("undone");
 		expect(await ruleCount()).toBe(0);
 	});
 });
