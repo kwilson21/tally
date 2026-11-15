@@ -81,22 +81,22 @@ export const feedbackFiling = setup({}).createMachine({
 				FAILED: {
 					target: "unfiled",
 					description:
-						"A failed try below the cap releases the claim and stays counted, so the row is ready again",
+						"A failed try before the fifth releases the claim and stays counted, so the row is ready again",
 				},
 				FAILED_LAST_TRY: {
 					target: "gave_up",
 					description:
-						"A failed try on the cap's last try releases the claim, and the row gives up",
+						"The fifth try failed: the claim is released and the row gives up",
 				},
 				LEASE_EXPIRED: {
 					target: "unfiled",
 					description:
-						"A cut-off try below the cap ran out with no answer, so the row is ready again",
+						"A cut-off try before the fifth ran out with no answer, so the row is ready again",
 				},
 				LEASE_EXPIRED_LAST_TRY: {
 					target: "gave_up",
 					description:
-						"A cut-off try on the cap's last try ran out with no answer, so the row gives up",
+						"The fifth try was cut off and ran out with no answer, so the row gives up",
 				},
 			},
 		},
