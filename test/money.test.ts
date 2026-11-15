@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	ceilToDollars,
 	centsToAmount,
+	floorToDollars,
 	formatCents,
 	plaidAmountToCents,
 	toCents,
@@ -89,5 +91,76 @@ describe("centsToAmount (cents → the money input's text)", () => {
 	it("refuses anything that isn't a non-negative integer", () => {
 		expect(() => centsToAmount(-1)).toThrow();
 		expect(() => centsToAmount(1.5)).toThrow();
+	});
+});
+
+describe("floorToDollars (cents → the whole dollar below, toward negative infinity)", () => {
+	it.each([
+		[150, 100],
+		[100, 100],
+		[99, 0],
+		[50, 0],
+		[0, 0],
+		[-50, -100],
+		[-150, -200],
+		[-199, -200],
+		[-200, -200],
+		[12345, 12300],
+	])("%i → %i", (cents, whole) => {
+		expect(floorToDollars(cents)).toBe(whole);
+	});
+
+	it("never returns -0 (a zero cent amount is +0)", () => {
+		expect(Object.is(floorToDollars(0), 0)).toBe(true);
+		expect(Object.is(floorToDollars(-0), 0)).toBe(true);
+	});
+
+	it("matches Math.floor(cents / 100) * 100 for every integer in a sweep", () => {
+		for (let cents = -1000; cents <= 1000; cents++) {
+			expect(floorToDollars(cents)).toBe(Math.floor(cents / 100) * 100 || 0);
+		}
+	});
+
+	it("refuses anything that isn't a safe integer, as centsToAmount does", () => {
+		expect(() => floorToDollars(1.5)).toThrow();
+		expect(() => floorToDollars(Number.NaN)).toThrow();
+		expect(() => floorToDollars(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+	});
+});
+
+describe("ceilToDollars (cents → the whole dollar above, toward positive infinity)", () => {
+	it.each([
+		[150, 200],
+		[100, 100],
+		[101, 200],
+		[199, 200],
+		[50, 100],
+		[1, 100],
+		[0, 0],
+		[-50, 0],
+		[-150, -100],
+		[-199, -100],
+		[-200, -200],
+		[12345, 12400],
+	])("%i → %i", (cents, whole) => {
+		expect(ceilToDollars(cents)).toBe(whole);
+	});
+
+	it("never returns -0 (a negative amount under a dollar rounds to +0)", () => {
+		expect(Object.is(ceilToDollars(-50), 0)).toBe(true);
+		expect(Object.is(ceilToDollars(-1), 0)).toBe(true);
+		expect(Object.is(ceilToDollars(0), 0)).toBe(true);
+	});
+
+	it("matches Math.ceil(cents / 100) * 100 (never -0) for every integer in a sweep", () => {
+		for (let cents = -1000; cents <= 1000; cents++) {
+			expect(ceilToDollars(cents)).toBe(Math.ceil(cents / 100) * 100 || 0);
+		}
+	});
+
+	it("refuses anything that isn't a safe integer, as centsToAmount does", () => {
+		expect(() => ceilToDollars(1.5)).toThrow();
+		expect(() => ceilToDollars(Number.NaN)).toThrow();
+		expect(() => ceilToDollars(Number.MIN_SAFE_INTEGER - 1)).toThrow();
 	});
 });
