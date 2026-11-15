@@ -71,6 +71,7 @@ import {
 	billPayments,
 	bills as billsTable,
 	categories as categoriesTable,
+	merchants as merchantsTable,
 	transactions as transactionsTable,
 } from "../db/schema";
 import { readAtEdge } from "../edge";
@@ -888,11 +889,13 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 
 	if (asked.kind !== "write") return c.notFound();
 
-	const result = await c.env.DB.prepare(
-		`INSERT INTO merchants(raw_name,not_a_bill) VALUES(?,1)
-		 ON CONFLICT(raw_name) DO UPDATE SET not_a_bill=1`,
-	)
-		.bind(asked.save.merchant)
+	const result = await drizzle(c.env.DB)
+		.insert(merchantsTable)
+		.values({ rawName: asked.save.merchant, notABill: 1 })
+		.onConflictDoUpdate({
+			target: merchantsTable.rawName,
+			set: { notABill: 1 },
+		})
 		.run();
 
 	if (!result.meta.changes) return c.notFound();
@@ -1248,8 +1251,10 @@ bills.post("/bills/:id/deactivate", async (c) => {
 
 	// A bill already off has nothing to save, and the answer is the same.
 	if (asked.kind === "write")
-		await c.env.DB.prepare("UPDATE bills SET active=0 WHERE id=?")
-			.bind(id)
+		await drizzle(c.env.DB)
+			.update(billsTable)
+			.set({ active: 0 })
+			.where(eq(billsTable.id, id))
 			.run();
 
 	return activeChanged(c, "Bill deactivated");
@@ -1486,6 +1491,7 @@ async function foundCharges(
 	const window = manualLinkWindowDays(bill.frequency);
 	const dues = months.map((month) => month.due).sort();
 
+	// Stays raw: isMerchantTextSql and paysPlanGroupSql fragments, with the NOT EXISTS on linked rows.
 	const charges = (
 		await db
 			.prepare(
@@ -1588,6 +1594,7 @@ async function billPage(
 	if (requestedPeriod && !periods.includes(requestedPeriod))
 		return c.notFound();
 
+	// Stays raw: ownNameSql and merchantColumnSql fragments, with a json_each over the periods.
 	const payments = (
 		await c.env.DB.prepare(
 			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked' AND bp.period IN (SELECT value FROM json_each(?)) ORDER BY t.date,bp.id`,
@@ -1660,6 +1667,7 @@ async function billPage(
 	if (pickerPeriod) {
 		const due = occurrenceDate(bill, pickerPeriod);
 		// A payment the person turned away for this month stays listed, last, under "You said not this one" (#340).
+		// Stays raw: the picker's fragments (ownNameSql, merchantColumnSql, isMerchantTextSql, paysPlanGroupSql) and a correlated EXISTS.
 		candidates = (
 			await c.env.DB.prepare(
 				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT ${paysPlanGroupSql("t")} ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
@@ -2137,6 +2145,7 @@ bills.post("/bills/:id/link", async (c) => {
 				}
 			: null;
 
+	// Stays raw: the facts batch mixes occurrenceUnpaidSql and paysPlanGroupSql fragments with plain selects.
 	const [unpaid, plannedAlready, eligible] = month
 		? await c.env.DB.batch<{ answer: number }>([
 				// A Paid month takes no more payments (decision 101): the picker lists none for it.
@@ -2196,6 +2205,7 @@ bills.post("/bills/:id/link", async (c) => {
 
 	try {
 		batch = await c.env.DB.batch<{ unpaid: number }>([
+			// Stays raw: linkPaymentSql is an INSERT OR IGNORE built on the shared occurrenceUnpaidSql fragment.
 			c.env.DB.prepare(linkPaymentSql).bind(
 				id,
 				link.period,
@@ -2203,11 +2213,13 @@ bills.post("/bills/:id/link", async (c) => {
 				due,
 				manualWindow,
 			),
+			// Stays raw: liftNotThisOneSql is a shared SQL string (src/bills/split-dismissals.ts) in a raw batch.
 			c.env.DB.prepare(liftNotThisOneSql).bind(
 				id,
 				link.period,
 				link.transactionId,
 			),
+			// Stays raw: unpaidSelect is built from the occurrenceUnpaidSql fragment, in the same raw batch.
 			c.env.DB.prepare(unpaidSelect).bind(id, link.period),
 		]);
 	} catch (error) {
@@ -2249,18 +2261,22 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	const named =
 		form.transaction_id === undefined ? null : paymentIdOf(form.transaction_id);
 
-	const paid = (
-		await c.env.DB.prepare(
-			"SELECT transaction_id FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
+	const paid = await drizzle(c.env.DB)
+		.select({ transactionId: billPayments.transactionId })
+		.from(billPayments)
+		.where(
+			and(
+				eq(billPayments.billId, id),
+				eq(billPayments.period, period),
+				eq(billPayments.status, "linked"),
+			),
 		)
-			.bind(id, period)
-			.all<{ transaction_id: number }>()
-	).results;
+		.all();
 
 	const asked = decided(
 		unlinkPayment.decide(
 			{ named },
-			{ linked: paid.map((row) => row.transaction_id) },
+			{ linked: paid.map((row) => row.transactionId) },
 		),
 	);
 
@@ -2269,13 +2285,26 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	// The token is random and saved on this Not this one, so its Undo works once (#340). It keeps the payment's id,
 	// so a Not this one that later moves to another payment is refused, as before.
 	const undoToken = `${linked.transaction_id}.${crypto.randomUUID()}`;
-	await c.env.DB.batch([
-		c.env.DB.prepare(
-			"DELETE FROM bill_payments WHERE bill_id=? AND period=? AND transaction_id=? AND status='linked'",
-		).bind(id, period, linked.transaction_id),
-		c.env.DB.prepare(
-			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status,undo_token) VALUES(?,?,?,'user','dismissed',?)",
-		).bind(id, period, linked.transaction_id, undoToken),
+	const orm = drizzle(c.env.DB);
+	await orm.batch([
+		orm
+			.delete(billPayments)
+			.where(
+				and(
+					eq(billPayments.billId, id),
+					eq(billPayments.period, period),
+					eq(billPayments.transactionId, linked.transaction_id),
+					eq(billPayments.status, "linked"),
+				),
+			),
+		orm.insert(billPayments).values({
+			billId: id,
+			period,
+			transactionId: linked.transaction_id,
+			matchedBy: "user",
+			status: "dismissed",
+			undoToken,
+		}),
 	]);
 	const undo = await unlinkUndo(c.env.DB, undoToken);
 
@@ -2298,12 +2327,13 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
  * its created_at was. The row is found by its undo_token, which is random, so a later Not this one never matches it.
  */
 async function unlinkUndo(db: D1Database, token: string) {
-	const row = await db
-		.prepare(
-			"SELECT CAST(MAX(0, MIN(?1, (julianday(created_at) - julianday('now')) * 86400000 + ?1)) AS INTEGER) AS ms FROM bill_payments WHERE undo_token=?2",
-		)
-		.bind(UNDO_MS, token)
-		.first<{ ms: number }>();
+	const row = await drizzle(db)
+		.select({
+			ms: sql<number>`CAST(MAX(0, MIN(${UNDO_MS}, (julianday(${billPayments.createdAt}) - julianday('now')) * 86400000 + ${UNDO_MS})) AS INTEGER)`,
+		})
+		.from(billPayments)
+		.where(eq(billPayments.undoToken, token))
+		.get();
 
 	return { token, ms: row?.ms ?? 0 };
 }
@@ -2324,11 +2354,23 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 
 	// The Not this one the token names, if it is still there, and whether its ten seconds are still running.
 	const held = name.ok
-		? await c.env.DB.prepare(
-				"SELECT transaction_id AS transactionId, period, (julianday('now')-julianday(created_at))*86400000<? AS fresh FROM bill_payments WHERE undo_token=? AND transaction_id=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
-			)
-				.bind(UNDO_MS, token, name.value.transactionId, id)
-				.first<{ transactionId: number; period: string; fresh: number }>()
+		? await drizzle(c.env.DB)
+				.select({
+					transactionId: billPayments.transactionId,
+					period: billPayments.period,
+					fresh: sql<number>`(julianday('now')-julianday(${billPayments.createdAt}))*86400000<${UNDO_MS}`,
+				})
+				.from(billPayments)
+				.where(
+					and(
+						eq(billPayments.undoToken, token),
+						eq(billPayments.transactionId, name.value.transactionId),
+						eq(billPayments.billId, id),
+						eq(billPayments.status, "dismissed"),
+						eq(billPayments.matchedBy, "user"),
+					),
+				)
+				.get()
 		: null;
 
 	// The link comes back as the matcher's ('auto'): the dismissal doesn't remember how the payment was linked, and most
@@ -2347,6 +2389,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 	const restored = undone
 		? (
 				await c.env.DB.batch([
+					// Stays raw: an INSERT..SELECT whose WHERE is the gate (token, no link yet, paysPlanGroupSql); the batch reads meta.changes.
 					c.env.DB.prepare(
 						`INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
 						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE undo_token=?4 AND transaction_id=?3 AND status='dismissed' AND matched_by='user' AND (julianday('now')-julianday(created_at))*86400000<?5)
@@ -2359,6 +2402,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 						undone.token,
 						UNDO_MS,
 					),
+					// Stays raw: liftNotThisOneSql is a shared SQL string (src/bills/split-dismissals.ts) in the same raw batch.
 					c.env.DB.prepare(liftNotThisOneSql).bind(
 						id,
 						undone.period,
