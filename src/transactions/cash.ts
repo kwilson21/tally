@@ -1,4 +1,7 @@
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { isRealDate } from "../dates";
+import { transactions } from "../db/schema";
 import { numberOf } from "../edge-kinds";
 import { CASH_MERCHANT_MAX, NOTE_MAX } from "../limits";
 import { toCents } from "../money";
@@ -130,6 +133,7 @@ export async function saveCash(
 	/** False when the entry key was already stored, so this call stored nothing (a repost). */
 	inserted: boolean;
 }> {
+	// Stays raw: both statements use partial-index conflict targets, which Drizzle's onConflictDoNothing cannot place (its where renders after DO NOTHING, which SQLite rejects).
 	const results = await db.batch([
 		db.prepare(
 			"INSERT INTO accounts (name,type) VALUES ('Cash','cash') ON CONFLICT(type) WHERE type='cash' DO NOTHING",
@@ -152,17 +156,17 @@ export async function saveCash(
 	]);
 
 	const stored = entryKey
-		? await db
-				.prepare(
-					"SELECT id, raw_name AS merchant, amount_cents AS amountCents, category_id AS categoryId FROM transactions WHERE entry_key = ?",
-				)
-				.bind(entryKey)
-				.first<{
-					id: number;
-					merchant: string;
-					amountCents: number;
-					categoryId: number;
-				}>()
+		? await drizzle(db)
+				.select({
+					id: transactions.id,
+					merchant: transactions.rawName,
+					amountCents: transactions.amountCents,
+					// The column is nullable for other rows; this entry's own insert always sets it, so the reply types it as a number.
+					categoryId: sql<number>`${transactions.categoryId}`,
+				})
+				.from(transactions)
+				.where(eq(transactions.entryKey, entryKey))
+				.get()
 		: null;
 
 	// With no entry key nothing guards the insert, so it always lands. D1 returns the batch's results in
