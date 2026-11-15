@@ -1333,6 +1333,8 @@ describe("closeToastOnce", () => {
 		});
 
 		expect(await closeToastOnce(db, runIdOf(started), T0)).toBe(false);
+		// A run still running is never marked as toasted (#963: the flag is set only on a done run).
+		expect((await readRun(db))?.toasted).toBe(false);
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
 		expect(await closeToastOnce(db, runIdOf(started), T0 + 6000)).toBe(true);
 		expect(await closeToastOnce(db, runIdOf(started), T0 + 6001)).toBe(false);
