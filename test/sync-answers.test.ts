@@ -21,7 +21,6 @@ describe("readSyncPage", () => {
 		["no added", { ...GOOD_PAGE, added: undefined }],
 		["a modified that is not a list", { ...GOOD_PAGE, modified: {} }],
 		["no removed", { ...GOOD_PAGE, removed: undefined }],
-		["no next_cursor", { ...GOOD_PAGE, next_cursor: undefined }],
 		[
 			"a charge with no date",
 			{ ...GOOD_PAGE, added: [{ ...GOOD_TRANSACTION, date: undefined }] },
@@ -45,6 +44,7 @@ describe("readSyncPage", () => {
 			{ ...GOOD_PAGE, has_more: undefined },
 			{ ...GOOD_PAGE, next_cursor: null },
 			{ ...GOOD_PAGE, next_cursor: 5 },
+			{ ...GOOD_PAGE, next_cursor: undefined, has_more: true },
 			{ ...GOOD_PAGE, extra: { a: [1] } },
 			{ ...GOOD_PAGE, added: [{ ...GOOD_TRANSACTION, transaction_id: null }] },
 			{ ...GOOD_PAGE, added: [{ ...GOOD_TRANSACTION, pending: undefined }] },

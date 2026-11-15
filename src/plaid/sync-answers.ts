@@ -69,7 +69,8 @@ const SyncPage = Schema.Struct({
 	added: Schema.Array(Charge),
 	modified: Schema.Array(Charge),
 	removed: Schema.Array(Schema.Struct({ transaction_id: Sent })),
-	next_cursor: Sent,
+	// next_cursor is not checked: the sync reads it only when it saves the page's position, and a page that says more is
+	// coming while it drops a waiting pending charge saves the held position instead, so a missing one is taken there.
 });
 
 const Account = Schema.Struct({
