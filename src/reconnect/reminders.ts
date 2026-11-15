@@ -1,6 +1,8 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { daysBefore, householdTimeZone, todayIn } from "../dates";
 import { readBankSignInEmails } from "../db/reconnect";
+import { parseStoredWith } from "../db/stored-shape";
 import { type DeliveryEnv, deliver, logDeliveries } from "./deliver";
 import { renderReconnectEmail } from "./email";
 
@@ -21,6 +23,28 @@ type ReminderEnv = DeliveryEnv & {
 	DB: D1Database;
 	DEMO?: string;
 };
+
+/**
+ * The accounts a bank's reminder lists, as stored: each entry has a name and a mask (the SQL writes both, so the mask is a
+ * string or null). Extra keys are allowed and stay on the entry.
+ */
+const StoredAccounts = Schema.mutable(
+	Schema.Array(
+		Schema.Struct({ name: Schema.String, mask: Schema.NullOr(Schema.String) }),
+	),
+);
+
+/**
+ * The accounts one bank's reminder lists, read as stored. An empty or null text is no accounts, as before. Null when the text
+ * is not JSON or is not shaped like the accounts: the run skips that bank before it claims the bank's reminder (decision 233).
+ */
+export function accountsOf(text: string | null) {
+	try {
+		return parseStoredWith(StoredAccounts, text || "[]");
+	} catch {
+		return null;
+	}
+}
 
 export function reconnectRecipients(db: D1Database) {
 	return db
@@ -99,6 +123,17 @@ export async function runReconnectReminders(
 	const failureKinds = new Set<string>();
 
 	for (const bank of banks) {
+		// The stored accounts are read before the claim. A bank that cannot be read is not claimed and sends nothing: it is
+		// counted once, and the next run tries it again (decision 233).
+		const accounts = accountsOf(bank.accounts);
+
+		if (accounts === null) {
+			failedCount += 1;
+			failureKinds.add("accounts unreadable");
+
+			continue;
+		}
+
 		const claimedAt = now.toISOString().replace("T", " ").slice(0, 19);
 
 		// A partial delivery keeps the claim; a failed recipient waits for the next three-day pass.
@@ -110,14 +145,10 @@ export async function runReconnectReminders(
 
 		if (!claim.meta.changes) continue;
 
-		// SAFETY: the SQL above builds accounts with json_object('name', ..., 'mask', ...), so each entry has a name and a mask.
 		const input = {
 			bank: bank.institution_name,
 			lastSyncedAt: bank.last_synced_at,
-			accounts: JSON.parse(bank.accounts || "[]") as {
-				name: string;
-				mask: string | null;
-			}[],
+			accounts,
 		};
 
 		const email = renderReconnectEmail(input, zone);
