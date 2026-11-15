@@ -856,7 +856,7 @@ describe("removeSplit names a split refund that no longer fits its purchase", ()
 describe("saveSplit only splits a whole purchase", () => {
 	it("refuses a part's id and changes nothing", async () => {
 		await saveSplit(db, PURCHASE, PARTS, "test");
-		const [part] = await partIds(PURCHASE);
+		const part = (await partIds(PURCHASE))[0] ?? 0;
 
 		await expect(
 			saveSplit(
