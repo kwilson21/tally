@@ -154,13 +154,11 @@ describe("inputMark: the name Jev is told", () => {
 		const variants = nameVariants();
 		const marks = await Promise.all(variants.map((row) => inputMark(row)));
 
+		const told = variants.map((row) => jevInputOf(row).displayName);
+
 		for (let i = 0; i < variants.length; i++) {
 			for (let j = i + 1; j < variants.length; j++) {
-				const same =
-					jevInputOf(variants[i] as JevSeen).displayName ===
-					jevInputOf(variants[j] as JevSeen).displayName;
-
-				expect(marks[i] === marks[j]).toBe(same);
+				expect(marks[i] === marks[j]).toBe(told[i] === told[j]);
 			}
 		}
 	});

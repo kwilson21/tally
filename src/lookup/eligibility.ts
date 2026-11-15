@@ -273,10 +273,9 @@ export async function readEligibilityRows(
 					: { inputMark: row.markInput, cleared: row.markCleared ?? 0 };
 
 			const seen = jevSeenOf(row);
+
 			const mark =
-				stored === null
-					? "owed"
-					: markState(stored, await inputMark(seen));
+				stored === null ? "owed" : markState(stored, await inputMark(seen));
 
 			return {
 				id: row.id,

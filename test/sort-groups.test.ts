@@ -2034,6 +2034,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 	it("reports jevBusy when the run stops because nextWait says Jev stayed busy (#1113)", async () => {
 		const ids = await addWaiting(3);
 		const { sleeps, sleep } = recordingSleep();
+
 		const done = await sortWith(
 			fakeSteps(),
 			vi.fn(async () => rateLimit("5")),
@@ -2049,6 +2050,7 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 	it("does not report jevBusy when the run ends for another reason", async () => {
 		const ids = await addWaiting(3);
 		const { sleep } = recordingSleep();
+
 		const done = await sortWith(
 			fakeSteps(),
 			vi.fn(async () => reply(0.9)),

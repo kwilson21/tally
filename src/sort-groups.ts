@@ -7,7 +7,7 @@
 // Rules: a group saves only while it holds the sorting turn; a Jev call is never made twice; no clock or
 // randomness is read outside a step (the Workflow's loop itself reads none).
 
-import { askJev, JEV_THRESHOLD } from "./ai/categorize";
+import { askJev, JEV_THRESHOLD, type JevResult } from "./ai/categorize";
 import { meetsConfidenceThreshold } from "./ai/confidence";
 import { decide, type JevAnswer } from "./ai/decide";
 import { cleanBankText } from "./clean-bank-text";
@@ -925,7 +925,8 @@ export function askBlocked(
 ): AskResult | null {
 	if (attempt > 1) return { id, outcome: "lost" };
 
-	if (todayIn(plan.timeZone) !== plan.day) return { id, outcome: "date-changed" };
+	if (todayIn(plan.timeZone) !== plan.day)
+		return { id, outcome: "date-changed" };
 
 	if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
 

@@ -13,6 +13,7 @@ import { clearWaitsForRunStatement } from "./db/first-tally";
 import { finishRun } from "./db/resort-run";
 import { waitingForJevSql } from "./db/transactions";
 import { lookupAsks, lookupEnvOpen } from "./lookup/gate";
+import { runPrivacyReask } from "./lookup/privacy-reask";
 import { fillLookupTexts } from "./lookup/texts";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -122,13 +123,18 @@ export async function runSortInstance(
 		}
 	}
 
+	// The privacy re-ask runs only after the groups finished without a busy Jev (#1113).
+	let sorted = false;
+
 	try {
-		await sortGroups(
+		const done = await sortGroups(
 			env,
 			runStep,
 			options.fetchImpl,
 			instanceSortOptions(params, options),
 		);
+
+		sorted = !done.jevBusy;
 	} catch (error) {
 		// A step that ran out of retries ends the sort quietly; the rows it didn't save wait for the next sort.
 		console.error(
@@ -153,6 +159,21 @@ export async function runSortInstance(
 		} catch (error) {
 			console.error(
 				`reask: finish step ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
+
+	// The privacy re-ask (#1113): a failure is logged by its error's name, and the night's steps still run.
+	if (sorted && lookupEnvOpen(env) && env.JEV_API_KEY) {
+		try {
+			await runPrivacyReask(env, runStep, {
+				runId: options.runId,
+				bySync: params.bySync,
+				fetchImpl: options.fetchImpl,
+			});
+		} catch (error) {
+			console.error(
+				`privacy re-ask: stopped ${error instanceof Error ? error.name : "unknown"}`,
 			);
 		}
 	}

@@ -131,9 +131,11 @@ describe("what Jev is told (#1113)", () => {
 		const rows = await pendingForJev(db, 10, { ids: [plain, named] });
 
 		expect(rows).toHaveLength(2);
+
 		for (const row of rows) {
 			expect(row).toMatchObject(jevInputOf(row.seen));
 		}
+
 		expect(rows.find((row) => row.id === named)?.displayName).toBe(
 			"Corner Shop",
 		);
