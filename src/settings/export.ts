@@ -17,6 +17,9 @@ export const EXPORT_COLUMNS = {
 	merchant_lookup_texts: "merchant_key, lookup_text, private",
 	// The store lookup's payee mark, one row per transaction Jev was asked about (migration 0075, spec §5).
 	lookup_cleared: "transaction_id, input_mark, cleared",
+	// The store lookup's answer, one row per transaction Jev was asked about with the line (migration 0078, spec §5).
+	lookup_answers:
+		"transaction_id, lookup_text, kept, kept_category_id, kept_confidence",
 	merchant_name_failures: "raw_name, failed_at",
 	// Each account names its bank and says whether it's disconnected, since bank rows carry no id. An uploaded Apple Card
 	// has no bank connection: its bank is Apple Card, and it can't be disconnected (spec §8.10).
@@ -36,7 +39,8 @@ export const EXPORT_COLUMNS = {
 	ai_log:
 		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
 	// What a person answered to a "Maybe …" (decision 155): the kind, the guess's confidence, the answer and the day; no transaction.
-	maybe_answers: "id, kind, confidence, answer, household_day, created_at",
+	maybe_answers:
+		"id, kind, confidence, answer, household_day, created_at, with_line",
 	// The name Workers AI gave a Maybe card's "New category" row, or NULL for "no name" (decision 161), and when it was kept.
 	// categories_key is a hash of the active categories it was asked against (decision 165). claim is left out: it is the
 	// random token that lets one request finish the row (migration 0063).

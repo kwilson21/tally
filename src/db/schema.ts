@@ -187,6 +187,21 @@ export const merchantLookupTexts = sqliteTable(
 	(t) => [index("merchant_lookup_texts_lookup_text").on(t.lookupText)],
 );
 
+/** The store lookup's answer for a transaction Jev was asked about with the line (migrations/0078_lookup_answers.sql). */
+export const lookupAnswers = sqliteTable(
+	"lookup_answers",
+	{
+		transactionId: integer("transaction_id")
+			.primaryKey()
+			.references(() => transactions.id, { onDelete: "cascade" }),
+		lookupText: text("lookup_text").notNull(),
+		kept: integer().notNull(),
+		keptCategoryId: integer("kept_category_id"),
+		keptConfidence: real("kept_confidence"),
+	},
+	(t) => [index("lookup_answers_lookup_text").on(t.lookupText)],
+);
+
 /** The store lookup's privacy mark for a transaction Jev was asked the payee question about (migrations/0075_lookup_cleared.sql). */
 export const lookupCleared = sqliteTable("lookup_cleared", {
 	transactionId: integer("transaction_id")
@@ -810,6 +825,8 @@ export const maybeAnswers = sqliteTable(
 		// The migration's CHECK here is (household_day GLOB 'YYYY-MM-DD'), not an IN list, so it is compared in CHECKS.
 		householdDay: text("household_day").notNull(),
 		createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+		// 1 when the category answer answered a kept line-backed guess, read in the answer's own batch (migrations/0078).
+		withLine: integer("with_line").notNull().default(0),
 	},
 	(t) => [index("maybe_answers_household_day").on(t.householdDay)],
 );
@@ -876,6 +893,7 @@ export const CHECK_LISTS = {
 	maybe_answers: {
 		kind: MAYBE_ANSWER_KIND_VALUES,
 		answer: MAYBE_ANSWER_ANSWER_VALUES,
+		with_line: ["0", "1"],
 	},
 	never_suggest_rules: {
 		kind: NEVER_SUGGEST_RULE_KIND_VALUES,
@@ -913,6 +931,9 @@ export const CHECK_LISTS = {
 	},
 	merchant_lookup_texts: {
 		private: ["0", "1"],
+	},
+	lookup_answers: {
+		kept: ["0", "1"],
 	},
 	lookup_cleared: {
 		cleared: ["0", "1"],

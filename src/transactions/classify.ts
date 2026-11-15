@@ -17,7 +17,7 @@
 // Plaid's sign: positive = money out, negative = money in. A money-in row is called a "credit" here.
 
 import { confidenceBasisPoints } from "../ai/confidence";
-import { askedBounds } from "../ai/maybe";
+import { askedBounds, isCategoryMaybe } from "../ai/maybe";
 
 /** The columns this file reads, as SELECT * gives them (SQLite gives 0 and 1 for booleans, and null). */
 export type Row = {
@@ -58,6 +58,8 @@ export type Context = {
 	anyActiveCategory: boolean;
 	/** A "Never suggest income" rule matches this row's store. */
 	neverSuggestIncome: boolean;
+	/** The store lookup's line rows say this row still holds the line-backed guess (lineGuessSql, decision 225). */
+	lineGuess: boolean;
 };
 
 // ---- the five answers -----------------------------------------------------------------------------------------------
@@ -224,11 +226,16 @@ function moneyOf(
 	};
 }
 
-/** Jev's guess, read against the Maybe range: 40% up to 80% is asked. Basis points keep the edges exact. */
-function guessOf(r: Row): Guess {
+/**
+ * Jev's guess, read against the Maybe range: 40% up to 80% is asked. Basis points keep the edges exact. A guess the store
+ * lookup's second ask kept with the line is a Maybe from 40% up, with no upper end (ctx.lineGuess, decision 225).
+ */
+function guessOf(r: Row, ctx: Context): Guess {
 	if (r.category_confidence === null) return { kind: "none" };
 	const basisPoints = confidenceBasisPoints(r.category_confidence);
 	const { above, below } = askedBounds("category");
+
+	if (ctx.lineGuess && basisPoints > above) return { kind: "maybe" };
 
 	if (basisPoints >= below) return { kind: "sure" };
 
@@ -237,18 +244,15 @@ function guessOf(r: Row): Guess {
 	return { kind: "below_floor" };
 }
 
-function categoryOf(r: Row): Category {
+function categoryOf(r: Row, ctx: Context): Category {
 	if (r.category_id !== null)
 		return { kind: "set", id: r.category_id, source: r.category_source };
 
-	return { kind: "unset", source: r.category_source, guess: guessOf(r) };
+	return { kind: "unset", source: r.category_source, guess: guessOf(r, ctx) };
 }
 
-/** Whether a stored confidence is inside the asked range for a kind (40% to 80% for categories, 20% to 80% for income). */
-function inAskedRange(
-	kind: "category" | "income",
-	confidence: number | null,
-): boolean {
+/** Whether a stored confidence is inside the asked range for income (20% to 80%). The category range is isCategoryMaybe's. */
+function inAskedRange(kind: "income", confidence: number | null): boolean {
 	if (confidence === null) return false;
 	const { above, below } = askedBounds(kind);
 	const basisPoints = confidenceBasisPoints(confidence);
@@ -263,7 +267,7 @@ export function classify(r: Row, ctx: Context): Classified {
 	const budget = budgetOf(r, ctx);
 	const income = incomeOf(r);
 	const money = moneyOf(r, ctx, income, budget.kind === "counted");
-	const category = categoryOf(r);
+	const category = categoryOf(r, ctx);
 
 	const questions = questionsOf(r, ctx, {
 		structure,
@@ -386,7 +390,8 @@ function questionsOf(
 		notSplitParent &&
 		!hasCategory &&
 		!hasCategorySource &&
-		inAskedRange("category", r.category_confidence) &&
+		r.category_confidence !== null &&
+		isCategoryMaybe(r.category_confidence, ctx.lineGuess) &&
 		!isIncome &&
 		jevMayBeAsked &&
 		!heldCredit &&

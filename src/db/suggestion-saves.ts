@@ -28,6 +28,7 @@ import { leftEmpty } from "./refused";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
+	lineGuessSql,
 	neverSuggestAskedSql,
 	transferAskedSql,
 } from "./suggestions-queue";
@@ -127,18 +128,29 @@ const guard = (
 			save.expectedVersion,
 		);
 
-/** The answer's record (decision 155): the guess it was given against, and the household's day. */
+/**
+ * The answer's record (decision 155): the guess it was given against, and the household's day. A category answer also says
+ * whether it answered a kept line-backed guess (with_line, decision 225). That is read here, in the answer's own batch and
+ * before the category is set, so the guard has already checked the row still holds the guess. Income and transfer keep 0.
+ */
 const record = (
 	db: D1Database,
 	kind: MaybeKind,
 	answer: string,
-	save: { confidence: number; today: string },
+	save: { confidence: number; today: string; transactionId: number },
 ) =>
-	db
-		.prepare(
-			"INSERT INTO maybe_answers (kind, confidence, answer, household_day) VALUES (?, ?, ?, ?)",
-		)
-		.bind(kind, save.confidence, answer, save.today);
+	kind === "category"
+		? db
+				.prepare(
+					`INSERT INTO maybe_answers (kind, confidence, answer, household_day, with_line)
+					VALUES (?, ?, ?, ?, (SELECT COUNT(*) FROM transactions t WHERE t.id = ? AND ${lineGuessSql("t")}))`,
+				)
+				.bind(kind, save.confidence, answer, save.today, save.transactionId)
+		: db
+				.prepare(
+					"INSERT INTO maybe_answers (kind, confidence, answer, household_day) VALUES (?, ?, ?, ?)",
+				)
+				.bind(kind, save.confidence, answer, save.today);
 
 /** What each money answer sets on its transaction. A No changes nothing that counts: it hides this one Maybe (decision 101). */
 const moneyAnswer = (db: D1Database, save: MoneyMaybeWrite) => {

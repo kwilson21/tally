@@ -96,7 +96,7 @@ import {
 	transactions,
 } from "./schema";
 import { withTurnGuard } from "./sorting-turn";
-import { askedSql } from "./suggestions-queue";
+import { categoryMaybeSql, lineGuessSql } from "./suggestions-queue";
 
 /** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
 /** Whether a value is a number, such as a purchase's or a person's id, before a rule branches on it. */
@@ -177,7 +177,7 @@ export const MAYBE_CATEGORY_JOINS = `LEFT JOIN categories maybeCat ON maybeCat.i
 	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending' AND NOT ${neverSuggestedSql("t", "new_category")}`;
 
 /** The Maybe chip's category name (a new one as "new:name"), and whether it is a new one; needs MAYBE_CATEGORY_JOINS. */
-export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND ${askedSql("category", "t.category_confidence")} THEN maybeCat.name END AS maybeCategoryName,
+export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND ${categoryMaybeSql("t")} THEN maybeCat.name END AS maybeCategoryName,
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
 
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
@@ -866,6 +866,8 @@ export type TransactionDetail = ListRow & {
 	jevSaysMixed: boolean;
 	/** A transfer for the rule offer (`countedTransferSql`): put back in the budget, it can become a counted pick (#372). */
 	markedTransfer: boolean;
+	/** The store lookup's line-backed guess is the one the row holds (lineGuessSql, decision 225): the Maybe chip and the edit panel read it. */
+	lineGuess: boolean;
 	/** The other category Jev named, when it is active (#233); the mixed line names it after the pick. */
 	alsoCategoryId: number | null;
 	alsoCategoryName: string | null;
@@ -965,6 +967,7 @@ export async function getTransaction(
 				alsoCat.id AS alsoCategoryId, alsoCat.name AS alsoCategoryName, CASE WHEN ${jevSaysMixedSql("t")} THEN 1 ELSE 0 END AS jevSaysMixed,
 				${countedTransferSql("t")} AS markedTransfer,
 				${MAYBE_CATEGORY_COLUMNS},
+				(${lineGuessSql("t")}) AS lineGuess,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType, pi.institution_name AS bankName
 			FROM transactions t
@@ -1000,11 +1003,14 @@ export async function getTransaction(
 				| "pending"
 				| "jevSaysMixed"
 				| "markedTransfer"
+				| "lineGuess"
 			> &
 				NameSuggestionColumns & {
 					/** 1 when Jev says the trip looks mixed (#233), whoever chose the category (`jevSaysMixedSql`). */
 					jevSaysMixed: number;
 					markedTransfer: number;
+					/** 1 when the row still holds the line-backed guess (lineGuessSql). */
+					lineGuess: number;
 					merchantTotal: number;
 					/** A JSON array of the other own-named transactions from this merchant (parts included): name, date and whether a part. */
 					ownedJson: string;
@@ -1100,6 +1106,7 @@ export async function getTransaction(
 		pending: r.pending === 1,
 		jevSaysMixed: r.jevSaysMixed === 1,
 		markedTransfer: r.markedTransfer === 1,
+		lineGuess: r.lineGuess === 1,
 		displayName: shown.name,
 		storeName,
 		nameSuggested: shown.suggested,
