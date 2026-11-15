@@ -3387,7 +3387,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(await stateOf(id)).toEqual(before);
 	});
 
-	it("saves nothing when the posted parts or the amount are out of date, and the save is an error", async () => {
+	it("refuses in words when the posted parts or the amount are out of date, and saves nothing", async () => {
 		const { id, a, b } = await splitCash("Out of date");
 		const before = await stateOf(id);
 
@@ -3399,7 +3399,10 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				.first<{ id: number }>(),
 		).id;
 
-		const cases: { name: string; run: () => Promise<{ res: Response }> }[] = [
+		const cases: {
+			name: string;
+			run: () => Promise<{ res: Response; html: string }>;
+		}[] = [
 			{
 				name: "a saved part is missing",
 				run: () =>
@@ -3432,8 +3435,11 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		];
 
 		for (const testCase of cases) {
-			const { res } = await testCase.run();
-			expect(res.status, testCase.name).toBe(500);
+			const { res, html } = await testCase.run();
+			expect(res.status, testCase.name).toBe(422);
+			expect(html, testCase.name).toContain(
+				"This split changed while you were editing it, so nothing was saved.",
+			);
 			expect(await stateOf(id), testCase.name).toEqual(before);
 		}
 	});
@@ -3477,7 +3483,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				},
 				"demo",
 			),
-		).rejects.toThrow("changed while it was being corrected");
+		).resolves.toEqual({ saved: false, changed: true });
 		expect(
 			(
 				await env.DB.prepare(
@@ -3561,7 +3567,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				},
 				"demo",
 			),
-		).rejects.toThrow("changed while it was being corrected");
+		).resolves.toEqual({ saved: false, changed: true });
 		expect(
 			(
 				await env.DB.prepare(
@@ -3617,7 +3623,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				},
 				"demo",
 			),
-		).rejects.toThrow("changed while it was being corrected");
+		).resolves.toEqual({ saved: false, changed: true });
 		expect(
 			(
 				await env.DB.prepare(

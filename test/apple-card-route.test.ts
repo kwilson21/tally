@@ -681,7 +681,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 			// Only the matcher's first read of the bills fails: the rows, the rules and the retry are the real D1's.
 			const bindings = envWith(family, {
-				DB: blipDb("FROM bills WHERE active=1"),
+				DB: blipDb(`from "bills" where "bills"."active" = ?`),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			});
@@ -728,7 +728,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const context = ctx();
 
 			const bindings = envWith(family, {
-				DB: failingDb("FROM bills WHERE active=1"),
+				DB: failingDb(`from "bills" where "bills"."active" = ?`),
 				JEV_API_KEY: "test-key",
 				SORT: { create },
 			});

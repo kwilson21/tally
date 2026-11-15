@@ -4,6 +4,8 @@
 // bills step's kept count and total), so a change made elsewhere, in the Transactions panel or on Bills, adds no line.
 // The strokes never overwrite a stroke's first day (markStroke).
 
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
 import { insertBillStatements } from "../bills/write";
@@ -39,6 +41,7 @@ import { PERSON_INCOME_SET_SQL, storedIncomeGuessSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import { merchantDisplayNames } from "../db/merchant-names";
 import { currentGoalSql } from "../db/savings-goals";
+import { bills } from "../db/schema";
 import { askedSql, payAskedSql } from "../db/suggestions-queue";
 import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
@@ -704,9 +707,11 @@ export async function keepBudgetAnswers(
 
 /** The active bills' names, which a found charge can't share (spec §8.5). */
 async function activeBillNames(db: D1Database): Promise<string[]> {
-	const { results } = await db
-		.prepare("SELECT name FROM bills WHERE active = 1")
-		.all<{ name: string }>();
+	const results = await drizzle(db)
+		.select({ name: bills.name })
+		.from(bills)
+		.where(eq(bills.active, 1))
+		.all();
 
 	return results.map((row) => row.name);
 }

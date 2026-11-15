@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
@@ -180,20 +180,33 @@ describe("POST /home/seen: the presence check-in", () => {
 		await setSeen(PERSON, "-31 seconds");
 
 		// The database as this request sees it: once it has read the member's row, another tab's check-in lands.
+		// Drizzle sends the member read as a lower-case select and reads it with raw, all or first, so the hook matches
+		// that select on home_seen_at, and each of those reads lets the other tab's check-in land after it.
 		const afterTheRead = (sql: string) => {
 			const statement = env.DB.prepare(sql);
 
-			if (!sql.startsWith("SELECT removed_at IS NULL")) return statement;
+			if (!/^select\b/i.test(sql) || !sql.includes("home_seen_at"))
+				return statement;
+
+			const thenOtherTab =
+				<T>(read: () => Promise<T>) =>
+				async (): Promise<T> => {
+					const result = await read();
+					await setSeen(PERSON, "+5 seconds");
+
+					return result;
+				};
 
 			return {
-				bind: (...values: (string | number)[]) => ({
-					first: async () => {
-						const row = await statement.bind(...values).first();
-						await setSeen(PERSON, "+5 seconds");
+				bind: (...values: (string | number)[]) => {
+					const bound = statement.bind(...values);
 
-						return row;
-					},
-				}),
+					return {
+						first: thenOtherTab(() => bound.first()),
+						raw: thenOtherTab(() => bound.raw()),
+						all: thenOtherTab(() => bound.all()),
+					};
+				},
 			};
 		};
 
@@ -221,6 +234,27 @@ describe("POST /home/seen: the presence check-in", () => {
 		const after = await seenOf(PERSON);
 		expect(after).not.toBe(before);
 		expect(after !== null && before !== null && after > before).toBe(true);
+	});
+
+	it("writes a check-in that is exactly 30 seconds old (the window's edge is inclusive)", async () => {
+		// The clock sits on a whole second, and the stored check-in is that second less 30: the window's edge exactly.
+		vi.useFakeTimers({ toFake: ["Date"] });
+
+		try {
+			const now = Math.floor(Date.now() / 1000) * 1000;
+			vi.setSystemTime(now);
+			await env.DB.prepare(
+				"UPDATE household_members SET home_seen_at = datetime(?, 'unixepoch') WHERE email = ?",
+			)
+				.bind(now / 1000 - 30, PERSON)
+				.run();
+			const before = await seenOf(PERSON);
+			await checkIn();
+
+			expect(await seenOf(PERSON)).not.toBe(before);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("writes nothing for a removed member, and still answers 204", async () => {

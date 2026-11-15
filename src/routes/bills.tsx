@@ -1,3 +1,5 @@
+import { and, asc, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Predicate from "effect/Predicate";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
@@ -65,6 +67,12 @@ import {
 import { ownNameSql } from "../db/own-name";
 import { loadPlans } from "../db/planned-expenses";
 import { databaseRefusal, isTriggerRaised } from "../db/refused";
+import {
+	billPayments,
+	bills as billsTable,
+	categories as categoriesTable,
+	transactions as transactionsTable,
+} from "../db/schema";
 import { readAtEdge } from "../edge";
 import {
 	BillAmount,
@@ -409,14 +417,26 @@ async function earlierPrice(db: D1Database, billId: number, today: string) {
 	return earlierAmount(history, today.slice(0, 7));
 }
 
+/** A bill's linked payments: the rows that say which month the bill was paid in. */
+const linkedPaymentsOf = (billId: number) =>
+	and(eq(billPayments.billId, billId), eq(billPayments.status, "linked"));
+
 async function categories(c: Context<App>) {
-	return (
-		await c.env.DB.prepare(
-			"SELECT id,name,icon,color FROM categories WHERE archived=0 ORDER BY sort_order,name",
-		).all<Category>()
-	).results;
+	return drizzle(c.env.DB)
+		.select({
+			id: categoriesTable.id,
+			name: categoriesTable.name,
+			icon: categoriesTable.icon,
+			color: categoriesTable.color,
+		})
+		.from(categoriesTable)
+		.where(eq(categoriesTable.archived, 0))
+		.orderBy(asc(categoriesTable.sortOrder), asc(categoriesTable.name))
+		.all();
 }
 
+// Stays raw SQL: b.* with the joined icon and color must match the snake_case DbBill that loadBillRows also returns
+// (src/bills/rows.ts); aliasing its fourteen columns would add nothing.
 async function dbBill(c: Context<App>, id: number) {
 	return c.env.DB.prepare(
 		`SELECT b.*,c.icon,c.color FROM bills b LEFT JOIN categories c ON c.id=b.category_id WHERE b.id=?`,
@@ -426,11 +446,15 @@ async function dbBill(c: Context<App>, id: number) {
 }
 
 async function activeBills(c: Context<App>) {
-	return (
-		await c.env.DB.prepare(
-			"SELECT id,name,active FROM bills WHERE active=1",
-		).all<{ id: number; name: string; active: number }>()
-	).results;
+	return drizzle(c.env.DB)
+		.select({
+			id: billsTable.id,
+			name: billsTable.name,
+			active: billsTable.active,
+		})
+		.from(billsTable)
+		.where(eq(billsTable.active, 1))
+		.all();
 }
 
 /** The sheet again, with the Name error for a name another active bill has (`values.name` is the name). */
@@ -1041,22 +1065,28 @@ async function save(c: Context<App>, id?: number) {
 		// Any category that was chosen is looked up, so one that isn't a number reads as not listed.
 		categoryListed: values.category_id
 			? Boolean(
-					await c.env.DB.prepare(
-						"SELECT id FROM categories WHERE id=? AND archived=0",
-					)
-						.bind(numberOf(values.category_id))
-						.first(),
+					await drizzle(c.env.DB)
+						.select({ id: categoriesTable.id })
+						.from(categoriesTable)
+						.where(
+							and(
+								eq(categoriesTable.id, numberOf(values.category_id)),
+								eq(categoriesTable.archived, 0),
+							),
+						)
+						.get(),
 				)
 			: null,
 		// Linked payments are budget history, so a bill that has them keeps its schedule; read only when it would change.
 		hasLinkedPayments:
 			bill && scheduleChanged(bill, request.schedule)
 				? Boolean(
-						await c.env.DB.prepare(
-							"SELECT 1 FROM bill_payments WHERE bill_id=? AND status='linked' LIMIT 1",
-						)
-							.bind(id)
-							.first(),
+						await drizzle(c.env.DB)
+							.select({ one: sql<number>`1` })
+							.from(billPayments)
+							.where(linkedPaymentsOf(bill.id))
+							.limit(1)
+							.get(),
 					)
 				: false,
 	};
@@ -1379,16 +1409,15 @@ const validPeriodKey: Record<DbBill["frequency"], (period: string) => boolean> =
 
 /** The periods a bill's page lists and accepts: back to its earliest linked payment (or six months), ahead two months (a year for yearly bills). */
 async function billPeriods(db: D1Database, bill: DbBill, today: string) {
-	const linked = await db
-		.prepare(
-			"SELECT period FROM bill_payments WHERE bill_id=? AND status='linked'",
-		)
-		.bind(bill.id)
-		.all<{ period: string }>();
+	const linked = await drizzle(db)
+		.select({ period: billPayments.period })
+		.from(billPayments)
+		.where(linkedPaymentsOf(bill.id))
+		.all();
 
 	let start = addMonths(today.slice(0, 7), -6);
 
-	for (const { period } of linked.results) {
+	for (const { period } of linked) {
 		if (!validPeriodKey[bill.frequency](period)) continue;
 		const month = occurrenceMonth(bill, period);
 
@@ -1476,13 +1505,21 @@ async function foundCharges(
 
 	const turnedAway = new Set(
 		(
-			await db
-				.prepare(
-					"SELECT period,transaction_id FROM bill_payments WHERE bill_id=? AND status='dismissed' AND matched_by='user'",
+			await drizzle(db)
+				.select({
+					period: billPayments.period,
+					transaction_id: billPayments.transactionId,
+				})
+				.from(billPayments)
+				.where(
+					and(
+						eq(billPayments.billId, bill.id),
+						eq(billPayments.status, "dismissed"),
+						eq(billPayments.matchedBy, "user"),
+					),
 				)
-				.bind(bill.id)
-				.all<{ period: string; transaction_id: number }>()
-		).results.map((row) => `${row.period}|${row.transaction_id}`),
+				.all()
+		).map((row) => `${row.period}|${row.transaction_id}`),
 	);
 
 	// Each month's closest so far: by amount to the month's own amount, then by days from its due date.
@@ -2044,11 +2081,11 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 
 	if (!named.ok) return c.notFound();
 
-	const payment = await c.env.DB.prepare(
-		"SELECT date FROM transactions WHERE id=?",
-	)
-		.bind(named.value)
-		.first<{ date: string }>();
+	const payment = await drizzle(c.env.DB)
+		.select({ date: transactionsTable.date })
+		.from(transactionsTable)
+		.where(eq(transactionsTable.id, named.value))
+		.get();
 
 	if (!payment) return c.notFound();
 
@@ -2452,13 +2489,18 @@ async function currentOffer(
 	| ({ period: string; dueMonth: string; billCents: number } & PriceOffer)
 	| undefined
 > {
-	const linked = (
-		await c.env.DB.prepare(
-			"SELECT bp.period AS period, t.amount_cents AS amount_cents FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked'",
+	const linked = await drizzle(c.env.DB)
+		.select({
+			period: billPayments.period,
+			amount_cents: transactionsTable.amountCents,
+		})
+		.from(billPayments)
+		.innerJoin(
+			transactionsTable,
+			eq(transactionsTable.id, billPayments.transactionId),
 		)
-			.bind(bill.id)
-			.all<{ period: string; amount_cents: number }>()
-	).results;
+		.where(linkedPaymentsOf(bill.id))
+		.all();
 
 	const paidByPeriod = paidByPeriodOf(linked);
 

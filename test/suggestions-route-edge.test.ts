@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDemo } from "../src/demo/reset";
 import baseline from "./fixtures/suggestions-edge-baseline.json";
 
@@ -559,7 +559,14 @@ async function recordLine(res: Response, html: string) {
 	].join(" | ");
 }
 
+/**
+ * The day the baseline was recorded. A "Never suggest" line stores the household's date (`decided_on`), which the state
+ * hash covers, so the test runs on this day whatever the real date: without it the cases fail the day after.
+ */
+const PINNED_DAY = "2026-11-14";
+
 beforeEach(async () => {
+	vi.setSystemTime(new Date(`${PINNED_DAY}T12:00:00Z`));
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
 		db.prepare("DELETE FROM transactions"),
@@ -568,6 +575,10 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe("the Suggestions screen's answers, read at the edge (#1006, PR 8)", () => {

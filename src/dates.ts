@@ -47,6 +47,7 @@ export function todayIn(timeZone: string, now: Date = new Date()): string {
 export async function householdTimeZone(db: D1Database): Promise<string> {
 	try {
 		const row = await db
+			// stays raw: refused.ts reads only the top message, and Drizzle's wrapper would hide the missing-table fallback (decision 179)
 			.prepare("SELECT value FROM household_settings WHERE key = 'time_zone'")
 			.first<{ value: string }>();
 

@@ -2741,9 +2741,11 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		// The sheet again at the posted parts, with why the correction was refused (nothing saved).
 		const refused = (refusal: CashSplitRefusal) => {
 			const error =
-				"refundPart" in refusal
-					? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
-					: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
+				"changed" in refusal
+					? "This split changed while you were editing it, so nothing was saved. Close this sheet and open it again to see it as it is now."
+					: "refundPart" in refusal
+						? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
+						: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
 
 			return sheetAgain(error);
 		};
@@ -3009,8 +3011,14 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 function pendingEditOf(form: FormData): string {
 	const fields = new URLSearchParams();
 	form.forEach((value, key) => {
-		if (key !== "change_parts" && isText(value)) fields.append(key, value);
+		if (key !== "change_parts" && key !== "note_not_posted" && isText(value))
+			fields.append(key, value);
 	});
+
+	// A file in the note is not a note (parseEdit): the sheet holds only text, so its replay is told so here.
+	// The marker is set here, never copied from the post, so a crafted earlier value cannot sit in front of it.
+	if (form.get("note") instanceof File || form.get("note_not_posted") === "1")
+		fields.set("note_not_posted", "1");
 
 	return fields.toString();
 }
@@ -3167,6 +3175,15 @@ async function savePanel(
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
 	// is the household as it is now, used when a For person was removed during the save.
+	// The note was not posted as text (a file, or a Change the parts replay's marker), or Details is off, its baseline was a file
+	// and no text came with it: the saved note stays, drawn in both boxes so a resubmit cannot clear it.
+	const noteLeftAlone =
+		form.get("note") instanceof File ||
+		form.get("note_not_posted") === "1" ||
+		(form.get("details_visible") === "0" &&
+			form.get("note_was") instanceof File &&
+			!(form.get("note")?.toString() ?? "").trim());
+
 	const showErrors = async (
 		errors: EditErrors,
 		changePartsTotalCents?: number,
@@ -3180,8 +3197,15 @@ async function savePanel(
 			alwaysWas: form.get("always_was") === "1",
 			merchantRuleWas: numberOfPosted(form.get("rule_category_was")) || null,
 			displayName: textOrNull(form.get("merchant")),
-			note: form.get("note")?.toString() ?? null,
-			noteWas: form.get("note_was")?.toString() ?? null,
+			// A file in either note is drawn back as the saved note, or "" when there is none, as a browser posts an
+			// empty box (parseEdit reads a file as not posted), never as text. A null here would draw the note in note_was.
+			note: noteLeftAlone
+				? (tx.note ?? "")
+				: (form.get("note")?.toString() ?? null),
+			noteWas:
+				noteLeftAlone || form.get("note_was") instanceof File
+					? (tx.note ?? "")
+					: (form.get("note_was")?.toString() ?? null),
 			excluded: form.get("excluded") === "1",
 			excludedWas: form.has("excluded_was")
 				? form.get("excluded_was") === "1"

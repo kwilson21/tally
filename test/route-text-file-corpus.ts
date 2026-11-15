@@ -675,7 +675,8 @@ export function buildSteps() {
 		"new_category_name",
 	);
 
-	// Pinned as they are: fields a file is refused in, or saved as text by design (decision for the owner, see the report).
+	// Pinned as they are: fields a file is refused in. The panel's note is the exception: a file in it is no note, so the
+	// saved note stays (test/panel-note-file-corpus.ts), and its two file rows were recorded on that change.
 	for (const key of [
 		"note",
 		"kind",

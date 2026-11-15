@@ -7,6 +7,8 @@
 // Rules: a group saves only while it holds the sorting turn; a Jev call is never made twice; no clock or
 // randomness is read outside a step (the Workflow's loop itself reads none).
 
+import { asc, count, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { askJev, JEV_THRESHOLD, type JevResult } from "./ai/categorize";
 import { meetsConfidenceThreshold } from "./ai/confidence";
 import { decide, type JevAnswer } from "./ai/decide";
@@ -38,6 +40,12 @@ import {
 	reaskPicks,
 	reaskRestoreStatement,
 } from "./db/resort-run";
+import {
+	categories as categoriesTable,
+	householdPeople,
+	householdSettings,
+	plaidItems,
+} from "./db/schema";
 import {
 	releaseSortingTurn,
 	releaseSortingTurnStatement,
@@ -85,11 +93,11 @@ export async function dailyJevCap(
 	// A set-up household has all four strokes drawn, so it has answered the three questions too.
 	if (questionsAnswered(await readFirstTally(db))) return usual;
 
-	const banks = await db
-		.prepare(
-			"SELECT COUNT(*) AS n FROM plaid_items WHERE disconnected_at IS NULL",
-		)
-		.first<{ n: number }>();
+	const banks = await drizzle(db)
+		.select({ n: count() })
+		.from(plaidItems)
+		.where(isNull(plaidItems.disconnectedAt))
+		.get();
 
 	return Math.max(usual, FIRST_WEEK_CALLS_PER_BANK * (banks?.n ?? 0));
 }
@@ -540,18 +548,17 @@ async function readGroup(
 		if (!asksJev(switches) || (options.bySync && !switches.sortOnArrival))
 			return await none();
 
-		const { results: categories } = await db
-			.prepare(
-				"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
-			)
-			.all<{ id: number; name: string }>();
+		const categories = await drizzle(db)
+			.select({ id: categoriesTable.id, name: categoriesTable.name })
+			.from(categoriesTable)
+			.where(eq(categoriesTable.archived, 0))
+			.orderBy(asc(categoriesTable.sortOrder));
 
 		const people = switches.details
-			? (
-					await db
-						.prepare("SELECT id, name FROM household_people ORDER BY id")
-						.all<{ id: number; name: string }>()
-				).results
+			? await drizzle(db)
+					.select({ id: householdPeople.id, name: householdPeople.name })
+					.from(householdPeople)
+					.orderBy(asc(householdPeople.id))
 			: [];
 
 		const timeZone = await householdTimeZone(db);
@@ -735,11 +742,11 @@ export async function reserveCalls(
 	env: SortEnv,
 	{ day, turnId, wanted }: { day: string; turnId: string; wanted: number },
 ): Promise<{ granted: number }> {
-	const kept = await env.DB.prepare(
-		"SELECT value FROM household_settings WHERE key = ?",
-	)
-		.bind(reservedKeyFor(day, turnId))
-		.first<{ value: string }>();
+	const kept = await drizzle(env.DB)
+		.select({ value: householdSettings.value })
+		.from(householdSettings)
+		.where(eq(householdSettings.key, reservedKeyFor(day, turnId)))
+		.get();
 
 	if (kept) return { granted: Number(kept.value) };
 
@@ -843,15 +850,18 @@ function lookupMarkStatement(
 	mark: { inputMark: string; cleared: boolean },
 	stillOn: string,
 ): D1PreparedStatement {
-	return db
-		.prepare(
-			`INSERT INTO lookup_cleared (transaction_id, input_mark, cleared)
+	return (
+		db
+			// stays raw: an INSERT..SELECT that reads changes() and a shared STILL_ON_SQL guard, batched with raw statements (decision 179)
+			.prepare(
+				`INSERT INTO lookup_cleared (transaction_id, input_mark, cleared)
 			SELECT ?, ?, CASE WHEN ? = 1 AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?
 				AND t.category_confidence IS NOT NULL AND (t.category_source IS NULL OR t.category_source = 'jev')) THEN 1 ELSE 0 END
 			WHERE changes() > 0 AND ${STILL_ON_SQL}
 			ON CONFLICT(transaction_id) DO UPDATE SET input_mark = excluded.input_mark, cleared = excluded.cleared`,
-		)
-		.bind(id, mark.inputMark, mark.cleared ? 1 : 0, id, stillOn);
+			)
+			.bind(id, mark.inputMark, mark.cleared ? 1 : 0, id, stillOn)
+	);
 }
 
 /**
@@ -1260,10 +1270,11 @@ export async function writeGroup(
 	// Its record gone means the save already went through, so there is nothing to save. Its record still there means
 	// another group holds the turn: the step throws, so it is tried again.
 	if ((saved.at(-1)?.meta.changes ?? 0) === 0) {
-		const record = await db
-			.prepare("SELECT key FROM household_settings WHERE key = ?")
-			.bind(reservedKey)
-			.first();
+		const record = await drizzle(db)
+			.select({ key: householdSettings.key })
+			.from(householdSettings)
+			.where(eq(householdSettings.key, reservedKey))
+			.get();
 
 		if (record) throw new Error("sorting turn taken");
 

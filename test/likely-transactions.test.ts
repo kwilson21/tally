@@ -235,6 +235,24 @@ describe("likelyTransactions", () => {
 		expect(rows.map((row) => row.id)).toEqual([sameMerchant]);
 	});
 
+	it("offers a guess for the name only while its suggestion is pending, and not once it is dismissed", async () => {
+		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
+			suggestionId: suggested,
+		});
+
+		const before = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(before.map((row) => row.id)).toContain(guess);
+
+		await env.DB.prepare(
+			"UPDATE category_suggestions SET status = 'dismissed' WHERE id = ?",
+		)
+			.bind(suggested)
+			.run();
+
+		const after = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(after.map((row) => row.id)).not.toContain(guess);
+	});
+
 	it("leaves out transactions that already have a category", async () => {
 		await tx(
 			`${THIS}-03`,
@@ -750,14 +768,24 @@ function editedAfterRead(change: string, id: number): D1Database {
 				if (property === "bind")
 					return (...values: unknown[]) => afterRead(target.bind(...values));
 
+				// Drizzle reads a select with fields through raw(), and one without through all().
+				const editAfter = async () =>
+					env.DB.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
+						.bind(id)
+						.run();
+
 				if (property === "all")
-					return async () => {
+					return async (): Promise<D1Result> => {
 						const result = await target.all();
-						await env.DB.prepare(
-							`UPDATE transactions SET ${change} WHERE id = ?`,
-						)
-							.bind(id)
-							.run();
+						await editAfter();
+
+						return result;
+					};
+
+				if (property === "raw")
+					return async (): Promise<unknown[][]> => {
+						const result = await target.raw();
+						await editAfter();
 
 						return result;
 					};
@@ -774,9 +802,8 @@ function editedAfterRead(change: string, id: number): D1Database {
 				return (sql: string) => {
 					const statement = target.prepare(sql);
 
-					return sql.includes(
-						"FROM category_suggestions WHERE status = 'pending'",
-					)
+					// The pending read is Drizzle's select now (matchingSuggestionIds), so the hook matches its column.
+					return sql.includes(`"category_suggestions"."status" = ?`)
 						? afterRead(statement)
 						: statement;
 				};

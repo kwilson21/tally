@@ -1236,6 +1236,10 @@ export async function saveEdit(
 		? await prepareCashSplitCorrection(db, id, splitEdit, actor)
 		: null;
 
+	// A correction whose entry or parts changed since its sheet was drawn is refused before any statement runs.
+	if (splitPrepared && "refused" in splitPrepared)
+		return { saved: false, split: splitPrepared.refused };
+
 	// The purchase this refund is being linked to now: undefined when its link stays as it is, null
 	// when it's being unlinked.
 	const noteChanged =
@@ -2590,7 +2594,8 @@ export type CashSplitEdit = {
 export type CashSplitResult =
 	| { saved: true }
 	| { saved: false; refundTotalCents: number }
-	| { saved: false; refundPart: { part: number; refundCents: number } };
+	| { saved: false; refundPart: { part: number; refundCents: number } }
+	| { saved: false; changed: true };
 
 /** A refused correction: what correctCashSplit returns when nothing was saved. */
 export type CashSplitRefusal = Exclude<CashSplitResult, { saved: true }>;
@@ -2613,7 +2618,8 @@ export type CashSplitRefusal = Exclude<CashSplitResult, { saved: true }>;
  * refunds linked to the entry and its parts together take) when those are more than the new total, which
  * moving the parts can't fix.
  * Returns `refundPart` (the part's 1-based position and what its refunds take) when a part's refunds don't
- * fit; throws when the entry or its parts are no longer as they were drawn, so the save is an error.
+ * fit. Returns `changed` when the entry or its parts are no longer as they were drawn (the amount or the saved
+ * parts differ from the sheet's): nothing is saved, and the sheet is drawn again to say so.
  */
 export async function correctCashSplit(
 	db: D1Database,
@@ -2622,6 +2628,8 @@ export async function correctCashSplit(
 	by: string,
 ): Promise<CashSplitResult> {
 	const prepared = await prepareCashSplitCorrection(db, parentId, edit, by);
+
+	if ("refused" in prepared) return prepared.refused;
 
 	return prepared.finish(
 		await db.batch([...prepared.before, ...prepared.after]),
@@ -2633,19 +2641,23 @@ export async function correctCashSplit(
  * The batch is `before`, then the edit's own statements, which carry `gate`, then `after`, which adds the new
  * parts. The gate's check that no saved part is missing from the posted parts only holds until the new parts are
  * added, so the edit's statements run before them: a refused correction refuses them too. `finish` takes the
- * batch's results in order (the parent's first) and says what was saved, or why not.
+ * batch's results in order (the parent's first) and says what was saved, or why not. When the saved parts aren't the
+ * entry's parts as they are now, there is no batch: `refused` says so (`changed`), and nothing runs.
  */
 async function prepareCashSplitCorrection(
 	db: D1Database,
 	parentId: number,
 	edit: CashSplitEdit,
 	by: string,
-): Promise<{
-	before: D1PreparedStatement[];
-	gate: { sql: (n: number) => string; args: unknown[] };
-	after: D1PreparedStatement[];
-	finish(results: D1Result[]): Promise<CashSplitResult>;
-}> {
+): Promise<
+	| { refused: CashSplitRefusal }
+	| {
+			before: D1PreparedStatement[];
+			gate: { sql: (n: number) => string; args: unknown[] };
+			after: D1PreparedStatement[];
+			finish(results: D1Result[]): Promise<CashSplitResult>;
+	  }
+> {
 	const { totalCents, amountWasCents, parts } = edit;
 	const partsTotal = parts.reduce((sum, part) => sum + part.amountCents, 0);
 
@@ -2672,7 +2684,7 @@ async function prepareCashSplitCorrection(
 		savedIds.length !== currentIds.length ||
 		savedIds.some((id, index) => id !== currentIds[index])
 	)
-		throw new Error(`Split ${parentId} changed while it was being corrected`);
+		return { refused: { saved: false, changed: true } };
 
 	// The gate's parameters are numbered from `n`, after the statement's own. Its entry amount is either the
 	// drawn one or the new total, which the parent statement sets first, so the gate reads the same thing
@@ -2764,7 +2776,7 @@ async function prepareCashSplitCorrection(
 			// Nothing changed. If the entry is still as it was drawn, or already has the posted total (the gate's two
 			// amounts), the refunds linked to the entry and to its parts together come first, since moving its parts
 			// can't make them fit; then the first part whose refunds no longer fit (in the sheet's order) is the reason.
-			// Otherwise the entry changed, which is an error.
+			// Otherwise the entry changed since the sheet was drawn: refused, with nothing saved.
 			const linked = await db
 				.prepare(
 					`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?2) AS saved), 0) AS refundCents
@@ -2795,7 +2807,8 @@ async function prepareCashSplitCorrection(
 					saved: false,
 					refundPart: { part: refused.part, refundCents: refused.refundCents },
 				};
-			throw new Error(`Split ${parentId} changed while it was being corrected`);
+
+			return { saved: false, changed: true };
 		},
 	};
 }

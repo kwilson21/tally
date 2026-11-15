@@ -1,10 +1,13 @@
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import { runWith } from "../db/database";
 import { decideFeedback } from "../db/feedback-saves";
+import { feedback as feedbackTable } from "../db/schema";
 import {
 	diagnosticsEnabled,
-	normalizeFeedbackContext,
+	normalizeContextText,
 } from "../feedback/diagnostics";
 import {
 	FEEDBACK_FEELINGS,
@@ -219,6 +222,7 @@ feedback.post("/feedback", async (c) => {
 	const saved = answer.saved;
 
 	if (c.env.FEEDBACK_GITHUB_TOKEN) {
+		// Stays raw: FeedbackRow is snake_case and diagnosticLines reads client_context, which a Drizzle select would rename and drop silently (decision 179).
 		const row = await c.env.DB.prepare("SELECT * FROM feedback WHERE id = ?")
 			.bind(saved)
 			.first<FeedbackRow>();
@@ -270,14 +274,16 @@ function fenced(text: string): string {
 }
 
 function diagnosticLines(item: FeedbackRow) {
+	return diagnosticLinesOf(item.client_context, item.page);
+}
+
+/** The diagnostic lines for a stored client context text and its page; none for no text or a malformed one. */
+export function diagnosticLinesOf(clientContext: string | null, page: string) {
 	const lines: string[] = [];
 
-	if (item.client_context) {
+	if (clientContext) {
 		try {
-			const context = normalizeFeedbackContext(
-				JSON.parse(item.client_context),
-				item.page,
-			);
+			const context = normalizeContextText(clientContext, page);
 
 			if (context)
 				lines.push(
@@ -425,11 +431,14 @@ export async function fileFeedbackIssue(
 
 	// If GitHub created the issue and this write fails, the next try files it again: a duplicate. No machine can close
 	// that gap, since the number is never stored (decision 221).
-	await db
-		.prepare(
-			"UPDATE feedback SET github_issue_number = ?, filed_at = CURRENT_TIMESTAMP, last_status = ? WHERE id = ?",
-		)
-		.bind(number, response.status, item.id)
+	await drizzle(db)
+		.update(feedbackTable)
+		.set({
+			githubIssueNumber: number,
+			filedAt: sql`CURRENT_TIMESTAMP`,
+			lastStatus: response.status,
+		})
+		.where(eq(feedbackTable.id, item.id))
 		.run();
 }
 
