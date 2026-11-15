@@ -1,5 +1,43 @@
+import { and, eq, getTableName, ne, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
 import { matchBillPayments } from "../bills/match";
 import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
+import {
+	accounts,
+	aiLog,
+	balanceHistory,
+	bankTextRules,
+	billAmounts,
+	billPayments,
+	bills,
+	budgetAmounts,
+	cashDeleteHolds,
+	categories,
+	categoryArchivePeriods,
+	categorySuggestions,
+	documents,
+	feedback,
+	forgottenTexts,
+	householdMembers,
+	householdPeople,
+	householdSettings,
+	lookupCleared,
+	maybeAnswers,
+	maybeNames,
+	merchantLookups,
+	merchantLookupTexts,
+	merchantNameFailures,
+	merchantSuggestedNames,
+	merchants,
+	neverSuggestRules,
+	plaidItems,
+	plannedDeleteHolds,
+	plannedExpenses,
+	pushSubscriptions,
+	savingsGoalAmounts,
+	transactions,
+} from "../db/schema";
 import { nameKey } from "../settings/category-form";
 import {
 	buildSeed,
@@ -19,41 +57,46 @@ import {
 const ELECTRIC_MERCHANT = "METRO ELECTRIC CO";
 const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 
-// Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
-export const TABLES_CHILD_FIRST = [
-	"feedback",
-	"forgotten_texts",
-	"bank_text_rules",
-	"ai_log",
-	"maybe_answers",
-	"maybe_names",
-	"cash_delete_holds",
-	"planned_delete_holds",
-	"bill_payments",
-	"planned_expenses",
-	"never_suggest_rules",
-	"bill_amounts",
-	"documents",
-	"balance_history",
-	"lookup_cleared",
-	"transactions",
-	"household_people",
-	"category_suggestions",
-	"bills",
-	"budget_amounts",
-	"category_archive_periods",
-	"savings_goal_amounts",
-	"merchant_name_failures",
-	"merchant_suggested_names",
-	"merchant_lookup_texts",
-	"merchant_lookups",
-	"merchants",
-	"categories",
-	"accounts",
-	"plaid_items",
-	"push_subscriptions",
-	"household_members",
-];
+// The tables the reset empties, child to parent (a table's rows go before the rows it references). The
+// names come from the table objects, so a table is named once, where its schema is.
+const TABLE_OBJECTS_CHILD_FIRST = [
+	feedback,
+	forgottenTexts,
+	bankTextRules,
+	aiLog,
+	maybeAnswers,
+	maybeNames,
+	cashDeleteHolds,
+	plannedDeleteHolds,
+	billPayments,
+	plannedExpenses,
+	neverSuggestRules,
+	billAmounts,
+	documents,
+	balanceHistory,
+	lookupCleared,
+	transactions,
+	householdPeople,
+	categorySuggestions,
+	bills,
+	budgetAmounts,
+	categoryArchivePeriods,
+	savingsGoalAmounts,
+	merchantNameFailures,
+	merchantSuggestedNames,
+	merchantLookupTexts,
+	merchantLookups,
+	merchants,
+	categories,
+	accounts,
+	plaidItems,
+	pushSubscriptions,
+	householdMembers,
+] as const;
+
+export const TABLES_CHILD_FIRST: string[] = TABLE_OBJECTS_CHILD_FIRST.map(
+	(table) => getTableName(table),
+);
 
 /**
  * The nightly reset runs only in the demo: DEMO is "true" and no Plaid credentials exist.
@@ -73,17 +116,21 @@ const BALANCES_PER_STATEMENT = 33; // 3 bound values each, under D1's limit of 1
 function balanceHistoryStatements(
 	db: D1Database,
 	balances: SeedBalance[],
-): D1PreparedStatement[] {
-	const statements: D1PreparedStatement[] = [];
+): BatchItem<"sqlite">[] {
+	const statements: BatchItem<"sqlite">[] = [];
 
 	for (let i = 0; i < balances.length; i += BALANCES_PER_STATEMENT) {
 		const chunk = balances.slice(i, i + BALANCES_PER_STATEMENT);
 		statements.push(
-			db
-				.prepare(
-					`INSERT INTO balance_history (account_id, date, balance_cents) VALUES ${chunk.map(() => "(?, ?, ?)").join(", ")}`,
-				)
-				.bind(...chunk.flatMap((b) => [b.accountId, b.date, b.balanceCents])),
+			drizzle(db)
+				.insert(balanceHistory)
+				.values(
+					chunk.map((b) => ({
+						accountId: b.accountId,
+						date: b.date,
+						balanceCents: b.balanceCents,
+					})),
+				),
 		);
 	}
 
@@ -101,6 +148,7 @@ export async function resetDemo(
 	// The demo's bills count as added long before its history (decision 99, #337), so every seeded occurrence is
 	// judged as it was before that rule. No screen shows the day a demo bill was added.
 	const addedOn = "2000-01-01";
+	const orm = drizzle(db);
 
 	if (todayDay < 4) {
 		const waterPayment = seed.transactions.find(
@@ -114,171 +162,204 @@ export async function resetDemo(
 
 	const b = (v: boolean) => (v ? 1 : 0);
 
-	await db.batch([
-		...TABLES_CHILD_FIRST.map((t) => db.prepare(`DELETE FROM ${t}`)),
+	await orm.batch([
 		// The household's choices go back to the start (the AI switches are all on, and a missing
 		// row means on), except how many calls Jev has had today: that is the day's, not a choice, so a
 		// second run on the same household day can't spend the demo's cap over again (spec §8.6).
-		db.prepare(
-			"DELETE FROM household_settings WHERE key NOT GLOB 'jev_calls_*'",
-		),
-		db.prepare(
-			"INSERT INTO household_people (id, name) VALUES (1, 'Everyone')",
-		),
+		orm
+			.delete(householdSettings)
+			.where(sql`${householdSettings.key} NOT GLOB ${"jev_calls_*"}`),
+		...TABLE_OBJECTS_CHILD_FIRST.map((table) => orm.delete(table)),
+		orm.insert(householdPeople).values({ id: 1, name: "Everyone" }),
 		// The demo's time zone goes back to the default, like everything else a visitor can change.
-		db
-			.prepare(
-				"INSERT INTO household_settings (key, value) VALUES ('time_zone', ?)",
-			)
-			.bind(DEFAULT_TIME_ZONE),
+		orm
+			.insert(householdSettings)
+			.values({ key: "time_zone", value: DEFAULT_TIME_ZONE }),
 		...seed.categories.map((c) =>
-			db
-				.prepare(
-					"INSERT INTO categories (id, name, name_key, icon, color, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-				)
-				.bind(c.id, c.name, nameKey(c.name), c.icon, c.color, c.sortOrder),
+			orm.insert(categories).values({
+				id: c.id,
+				name: c.name,
+				nameKey: nameKey(c.name),
+				icon: c.icon,
+				color: c.color,
+				sortOrder: c.sortOrder,
+			}),
 		),
 		// An empty token: the demo has no Plaid credentials, so nothing ever tries to use it.
 		...seed.banks.map((bank) =>
-			db
-				.prepare(
-					"INSERT INTO plaid_items (id, access_token_encrypted, institution_name, linked_by, last_synced_at, last_sync_attempt_at) VALUES (?, X'', ?, 'demo', datetime('now'), datetime('now'))",
-				)
-				.bind(bank.id, bank.name),
+			orm.insert(plaidItems).values({
+				id: bank.id,
+				accessTokenEncrypted: sql`X''`,
+				institutionName: bank.name,
+				linkedBy: "demo",
+				lastSyncedAt: sql`datetime('now')`,
+				lastSyncAttemptAt: sql`datetime('now')`,
+			}),
 		),
 		...seed.accounts.map((a) =>
-			db
-				.prepare(
-					"INSERT INTO accounts (id, plaid_item_id, name, mask, type, subtype, is_liability, balance_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				)
-				.bind(
-					a.id,
-					a.bankId,
-					a.name,
-					a.mask,
-					a.type,
-					a.subtype,
-					b(a.isLiability),
-					a.balanceCents,
-				),
+			orm.insert(accounts).values({
+				id: a.id,
+				plaidItemId: a.bankId,
+				name: a.name,
+				mask: a.mask,
+				type: a.type,
+				subtype: a.subtype,
+				isLiability: b(a.isLiability),
+				balanceCents: a.balanceCents,
+			}),
 		),
 		// The net-worth chart's six months, a few dozen rows per statement: D1 allows 100 bound values in one.
 		...balanceHistoryStatements(db, seed.balanceHistory),
 		...seed.merchants.map((m) =>
-			db
-				.prepare(
-					"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill, suggestion_status) VALUES (?, ?, ?, ?, ?)",
-				)
-				.bind(
-					m.key,
-					m.displayName,
-					m.defaultCategoryId,
-					m.notABill ? 1 : 0,
+			orm.insert(merchants).values({
+				rawName: m.key,
+				displayName: m.displayName,
+				defaultCategoryId: m.defaultCategoryId,
+				notABill: m.notABill ? 1 : 0,
+				suggestionStatus:
 					(m.suggestedNames?.length ?? 0) > 0 ? "pending" : "none",
-				),
+			}),
 		),
 		// A seeded suggestion's names, one row per name (at most three), as a person would have them waiting.
 		...seed.merchants.flatMap((m) =>
-			(m.suggestedNames ?? [])
-				.slice(0, 3)
-				.map((name, position) =>
-					db
-						.prepare(
-							"INSERT INTO merchant_suggested_names (merchant_key, position, name) VALUES (?, ?, ?)",
-						)
-						.bind(m.key, position, name),
-				),
+			(m.suggestedNames ?? []).slice(0, 3).map((name, position) =>
+				orm.insert(merchantSuggestedNames).values({
+					merchantKey: m.key,
+					position,
+					name,
+				}),
+			),
 		),
 		...seed.budgetAmounts.map((a) =>
-			db
-				.prepare(
-					"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)",
-				)
-				.bind(a.categoryId, a.effectiveMonth, a.amountCents),
+			orm.insert(budgetAmounts).values({
+				categoryId: a.categoryId,
+				effectiveMonth: a.effectiveMonth,
+				amountCents: a.amountCents,
+			}),
 		),
 		...seed.transactions.map((t) =>
-			db
-				.prepare(
-					`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, category_confidence,
-					 jev_category_id, flag_transfer, flag_reimbursement, flag_income, excluded, is_split, parent_id, refund_of_id, income_source, credit_reviewed, credit_reviewed_by, updated_by)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, 'demo')`,
-				)
-				.bind(
-					t.id,
-					t.accountId,
-					t.date,
-					t.amountCents,
-					t.rawName,
-					t.merchantName ?? null,
-					t.categoryId,
-					t.categorySource,
-					t.categoryConfidence,
-					// The seed's Jev-categorized rows are Jev's picks, so they carry a matching pick.
-					t.categorySource === "jev" ? t.categoryId : null,
-					b(t.flagTransfer),
-					b(t.flagReimbursement),
-					b(t.flagIncome),
-					b(t.excluded),
-					b(t.isSplit),
-					t.parentId ?? null,
-					t.refundOfId ?? null,
-					t.flagIncome ? "jev" : null,
-				),
+			orm.insert(transactions).values({
+				id: t.id,
+				accountId: t.accountId,
+				date: t.date,
+				amountCents: t.amountCents,
+				rawName: t.rawName,
+				merchantName: t.merchantName ?? null,
+				categoryId: t.categoryId,
+				categorySource: t.categorySource,
+				categoryConfidence: t.categoryConfidence,
+				// The seed's Jev-categorized rows are Jev's picks, so they carry a matching pick.
+				jevCategoryId: t.categorySource === "jev" ? t.categoryId : null,
+				flagTransfer: b(t.flagTransfer),
+				flagReimbursement: b(t.flagReimbursement),
+				flagIncome: b(t.flagIncome),
+				excluded: b(t.excluded),
+				isSplit: b(t.isSplit),
+				parentId: t.parentId ?? null,
+				refundOfId: t.refundOfId ?? null,
+				incomeSource: t.flagIncome ? "jev" : null,
+				creditReviewed: 1,
+				creditReviewedBy: null,
+				updatedBy: "demo",
+			}),
 		),
 		// The seed's own Tally work (spec §8.6), read from the rows just inserted above: each transaction Jev
 		// gave a category or marked as income, dated by the transaction, so the demo's tally shows the family's work.
-		db.prepare(
-			"INSERT INTO ai_log (kind, transaction_id, household_day) SELECT 'category', id, date FROM transactions WHERE category_source = 'jev'",
+		// The id and created_at are written as their defaults, since a select lists every column in table order.
+		orm.insert(aiLog).select(
+			orm
+				.select({
+					id: sql`NULL`.as("id"),
+					kind: sql`'category'`.as("kind"),
+					transactionId: transactions.id,
+					merchantRawName: sql`NULL`.as("merchant_raw_name"),
+					householdDay: transactions.date,
+					createdAt: sql`(datetime('now'))`.as("created_at"),
+				})
+				.from(transactions)
+				.where(eq(transactions.categorySource, "jev")),
 		),
-		db.prepare(
-			"INSERT INTO ai_log (kind, transaction_id, household_day) SELECT 'income', id, date FROM transactions WHERE income_source = 'jev'",
+		orm.insert(aiLog).select(
+			orm
+				.select({
+					id: sql`NULL`.as("id"),
+					kind: sql`'income'`.as("kind"),
+					transactionId: transactions.id,
+					merchantRawName: sql`NULL`.as("merchant_raw_name"),
+					householdDay: transactions.date,
+					createdAt: sql`(datetime('now'))`.as("created_at"),
+				})
+				.from(transactions)
+				.where(eq(transactions.incomeSource, "jev")),
 		),
 		...demoBills(today, seed.transactions).map((bill) =>
-			db
-				.prepare(
-					"INSERT INTO bills (id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name,active,added_on) VALUES (?,?,?,?,?,?,?,?,?,?)",
-				)
-				.bind(...bill, addedOn),
+			orm.insert(bills).values({ ...bill, addedOn }),
 		),
 		// Each bill's first amount row (decision 101), as migration 0044 gives one: this month, so a bill has
 		// no earlier price. Netflix's is from the seed's first month instead, so its earlier price is there
 		// and its history appears once a visitor accepts the price offer.
-		db
-			.prepare(
-				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) SELECT id, ?, amount_cents FROM bills WHERE merchant_raw_name <> ?",
-			)
-			.bind(today.slice(0, 7), seedMerchantKey(NETFLIX.rawName)),
-		db
-			.prepare(
-				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) SELECT id, ?, amount_cents FROM bills WHERE merchant_raw_name = ?",
-			)
-			.bind(monthOffset(today, 5), seedMerchantKey(NETFLIX.rawName)),
+		orm.insert(billAmounts).select(
+			orm
+				.select({
+					billId: bills.id,
+					effectiveMonth: sql`${today.slice(0, 7)}`.as("effective_month"),
+					amountCents: bills.amountCents,
+				})
+				.from(bills)
+				.where(ne(bills.merchantRawName, seedMerchantKey(NETFLIX.rawName))),
+		),
+		orm.insert(billAmounts).select(
+			orm
+				.select({
+					billId: bills.id,
+					effectiveMonth: sql`${monthOffset(today, 5)}`.as("effective_month"),
+					amountCents: bills.amountCents,
+				})
+				.from(bills)
+				.where(eq(bills.merchantRawName, seedMerchantKey(NETFLIX.rawName))),
+		),
 		// Rent's payments are linked by hand (#205, decision 101): two last month make it Paid, and this month's one
 		// leaves it part paid. The late one dates this month's 1st but pays last month, so two payments share that date
 		// and each is matched on its bank text, date and amount, which the seed's own transactions carry.
-		...[
-			[monthOffset(today, 1), `${monthOffset(today, 1)}-01`, 70000],
-			[monthOffset(today, 1), `${today.slice(0, 7)}-01`, 50000],
-			[today.slice(0, 7), `${today.slice(0, 7)}-01`, 60000],
-		].map(([period, date, cents]) =>
-			db
-				.prepare(
-					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT b.id, ?, t.id, 'user', 'linked' FROM bills b, transactions t WHERE b.merchant_raw_name = ? AND t.raw_name = ? AND t.date = ? AND t.amount_cents = ?",
-				)
-				.bind(period, seedMerchantKey(RENT_PAYEE), RENT_PAYEE, date, cents),
+		...rentPayments(today).map(([period, date, cents]) =>
+			orm.insert(billPayments).select(
+				orm
+					.select({
+						id: sql`NULL`.as("id"),
+						billId: bills.id,
+						period: sql`${period}`.as("period"),
+						transactionId: transactions.id,
+						matchedBy: sql`'user'`.as("matched_by"),
+						status: sql`'linked'`.as("status"),
+						createdAt: sql`(datetime('now'))`.as("created_at"),
+						undoToken: sql`NULL`.as("undo_token"),
+					})
+					.from(bills)
+					.crossJoin(transactions)
+					.where(
+						and(
+							eq(bills.merchantRawName, seedMerchantKey(RENT_PAYEE)),
+							eq(transactions.rawName, RENT_PAYEE),
+							eq(transactions.date, date),
+							eq(transactions.amountCents, cents),
+						),
+					),
+			),
 		),
 		// Planned one-time expenses (#202): one set aside this month, and one from last month still unpaid, so Bills shows
 		// its Band ("Car registration wasn't paid") and Safe to spend sets both aside.
-		db
-			.prepare(
-				"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Lawn service', 9000, ?, 'demo')",
-			)
-			.bind(today.slice(0, 7)),
-		db
-			.prepare(
-				"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Car registration', 18000, ?, 'demo')",
-			)
-			.bind(monthOffset(today, 1)),
+		orm.insert(plannedExpenses).values({
+			name: "Lawn service",
+			amountCents: 9000,
+			month: today.slice(0, 7),
+			createdBy: "demo",
+		}),
+		orm.insert(plannedExpenses).values({
+			name: "Car registration",
+			amountCents: 18000,
+			month: monthOffset(today, 1),
+			createdBy: "demo",
+		}),
 	]);
 
 	if (options.categoryExample) {
@@ -290,53 +371,66 @@ export async function resetDemo(
 		const petMonthNumberNormalized = ((petMonthNumber - 1 + 12) % 12) + 1;
 		const petYear = String(petYearNumber).padStart(4, "0");
 		const petMonth = `${petYear}-${String(petMonthNumberNormalized).padStart(2, "0")}`;
-		await db.batch([
-			...[
-				["Chewy", "Chewy"],
-				["Petsmart", "Petsmart"],
-				["Banfield Pet Hospital", "Banfield Pet Hospital"],
-			].map(([raw, display]) =>
-				db
-					.prepare(
-						"INSERT INTO merchants (raw_name, display_name, not_a_bill) VALUES (?, ?, 1)",
-					)
-					.bind(raw, display),
-			),
+		await orm.insert(merchants).values([
+			{ rawName: "Chewy", displayName: "Chewy", notABill: 1 },
+			{ rawName: "Petsmart", displayName: "Petsmart", notABill: 1 },
+			{
+				rawName: "Banfield Pet Hospital",
+				displayName: "Banfield Pet Hospital",
+				notABill: 1,
+			},
 		]);
 
-		const petSuggestion = await db
-			.prepare(
-				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
-			)
-			.first<{ id: number }>();
+		const petSuggestion = await orm
+			.insert(categorySuggestions)
+			.values({ name: "Pet Care", status: "pending" })
+			.returning({ id: categorySuggestions.id })
+			.get();
 
-		await db.batch([
-			...[
-				["CHEWY.COM", "Chewy", 6412, 8],
-				["PETSMART 0412", "Petsmart", 2399, 14],
-				["BANFIELD PET HOSPITAL", "Banfield Pet Hospital", 18900, 21],
-			].map(([raw, merchant, cents, day]) =>
-				db
-					.prepare(`INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, plaid_category, category_confidence, jev_none_fit, category_suggestion_id, updated_by)
-			VALUES (1, ?, ?, ?, ?, 'GENERAL_MERCHANDISE', 0.95, 1, ?, 'demo')`)
-					.bind(
-						`${petMonth}-${String(day).padStart(2, "0")}`,
-						cents,
-						raw,
-						merchant,
-						petSuggestion?.id ?? null,
-					),
-			),
+		// One statement per charge, in one batch: each has more bound values than D1 allows in a single statement's
+		// share of three rows.
+		const petCharge = (
+			raw: string,
+			merchant: string,
+			cents: number,
+			day: number,
+		) =>
+			orm.insert(transactions).values({
+				accountId: 1,
+				date: `${petMonth}-${String(day).padStart(2, "0")}`,
+				amountCents: cents,
+				rawName: raw,
+				merchantName: merchant,
+				plaidCategory: "GENERAL_MERCHANDISE",
+				categoryConfidence: 0.95,
+				jevNoneFit: 1,
+				categorySuggestionId: petSuggestion?.id ?? null,
+				updatedBy: "demo",
+			});
+
+		await orm.batch([
+			petCharge("CHEWY.COM", "Chewy", 6412, 8),
+			petCharge("PETSMART 0412", "Petsmart", 2399, 14),
+			petCharge("BANFIELD PET HOSPITAL", "Banfield Pet Hospital", 18900, 21),
 		]);
 	}
 
 	await matchBillPayments(db, today);
 }
 
+/** The three rent payments to link: the period each pays, the date it carries and its amount. */
+function rentPayments(today: string): [string, string, number][] {
+	return [
+		[monthOffset(today, 1), `${monthOffset(today, 1)}-01`, 70000],
+		[monthOffset(today, 1), `${today.slice(0, 7)}-01`, 50000],
+		[today.slice(0, 7), `${today.slice(0, 7)}-01`, 60000],
+	];
+}
+
 function demoBills(
 	today: string,
 	transactions: { date: string; rawName: string; amountCents: number }[],
-): (string | number | null)[][] {
+): (typeof bills.$inferInsert)[] {
 	const day = Number(today.slice(8, 10));
 	// The soccer payment the yearly bill is linked to, so its amount matches (src/demo/seed.ts).
 	const soccerDay = SOCCER_DAY;
@@ -382,96 +476,106 @@ function demoBills(
 	const dueSoon = plusThree.getUTCDate();
 
 	return [
-		[
-			1,
-			"Streaming",
-			299,
-			paymentDay("APPLE.COM/BILL"),
-			"monthly",
-			null,
-			5,
-			seedMerchantKey("APPLE.COM/BILL"),
-			1,
-		],
-		[
-			2,
-			"Water",
-			1399,
-			threeDaysBeforePayment("GOOGLE *YOUTUBE"),
-			"monthly",
-			null,
-			5,
-			seedMerchantKey("GOOGLE *YOUTUBE"),
-			1,
-		],
-		[
-			3,
-			"Electric",
-			14200,
-			day === 1 ? 28 : day - 1,
-			"monthly",
-			null,
-			5,
-			ELECTRIC_MERCHANT,
-			1,
-		],
+		{
+			id: 1,
+			name: "Streaming",
+			amountCents: 299,
+			dueDay: paymentDay("APPLE.COM/BILL"),
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: seedMerchantKey("APPLE.COM/BILL"),
+			active: 1,
+		},
+		{
+			id: 2,
+			name: "Water",
+			amountCents: 1399,
+			dueDay: threeDaysBeforePayment("GOOGLE *YOUTUBE"),
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: seedMerchantKey("GOOGLE *YOUTUBE"),
+			active: 1,
+		},
+		{
+			id: 3,
+			name: "Electric",
+			amountCents: 14200,
+			dueDay: day === 1 ? 28 : day - 1,
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: ELECTRIC_MERCHANT,
+			active: 1,
+		},
 		// Due the day before its $17.99 charge, which is 16% over $15.49: overdue, with the charge on offer.
-		[
-			4,
-			"Netflix",
-			NETFLIX.billCents,
-			Number(netflixDue.slice(8)),
-			"monthly",
-			null,
-			5,
-			seedMerchantKey(NETFLIX.rawName),
-			1,
-		],
-		[5, "Internet", 6500, dueSoon, "monthly", null, 5, INTERNET_MERCHANT, 1],
+		{
+			id: 4,
+			name: "Netflix",
+			amountCents: NETFLIX.billCents,
+			dueDay: Number(netflixDue.slice(8)),
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: seedMerchantKey(NETFLIX.rawName),
+			active: 1,
+		},
+		{
+			id: 5,
+			name: "Internet",
+			amountCents: 6500,
+			dueDay: dueSoon,
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: INTERNET_MERCHANT,
+			active: 1,
+		},
 		// Yearly, paid three months ago, so its next one is upcoming (decision 62).
-		[
-			6,
-			"Soccer league",
-			paidSoccer.cents,
-			soccerDay,
-			"yearly",
-			Number(monthOffset(today, 3).slice(5)),
-			4,
-			seedMerchantKey("YOUTH SOCCER LEAGUE"),
-			1,
-		],
-		[
-			7,
-			"Old phone plan",
-			4500,
-			15,
-			"monthly",
-			null,
-			5,
-			seedMerchantKey("GOOGLE *YOUTUBE"),
-			0,
-		],
-		[
-			8,
-			"Daycare",
-			24000,
-			5,
-			"weekly",
-			null,
-			6,
-			seedMerchantKey("LITTLE SPROUTS DAYCARE"),
-			1,
-		],
-		[
-			9,
-			"Rent",
-			RENT_CENTS,
-			1,
-			"monthly",
-			null,
-			RENT_CATEGORY,
-			seedMerchantKey(RENT_PAYEE),
-			1,
-		],
+		{
+			id: 6,
+			name: "Soccer league",
+			amountCents: paidSoccer.cents,
+			dueDay: soccerDay,
+			frequency: "yearly",
+			anchorMonth: Number(monthOffset(today, 3).slice(5)),
+			categoryId: 4,
+			merchantRawName: seedMerchantKey("YOUTH SOCCER LEAGUE"),
+			active: 1,
+		},
+		{
+			id: 7,
+			name: "Old phone plan",
+			amountCents: 4500,
+			dueDay: 15,
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: 5,
+			merchantRawName: seedMerchantKey("GOOGLE *YOUTUBE"),
+			active: 0,
+		},
+		{
+			id: 8,
+			name: "Daycare",
+			amountCents: 24000,
+			dueDay: 5,
+			frequency: "weekly",
+			anchorMonth: null,
+			categoryId: 6,
+			merchantRawName: seedMerchantKey("LITTLE SPROUTS DAYCARE"),
+			active: 1,
+		},
+		{
+			id: 9,
+			name: "Rent",
+			amountCents: RENT_CENTS,
+			dueDay: 1,
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: RENT_CATEGORY,
+			merchantRawName: seedMerchantKey(RENT_PAYEE),
+			active: 1,
+		},
 	];
 }
