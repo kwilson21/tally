@@ -1742,7 +1742,9 @@ describe("the ready email: the words", () => {
 		await addTransactions(gone, 5);
 		const { fetchImpl, sent } = resendFake();
 		await runReadyEmail(production(), fetchImpl);
-		expect(sent[0]?.text).toContain("from Chase and sorted all 2 transactions.");
+		expect(sent[0]?.text).toContain(
+			"from Chase and sorted all 2 transactions.",
+		);
 	});
 });
 

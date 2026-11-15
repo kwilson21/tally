@@ -20,8 +20,11 @@
 // 8 minutes from the claim (above). The email's own claim (readyEmailedTo) does not depend on this one, so the email still goes.
 // The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
 
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { readFirstTally } from "../db/first-tally";
+import { pushSubscriptions } from "../db/schema";
 import { MAX_DEVICES_PER_PERSON } from "../push/devices";
 import { isPushServiceEndpoint } from "../push/endpoint";
 import { type PushEnv, vapidKeys } from "../push/keys";
@@ -65,6 +68,7 @@ export const PUSH_CLAIM_SQL = claimSql(
  * and the email isn't held for a push that reached no device. ?1 is the address, ?2 its hash. Only those two paths: RELEASE_SQL
  * would also rewrite the kept email's try under the same address hash, and so wipe it (decisions 146 and 147).
  */
+// Stays raw: json_* on the record (household_settings.value), which the builder does not express (decision 179).
 export const PUSH_RELEASE_SQL = `UPDATE household_settings
 	SET value = json_remove(json_set(household_settings.value, '$.readyPushedTo',
 		json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyPushedTo') AS e WHERE e.value <> ?1))),
@@ -75,6 +79,7 @@ export const PUSH_RELEASE_SQL = `UPDATE household_settings
  * Removes the stamp the claim wrote and keeps the claim, when no device took the push and none answered transiently (?1 is the
  * hash). The claim stays, so no later minute sends again, and the email goes at its ten minutes (decision 149).
  */
+// Stays raw: json_* on the record (household_settings.value), which the builder does not express (decision 179).
 export const PUSH_UNSTAMP_SQL = `UPDATE household_settings
 	SET value = json_remove(household_settings.value, '$.readyPushedAt."' || ?1 || '"')
 	WHERE key = 'first_tally'`;
@@ -83,6 +88,7 @@ export const PUSH_UNSTAMP_SQL = `UPDATE household_settings
  * Stores the time a push reached one of a person's devices, under the address's hash (readyPushedAt, decision 149). ?1 is the hash.
  * The time is SQLite's own clock, as the email's guard reads it (ready-email.tsx), so the two never disagree.
  */
+// Stays raw: json_* on the record (household_settings.value), which the builder does not express (decision 179).
 export const PUSH_STAMP_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.readyPushedAt."' || ?1 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 	WHERE key = 'first_tally'`;
@@ -92,6 +98,7 @@ export const PUSH_STAMP_SQL = `UPDATE household_settings
  * removed person's devices are deleted with them). At most MAX_DEVICES_PER_PERSON per person, the newest (by created_at, then
  * id), as a backstop to the route's cap (decision 149, spec §10).
  */
+// Stays raw: a ROW_NUMBER window in a subquery, which the builder does not express here (decision 179).
 const DEVICES_SQL = `SELECT id, email, endpoint, p256dh, auth FROM (
 	SELECT s.id, s.member_email AS email, s.endpoint, s.p256dh, s.auth,
 		ROW_NUMBER() OVER (PARTITION BY s.member_email ORDER BY s.created_at DESC, s.id DESC) AS newest
@@ -197,10 +204,14 @@ export async function runReadyPush(
 			// A device that is gone is deleted by the id and endpoint read before the claims. Ids are not AUTOINCREMENT, so a freed
 			// id can be given to another device before this DELETE lands: the endpoint keeps that device (and a subscription made since).
 			if (answer === "gone")
-				await env.DB.prepare(
-					"DELETE FROM push_subscriptions WHERE id = ? AND endpoint = ?",
-				)
-					.bind(device.id, device.endpoint)
+				await drizzle(env.DB)
+					.delete(pushSubscriptions)
+					.where(
+						and(
+							eq(pushSubscriptions.id, device.id),
+							eq(pushSubscriptions.endpoint, device.endpoint),
+						),
+					)
 					.run();
 
 			if (answer === "sent") return { answer, failure: null };
