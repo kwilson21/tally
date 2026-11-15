@@ -1460,7 +1460,7 @@ export async function saveEdit(
 						note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END, ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 						income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 						credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
-						credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+						credit_reviewed_by = CASE WHEN ? = 1 AND amount_cents < 0 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 						updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[
 						edit.categoryId,
@@ -1478,7 +1478,7 @@ export async function saveEdit(
 					`UPDATE transactions SET note = CASE WHEN ? = 1 THEN ? ELSE note END, note_state = CASE WHEN ? = 1 AND (? = 1 OR note_state = ?) THEN ? ELSE note_state END, ${edit.categoryId !== null ? "split_removed_from_cents = NULL, split_removed_bills = NULL," : ""} ${EXCLUDE}, flag_income = CASE WHEN ? = 1 THEN ? ELSE flag_income END,
 				income_source = CASE WHEN ? = 1 OR ? = 1 THEN 'user' ELSE income_source END,
 					credit_reviewed = CASE WHEN amount_cents < 0 AND ? = 1 AND ? = 1 THEN 1 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN 0 WHEN amount_cents < 0 AND ? = 1 AND ? = 0 AND income_source = 'jev' THEN 0 ELSE credit_reviewed END,
-					credit_reviewed_by = CASE WHEN ? = 1 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
+					credit_reviewed_by = CASE WHEN ? = 1 AND amount_cents < 0 THEN 'user' WHEN ? = 1 AND ? = 0 AND credit_reviewed_by = 'user' THEN NULL ELSE credit_reviewed_by END,
 					updated_by = ?, updated_at = datetime('now') WHERE id = ?`,
 					[
 						noteChanged ? 1 : 0,
@@ -2974,7 +2974,7 @@ export async function pendingForJev(
 > {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, ${jevSeenColumnsSql()}, COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName,
+			`SELECT t.id, ${jevSeenColumnsSql()},
 				t.details_asked AS detailsAsked,
 				t.kind_cleared AS kindCleared, t.for_person_cleared AS forPersonCleared,
 				(t.category_id IS NOT NULL OR t.category_source IS NOT NULL OR t.category_confidence IS NOT NULL) AS categoryAnswered,
@@ -3041,24 +3041,8 @@ export async function pendingForJev(
 			accountId,
 			forPersonId,
 			...transaction
-		}) => ({
-			...transaction,
-			// With no name chosen, Jev is told the bank's own store name, never a name Tally guessed (decision 103).
-			displayName:
-				transaction.displayName ??
-				usableSuggestedNames({
-					stored: suggestedNames,
-					status: suggestionStatus,
-					key: transaction.merchantKey,
-					namesOn: false,
-				})[0] ??
-				null,
-			categoryOnly: transaction.categoryOnly === 1,
-			detailsAsked: transaction.detailsAsked === 1,
-			kindCleared: transaction.kindCleared === 1,
-			forPersonCleared: transaction.forPersonCleared === 1,
-			categoryAnswered: transaction.categoryAnswered === 1,
-			seen: jevSeenOf({
+		}) => {
+			const seen = jevSeenOf({
 				...transaction,
 				suggestedNames,
 				suggestionStatus,
@@ -3066,8 +3050,19 @@ export async function pendingForJev(
 				merchantName,
 				accountId,
 				forPersonId,
-			}),
-		}),
+			});
+
+			return {
+				...transaction,
+				...jevInputOf(seen),
+				categoryOnly: transaction.categoryOnly === 1,
+				detailsAsked: transaction.detailsAsked === 1,
+				kindCleared: transaction.kindCleared === 1,
+				forPersonCleared: transaction.forPersonCleared === 1,
+				categoryAnswered: transaction.categoryAnswered === 1,
+				seen,
+			};
+		},
 	);
 }
 
@@ -3195,6 +3190,33 @@ export function jevSeenOf(row: JevSeenColumns): JevSeen {
 		kind: row.kind ?? null,
 		forPersonId: row.forPersonId,
 		forPersonName: row.forPerson ?? null,
+	};
+}
+
+/**
+ * What Jev is told of a row (the request's facts, without the learned line), from its JevSeen: the one place the name Jev
+ * is told is chosen. With no own name, the chosen name, then a suggestion Jev may be told (usableSuggestedNames with names
+ * off, so only the bank's own name, never one Tally guessed, decision 103). The store lookup's mark is hashed from this too.
+ */
+export function jevInputOf(seen: JevSeen): JevInput {
+	return {
+		rawName: seen.rawName,
+		displayName:
+			seen.ownName ??
+			seen.merchantName ??
+			usableSuggestedNames({
+				stored: seen.suggestedNames,
+				status: seen.suggestionStatus,
+				key: seen.merchantKey,
+				namesOn: false,
+			})[0] ??
+			null,
+		amountCents: seen.amountCents,
+		accountType: seen.accountType,
+		plaidCategory: seen.plaidCategory,
+		note: seen.note,
+		kind: seen.kind,
+		forPerson: seen.forPersonName,
 	};
 }
 

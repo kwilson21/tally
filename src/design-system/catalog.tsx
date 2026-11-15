@@ -27,6 +27,10 @@ import {
 	categorySuggestionMachine,
 } from "../machines/category-suggestion";
 import {
+	FEEDBACK_FILING_LABELS,
+	feedbackFiling,
+} from "../machines/feedback-filing";
+import {
 	MERCHANT_SUGGESTION_LABELS,
 	merchantSuggestionMachine,
 } from "../machines/merchant-suggestion";
@@ -6774,6 +6778,15 @@ function Diagrams() {
 						title="How a ready email is claimed and sent"
 						machine={readyClaimMachine}
 						labels={READY_CLAIM_LABELS}
+					/>
+				</State>
+				<State label="The feedback filing">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.feedbackFiling}</p>
+					<MachineDiagram
+						id="machine-diagram-feedback-filing"
+						title="How a feedback message is filed as a GitHub issue"
+						machine={feedbackFiling}
+						labels={FEEDBACK_FILING_LABELS}
 					/>
 				</State>
 			</Specimen>

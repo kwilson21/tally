@@ -1,6 +1,5 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { undoRemainingMs } from "../src/db/learned-lines";
 import { forgetUndoLeftMs } from "../src/db/settings-saves";
 import { resetDemo } from "../src/demo/reset";
 
@@ -99,16 +98,21 @@ describe("the Undo's remaining time", () => {
 		expect(forgetUndoLeftMs(50_000, 54_000)).toBe(6_000);
 		expect(forgetUndoLeftMs(50_000, 60_000)).toBe(0);
 		expect(forgetUndoLeftMs(50_000, 61_000)).toBe(0);
+		expect(forgetUndoLeftMs(50_000, 59_500)).toBe(500);
 	});
 
-	it("a Forget written 4 s ago has about 6 s of Undo left", async () => {
-		const ms = await undoRemainingMs(db, await writtenAgo(4));
-		expect(ms).toBeGreaterThanOrEqual(5800);
-		expect(ms).toBeLessThanOrEqual(6000);
-	});
+	it("an Undo of a Forget written 4 s ago on the database's clock is still undone", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const id = await writtenAgo(4);
 
-	it("a Forget written 9.5 s ago has under a second left", async () => {
-		expect(await undoRemainingMs(db, await writtenAgo(9.5))).toBeLessThan(1000);
+		const undo = await post("/settings/learned/undo", {
+			token: String(id),
+			back: "/settings/learned",
+		});
+
+		expect(trigger(undo.res).toast?.message).toBe(
+			"Forget undone. Tally has that line back.",
+		);
 	});
 
 	it("a Forget written 10.5 s ago is no longer undone: the server refuses the Undo", async () => {

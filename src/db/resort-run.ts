@@ -12,6 +12,8 @@
 // claim is open. A row is the same transaction only while its Plaid id and amount are the ones the run recorded, so a
 // deleted row whose id another purchase reused is never restored or undone.
 
+import { and, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { JEV_THRESHOLD } from "../ai/categorize";
@@ -28,6 +30,7 @@ import {
 	type ResortCandidate,
 	type ResortSnapshot,
 } from "./resort-candidates";
+import { householdSettings } from "./schema";
 import { withTurnGuard } from "./sorting-turn";
 import {
 	type Guard,
@@ -199,12 +202,17 @@ function usable<T>(text: string, guard: Guard<T>): T | null {
 const parseRun = (value: string) => usable(value, isResortRun);
 const parseMoved = (value: string) => usable(value, isMovedRecord);
 
+/** The stored text of one household_settings key, or undefined when there is no row. */
+const storedValue = (db: D1Database, key: string) =>
+	drizzle(db)
+		.select({ value: householdSettings.value })
+		.from(householdSettings)
+		.where(eq(householdSettings.key, key))
+		.get();
+
 /** The run, or null when none has ever been started. */
 export async function readRun(db: D1Database): Promise<ResortRun | null> {
-	const row = await db
-		.prepare("SELECT value FROM household_settings WHERE key = ?")
-		.bind(RUN_KEY)
-		.first<{ value: string }>();
+	const row = await storedValue(db, RUN_KEY);
 
 	return row ? parseRun(row.value) : null;
 }
@@ -217,10 +225,7 @@ export async function readMoved(
 	db: D1Database,
 	runId: string,
 ): Promise<MovedRecord | null> {
-	const row = await db
-		.prepare("SELECT value FROM household_settings WHERE key = ?")
-		.bind(movedKey(runId))
-		.first<{ value: string }>();
+	const row = await storedValue(db, movedKey(runId));
 
 	return row ? parseMoved(row.value) : null;
 }
@@ -233,18 +238,23 @@ async function writeRunIf(
 ): Promise<boolean> {
 	const value = JSON.stringify(next);
 
+	const orm = drizzle(db);
+
 	const statement =
 		expected === null
-			? db
-					.prepare(
-						"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
-					)
-					.bind(RUN_KEY, value)
-			: db
-					.prepare(
-						"UPDATE household_settings SET value = ? WHERE key = ? AND value = ?",
-					)
-					.bind(value, RUN_KEY, expected);
+			? orm
+					.insert(householdSettings)
+					.values({ key: RUN_KEY, value })
+					.onConflictDoNothing({ target: householdSettings.key })
+			: orm
+					.update(householdSettings)
+					.set({ value })
+					.where(
+						and(
+							eq(householdSettings.key, RUN_KEY),
+							eq(householdSettings.value, expected),
+						),
+					);
 
 	const { meta } = await statement.run();
 
@@ -307,10 +317,7 @@ export async function startOrJoinRun(
 	});
 
 	for (let attempt = 0; attempt < 5; attempt++) {
-		const row = await db
-			.prepare("SELECT value FROM household_settings WHERE key = ?")
-			.bind(RUN_KEY)
-			.first<{ value: string }>();
+		const row = await storedValue(db, RUN_KEY);
 
 		const expected = row?.value ?? null;
 		const current = row ? parseRun(row.value) : null;
@@ -655,10 +662,7 @@ async function recordInstanceFinish(
 	key: string,
 ): Promise<FinishResult | null> {
 	for (let attempt = 0; attempt < 5; attempt++) {
-		const row = await db
-			.prepare("SELECT value FROM household_settings WHERE key = ?")
-			.bind(RUN_KEY)
-			.first<{ value: string }>();
+		const row = await storedValue(db, RUN_KEY);
 
 		const current = row ? parseRun(row.value) : null;
 
@@ -820,10 +824,7 @@ async function readRecord(
 	db: D1Database,
 	runId: string,
 ): Promise<FinishCounts | null> {
-	const row = await db
-		.prepare("SELECT value FROM household_settings WHERE key = ?")
-		.bind(movedKey(runId))
-		.first<{ value: string }>();
+	const row = await storedValue(db, movedKey(runId));
 
 	if (!row) return null;
 	const record = parseMoved(row.value);
@@ -843,14 +844,12 @@ async function readRecord(
  * its finish (the toast was never shown). Runs on every new run, every claim and every finalize.
  */
 async function sweepMovedRecords(db: D1Database, now: number): Promise<void> {
-	await db
-		.prepare(
-			`DELETE FROM household_settings WHERE substr(key, 1, ?) = ? AND (
-				(json_extract(value, '$.claimedAt') IS NOT NULL AND json_extract(value, '$.until') < ?)
-				OR (json_extract(value, '$.claimedAt') IS NULL AND json_extract(value, '$.finalizedAt') + ? < ?))`,
-		)
-		.bind(MOVED_PREFIX.length, MOVED_PREFIX, now, STALE_MS, now)
-		.run();
+	// The JSON conditions stay SQL on the column (decision 179): the sweep runs alone, over no capped set.
+	await drizzle(db).run(
+		sql`DELETE FROM household_settings WHERE substr(key, 1, ${MOVED_PREFIX.length}) = ${MOVED_PREFIX} AND (
+				(json_extract(value, '$.claimedAt') IS NOT NULL AND json_extract(value, '$.until') < ${now})
+				OR (json_extract(value, '$.claimedAt') IS NULL AND json_extract(value, '$.finalizedAt') + ${STALE_MS} < ${now}))`,
+	);
 }
 
 /**
@@ -863,20 +862,32 @@ export async function closeToastOnce(
 	runId: string,
 	now: number,
 ): Promise<boolean> {
-	const [claim] = await db.batch([
-		db
-			.prepare(
-				`UPDATE household_settings SET value = json_set(value, '$.claimedAt', ?, '$.until', ? + ?)
-				WHERE key = ? AND json_extract(value, '$.claimedAt') IS NULL
-					AND json_extract(value, '$.finalizedAt') + ? >= ?`,
-			)
-			.bind(now, now, UNDO_MS, movedKey(runId), STALE_MS, now),
-		db
-			.prepare(
-				`UPDATE household_settings SET value = json_set(value, '$.toasted', json('true'))
-				WHERE key = ? AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'done'`,
-			)
-			.bind(RUN_KEY, runId),
+	const orm = drizzle(db);
+	const value = householdSettings.value;
+
+	const [claim] = await orm.batch([
+		orm
+			.update(householdSettings)
+			.set({
+				value: sql`json_set(${value}, '$.claimedAt', ${now}, '$.until', ${now} + ${UNDO_MS})`,
+			})
+			.where(
+				and(
+					eq(householdSettings.key, movedKey(runId)),
+					sql`json_extract(${value}, '$.claimedAt') IS NULL`,
+					sql`json_extract(${value}, '$.finalizedAt') + ${STALE_MS} >= ${now}`,
+				),
+			),
+		orm
+			.update(householdSettings)
+			.set({ value: sql`json_set(${value}, '$.toasted', json('true'))` })
+			.where(
+				and(
+					eq(householdSettings.key, RUN_KEY),
+					sql`json_extract(${value}, '$.id') = ${runId}`,
+					sql`json_extract(${value}, '$.status') = 'done'`,
+				),
+			),
 	]);
 
 	await sweepMovedRecords(db, now);
@@ -1032,11 +1043,15 @@ export const decideUndo = <E>(
 		}).pipe(
 			Effect.tapError(() =>
 				Effect.promise(() =>
-					db
-						.prepare(
-							"DELETE FROM household_settings WHERE key = ?1 AND json_valid(value) AND json_extract(value, '$.until') < ?2",
+					drizzle(db)
+						.delete(householdSettings)
+						.where(
+							and(
+								eq(householdSettings.key, movedKey(request.runId)),
+								sql`json_valid(${householdSettings.value})`,
+								sql`json_extract(${householdSettings.value}, '$.until') < ${request.now}`,
+							),
 						)
-						.bind(movedKey(request.runId), request.now)
 						.run(),
 				),
 			),
