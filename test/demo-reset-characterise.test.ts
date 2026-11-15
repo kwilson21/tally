@@ -27,7 +27,7 @@ async function dump(): Promise<Record<string, Row[]>> {
 			Object.fromEntries(
 				Object.entries(row).map(([key, value]) => [
 					key,
-					key.endsWith("_at") && typeof value === "string" ? "<ts>" : value,
+					key.endsWith("_at") && value !== null ? "<ts>" : value,
 				]),
 			),
 		);
@@ -36,6 +36,7 @@ async function dump(): Promise<Record<string, Row[]>> {
 	const { results: sequences } = await db
 		.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name")
 		.all<Row>();
+
 	out.sqlite_sequence = sequences;
 
 	return out;
