@@ -722,7 +722,8 @@ describe("categorizePending", () => {
 
 					if (property === "prepare")
 						return (sql: string) => {
-							if (sql.includes("FROM forgotten_texts")) loads += 1;
+							// Drizzle writes the table name quoted and lower case: `from "forgotten_texts"`.
+							if (sql.includes('from "forgotten_texts"')) loads += 1;
 
 							return target.prepare(sql);
 						};
