@@ -39,15 +39,17 @@ describe("the bill sheet's category list", () => {
 		const res = await exports.default.fetch(`${BASE}/bills/new`, {
 			headers: { Origin: BASE, "HX-Request": "true" },
 		});
+
 		const html = (await res.text()).replaceAll("&#39;", "'");
 
 		// The chips are radio inputs named category_id; read their names in the order they are drawn.
 		const offered = [
 			...html.matchAll(/name="category_id"[^>]*>[\s\S]*?<\/label>/g),
-		]
-			.map((match) => match[0])
-			.map((chip) => /(\w+ Ord)/.exec(chip)?.[1])
-			.filter((name): name is string => name !== undefined);
+		].flatMap((match) => {
+			const name = /(\w+ Ord)/.exec(match[0])?.[1];
+
+			return name ? [name] : [];
+		});
 
 		const ours = offered.filter((name) => /Ord$/.test(name));
 
