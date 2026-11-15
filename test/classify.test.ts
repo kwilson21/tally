@@ -970,9 +970,9 @@ describe("a kept line-backed guess is a Maybe at 40% or more (decision 225)", ()
 	});
 
 	it("a kept line guess on a pending purchase is not asked", () => {
-		expect(
-			sqlSays("categoryAsked", "kept line guess, Jev 95%, pending"),
-		).toBe(false);
+		expect(sqlSays("categoryAsked", "kept line guess, Jev 95%, pending")).toBe(
+			false,
+		);
 	});
 });
 

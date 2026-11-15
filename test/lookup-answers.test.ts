@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { present } from "./helpers/present";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 // The store lookup's answers (spec §5, migration 0078): one row per transaction Jev was asked about with the line,
 // and the `with_line` flag each Maybe answer records. Nothing writes lookup_answers until part B, so the rows here
@@ -160,6 +160,8 @@ describe("reset and export", () => {
 		const body = await (
 			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
 		).text();
+
+		// SAFETY: the export is the JSON this route writes, so each table is an array of its rows.
 		const data = JSON.parse(body) as Record<string, unknown[]>;
 
 		expect(data.lookup_answers).toContainEqual({

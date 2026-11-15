@@ -275,7 +275,7 @@ describe("with_line: a Maybe answer says whether it answered a kept line-backed 
 	const saveCategory = async (
 		id: number,
 		category: number,
-		record: string,
+		record: "yes" | "something_else",
 		confidence: number,
 	) => {
 		const { version } = await maybeFacts(db, "category", id, category);
@@ -400,15 +400,17 @@ describe("with_line: a Maybe answer says whether it answered a kept line-backed 
 			"an income Yes",
 			"income",
 			async () => {
-				const id = (
-					await db
-						.prepare(
-							`INSERT INTO transactions (account_id, date, amount_cents, raw_name, income_confidence)
+				const id =
+					(
+						await db
+							.prepare(
+								`INSERT INTO transactions (account_id, date, amount_cents, raw_name, income_confidence)
 							VALUES ((SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', -500000, 'PAYROLL', 0.5)
 							RETURNING id`,
-						)
-						.first<{ id: number }>()
-				)?.id ?? 0;
+							)
+							.first<{ id: number }>()
+					)?.id ?? 0;
+
 				const { version } = await maybeFacts(db, "income", id);
 
 				await db.batch(
@@ -472,6 +474,7 @@ describe("a stale line-backed card writes nothing", () => {
 
 			return row?.id ?? 0;
 		})();
+
 		const eatingOut = await categoryId("Eating Out");
 
 		await db

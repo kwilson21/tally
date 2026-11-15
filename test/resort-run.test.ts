@@ -1427,6 +1427,7 @@ describe("undoRun", () => {
 				confidence,
 				jevCategoryId: eatingOut,
 			});
+
 			await db
 				.prepare(
 					"INSERT INTO lookup_answers (transaction_id, lookup_text, kept, kept_category_id, kept_confidence) VALUES (?, 'CHECKCARD 0921 CVS', 1, ?, ?)",
@@ -1440,6 +1441,7 @@ describe("undoRun", () => {
 				categoryName: "Groceries",
 				now: T0,
 			});
+
 			const runId = runIdOf(started);
 
 			await clear([a]);
@@ -1457,9 +1459,9 @@ describe("undoRun", () => {
 				jevCategoryId: eatingOut,
 			});
 			expect((await getTransaction(db, a))?.lineGuess).toBe(true);
-			expect(
-				(await listRowsByIds(db, [a]))[0]?.maybeCategoryName,
-			).toBe("Eating Out");
+			expect((await listRowsByIds(db, [a]))[0]?.maybeCategoryName).toBe(
+				"Eating Out",
+			);
 		},
 	);
 
