@@ -1,5 +1,8 @@
+import { and, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
+import { cashDeleteHolds } from "../db/schema";
 import type { Json } from "../json";
 import { UNDO_MS, undoLeftMs } from "../undo";
 
@@ -22,6 +25,7 @@ export async function holdCashDelete(
 	id: number,
 	displayName: string,
 ) {
+	// Stays raw: PRAGMA table_info takes the table name itself, which a bound query cannot.
 	const columns = async (table: string) =>
 		(
 			await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
@@ -45,6 +49,7 @@ export async function holdCashDelete(
 
 	const token = crypto.randomUUID();
 
+	// Stays raw: the insert's json_object and json_group_array strings come from the PRAGMA column lists, and a raw statement cannot share a D1 batch with a builder query.
 	const result = await db.batch([
 		db
 			.prepare(`INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows,plan_rows)
@@ -55,6 +60,7 @@ export async function holdCashDelete(
 				${arrayOf(`SELECT json_object('id', pe.id, 'transaction_id', pe.transaction_id) AS row FROM planned_expenses pe WHERE pe.transaction_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY pe.id`)}
 				FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')`)
 			.bind(token, Date.now(), displayName, id, id, id, id, id, id, id, id),
+		// Stays raw: the delete batches with the raw insert above, which a builder query cannot join.
 		db
 			.prepare(
 				"DELETE FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
@@ -67,46 +73,42 @@ export async function holdCashDelete(
 
 /** The server clock determines how long the client may keep the Undo action visible. */
 export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
-	const hold = await db
-		.prepare(
-			"SELECT created_at FROM cash_delete_holds WHERE token=? AND restore_marker IS NULL",
+	const hold = await drizzle(db)
+		.select({ createdAt: cashDeleteHolds.createdAt })
+		.from(cashDeleteHolds)
+		.where(
+			and(
+				eq(cashDeleteHolds.token, token),
+				isNull(cashDeleteHolds.restoreMarker),
+			),
 		)
-		.bind(token)
-		.first<{ created_at: number }>();
+		.get();
 
-	return hold ? undoLeftMs(hold.created_at, Date.now()) : 0;
+	return hold ? undoLeftMs(hold.createdAt, Date.now()) : 0;
 }
 
 /** Restores once, only while the token is younger than the Undo window (src/undo.ts). */
 export async function restoreCashDelete(db: D1Database, token: string) {
-	const hold = await db
-		.prepare("SELECT * FROM cash_delete_holds WHERE token=?")
-		.bind(token)
-		.first<{
-			created_at: number;
-			restore_marker: string | null;
-			transaction_row: string;
-			display_name: string;
-			split_rows: string;
-			payment_rows: string;
-			refund_rows: string;
-			plan_rows: string;
-		}>();
+	const hold = await drizzle(db)
+		.select()
+		.from(cashDeleteHolds)
+		.where(eq(cashDeleteHolds.token, token))
+		.get();
 
 	if (!hold) return null;
 
-	if (hold.restore_marker !== null)
-		return { alreadyRestored: true as const, name: hold.display_name };
+	if (hold.restoreMarker !== null)
+		return { alreadyRestored: true as const, name: hold.displayName };
 	const now = Date.now();
 
-	if (hold.created_at <= now - UNDO_MS || hold.created_at > now) return null;
+	if (hold.createdAt <= now - UNDO_MS || hold.createdAt > now) return null;
 
 	const snapshot: Snapshot = {
-		transaction: JSON.parse(hold.transaction_row),
-		parts: JSON.parse(hold.split_rows),
-		payments: JSON.parse(hold.payment_rows),
-		refunds: JSON.parse(hold.refund_rows),
-		plans: JSON.parse(hold.plan_rows),
+		transaction: JSON.parse(hold.transactionRow),
+		parts: JSON.parse(hold.splitRows),
+		payments: JSON.parse(hold.paymentRows),
+		refunds: JSON.parse(hold.refundRows),
+		plans: JSON.parse(hold.planRows),
 	};
 
 	const transaction = snapshot.transaction;
@@ -140,6 +142,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 
 	try {
 		// Predict the same fresh ids as the insert so payment conflicts never use snapshot ids.
+		// Stays raw: a CTE with json_each and a ROW_NUMBER window.
 		const paymentCheck = await db
 			.prepare(
 				`WITH source AS (
@@ -206,6 +209,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 
 		const targets = [transaction, ...snapshot.parts];
 
+		// Stays raw: this batch mixes raw JSON and window statements, which a builder query cannot join in one D1 batch.
 		const writes = [
 			db
 				.prepare(
@@ -250,6 +254,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			);
 		writes.push(
 			db
+				// Stays raw: a CTE with json_each and a ROW_NUMBER window, batched with the raw writes.
 				.prepare(`WITH targets AS (
 						SELECT CAST(json_extract(value, '$.id') AS INTEGER) AS old_id,
 							(SELECT MAX(id) FROM transactions) - (SELECT COUNT(*) FROM json_each(?)) + ROW_NUMBER() OVER (ORDER BY CAST(json_extract(value, '$.id') AS INTEGER)) AS new_id
@@ -284,6 +289,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		// A plan the entry or a part paid is paid again by the restored row, if canPayPlanSql accepts it for the plan's month
 		// as it is now, as restorePlanDelete does (splitOk). Its id is the plan's own, since the delete only unlinked it.
 		if (snapshot.plans.length > 0)
+			// Stays raw: a CTE with json_each and a ROW_NUMBER window, batched with the raw writes.
 			writes.push(
 				db
 					.prepare(
@@ -311,6 +317,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 
 		if (results[0]?.meta.changes !== 1) return null;
 
+		// Stays raw: a CTE with json_each and a ROW_NUMBER window over the restored rows.
 		const restoredLinks = new Set(
 			(
 				await db
@@ -357,6 +364,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		// A plan the Undo didn't pay again (its month moved, or another payment took it) is named the way a refund link is.
 		// A plan deleted during the window has no row, so it is not named.
 		if (snapshot.plans.length > 0) {
+			// Stays raw: an IN over a bound json_each list.
 			const plans = await db
 				.prepare(
 					"SELECT id, name, transaction_id AS transactionId FROM planned_expenses WHERE id IN (SELECT value FROM json_each(?))",
@@ -373,7 +381,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		}
 
 		return {
-			name: hold.display_name,
+			name: hold.displayName,
 			lostLinks,
 			alreadyRestored: false as const,
 			// The entry's new id, so its row in the list can take focus (#397).
