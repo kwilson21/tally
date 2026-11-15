@@ -166,7 +166,8 @@ export function skipStatements(
 
 /**
  * Saves a search's line, or "nothing found" (`line` null), for the run that holds the claim. It lands only on that
- * run's pending claim and only while every switch is still on; the claim is then let go.
+ * run's pending claim, only while every switch is still on, and only while the text is not private (a text that turned
+ * private since the save's read stops the save, spec §7 "when its line is saved"); the claim is then let go.
  */
 export function saveResultStatement(
 	db: D1Database,
@@ -189,7 +190,8 @@ export function saveResultStatement(
 			// stays raw: a write guarded by the stored row's claim and the switches (decision 209).
 			.prepare(
 				`UPDATE merchant_lookups SET status = ?, line = ?, looked_up_at = ?, claimed_by = NULL, claimed_at = NULL
-				WHERE lookup_text = ? AND status = 'pending' AND claimed_by = ? AND ${STILL_ON_SQL}`,
+				WHERE lookup_text = ? AND status = 'pending' AND claimed_by = ? AND ${STILL_ON_SQL}
+					AND NOT EXISTS (SELECT 1 FROM merchant_lookup_texts WHERE lookup_text = ? AND private = 1)`,
 			)
 			.bind(
 				status,
@@ -198,6 +200,7 @@ export function saveResultStatement(
 				text,
 				token,
 				SWITCHES_ON,
+				text,
 			)
 	);
 }
