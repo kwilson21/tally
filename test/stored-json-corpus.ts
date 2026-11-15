@@ -3,11 +3,15 @@
 // with fixtures/stored-json-baseline.json, recorded on the code before any site moved to Effect Schema. Every name,
 // merchant and address here is made up for the Rivera family.
 
+import type { Json } from "../src/json";
+
 export const GUARDS = ["number", "strings", "pair", "flags"] as const;
+
 export type GuardName = (typeof GUARDS)[number];
 
 /** The address hash a kept try is stored under in these cases; the answer is read for this hash only. */
 export const KEPT_HASH = "a".repeat(64);
+
 /** A hash no case stores under. */
 export const OTHER_HASH = "b".repeat(64);
 
@@ -31,7 +35,7 @@ export type StoredCase =
 const LINE = "2026-11-14T10:00:00.000Z";
 
 /** A held map with one entry under the kept hash. */
-const heldWith = (entry: unknown) => JSON.stringify({ [KEPT_HASH]: entry });
+const heldWith = (entry: Json) => JSON.stringify({ [KEPT_HASH]: entry });
 
 const UNPAID = [
 	{ label: "unpaid | no value", stored: null },

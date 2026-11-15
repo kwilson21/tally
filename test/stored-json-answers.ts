@@ -16,6 +16,7 @@ import {
 import { readFeedbackForm } from "../src/feedback/form";
 import { shownBudgetIds } from "../src/first-tally/budgets";
 import { keptTryFrom } from "../src/first-tally/ready-email";
+import type { Json } from "../src/json";
 import { diagnosticLinesOf } from "../src/routes/feedback";
 import { parseSuggestedNames } from "../src/transactions/name-suggestions";
 import {
@@ -24,16 +25,20 @@ import {
 	type StoredCase,
 } from "./stored-json-corpus";
 
-const GUARD_READS: Record<GuardName, Guard<unknown>> = {
+const GUARD_READS: Record<GuardName, Guard<Json>> = {
 	number: isNumber,
 	strings: isArrayOf(isString),
 	pair: hasStoredFields<{ a: number; b: string }>({ a: isNumber, b: isString }),
 	flags: isRecordOf(isBoolean),
 };
 
+/** True for a number value. */
+const isNumberValue = (value: Json): value is number =>
+	typeof value === "number";
+
 /** Numbers JSON cannot tell apart from 0 or from a string are written as a tagged string. */
-const replacer = (_key: string, value: unknown) =>
-	typeof value === "number" && (Object.is(value, -0) || !Number.isFinite(value))
+const replacer = (_key: string, value: Json) =>
+	isNumberValue(value) && (Object.is(value, -0) || !Number.isFinite(value))
 		? { "#number": Object.is(value, -0) ? "-0" : String(value) }
 		: value;
 
@@ -48,7 +53,7 @@ function formFor(clientContext: string | null): FormData {
 	return form;
 }
 
-function run(c: StoredCase): unknown {
+function run(c: StoredCase): Json | undefined {
 	switch (c.site) {
 		case "unpaid":
 			return parseUnpaidBills(c.stored);
@@ -68,7 +73,7 @@ function run(c: StoredCase): unknown {
 }
 
 /** A value as the text the baseline holds it: JSON, with -0 and non-finite numbers kept apart. */
-export function encodeAnswer(value: unknown): string {
+export function encodeAnswer(value: Json | undefined): string {
 	return JSON.stringify(value, replacer) ?? "undefined";
 }
 
@@ -77,6 +82,6 @@ export function answerOf(c: StoredCase): string {
 	try {
 		return encodeAnswer(run(c));
 	} catch (error) {
-		return `throws ${error instanceof Error ? error.name : typeof error}`;
+		return `throws ${error instanceof Error ? error.name : "non-error"}`;
 	}
 }

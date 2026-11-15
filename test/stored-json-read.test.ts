@@ -1,9 +1,9 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
 import { readStoredWith } from "../src/db/stored-shape";
+import baseline from "./fixtures/stored-json-baseline.json";
 import { encodeAnswer } from "./stored-json-answers";
 import { cases } from "./stored-json-corpus";
-import baseline from "./fixtures/stored-json-baseline.json";
 
 // The Schema read beside the stored-shape guards (#1120). For every stored-shape case, readStoredWith with the Schema
 // that matches each guard must answer what readStored answered with that guard (fixtures/stored-json-baseline.json).
@@ -12,7 +12,7 @@ const recorded: Record<string, string> = baseline;
 
 const SCHEMAS = {
 	number: Schema.Finite,
-	strings: Schema.Array(Schema.String),
+	strings: Schema.mutable(Schema.Array(Schema.String)),
 	pair: Schema.Struct({ a: Schema.Finite, b: Schema.String }),
 	flags: Schema.Record(Schema.String, Schema.Boolean),
 };
@@ -40,9 +40,7 @@ describe("readStoredWith reads stored text with a Schema (#1120)", () => {
 		for (const item of cases()) {
 			if (item.site !== "stored") continue;
 
-			const got = encodeAnswer(
-				readStoredWith(SCHEMAS[item.guard], item.text),
-			);
+			const got = encodeAnswer(readStoredWith(SCHEMAS[item.guard], item.text));
 
 			if (got !== recorded[item.label])
 				problems.push(

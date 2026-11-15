@@ -316,7 +316,7 @@ export function keptTryFrom(held: string | null, hash: string): KeptTry | null {
 	// Only a claim's own entry is marked fresh: the email was stored and no run has sent it.
 	const fresh = tried === false;
 
-	if (mail === undefined && typeof line === "string")
+	if (mail === undefined && isText(line))
 		return { mail: renderReadyEmail(line), at, ...(fresh && { tried: false }) };
 
 	if (!Schema.is(KeptMail)(mail)) return null;
