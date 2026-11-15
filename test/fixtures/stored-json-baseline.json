@@ -291,5 +291,9 @@
 	"stored | flags | pair with a duplicate key": "null",
 	"stored | flags | spaces around": "null",
 	"stored | flags | proto key": "{\"__proto__\":true}",
-	"stored | flags | deep nesting": "null"
+	"stored | flags | deep nesting": "null",
+	"diagnostics | Infinity nested in an object": "[\"Route: ` /other `\\nDevice category: Mobile browser\\nRecent error category: TypeError\"]",
+	"diagnostics | Infinity nested in an array": "[\"Route: ` /other `\\nDevice category: Unknown\"]",
+	"context | Infinity nested in an object": "{\"route\":\"/other\",\"deviceCategory\":\"Mobile browser\",\"errorName\":\"TypeError\"}",
+	"context | Infinity nested in an array": "{\"route\":\"/other\",\"deviceCategory\":\"Unknown\",\"errorName\":null}"
 }

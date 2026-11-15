@@ -333,6 +333,14 @@ const DIAGNOSTICS: Array<[string, string | null]> = [
 		'{"deviceCategory":"Mobile browser","deviceCategory":"Unknown"}',
 	],
 	["deep nesting", `${"[".repeat(200)}${"]".repeat(200)}`],
+	[
+		"Infinity nested in an object",
+		'{"deviceCategory":"Mobile browser","errorName":"TypeError","width":1e999}',
+	],
+	[
+		"Infinity nested in an array",
+		'[{"deviceCategory":"Mobile browser","errorName":"TypeError","width":1e999}]',
+	],
 ];
 
 const CONTEXTS: Array<[string, string | null]> = [
@@ -351,6 +359,14 @@ const CONTEXTS: Array<[string, string | null]> = [
 	["array context", '[{"deviceCategory":"Mobile browser"}]'],
 	["unknown error name", '{"errorName":"Teapot"}'],
 	["truncated", '{"deviceCategory":'],
+	[
+		"Infinity nested in an object",
+		'{"deviceCategory":"Mobile browser","errorName":"TypeError","width":1e999}',
+	],
+	[
+		"Infinity nested in an array",
+		'[{"deviceCategory":"Mobile browser","errorName":"TypeError","width":1e999}]',
+	],
 ];
 
 const BUDGETS: Array<[string, string[]]> = [
