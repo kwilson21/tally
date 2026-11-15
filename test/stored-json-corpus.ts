@@ -286,7 +286,7 @@ const KEPT = [
 	{ label: "kept | entry is a string", held: heldWith("Maya") },
 	{
 		label: "kept | big tried number",
-		held: heldWith({ mail: KEPT_MAIL, at: LINE, tried: 1e999 }),
+		held: `{"${KEPT_HASH}":{"mail":${JSON.stringify(KEPT_MAIL)},"at":"${LINE}","tried":1e999}}`,
 	},
 	{
 		label: "kept | deep mail",
