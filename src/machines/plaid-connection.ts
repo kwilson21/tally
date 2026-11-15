@@ -34,41 +34,127 @@ export const plaidConnectionMachine = setup({}).createMachine({
 	initial: "ok",
 	states: {
 		ok: {
+			description: "The bank works.",
 			on: {
-				LOGIN_BROKEN: { target: "login_broken" },
-				RELINK_NEEDED: { target: "needs_relink" },
-				SYNC_SUCCEEDED: { target: "ok" },
-				RELINKED: { target: "ok" },
-				DISCONNECT: { target: "disconnected" },
+				LOGIN_BROKEN: {
+					target: "login_broken",
+					description: "Plaid says the bank's login needs signing in again.",
+				},
+				RELINK_NEEDED: {
+					target: "needs_relink",
+					description:
+						"Plaid says the bank needs a relink, because its login will expire or the person took back its permission.",
+				},
+				SYNC_SUCCEEDED: {
+					target: "ok",
+					description: "A sync got every page, so the login works.",
+				},
+				RELINKED: {
+					target: "ok",
+					description: "The person fixed the bank with Fix connection.",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The person disconnected the bank.",
+				},
 			},
 		},
 		login_broken: {
+			description: "Plaid says the login is broken, and a good sync clears it.",
 			on: {
-				LOGIN_BROKEN: { target: "login_broken" },
-				RELINK_NEEDED: { target: "login_broken_and_needs_relink" },
-				SYNC_SUCCEEDED: { target: "ok" },
-				RELINKED: { target: "ok" },
-				DISCONNECT: { target: "disconnected" },
+				LOGIN_BROKEN: {
+					target: "login_broken",
+					description: "Plaid says the login is still broken.",
+				},
+				RELINK_NEEDED: {
+					target: "login_broken_and_needs_relink",
+					description:
+						"Plaid says the bank now needs a relink, on top of the broken login.",
+				},
+				SYNC_SUCCEEDED: {
+					target: "ok",
+					description: "A sync got every page, so the login works again.",
+				},
+				RELINKED: {
+					target: "ok",
+					description: "The person fixed the bank with Fix connection.",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The person disconnected the bank.",
+				},
 			},
 		},
 		needs_relink: {
+			description:
+				"The bank needs a relink, which a good sync does not clear: only a relink does.",
 			on: {
-				LOGIN_BROKEN: { target: "login_broken_and_needs_relink" },
-				RELINK_NEEDED: { target: "needs_relink" },
-				SYNC_SUCCEEDED: { target: "needs_relink" },
-				RELINKED: { target: "ok" },
-				DISCONNECT: { target: "disconnected" },
+				LOGIN_BROKEN: {
+					target: "login_broken_and_needs_relink",
+					description: "Plaid says the login is broken as well.",
+				},
+				RELINK_NEEDED: {
+					target: "needs_relink",
+					description: "Plaid says the bank needs a relink again.",
+				},
+				SYNC_SUCCEEDED: {
+					target: "needs_relink",
+					description:
+						"A sync got every page, but only a relink clears this, so the bank still needs one.",
+				},
+				RELINKED: {
+					target: "ok",
+					description: "The person fixed the bank with Fix connection.",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The person disconnected the bank.",
+				},
 			},
 		},
 		login_broken_and_needs_relink: {
+			description:
+				"The login is broken and the bank needs a relink, and a good sync clears only the login.",
 			on: {
-				LOGIN_BROKEN: { target: "login_broken_and_needs_relink" },
-				RELINK_NEEDED: { target: "login_broken_and_needs_relink" },
-				SYNC_SUCCEEDED: { target: "needs_relink" },
-				RELINKED: { target: "ok" },
-				DISCONNECT: { target: "disconnected" },
+				LOGIN_BROKEN: {
+					target: "login_broken_and_needs_relink",
+					description: "Plaid says the login is broken again.",
+				},
+				RELINK_NEEDED: {
+					target: "login_broken_and_needs_relink",
+					description: "Plaid says the bank needs a relink again.",
+				},
+				SYNC_SUCCEEDED: {
+					target: "needs_relink",
+					description:
+						"A sync got every page, so the login works, but the bank still needs a relink.",
+				},
+				RELINKED: {
+					target: "ok",
+					description: "The person fixed the bank with Fix connection.",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The person disconnected the bank.",
+				},
 			},
 		},
-		disconnected: { type: "final" },
+		disconnected: {
+			type: "final",
+			description:
+				"The bank was removed, its token is gone, and nothing moves it.",
+		},
 	},
 });
+
+// The plain name of each state, for the diagrams and tables that show this machine.
+export const PLAID_CONNECTION_LABELS: Record<
+	keyof typeof plaidConnectionMachine.states,
+	string
+> = {
+	ok: "Working",
+	login_broken: "Login broken",
+	needs_relink: "Needs reconnecting",
+	login_broken_and_needs_relink: "Login broken and needs reconnecting",
+	disconnected: "Disconnected",
+};

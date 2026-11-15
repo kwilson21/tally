@@ -136,6 +136,16 @@ describe("GET /design-system in the demo", () => {
 		expect(text).toContain("How a feedback message is filed as a GitHub issue");
 	});
 
+	it("shows the Plaid connection as a table: its purpose sentence, state label and caption (#865)", async () => {
+		const { html } = await get("/design-system");
+		const text = html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+		expect(text).toContain(MACHINE_PURPOSE.plaidConnection);
+		expect(text).toContain("The Plaid connection");
+		expect(text).toContain("How a bank connection moves between states");
+		expect(text).toContain('data-ds-components="MachineTable"');
+	});
+
 	it("quotes in NetWorthChart's words the examples its states draw: the card and the bank, both on Oct 1 (#780)", async () => {
 		const { html } = await get("/design-system");
 		const start = html.indexOf('<section id="net-worth-chart"');

@@ -34,6 +34,10 @@ import {
 	MERCHANT_SUGGESTION_LABELS,
 	merchantSuggestionMachine,
 } from "../machines/merchant-suggestion";
+import {
+	PLAID_CONNECTION_LABELS,
+	plaidConnectionMachine,
+} from "../machines/plaid-connection";
 import { PLAID_LEASE_LABELS, plaidLeaseMachine } from "../machines/plaid-lease";
 import { READY_CLAIM_LABELS, readyClaimMachine } from "../machines/ready-claim";
 import {
@@ -121,6 +125,7 @@ import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
 import { LinkBankButton, LinkBankError } from "../views/link-bank";
 import { MachineDiagram } from "../views/machine-diagram";
+import { MachineTable } from "../views/machine-table";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -6787,6 +6792,25 @@ function Diagrams() {
 						title="How a feedback message is filed as a GitHub issue"
 						machine={feedbackFiling}
 						labels={FEEDBACK_FILING_LABELS}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="machine-table"
+				title="MachineTable"
+				tier="visual"
+				components={["MachineTable"]}
+				sentence="A state machine as a table, read from its own definition: one row for each state, what it means, and what moves it, with a sentence for every move, for a machine too tangled to draw as a picture."
+			>
+				<State label="The Plaid connection">
+					<p class="max-w-prose text-muted">
+						{MACHINE_PURPOSE.plaidConnection}
+					</p>
+					<MachineTable
+						id="machine-table-plaid-connection"
+						title="How a bank connection moves between states"
+						machine={plaidConnectionMachine}
+						labels={PLAID_CONNECTION_LABELS}
 					/>
 				</State>
 			</Specimen>
