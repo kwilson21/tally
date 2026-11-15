@@ -99,6 +99,21 @@ describe("the Undo's remaining time", () => {
 		expect(forgetUndoLeftMs(50_000, 54_000)).toBe(6_000);
 		expect(forgetUndoLeftMs(50_000, 60_000)).toBe(0);
 		expect(forgetUndoLeftMs(50_000, 61_000)).toBe(0);
+		expect(forgetUndoLeftMs(50_000, 59_500)).toBe(500);
+	});
+
+	it("an Undo of a Forget written 4 s ago on the database's clock is still undone", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const id = await writtenAgo(4);
+
+		const undo = await post("/settings/learned/undo", {
+			token: String(id),
+			back: "/settings/learned",
+		});
+
+		expect(trigger(undo.res).toast?.message).toBe(
+			"Forget undone. Tally has that line back.",
+		);
 	});
 
 	it("a Forget written 4 s ago has about 6 s of Undo left", async () => {
