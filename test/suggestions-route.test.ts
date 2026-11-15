@@ -3,10 +3,10 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
+import { archiveOn } from "./archive-category";
 import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { present } from "./helpers/present";
@@ -1535,7 +1535,7 @@ describe("a new category the family already has is added to, and the button says
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 		const { html } = await newCategoryPage(ids);
 		expect(textOf(html)).toContain("A new category: Pet Care");
 		expect(textOf(html)).toContain("Restore pet care");
@@ -1561,7 +1561,7 @@ describe("a new category the family already has is added to, and the button says
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 		await db
 			.prepare(
 				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('école', 'école', 'tag', 'cat-blue', 100)",
@@ -1587,7 +1587,7 @@ describe("Yes on an archived category restores it, with the ticked purchases (de
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 
 		const { res } = await post(
 			"/settings/suggestions",

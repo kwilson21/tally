@@ -417,7 +417,7 @@ export async function createFacts(
 	};
 }
 
-/** What makes the category, or brings it back with its archive period closed (as setArchived's restore does); an Add to changes none. */
+/** What makes the category, or brings it back with its archive period closed (as restoreCategoryStatements in category-saves.ts does); an Add to changes none. */
 const categoryStatements = (
 	db: D1Database,
 	category: CreateWrite["category"],

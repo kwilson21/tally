@@ -194,54 +194,6 @@ export async function saveCategory(
 		.run();
 }
 
-/**
- * Archives or restores a category. Nothing is deleted, so every pick and source stays meaningful
- * (spec §7). A restored category goes to the end of the list, so it never shares a place.
- * `on` is the household's date. The category and its archive period (spec §5) change in one batch,
- * so the period opens on archive and closes on restore on the same date.
- */
-export async function setArchived(
-	db: D1Database,
-	id: number,
-	archived: boolean,
-	on = new Date().toISOString().slice(0, 10),
-): Promise<boolean> {
-	// stays raw: the caller reads results[0].meta.changes from this one raw db.batch (decision 179).
-	const results = await db.batch([
-		archived
-			? db
-					.prepare(
-						"UPDATE categories SET archived = 1, archived_on = ? WHERE id = ? AND archived = 0",
-					)
-					.bind(on, id)
-			: db
-					.prepare(
-						`UPDATE categories SET archived = 0, archived_on = NULL,
-						sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
-					WHERE id = ? AND archived = 1 AND ${ROOM}`,
-					)
-					.bind(id),
-		archived
-			? db
-					.prepare(
-						`INSERT INTO category_archive_periods (category_id, archived_on)
-						SELECT id, archived_on FROM categories WHERE id = ? AND archived = 1 AND archived_on = ?
-						AND NOT EXISTS (SELECT 1 FROM category_archive_periods WHERE category_id = ? AND restored_on IS NULL)`,
-					)
-					.bind(id, on, id)
-			: db
-					.prepare(
-						`UPDATE category_archive_periods SET restored_on = ?
-						WHERE category_id = ? AND restored_on IS NULL
-						AND EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0)`,
-					)
-					.bind(on, id, id),
-	]);
-
-	// False when a restore found the category already active, or the list already full.
-	return (results[0]?.meta.changes ?? 0) > 0;
-}
-
 /** Moves an active category one place up or down; the list is renumbered 1, 2, 3… as it goes. */
 export async function moveCategory(
 	db: D1Database,

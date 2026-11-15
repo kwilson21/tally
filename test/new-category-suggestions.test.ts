@@ -1,8 +1,8 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import { setArchived } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
+import { archiveOn, restoreOn } from "./archive-category";
 import { present } from "./helpers/present";
 
 const BASE = "http://tally.test";
@@ -198,7 +198,7 @@ describe("Settings' Suggested card for an archived category with that name (deci
 			)?.id,
 		);
 
-		await setArchived(env.DB, id, true, "2026-07-15");
+		await archiveOn(env.DB, id, "2026-07-15");
 
 		return id;
 	}
@@ -330,7 +330,7 @@ describe("Settings' Suggested card for an archived category with that name (deci
 
 	it("becomes Add to, with no second restore, when someone restored it after the page was drawn", async () => {
 		const id = await archivePetCare();
-		await setArchived(env.DB, id, false, TODAY);
+		await restoreOn(env.DB, id, TODAY);
 
 		const { res } = await post(`/settings/suggestions/${suggestion}/create`, [
 			["shown", String(first)],
