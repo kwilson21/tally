@@ -57,9 +57,47 @@ const TEXTS_REFUSED_IN_CATEGORIES = [
 	"nested array",
 ];
 
+// A bank's stored accounts the Schema refuses answer null (accountsOf), and the run skips that bank before its claim. The
+// last three are shapes SQL cannot write (json_object always writes the mask key, and name and mask are TEXT columns), so
+// the Schema refuses what the renderer used to draw without error; they are named here, not left to chance.
+const REMINDERS_REFUSED = [
+	"10k element array",
+	"2MB string",
+	"BOM before JSON",
+	"Infinity element",
+	"JSON number",
+	"JSON string",
+	"JSON true",
+	"__proto__ key",
+	"array of null",
+	"array of number",
+	"array of object",
+	"depth 1000 array",
+	"depth 200 array",
+	"depth 2000 array",
+	"depth 2000 object",
+	"depth 5000 array",
+	"duplicate keys",
+	"empty object",
+	"good then number",
+	"lone surrogate",
+	"minus Infinity element",
+	"missing mask key",
+	"name missing",
+	"nested array",
+	"not JSON",
+	"numeric mask",
+	"numeric name",
+	"object not array",
+	"string and null",
+	"truncated",
+];
+
 /** The answer the code gives now for a case: the recorded one, unless the conversion moved it on purpose. */
 function expectedAnswer(label: string): string {
-	const [site = "", column = "", name = ""] = label.split(" | ");
+	const [site = "", ...rest] = label.split(" | ");
+	const name = rest.at(-1) ?? "";
+	const column = rest.length === 2 ? (rest[0] ?? "") : "";
 
 	if (
 		site === "texts" &&
@@ -74,6 +112,8 @@ function expectedAnswer(label: string): string {
 		TEXTS_REFUSED_IN_CATEGORIES.includes(name)
 	)
 		return "throws Error";
+
+	if (site === "reminders" && REMINDERS_REFUSED.includes(name)) return "null";
 
 	return recorded[label] ?? "";
 }
