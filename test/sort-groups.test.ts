@@ -313,6 +313,52 @@ describe("sortGroups with a fake step runner", () => {
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
 
+	it("a write that finds the turn taken by another group throws and waits, then saves on its retry", async () => {
+		const ids = await addWaiting(2);
+
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				// While this group's first write is tried, another group holds the turn: the take and the release change
+				// nothing, and the group's reservation record is still there, so the write throws (decision 143).
+				if (name !== "group-1-write") return;
+
+				if (attempt === 1)
+					await db
+						.prepare(
+							"UPDATE household_settings SET value = ? WHERE key = 'sorting_turn'",
+						)
+						.bind(
+							JSON.stringify({
+								id: "someone-else",
+								until: Date.now() + 60_000,
+							}),
+						)
+						.run();
+
+				// The other group has finished, so the turn is free for the retry.
+				if (attempt === 2)
+					await db
+						.prepare("DELETE FROM household_settings WHERE key = 'sorting_turn'")
+						.run();
+			},
+		});
+
+		const fetchImpl = vi.fn(async () => reply(0.9));
+
+		await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-write-taken",
+		});
+
+		expect(
+			fake.steps.find((step) => step.name === "group-1-write")?.attempts,
+		).toBe(2);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(await categoryOf(itemAt(ids, 0))).not.toBeNull();
+		expect(await turnRow()).toBeNull();
+	});
+
 	it("a group whose first ask is already past its 2-minute budget asks nothing and ends the run", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
