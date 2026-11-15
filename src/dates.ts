@@ -190,3 +190,7 @@ export function monthLabel(month: string, today: string): string {
 /** 1 → "1st", 22 → "22nd", 13 → "13th". */
 export const ordinal = (day: number) =>
 	`${day}${day % 100 >= 11 && day % 100 <= 13 ? "th" : day % 10 === 1 ? "st" : day % 10 === 2 ? "nd" : day % 10 === 3 ? "rd" : "th"}`;
+
+/** True when the household's day is no longer `day`: a search or an ask taken on `day` is then not made (spec §7, Limits). */
+export const dayChanged = (timeZone: string, day: string): boolean =>
+	todayIn(timeZone) !== day;

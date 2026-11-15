@@ -5,7 +5,7 @@
 // logs a text, a query, a result or a line.
 
 import { lineOnce, searchOnce } from "../ai/lookup-store";
-import { householdTimeZone, todayIn } from "../dates";
+import { dayChanged, householdTimeZone, todayIn } from "../dates";
 import { readAiSwitches } from "../db/ai-switches";
 import {
 	claimStatements,
@@ -177,7 +177,7 @@ export async function searchClaimed(
 	if (attempt > 1) return { kind: "lost" };
 
 	try {
-		if (todayIn(claim.timeZone) !== claim.day) return { kind: "date-changed" };
+		if (dayChanged(claim.timeZone, claim.day)) return { kind: "date-changed" };
 
 		const before = await check(env, claim);
 

@@ -13,7 +13,7 @@ import { askJev, JEV_THRESHOLD, type JevResult } from "./ai/categorize";
 import { meetsConfidenceThreshold } from "./ai/confidence";
 import { decide, type JevAnswer } from "./ai/decide";
 import { cleanBankText } from "./clean-bank-text";
-import { householdTimeZone, todayIn } from "./dates";
+import { dayChanged, householdTimeZone, todayIn } from "./dates";
 import {
 	type AiSwitches,
 	asksJev,
@@ -935,7 +935,7 @@ export function askBlocked(
 ): AskResult | null {
 	if (attempt > 1) return { id, outcome: "lost" };
 
-	if (todayIn(plan.timeZone) !== plan.day)
+	if (dayChanged(plan.timeZone, plan.day))
 		return { id, outcome: "date-changed" };
 
 	if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
