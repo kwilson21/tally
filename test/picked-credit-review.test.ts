@@ -84,6 +84,36 @@ async function stuckCredit(incomeConfidence: number | null = 0.1) {
 	return id;
 }
 
+/**
+ * A real split of a stuck credit: the parent is a split parent (is_split = 1) and two part rows (their own ids, parent_id
+ * set to the parent) hold its amount between them. Each part is a bank credit row with the same income answer as the parent.
+ */
+async function splitCredit() {
+	const parent = await stuckCredit(0.1);
+	await db
+		.prepare("UPDATE transactions SET is_split = 1 WHERE id = ?")
+		.bind(parent)
+		.run();
+
+	const parts: number[] = [];
+
+	for (const amount of [-2000, -3000]) {
+		const row = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, is_split,
+					flag_income, income_confidence, credit_reviewed, credit_reviewed_by, excluded)
+				SELECT NULL, account_id, date, ?, raw_name, id, 0, 0, 0.1, 0, NULL, 0 FROM transactions WHERE id = ?
+				RETURNING id`,
+			)
+			.bind(amount, parent)
+			.first<{ id: number }>();
+
+		parts.push(present(row?.id));
+	}
+
+	return { parent, parts };
+}
+
 type Edit = Parameters<typeof saveEdit>[2];
 
 const edit = (over: Partial<Edit> = {}): Edit => ({
@@ -339,41 +369,39 @@ describe("a person's pick settles a credit Jev called not income (#870)", () => 
 			});
 		});
 
-		it("does not settle a split part, whose category pick is on its own row", async () => {
-			const parent = await stuckCredit(0.1);
-			const part = await idOf("SQ *LOCAL BAKERY 4432");
-			await db
-				.prepare(
-					"UPDATE transactions SET parent_id = ?, amount_cents = -1000, excluded = 0, is_split = 0, category_id = NULL, category_source = NULL, credit_reviewed = 0, credit_reviewed_by = NULL, income_confidence = 0.1 WHERE id = ?",
-				)
-				.bind(parent, part)
-				.run();
-			await pick(part);
+		it("does not settle a split parent, whose category is not a pick on a counted row (the is_split guard)", async () => {
+			const { parent, parts } = await splitCredit();
+			await pick(parent);
 
-			expect(await stateOf(part)).toMatchObject({
+			// The pick is real: the parent's category source is now the person's, so only the is_split guard stops the trigger.
+			expect(await stateOf(parent)).toMatchObject({
 				category_source: "user",
+				is_split: 1,
 				credit_reviewed: 0,
 				credit_reviewed_by: null,
+				income_source: null,
+			});
+			expect(await stateOf(present(parts[0]))).toMatchObject({
+				credit_reviewed: 0,
 			});
 		});
 
-		it("a split part inserted already picked does not settle the credit (an insert never fires the update trigger)", async () => {
-			const parent = await stuckCredit(0.1);
+		it("does not settle a split part, whose category pick is on its own row (the parent_id guard)", async () => {
+			const { parent, parts } = await splitCredit();
+			const part = present(parts[0]);
+			await pick(part);
 
-			const inserted = await db
-				.prepare(
-					`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, parent_id, is_split,
-						category_id, category_source, income_confidence, flag_income, credit_reviewed, credit_reviewed_by)
-					SELECT NULL, account_id, date, -1000, raw_name, id, 0, ?, 'user', 0.1, 0, 0, NULL FROM transactions WHERE id = ?
-					RETURNING id`,
-				)
-				.bind(GROCERIES, parent)
-				.first<{ id: number }>();
-
-			expect(await stateOf(present(inserted?.id))).toMatchObject({
+			// The part's own row is the one picked, and it is not the parent, so only the parent_id guard stops the trigger.
+			expect(await stateOf(part)).toMatchObject({
+				parent_id: parent,
+				is_split: 0,
+				category_id: GROCERIES,
+				category_source: "user",
 				credit_reviewed: 0,
 				credit_reviewed_by: null,
+				income_source: null,
 			});
+			expect(await stateOf(parent)).toMatchObject({ credit_reviewed: 0 });
 		});
 
 		it("settles an excluded credit that pays a bill, the same way the held count reads it (INCLUDED)", async () => {
