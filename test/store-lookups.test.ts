@@ -679,3 +679,72 @@ describe("the lease cutoff", () => {
 		expect(leaseCutoff(NOW_MS)).toBe(new Date(CUTOFF_MS).toISOString());
 	});
 });
+
+// The save's private guard (spec §7, "when its line is saved"): a row that turns private between the save's read and its
+// write stops the save. The merchant_lookup_texts mark is the one the guard reads.
+
+describe("a saved line is kept only while its text is not private", () => {
+	const PRIVATE_TEXT = "private bakery";
+
+	beforeEach(async () => {
+		await db.prepare("DELETE FROM merchant_lookup_texts").run();
+	});
+
+	async function markText(text: string, isPrivate: 0 | 1) {
+		await db
+			.prepare(
+				"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, ?, ?)",
+			)
+			.bind(`key-${text}`, text, isPrivate)
+			.run();
+	}
+
+	for (const status of ["found", "nothing_found"] as const) {
+		const line = status === "found" ? "Bakery in Arlington, VA." : null;
+
+		it(`a ${status} save changes nothing when the text is private`, async () => {
+			await seed({ text: PRIVATE_TEXT, status: "pending", claimedBy: ME, claimedAt: LIVE_ISO });
+			await markText(PRIVATE_TEXT, 1);
+
+			const result = await saveResultStatement(db, {
+				text: PRIVATE_TEXT,
+				token: ME,
+				status,
+				line,
+				nowMs: NOW_MS,
+			}).run();
+
+			expect(result.meta.changes).toBe(0);
+			expect((await readLookup(db, PRIVATE_TEXT))?.status).toBe("pending");
+		});
+
+		it(`a ${status} save lands when the text's mark is 0`, async () => {
+			await seed({ text: "public bakery", status: "pending", claimedBy: ME, claimedAt: LIVE_ISO });
+			await markText("public bakery", 0);
+
+			const result = await saveResultStatement(db, {
+				text: "public bakery",
+				token: ME,
+				status,
+				line,
+				nowMs: NOW_MS,
+			}).run();
+
+			expect(result.meta.changes).toBe(1);
+		});
+
+		it(`a ${status} save lands when the text has no mark row`, async () => {
+			await seed({ text: "unmarked bakery", status: "pending", claimedBy: ME, claimedAt: LIVE_ISO });
+
+			const result = await saveResultStatement(db, {
+				text: "unmarked bakery",
+				token: ME,
+				status,
+				line,
+				nowMs: NOW_MS,
+			}).run();
+
+			expect(result.meta.changes).toBe(1);
+		});
+	}
+});
