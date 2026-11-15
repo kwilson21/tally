@@ -1,5 +1,5 @@
 // The household's categories, as Settings shows and changes them (spec §5, §7, §8). Budgets: db/budgets.ts.
-import { asc, count, eq, sql } from "drizzle-orm";
+import { asc, count, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { budgetForMonth } from "../budget";
 import {
@@ -178,52 +178,4 @@ export async function unmakeCategory(
 		)
 		.bind(id)
 		.run();
-}
-
-/** Renames a category. Throws a UNIQUE error when another category already has the name's key. */
-export async function saveCategory(
-	db: D1Database,
-	id: number,
-	value: CategoryValue,
-): Promise<void> {
-	// stays SQL: Drizzle's wrapped error ("Failed query: ...") drops the UNIQUE text that test/categories-db.test.ts
-	// reads from the message (decision 179).
-	await db
-		.prepare("UPDATE categories SET name = ?, name_key = ? WHERE id = ?")
-		.bind(value.name, nameKey(value.name), id)
-		.run();
-}
-
-/** Moves an active category one place up or down; the list is renumbered 1, 2, 3… as it goes. */
-export async function moveCategory(
-	db: D1Database,
-	id: number,
-	direction: "up" | "down",
-): Promise<void> {
-	const rows = await drizzle(db)
-		.select({ id: categories.id })
-		.from(categories)
-		.where(eq(categories.archived, 0))
-		.orderBy(asc(categories.sortOrder), asc(categories.name))
-		.all();
-
-	const order = rows.map((c) => c.id);
-	const from = order.indexOf(id);
-	const to = direction === "up" ? from - 1 : from + 1;
-
-	if (from === -1 || to < 0 || to >= order.length) return;
-	// SAFETY: from and to were checked against order.length above, so both entries exist.
-	[order[from], order[to]] = [order[to] as number, order[from] as number];
-
-	const orm = drizzle(db);
-
-	const [first, ...rest] = order.map((categoryId, i) =>
-		orm
-			.update(categories)
-			.set({ sortOrder: i + 1 })
-			.where(eq(categories.id, categoryId)),
-	);
-
-	// The list has at least two entries here (from and to both exist), so there is always a first statement.
-	if (first) await orm.batch([first, ...rest]);
 }

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vitest";
+import { settingsCategories } from "../src/db/categories";
 import {
 	addCategoryStatements,
 	archiveCategoryStatements,
@@ -13,7 +14,6 @@ import {
 	saveCategories,
 	saveNamedCategory,
 } from "../src/db/category-saves";
-import { settingsCategories } from "../src/db/categories";
 import { Database } from "../src/db/database";
 import { resetDemo } from "../src/demo/reset";
 import {
@@ -571,6 +571,7 @@ describe("renames, moves and restores through the rules", () => {
 			{ id: 1, direction: "up" },
 			moveCategoryStatements,
 		);
+
 		const last = await decideCategory(
 			moveCategory,
 			{ id: 7, direction: "down" },
@@ -580,6 +581,7 @@ describe("renames, moves and restores through the rules", () => {
 		for (const answer of [first, last]) {
 			expect("decided" in answer && Option.isNone(answer.decided)).toBe(true);
 		}
+
 		expect(await rows()).toEqual(before);
 	});
 });

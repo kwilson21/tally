@@ -1,5 +1,5 @@
 // Renames and moves a category through the save the settings screen runs (the live path), with the household's list read
-// just before, as the screen does. Tests use these instead of the old one-line database helpers.
+// just before, as the screen does. Tests use these instead of writing the rows by hand.
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import {

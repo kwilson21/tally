@@ -18,6 +18,7 @@ import {
 } from "../src/db/settings-saves";
 import { resetDemo } from "../src/demo/reset";
 import {
+	AddressNotFound,
 	addPerson,
 	PersonNameTaken,
 	removePerson,
@@ -373,18 +374,21 @@ describe("removing a sign-in address", () => {
 		);
 
 		expect(await subscriptionCount()).toBe(0);
+
 		const others = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM push_subscriptions WHERE member_email = ?",
 			)
 			.bind(OTHER)
 			.first<{ n: number }>();
+
 		const otherRow = await db
 			.prepare(
 				"SELECT removed_at AS removedAt FROM household_members WHERE email = ?",
 			)
 			.bind(OTHER)
 			.first<{ removedAt: string | null }>();
+
 		expect(others?.n).toBe(1);
 		expect(otherRow?.removedAt).toBeNull();
 	});
@@ -402,14 +406,16 @@ describe("removing a sign-in address", () => {
 			),
 		);
 
-		expect(refused).toMatchObject({ _tag: "AddressNotFound" });
+		expect(refused).toBeInstanceOf(AddressNotFound);
 		expect((await memberRow())?.removedAt).toBeNull();
 		expect(await subscriptionCount()).toBe(1);
+
 		const removedAny = await db
 			.prepare(
 				"SELECT COUNT(*) AS n FROM household_members WHERE removed_at IS NOT NULL",
 			)
 			.first<{ n: number }>();
+
 		expect(removedAny?.n).toBe(0);
 	});
 
