@@ -8,7 +8,6 @@ import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { cleanBankText } from "../clean-bank-text";
 import { isVague, VAGUE_TEXTS } from "../same-text-matches";
-import { UNDO_MS, UNDO_SECONDS } from "../undo";
 import { activeBankTextRules, type BankTextRule } from "./bank-text-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { categories, forgottenTexts } from "./schema";
@@ -252,104 +251,4 @@ export async function learnedCategoryChoices(
 		.where(eq(categories.archived, 0))
 		.orderBy(asc(categories.sortOrder), asc(categories.name))
 		.all();
-}
-
-/**
- * Forgets a text (its Forget). A text forgotten before keeps its one row: its time moves to now, and the time it had
- * goes to previous_forgotten_at, so the Undo of this Forget can put the line back as it was. Returns the row's id,
- * which the Undo names.
- */
-// Stays raw SQL: no production caller (tests only; production Forget goes through settings-saves.ts, #966 to delete).
-export async function forgetText(
-	db: D1Database,
-	cleanedText: string,
-): Promise<number> {
-	// One batch: the Forget remembers the rule it removes (its Undo puts that rule back), then the rule goes. The
-	// insert reads the rule before the delete, in the same batch, in order.
-	const [forgot] = await db.batch<{ id: number }>([
-		db
-			.prepare(
-				`INSERT INTO forgotten_texts (cleaned_text, forgotten_at, rule_category_id)
-				VALUES (?, datetime('now'), (SELECT category_id FROM bank_text_rules WHERE cleaned_text = ?))
-				ON CONFLICT(cleaned_text) DO UPDATE SET
-					previous_forgotten_at = forgotten_texts.forgotten_at,
-					forgotten_at = excluded.forgotten_at,
-					rule_category_id = excluded.rule_category_id
-				RETURNING id`,
-			)
-			.bind(cleanedText, cleanedText),
-		db
-			.prepare("DELETE FROM bank_text_rules WHERE cleaned_text = ?")
-			.bind(cleanedText),
-	]);
-
-	return forgot?.results[0]?.id ?? 0;
-}
-
-/**
- * The Undo's time left for a Forget row, in milliseconds, counted by the database's clock from the row's stored time
- * (the same basis undoForget checks). 0 when it has run out or the row is gone.
- */
-// Stays raw SQL: no production caller (tests only; production Undo goes through settings-saves.ts, #966 to delete).
-export async function undoRemainingMs(
-	db: D1Database,
-	id: number,
-): Promise<number> {
-	const row = await db
-		.prepare(
-			"SELECT CAST(MAX(0, MIN(?, (julianday(forgotten_at) + ? / 86400.0 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM forgotten_texts WHERE id = ?",
-		)
-		.bind(UNDO_MS, UNDO_SECONDS, id)
-		.first<{ ms: number }>();
-
-	return row?.ms ?? 0;
-}
-
-/**
- * Undo of a Forget, only within the Undo window (src/undo.ts), by the database's clock. A first Forget's row is deleted; a second
- * Forget's row gets back the time it replaced, so the line is as it was before that Forget. "gone" when the row is not
- * there (already undone, or never written).
- */
-// Stays raw SQL: no production caller (tests only; production Undo goes through settings-saves.ts, #966 to delete).
-export async function undoForget(
-	db: D1Database,
-	id: number,
-): Promise<"undone" | "expired" | "gone"> {
-	const row = await db
-		.prepare(
-			`SELECT julianday('now') - julianday(forgotten_at) < ? / 86400.0 AS fresh,
-				previous_forgotten_at AS previous
-			FROM forgotten_texts WHERE id = ?`,
-		)
-		.bind(UNDO_SECONDS, id)
-		.first<{ fresh: number; previous: string | null }>();
-
-	if (!row) return "gone";
-
-	if (!row.fresh) return "expired";
-
-	// One batch: the rule the Forget removed comes back, unless the text has a newer rule (ON CONFLICT keeps that one),
-	// and the forgotten row goes back to its earlier state, or goes.
-	const restore =
-		row.previous !== null
-			? db
-					.prepare(
-						"UPDATE forgotten_texts SET forgotten_at = previous_forgotten_at, previous_forgotten_at = NULL, rule_category_id = NULL WHERE id = ?",
-					)
-					.bind(id)
-			: db.prepare("DELETE FROM forgotten_texts WHERE id = ?").bind(id);
-
-	await db.batch([
-		db
-			.prepare(
-				`INSERT INTO bank_text_rules (cleaned_text, category_id)
-				SELECT cleaned_text, rule_category_id FROM forgotten_texts
-				WHERE id = ? AND rule_category_id IS NOT NULL
-				ON CONFLICT(cleaned_text) DO NOTHING`,
-			)
-			.bind(id),
-		restore,
-	]);
-
-	return "undone";
 }

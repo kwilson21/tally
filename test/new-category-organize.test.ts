@@ -288,6 +288,19 @@ describe("New category in Organize", () => {
 		expect(html).not.toContain("These might belong too:");
 	});
 
+	it("a new name's group asks Always use that category for its store, as an existing one does", async () => {
+		await harborCharges(2);
+
+		const { html } = await post({
+			group: "Harbor Supply",
+			category: "new",
+			new_category_name: "Pets",
+			name: "",
+		});
+
+		expect(html).toContain("Always use Pets for Harbor Supply?");
+	});
+
 	it("a 51st active category gives the full message and makes nothing", async () => {
 		await harborCharges(2);
 

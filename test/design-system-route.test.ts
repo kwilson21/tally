@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
 import dsScript from "../public/js/ds.js?raw";
 import { parseBudgetAmount } from "../src/budgets/amount";
+import { MACHINE_PURPOSE } from "../src/design-system/machine-purpose";
 import {
 	ADJUST_ROWS,
 	APPLE_LINE,
@@ -92,6 +93,47 @@ describe("GET /design-system in the demo", () => {
 		for (const tier of ["Visual", "Interactive", "Flow"]) {
 			expect(html).toContain(tier);
 		}
+	});
+
+	it("says what each machine is for above its picture, and no longer labels it by its shape (#865)", async () => {
+		const { html } = await get("/design-system");
+		// Hono escapes ' and " in text; decode them so the sentences compare as written.
+		const text = html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+		for (const sentence of Object.values(MACHINE_PURPOSE)) {
+			expect(text).toContain(sentence);
+		}
+
+		const retiredLabels = [
+			"one state, three ways out",
+			"a loop on one state, an arrow back, two ways out",
+			"four ways in and out, one state that runs out on its own",
+		];
+
+		for (const label of retiredLabels) {
+			expect(text).not.toContain(label);
+		}
+	});
+
+	it("shows the Plaid lease and the ready-email claim with their purpose sentences and state labels (#865)", async () => {
+		const { html } = await get("/design-system");
+		const text = html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+		expect(text).toContain(MACHINE_PURPOSE.plaidLease);
+		expect(text).toContain(MACHINE_PURPOSE.readyClaim);
+		expect(text).toContain("The Plaid lease");
+		expect(text).toContain("The ready-email claim");
+		expect(text).toContain("How a bank's sync lease is taken and given back");
+		expect(text).toContain("How a ready email is claimed and sent");
+	});
+
+	it("shows the feedback filing with its purpose sentence and state label (#865)", async () => {
+		const { html } = await get("/design-system");
+		const text = html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+		expect(text).toContain(MACHINE_PURPOSE.feedbackFiling);
+		expect(text).toContain("The feedback filing");
+		expect(text).toContain("How a feedback message is filed as a GitHub issue");
 	});
 
 	it("quotes in NetWorthChart's words the examples its states draw: the card and the bank, both on Oct 1 (#780)", async () => {

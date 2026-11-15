@@ -4,6 +4,7 @@ import { transition } from "xstate";
 import {
 	FILING_ATTEMPT_CAP,
 	type FilingState,
+	failureMove,
 	feedbackFiling,
 	filingStateOf,
 	giveUpReason,
@@ -26,7 +27,9 @@ const EVENTS = [
 	"REJECTED",
 	"TOKEN_REFUSED",
 	"FAILED",
+	"FAILED_LAST_TRY",
 	"LEASE_EXPIRED",
+	"LEASE_EXPIRED_LAST_TRY",
 ];
 
 /** The state and count the machine reaches from a state and a count, after one event. */
@@ -87,32 +90,49 @@ describe("the feedback filing machine", () => {
 	});
 
 	it("FAILED releases the claim and keeps the try counted, below the cap", () => {
-		expect(moveOf("claimed", 1, "FAILED")).toEqual({
+		expect(moveOf("claimed", 1, failureMove("FAILED", 1))).toEqual({
 			state: "unfiled",
 			attempts: 1,
 		});
-		expect(moveOf("claimed", CAP - 1, "FAILED")).toEqual({
+		expect(moveOf("claimed", CAP - 1, failureMove("FAILED", CAP - 1))).toEqual({
 			state: "unfiled",
 			attempts: CAP - 1,
 		});
 	});
 
-	it("FAILED on the cap's try gives up as exhausted", () => {
-		expect(moveOf("claimed", CAP, "FAILED")).toEqual({
+	it("FAILED_LAST_TRY on the cap's try gives up as exhausted", () => {
+		expect(moveOf("claimed", CAP, failureMove("FAILED", CAP))).toEqual({
+			state: "gave_up",
+			attempts: CAP,
+		});
+		expect(moveOf("claimed", CAP, "FAILED_LAST_TRY")).toEqual({
 			state: "gave_up",
 			attempts: CAP,
 		});
 	});
 
 	it("LEASE_EXPIRED: a cut-off try below the cap is ready again, and the cap's try gives up", () => {
-		expect(moveOf("claimed", 4, "LEASE_EXPIRED")).toEqual({
+		expect(moveOf("claimed", 4, failureMove("LEASE_EXPIRED", 4))).toEqual({
 			state: "unfiled",
 			attempts: 4,
 		});
-		expect(moveOf("claimed", CAP, "LEASE_EXPIRED")).toEqual({
+		expect(moveOf("claimed", CAP, failureMove("LEASE_EXPIRED", CAP))).toEqual({
 			state: "gave_up",
 			attempts: CAP,
 		});
+		expect(moveOf("claimed", CAP, "LEASE_EXPIRED_LAST_TRY")).toEqual({
+			state: "gave_up",
+			attempts: CAP,
+		});
+	});
+
+	it("failureMove picks the plain event below the cap and the last-try event at the cap, for both kinds", () => {
+		for (const kind of ["FAILED", "LEASE_EXPIRED"] as const) {
+			expect(failureMove(kind, 0)).toBe(kind);
+			expect(failureMove(kind, 4)).toBe(kind);
+			expect(failureMove(kind, 5)).toBe(`${kind}_LAST_TRY`);
+			expect(failureMove(kind, 6)).toBe(`${kind}_LAST_TRY`);
+		}
 	});
 
 	it("a claimed row refuses another CLAIM", () => {
@@ -393,7 +413,7 @@ describe("every writer agrees with the machine, from every state", () => {
 
 	type Answer = {
 		label: string;
-		event: string;
+		event: "FILED" | "REJECTED" | "TOKEN_REFUSED" | "FAILED";
 		/** The status GitHub sent, when one came back. */
 		status?: number;
 		answer: () => Response;
@@ -531,9 +551,15 @@ describe("every writer agrees with the machine, from every state", () => {
 						attempts: start.attempts,
 					}) !== null;
 
+				// The failed answer picks its move from the count the claim left: the try just counted.
+				const event =
+					answer.event === "FAILED"
+						? failureMove("FAILED", start.attempts + 1)
+						: answer.event;
+
 				const expected = claimable
 					? {
-							...runFrom(start.state, start.attempts, ["CLAIM", answer.event]),
+							...runFrom(start.state, start.attempts, ["CLAIM", event]),
 							// An answer writes its status only when a claim was made; a refused claim writes nothing.
 							lastStatus: answer.status ?? start.lastStatus,
 						}

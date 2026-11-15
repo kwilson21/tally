@@ -939,8 +939,9 @@ describe("a failing re-check never fails the Create (#842 review)", () => {
 	};
 
 	it("answers the Create as a success, with no line, when the run cannot be written (a failed CAS)", async () => {
+		// Drizzle writes the insert in its own lower-case text (#963): the start's create-if-absent insert.
 		failStatement(
-			"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
+			'insert into "household_settings" ("key", "value") values (?, ?) on conflict ("household_settings"."key") do nothing',
 		);
 		const { res, html } = await maybeCreate();
 		expect(res.status).toBe(200);

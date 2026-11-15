@@ -1304,6 +1304,19 @@ describe("readEligibility: through the app's own save paths", () => {
 	});
 });
 
+describe("readEligibilityRows: the facts it judged (#1113)", () => {
+	it("gives each row the seen it judged its mark by, which is what Jev is told", async () => {
+		await clearedRow();
+
+		const rows = await readEligibilityRows(db);
+		const row = rows[0];
+
+		expect(row?.seen).not.toBeNull();
+		expect(row?.seen?.rawName).toBeTypeOf("string");
+		expect(row?.seen?.accountType).toBeTypeOf("string");
+	});
+});
+
 describe("readEligibilityRows: shape", () => {
 	it("with an only filter, a text's answer is the same as in the full read", async () => {
 		await clearedRow();
