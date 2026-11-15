@@ -10,6 +10,7 @@ import { present } from "./helpers/present";
 // refund refusals, and nothing is written. Only a race inside the batch itself is still an error.
 
 const BASE = "http://tally.test";
+
 const STALE =
 	"This split changed while you were editing it, so nothing was saved. Close this sheet and open it again to see it as it is now.";
 
@@ -18,12 +19,12 @@ beforeEach(() => resetDemo(env.DB, "2026-09-22"));
 const today = () => todayIn(DEFAULT_TIME_ZONE);
 
 async function post(path: string, fields: [string, string][], htmx = true) {
-	const headers: Record<string, string> = {
+	const headers = new Headers({
 		Origin: BASE,
 		"content-type": "application/x-www-form-urlencoded",
-	};
+	});
 
-	if (htmx) headers["HX-Request"] = "true";
+	if (htmx) headers.set("HX-Request", "true");
 
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
@@ -166,12 +167,11 @@ async function panelFields(id: number, edits: [string, string][]) {
 		...html
 			.slice(start, end)
 			.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g),
-	]
-		.map(([, name = "", value = ""]): [string, string] => [
-			name,
-			value.replaceAll("&amp;", "&").replaceAll("&quot;", '"'),
-		])
-		.filter(([name]) => !edits.some(([edit]) => edit === name));
+	].flatMap(([, name = "", value = ""]): [string, string][] =>
+		edits.some(([edit]) => edit === name)
+			? []
+			: [[name, value.replaceAll("&amp;", "&").replaceAll("&quot;", '"')]],
+	);
 }
 
 const panelEdits: [string, string][] = [
@@ -187,6 +187,7 @@ const panelEdits: [string, string][] = [
 /** The pending edit a panel sends with Change the parts: its drawn fields and its own edits, as the sheet carries them. */
 async function pendingEditOf(id: number) {
 	const drawn = await panelFields(id, panelEdits);
+
 	const sheet = await post(`/transactions/${id}`, [
 		...drawn,
 		...panelEdits,
@@ -240,6 +241,7 @@ describe("a Change the parts correction whose entry or parts changed since the s
 		"is refused in words when %s (the parts changed before the batch)",
 		async (_name, parts) => {
 			const { id, a, b } = await splitCash("Parts moved");
+
 			const foreign = present(
 				await env.DB.prepare(
 					"SELECT t.id FROM transactions t WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.id <> ? ORDER BY t.id LIMIT 1",
@@ -247,8 +249,10 @@ describe("a Change the parts correction whose entry or parts changed since the s
 					.bind(id)
 					.first<{ id: number }>(),
 			).id;
+
 			const before = await stateOf(id);
 
+			// SAFETY: each case returns the three posted fields of a part (id, category, amount) as strings, as the sheet posts them.
 			const { res, html } = await correction(
 				id,
 				parts(a, b, foreign) as [string, string, string][],
@@ -310,7 +314,9 @@ describe("a Change the parts correction whose entry or parts changed since the s
 		const { res } = await correction(id, savedParts(a, b));
 
 		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Trigger")).toContain("Saved split for Normal save.");
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Saved split for Normal save.",
+		);
 		expect(
 			(
 				await env.DB.prepare(
@@ -325,6 +331,7 @@ describe("a Change the parts correction whose entry or parts changed since the s
 	it("keeps the refund refusals' sentences, and their statuses, as they were", async () => {
 		const total = await splitCash("Refund total");
 		const totalBefore = await stateOf(total.id);
+
 		const refundTotal = await correction(
 			total.id,
 			[
@@ -343,6 +350,7 @@ describe("a Change the parts correction whose entry or parts changed since the s
 
 		const part = await splitCash("Refund part");
 		const partBefore = await stateOf(part.id);
+
 		const refundPart = await correction(
 			part.id,
 			[
