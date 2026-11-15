@@ -6,6 +6,8 @@ export const MACHINE_PURPOSE = {
 	feedbackFiling:
 		"Each feedback message is filed once as a GitHub issue, and gets up to five tries. A try holds the message for 10 minutes; a failed or cut-off try makes it ready again until the fifth, and a message GitHub rejects gives up at once. A refused token gives its try back.",
 	name: 'Tally suggests a plain name for a store whose text on the statement is cryptic ("AMZN Mktp US*2K4" becomes "Amazon"), from the bank or a guess. A person picks one, types their own, or keeps the bank\'s text. A suggestion that goes stale is withdrawn.',
+	plaidConnection:
+		"Each connected bank is in one state: working, or one of three kinds of needs attention, or disconnected. Plaid's signals and the person's actions move it. A good sync clears a broken login, but only reconnecting clears a bank that needs reconnecting. Disconnected is final: its token is gone.",
 	plaidLease:
 		"Before a bank is read, its sync takes the bank's lease, so two syncs never read the same bank at once. A sync gives the lease back when it finishes; if a sync is cut off, the lease runs out by itself when its time passes, and the next sync may take it. Once a bank is disconnected, nothing may take it or write to it again.",
 	readyClaim:

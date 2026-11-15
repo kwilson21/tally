@@ -590,6 +590,12 @@ export const DECIDED: readonly {
 			"Option A: the net worth line keeps its past months and steps on the day an account gets its first balance, and the sentence names the account and the day, “Up $2,370 since May. You added Apple Card on Oct 18.” (decision 154).",
 		issue: 780,
 	},
+	{
+		title: "P145 · How the Plaid connection's flow reads as a table",
+		outcome:
+			"Option A: the moves are grouped by who or what sets them off (Plaid, a finished sync, you), each group a table of from, to and what happens. The by-state table and the getting-worse and worked-example options are not built.",
+		issue: 865,
+	},
 ];
 
 /** The proposals page body. */

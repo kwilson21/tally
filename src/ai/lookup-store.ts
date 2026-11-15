@@ -8,6 +8,7 @@
 
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
@@ -159,6 +160,81 @@ export const searchStore = (
 		),
 	);
 };
+
+/** What one search answered for the run: the results, or the failure it names and the status Tavily gave. */
+export type SearchOnce =
+	| { ok: true; results: readonly SearchResult[] }
+	| {
+			ok: false;
+			failure: "rate_limited" | "refused" | "unreachable" | "unreadable";
+			status: number | null;
+	  };
+
+/**
+ * One search for the run, as a plain value: a rate limit reports 429, a refusal reports Tavily's own status. It never
+ * throws, so the run needs no Effect of its own (as client.ts's orThrow).
+ */
+export async function searchOnce(
+	query: string,
+	apiKey: string,
+	fetchImpl: typeof fetch = fetch,
+): Promise<SearchOnce> {
+	const result = await Effect.runPromise(
+		Effect.result(searchStore(query, apiKey, fetchImpl)),
+	);
+
+	if (Result.isSuccess(result)) {
+		return { ok: true, results: result.success.results };
+	}
+
+	return failedSearch(result.failure);
+}
+
+/** A failed search as the run reads it: the failure's name, and the status Tavily gave when it refused. */
+type FailedSearch = Extract<SearchOnce, { ok: false }>;
+
+const failedSearch = Match.type<SearchFailure>().pipe(
+	Match.tagsExhaustive({
+		SearchRateLimited: (): FailedSearch => ({
+			ok: false,
+			failure: "rate_limited",
+			status: 429,
+		}),
+		SearchRefused: (refused): FailedSearch => ({
+			ok: false,
+			failure: "refused",
+			status: refused.status,
+		}),
+		SearchUnreachable: (): FailedSearch => ({
+			ok: false,
+			failure: "unreachable",
+			status: null,
+		}),
+		SearchUnreadable: (): FailedSearch => ({
+			ok: false,
+			failure: "unreadable",
+			status: null,
+		}),
+	}),
+);
+
+/** The run's line for a store, as a plain value: a line (or null for nothing found), or not ok when Workers AI failed. */
+export type LineOnce = { ok: true; line: string | null } | { ok: false };
+
+/** One line from the results, as a plain value. It never throws. */
+export async function lineOnce(
+	ai: Ai,
+	lookupText: string,
+	results: readonly SearchResult[],
+): Promise<LineOnce> {
+	const result = await Effect.runPromise(
+		Effect.result(lineFromResults(ai, lookupText, results)),
+	);
+
+	return Result.isSuccess(result)
+		? { ok: true, line: result.success }
+		: { ok: false };
+}
 
 /** The line as the model's answer is cleaned: one line, plain characters, at most 80 characters, cut at a word. */
 export function cleanLine(reply: string): string | null {

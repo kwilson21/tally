@@ -18,6 +18,8 @@ import {
 } from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { accounts as accountsTable, plaidItems } from "../db/schema";
+import { lookupEnvOpen } from "../lookup/gate";
+import { syncedTextRows, syncedTextsStatements } from "../lookup/texts";
 import {
 	extendLeaseSql,
 	ownsLeaseSql,
@@ -49,6 +51,8 @@ import { decryptToken } from "./token-crypto";
 type SyncEnv = PlaidEnv & {
 	DB: D1Database;
 	TOKEN_ENCRYPTION_KEY?: string;
+	DEMO?: string;
+	TAVILY_API_KEY?: string;
 };
 
 type PlaidAccount = {
@@ -704,6 +708,23 @@ export async function syncItem(
 			const statements: D1PreparedStatement[] = [
 				env.DB.prepare(extendLeaseSql("?", "?")).bind(itemRowId, lockId),
 			];
+
+			// Each key's lookup row is written before any transaction statement, so the triggers on transactions (migration
+			// 0077) find it. Not lease-guarded: a mark for a key Plaid sent only adds privacy.
+			if (lookupEnvOpen(env))
+				statements.push(
+					...syncedTextsStatements(
+						env.DB,
+						syncedTextRows(
+							[...added, ...page.modified].map((transaction) => ({
+								merchantKey: merchantNameOf(transaction) ?? transaction.name,
+								rawName: transaction.name,
+								plaidCategory:
+									transaction.personal_finance_category?.primary ?? null,
+							})),
+						),
+					),
+				);
 
 			const existingTransactionIds = new Set<string>();
 
