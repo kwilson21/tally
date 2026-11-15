@@ -2185,3 +2185,126 @@ describe("reading the stored run and moved record", () => {
 		}
 	});
 });
+
+describe("the compare-and-set that starts or joins a run (#963)", () => {
+	const stored = async (key: string) =>
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(key)
+				.first<{ value: string }>()
+		)?.value ?? "";
+
+	/**
+	 * A db whose first write (the first statement run) is preceded by `before`: a write another instance makes between
+	 * this call's read and its own write. Reads and the other statements pass through unchanged.
+	 */
+	function beforeFirstWrite(before: () => Promise<void>): D1Database {
+		let fired = false;
+
+		const wrap = (statement: D1PreparedStatement): D1PreparedStatement =>
+			new Proxy(statement, {
+				get(target, prop: keyof D1PreparedStatement) {
+					if (prop === "bind")
+						return (...values: unknown[]) => wrap(target.bind(...values));
+
+					if (prop === "run")
+						return async () => {
+							if (!fired) {
+								fired = true;
+								await before();
+							}
+
+							return target.run();
+						};
+
+					const value = target[prop];
+
+					return isMethod(value) ? value.bind(target) : value;
+				},
+			});
+
+		return new Proxy(db, {
+			get(target, prop: keyof D1Database) {
+				if (prop === "prepare")
+					return (sql: string) => wrap(target.prepare(sql));
+
+				const value = target[prop];
+
+				return isMethod(value) ? value.bind(target) : value;
+			},
+		});
+	}
+
+	it("a join whose stored run changed between its read and its write writes nothing over the change, and joins the run that is there", async () => {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const b = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
+		const first = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(first);
+
+		// Another instance joins between this call's read and its write: one more instance is counted.
+		const racing = beforeFirstWrite(async () => {
+			const run = JSON.parse(await stored("resort_run"));
+
+			await db
+				.prepare("UPDATE household_settings SET value = ? WHERE key = ?")
+				.bind(
+					JSON.stringify({ ...run, instances: run.instances + 1 }),
+					"resort_run",
+				)
+				.run();
+		});
+
+		const joined = await startOrJoinRun(racing, {
+			candidates: (await candidatesNow()).filter((c) => c.id === b),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0 + 1000,
+		});
+
+		expect(joined).toEqual({ runId, newIds: [b], joined: true });
+		expect(await readRun(db)).toMatchObject({ instances: 3, ids: [a, b] });
+	});
+
+	it("a start that reads no run, and finds one written before its insert, joins that run instead of replacing it", async () => {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const b = await tx({ plaidCategory: HINT, confidence: 0.3 });
+
+		const first = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(first);
+		const text = await stored("resort_run");
+		await db
+			.prepare("DELETE FROM household_settings WHERE key = ?")
+			.bind("resort_run")
+			.run();
+
+		// Another instance writes the run between this call's read (none) and its insert.
+		const racing = beforeFirstWrite(async () => {
+			await db
+				.prepare("INSERT INTO household_settings (key, value) VALUES (?, ?)")
+				.bind("resort_run", text)
+				.run();
+		});
+
+		const joined = await startOrJoinRun(racing, {
+			candidates: (await candidatesNow()).filter((c) => c.id === b),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0 + 1000,
+		});
+
+		expect(joined).toEqual({ runId, newIds: [b], joined: true });
+		expect(await readRun(db)).toMatchObject({ instances: 2, ids: [a, b] });
+	});
+});
