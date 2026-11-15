@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { householdToday } from "../dates";
 import { KEPT_NAMES_LOG_SQL } from "../db/ai-log";
 import { LIST, LIST_VERSION } from "../db/category-saves";
 import { COUNTED_JOINS, INCLUDED_ROW } from "../db/counted-month";
@@ -23,7 +22,6 @@ import type {
 	StoreRuleRequest,
 	StoreRuleWrite,
 } from "../rules/organize";
-import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
 const NEEDS_CATEGORY_UPDATE = `category_id IS NULL AND ${INCLUDED_ROW} AND is_split = 0 AND flag_income = 0 AND (amount_cents >= 0 OR credit_reviewed = 1) AND (refund_of_id IS NULL OR refund_of_id IN (SELECT id FROM transactions WHERE excluded = 1))`;
@@ -251,62 +249,6 @@ function groupStatements(
 	return { settles, updates };
 }
 
-/**
- * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
- * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
- * Returns the ids of the charges it filed. The question's address names their store by a merchant row (`storeRowOf`,
- * #532), and nothing carries these ids back.
- */
-export async function saveOrganizeGroup(
-	db: D1Database,
-	merchantKeys: string[],
-	categoryId: number,
-	displayName: string | null,
-	updatedBy: string,
-): Promise<number[]> {
-	const names = [...new Set(merchantKeys)];
-
-	if (names.length === 0) return [];
-	let saved = 0;
-
-	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
-		const chunk = names.slice(offset, offset + CHUNK_SIZE);
-		const marks = chunk.map(() => "?").join(", ");
-
-		// Stays raw: the count shares the COUNTED_JOINS and NEEDS_CATEGORY fragments, and an IN list of marks.
-		const count = await db
-			.prepare(
-				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND ${KEY} IN (${marks})`,
-			)
-			.bind(...chunk)
-			.first<{ n: number }>();
-
-		saved += count?.n ?? 0;
-	}
-
-	// A stale form files nothing after another request categorized the group.
-	if (saved === 0) return [];
-
-	const { settles, updates } = groupStatements(
-		db,
-		names,
-		{ id: categoryId },
-		displayName,
-		displayName
-			? names.filter(
-					(merchantKey) => nameSource([displayName], merchantKey) === "tally",
-				)
-			: [],
-		displayName ? await householdToday(db) : null,
-		updatedBy,
-	);
-
-	const results = await db.batch([...settles, ...updates]);
-
-	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
-	return filedIds(results.slice(settles.length));
-}
-
 /** How many charges of the merchant keys ?1 (a JSON list) still need a category, as SQL. */
 const WAITING_COUNT = `(SELECT COUNT(*) FROM transactions t ${COUNTED_JOINS} WHERE ${NEEDS_CATEGORY} AND ${KEY} IN (SELECT value FROM json_each(?1)))`;
 
@@ -492,24 +434,18 @@ export async function groupHasRule(
 	categoryId: number,
 ): Promise<boolean> {
 	const names = [...new Set(merchantKeys)];
-	let ruled = 0;
 
-	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
-		const chunk = names.slice(offset, offset + CHUNK_SIZE);
-		const marks = chunk.map(() => "?").join(", ");
+	if (names.length === 0) return true;
 
-		// Stays raw: one COUNT per chunk inside this loop, which decision 209 does not allow as a Drizzle query; restructuring it is the owner's call.
-		const row = await db
-			.prepare(
-				`SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (${marks})`,
-			)
-			.bind(categoryId, ...chunk)
-			.first<{ n: number }>();
+	// One statement: the key list has no cap, and json_each takes the whole list in one bind (decision 209).
+	const row = await db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (SELECT value FROM json_each(?))",
+		)
+		.bind(categoryId, JSON.stringify(names))
+		.first<{ n: number }>();
 
-		ruled += row?.n ?? 0;
-	}
-
-	return ruled === names.length;
+	return (row?.n ?? 0) === names.length;
 }
 
 /**

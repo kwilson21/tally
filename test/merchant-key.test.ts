@@ -16,12 +16,10 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { transactionsCsv } from "../src/settings/export";
 import { parseFilters } from "../src/transactions/filters";
-import {
-	organizeGroups,
-	saveOrganizeGroup,
-} from "../src/transactions/organize";
+import { organizeGroups } from "../src/transactions/organize";
 import { tidyName } from "../src/transactions/tidy-name";
 import { present } from "./helpers/present";
+import { fileOrganizeGroup } from "./organize-group";
 
 // A transaction's merchant key is Plaid's merchant_name when there is one, otherwise its raw_name
 // (spec §6.1 rule 1, decision 67), so "TARGET 1234" and "TARGET 5678" are one merchant.
@@ -332,11 +330,12 @@ describe("merchant rules", () => {
 			merchantKeys: ["Target"],
 		});
 
-		await saveOrganizeGroup(
+		await fileOrganizeGroup(
 			db,
 			group?.merchantKeys ?? [],
 			GROCERIES,
 			null,
+			"Target",
 			"me@example.com",
 		);
 
@@ -866,7 +865,14 @@ describe("one merchants row per key, whatever the bank text", () => {
 			},
 		]);
 
-		await saveOrganizeGroup(db, ["Comcast"], GAS, "Comcast Two", "me");
+		await fileOrganizeGroup(
+			db,
+			["Comcast"],
+			GAS,
+			"Comcast Two",
+			"Comcast Cable",
+			"me",
+		);
 
 		expect(await row(8601)).toMatchObject({ category_id: GAS });
 		expect(await row(8602)).toMatchObject({ category_id: GAS });
