@@ -782,6 +782,30 @@ describe("namesToAvoid", () => {
 	});
 });
 
+// The two avoid lists are SQL UNIONs, so a name that is both a category and a dismissed suggestion comes once (#963).
+describe("namesToAvoid and purchaseNamesToAvoid list a name once", () => {
+	it("holds a name that is both a category and a dismissed suggestion once, in each list", async () => {
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
+			.run();
+
+		for (const name of ["Groceries", "Gas"])
+			await db
+				.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'dismissed')",
+				)
+				.bind(name)
+				.run();
+
+		const all = await namesToAvoid(db);
+		const purchase = await purchaseNamesToAvoid(db);
+
+		expect(all.filter((name) => name === "Groceries")).toHaveLength(1);
+		expect(all.filter((name) => name === "Gas")).toHaveLength(1);
+		expect(purchase.filter((name) => name === "Gas")).toHaveLength(1);
+	});
+});
+
 // Decision 165: a single purchase's naming call is given the active categories as choices, so its avoid list keeps the
 // archived ones and the dismissed suggestions only. The nightly naming's namesToAvoid is unchanged (above).
 describe("purchaseNamesToAvoid", () => {
