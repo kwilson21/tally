@@ -236,6 +236,14 @@ describe("POST /home/seen: the presence check-in", () => {
 		expect(after !== null && before !== null && after > before).toBe(true);
 	});
 
+	it("writes a check-in that is exactly 30 seconds old (the window's edge is inclusive)", async () => {
+		await setSeen(PERSON, "-30 seconds");
+		const before = await seenOf(PERSON);
+		await checkIn();
+		const after = await seenOf(PERSON);
+		expect(after).not.toBe(before);
+	});
+
 	it("writes nothing for a removed member, and still answers 204", async () => {
 		await env.DB.prepare(
 			"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
