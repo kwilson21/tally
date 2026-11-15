@@ -151,14 +151,22 @@ export const UndoName = Schema.String.pipe(
 	),
 );
 
-/** True for a posted value that is text (a file part is not text). */
-function isText(value: string | File | null | undefined): value is string {
-	return typeof value === "string";
+/**
+ * A posted field as text, or null when it is missing or a file part (a text box posts no file, and a plain key is never
+ * an array in parseBody). Routes that read a missing field and an empty one differently branch on this, not on `typeof`.
+ */
+export function textOrNull(
+	posted: string | File | (string | File)[] | null | undefined,
+): string | null {
+	if (posted instanceof File || Array.isArray(posted)) return null;
+
+	return posted ?? null;
 }
 
 /** A posted field as text: "" when it is missing or a file part, so no id, token, name or address is read from a file. */
-export const textOf = (posted: string | File | null | undefined): string =>
-	isText(posted) ? posted : "";
+export const textOf = (
+	posted: string | File | (string | File)[] | null | undefined,
+): string => textOrNull(posted) ?? "";
 
 /** A row id read at the edge (RowId), or undefined when the text is no row id. */
 export function rowIdOf(text: string | undefined): number | undefined {

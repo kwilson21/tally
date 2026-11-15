@@ -335,10 +335,11 @@ describe("the category and the name and bank text", () => {
 		expect(page).toContain("Enter the bank's text.");
 	});
 
-	it("saves a file posted as the name as the bill's name, as it always has", async () => {
+	// A file part is no text: it is read as a missing name, so no bill is named "[object File]" (#1109).
+	it("reads a file posted as the name as a missing name, saving no '[object File]' bill", async () => {
 		await post("/bills", { ...GOOD_NEW, name: file() });
 
-		expect(await savedNamed("[object File]")).not.toBeNull();
+		expect(await savedNamed("[object File]")).toBeNull();
 	});
 });
 

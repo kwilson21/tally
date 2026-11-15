@@ -934,7 +934,7 @@ function rulesAddress(search: string): string {
 
 settings.post("/settings/merchant-rules/remove", async (c) => {
 	const form = await c.req.formData();
-	const merchantKey = String(form.get("merchant") ?? "");
+	const merchantKey = textOf(form.get("merchant"));
 	const search = String(form.get("rules_search") ?? "");
 
 	if (!merchantKey) {
@@ -1079,7 +1079,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 // body, never the address. A text with no line now (a stale form) changes nothing and says the normal thing.
 settings.post("/settings/learned/forget", async (c) => {
 	const form = await c.req.formData();
-	const text = String(form.get("text") ?? "");
+	const text = textOf(form.get("text"));
 
 	if (text === "") {
 		const message = "Choose a line to forget.";
@@ -1181,7 +1181,7 @@ settings.post("/settings/learned/undo", async (c) => {
 // filled, and a toast says so. The rule never changes a merchant rule.
 settings.post("/settings/learned/change", async (c) => {
 	const form = await c.req.formData();
-	const text = String(form.get("text") ?? "");
+	const text = textOf(form.get("text"));
 	const category = readAtEdge(CategoryId, textOf(form.get("category")));
 	const htmx = Boolean(c.req.header("HX-Request"));
 
@@ -1282,7 +1282,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	const shown = rowIdsOf(form.getAll("shown"));
 
 	const notes = Object.fromEntries(
-		shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
+		shown.map((tx) => [tx, textOf(form.get(`note_${tx}`))]),
 	);
 
 	const result = await createFromSuggestion(
@@ -1355,7 +1355,7 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 		...new Set(
 			form
 				.getAll("store")
-				.map((store) => store.toString())
+				.map((store) => textOf(store))
 				.filter(
 					(store) => store.length > 0 && store.length <= MERCHANT_KEY_MAX,
 				),
@@ -1450,7 +1450,7 @@ function retry(
 ) {
 	return renderPage(c, "categories", {
 		open,
-		values: { name: String(form.get("name") ?? "") },
+		values: { name: textOf(form.get("name")) },
 		errors,
 		status: 422,
 	});
@@ -1715,7 +1715,7 @@ settings.post("/settings/people", async (c) => {
 		? "remove"
 		: String(form.get("action") ?? "");
 
-	const nameValue = String(form.get("name") ?? "");
+	const nameValue = textOf(form.get("name"));
 	// A refused id is 0: no row opens and nothing is removed or renamed, as a NaN gave before.
 	const id = rowIdOrZero(textOf(form.get("person_id")));
 
@@ -1878,7 +1878,7 @@ const run = (
 
 /** The typed name, read at the edge (decision 206): the tidied name, or the sentence to show under the field. */
 const typedName = (form: FormData) =>
-	readAtEdge(CategoryName, String(form.get("name") ?? ""));
+	readAtEdge(CategoryName, textOf(form.get("name")));
 
 settings.post("/settings/categories", async (c) => {
 	const form = await c.req.formData();

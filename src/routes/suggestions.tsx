@@ -42,7 +42,7 @@ import {
 	suggestionQueue,
 } from "../db/suggestions-queue";
 import { readAtEdge } from "../edge";
-import { DigitsUpTo15, numberOf } from "../edge-kinds";
+import { DigitsUpTo15, numberOf, textOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
@@ -673,7 +673,7 @@ suggestions.post(PATH, async (c) => {
 			...new Set(
 				form
 					.getAll("store")
-					.map((store) => store.toString())
+					.map((store) => textOf(store))
 					.filter(
 						(store) => store.length > 0 && store.length <= MERCHANT_KEY_MAX,
 					),
@@ -971,7 +971,7 @@ suggestions.post(PATH, async (c) => {
 					return filedAs({ categoryId: tapped.value }, () => ({ id }), false);
 				}
 
-				const typed = String(form.get("new_name") ?? "");
+				const typed = textOf(form.get("new_name"));
 
 				return typedName(
 					typed,
@@ -984,7 +984,7 @@ suggestions.post(PATH, async (c) => {
 			// as the new row's; a blank name beside a chosen category counts as no name.
 			if (answer === "else") {
 				const category = form.get("category")?.toString() ?? "";
-				const typed = form.get("new_name")?.toString() ?? "";
+				const typed = textOf(form.get("new_name"));
 				const hasCategory = category.trim() !== "";
 				const hasName = typed.trim() !== "";
 
@@ -1066,7 +1066,7 @@ suggestions.post(PATH, async (c) => {
 
 				// The note under an unticked purchase is kept with the answer, as Settings keeps it (decision 120).
 				const notes = Object.fromEntries(
-					shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
+					shown.map((tx) => [tx, textOf(form.get(`note_${tx}`))]),
 				);
 
 				const result = await createFromSuggestion(
@@ -1164,7 +1164,7 @@ suggestions.post(PATH, async (c) => {
 
 			if (answer === "else") {
 				const picked = form.get("name_pick")?.toString() ?? null;
-				const own = form.get("merchant")?.toString().trim() ?? "";
+				const own = textOf(form.get("merchant")).trim();
 				const choice = readChoice(review, picked, own);
 
 				if (!choice.ok)
