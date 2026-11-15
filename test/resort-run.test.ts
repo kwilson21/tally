@@ -2246,6 +2246,7 @@ describe("the compare-and-set that starts or joins a run (#963)", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(first);
 
 		// Another instance joins between this call's read and its write: one more instance is counted.
@@ -2282,8 +2283,11 @@ describe("the compare-and-set that starts or joins a run (#963)", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
+
 		const runId = runIdOf(first);
+
 		const text = await stored("resort_run");
+
 		await db
 			.prepare("DELETE FROM household_settings WHERE key = ?")
 			.bind("resort_run")
