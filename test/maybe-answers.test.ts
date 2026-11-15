@@ -21,6 +21,7 @@ const COLUMNS = [
 	"household_day",
 	"id",
 	"kind",
+	"with_line",
 ];
 
 const screen = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
@@ -135,6 +136,7 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 				answer: "yes",
 				household_day: day,
 				created_at: expect.any(String),
+				with_line: 0,
 			},
 			{
 				id: 2,
@@ -143,6 +145,7 @@ describe("maybe_answers: one row per Yes or No that changes a guess", () => {
 				answer: "no",
 				household_day: day,
 				created_at: expect.any(String),
+				with_line: 0,
 			},
 		]);
 	});
