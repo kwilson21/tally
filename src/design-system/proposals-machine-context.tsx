@@ -92,11 +92,12 @@ export function MachineContextProposal() {
 						</StateRow>
 						<StateRow label="Held">
 							The row's <Code>value</Code> names the holding group's{" "}
-							<Code>id</Code>, and its <Code>until</Code> is still ahead of the
-							clock. Taking the turn writes <Code>until</Code> 15 minutes on.
+							<Code>id</Code>, and its <Code>until</Code> is at the clock or
+							still ahead of it. Taking the turn writes <Code>until</Code> 15
+							minutes on.
 						</StateRow>
 						<StateRow label="Ran out">
-							The same row, with an <Code>until</Code> in the past, null or
+							The same row, with an <Code>until</Code> behind the clock, null or
 							missing. Nothing is written when a turn runs out: a reader
 							compares <Code>until</Code> with the clock.
 						</StateRow>

@@ -118,6 +118,26 @@ describe("P144, the sorting turn's picture with its context", () => {
 			expect(block, label).toContain(`${label}</th>`);
 	});
 
+	it("puts an until equal to the clock in Held, and only one behind the clock in Ran out (sorting-turn.ts compares with <)", async () => {
+		const block = await proposal();
+		// The picture's own labels also read "Held", so anchor on the table's row header cells.
+		const heldAt = block.indexOf("Held</th>");
+		const ranOutAt = block.indexOf("Ran out</th>");
+		expect(heldAt).toBeGreaterThan(-1);
+		expect(ranOutAt).toBeGreaterThan(heldAt);
+
+		const held = block.slice(heldAt, ranOutAt);
+		const ranOut = block.slice(ranOutAt);
+
+		expect(held).toContain("at the clock or still ahead of it");
+		expect(ranOut).toContain("behind the clock, null or missing");
+
+		for (const text of [held, ranOut]) {
+			expect(text).not.toContain("in the past");
+			expect(text).not.toContain("is still ahead of the clock");
+		}
+	});
+
 	it("keeps to the page's rules: tokens and classes only, no style or htmx attributes, no fixed widths that would overflow a phone", async () => {
 		const block = await proposal();
 
