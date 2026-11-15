@@ -907,6 +907,55 @@ describe("the claim and the day (rule 6 and the replayed claim)", () => {
 	});
 });
 
+describe("a check that throws is logged by name only (18)", () => {
+	it("18b. a check whose database read throws is lost, and the log says the error's name and nothing more", async () => {
+		const logged: string[] = [];
+
+		const spy = vi
+			.spyOn(console, "error")
+			.mockImplementation((...args: unknown[]) => {
+				logged.push(args.map(String).join(" "));
+			});
+
+		try {
+			const broken: Pick<D1Database, "prepare"> = {
+				prepare: () => {
+					throw new TypeError(`${T(0)} could not be read`);
+				},
+			};
+
+			// SAFETY: the run reads the database only through prepare, the one member this stand-in provides; every read throws.
+			const env = {
+				DB: broken as D1Database,
+				DEMO: "false",
+				TAVILY_API_KEY: "tvly",
+				AI: fakeAi([]).ai,
+			};
+
+			const search = fakeSearch([]);
+
+			const outcome = await searchClaimed(
+				env,
+				{
+					text: T(0),
+					attempts: 0,
+					token: "tok",
+					day: DAY,
+					timeZone: "America/New_York",
+				},
+				search.fetch,
+				{ attempt: 1 },
+			);
+
+			expect(outcome).toEqual({ kind: "lost" });
+			expect(search.queries).toEqual([]);
+			expect(logged).toEqual(["store lookup: check TypeError"]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+});
+
 describe("the run's own functions", () => {
 	it("LOOKUP_RUN_LIMIT is 10", () => {
 		expect(LOOKUP_RUN_LIMIT).toBe(10);
