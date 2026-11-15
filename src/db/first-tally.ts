@@ -3,8 +3,11 @@
 // and the pay, bills and savings answers. Setup is done at the budgets stroke. A household set up before the feature
 // shipped has its strokes drawn with no day (migration 0057, and 0061 takes the count stroke out), so it reads as set up.
 
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import type { PayDeposit } from "../first-tally/pay";
 import type { Json } from "../json";
+import { householdSettings } from "./schema";
 
 /**
  * The four strokes of the first week (P125 E, decision 148): link a bank, your pay, your bills, and your budgets (the
@@ -130,10 +133,11 @@ const KEY = "first_tally";
 export async function readFirstTally(
 	db: D1Database,
 ): Promise<FirstTally | null> {
-	const row = await db
-		.prepare("SELECT value FROM household_settings WHERE key = ?")
-		.bind(KEY)
-		.first<{ value: string }>();
+	const row = await drizzle(db)
+		.select({ value: householdSettings.value })
+		.from(householdSettings)
+		.where(eq(householdSettings.key, KEY))
+		.get();
 
 	return row ? parseFirstTally(row.value) : null;
 }
@@ -340,12 +344,15 @@ export function strokeStatement(
 			? "json_remove(json_insert(value, '$.strokes.' || ?2, ?3), '$.reAsk')"
 			: "json_insert(value, '$.strokes.' || ?2, ?3)";
 
-	return db
-		.prepare(
-			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
+	return (
+		db
+			// stays raw: the guard and EMPTY_RECORD are shared SQL fragments in a JSON upsert (decision 179)
+			.prepare(
+				`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
 			ON CONFLICT(key) DO UPDATE SET value = ${drawn}`,
-		)
-		.bind(KEY, stroke, day);
+			)
+			.bind(KEY, stroke, day)
+	);
 }
 
 /** Draws a stroke on a household day (or with no day); strokeStatement has the guard. */
@@ -368,11 +375,14 @@ export function waitsForRunStatement(
 	db: D1Database,
 	waitingSql: string,
 ): D1PreparedStatement {
-	return db
-		.prepare(
-			`UPDATE household_settings SET value = json_set(value, '$.waitsForRun', json('true')) WHERE key = ?1 AND json_type(value, '$.strokes.budgets') IS NULL AND EXISTS (SELECT 1 ${waitingSql})`,
-		)
-		.bind(KEY);
+	return (
+		db
+			// stays raw: waitingSql is a shared SQL fragment (decision 179)
+			.prepare(
+				`UPDATE household_settings SET value = json_set(value, '$.waitsForRun', json('true')) WHERE key = ?1 AND json_type(value, '$.strokes.budgets') IS NULL AND EXISTS (SELECT 1 ${waitingSql})`,
+			)
+			.bind(KEY)
+	);
 }
 
 /**
@@ -387,11 +397,14 @@ export function clearWaitsForRunStatement(
 	const nothingWaiting =
 		waitingSql === null ? "" : ` AND NOT EXISTS (SELECT 1 ${waitingSql})`;
 
-	return db
-		.prepare(
-			`UPDATE household_settings SET value = json_remove(value, '$.waitsForRun') WHERE key = ?1${nothingWaiting}`,
-		)
-		.bind(KEY);
+	return (
+		db
+			// stays raw: nothingWaiting is built from the shared waitingSql fragment (decision 179)
+			.prepare(
+				`UPDATE household_settings SET value = json_remove(value, '$.waitsForRun') WHERE key = ?1${nothingWaiting}`,
+			)
+			.bind(KEY)
+	);
 }
 
 /**
@@ -409,13 +422,16 @@ export function takeBackBankStrokes(
 		(stroke) => `json_type(value, '$.strokes.${stroke}') IS NOT NULL`,
 	).join(" AND ");
 
-	return db
-		.prepare(
-			`UPDATE household_settings SET value = json_remove(value, ${STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.reAsk', '$.waitsForRun')
+	return (
+		db
+			// stays raw: its path list and notSetUp are shared SQL fragments (decision 179)
+			.prepare(
+				`UPDATE household_settings SET value = json_remove(value, ${STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.reAsk', '$.waitsForRun')
 			WHERE key = ?1 AND NOT (${notSetUp})
 				AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND id != ?2)`,
-		)
-		.bind(KEY, disconnectingId);
+			)
+			.bind(KEY, disconnectingId)
+	);
 }
 
 /**
@@ -443,9 +459,11 @@ function forgetDepositsWhere(
 	const hasKept = (answer: "yes" | "no") =>
 		`EXISTS (SELECT 1 FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
 
-	return db
-		.prepare(
-			`WITH gone AS (${gone})
+	return (
+		db
+			// stays raw: a CTE over json_each of one column, with no cap on the set (decision 209)
+			.prepare(
+				`WITH gone AS (${gone})
 			UPDATE household_settings SET value = json_set(value, '$.pay', json((
 				SELECT json_group_object(m.key, json(json_patch(json_object('at', json_extract(m.value, '$.at')), json_patch(
 					CASE WHEN ${hasKept("yes")} THEN json_object('yes', json(${kept("yes")})) ELSE '{}' END,
@@ -455,8 +473,9 @@ function forgetDepositsWhere(
 				WHERE ${hasKept("yes")} OR ${hasKept("no")}
 			)))
 			WHERE key = ?1 AND json_type(value, '$.pay') IS NOT NULL AND ${guard}`,
-		)
-		.bind(KEY, ...binds);
+			)
+			.bind(KEY, ...binds)
+	);
 }
 
 /**
@@ -504,12 +523,15 @@ export function keepBudgetStatement(
 	answer: BudgetAnswer,
 	guard = "1",
 ): D1PreparedStatement {
-	return db
-		.prepare(
-			`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)) WHERE ${guard}
+	return (
+		db
+			// stays raw: EMPTY_RECORD is a shared SQL string in a JSON upsert (decision 179)
+			.prepare(
+				`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)) WHERE ${guard}
 			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.budgets."' || ?2 || '"', json(?3))`,
-		)
-		.bind(KEY, String(categoryId), JSON.stringify(answer));
+			)
+			.bind(KEY, String(categoryId), JSON.stringify(answer))
+	);
 }
 
 /**
@@ -524,15 +546,18 @@ export function takeBackQuestionStrokes(
 	db: D1Database,
 	bankName: string,
 ): D1PreparedStatement {
-	return db
-		.prepare(
-			`UPDATE household_settings SET value = json_set(json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.waitsForRun'),
+	return (
+		db
+			// stays raw: a json_set/json_remove on the stored record, batched with the plaid route's raw statements (decision 179)
+			.prepare(
+				`UPDATE household_settings SET value = json_set(json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.waitsForRun'),
 				'$.reAsk', json_object('bank', ?2))
 			WHERE key = ?1 AND json_type(value, '$.strokes.budgets') IS NULL
 				AND (json_type(value, '$.strokes.pay') IS NOT NULL OR json_type(value, '$.strokes.bills') IS NOT NULL
 					OR json_type(value, '$.reAsk') IS NOT NULL)`,
-		)
-		.bind(KEY, bankName);
+			)
+			.bind(KEY, bankName)
+	);
 }
 
 /**
@@ -551,14 +576,17 @@ export function payAnswerStatement(
 	merchant: string,
 	record: PayAnswerRecord,
 ): D1PreparedStatement {
-	return db
-		.prepare(
-			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json_set(json(?3), '$.at', 0)))) WHERE changes() > 0
+	return (
+		db
+			// stays raw: a changes() guard in a JSON upsert, with the shared EMPTY_RECORD (decision 179)
+			.prepare(
+				`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json_set(json(?3), '$.at', 0)))) WHERE changes() > 0
 			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json_set(json(?3), '$.at', COALESCE(
 				(SELECT json_extract(p.value, '$.at') FROM json_each(household_settings.value, '$.pay') AS p WHERE p.key = ?2),
 				(SELECT COALESCE(MAX(json_extract(p.value, '$.at')) + 1, 0) FROM json_each(household_settings.value, '$.pay') AS p))))))`,
-		)
-		.bind(KEY, merchant, JSON.stringify(record));
+			)
+			.bind(KEY, merchant, JSON.stringify(record))
+	);
 }
 
 /**
@@ -572,10 +600,13 @@ export function keptBillStatement(
 	db: D1Database,
 	cents: number,
 ): D1PreparedStatement {
-	return db
-		.prepare(
-			`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.bills', json_object('kept', 1, 'cents', ?2)) WHERE changes() > 0
+	return (
+		db
+			// stays raw: a changes() guard in a JSON upsert, batched with raw keepBills statements (decision 179)
+			.prepare(
+				`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.bills', json_object('kept', 1, 'cents', ?2)) WHERE changes() > 0
 			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.bills', json_object('kept', COALESCE(json_extract(value, '$.bills.kept'), 0) + 1, 'cents', COALESCE(json_extract(value, '$.bills.cents'), 0) + ?2))`,
-		)
-		.bind(KEY, cents);
+			)
+			.bind(KEY, cents)
+	);
 }

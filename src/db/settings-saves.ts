@@ -35,6 +35,7 @@ import { changeBankTextRuleStatements } from "./bank-text-rules";
 import { Database, runWith } from "./database";
 import { waitsForRunStatement } from "./first-tally";
 import { decideAndSave, guardedSave } from "./guarded-save";
+import { householdSettingUpsert } from "./household-setting";
 import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
 import {
 	type NeverSuggestRule,
@@ -170,22 +171,16 @@ export const aiSwitchesStatements = (db: D1Database, save: AiSwitchesWrite) => {
 
 // One stored value each.
 
-const setting = (db: D1Database, key: string, value: string) =>
-	drizzle(db)
-		.insert(householdSettings)
-		.values({ key, value })
-		.onConflictDoUpdate({
-			target: householdSettings.key,
-			set: { value: sql`excluded.value` },
-		});
-
 export const timeZoneStatements = (db: D1Database, save: { zone: string }) =>
-	inOneBatch(setting(db, "time_zone", save.zone));
+	inOneBatch(householdSettingUpsert(db, "time_zone", save.zone));
 
 export const bankSignInEmailsStatements = (
 	db: D1Database,
 	save: { on: boolean },
-) => inOneBatch(setting(db, "bank_sign_in_emails", save.on ? "on" : "off"));
+) =>
+	inOneBatch(
+		householdSettingUpsert(db, "bank_sign_in_emails", save.on ? "on" : "off"),
+	);
 
 // A sign-in address.
 

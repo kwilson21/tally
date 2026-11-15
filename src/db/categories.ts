@@ -1,5 +1,5 @@
 // The household's categories, as Settings shows and changes them (spec §5, §7, §8). Budgets: db/budgets.ts.
-import { asc, count, eq, sql } from "drizzle-orm";
+import { asc, count, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { budgetForMonth } from "../budget";
 import {
@@ -178,100 +178,4 @@ export async function unmakeCategory(
 		)
 		.bind(id)
 		.run();
-}
-
-/** Renames a category. Throws a UNIQUE error when another category already has the name's key. */
-export async function saveCategory(
-	db: D1Database,
-	id: number,
-	value: CategoryValue,
-): Promise<void> {
-	// stays SQL: Drizzle's wrapped error ("Failed query: ...") drops the UNIQUE text that test/categories-db.test.ts
-	// reads from the message (decision 179).
-	await db
-		.prepare("UPDATE categories SET name = ?, name_key = ? WHERE id = ?")
-		.bind(value.name, nameKey(value.name), id)
-		.run();
-}
-
-/**
- * Archives or restores a category. Nothing is deleted, so every pick and source stays meaningful
- * (spec §7). A restored category goes to the end of the list, so it never shares a place.
- * `on` is the household's date. The category and its archive period (spec §5) change in one batch,
- * so the period opens on archive and closes on restore on the same date.
- */
-export async function setArchived(
-	db: D1Database,
-	id: number,
-	archived: boolean,
-	on = new Date().toISOString().slice(0, 10),
-): Promise<boolean> {
-	// stays raw: the caller reads results[0].meta.changes from this one raw db.batch (decision 179).
-	const results = await db.batch([
-		archived
-			? db
-					.prepare(
-						"UPDATE categories SET archived = 1, archived_on = ? WHERE id = ? AND archived = 0",
-					)
-					.bind(on, id)
-			: db
-					.prepare(
-						`UPDATE categories SET archived = 0, archived_on = NULL,
-						sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
-					WHERE id = ? AND archived = 1 AND ${ROOM}`,
-					)
-					.bind(id),
-		archived
-			? db
-					.prepare(
-						`INSERT INTO category_archive_periods (category_id, archived_on)
-						SELECT id, archived_on FROM categories WHERE id = ? AND archived = 1 AND archived_on = ?
-						AND NOT EXISTS (SELECT 1 FROM category_archive_periods WHERE category_id = ? AND restored_on IS NULL)`,
-					)
-					.bind(id, on, id)
-			: db
-					.prepare(
-						`UPDATE category_archive_periods SET restored_on = ?
-						WHERE category_id = ? AND restored_on IS NULL
-						AND EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0)`,
-					)
-					.bind(on, id, id),
-	]);
-
-	// False when a restore found the category already active, or the list already full.
-	return (results[0]?.meta.changes ?? 0) > 0;
-}
-
-/** Moves an active category one place up or down; the list is renumbered 1, 2, 3… as it goes. */
-export async function moveCategory(
-	db: D1Database,
-	id: number,
-	direction: "up" | "down",
-): Promise<void> {
-	const rows = await drizzle(db)
-		.select({ id: categories.id })
-		.from(categories)
-		.where(eq(categories.archived, 0))
-		.orderBy(asc(categories.sortOrder), asc(categories.name))
-		.all();
-
-	const order = rows.map((c) => c.id);
-	const from = order.indexOf(id);
-	const to = direction === "up" ? from - 1 : from + 1;
-
-	if (from === -1 || to < 0 || to >= order.length) return;
-	// SAFETY: from and to were checked against order.length above, so both entries exist.
-	[order[from], order[to]] = [order[to] as number, order[from] as number];
-
-	const orm = drizzle(db);
-
-	const [first, ...rest] = order.map((categoryId, i) =>
-		orm
-			.update(categories)
-			.set({ sortOrder: i + 1 })
-			.where(eq(categories.id, categoryId)),
-	);
-
-	// The list has at least two entries here (from and to both exist), so there is always a first statement.
-	if (first) await orm.batch([first, ...rest]);
 }

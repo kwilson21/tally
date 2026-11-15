@@ -6,14 +6,17 @@ import { readAtEdge, readText } from "./edge";
 import { PERSON_NAME_MAX } from "./limits";
 import { formatCents, toCents } from "./money";
 
+/** The digits a row id is written with (RowId, and CategoryId in settings/category-form.ts). */
+export const ROW_ID_DIGITS = /^[1-9]\d{0,14}$/;
+
 /**
  * A row id from the address or a form: a whole number above zero, written with digits only. Fifteen digits at most, so
  * the largest id is 999999999999999, under Number.MAX_SAFE_INTEGER (9007199254740991), and a larger one is refused. Ids
  * come from our own pages, so no leading zero, sign, space, decimal point or exponent is written by the app.
  */
-export const RowId = Schema.String.check(
-	Schema.isPattern(/^[1-9]\d{0,14}$/),
-).pipe(Schema.decodeTo(Schema.NumberFromString));
+export const RowId = Schema.String.check(Schema.isPattern(ROW_ID_DIGITS)).pipe(
+	Schema.decodeTo(Schema.NumberFromString),
+);
 
 /**
  * The place of a card on a page, from a form (Settings, a No's answer): digits only, leading zeros read as they always

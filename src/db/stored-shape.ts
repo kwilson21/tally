@@ -1,3 +1,5 @@
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import type { Json } from "../json";
 // Checks for JSON that was stored as text and is read back as a type. A cast (`JSON.parse(text) as Run`) claims the
 // shape without looking; these look, so a stored value of the wrong shape fails where it is read and not later, as a
@@ -65,4 +67,38 @@ export function readStored<T>(text: string, guard: Guard<T>): T | null {
 	}
 
 	return guard(value) ? value : null;
+}
+
+/**
+ * The stored text as the Schema's type, or null when it is not JSON or is not shaped like it: the Schema read beside the
+ * guards above (decision 206). It checks the shape and gives the value as stored, so a key the Schema does not name stays
+ * on it, as with readStored. Its answers match readStored's for the guard of the same shape (test/stored-json-read.test.ts).
+ * resort-run.ts still reads through the guards: its guards move here when #963 lets that file change.
+ */
+export function readStoredWith<S extends Schema.Constraint>(
+	schema: S,
+	text: string,
+): S["Type"] | null {
+	const read = Schema.decodeUnknownResult(
+		Schema.fromJsonString(Schema.Unknown),
+	)(text);
+
+	if (!Result.isSuccess(read)) return null;
+
+	return Schema.is(schema)(read.success) ? read.success : null;
+}
+
+/**
+ * The stored text as the Schema's type, given as stored. JSON.parse runs first, so text that is not JSON throws the
+ * SyntaxError it always threw; the parsed value is then checked with `Schema.is`, and a value of the wrong shape is null.
+ * Unlike readStoredWith, the two failures are told apart, so a read that must refuse bad data can throw on one and
+ * not the other (#1120). Decoding would strip the keys the Schema does not name, so the value is returned as parsed.
+ */
+export function parseStoredWith<S extends Schema.Constraint>(
+	schema: S,
+	text: string,
+): S["Type"] | null {
+	const value: unknown = JSON.parse(text);
+
+	return Schema.is(schema)(value) ? value : null;
 }

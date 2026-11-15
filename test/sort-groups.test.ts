@@ -313,6 +313,54 @@ describe("sortGroups with a fake step runner", () => {
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
 
+	it("a write that finds the turn taken by another group throws and waits, then saves on its retry", async () => {
+		const ids = await addWaiting(2);
+
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				// While this group's first write is tried, another group holds the turn: the take and the release change
+				// nothing, and the group's reservation record is still there, so the write throws (decision 143).
+				if (name !== "group-1-write") return;
+
+				if (attempt === 1)
+					await db
+						.prepare(
+							"UPDATE household_settings SET value = ? WHERE key = 'sorting_turn'",
+						)
+						.bind(
+							JSON.stringify({
+								id: "someone-else",
+								until: Date.now() + 60_000,
+							}),
+						)
+						.run();
+
+				// The other group has finished, so the turn is free for the retry.
+				if (attempt === 2)
+					await db
+						.prepare(
+							"DELETE FROM household_settings WHERE key = 'sorting_turn'",
+						)
+						.run();
+			},
+		});
+
+		const fetchImpl = vi.fn(async () => reply(0.9));
+
+		await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-write-taken",
+		});
+
+		expect(
+			fake.steps.find((step) => step.name === "group-1-write")?.attempts,
+		).toBe(2);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(await categoryOf(itemAt(ids, 0))).not.toBeNull();
+		expect(await turnRow()).toBeNull();
+	});
+
 	it("a group whose first ask is already past its 2-minute budget asks nothing and ends the run", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
@@ -440,6 +488,30 @@ describe("sortGroups with a fake step runner", () => {
 			{ rulesApplied: true, onlyIds: ids, runId: "run-reserve-replay" },
 		);
 		expect(fake.names()).toContain("group-1-reserve");
+		expect(await callsUsed()).toBe(3);
+	});
+
+	it("a reserve whose result is lost reserves no calls again, and its retry asks with the grant it kept", async () => {
+		const ids = await addWaiting(3);
+		const fake = fakeSteps();
+		const fetchImpl = vi.fn(async () => reply(0.9));
+
+		// The first run commits the reservation and its result is lost, so the step runs again: the second result is the one used.
+		const runStep: StepRunner = async (name, config, fn) => {
+			if (name !== "group-1-reserve") return fake.runStep(name, config, fn);
+
+			await fn({ attempt: 1 });
+
+			return fn({ attempt: 2 });
+		};
+
+		await sortGroups(withKey, runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-reserve-kept",
+		});
+
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(await callsUsed()).toBe(3);
 	});
 
@@ -1532,6 +1604,37 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			expect(body).not.toContain("seen");
 			expect(body).not.toContain("merchantKey");
 		}
+	});
+
+	it("Jev is told the categories in their sort order, not in name or insertion order", async () => {
+		// Inserted in name order, so a read with no ORDER BY would list Aardvark first; its sort order puts Zulu first.
+		await makeCategory(db, { name: "Aardvark Zone" });
+		await makeCategory(db, { name: "Zulu Zone" });
+		await db
+			.prepare(
+				"UPDATE categories SET sort_order = CASE name WHEN 'Zulu Zone' THEN -5 ELSE 500 END WHERE name IN ('Zulu Zone', 'Aardvark Zone')",
+			)
+			.run();
+		const ids = await addWaiting(1);
+		const bodies: string[] = [];
+
+		const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+			bodies.push(String(init?.body));
+
+			return reply(0.9);
+		});
+
+		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-category-order",
+		});
+
+		const body = itemAt(bodies, 0);
+		expect(body.indexOf("Zulu Zone")).toBeGreaterThan(-1);
+		expect(body.indexOf("Zulu Zone")).toBeLessThan(
+			body.indexOf("Aardvark Zone"),
+		);
 	});
 });
 

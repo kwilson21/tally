@@ -1,4 +1,4 @@
--- A person's category pick settles a bank credit that Jev called not income (#870, decision 231).
+-- A person's category pick settles a bank credit that Jev called not income (#870, decision 234).
 -- A held credit (decision 70) waits for a review, and a pick of its category is one too: when Jev's income
 -- answer was 20% or less, Jev has already said it is not income, so no question about it is ever asked, and
 -- before this a credit the person had categorized stayed held for good. The trigger makes the pick the person's

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
-import { setArchived } from "../src/db/categories";
 import { firstCountedMonth, loadMonth } from "../src/db/month";
+import { archiveOn, restoreOn } from "./archive-category";
 import { isMethod } from "./helpers/present";
 
 const db = env.DB;
@@ -56,12 +56,12 @@ describe("loadMonth", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id) VALUES (1, '2026-09-12', 500, 'BEFORE SPEND', 42)",
 			),
 		]);
-		await setArchived(db, 41, true, "2026-08-31");
-		await setArchived(db, 42, true, "2026-08-31");
-		await setArchived(db, 43, true, "2026-09-15");
-		await setArchived(db, 44, true, "2026-10-01");
-		await setArchived(db, 45, true, "2026-08-31");
-		await setArchived(db, 45, false, "2026-10-05");
+		await archiveOn(db, 41, "2026-08-31");
+		await archiveOn(db, 42, "2026-08-31");
+		await archiveOn(db, 43, "2026-09-15");
+		await archiveOn(db, 44, "2026-10-01");
+		await archiveOn(db, 45, "2026-08-31");
+		await restoreOn(db, 45, "2026-10-05");
 		const data = await loadMonth(db, "2026-09");
 
 		const byId = new Map(
@@ -176,9 +176,9 @@ describe("a budget across archive periods", () => {
 
 	it("is left out of the months a restored category was archived for", async () => {
 		await addBudgetedCategory(51);
-		await setArchived(db, 51, true, "2026-08-20");
+		await archiveOn(db, 51, "2026-08-20");
 		const archived = await loadMonth(db, "2026-09");
-		await setArchived(db, 51, false, "2026-10-05");
+		await restoreOn(db, 51, "2026-10-05");
 		const restored = await loadMonth(db, "2026-09");
 		expect(restored.categories).toEqual(archived.categories);
 		expect(restored.amounts).toEqual(archived.amounts);
@@ -189,8 +189,8 @@ describe("a budget across archive periods", () => {
 
 	it("still counts in the month a category was archived in", async () => {
 		await addBudgetedCategory(52);
-		await setArchived(db, 52, true, "2026-09-15");
-		await setArchived(db, 52, false, "2026-10-01");
+		await archiveOn(db, 52, "2026-09-15");
+		await restoreOn(db, 52, "2026-10-01");
 		const september = await loadMonth(db, "2026-09");
 		expect(september.categories.map((c) => c.id)).toContain(52);
 		expect(september.amounts.map((a) => a.categoryId)).toContain(52);
@@ -199,9 +199,9 @@ describe("a budget across archive periods", () => {
 
 	it("is counted again in the months after it is archived again", async () => {
 		await addBudgetedCategory(53);
-		await setArchived(db, 53, true, "2026-08-20");
-		await setArchived(db, 53, false, "2026-10-05");
-		await setArchived(db, 53, true, "2026-10-20");
+		await archiveOn(db, 53, "2026-08-20");
+		await restoreOn(db, 53, "2026-10-05");
+		await archiveOn(db, 53, "2026-10-20");
 		const september = await loadMonth(db, "2026-09");
 		const october = await loadMonth(db, "2026-10");
 		expect(september.categories.map((c) => c.id)).not.toContain(53);

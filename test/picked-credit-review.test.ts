@@ -8,7 +8,7 @@ import { resetDemo } from "../src/demo/reset";
 import { present } from "./helpers/present";
 
 // #870: a person's category pick on a bank credit that Jev called not income (income_confidence at or below
-// 20%) counts as the person's review as not income (decision 231), by the trigger picked_credit_review.
+// 20%) counts as the person's review as not income (decision 234), by the trigger picked_credit_review.
 
 const db = env.DB;
 const TODAY = "2026-09-22";

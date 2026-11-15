@@ -71,6 +71,30 @@ export function centsToAmount(cents: number): string {
 }
 
 /**
+ * The whole dollar at or below an amount, in cents (toward negative infinity): 150 is 100, -150 is -200. Integer
+ * remainder maths, never -0.
+ */
+export function floorToDollars(cents: number): number {
+	if (!Number.isSafeInteger(cents))
+		throw new Error(`Not an amount in cents: ${cents}`);
+
+	const remainder = cents % 100;
+	const whole = cents - (remainder < 0 ? remainder + 100 : remainder);
+
+	return whole === 0 ? 0 : whole;
+}
+
+/**
+ * The whole dollar at or above an amount, in cents (toward positive infinity): 150 is 200, -150 is -100, -50 is 0
+ * (never -0). It is the mirror of floorToDollars.
+ */
+export function ceilToDollars(cents: number): number {
+	const whole = -floorToDollars(-cents);
+
+	return whole === 0 ? 0 : whole;
+}
+
+/**
  * A finished month's amount as MonthEnd, its cause line and the month strip's words say it: whole dollars, except a
  * nonzero amount under $1 keeps its cents so it never reads $0.
  */

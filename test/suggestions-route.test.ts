@@ -3,10 +3,10 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
+import { archiveOn } from "./archive-category";
 import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import { present } from "./helpers/present";
@@ -247,6 +247,42 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);
+});
+
+// Characterisation (#963): the category options of the "something else" answer are the active categories only, in
+// sort order and then name, as the page read them before the Drizzle conversion.
+describe("GET /settings/suggestions: the category options (#963)", () => {
+	it("offers the active categories only, in sort order then name", async () => {
+		const ids = await oneOfEach();
+		await db.batch([
+			db.prepare(
+				"UPDATE categories SET archived = 1 WHERE id = (SELECT MIN(id) FROM categories WHERE archived = 0)",
+			),
+			db.prepare(
+				"UPDATE categories SET sort_order = -1 WHERE id = (SELECT MAX(id) FROM categories WHERE archived = 0)",
+			),
+		]);
+
+		const { res, html } = await get(
+			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`,
+		);
+
+		const offered = [...html.matchAll(/<option value="(\d+)"/g)].map((m) =>
+			Number(m[1]),
+		);
+
+		const expected = (
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+				)
+				.all<{ id: number }>()
+		).results.map((row) => row.id);
+
+		expect(res.status).toBe(200);
+		expect(expected.length).toBeGreaterThan(1);
+		expect(offered).toEqual(expected);
+	});
 });
 
 describe("GET /settings/suggestions", () => {
@@ -1535,7 +1571,7 @@ describe("a new category the family already has is added to, and the button says
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 		const { html } = await newCategoryPage(ids);
 		expect(textOf(html)).toContain("A new category: Pet Care");
 		expect(textOf(html)).toContain("Restore pet care");
@@ -1561,7 +1597,7 @@ describe("a new category the family already has is added to, and the button says
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 		await db
 			.prepare(
 				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('école', 'école', 'tag', 'cat-blue', 100)",
@@ -1587,7 +1623,7 @@ describe("Yes on an archived category restores it, with the ticked purchases (de
 			)?.id,
 		);
 
-		await setArchived(db, archived, true, "2026-07-15");
+		await archiveOn(db, archived, "2026-07-15");
 
 		const { res } = await post(
 			"/settings/suggestions",

@@ -1,6 +1,9 @@
 // Home's Your banks list during a new family's first week (P140 A, decision 133, spec §8.8): one row per connected bank,
 // with how far Tally has got with it. `readYourBanks` is one grouped query; `bankState` is pure over one row, so the
 // precedence is tested without a database. The view (src/views/your-banks.tsx) draws the words.
+import { and, asc, count, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { accounts, plaidItems, transactions } from "../db/schema";
 import { bankFlag } from "../stale-bank";
 
 /** One connected bank, as the list reads it: its sync marks, its stored transactions and whether it was linked in the hour. */
@@ -46,19 +49,30 @@ export function bankState(bank: YourBank, today: string): BankState {
 
 /** The connected banks, in link order, with their counts. D1 returns the freshness flag as 0 or 1. */
 export async function readYourBanks(db: D1Database): Promise<YourBank[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT p.id AS id, p.institution_name AS name, p.status AS status,
-				p.last_synced_at AS lastSyncedAt, p.history_complete_at AS historyCompleteAt,
-				p.created_at > datetime('now', '-1 hour') AS fresh, COUNT(t.id) AS count
-			FROM plaid_items p
-			LEFT JOIN accounts a ON a.plaid_item_id = p.id
-			LEFT JOIN transactions t ON t.account_id = a.id AND t.plaid_transaction_id IS NOT NULL
-			WHERE p.disconnected_at IS NULL
-			GROUP BY p.id
-			ORDER BY p.id`,
+	// The synced-row test sits in the JOIN, not the WHERE: a bank with no synced transactions must still be listed, at 0.
+	const results = await drizzle(db)
+		.select({
+			id: plaidItems.id,
+			name: plaidItems.institutionName,
+			status: plaidItems.status,
+			lastSyncedAt: plaidItems.lastSyncedAt,
+			historyCompleteAt: plaidItems.historyCompleteAt,
+			fresh: sql<number>`${plaidItems.createdAt} > datetime('now', '-1 hour')`,
+			count: count(transactions.id),
+		})
+		.from(plaidItems)
+		.leftJoin(accounts, eq(accounts.plaidItemId, plaidItems.id))
+		.leftJoin(
+			transactions,
+			and(
+				eq(transactions.accountId, accounts.id),
+				isNotNull(transactions.plaidTransactionId),
+			),
 		)
-		.all<Omit<YourBank, "fresh"> & { fresh: number }>();
+		.where(isNull(plaidItems.disconnectedAt))
+		.groupBy(plaidItems.id)
+		.orderBy(asc(plaidItems.id))
+		.all();
 
 	return results.map((row) => ({ ...row, fresh: row.fresh === 1 }));
 }

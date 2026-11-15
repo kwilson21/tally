@@ -10,6 +10,8 @@
 // The re-check is an extra: the Create has already filed its category when this runs, so no failure here fails the
 // Create (#842 review). Every error is logged by its name only, and the answer is null, as for "nothing to show".
 
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { buildClusters } from "../resort-clusters";
 import { startSorting } from "../sort-start";
 import type { RecheckRun } from "../views/recheck-line";
@@ -22,6 +24,7 @@ import {
 	STALE_MS,
 	startOrJoinRun,
 } from "./resort-run";
+import { categories, transactions } from "./schema";
 import { suggestionQueue } from "./suggestions-queue";
 
 /**
@@ -147,19 +150,22 @@ async function startFor(
 
 	if (!(await readAiSwitches(db)).categories) return null;
 
-	const filed = await db
-		.prepare(
-			"SELECT category_id AS categoryId, jev_category_id AS cameFrom FROM transactions WHERE id = ?",
-		)
-		.bind(filedId)
-		.first<{ categoryId: number | null; cameFrom: number | null }>();
+	const filed = await drizzle(db)
+		.select({
+			categoryId: transactions.categoryId,
+			cameFrom: transactions.jevCategoryId,
+		})
+		.from(transactions)
+		.where(eq(transactions.id, filedId))
+		.get();
 
 	if (!filed || filed.categoryId === null) return null;
 
-	const category = await db
-		.prepare("SELECT id, name FROM categories WHERE id = ?")
-		.bind(filed.categoryId)
-		.first<{ id: number; name: string }>();
+	const category = await drizzle(db)
+		.select({ id: categories.id, name: categories.name })
+		.from(categories)
+		.where(eq(categories.id, filed.categoryId))
+		.get();
 
 	if (!category) return null;
 

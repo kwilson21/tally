@@ -5,12 +5,15 @@
 // question uses) or whose Jev category is the one the filed row's guess was. Pure ordering, then one read. No Jev or
 // AI call: the run that uses these rows is the only one that asks, and it's a later step (#820).
 
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
 import { COUNTED_JOINS } from "./counted-month";
 import { merchantKeySql } from "./merchant-key";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { WAITING } from "./more-like-this";
+import { categories } from "./schema";
 import { jevCategoryHintSql, visibleNoteSql } from "./transactions";
 
 /** The most candidates one run may hold (decision 160). */
@@ -119,13 +122,15 @@ export async function resortCandidates(
 		queueIds?: readonly number[];
 	},
 ): Promise<ResortCandidate[]> {
-	const active = await db
-		.prepare("SELECT id FROM categories WHERE id = ? AND archived = 0")
-		.bind(newCategoryId)
-		.first<{ id: number }>();
+	const active = await drizzle(db)
+		.select({ id: categories.id })
+		.from(categories)
+		.where(and(eq(categories.id, newCategoryId), eq(categories.archived, 0)))
+		.get();
 
 	if (!active) return [];
 
+	// Stays raw: the merchantKeySql, jevSaysMixedSql, visibleNoteSql and COUNTED_JOINS fragments are shared (decision 179).
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.plaid_transaction_id AS plaidTransactionId, t.raw_name AS rawName,
@@ -194,6 +199,7 @@ export async function currentClusterRows(
 > {
 	if (ids.length === 0) return [];
 
+	// Stays raw: the same shared fragments, with json_each over bound ids (decision 179).
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.amount_cents AS amountCents, t.raw_name AS rawName, ${merchantKeySql("t")} AS merchantKey,

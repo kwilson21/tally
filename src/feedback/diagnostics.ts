@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema";
+import { readStoredWith } from "../db/stored-shape";
 import type { Json } from "../json";
 import { sanitizeFeedbackRoute } from "./privacy";
 
@@ -27,6 +29,21 @@ function isObjectValue(value: Json): value is { [key: string]: Json } {
 
 function isText(value: Json | undefined): value is string {
 	return typeof value === "string";
+}
+
+/** True for a parsed JSON object or array (not null), the values the normaliser reads; any other value has no context. */
+const isParsedObject = (value: unknown): value is Json =>
+	typeof value === "object" && value !== null;
+
+/**
+ * The client context text, normalised: null when it is not JSON, is null or another non-object, or is refused by
+ * normalizeFeedbackContext. The text is read as any JSON value, so a deep or Infinity-holding context reads as it always did;
+ * the normaliser's allowlist is the check (a recursive schema threw on deep text).
+ */
+export function normalizeContextText(text: string, from: string) {
+	const value = readStoredWith(Schema.Unknown, text);
+
+	return isParsedObject(value) ? normalizeFeedbackContext(value, from) : null;
 }
 
 /** Accept only client-side coarse fields. Raw user agents, dimensions and versions are ignored. */

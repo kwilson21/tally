@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vitest";
+import { settingsCategories } from "../src/db/categories";
 import {
 	addCategoryStatements,
 	archiveCategoryStatements,
@@ -23,6 +24,7 @@ import {
 	restoreCategory,
 } from "../src/rules/categories";
 import type { Refusal } from "../src/rules/terms";
+import { MAX_ACTIVE } from "../src/settings/category-form";
 
 // The categories area's guard (decision 190): a save lands only while the list the rule read is still the list, and a
 // miss raises an error the save loop recognises, so nothing is saved on a stale list and the rule is asked again.
@@ -312,6 +314,98 @@ describe("a save on a list that changed since the rule read it", () => {
 		// A save that sets no name has no such refusal: the same failure there is a defect, and the request fails.
 		await expect(run(saveCategories(statements()))).rejects.toThrow(/UNIQUE/);
 	});
+
+	it("refuses a rename to a name that differs only in capitals, from the database", async () => {
+		const { version } = await categoryFacts(db);
+
+		expect(
+			await ending(
+				renameCategoryStatements(db, {
+					id: 1,
+					name: "GAS",
+					nameKey: "gas",
+					expectedVersion: version,
+				}),
+			),
+		).toBe("NameTaken");
+		expect((await rows()).find((c) => c.id === 1)?.name).toBe("Groceries");
+	});
+});
+
+// Archive and restore through their rules, as the settings screen runs them (the live path).
+describe("archive and restore through the rules", () => {
+	const archive = (id: number, today: string) =>
+		decideCategory(archiveCategory, { id, today }, archiveCategoryStatements);
+
+	const restore = (id: number, today: string) =>
+		decideCategory(restoreCategory, { id, today }, restoreCategoryStatements);
+
+	const transactionsOf = async (id: number) =>
+		(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = ?")
+				.bind(id)
+				.first<{ n: number }>()
+		)?.n;
+
+	it("leaves the archive period open when a restore is refused because the list is full", async () => {
+		await archive(2, "2026-09-15");
+
+		// Fill the list to its limit, so the restore has no room.
+		const active = (await rows()).filter((c) => !c.archived).length;
+		await db.batch(
+			Array.from({ length: MAX_ACTIVE - active }, (_, i) =>
+				db
+					.prepare(
+						"INSERT INTO categories (name, icon, color) VALUES (?, 'tag', 'cat-blue')",
+					)
+					.bind(`Extra ${i + 1}`),
+			),
+		);
+
+		expect(await restore(2, "2026-10-01")).toEqual({ refused: "ListFull" });
+		expect((await rows()).find((c) => c.id === 2)?.archived).toBe(1);
+		expect(await periods(2)).toEqual([
+			{ archivedOn: "2026-09-15", restoredOn: null },
+		]);
+	});
+
+	it("opens a new period on a later archive and keeps the first one closed", async () => {
+		await archive(2, "2026-08-20");
+		await restore(2, "2026-10-05");
+		await archive(2, "2026-10-20");
+
+		expect(await periods(2)).toEqual([
+			{ archivedOn: "2026-08-20", restoredOn: "2026-10-05" },
+			{ archivedOn: "2026-10-20", restoredOn: null },
+		]);
+	});
+
+	it("leaves the category's transactions as they were, on archive and on restore", async () => {
+		const before = await transactionsOf(2);
+		expect(before).toBeGreaterThan(0);
+
+		await archive(2, "2026-09-15");
+		expect(await transactionsOf(2)).toBe(before);
+
+		await restore(2, "2026-10-01");
+		expect(await transactionsOf(2)).toBe(before);
+	});
+
+	it("keeps the first archive date when a later archive finds the category already archived", async () => {
+		await archive(5, "2026-09-30");
+
+		const later = await archive(5, "2026-10-01");
+
+		expect("decided" in later && Option.isNone(later.decided)).toBe(true);
+		expect((await rows()).find((c) => c.id === 5)).toMatchObject({
+			archived: 1,
+			archivedOn: "2026-09-30",
+		});
+		expect(await periods(5)).toEqual([
+			{ archivedOn: "2026-09-30", restoredOn: null },
+		]);
+	});
 });
 
 describe("decideCategory", () => {
@@ -405,5 +499,89 @@ describe("decideCategory", () => {
 		);
 		expect(n).toBe(3);
 		expect((await rows()).find((c) => c.id === 1)?.archived).toBe(0);
+	});
+});
+
+// Renames, moves and restores through their rules, with the budget and the places they must keep (the live path).
+describe("renames, moves and restores through the rules", () => {
+	const MONTH = "2026-09";
+
+	const rename = (id: number, name: string) =>
+		run(
+			decideCategoryIn(
+				renameCategory,
+				{ id, name },
+				renameCategoryStatements,
+				saveNamedCategory,
+			).pipe(
+				Effect.match({
+					onFailure: (refusal) => ({ refused: refusal._tag }),
+					onSuccess: (answer) => answer,
+				}),
+			),
+		);
+
+	it("renames a category and leaves its budget as it was", async () => {
+		const before = (await settingsCategories(db, MONTH)).active[0];
+
+		expect("refused" in (await rename(1, "Food at home"))).toBe(false);
+
+		const after = (await settingsCategories(db, MONTH)).active[0];
+		expect(after).toMatchObject({ id: 1, name: "Food at home" });
+		expect(after?.budgetCents).toBe(before?.budgetCents);
+		expect(after?.budgetCents).toBe(95000);
+	});
+
+	it("restores a category after another was moved, to a place no other holds", async () => {
+		await decideCategory(
+			archiveCategory,
+			{ id: 2, today: TODAY },
+			archiveCategoryStatements,
+		);
+		// Rent (id 7) moves up over Childcare (id 6).
+		await decideCategory(
+			moveCategory,
+			{ id: 7, direction: "up" },
+			moveCategoryStatements,
+		);
+		await decideCategory(
+			restoreCategory,
+			{ id: 2, today: TODAY },
+			restoreCategoryStatements,
+		);
+
+		const active = (await rows()).filter((c) => !c.archived);
+		expect(active.map((c) => c.name)).toEqual([
+			"Groceries",
+			"Gas",
+			"Kids",
+			"Household",
+			"Rent",
+			"Childcare",
+			"Eating Out",
+		]);
+		expect(active.map((c) => c.sortOrder)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+	});
+
+	it("does nothing when a move asks past either end, and saves no row", async () => {
+		const before = await rows();
+
+		const first = await decideCategory(
+			moveCategory,
+			{ id: 1, direction: "up" },
+			moveCategoryStatements,
+		);
+
+		const last = await decideCategory(
+			moveCategory,
+			{ id: 7, direction: "down" },
+			moveCategoryStatements,
+		);
+
+		for (const answer of [first, last]) {
+			expect("decided" in answer && Option.isNone(answer.decided)).toBe(true);
+		}
+
+		expect(await rows()).toEqual(before);
 	});
 });

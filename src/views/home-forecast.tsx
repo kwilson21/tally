@@ -1,5 +1,5 @@
 import { monthName } from "../dates";
-import { formatCents } from "../money";
+import { ceilToDollars, floorToDollars, formatCents } from "../money";
 import { Icon } from "./icons";
 
 /** A compact, screen-reader named forecast from the month's daily counted spending. */
@@ -23,8 +23,8 @@ export function HomeForecast({
 	const under = differenceCents >= 0;
 
 	const shownCents = under
-		? Math.floor(differenceCents / 100) * 100
-		: Math.ceil(-differenceCents / 100) * 100;
+		? floorToDollars(differenceCents)
+		: ceilToDollars(-differenceCents);
 
 	const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 	const left = 10;
