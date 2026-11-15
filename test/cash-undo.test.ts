@@ -5,6 +5,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import {
+	cashDeleteUndoExpiresInMs,
 	holdCashDelete,
 	restoreCashDelete,
 } from "../src/transactions/cash-undo";
@@ -1489,5 +1490,21 @@ describe("where focus goes after Undo (#397)", () => {
 		const restored = await undo(token, "/transactions?q=no-such-merchant");
 		expect(feedbackOf(restored.res).announce).toMatch(/ is back\.$/);
 		expect(restored.html).not.toContain("autofocus");
+	});
+});
+
+describe("cashDeleteUndoExpiresInMs", () => {
+	it("is the Undo window for a fresh hold, zero for an unknown token, and zero once the entry is restored", async () => {
+		const id = await cashEntry();
+		const token = cashToken(await holdCashDelete(env.DB, id, "Market"));
+
+		const fresh = await cashDeleteUndoExpiresInMs(env.DB, token);
+		expect(fresh).toBeGreaterThan(0);
+		expect(fresh).toBeLessThanOrEqual(10_000);
+
+		expect(await cashDeleteUndoExpiresInMs(env.DB, "no-such-token")).toBe(0);
+
+		await restoreCashDelete(env.DB, token);
+		expect(await cashDeleteUndoExpiresInMs(env.DB, token)).toBe(0);
 	});
 });
