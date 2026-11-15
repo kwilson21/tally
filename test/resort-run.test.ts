@@ -1446,6 +1446,25 @@ describe("undoRun", () => {
 		);
 	});
 
+	it("reads an unreadable record as expired, and the expiry sweep does not fail on its text (#963)", async () => {
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, ?)")
+			.bind(movedKey("broken-run"), "not json")
+			.run();
+
+		expect(await undoRun(db, { runId: "broken-run", now: T0 + 6000 })).toEqual({
+			restored: 0,
+			changedSince: 0,
+			expired: true,
+		});
+		expect(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(movedKey("broken-run"))
+				.first<{ value: string }>(),
+		).toEqual({ value: "not json" });
+	});
+
 	it("never calls Jev or Workers AI", async () => {
 		const { runId } = await finishedRunWithTwoMoved();
 		await undoRun(db, { runId, now: T0 + 6000 });
