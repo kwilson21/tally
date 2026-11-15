@@ -2261,16 +2261,12 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	const named =
 		form.transaction_id === undefined ? null : paymentIdOf(form.transaction_id);
 
-	const paid = await drizzle(c.env.DB)
+	const orm = drizzle(c.env.DB);
+
+	const paid = await orm
 		.select({ transactionId: billPayments.transactionId })
 		.from(billPayments)
-		.where(
-			and(
-				eq(billPayments.billId, id),
-				eq(billPayments.period, period),
-				eq(billPayments.status, "linked"),
-			),
-		)
+		.where(and(linkedPaymentsOf(id), eq(billPayments.period, period)))
 		.all();
 
 	const asked = decided(
@@ -2285,16 +2281,14 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 	// The token is random and saved on this Not this one, so its Undo works once (#340). It keeps the payment's id,
 	// so a Not this one that later moves to another payment is refused, as before.
 	const undoToken = `${linked.transaction_id}.${crypto.randomUUID()}`;
-	const orm = drizzle(c.env.DB);
 	await orm.batch([
 		orm
 			.delete(billPayments)
 			.where(
 				and(
-					eq(billPayments.billId, id),
+					linkedPaymentsOf(id),
 					eq(billPayments.period, period),
 					eq(billPayments.transactionId, linked.transaction_id),
-					eq(billPayments.status, "linked"),
 				),
 			),
 		orm.insert(billPayments).values({
