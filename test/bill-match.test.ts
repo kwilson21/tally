@@ -109,6 +109,18 @@ describe("bill payment matching", () => {
 		]);
 	});
 
+	it("links nothing and returns 0 when there are no transactions at all", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+		]);
+
+		expect(await matchBillPayments(env.DB, "2026-04-03")).toBe(0);
+		expect(
+			await env.DB.prepare("SELECT COUNT(*) AS n FROM bill_payments").first(),
+		).toEqual({ n: 0 });
+	});
+
 	it("fills old occurrences, respects dismissals, and is idempotent", async () => {
 		expect(await matchBillPayments(env.DB, "2026-04-03")).toBe(2);
 		expect(await matchBillPayments(env.DB, "2026-04-03")).toBe(0);

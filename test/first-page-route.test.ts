@@ -1106,6 +1106,29 @@ describe("bills: the exclusions and the one-tap keep", () => {
 		expect(textOf(html)).toContain("Nothing here to keep in one tap.");
 	});
 
+	it("leaves a charge waiting when an active bill has its name", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES ('Gym', 4500, 5, 'monthly', 'OTHER GYM', 1)",
+			)
+			.run();
+		await charge("GYM", 4500);
+		const { html } = await get("/setup");
+		expect(textOf(html)).toContain("1 more waits in Possible bills.");
+	});
+
+	it("offers a charge whose name only an archived bill has, since only active bills block a name", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES ('Gym', 4500, 5, 'monthly', 'OTHER GYM', 0)",
+			)
+			.run();
+		await charge("GYM", 4500);
+		const { html } = await get("/setup");
+		expect(textOf(html)).toContain("Keep this one as a bill?");
+		expect(textOf(html)).not.toContain("waits in Possible bills");
+	});
+
 	it("leaves out both charges whose names collide", async () => {
 		await db
 			.prepare(
