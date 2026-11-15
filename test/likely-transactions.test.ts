@@ -235,6 +235,24 @@ describe("likelyTransactions", () => {
 		expect(rows.map((row) => row.id)).toEqual([sameMerchant]);
 	});
 
+	it("offers a guess for the name only while its suggestion is pending, and not once it is dismissed", async () => {
+		const guess = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
+			suggestionId: suggested,
+		});
+
+		const before = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(before.map((row) => row.id)).toContain(guess);
+
+		await env.DB.prepare(
+			"UPDATE category_suggestions SET status = 'dismissed' WHERE id = ?",
+		)
+			.bind(suggested)
+			.run();
+
+		const after = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		expect(after.map((row) => row.id)).not.toContain(guess);
+	});
+
 	it("leaves out transactions that already have a category", async () => {
 		await tx(
 			`${THIS}-03`,
