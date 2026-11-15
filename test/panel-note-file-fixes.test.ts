@@ -199,6 +199,25 @@ describe("the edit panel's note when a file is posted in it (#1133 Codex finding
 		}
 	});
 
+	it("(d) with details shown, an empty note and a file in note_was is a clear: the redraw keeps the box empty", async () => {
+		for (const details of ["1", null] as const) {
+			const ids = await seed();
+
+			const redraw = await post(`/transactions/${ids.id}`, [
+				["category", "abc"],
+				["name_pick", "own"],
+				["merchant", "Corpus name"],
+				["back", LIST],
+				["details_visible", details],
+				["note", ""],
+				["note_was", file()],
+			]);
+
+			expect(redraw.res.status).toBe(422);
+			expect(drawnNote(redraw.html).note).toBe("");
+		}
+	});
+
 	it("(b) a Change the parts post with a file in note and a crafted note_not_posted=0 replays and keeps the saved note", async () => {
 		const ids = await seed();
 

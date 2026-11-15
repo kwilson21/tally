@@ -3175,12 +3175,13 @@ async function savePanel(
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
 	// is the household as it is now, used when a For person was removed during the save.
-	// The note was not posted as text (a file, or a Change the parts replay's marker), or its baseline was a file
+	// The note was not posted as text (a file, or a Change the parts replay's marker), or Details is off, its baseline was a file
 	// and no text came with it: the saved note stays, drawn in both boxes so a resubmit cannot clear it.
 	const noteLeftAlone =
 		form.get("note") instanceof File ||
 		form.get("note_not_posted") === "1" ||
-		(form.get("note_was") instanceof File &&
+		(form.get("details_visible") === "0" &&
+			form.get("note_was") instanceof File &&
 			!(form.get("note")?.toString() ?? "").trim());
 
 	const showErrors = async (

@@ -380,13 +380,17 @@ const twinOf = (
 	note: Value,
 	noteWas: Value,
 	redrawn: boolean,
+	details: Value,
 ): [Value, Value | typeof ABSENT] => {
 	if (note === FILE) return [SAVED, noteWas === FILE ? SAVED : noteWas];
 
 	// A refused category draws the panel again with a file in note_was (and no note text) as the saved note in both
 	// boxes (the note is left alone): the twin posts the saved note. With note text, the note is drawn as typed.
+	// With Details shown (or no say), an empty note is a clear, so it is drawn empty with the saved note as the baseline.
 	if (redrawn && noteWas === FILE)
-		return [note === "" || note === ABSENT ? SAVED : note, SAVED];
+		return details === "0"
+			? [note === "" || note === ABSENT ? SAVED : note, SAVED]
+			: [note, SAVED];
 
 	return [note, noteWas === FILE ? ABSENT : noteWas];
 };
@@ -425,6 +429,7 @@ function buildSteps(): Step[] {
 			note,
 			noteWas,
 			options.redrawn ?? false,
+			details,
 		);
 
 		const suffix = options.replay ? " (then the split save)" : "";
