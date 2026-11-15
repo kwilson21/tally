@@ -60,7 +60,8 @@ const Charge = Schema.Struct({
 	transaction_id: Sent,
 	date: Sent,
 	amount: Schema.Number,
-	name: Schema.String,
+	// Only that it is sent: a name of another type fails the sync only beside a merchant that is not blank, so it is not refused here.
+	name: Sent,
 	merchant_name: Schema.optional(Schema.NullOr(Schema.String)),
 });
 

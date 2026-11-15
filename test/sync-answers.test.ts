@@ -53,6 +53,11 @@ describe("readSyncPage", () => {
 				modified: [{ ...GOOD_TRANSACTION, account_id: undefined }],
 			},
 			{ ...GOOD_PAGE, removed: [{ transaction_id: 5 }] },
+			// A name of another type fails the sync only beside a merchant that is not blank (the code review of #1170).
+			{
+				...GOOD_PAGE,
+				added: [{ ...GOOD_TRANSACTION, merchant_name: null, name: 5 }],
+			},
 		])
 			expect(readSyncPage(sent(page))).toEqual(page);
 	});
