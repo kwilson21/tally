@@ -49,17 +49,13 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	if (verification === "unavailable") return c.body(null, 503);
 
 	if (verification === "invalid") return c.body(null, 401);
-	let parsed: unknown;
+	const read = readWebhookBody(rawBody);
 
-	try {
-		parsed = JSON.parse(rawBody);
-	} catch {
-		return c.body(null, 400);
-	}
+	if (read.kind === "not-json") return c.body(null, 400);
 
-	const body = readWebhookBody(parsed);
+	if (read.kind === "not-object") return c.body(null, 200);
 
-	if (body === null) return c.body(null, 200);
+	const { body } = read;
 
 	if (body.item_id === undefined) return c.body(null, 200);
 

@@ -72,9 +72,6 @@ const plaidEnv = {
 	PLAID_ENV: "sandbox",
 };
 
-const errorClass = (error: unknown) =>
-	error instanceof Error ? error.constructor.name : typeof error;
-
 /** The answer of one token case: the verifier's word, and how many times it asked Plaid for a key. */
 async function tokenAnswer(item: TokenCase): Promise<string> {
 	const pair = await keyPair();
@@ -124,6 +121,7 @@ async function tokenAnswer(item: TokenCase): Promise<string> {
 
 	const value =
 		item.whole !== undefined ? item.whole : `${signed}.${b64(sent)}`;
+
 	let calls = 0;
 
 	const fetchImpl = vi.fn(async () => {
@@ -142,7 +140,7 @@ async function tokenAnswer(item: TokenCase): Promise<string> {
 
 		return `${verdict} | key fetches ${calls}`;
 	} catch (error) {
-		return `throws ${errorClass(error)} | key fetches ${calls}`;
+		return `throws ${error instanceof Error ? error.name : "non-error"} | key fetches ${calls}`;
 	}
 }
 
@@ -194,7 +192,7 @@ async function keyAnswer(item: KeyCase): Promise<string> {
 
 		return `${verdict} | key fetches ${calls}`;
 	} catch (error) {
-		return `throws ${errorClass(error)} | key fetches ${calls}`;
+		return `throws ${error instanceof Error ? error.name : "non-error"} | key fetches ${calls}`;
 	}
 }
 
@@ -268,13 +266,17 @@ async function bodyAnswer(item: BodyCase): Promise<string> {
 		}),
 	);
 
-	const headers: Record<string, string> = {
-		"content-type": "application/json",
-	};
+	const verification =
+		item.token === "bad"
+			? "bad"
+			: item.token === "none"
+				? undefined
+				: `${signed}.${b64(signature)}`;
 
-	if (item.token === "bad") headers["Plaid-Verification"] = "bad";
-	else if (item.token !== "none")
-		headers["Plaid-Verification"] = `${signed}.${b64(signature)}`;
+	const headers = new Headers({ "content-type": "application/json" });
+
+	if (verification !== undefined)
+		headers.set("Plaid-Verification", verification);
 
 	const promises: Promise<unknown>[] = [];
 	const ctx = createExecutionContext();
@@ -302,7 +304,7 @@ async function bodyAnswer(item: BodyCase): Promise<string> {
 
 		return `${response.status} | ${JSON.stringify(row)} | ${calls.join(",")}`;
 	} catch (thrown) {
-		return `throws ${errorClass(thrown)} | ${calls.join(",")}`;
+		return `throws ${thrown instanceof Error ? thrown.name : "non-error"} | ${calls.join(",")}`;
 	} finally {
 		log.mockRestore();
 		error.mockRestore();

@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import type { Json as JsonValue } from "../json";
 
 // The webhook body, read at the edge (decision 206, #1149). Only the fields the webhook route uses are named. A field of the
 // wrong type reads as not sent, as the route's hand checks always did, so one odd field never refuses a whole webhook.
@@ -20,12 +21,27 @@ const WebhookBody = Schema.Struct({
 
 export type WebhookBody = typeof WebhookBody.Type;
 
-/** The body's fields as typed values, or null when the parsed JSON is not an object. */
-export function readWebhookBody(value: unknown): WebhookBody | null {
+/** What the body's text is: not JSON, JSON that is not an object, or the object's fields as typed values. */
+export type WebhookRead =
+	| { kind: "not-json" }
+	| { kind: "not-object" }
+	| { kind: "body"; body: WebhookBody };
+
+export function readWebhookBody(text: string): WebhookRead {
+	let parsed: JsonValue;
+
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return { kind: "not-json" };
+	}
+
 	// An array is not a webhook, though a Struct would read one as an object with no fields.
-	if (Array.isArray(value)) return null;
+	if (Array.isArray(parsed)) return { kind: "not-object" };
 
-	const read = Schema.decodeUnknownResult(WebhookBody)(value);
+	const read = Schema.decodeUnknownResult(WebhookBody)(parsed);
 
-	return Result.isSuccess(read) ? read.success : null;
+	return Result.isSuccess(read)
+		? { kind: "body", body: read.success }
+		: { kind: "not-object" };
 }
