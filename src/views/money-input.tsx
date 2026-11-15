@@ -106,8 +106,11 @@ export function MoneyInput({
 			.filter(Boolean)
 			.join(" ") || undefined;
 
-	const hasCents = cents !== null && cents % 100 !== 0;
-	const roundedCents = cents === null ? 0 : ceilToDollars(cents);
+	// An amount past the safe integer range (a typed 20-digit balance) has no round-up: it is refused on save, and
+	// ceilToDollars only takes safe integers.
+	const roundable = cents !== null && Number.isSafeInteger(cents);
+	const hasCents = roundable && cents % 100 !== 0;
+	const roundedCents = roundable ? ceilToDollars(cents) : 0;
 
 	return (
 		<div data-money class="flex flex-col gap-2">
