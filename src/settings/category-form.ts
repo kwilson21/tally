@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import { NONE_FIT } from "../ai/decide";
 import { readAtEdge, readText } from "../edge";
-import { textOf } from "../edge-kinds";
+import { ROW_ID_DIGITS, textOf } from "../edge-kinds";
 import { CATEGORY_NAME_MAX } from "../limits";
 
 /** New categories take the next color in turn, so neighbors differ. */
@@ -53,16 +53,18 @@ export const CategoryName = Schema.String.pipe(
 	}),
 );
 
-/** A category's id from the address: a whole number above zero. */
+/**
+ * A category's id from the address or a form: a whole number above zero, written with digits only (the digits RowId
+ * reads, edge-kinds.ts). A leading zero, a sign, a space, a decimal point, an exponent or hex is refused, as any other
+ * non-id is.
+ */
 export const CategoryId = Schema.String.pipe(
 	Schema.decodeTo(Schema.Number, {
-		decode: readText<number>((text) => {
-			const id = Number(text);
-
-			return Number.isInteger(id) && id > 0
-				? { value: id }
-				: { say: "That is not a category." };
-		}),
+		decode: readText<number>((text) =>
+			ROW_ID_DIGITS.test(text)
+				? { value: Number(text) }
+				: { say: "That is not a category." },
+		),
 		encode: SchemaGetter.transform((id: number) => String(id)),
 	}),
 );
