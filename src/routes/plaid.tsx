@@ -1,3 +1,5 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import { actor } from "../actor";
@@ -8,6 +10,7 @@ import {
 	strokeStatement,
 	takeBackQuestionStrokes,
 } from "../db/first-tally";
+import { plaidItems } from "../db/schema";
 import { readAtEdge } from "../edge";
 import { RowId } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
@@ -89,16 +92,18 @@ async function storedItem(db: D1Database, id: string) {
 
 	if (!read.ok) return null;
 
-	return db
-		.prepare(
-			"SELECT id, access_token_encrypted, institution_name FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
+	return drizzle(db)
+		.select({
+			id: plaidItems.id,
+			// Raw bytes: the schema's blob() is JSON-mode, which would try to parse the token, so the column is read as SQL.
+			access_token_encrypted: sql<ArrayBuffer>`${plaidItems.accessTokenEncrypted}`,
+			institution_name: plaidItems.institutionName,
+		})
+		.from(plaidItems)
+		.where(
+			and(eq(plaidItems.id, read.value), isNull(plaidItems.disconnectedAt)),
 		)
-		.bind(read.value)
-		.first<{
-			id: number;
-			access_token_encrypted: ArrayBuffer;
-			institution_name: string;
-		}>();
+		.get();
 }
 
 function logPlaidRequestId(cause: unknown) {

@@ -1,4 +1,7 @@
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import { plaidItems } from "../db/schema";
 import { type PlaidEnv, PlaidError } from "../plaid/client";
 import { connectionOf, markNeedsAttention } from "../plaid/item-store";
 import { loginStillBroken } from "../plaid/login-broken";
@@ -80,19 +83,20 @@ webhooks.post("/webhooks/plaid", async (c) => {
 
 	if (!isText(body.item_id)) return c.body(null, 200);
 
-	const item = await c.env.DB.prepare(
-		"SELECT id, access_token_encrypted, status, disconnected_at, attention_login, attention_held, connection_revision FROM plaid_items WHERE plaid_item_id = ?",
-	)
-		.bind(body.item_id)
-		.first<{
-			id: number;
-			access_token_encrypted: ArrayBuffer;
-			status: string;
-			disconnected_at: string | null;
-			attention_login: number;
-			attention_held: number;
-			connection_revision: number;
-		}>();
+	const item = await drizzle(c.env.DB)
+		.select({
+			id: plaidItems.id,
+			// Raw bytes: the schema's blob() is JSON-mode, which would try to parse the token, so the column is read as SQL.
+			access_token_encrypted: sql<ArrayBuffer>`${plaidItems.accessTokenEncrypted}`,
+			status: plaidItems.status,
+			disconnected_at: plaidItems.disconnectedAt,
+			attention_login: plaidItems.attentionLogin,
+			attention_held: plaidItems.attentionHeld,
+			connection_revision: plaidItems.connectionRevision,
+		})
+		.from(plaidItems)
+		.where(eq(plaidItems.plaidItemId, body.item_id))
+		.get();
 
 	if (!item) return c.body(null, 200);
 
