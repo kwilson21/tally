@@ -341,6 +341,30 @@ const DIAGNOSTICS: Array<[string, string | null]> = [
 		"Infinity nested in an array",
 		'[{"deviceCategory":"Mobile browser","errorName":"TypeError","width":1e999}]',
 	],
+	[
+		"deep arrays in a key, 1000 deep",
+		`{"deviceCategory":"Mobile browser","x":${"[".repeat(1000)}${"]".repeat(1000)}}`,
+	],
+	[
+		"deep arrays in a key, 2000 deep",
+		`{"deviceCategory":"Mobile browser","x":${"[".repeat(2000)}${"]".repeat(2000)}}`,
+	],
+	[
+		"deep arrays in a key, 5000 deep",
+		`{"deviceCategory":"Mobile browser","x":${"[".repeat(5000)}${"]".repeat(5000)}}`,
+	],
+	[
+		"deep arrays at the top level, 5000 deep",
+		`${"[".repeat(5000)}${"]".repeat(5000)}`,
+	],
+	[
+		"deep objects at the top level, 5000 deep",
+		`${'{"a":'.repeat(5000)}1${"}".repeat(5000)}`,
+	],
+	[
+		"deep objects in a key, 5000 deep",
+		`{"deviceCategory":"Mobile browser","x":${'{"a":'.repeat(5000)}1${"}".repeat(5000)}}`,
+	],
 ];
 
 const CONTEXTS: Array<[string, string | null]> = [
@@ -366,6 +390,30 @@ const CONTEXTS: Array<[string, string | null]> = [
 	[
 		"Infinity nested in an array",
 		'[{"deviceCategory":"Mobile browser","errorName":"TypeError","width":1e999}]',
+	],
+	[
+		"deep arrays in a key, 1000 deep",
+		`{"deviceCategory":"Mobile browser","x":${"[".repeat(1000)}${"]".repeat(1000)}}`,
+	],
+	[
+		"deep arrays in a key, 2000 deep",
+		`{"deviceCategory":"Mobile browser","x":${"[".repeat(2000)}${"]".repeat(2000)}}`,
+	],
+	[
+		"deep arrays in a key, 5000 deep",
+		`{"deviceCategory":"Mobile browser","x":${"[".repeat(5000)}${"]".repeat(5000)}}`,
+	],
+	[
+		"deep arrays at the top level, 5000 deep",
+		`${"[".repeat(5000)}${"]".repeat(5000)}`,
+	],
+	[
+		"deep objects at the top level, 5000 deep",
+		`${'{"a":'.repeat(5000)}1${"}".repeat(5000)}`,
+	],
+	[
+		"deep objects in a key, 5000 deep",
+		`{"deviceCategory":"Mobile browser","x":${'{"a":'.repeat(5000)}1${"}".repeat(5000)}}`,
 	],
 ];
 

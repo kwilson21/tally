@@ -295,5 +295,17 @@
 	"diagnostics | Infinity nested in an object": "[\"Route: ` /other `\\nDevice category: Mobile browser\\nRecent error category: TypeError\"]",
 	"diagnostics | Infinity nested in an array": "[\"Route: ` /other `\\nDevice category: Unknown\"]",
 	"context | Infinity nested in an object": "{\"route\":\"/other\",\"deviceCategory\":\"Mobile browser\",\"errorName\":\"TypeError\"}",
-	"context | Infinity nested in an array": "{\"route\":\"/other\",\"deviceCategory\":\"Unknown\",\"errorName\":null}"
+	"context | Infinity nested in an array": "{\"route\":\"/other\",\"deviceCategory\":\"Unknown\",\"errorName\":null}",
+	"diagnostics | deep arrays in a key, 1000 deep": "[\"Route: ` /other `\\nDevice category: Mobile browser\"]",
+	"diagnostics | deep arrays in a key, 2000 deep": "[\"Route: ` /other `\\nDevice category: Mobile browser\"]",
+	"diagnostics | deep arrays in a key, 5000 deep": "[\"Route: ` /other `\\nDevice category: Mobile browser\"]",
+	"diagnostics | deep arrays at the top level, 5000 deep": "[\"Route: ` /other `\\nDevice category: Unknown\"]",
+	"diagnostics | deep objects at the top level, 5000 deep": "[\"Route: ` /other `\\nDevice category: Unknown\"]",
+	"diagnostics | deep objects in a key, 5000 deep": "[\"Route: ` /other `\\nDevice category: Mobile browser\"]",
+	"context | deep arrays in a key, 1000 deep": "{\"route\":\"/other\",\"deviceCategory\":\"Mobile browser\",\"errorName\":null}",
+	"context | deep arrays in a key, 2000 deep": "{\"route\":\"/other\",\"deviceCategory\":\"Mobile browser\",\"errorName\":null}",
+	"context | deep arrays in a key, 5000 deep": "{\"route\":\"/other\",\"deviceCategory\":\"Mobile browser\",\"errorName\":null}",
+	"context | deep arrays at the top level, 5000 deep": "{\"route\":\"/other\",\"deviceCategory\":\"Unknown\",\"errorName\":null}",
+	"context | deep objects at the top level, 5000 deep": "{\"route\":\"/other\",\"deviceCategory\":\"Unknown\",\"errorName\":null}",
+	"context | deep objects in a key, 5000 deep": "{\"route\":\"/other\",\"deviceCategory\":\"Mobile browser\",\"errorName\":null}"
 }
