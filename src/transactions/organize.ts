@@ -434,24 +434,18 @@ export async function groupHasRule(
 	categoryId: number,
 ): Promise<boolean> {
 	const names = [...new Set(merchantKeys)];
-	let ruled = 0;
 
-	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
-		const chunk = names.slice(offset, offset + CHUNK_SIZE);
-		const marks = chunk.map(() => "?").join(", ");
+	if (names.length === 0) return true;
 
-		// Stays raw: one COUNT per chunk inside this loop, which decision 209 does not allow as a Drizzle query; restructuring it is the owner's call.
-		const row = await db
-			.prepare(
-				`SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (${marks})`,
-			)
-			.bind(categoryId, ...chunk)
-			.first<{ n: number }>();
+	// One statement: the key list has no cap, and json_each takes the whole list in one bind (decision 209).
+	const row = await db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (SELECT value FROM json_each(?))",
+		)
+		.bind(categoryId, JSON.stringify(names))
+		.first<{ n: number }>();
 
-		ruled += row?.n ?? 0;
-	}
-
-	return ruled === names.length;
+	return (row?.n ?? 0) === names.length;
 }
 
 /**
