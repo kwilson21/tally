@@ -768,9 +768,12 @@ function editedAfterRead(change: string, id: number): D1Database {
 				if (property === "bind")
 					return (...values: unknown[]) => afterRead(target.bind(...values));
 
-				if (property === "all")
+				// Drizzle reads a select with fields through raw(), and one without through all().
+				if (property === "all" || property === "raw") {
+					const read = Reflect.get(target, property) as () => Promise<unknown>;
+
 					return async () => {
-						const result = await target.all();
+						const result = await read.call(target);
 						await env.DB.prepare(
 							`UPDATE transactions SET ${change} WHERE id = ?`,
 						)
@@ -779,6 +782,7 @@ function editedAfterRead(change: string, id: number): D1Database {
 
 						return result;
 					};
+				}
 
 				const value: unknown = Object(target)[property];
 
@@ -792,9 +796,8 @@ function editedAfterRead(change: string, id: number): D1Database {
 				return (sql: string) => {
 					const statement = target.prepare(sql);
 
-					return sql.includes(
-						"FROM category_suggestions WHERE status = 'pending'",
-					)
+					// The pending read is Drizzle's select now (matchingSuggestionIds), so the hook matches its column.
+					return sql.includes(`"category_suggestions"."status" = ?`)
 						? afterRead(statement)
 						: statement;
 				};

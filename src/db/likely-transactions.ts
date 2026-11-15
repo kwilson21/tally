@@ -1,6 +1,8 @@
 // The transactions that might belong in a category a person has just made from one transaction (spec §8.4,
 // decision 76). Same-merchant rows come ticked; Tally's guesses come unticked, and only for a name Tally
 // suggested for them (decision 30). Nothing moves until a person adds them (addLikely).
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { STILL_UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { monthsBefore } from "../dates";
 import { nameKey, sameName } from "../settings/category-form";
@@ -10,6 +12,7 @@ import { readAiSwitches } from "./ai-switches";
 import { COUNTED_JOINS, paysBillSql, paysPlanSql } from "./counted-month";
 import { merchantColumnSql, sameMerchantSql } from "./merchant-key";
 import { ownNameSql } from "./own-name";
+import { categorySuggestions } from "./schema";
 import {
 	BILL_NAME_COLUMN,
 	COUNTS_IN_MONTH_COLUMN,
@@ -104,13 +107,13 @@ async function matchingSuggestionIds(
 	db: D1Database,
 	categoryName: string,
 ): Promise<number[]> {
-	const { results } = await db
-		.prepare(
-			"SELECT id, name FROM category_suggestions WHERE status = 'pending'",
-		)
-		.all<{ id: number; name: string }>();
+	const pending = await drizzle(db)
+		.select({ id: categorySuggestions.id, name: categorySuggestions.name })
+		.from(categorySuggestions)
+		.where(eq(categorySuggestions.status, "pending"))
+		.all();
 
-	return results
+	return pending
 		.filter((sug) => sameName(tidyName(sug.name), categoryName))
 		.map((sug) => sug.id);
 }
@@ -170,6 +173,7 @@ export async function likelyTransactions(
 	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
 
 	const { results } = await db
+		// Stays raw: LIKELY_SELECT, LIKELY_WHERE and LIKELY_LIMIT are shared strings (decision 179).
 		.prepare(
 			`${LIKELY_SELECT} ${LIKELY_WHERE}
 			ORDER BY sameMerchant DESC, t.date DESC, t.id DESC LIMIT ${LIKELY_LIMIT}`,
@@ -236,6 +240,7 @@ export async function likelyStill(
 	if (ids.length === 0) return [];
 
 	const { results } = await db
+		// Stays raw: COUNTED_JOINS, LIKELY_WHERE and PANEL_CATEGORY_SQL are shared, with json_each (decision 179).
 		.prepare(
 			`SELECT t.id AS id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
 				AND ${PANEL_CATEGORY_SQL} AND t.id IN (SELECT value FROM json_each(?8))`,
@@ -275,6 +280,7 @@ export async function addLikely(
 	// was archived or renamed since the read. ?1-?7 are the panel's parameters and category (panelBinds), ?8 the
 	// ticked ids as JSON and ?9 the actor. RETURNING reads the category's stored name back for the toast.
 	const { results } = await db
+		// Stays raw: the same shared fragments, with json_each over bound ids (decision 179).
 		.prepare(
 			`UPDATE transactions SET category_id = ?5, category_source = 'user', category_confidence = NULL,
 				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?9, updated_at = datetime('now')
