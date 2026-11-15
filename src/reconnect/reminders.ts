@@ -1,6 +1,9 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { daysBefore, householdTimeZone, todayIn } from "../dates";
 import { readBankSignInEmails } from "../db/reconnect";
+import { householdMembers, plaidItems } from "../db/schema";
 import { type DeliveryEnv, deliver, logDeliveries } from "./deliver";
 import { renderReconnectEmail } from "./email";
 
@@ -22,12 +25,23 @@ type ReminderEnv = DeliveryEnv & {
 	DEMO?: string;
 };
 
-export function reconnectRecipients(db: D1Database) {
-	return db
-		.prepare(
-			"SELECT email FROM household_members WHERE removed_at IS NULL AND last_seen_at >= datetime('now', '-90 days') ORDER BY email",
+/** The members a reminder can go to: not removed, and seen in the last 90 days. Shaped as D1's result, for its callers. */
+export async function reconnectRecipients(
+	db: D1Database,
+): Promise<{ results: { email: string }[] }> {
+	const results = await drizzle(db)
+		.select({ email: householdMembers.email })
+		.from(householdMembers)
+		.where(
+			and(
+				isNull(householdMembers.removedAt),
+				sql`${householdMembers.lastSeenAt} >= datetime('now', '-90 days')`,
+			),
 		)
-		.all<{ email: string }>();
+		.orderBy(householdMembers.email)
+		.all();
+
+	return { results };
 }
 
 export async function runReconnectReminders(
@@ -42,6 +56,7 @@ export async function runReconnectReminders(
 	const today = todayIn(zone, now);
 	const cutoff = daysBefore(today, REMINDER_DAYS);
 
+	// Stays raw SQL: a json_group_array over a correlated subquery with literal json_object keys reads plainer as SQL (decision 179).
 	const result =
 		await env.DB.prepare(`SELECT p.id, p.institution_name, p.last_synced_at, p.reconnect_emailed_at,
 		(SELECT json_group_array(json_object('name', a.name, 'mask', a.mask)) FROM accounts a WHERE a.plaid_item_id = p.id) AS accounts
@@ -102,10 +117,18 @@ export async function runReconnectReminders(
 		const claimedAt = now.toISOString().replace("T", " ").slice(0, 19);
 
 		// A partial delivery keeps the claim; a failed recipient waits for the next three-day pass.
-		const claim = await env.DB.prepare(
-			"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND reconnect_emailed_at IS ? AND status = 'needs_attention' AND disconnected_at IS NULL",
-		)
-			.bind(claimedAt, bank.id, bank.reconnect_emailed_at)
+		const claim = await drizzle(env.DB)
+			.update(plaidItems)
+			.set({ reconnectEmailedAt: claimedAt })
+			.where(
+				and(
+					eq(plaidItems.id, bank.id),
+					// IS, not =: a bank never emailed (null) must match too.
+					sql`${plaidItems.reconnectEmailedAt} IS ${bank.reconnect_emailed_at}`,
+					eq(plaidItems.status, "needs_attention"),
+					isNull(plaidItems.disconnectedAt),
+				),
+			)
 			.run();
 
 		if (!claim.meta.changes) continue;
@@ -149,10 +172,17 @@ export async function runReconnectReminders(
 		}
 
 		if (!sent)
-			await env.DB.prepare(
-				"UPDATE plaid_items SET reconnect_emailed_at = ? WHERE id = ? AND reconnect_emailed_at = ? AND status = 'needs_attention' AND disconnected_at IS NULL",
-			)
-				.bind(bank.reconnect_emailed_at, bank.id, claimedAt)
+			await drizzle(env.DB)
+				.update(plaidItems)
+				.set({ reconnectEmailedAt: bank.reconnect_emailed_at })
+				.where(
+					and(
+						eq(plaidItems.id, bank.id),
+						eq(plaidItems.reconnectEmailedAt, claimedAt),
+						eq(plaidItems.status, "needs_attention"),
+						isNull(plaidItems.disconnectedAt),
+					),
+				)
 				.run();
 	}
 

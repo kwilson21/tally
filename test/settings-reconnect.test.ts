@@ -93,7 +93,10 @@ describe("reconnect reminder schedule", () => {
 					return (sql: string) => {
 						const statement = target.prepare(sql);
 
-						if (sql.startsWith("UPDATE plaid_items SET reconnect_emailed_at"))
+						// Drizzle writes the claim and the release as `update "plaid_items" set "reconnect_emailed_at" = ? ...` (the builder's own SQL text).
+						if (
+							sql.startsWith('update "plaid_items" set "reconnect_emailed_at"')
+						)
 							return new Proxy(statement, {
 								get(inner, key) {
 									if (key === "bind")
