@@ -126,7 +126,8 @@ export const KEPT_NAME_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, merchant_r
 /**
  * KEPT_NAME_LOG_SQL for many merchants in one statement, so a save of hundreds of merchants stays under D1's
  * statement limit. It writes the same rows: parameters are the day, a JSON array of the merchants' keys, and the
- * name. A caller narrows it the same way as KEPT_NAME_LOG_SQL (saveOrganizeGroup adds its upsert's EXISTS guard).
+ * name. A caller narrows it the same way as KEPT_NAME_LOG_SQL (groupStatements, reached through decideFileGroup, adds
+ * its upsert's EXISTS guard).
  */
 export const KEPT_NAMES_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, merchant_raw_name, household_day)
 	SELECT 'name', m.raw_name, ? FROM merchants m

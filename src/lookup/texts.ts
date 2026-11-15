@@ -219,6 +219,90 @@ export async function saveLookupTexts(
 	};
 }
 
+/**
+ * The rows sync writes, one per distinct merchant key, from the rows it is writing: the key's bank texts and Plaid categories.
+ * The row facts (flags, a Maybe, a transfer, an exclusion) are false here: the triggers on transactions (migration 0077) set the
+ * mark as those rows are written, and the fill sets it exactly.
+ */
+export function syncedTextRows(
+	rows: {
+		merchantKey: string;
+		rawName: string;
+		plaidCategory: string | null;
+	}[],
+): LookupTextRow[] {
+	const byKey = new Map<
+		string,
+		{ rawTexts: Set<string>; categories: Set<string | null> }
+	>();
+
+	for (const row of rows) {
+		const facts = byKey.get(row.merchantKey) ?? {
+			rawTexts: new Set<string>(),
+			categories: new Set<string | null>(),
+		};
+
+		facts.rawTexts.add(row.rawName);
+		facts.categories.add(row.plaidCategory);
+		byKey.set(row.merchantKey, facts);
+	}
+
+	return [...byKey].map(([merchantKey, facts]) =>
+		lookupTextRow(merchantKey, {
+			rawTexts: [...facts.rawTexts],
+			categories: [...facts.categories],
+			flagged: false,
+			maybe: false,
+			transfer: false,
+			excluded: false,
+		}),
+	);
+}
+
+/**
+ * The statements that write each key's row before sync's transaction statements, KEYS_PER_STATEMENT keys to a chunk. A key with
+ * no row yet starts private (the first statement), until the fill sets its exact mark; an existing key's mark only rises (the
+ * second, MAX). So the triggers that fire in the same batch find the key's row.
+ */
+export function syncedTextsStatements(
+	db: D1Database,
+	rows: LookupTextRow[],
+): D1PreparedStatement[] {
+	const statements: D1PreparedStatement[] = [];
+
+	for (let start = 0; start < rows.length; start += KEYS_PER_STATEMENT) {
+		const json = JSON.stringify(
+			rows.slice(start, start + KEYS_PER_STATEMENT).map((row) => ({
+				k: row.merchantKey,
+				t: row.lookupText,
+				p: row.private,
+			})),
+		);
+
+		statements.push(
+			db
+				.prepare(
+					`INSERT OR IGNORE INTO merchant_lookup_texts (merchant_key, lookup_text, private)
+					SELECT json_extract(j.value, '$.k'), json_extract(j.value, '$.t'), 1 FROM json_each(?) AS j WHERE true`,
+				)
+				.bind(json),
+		);
+		// stays raw: a json_each upsert batched with sync's raw statements (decision 179)
+		statements.push(
+			db
+				.prepare(
+					`INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private)
+					SELECT json_extract(j.value, '$.k'), json_extract(j.value, '$.t'), json_extract(j.value, '$.p') FROM json_each(?) AS j WHERE true
+					ON CONFLICT(merchant_key) DO UPDATE SET lookup_text = excluded.lookup_text,
+						private = MAX(merchant_lookup_texts.private, excluded.private)`,
+				)
+				.bind(json),
+		);
+	}
+
+	return statements;
+}
+
 /** The whole fill: one read, then the fenced save. */
 export async function fillLookupTexts(
 	db: D1Database,

@@ -11,6 +11,9 @@
 // Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a deploy that changes the words cannot
 // change the key. After that the address stays reached and nothing more is sent (decisions 146, 147 and 224). It is drawn like
 // the bank sign-in email (src/reconnect/email.tsx).
+
+import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Schema from "effect/Schema";
 import {
 	anyQuestionAnswered,
@@ -18,6 +21,7 @@ import {
 	QUESTION_STROKES,
 	readFirstTally,
 } from "../db/first-tally";
+import { accounts, plaidItems, transactions } from "../db/schema";
 import { READY_LEASE_MINUTES } from "../machines/ready-claim";
 import {
 	type DeliveryEnv,
@@ -50,12 +54,6 @@ const QUESTIONS_UNDRAWN_SQL = QUESTION_STROKES.map(
 	(stroke) =>
 		`json_type(household_settings.value, '$.strokes.${stroke}') IS NULL`,
 ).join(" AND ");
-
-// The transactions the connected banks sent: Plaid's own. A split part or a manual entry has no Plaid id, so it is left out.
-const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
-	JOIN accounts a ON a.id = t.account_id
-	JOIN plaid_items p ON p.id = a.plaid_item_id
-	WHERE p.disconnected_at IS NULL AND t.plaid_transaction_id IS NOT NULL`;
 
 /**
  * The send's test on a member, in SQL (reconnectRecipients' rule, plus the away test): ?n is the address. The address must be a
@@ -119,6 +117,7 @@ export const CLAIM_SQL = claimSql(
 // when none is kept: a definite failure keeps no try, so it removes any kept before (json_patch takes a null away), and the next
 // try uses fresh words. The address's old entry is removed first, so the new one replaces it whole: a patch alone would merge it
 // into an entry the merged code kept as its read line ({"line", "at"}), and leave that line behind.
+// Stays raw: json_* on the record (household_settings.value), which the builder does not express (decision 179).
 const RELEASE_SQL = `UPDATE household_settings
 	SET value = json_remove(json_set(household_settings.value,
 		'$.readyEmailedTo', json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)),
@@ -128,6 +127,7 @@ const RELEASE_SQL = `UPDATE household_settings
 
 // Removes one address's kept try and its claim's stamp, and leaves the address on the list: the kept try was delivered, or is too
 // old to try again. ?1 is the address's hash.
+// Stays raw: json_remove and json_patch on the record, shared by four statements in this file (decision 179).
 const DROP_HELD_SQL = `UPDATE household_settings
 	SET value = json_remove(json_set(household_settings.value,
 		'$.heldReadyEmail', json(json_patch(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), json_object(?1, NULL)))),
@@ -139,6 +139,7 @@ const DROP_HELD_SQL = `UPDATE household_settings
 // address's hash and ?2 the address. It keeps the claim's own send conditions (questions undrawn, a member still active, not on a
 // first-week page within the away window), so a cut-off email is never sent to someone the claim would now refuse. A stamp that is
 // missing reads NULL, so a claim with no stamp is never recovered.
+// Stays raw: json_* on the record (household_settings.value), which the builder does not express (decision 179).
 export const RECOVER_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.readyClaimedAt."' || ?1 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL}
@@ -148,11 +149,13 @@ export const RECOVER_SQL = `UPDATE household_settings
 		AND datetime(json_extract(household_settings.value, '$.readyClaimedAt."' || ?1 || '"')) <= datetime('now', '-${READY_LEASE_MINUTES * 60} seconds')`;
 
 // The kept tries (heldReadyEmail), read whole: the minute run picks one address's out of them.
+// Stays raw: json_extract on the record (decision 179).
 const HELD_SQL = `SELECT json_extract(value, '$.heldReadyEmail') AS held FROM household_settings WHERE key = 'first_tally'`;
 
 // Turns one legacy kept try into the whole email its line builds, with its own time. ?1 is the address's hash and ?2 the kept
 // try as JSON ({"mail", "at"}). Only an entry that is still a line when the write lands changes, so a release that replaced
 // it meanwhile is never overwritten, and the other paths of the record are left as they are.
+// Stays raw: json_* on the record (household_settings.value), which the builder does not express (decision 179).
 const UPGRADE_LEGACY_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.heldReadyEmail."' || ?1 || '"', json(?2))
 	WHERE key = 'first_tally'
@@ -410,8 +413,21 @@ export async function openRead(
 	)
 		return null;
 
-	const total =
-		(await db.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
+	// The transactions the connected banks sent: Plaid's own. A split part or a manual entry has no Plaid id, so it is left out.
+	const counted = await drizzle(db)
+		.select({ total: count() })
+		.from(transactions)
+		.innerJoin(accounts, eq(accounts.id, transactions.accountId))
+		.innerJoin(plaidItems, eq(plaidItems.id, accounts.plaidItemId))
+		.where(
+			and(
+				isNull(plaidItems.disconnectedAt),
+				isNotNull(transactions.plaidTransactionId),
+			),
+		)
+		.get();
+
+	const total = counted?.total ?? 0;
 
 	return readLine(banks, total);
 }

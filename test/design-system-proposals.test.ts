@@ -4113,7 +4113,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 		for (const [name, id] of demo) {
 			expect(resetSource, name).toMatch(
-				new RegExp(`\\[\\s*${id},\\s*"${name}"`),
+				new RegExp(`\\{\\s*id: ${id},\\s*name: "${name}"`),
 			);
 		}
 

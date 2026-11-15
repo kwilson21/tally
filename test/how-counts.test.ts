@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	bankDatedCount,
 	excludedBreakdown,
 	monthCounts,
 	needsCategoryCount,
@@ -267,5 +268,22 @@ describe("the held count (Home) counts a credit flagged as a transfer that the p
 		// Included on purpose, so it stays held until a person reviews it (see #870 and the design issue).
 		await insertCredit("SYNTH TRANSFER CREDIT", 1);
 		expect((await monthCounts(db, MONTH)).heldForReview).toBe(before + 2);
+	});
+});
+
+describe("bankDatedCount", () => {
+	it("counts the bank's lines dated in the month, and not a later month's", async () => {
+		await db
+			.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9041,id,'2026-10-02',1000,'BANK DATED LATER' FROM accounts LIMIT 1",
+			)
+			.run();
+
+		const dated = await db
+			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE date LIKE ?")
+			.bind(`${MONTH}%`)
+			.first<{ n: number }>();
+
+		expect(await bankDatedCount(db, MONTH)).toBe(dated?.n);
 	});
 });

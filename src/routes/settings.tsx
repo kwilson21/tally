@@ -1,4 +1,4 @@
-import { asc, count, gt } from "drizzle-orm";
+import { count, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -34,6 +34,7 @@ import {
 } from "../db/category-suggestions";
 import { type Database, runWith } from "../db/database";
 import { isUniqueViolation } from "../db/errors";
+import { householdPeopleList } from "../db/household-people";
 import {
 	displayName,
 	FORGET_UNDO_MIN_MS,
@@ -834,11 +835,7 @@ async function renderHousehold(c: Context<App>, view: View = {}) {
 
 /** People (decision 81): the household's names, Everyone first. */
 async function renderPeople(c: Context<App>, view: View = {}) {
-	const people = await drizzle(c.env.DB)
-		.select({ id: householdPeople.id, name: householdPeople.name })
-		.from(householdPeople)
-		.orderBy(asc(householdPeople.id))
-		.all();
+	const people = await householdPeopleList(c.env.DB);
 
 	return settingsPage(
 		c,

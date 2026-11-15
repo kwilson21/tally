@@ -2,7 +2,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { BankSync } from "../stale-bank";
-import { accounts, plaidItems } from "./schema";
+import { accounts, plaidItems, transactions } from "./schema";
 
 export type Account = {
 	id: number;
@@ -278,24 +278,32 @@ export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
  * linked but not yet synced has no accounts and still appears, so it can be fixed if it needs attention.
  */
 export async function accountsByBank(db: D1Database): Promise<Bank[]> {
-	const { results } = await banksStatement(db).all<BankRow>();
-
-	return banksFromRows(results);
+	return banksFromRows(await banksStatement(db));
 }
 
 /**
- * The query behind `accountsByBank`, unrun, so a page can read it in the same `db.batch` as other
- * reads that must agree with it (Accounts' headline and its net-worth line); batch results go to
- * `banksFromRows`.
+ * The query behind `accountsByBank`, unrun, so a page can read it in the same batch as other reads that must agree
+ * with it (Accounts' headline and its net-worth line); batch results go to `banksFromRows`. Its rows keep the
+ * snake_case keys BankRow names. `bank_id` is aliased because `a.id` has the same column name.
  */
-// Stays raw SQL: returned unrun for other pages' db.batch; converts with that batch (#963 PR 12).
-export function banksStatement(db: D1Database): D1PreparedStatement {
-	return db.prepare(
-		`SELECT p.id AS bank_id, p.institution_name AS bank_name, p.status, p.last_synced_at, p.disconnected_at,
-			a.id, a.name, a.mask, a.type, a.balance_cents, a.is_liability
-		FROM plaid_items p LEFT JOIN accounts a ON a.plaid_item_id = p.id
-		ORDER BY p.id, a.id`,
-	);
+export function banksStatement(db: D1Database) {
+	return drizzle(db)
+		.select({
+			bank_id: sql<number>`${plaidItems.id}`.as("bank_id"),
+			bank_name: plaidItems.institutionName,
+			status: plaidItems.status,
+			last_synced_at: plaidItems.lastSyncedAt,
+			disconnected_at: plaidItems.disconnectedAt,
+			id: accounts.id,
+			name: accounts.name,
+			mask: accounts.mask,
+			type: accounts.type,
+			balance_cents: accounts.balanceCents,
+			is_liability: accounts.isLiability,
+		})
+		.from(plaidItems)
+		.leftJoin(accounts, eq(accounts.plaidItemId, plaidItems.id))
+		.orderBy(asc(plaidItems.id), asc(accounts.id));
 }
 
 /** The banks `banksStatement` read, with their accounts. */
@@ -370,14 +378,29 @@ export type AppleCardRow = {
 	through: string | null;
 };
 
-/** The household's Apple Card account, unrun, so a page can read it in the same `db.batch` as its other reads. */
-// Stays raw SQL: returned unrun for other pages' db.batch; converts with that batch (#963 PR 12).
-export function appleCardStatement(db: D1Database): D1PreparedStatement {
-	return db.prepare(
-		`SELECT id, balance_cents, balance_on, uploaded_on, removed_at, counted_from,
-			(SELECT MAX(date) FROM transactions WHERE account_id = a.id) AS through
-		FROM accounts a WHERE subtype = 'apple_card'`,
-	);
+/**
+ * The household's Apple Card account, unrun, so a page can read it in the same batch as its other reads. Its rows keep
+ * the snake_case keys AppleCardRow names; `through` is the latest date of the card's transactions.
+ */
+export function appleCardStatement(db: D1Database) {
+	return drizzle(db)
+		.select({
+			id: accounts.id,
+			balance_cents: accounts.balanceCents,
+			balance_on: accounts.balanceOn,
+			uploaded_on: accounts.uploadedOn,
+			removed_at: accounts.removedAt,
+			counted_from: accounts.countedFrom,
+			// A single-table select writes its columns unqualified, so `id` alone would name the subquery's own
+			// transactions.id; the card's id is qualified by hand.
+			through: sql<
+				string | null
+			>`(SELECT MAX(${transactions.date}) FROM ${transactions} WHERE ${transactions.accountId} = ${sql.identifier("accounts")}.${sql.identifier("id")})`.as(
+				"through",
+			),
+		})
+		.from(accounts)
+		.where(eq(accounts.subtype, "apple_card"));
 }
 
 /** The card `appleCardStatement` read, or null when there is none. */
@@ -401,7 +424,7 @@ export function appleCardFromRow(
 export async function appleCardAccount(
 	db: D1Database,
 ): Promise<AppleCardAccount | null> {
-	return appleCardFromRow(await appleCardStatement(db).first<AppleCardRow>());
+	return appleCardFromRow((await appleCardStatement(db))[0]);
 }
 
 /**

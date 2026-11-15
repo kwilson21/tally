@@ -399,6 +399,33 @@ describe("saveEdit", () => {
 		expect(await row(id)).toMatchObject({ category_id: null, note: null });
 	});
 
+	it("a For person removed since the panel loaded is refused as personMissing, and nothing is saved", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+
+		const forPerson = () =>
+			db
+				.prepare("SELECT for_person_id FROM transactions WHERE id = ?")
+				.bind(id)
+				.first<{ for_person_id: number | null }>();
+
+		const before = await forPerson();
+
+		const result = await saveEdit(
+			db,
+			id,
+			edit({
+				note: "should not stick",
+				forPersonId: 999,
+				forPersonIdWas: null,
+			}),
+			"demo",
+		);
+
+		expect(result).toEqual({ saved: false, personMissing: true });
+		expect(await forPerson()).toEqual(before);
+		expect(await row(id)).toMatchObject({ note: null });
+	});
+
 	it("keeps a Kind and For a person cleared, when Jev answers later (#304)", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 

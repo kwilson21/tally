@@ -1,5 +1,8 @@
 // Reads `balance_history` (spec §5) for the net-worth chart on Accounts.
 
+import { and, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import {
 	type AccountAdded,
 	type AccountSource,
@@ -11,22 +14,14 @@ import {
 } from "../net-worth";
 import {
 	type AppleCardAccount,
-	type AppleCardRow,
 	appleCardFromRow,
 	appleCardStatement,
 	type Bank,
-	type BankRow,
 	banksFromRows,
 	banksStatement,
 	countedAccounts,
 } from "./accounts";
-
-type HistoryRow = {
-	account_id: number;
-	date: string;
-	balance_cents: number;
-	is_liability: number;
-};
+import { accounts, balanceHistory, plaidItems } from "./schema";
 
 /**
  * The chart's balance rows: those of the six months, through today, and each account's last one from
@@ -36,21 +31,41 @@ type HistoryRow = {
  */
 function balanceRowsStatement(db: D1Database, today: string) {
 	const from = chartStart(today);
+	const h = alias(balanceHistory, "h");
+	// The last balance before the six months, read from a second alias so its columns don't shadow the outer row's.
+	const prior = alias(balanceHistory, "prior");
 
-	return db
-		.prepare(
-			`SELECT h.account_id, h.date, h.balance_cents, a.is_liability
-			FROM balance_history h
-			JOIN accounts a ON a.id = h.account_id
-			LEFT JOIN plaid_items p ON p.id = a.plaid_item_id
-			WHERE ((p.id IS NOT NULL AND p.disconnected_at IS NULL)
-					OR (a.subtype = 'apple_card' AND a.removed_at IS NULL AND a.balance_on IS NOT NULL AND h.date >= a.counted_from))
-				AND h.date <= ?
-				AND (h.date >= ? OR h.date = (
-					SELECT MAX(date) FROM balance_history WHERE account_id = h.account_id AND date < ?
-				))`,
-		)
-		.bind(today, from, from);
+	return drizzle(db)
+		.select({
+			account_id: h.accountId,
+			date: h.date,
+			balance_cents: h.balanceCents,
+			is_liability: accounts.isLiability,
+		})
+		.from(h)
+		.innerJoin(accounts, eq(accounts.id, h.accountId))
+		.leftJoin(plaidItems, eq(plaidItems.id, accounts.plaidItemId))
+		.where(
+			and(
+				or(
+					and(isNotNull(plaidItems.id), isNull(plaidItems.disconnectedAt)),
+					and(
+						eq(accounts.subtype, "apple_card"),
+						isNull(accounts.removedAt),
+						isNotNull(accounts.balanceOn),
+						gte(h.date, accounts.countedFrom),
+					),
+				),
+				lte(h.date, today),
+				or(
+					gte(h.date, from),
+					eq(
+						h.date,
+						sql`(SELECT MAX(${prior.date}) FROM ${balanceHistory} ${sql.identifier("prior")} WHERE ${prior.accountId} = ${h.accountId} AND ${prior.date} < ${from})`,
+					),
+				),
+			),
+		);
 }
 
 /**
@@ -103,28 +118,22 @@ export async function accountsWithHistory(
 	added: AccountAdded[];
 	appleCard: AppleCardAccount | null;
 }> {
-	const [bankResult, balanceResult, cardResult] = await db.batch([
+	const [bankRows, historyRows, cardRows] = await drizzle(db).batch([
 		banksStatement(db),
 		balanceRowsStatement(db, today),
 		appleCardStatement(db),
 	]);
 
-	// SAFETY: each statement of the batch above returns the rows its own SELECT names, so these are the typed row shapes.
-	const banks = banksFromRows((bankResult?.results ?? []) as BankRow[]);
+	const banks = banksFromRows(bankRows);
 
-	// SAFETY: the Apple Card statement of the batch above returns AppleCardRow rows; [0] is its one row or undefined.
-	const appleCard = appleCardFromRow(
-		((cardResult?.results ?? []) as AppleCardRow[])[0],
-	);
+	// The Apple Card statement returns at most one row; [0] is that row or undefined.
+	const appleCard = appleCardFromRow(cardRows[0]);
 
 	const accountIds = countedAccounts(banks, appleCard)
 		.filter((account) => account.connected !== false)
 		.map((account) => account.id);
 
-	// SAFETY: the balance statement of the batch above returns HistoryRow rows.
-	const rows: BalanceRow[] = (
-		(balanceResult?.results ?? []) as HistoryRow[]
-	).map((r) => ({
+	const rows: BalanceRow[] = historyRows.map((r) => ({
 		accountId: r.account_id,
 		date: r.date,
 		balanceCents: r.balance_cents,

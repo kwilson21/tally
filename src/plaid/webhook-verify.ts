@@ -1,10 +1,34 @@
-import { type PlaidEnv, plaidPost } from "./client";
+import * as Schema from "effect/Schema";
+import { readStoredWith } from "../db/stored-shape";
+import { askPlaid, orThrow, type PlaidEnv } from "./client";
 
-type Header = { alg?: unknown; kid?: unknown; crit?: unknown };
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+const LOWERCASE_SHA256 = /^[0-9a-f]{64}$/;
 
-type Claims = { iat?: unknown; request_body_sha256?: unknown };
+/** The token's first part (decision 206, #1149): ES256 with a key id, and no `crit`, which would name rules this check does not know. */
+const Header = Schema.Struct({
+	alg: Schema.Literal("ES256"),
+	kid: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+	crit: Schema.optionalKey(Schema.Never),
+});
+
+/** The token's second part: when it was issued, and the SHA-256 of the request body it signs, in lower-case hex. */
+const Claims = Schema.Struct({
+	iat: Schema.Finite,
+	request_body_sha256: Schema.String.check(Schema.isPattern(LOWERCASE_SHA256)),
+});
+
+/**
+ * Plaid's answer to the key fetch. The key is kept as sent: its expiry is read below, and Web Crypto's importKey is the
+ * check of the key's own fields.
+ */
+const KeyAnswer = Schema.Struct({ key: Schema.optional(Schema.Unknown) });
 
 type VerificationKey = JsonWebKey & { expired_at?: unknown };
+
+/** True for a key Plaid sent as an object, the only kind that can carry an expiry. */
+const isKeyObject = (value: unknown): value is VerificationKey =>
+	typeof value === "object" && value !== null;
 
 type CachedKey = { key: CryptoKey; fetchedAt: number };
 
@@ -16,8 +40,6 @@ type KeyLookup =
 
 export type PlaidWebhookVerification = "valid" | "invalid" | "unavailable";
 
-const BASE64URL = /^[A-Za-z0-9_-]+$/;
-const LOWERCASE_SHA256 = /^[0-9a-f]{64}$/;
 const KEY_TTL_MS = 60 * 60 * 1000;
 const FAILED_KEY_TTL_MS = 60 * 1000;
 const MAX_CACHE_ENTRIES = 32;
@@ -56,13 +78,12 @@ function decode(part: string): Uint8Array {
 	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-const isText = (value: unknown): value is string => typeof value === "string";
-
-const isNumber = (value: unknown): value is number => typeof value === "number";
-
-function json<T>(part: string): T {
-	// SAFETY: T is Header or Claims, whose fields are all unknown, so any parsed object fits T; each field is checked before use.
-	return JSON.parse(new TextDecoder().decode(decode(part))) as T;
+/** One base64url part of the token as the Schema's type, or null when its text is not JSON or not shaped like it. */
+function readPart<S extends Schema.Constraint>(
+	schema: S,
+	part: string,
+): S["Type"] | null {
+	return readStoredWith(schema, new TextDecoder().decode(decode(part)));
 }
 
 async function verificationKey(
@@ -90,16 +111,22 @@ async function verificationKey(
 
 	const lookup: Promise<KeyLookup> = (async () => {
 		try {
-			const response = await plaidPost<{ key?: VerificationKey }>(
-				env,
-				"/webhook_verification_key/get",
-				{ key_id: kid },
-				fetchImpl,
+			const response = await orThrow(
+				askPlaid(
+					env,
+					"/webhook_verification_key/get",
+					{ key_id: kid },
+					KeyAnswer,
+					fetchImpl,
+				),
 			);
 
-			if (!response.key) throw new Error("Missing Plaid verification key");
+			const sent = response.key;
 
-			if (response.key.expired_at !== null) {
+			if (!sent) throw new Error("Missing Plaid verification key");
+
+			// A key that is not an object has no expiry, so it is refused as an expired one is.
+			if (!isKeyObject(sent) || sent.expired_at !== null) {
 				setBounded(failedKeys, kid, {
 					result: "invalid",
 					failedAt: Date.now(),
@@ -110,7 +137,7 @@ async function verificationKey(
 
 			const key = await crypto.subtle.importKey(
 				"jwk",
-				response.key,
+				sent,
 				{ name: "ECDSA", namedCurve: "P-256" },
 				false,
 				["verify"],
@@ -157,17 +184,9 @@ export async function verifyPlaidWebhook(
 		const [encodedHeader = "", encodedClaims = "", encodedSignature = ""] =
 			parts;
 
-		const header = json<Header>(encodedHeader);
+		const header = readPart(Header, encodedHeader);
 
-		if (
-			header.alg !== "ES256" ||
-			!isText(header.kid) ||
-			header.kid.length === 0 ||
-			header.kid.length > 128 ||
-			header.crit !== undefined
-		) {
-			return "invalid";
-		}
+		if (header === null) return "invalid";
 
 		const signature = decode(encodedSignature);
 
@@ -187,16 +206,13 @@ export async function verifyPlaidWebhook(
 			return "invalid";
 		}
 
-		const claims = json<Claims>(encodedClaims);
+		const claims = readPart(Claims, encodedClaims);
 		const now = Date.now() / 1000;
 
 		if (
-			!isNumber(claims.iat) ||
-			!Number.isFinite(claims.iat) ||
+			claims === null ||
 			claims.iat < now - MAX_AGE_SECONDS ||
-			claims.iat > now + MAX_FUTURE_SECONDS ||
-			!isText(claims.request_body_sha256) ||
-			!LOWERCASE_SHA256.test(claims.request_body_sha256)
+			claims.iat > now + MAX_FUTURE_SECONDS
 		) {
 			return "invalid";
 		}
