@@ -1,4 +1,4 @@
-import { and, eq, getTableName, ne, sql } from "drizzle-orm";
+import { and, eq, getTableName, ne, type SQL, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { matchBillPayments } from "../bills/match";
@@ -113,8 +113,10 @@ export function canResetDemo(env: {
 
 const BALANCES_PER_STATEMENT = 33; // 3 bound values each, under D1's limit of 100 per statement
 
+type Orm = ReturnType<typeof drizzle>;
+
 function balanceHistoryStatements(
-	db: D1Database,
+	orm: Orm,
 	balances: SeedBalance[],
 ): BatchItem<"sqlite">[] {
 	const statements: BatchItem<"sqlite">[] = [];
@@ -122,19 +124,37 @@ function balanceHistoryStatements(
 	for (let i = 0; i < balances.length; i += BALANCES_PER_STATEMENT) {
 		const chunk = balances.slice(i, i + BALANCES_PER_STATEMENT);
 		statements.push(
-			drizzle(db)
-				.insert(balanceHistory)
-				.values(
-					chunk.map((b) => ({
-						accountId: b.accountId,
-						date: b.date,
-						balanceCents: b.balanceCents,
-					})),
-				),
+			orm.insert(balanceHistory).values(
+				chunk.map((b) => ({
+					accountId: b.accountId,
+					date: b.date,
+					balanceCents: b.balanceCents,
+				})),
+			),
 		);
 	}
 
 	return statements;
+}
+
+/**
+ * One ai_log row per transaction that `filed` selects, of the given kind, dated by the transaction. A select lists
+ * every column in table order, so the id and the created_at are written as their defaults.
+ */
+function tallyFromJev(orm: Orm, kind: "category" | "income", filed: SQL) {
+	return orm.insert(aiLog).select(
+		orm
+			.select({
+				id: sql`NULL`.as("id"),
+				kind: sql`${kind}`.as("kind"),
+				transactionId: transactions.id,
+				merchantRawName: sql`NULL`.as("merchant_raw_name"),
+				householdDay: transactions.date,
+				createdAt: sql`(datetime('now'))`.as("created_at"),
+			})
+			.from(transactions)
+			.where(filed),
+	);
 }
 
 /** Wipes the database and reloads the Rivera household. Only ever called when canResetDemo(env) is true. */
@@ -209,7 +229,7 @@ export async function resetDemo(
 			}),
 		),
 		// The net-worth chart's six months, a few dozen rows per statement: D1 allows 100 bound values in one.
-		...balanceHistoryStatements(db, seed.balanceHistory),
+		...balanceHistoryStatements(orm, seed.balanceHistory),
 		...seed.merchants.map((m) =>
 			orm.insert(merchants).values({
 				rawName: m.key,
@@ -265,33 +285,8 @@ export async function resetDemo(
 		),
 		// The seed's own Tally work (spec §8.6), read from the rows just inserted above: each transaction Jev
 		// gave a category or marked as income, dated by the transaction, so the demo's tally shows the family's work.
-		// The id and created_at are written as their defaults, since a select lists every column in table order.
-		orm.insert(aiLog).select(
-			orm
-				.select({
-					id: sql`NULL`.as("id"),
-					kind: sql`'category'`.as("kind"),
-					transactionId: transactions.id,
-					merchantRawName: sql`NULL`.as("merchant_raw_name"),
-					householdDay: transactions.date,
-					createdAt: sql`(datetime('now'))`.as("created_at"),
-				})
-				.from(transactions)
-				.where(eq(transactions.categorySource, "jev")),
-		),
-		orm.insert(aiLog).select(
-			orm
-				.select({
-					id: sql`NULL`.as("id"),
-					kind: sql`'income'`.as("kind"),
-					transactionId: transactions.id,
-					merchantRawName: sql`NULL`.as("merchant_raw_name"),
-					householdDay: transactions.date,
-					createdAt: sql`(datetime('now'))`.as("created_at"),
-				})
-				.from(transactions)
-				.where(eq(transactions.incomeSource, "jev")),
-		),
+		tallyFromJev(orm, "category", eq(transactions.categorySource, "jev")),
+		tallyFromJev(orm, "income", eq(transactions.incomeSource, "jev")),
 		...demoBills(today, seed.transactions).map((bill) =>
 			orm.insert(bills).values({ ...bill, addedOn }),
 		),
@@ -387,8 +382,7 @@ export async function resetDemo(
 			.returning({ id: categorySuggestions.id })
 			.get();
 
-		// One statement per charge, in one batch: each has more bound values than D1 allows in a single statement's
-		// share of three rows.
+		// One statement per charge, in one batch: a transaction row binds more values than D1 allows for three rows in one statement.
 		const petCharge = (
 			raw: string,
 			merchant: string,
