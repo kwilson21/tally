@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDemo } from "../src/demo/reset";
 import baseline from "./fixtures/suggestions-edge-baseline.json";
 
@@ -559,7 +559,9 @@ async function recordLine(res: Response, html: string) {
 	].join(" | ");
 }
 
+// The recorded states hold the day an answer was decided (never_suggest_rules.decided_on), so the clock is the day they were recorded.
 beforeEach(async () => {
+	vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
 		db.prepare("DELETE FROM transactions"),
@@ -568,6 +570,10 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
 	]);
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe("the Suggestions screen's answers, read at the edge (#1006, PR 8)", () => {
