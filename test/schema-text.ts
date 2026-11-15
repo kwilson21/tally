@@ -42,29 +42,81 @@ interface Segment {
 const TABLE_LEVEL_ITEM = /^\s*(CONSTRAINT|CHECK|PRIMARY|UNIQUE|FOREIGN)\b/i;
 const IN_LIST = /^\w+\s+IN\s*\([^()]*\)$/i;
 
-/** Same length as the input; the inside of each 'literal' and "identifier" is `_`, the quotes stay. */
+/** The closing character of a quoted span that opens with `open`: a bracketed name closes with `]`. */
+function closerOf(open: string): string {
+	return open === "[" ? "]" : open;
+}
+
+/**
+ * The statement with its SQL comments (`-- ...` to the end of the line, and `/* ... *\/`) replaced by a space. SQLite
+ * keeps comments in sqlite_master.sql, so they are removed before anything reads the statement. A `--` or `/*` inside
+ * a literal or a quoted name is not a comment and is left as it is.
+ */
+export function stripComments(sql: string): string {
+	let out = "";
+	let closer = "";
+
+	for (let i = 0; i < sql.length; i++) {
+		const ch = sql[i] ?? "";
+		const next = sql[i + 1];
+
+		if (closer !== "") {
+			out += ch;
+
+			if (ch === closer) {
+				if (closer !== "]" && next === closer) {
+					out += next;
+					i++;
+				} else closer = "";
+			}
+		} else if (ch === "'" || ch === '"' || ch === "`" || ch === "[") {
+			closer = closerOf(ch);
+			out += ch;
+		} else if (ch === "-" && next === "-") {
+			const end = sql.indexOf("\n", i);
+
+			out += " ";
+			i = end < 0 ? sql.length : end - 1;
+		} else if (ch === "/" && next === "*") {
+			const end = sql.indexOf("*/", i + 2);
+
+			if (end < 0) throw new Error(`an unclosed comment in: ${sql}`);
+			out += " ";
+			i = end + 1;
+		} else out += ch;
+	}
+
+	return out;
+}
+
+/**
+ * Same length as the input; the inside of each 'literal', "identifier", `identifier` and [identifier] is `_`, and the
+ * quotes stay. A comment must be stripped first (stripComments), or its words are read as SQL.
+ */
 export function maskLiterals(sql: string): string {
 	let out = "";
-	let quote = "";
+	let closer = "";
 
 	for (let i = 0; i < sql.length; i++) {
 		const ch = sql[i] ?? "";
 
-		if (quote === "") {
-			if (ch === "'" || ch === '"') quote = ch;
+		if (closer === "") {
+			if (ch === "'" || ch === '"' || ch === "`" || ch === "[")
+				closer = closerOf(ch);
 			out += ch;
-		} else if (ch === quote) {
-			if (sql[i + 1] === quote) {
+		} else if (ch === closer) {
+			if (closer !== "]" && sql[i + 1] === closer) {
 				out += "__";
 				i++;
 			} else {
-				quote = "";
+				closer = "";
 				out += ch;
 			}
 		} else out += "_";
 	}
 
-	if (quote !== "") throw new Error("an unclosed quote in a CREATE TABLE text");
+	if (closer !== "")
+		throw new Error("an unclosed quote in a CREATE TABLE text");
 
 	return out;
 }
@@ -88,7 +140,8 @@ function closeIndex(masked: string, open: number): number {
 }
 
 /** The statement's top-level definitions: the text between the table's parentheses, cut at each comma outside any. */
-function items(createSql: string): Item[] {
+function items(sqlWithComments: string): Item[] {
+	const createSql = stripComments(sqlWithComments);
 	const masked = maskLiterals(createSql);
 	const open = masked.indexOf("(");
 
@@ -369,17 +422,38 @@ export function autoIncrementProblems(
 	return problems;
 }
 
+/**
+ * The collation name after a COLLATE keyword, read from the original text at `at`: a bare word, or a double-quoted,
+ * bracketed or backtick-quoted name. Upper-cased, because SQLite collation names are case-insensitive (NOCASE and
+ * nocase are the same collation). Anything else throws, so a COLLATE this reader cannot read fails the test.
+ */
+function collationName(text: string, at: number): string {
+	const rest = text.slice(at);
+
+	const found =
+		/^\s*(?:(\w+)|"((?:[^"]|"")*)"|\[([^\]]*)\]|`((?:[^`]|``)*)`)/.exec(rest);
+
+	if (!found)
+		throw new Error(
+			`cannot read the COLLATE name after COLLATE in: ${text.trim()}`,
+		);
+
+	const name = found[1] ?? found[2] ?? found[3] ?? found[4] ?? "";
+
+	return name.replace(/""/g, '"').replace(/``/g, "`").toUpperCase();
+}
+
 /** Every COLLATE in a CREATE TABLE: its column, and its collation in upper case. A table-level one is named by its item. */
 export function liveCollations(
-	createSql: string,
+	sqlWithComments: string,
 ): { column: string; collation: string }[] {
 	const found: { column: string; collation: string }[] = [];
 
-	for (const item of items(createSql))
-		for (const match of item.masked.matchAll(/\bCOLLATE\s+(\w+)/gi))
+	for (const item of items(sqlWithComments))
+		for (const match of item.masked.matchAll(/\bCOLLATE\b/gi))
 			found.push({
 				column: item.column ?? "(table constraint)",
-				collation: (match[1] ?? "").toUpperCase(),
+				collation: collationName(item.text, match.index + match[0].length),
 			});
 
 	return found;

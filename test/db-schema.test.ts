@@ -1902,6 +1902,82 @@ describe("the drift check reads the CHECKs, AUTOINCREMENT keys and collations th
 	});
 });
 
+describe("the readers skip SQL comments and read quoted collation names", () => {
+	const commented = `CREATE TABLE t (
+	-- the CHECK (amount > 99), the COLLATE NOCASE and the AUTOINCREMENT in this comment are not SQL
+	id INTEGER PRIMARY KEY,
+	amount INTEGER CHECK (amount > 0) /* COLLATE NOCASE, CHECK (amount < 9) and AUTOINCREMENT */,
+	name TEXT -- COLLATE "NOCASE"
+)`;
+
+	it("a -- comment before a column and a /* */ comment mid-definition are ignored and do not throw", () => {
+		expect(() => liveCheckClauses(commented)).not.toThrow();
+		expect(liveCheckClauses(commented)).toEqual([
+			{ column: "amount", expression: "amount > 0" },
+		]);
+		expect(autoIncrementProblems(commented, "t", [])).toEqual([]);
+		expect(collationProblems(commented, "t", {})).toEqual([]);
+	});
+
+	it("a -- comment before the first column is skipped when the column is named", () => {
+		const leading =
+			"CREATE TABLE t (\n\t-- the first column follows\n\tid INTEGER PRIMARY KEY AUTOINCREMENT\n)";
+
+		expect(autoIncrementProblems(leading, "t", ["id"])).toEqual([]);
+	});
+
+	it("a -- or /* inside a string literal is not a comment and the literal stays byte-exact", () => {
+		const literal =
+			"CREATE TABLE t (code TEXT CHECK (code <> '--/*x*/'), label TEXT DEFAULT 'a -- b /* c')";
+
+		expect(liveCheckClauses(literal)).toEqual([
+			{ column: "code", expression: "code <> '--/*x*/'" },
+		]);
+		expect(
+			checkProblems(literal, "t", {
+				columns: { code: "code <> '--/*x*/'" },
+				tables: [],
+			}),
+		).toEqual([]);
+	});
+
+	it("COLLATE with a double-quoted name reads as that collation", () => {
+		const quoted = 'CREATE TABLE t (name TEXT COLLATE "NOCASE")';
+
+		expect(collationProblems(quoted, "t", { name: "NOCASE" })).toEqual([]);
+		expect(collationProblems(quoted, "t", {})).toEqual([
+			"t.name has COLLATE NOCASE in the database, but COLLATIONS does not list it",
+		]);
+	});
+
+	it("COLLATE with a bracketed name reads as that collation", () => {
+		const bracketed = "CREATE TABLE t (name TEXT COLLATE [NOCASE])";
+
+		expect(collationProblems(bracketed, "t", { name: "NOCASE" })).toEqual([]);
+	});
+
+	it("COLLATE with a backtick-quoted name reads as that collation", () => {
+		const backtick = "CREATE TABLE t (name TEXT COLLATE `NOCASE`)";
+
+		expect(collationProblems(backtick, "t", { name: "NOCASE" })).toEqual([]);
+	});
+
+	it("a lower-case collation name is the same collation: nocase reads as NOCASE", () => {
+		const lower = "CREATE TABLE t (name TEXT COLLATE nocase)";
+
+		expect(collationProblems(lower, "t", { name: "NOCASE" })).toEqual([]);
+		expect(collationProblems(lower, "t", { name: "nocase" })).toEqual([]);
+	});
+
+	it("a COLLATE the reader cannot parse fails loudly and is never ignored", () => {
+		const unparsed = "CREATE TABLE t (name TEXT COLLATE (NOCASE))";
+
+		expect(() => collationProblems(unparsed, "t", { name: "NOCASE" })).toThrow(
+			/COLLATE/,
+		);
+	});
+});
+
 describe("the table-set check fails on a wrong list", () => {
 	const described = ["a"];
 
