@@ -5,6 +5,7 @@ import { cleanBankText } from "../clean-bank-text";
 import { FOLLOWS_PURCHASE } from "../db/counted-month";
 import { merchantKeySql } from "../db/merchant-key";
 import {
+	type JevSeen,
 	type JevSeenColumns,
 	jevSeenColumnsSql,
 	jevSeenOf,
@@ -28,6 +29,9 @@ export type EligibilityRow = {
 	mark: "cleared" | "asked" | "owed";
 	ruleSettled: boolean;
 };
+
+/** A row as the read gives it: the decision's facts, and the seen (what Jev is told) it judged the mark by, or null with no account. */
+export type ReadEligibilityRow = EligibilityRow & { seen: JevSeen | null };
 
 export type Eligibility =
 	| { kind: "private" }
@@ -229,7 +233,7 @@ export function jevOf(row: ReadRow): EligibilityRow["jev"] {
 export async function readEligibilityRows(
 	db: D1Database,
 	only?: { lookupTexts: string[] },
-): Promise<EligibilityRow[]> {
+): Promise<ReadEligibilityRow[]> {
 	const batch = await db.batch([db.prepare(READ_SQL), db.prepare(RULES_SQL)]);
 
 	// SAFETY: READ_SQL selects exactly the ReadRow columns, and RULES_SQL selects cleanedText, so each result has its shape.
@@ -255,7 +259,7 @@ export async function readEligibilityRows(
 	const wanted = only ? new Set(only.lookupTexts) : null;
 
 	const decided = await Promise.all(
-		readRows.map(async (row): Promise<EligibilityRow | null> => {
+		readRows.map(async (row): Promise<ReadEligibilityRow | null> => {
 			const merchantKey = row.merchantKey;
 			const lookupText = lookupTextOf(merchantKey);
 
@@ -268,10 +272,11 @@ export async function readEligibilityRows(
 					? null
 					: { inputMark: row.markInput, cleared: row.markCleared ?? 0 };
 
+			const seen = jevSeenOf(row);
 			const mark =
 				stored === null
 					? "owed"
-					: markState(stored, await inputMark(jevSeenOf(row)));
+					: markState(stored, await inputMark(seen));
 
 			return {
 				id: row.id,
@@ -282,11 +287,13 @@ export async function readEligibilityRows(
 				mark,
 				ruleSettled:
 					row.merchantRule === 1 || rules.has(cleanBankText(row.rawName)),
+				// No account (the LEFT JOIN leaves it empty): the facts Jev would be told are not all known, so none is given.
+				seen: row.accountType === null ? null : seen,
 			};
 		}),
 	);
 
-	return decided.filter((row): row is EligibilityRow => row !== null);
+	return decided.filter((row): row is ReadEligibilityRow => row !== null);
 }
 
 /** The read, then the decision: each lookup text's eligibility (`only` as readEligibilityRows takes it). */
