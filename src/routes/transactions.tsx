@@ -1,3 +1,5 @@
+import { and, asc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Predicate from "effect/Predicate";
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
@@ -7,9 +9,11 @@ import { type UnpaidBill, unpaidBillsSentence } from "../bills/unpaid";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
+import { activeCategories } from "../db/active-categories";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { FOLLOWS_PURCHASE, isIncluded } from "../db/counted-month";
+import { householdPeopleList } from "../db/household-people";
 import {
 	addLikely,
 	type LikelyRow,
@@ -18,6 +22,11 @@ import {
 } from "../db/likely-transactions";
 import { mixedCategories } from "../db/mixed-trip";
 import { refundedByOthersSql } from "../db/refunded";
+import {
+	categories as categoryTable,
+	merchants,
+	transactions as transactionTable,
+} from "../db/schema";
 import {
 	type CashSplitEdit,
 	type CashSplitRefusal,
@@ -376,12 +385,11 @@ async function renderList(
 		listTransactions(c.env.DB, filters),
 		monthsWithTransactions(c.env.DB),
 		needsCategoryCount(c.env.DB, filters.month, filters.raw),
-		c.env.DB.prepare(
-			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		).all<Category>(),
+		activeCategories(c.env.DB),
 		accountChoices(c.env.DB),
 	]);
 
+	// One statement of two scalar subqueries with no row to map: the builder would add no clarity (decision 179).
 	const peoplePrompt = filters.raw
 		? false
 		: await c.env.DB.prepare(
@@ -409,12 +417,8 @@ async function renderList(
 
 	if (filters.category !== null) {
 		categoryName =
-			categories.results.find((cat) => cat.id === filters.category)?.name ??
-			(
-				await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
-					.bind(filters.category)
-					.first<{ name: string }>()
-			)?.name ??
+			categories.find((cat) => cat.id === filters.category)?.name ??
+			(await categoryNamed(c.env.DB, filters.category)) ??
 			`category ${filters.category}`;
 	}
 
@@ -831,7 +835,7 @@ async function renderList(
 							label="Category"
 							options={[
 								{ value: "", label: "All categories" },
-								...categories.results.map((cat) => ({
+								...categories.map((cat) => ({
 									value: cat.id,
 									label: cat.name,
 								})),
@@ -1111,7 +1115,7 @@ async function renderList(
 						<HowFoot section="transactions" />
 					</section>
 				)}
-				<div id="sheet">{sheet?.(categories.results, today)}</div>
+				<div id="sheet">{sheet?.(categories, today)}</div>
 			</div>
 		</Layout>,
 		status,
@@ -1653,11 +1657,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	// The category is looked up only for a selection that can be acted on; the rule refuses the others first.
 	const cat =
 		posted.error === undefined && Number.isInteger(category)
-			? await c.env.DB.prepare(
-					"SELECT id,name FROM categories WHERE id=? AND archived=0",
-				)
-					.bind(category)
-					.first<{ id: number; name: string }>()
+			? await listedCategory(c.env.DB, category)
 			: null;
 
 	const asked = decided(
@@ -1845,12 +1845,29 @@ async function postedRuleCategoryName(
 ): Promise<string | undefined> {
 	if (!id) return undefined;
 
+	return categoryNamed(db, id);
+}
+
+/** A category by id, archived or not: its name, or undefined. */
+async function categoryNamed(db: D1Database, id: number) {
 	return (
-		await db
-			.prepare("SELECT name FROM categories WHERE id = ?")
-			.bind(id)
-			.first<{ name: string }>()
+		await drizzle(db)
+			.select({ name: categoryTable.name })
+			.from(categoryTable)
+			.where(eq(categoryTable.id, id))
+			.get()
 	)?.name;
+}
+
+/** A category on the list (not archived) by id, or null: the only one a form may name. */
+async function listedCategory(db: D1Database, id: number) {
+	return (
+		(await drizzle(db)
+			.select({ id: categoryTable.id, name: categoryTable.name })
+			.from(categoryTable)
+			.where(and(eq(categoryTable.id, id), eq(categoryTable.archived, 0)))
+			.get()) ?? null
+	);
 }
 
 const filtersFrom = (c: Context<App>, today: string, url: string) =>
@@ -1982,9 +1999,7 @@ transactions.post("/transactions/cash", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const values = cashValues(today, form);
 
-	const { results: categories } = await c.env.DB.prepare(
-		"SELECT id,name,icon,color FROM categories WHERE archived=0 ORDER BY sort_order,name",
-	).all<Category>();
+	const categories = await activeCategories(c.env.DB);
 
 	const parsed = parseCash(
 		values,
@@ -2167,11 +2182,7 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 		forPersonId: tx.forPersonId,
 	};
 
-	const people = (
-		await c.env.DB.prepare(
-			"SELECT id, name FROM household_people ORDER BY id",
-		).all<HouseholdPerson>()
-	).results;
+	const people = await householdPeopleList(c.env.DB);
 
 	const refunds = await refundPurchases(c.env.DB, tx);
 	const jevCategories = await jevAnswersCategories(c);
@@ -2410,11 +2421,8 @@ function refundAnswers(
 async function splitContext(c: Context<App>) {
 	const tx = await transactionAt(c);
 
-	const categories = await c.env.DB.prepare(
-		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-	).all<Category>();
-
-	return { tx, categories: categories.results };
+	const categories = await activeCategories(c.env.DB);
+	return { tx, categories };
 }
 
 /**
@@ -2423,15 +2431,23 @@ async function splitContext(c: Context<App>) {
  * the form.
  */
 async function archivedPartCategories(db: D1Database, parentId: number) {
-	const rows = await db
-		.prepare(
-			"SELECT part.id AS partId, cat.id, cat.name FROM transactions part JOIN categories cat ON cat.id = part.category_id WHERE part.parent_id = ? AND cat.archived = 1",
+	const rows = await drizzle(db)
+		.select({
+			partId: transactionTable.id,
+			id: categoryTable.id,
+			name: categoryTable.name,
+		})
+		.from(transactionTable)
+		.innerJoin(categoryTable, eq(categoryTable.id, transactionTable.categoryId))
+		.where(
+			and(
+				eq(transactionTable.parentId, parentId),
+				eq(categoryTable.archived, 1),
+			),
 		)
-		.bind(parentId)
-		.all<{ partId: number; id: number; name: string }>();
-
+		.all();
 	return new Map(
-		rows.results.map((row) => [row.partId, { id: row.id, name: row.name }]),
+		rows.map((row) => [row.partId, { id: row.id, name: row.name }]),
 	);
 }
 
@@ -2443,16 +2459,20 @@ async function savedPartValues(
 	db: D1Database,
 	tx: TransactionDetail,
 ): Promise<SplitValue[]> {
-	const saved = await db
-		.prepare(
-			"SELECT id, category_id AS categoryId, amount_cents AS amountCents FROM transactions WHERE parent_id = ? ORDER BY id",
-		)
-		.bind(tx.id)
-		.all<{ id: number; categoryId: number | null; amountCents: number }>();
+	const saved = await drizzle(db)
+		.select({
+			id: transactionTable.id,
+			categoryId: transactionTable.categoryId,
+			amountCents: transactionTable.amountCents,
+		})
+		.from(transactionTable)
+		.where(eq(transactionTable.parentId, tx.id))
+		.orderBy(asc(transactionTable.id))
+		.all();
 
 	const archived = await archivedPartCategories(db, tx.id);
 
-	return saved.results.map((part) => ({
+	return saved.map((part) => ({
 		category: part.categoryId === null ? "" : String(part.categoryId),
 		amount: centsToAmount(part.amountCents),
 		partId: part.id,
@@ -2946,9 +2966,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 		await refundPurchases(c.env.DB, tx),
 	);
 
-	const { results: categories } = await c.env.DB.prepare(
-		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-	).all<Category>();
+	const categories = await activeCategories(c.env.DB);
 
 	if (linked)
 		c.header(
@@ -3054,15 +3072,9 @@ async function savePanel(
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 
-	const { results: categories } = await c.env.DB.prepare(
-		"SELECT id, name FROM categories WHERE archived = 0",
-	).all<Category>();
+	const categories = await activeCategories(c.env.DB);
 
-	const people = (
-		await c.env.DB.prepare(
-			"SELECT id, name FROM household_people ORDER BY id",
-		).all<HouseholdPerson>()
-	).results;
+	const people = await householdPeopleList(c.env.DB);
 
 	// "This refunds…": no field leaves the link as it is; an empty one unlinks. A chosen purchase
 	// must be one the panel offers (the current link always is).
@@ -3400,11 +3412,7 @@ async function savePanel(
 			return showErrors(
 				{ forPerson: FOR_PERSON_ERROR },
 				undefined,
-				(
-					await c.env.DB.prepare(
-						"SELECT id, name FROM household_people ORDER BY id",
-					).all<HouseholdPerson>()
-				).results,
+				await householdPeopleList(c.env.DB),
 			);
 
 		// A part of a split refund that doesn't fit names its own purchase, unless that is the purchase the
@@ -3652,10 +3660,7 @@ async function liveCategory(db: D1Database, value: string | File | null) {
 
 	if (!Number.isInteger(id) || id <= 0) return null;
 
-	return db
-		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
-		.bind(id)
-		.first<{ id: number; name: string }>();
+	return listedCategory(db, id);
 }
 
 // The likely transactions after a new category (decision 76): Add files the ticked ones, and only them.
@@ -3743,20 +3748,16 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const trip = numberOfPosted(form.get("trip"));
 	const today = await householdToday(c.env.DB);
 
-	const validCategory = await c.env.DB.prepare(
-		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
-	)
-		.bind(categoryId)
-		.first<{ id: number; name: string }>();
+	const validCategory = await listedCategory(c.env.DB, categoryId);
 
 	const askedName = textOf(form.get("merchant"));
 
 	const merchantName = merchantKey
-		? await c.env.DB.prepare(
-				"SELECT display_name AS displayName FROM merchants WHERE raw_name = ?",
-			)
-				.bind(merchantKey)
-				.first<{ displayName: string | null }>()
+		? await drizzle(c.env.DB)
+				.select({ displayName: merchants.displayName })
+				.from(merchants)
+				.where(eq(merchants.rawName, merchantKey))
+				.get()
 		: null;
 
 	const offer =
@@ -3910,11 +3911,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 
 	// Not confirmed yet: the sheet that asks, and nothing saved.
 	if (asked.kind === "nothingToDo") {
-		const people = (
-			await c.env.DB.prepare(
-				"SELECT id, name FROM household_people ORDER BY id",
-			).all<HouseholdPerson>()
-		).results;
+		const people = await householdPeopleList(c.env.DB);
 
 		const values: Edit = {
 			categoryId: tx.categoryId,
