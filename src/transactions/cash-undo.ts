@@ -1,20 +1,37 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import * as Schema from "effect/Schema";
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
 import { cashDeleteHolds } from "../db/schema";
+import { parseStoredWith } from "../db/stored-shape";
 import type { Json } from "../json";
 import { UNDO_MS, undoLeftMs } from "../undo";
 
 type Row = { [key: string]: Json };
 
-type Snapshot = {
+export type Snapshot = {
 	transaction: Row;
 	parts: Row[];
-	payments: (Row & { bill_name: string })[];
+	payments: Row[];
 	refunds: Row[];
 	plans: { id: number; transaction_id: number }[];
 };
+
+/**
+ * A stored row: a plain object, whose keys are the column names and stay as stored (the restore writes each key as a column),
+ * and whose values are not checked, since the restore binds them as JSON. Schema.Unknown does not recurse, so a deeply
+ * nested value is kept whole.
+ */
+const StoredRow = Schema.Record(Schema.String, Schema.Unknown);
+
+const StoredRows = Schema.mutable(Schema.Array(StoredRow));
+
+const StoredPlans = Schema.mutable(
+	Schema.Array(
+		Schema.Struct({ id: Schema.Number, transaction_id: Schema.Number }),
+	),
+);
 
 const jsonColumn = (column: string, alias = "") =>
 	`json_extract(${alias}value, '$."${column}"')`;
@@ -87,6 +104,43 @@ export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
 	return hold ? undoLeftMs(hold.createdAt, Date.now()) : 0;
 }
 
+/**
+ * The snapshot the five stored columns hold, as they are stored. Text that is not JSON throws its SyntaxError (as JSON.parse
+ * always did), and every column is parsed before any shape is judged. A column of the wrong shape makes the whole snapshot
+ * null, which the restore answers as "cannot restore", so nothing is written (#1120, decision 233).
+ */
+export function snapshotOf(hold: {
+	transaction_row: string;
+	split_rows: string;
+	payment_rows: string;
+	refund_rows: string;
+	plan_rows: string;
+}): Snapshot | null {
+	const transaction = parseStoredWith(StoredRow, hold.transaction_row);
+	const parts = parseStoredWith(StoredRows, hold.split_rows);
+	const payments = parseStoredWith(StoredRows, hold.payment_rows);
+	const refunds = parseStoredWith(StoredRows, hold.refund_rows);
+	const plans = parseStoredWith(StoredPlans, hold.plan_rows);
+
+	if (
+		transaction === null ||
+		parts === null ||
+		payments === null ||
+		refunds === null ||
+		plans === null
+	)
+		return null;
+
+	// SAFETY: each text was JSON.parse'd above, so every value in these is a Json value; the Schemas checked only the shape.
+	return {
+		transaction: transaction as Row,
+		parts: parts as Row[],
+		payments: payments as Row[],
+		refunds: refunds as Row[],
+		plans,
+	};
+}
+
 /** Restores once, only while the token is younger than the Undo window (src/undo.ts). */
 export async function restoreCashDelete(db: D1Database, token: string) {
 	const hold = await drizzle(db)
@@ -103,13 +157,16 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 
 	if (hold.createdAt <= now - UNDO_MS || hold.createdAt > now) return null;
 
-	const snapshot: Snapshot = {
-		transaction: JSON.parse(hold.transactionRow),
-		parts: JSON.parse(hold.splitRows),
-		payments: JSON.parse(hold.paymentRows),
-		refunds: JSON.parse(hold.refundRows),
-		plans: JSON.parse(hold.planRows),
-	};
+	// snapshotOf reads the stored columns under their column names: a column of the wrong shape refuses the restore (#1120).
+	const snapshot = snapshotOf({
+		transaction_row: hold.transactionRow,
+		split_rows: hold.splitRows,
+		payment_rows: hold.paymentRows,
+		refund_rows: hold.refundRows,
+		plan_rows: hold.planRows,
+	});
+
+	if (snapshot === null) return null;
 
 	const transaction = snapshot.transaction;
 	const columns = Object.keys(transaction);
