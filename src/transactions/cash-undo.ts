@@ -5,7 +5,7 @@ import { UNDO_MS, undoLeftMs } from "../undo";
 
 type Row = { [key: string]: Json };
 
-type Snapshot = {
+export type Snapshot = {
 	transaction: Row;
 	parts: Row[];
 	payments: (Row & { bill_name: string })[];
@@ -77,6 +77,23 @@ export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
 	return hold ? undoLeftMs(hold.created_at, Date.now()) : 0;
 }
 
+/** The snapshot the five stored columns hold, parsed as they are stored (no shape is checked yet). */
+export function snapshotOf(hold: {
+	transaction_row: string;
+	split_rows: string;
+	payment_rows: string;
+	refund_rows: string;
+	plan_rows: string;
+}): Snapshot {
+	return {
+		transaction: JSON.parse(hold.transaction_row),
+		parts: JSON.parse(hold.split_rows),
+		payments: JSON.parse(hold.payment_rows),
+		refunds: JSON.parse(hold.refund_rows),
+		plans: JSON.parse(hold.plan_rows),
+	};
+}
+
 /** Restores once, only while the token is younger than the Undo window (src/undo.ts). */
 export async function restoreCashDelete(db: D1Database, token: string) {
 	const hold = await db
@@ -101,13 +118,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 
 	if (hold.created_at <= now - UNDO_MS || hold.created_at > now) return null;
 
-	const snapshot: Snapshot = {
-		transaction: JSON.parse(hold.transaction_row),
-		parts: JSON.parse(hold.split_rows),
-		payments: JSON.parse(hold.payment_rows),
-		refunds: JSON.parse(hold.refund_rows),
-		plans: JSON.parse(hold.plan_rows),
-	};
+	const snapshot = snapshotOf(hold);
 
 	const transaction = snapshot.transaction;
 	const columns = Object.keys(transaction);

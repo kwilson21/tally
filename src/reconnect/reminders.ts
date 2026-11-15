@@ -22,6 +22,16 @@ type ReminderEnv = DeliveryEnv & {
 	DEMO?: string;
 };
 
+/** The accounts one bank's reminder lists, as the stored JSON reads them now: an empty or null text is no accounts. */
+export function accountsOf(
+	text: string | null,
+): { name: string; mask: string | null }[] {
+	return JSON.parse(text || "[]") as {
+		name: string;
+		mask: string | null;
+	}[];
+}
+
 export function reconnectRecipients(db: D1Database) {
 	return db
 		.prepare(
@@ -114,10 +124,7 @@ export async function runReconnectReminders(
 		const input = {
 			bank: bank.institution_name,
 			lastSyncedAt: bank.last_synced_at,
-			accounts: JSON.parse(bank.accounts || "[]") as {
-				name: string;
-				mask: string | null;
-			}[],
+			accounts: accountsOf(bank.accounts),
 		};
 
 		const email = renderReconnectEmail(input, zone);

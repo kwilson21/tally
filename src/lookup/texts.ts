@@ -37,6 +37,29 @@ export type LookupTextRow = {
 	private: 0 | 1;
 };
 
+/** The stored columns one read row carries, as the read SQL returns them (the two lists as JSON text). */
+export type LookupTextsRow = {
+	rawTexts: string;
+	categories: string;
+	flagged: number | null;
+	maybe: number | null;
+	transfer: number | null;
+	excluded: number | null;
+};
+
+/** The facts one read row gives: its two lists parsed as they are stored, its flags as booleans. */
+export function lookupFactsOf(row: LookupTextsRow): LookupTextFacts {
+	// SAFETY: json_group_array always returns a JSON array of the column's values, so each parse below is an array of strings or nulls.
+	return {
+		rawTexts: JSON.parse(row.rawTexts) as string[],
+		categories: JSON.parse(row.categories) as (string | null)[],
+		flagged: row.flagged === 1,
+		maybe: row.maybe === 1,
+		transfer: row.transfer === 1,
+		excluded: row.excluded === 1,
+	};
+}
+
 /**
  * The row for one merchant key: its lookup text, and private when the key, any of its bank texts, or any of its Plaid
  * categories is private, or any of its transactions is flagged, unanswered as a Maybe, or a transfer.
@@ -125,17 +148,9 @@ export async function readLookupTexts(
 		version: string;
 	}>();
 
-	// SAFETY: json_group_array always returns a JSON array of the column's values, so each parse below is an array of strings or nulls.
 	return {
 		keys: results.map((row) => ({
-			row: lookupTextRow(row.merchantKey, {
-				rawTexts: JSON.parse(row.rawTexts) as string[],
-				categories: JSON.parse(row.categories) as (string | null)[],
-				flagged: row.flagged === 1,
-				maybe: row.maybe === 1,
-				transfer: row.transfer === 1,
-				excluded: row.excluded === 1,
-			}),
+			row: lookupTextRow(row.merchantKey, lookupFactsOf(row)),
 			version: row.version,
 		})),
 	};
