@@ -18,6 +18,7 @@ import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { KeyboardListProposal } from "./proposals-keys";
+import { MachineContextProposal } from "./proposals-machine-context";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { MoneyInputProposal } from "./proposals-money";
 import { NetWorthProposal } from "./proposals-net-worth";
@@ -890,6 +891,18 @@ export function Proposals() {
 					says so there.
 				</p>
 				<Phase5PicksProposals />
+			</section>
+
+			<section aria-labelledby="p144-title" class="mt-12">
+				<h2 id="p144-title" class="font-serif text-3xl font-semibold">
+					P144 · What the sorting turn's picture needs to make sense
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Nov 14 for issue #865, after the owner said the picture lacks
+					the context to make it make sense. Open: the owner picks CURRENT or
+					PROPOSED, and How Tally works changes only after that.
+				</p>
+				<MachineContextProposal />
 			</section>
 
 			<section aria-labelledby="open-title" class="mt-12">

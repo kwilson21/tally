@@ -26,34 +26,73 @@ export const plaidLeaseMachine = setup({}).createMachine({
 		// No live lease and no lock id: any run may take it.
 		free: {
 			on: {
-				TAKE: { target: "held" },
-				DISCONNECT: { target: "disconnected" },
+				TAKE: {
+					target: "held",
+					description: "A sync takes the bank's lease",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The bank is disconnected",
+				},
 			},
 		},
 		// A live lease (not strictly past). The holder moves it, gives it back, or the bank is disconnected. A TAKE is refused.
 		held: {
 			on: {
-				EXTEND: { target: "held" },
-				RELEASE: { target: "free" },
-				DISCONNECT: { target: "disconnected" },
+				EXTEND: {
+					target: "held",
+					description:
+						"The sync holding the lease moves it forward as it reads each page",
+				},
+				RELEASE: {
+					target: "free",
+					description: "The sync gives the lease back when its run ends",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The bank is disconnected",
+				},
 			},
 		},
 		// A lock id with no live lease: the holder was cut off, or its lease ran out. A new run may take it, and the holder may
 		// still extend or release it until someone does.
 		expired: {
 			on: {
-				TAKE: { target: "held" },
-				EXTEND: { target: "held" },
-				RELEASE: { target: "free" },
-				DISCONNECT: { target: "disconnected" },
+				TAKE: {
+					target: "held",
+					description: "Another sync takes the lease that ran out",
+				},
+				EXTEND: {
+					target: "held",
+					description: "The sync that held the lease moves it forward again",
+				},
+				RELEASE: {
+					target: "free",
+					description: "The sync that held the lease gives it back",
+				},
+				DISCONNECT: {
+					target: "disconnected",
+					description: "The bank is disconnected",
+				},
 			},
 		},
 		// Final: disconnected_at is set. Nothing moves it.
-		disconnected: {},
+		disconnected: { type: "final" },
 	},
 });
 
 export type PlaidLeaseState = "free" | "held" | "expired" | "disconnected";
+
+/** The short word each state wears in a diagram box. Typed by state, so a new state fails to compile until it has one. */
+export const PLAID_LEASE_LABELS: Record<
+	keyof typeof plaidLeaseMachine.states,
+	string
+> = {
+	free: "Free",
+	held: "Held",
+	expired: "Ran out",
+	disconnected: "Disconnected",
+};
 
 /** A bank's lease columns as the database stores them; `lockedUntil` and `disconnectedAt` are SQLite's UTC text or null. */
 export type StoredLease = {

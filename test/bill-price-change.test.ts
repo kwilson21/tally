@@ -406,6 +406,30 @@ describe("bill matching and price changes", () => {
 	describe("a payment at a new price", () => {
 		beforeEach(() => seed({ amount: 10000 }, [{ id: 1, amount: 11500 }]));
 
+		it("refuses to accept a price for a month whose payment is already linked", async () => {
+			// Payment 2 pays this month; payment 3 is a new-price charge still unclaimed. Transaction 1 is absent, so
+			// the paid month's own link is the only thing that stops the offer.
+			await seed({ amount: 10000 }, [
+				{ id: 2, amount: 10000 },
+				{ id: 3, amount: 11500 },
+			]);
+			await env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,status,matched_by) VALUES(1,?,2,'linked','user')",
+			)
+				.bind(period)
+				.run();
+
+			const res = await accept(3);
+
+			expect(await res.text()).toContain("isn&#39;t on offer");
+			expect(await rows("bill_payments", "transaction_id=3")).toEqual([]);
+			expect((await billRow())?.amount_cents).toBe(10000);
+
+			// Dismissing the same charge is refused too, so no dismissal is recorded for the paid month.
+			await dismiss(3);
+			expect(await rows("bill_payments", "transaction_id=3")).toEqual([]);
+		});
+
 		it("is offered, not matched: a 15% rise changes nothing by itself", async () => {
 			expect(await matchBillPayments(env.DB, today)).toBe(0);
 			expect(await rows("bill_payments")).toEqual([]);
