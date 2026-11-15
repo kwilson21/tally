@@ -2,7 +2,7 @@
 // −$1 button, a big amount field with ▲▼ cent arrows inside its right edge, and a round +$1 button;
 // under it the Round-to and Last-month chips. public/js/money.js runs the buttons; the server draws
 // their starting state, and without the script they stay hidden and the field works on its own.
-import { formatCents, toCents } from "../money";
+import { ceilToDollars, formatCents, toCents } from "../money";
 import { Icon } from "./icons";
 
 type Props = {
@@ -107,7 +107,7 @@ export function MoneyInput({
 			.join(" ") || undefined;
 
 	const hasCents = cents !== null && cents % 100 !== 0;
-	const roundedCents = cents === null ? 0 : Math.ceil(cents / 100) * 100;
+	const roundedCents = cents === null ? 0 : ceilToDollars(cents);
 
 	return (
 		<div data-money class="flex flex-col gap-2">
