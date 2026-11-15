@@ -1,15 +1,13 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	noteHouseholdMember,
-	removeHouseholdMember,
-} from "../src/db/reconnect";
+import { noteHouseholdMember } from "../src/db/reconnect";
+import { removeAddressOn } from "./sign-in-address";
 
 const EMAIL = "dana@example.com";
 
 // 2026-01-01 00:00:00 UTC, the removal time every case below pins.
-const REMOVED_AT = "2026-01-01 00:00:00";
 const REMOVED_AT_UNIX = 1767225600;
+const REMOVED_AT_MS = REMOVED_AT_UNIX * 1000;
 
 type Row = {
 	session_issued_at: number;
@@ -23,14 +21,6 @@ async function row(email = EMAIL): Promise<Row | null> {
 	)
 		.bind(email, email)
 		.first<Row>();
-}
-
-async function pinRemoval(email = EMAIL) {
-	await env.DB.prepare(
-		"UPDATE household_members SET removed_at = ? WHERE email = ?",
-	)
-		.bind(REMOVED_AT, email)
-		.run();
 }
 
 describe("noteHouseholdMember", () => {
@@ -80,7 +70,7 @@ describe("noteHouseholdMember", () => {
 
 	it("does not restore a removed member on a visit with no issue time", async () => {
 		await noteHouseholdMember(env.DB, EMAIL, 100);
-		await removeHouseholdMember(env.DB, EMAIL);
+		await removeAddressOn(env.DB, EMAIL, REMOVED_AT_MS);
 		await noteHouseholdMember(env.DB, EMAIL, null);
 		expect(await row()).toMatchObject({ session_issued_at: 100 });
 		expect((await row())?.removed_at).not.toBeNull();
@@ -95,8 +85,7 @@ describe("noteHouseholdMember", () => {
 			"issued %s: still removed = %s",
 			async (_label, issuedAt, stillRemoved) => {
 				await noteHouseholdMember(env.DB, EMAIL, 100);
-				await removeHouseholdMember(env.DB, EMAIL);
-				await pinRemoval();
+				await removeAddressOn(env.DB, EMAIL, REMOVED_AT_MS);
 				await noteHouseholdMember(env.DB, EMAIL, issuedAt);
 				const found = await row();
 				expect(found?.count).toBe(1);
@@ -107,8 +96,7 @@ describe("noteHouseholdMember", () => {
 
 	it("re-adds a removed member with the later session", async () => {
 		await noteHouseholdMember(env.DB, EMAIL, 100);
-		await removeHouseholdMember(env.DB, EMAIL);
-		await pinRemoval();
+		await removeAddressOn(env.DB, EMAIL, REMOVED_AT_MS);
 		await noteHouseholdMember(env.DB, EMAIL, REMOVED_AT_UNIX + 60);
 		expect(await row()).toMatchObject({
 			session_issued_at: REMOVED_AT_UNIX + 60,

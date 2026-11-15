@@ -2,11 +2,9 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifiedAccessIdentity, verifiedEmail } from "../src/access";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import {
-	noteHouseholdMember,
-	removeHouseholdMember,
-} from "../src/db/reconnect";
+import { noteHouseholdMember } from "../src/db/reconnect";
 import { resetDemo } from "../src/demo/reset";
+import { removeAddressOn } from "./sign-in-address";
 
 const encoder = new TextEncoder();
 
@@ -389,7 +387,7 @@ describe("verified Access identity and household members", () => {
 			vi.fn(async () => Response.json({ keys: [jwk] })),
 		);
 		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
-		await removeHouseholdMember(env.DB, "family.member@example.com");
+		await removeAddressOn(env.DB, "family.member@example.com", Date.now());
 		const jwt = await token(privateKey, team);
 
 		const identity = await verifiedAccessIdentity(request(jwt), {
@@ -421,7 +419,7 @@ describe("verified Access identity and household members", () => {
 			vi.fn(async () => Response.json({ keys: [jwk] })),
 		);
 		await noteHouseholdMember(env.DB, "family.member@example.com", 100);
-		await removeHouseholdMember(env.DB, "family.member@example.com");
+		await removeAddressOn(env.DB, "family.member@example.com", Date.now());
 
 		const earlier = await token(privateKey, team, {
 			iat: Math.floor(Date.now() / 1000) - 60,
