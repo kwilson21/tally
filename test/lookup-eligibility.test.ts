@@ -648,6 +648,21 @@ describe("readEligibility: split parents keep their mark", () => {
 			owed: [parent],
 		});
 	});
+
+	it("a split parent Jev gave up on (five failures), with no mark and no answer, holds the text back (red before the fix)", async () => {
+		await clearedRow();
+		await addRow({ is_split: 1, jev_attempts: 5 });
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+	});
+
+	it("a split parent Jev gave up on, with a cleared mark that still matches, does not block", async () => {
+		await clearedRow();
+		const parent = await addRow({ is_split: 1, jev_attempts: 5 });
+		await markCleared(parent, 1);
+
+		await expectMaySearch();
+	});
 });
 
 describe("readEligibility: a key's privacy does not depend on insertion order", () => {
@@ -834,6 +849,14 @@ describe("readEligibility: a refund linked to its purchase follows it", () => {
 			.run();
 
 		expect(await decided()).toEqual({ kind: "private" });
+	});
+
+	it("a linked refund Jev gave up on (five failures), with no mark and no answer, holds the text back (red before the fix)", async () => {
+		const purchase = await clearedRow({ amount_cents: 1200 });
+		const refund = await addRow({ amount_cents: -1200, jev_attempts: 5 });
+		await linkAndRemark(refund, purchase);
+
+		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
 	});
 });
 

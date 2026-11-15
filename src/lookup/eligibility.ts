@@ -186,21 +186,23 @@ const RULES_SQL = `SELECT r.cleaned_text AS cleanedText FROM bank_text_rules r
 
 /** The jev state of a row, from its retry columns (retryStateOf), a split parent is never asked, and a filed row counts as answered only when it holds an answer or a mark. */
 function jevOf(row: ReadRow): EligibilityRow["jev"] {
-	// A split parent has no category of its own and Jev is not asked about it again, so it is never waiting. It still keeps
-	// its mark: answered when it has a lookup_cleared row or holds a Jev answer, otherwise never.
-	// A refund that follows its purchase is never asked (pendingForJev leaves it out), so it is never waiting either: it is
-	// answered when it has a lookup_cleared row or holds a Jev answer, otherwise never, as a split parent is.
-	if (row.isSplit === 1 || row.followsPurchase === 1)
-		return row.holdsAnswer === 1 || row.markInput !== null
-			? "answered"
-			: "never";
-
 	const state = retryStateOf({
 		attempts: row.attempts,
 		categoryId: row.categoryId,
 		categorySource: row.categorySource,
 		confidence: row.categoryConfidence,
 	});
+
+	// A split parent, and a refund that follows its purchase, is never waiting: Jev is not asked about it again. So it reads
+	// by its mark first; then gave_up when Jev failed on it five times (it holds its store back, as any gave-up row does);
+	// then answered when it holds a Jev answer; otherwise never.
+	if (row.isSplit === 1 || row.followsPurchase === 1) {
+		if (row.markInput !== null) return "answered";
+
+		if (state === "gave_up") return "gave_up";
+
+		return row.holdsAnswer === 1 ? "answered" : "never";
+	}
 
 	if (state === "waiting") return "waiting";
 
