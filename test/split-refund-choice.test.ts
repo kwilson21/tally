@@ -852,3 +852,24 @@ describe("removeSplit names a split refund that no longer fits its purchase", ()
 		expect(await linkOf(FIRST)).toBeNull();
 	});
 });
+
+describe("saveSplit only splits a whole purchase", () => {
+	it("refuses a part's id and changes nothing", async () => {
+		await saveSplit(db, PURCHASE, PARTS, "test");
+		const [part] = await partIds(PURCHASE);
+
+		await expect(
+			saveSplit(
+				db,
+				part,
+				[
+					{ categoryId: KIDS, amountCents: 3000 },
+					{ categoryId: HOUSEHOLD, amountCents: 3000 },
+				],
+				"test",
+			),
+		).rejects.toThrow(`No transaction ${part}`);
+		expect(await partIds(part)).toEqual([]);
+		expect(await partIds(PURCHASE)).toHaveLength(2);
+	});
+});
