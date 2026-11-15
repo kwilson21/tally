@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadMonth } from "../src/db/month";
-import { saveSplit } from "../src/db/transactions";
+import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { isMethod } from "./helpers/present";
 
@@ -827,5 +827,28 @@ describe("a split refund moves with its parts, which count once in the chosen pa
 			expect(await linkOf(REFUND_KIDS)).toBeNull();
 			expect(await linkOf(REFUND_HOUSEHOLD)).toBeNull();
 		});
+	});
+});
+
+describe("removeSplit names a split refund that no longer fits its purchase", () => {
+	it("unlinks the refund and names its date", async () => {
+		await saveSplit(
+			db,
+			FIRST,
+			[
+				{ categoryId: KIDS, amountCents: -2500 },
+				{ categoryId: HOUSEHOLD, amountCents: -2000 },
+			],
+			"test",
+		);
+		// The bank trims the purchase to $40.00: the $45.00 refund no longer fits beside the $20.00 one.
+		await db
+			.prepare("UPDATE transactions SET amount_cents = 4000 WHERE id = ?")
+			.bind(PURCHASE)
+			.run();
+
+		const result = await removeSplit(db, FIRST, "test");
+		expect(result.unlinked).toEqual(["2026-09-05"]);
+		expect(await linkOf(FIRST)).toBeNull();
 	});
 });

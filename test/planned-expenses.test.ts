@@ -2629,6 +2629,39 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 		expect(await linkOf(planId)).toBe(id);
 	});
 
+	it("a refund flagged as income is left out of the refunds a cash amount is refused for", async () => {
+		const id = await cashEntry(18000, dateIn(MONTH));
+		await refundOf(id, 9851);
+		await env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,refund_of_id,flag_income) SELECT 9852,id,?,-3000,'INCOME REFUND FIXTURE',?,1 FROM accounts WHERE type!='cash' LIMIT 1",
+		)
+			.bind(dateIn(MONTH), id)
+			.run();
+
+		const result = await saveEdit(
+			env.DB,
+			id,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: false,
+				cashDate: dateIn(LAST_MONTH),
+				cashAmountCents: 4000,
+			},
+			"demo",
+		);
+
+		expect(result).toEqual({
+			saved: false,
+			cashError: "refund",
+			refundCents: 5000,
+		});
+	});
+
 	it("a save refused by the batch's gate unlinks nothing either, though the route's own check let it through", async () => {
 		const id = await cashEntry(18000, dateIn(MONTH));
 		const planId = await plan("Car registration", 18000, MONTH, id);

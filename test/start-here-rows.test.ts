@@ -9,6 +9,7 @@ import {
 	startHereRows,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { present } from "./helpers/present";
 
 const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 
@@ -61,6 +62,29 @@ describe("startHereRows (spec §8.8)", () => {
 		expect(lines.paycheck?.id).toBe(await latestId("flag_income", thisMonth));
 		expect(lines.transfer?.id).toBe(await latestId("flag_transfer", thisMonth));
 		expect(lines.bakery?.id).toBe(110);
+	});
+
+	it("takes the later row when two flagged lines of the month share a date", async () => {
+		const paycheckId = present(await latestId("flag_income", thisMonth));
+
+		const other = present(
+			(
+				await env.DB.prepare(
+					"SELECT id FROM transactions WHERE substr(date, 1, 7) = ? AND id != ? AND parent_id IS NULL AND is_split = 0 AND flag_income = 0 AND flag_transfer = 0 ORDER BY id DESC LIMIT 1",
+				)
+					.bind(thisMonth, paycheckId)
+					.first<{ id: number }>()
+			)?.id,
+		);
+
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_income = 1, date = (SELECT date FROM transactions WHERE id = ?) WHERE id = ?",
+		)
+			.bind(paycheckId, other)
+			.run();
+
+		const { paycheck } = await startHereRows(env.DB, thisMonth);
+		expect(paycheck?.id).toBe(Math.max(paycheckId, other));
 	});
 
 	it("gives each line Tally's own row: the bank's text as the raw name, and the name Tally shows", async () => {

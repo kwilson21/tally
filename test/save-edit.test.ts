@@ -401,11 +401,13 @@ describe("saveEdit", () => {
 
 	it("a For person removed since the panel loaded is refused as personMissing, and nothing is saved", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
+
 		const forPerson = () =>
 			db
 				.prepare("SELECT for_person_id FROM transactions WHERE id = ?")
 				.bind(id)
 				.first<{ for_person_id: number | null }>();
+
 		const before = await forPerson();
 
 		const result = await saveEdit(
