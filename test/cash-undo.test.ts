@@ -1508,3 +1508,27 @@ describe("cashDeleteUndoExpiresInMs", () => {
 		expect(await cashDeleteUndoExpiresInMs(env.DB, token)).toBe(0);
 	});
 });
+
+describe("the cash delete hold's Undo window", () => {
+	it("refuses a hold older than the Undo window, and the entry stays deleted", async () => {
+		const id = await cashEntry();
+		const token = cashToken(await holdCashDelete(env.DB, id, "Market"));
+
+		await env.DB.prepare(
+			"UPDATE cash_delete_holds SET created_at=? WHERE token=?",
+		)
+			.bind(Date.now() - 11_000, token)
+			.run();
+
+		expect(await restoreCashDelete(env.DB, token)).toBeNull();
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE id=?",
+				)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(0);
+	});
+});
