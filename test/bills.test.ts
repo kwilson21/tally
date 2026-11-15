@@ -1335,6 +1335,38 @@ describe("Bills", () => {
 		expect(res.headers.get("HX-Push-Url")).toBe("/bills");
 	});
 
+	it("saves a deactivated bill as inactive, and leaves the others as they were", async () => {
+		const { id } = present(
+			await env.DB.prepare(
+				"SELECT id FROM bills WHERE active=1 ORDER BY id LIMIT 1",
+			).first<{ id: number }>(),
+		);
+
+		const activeBefore = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM bills WHERE active=1",
+		).first<{ n: number }>();
+
+		const res = await exports.default.fetch(
+			`http://tally.test/bills/${id}/deactivate`,
+			{
+				method: "POST",
+				headers: { "HX-Request": "true", Origin: "http://tally.test" },
+			},
+		);
+
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT active FROM bills WHERE id=?")
+				.bind(id)
+				.first("active"),
+		).toBe(0);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bills WHERE active=1",
+			).first("n"),
+		).toBe((activeBefore?.n ?? 0) - 1);
+	});
+
 	// A payment Plaid or Jev excluded can still pay a bill. Once linked it counts in Spent whatever its
 	// exclusion, and linking or unlinking never writes the exclusion (spec §6.1 rule 4, §8.5).
 	describe("a payment Plaid or Jev excluded that pays a bill", () => {
