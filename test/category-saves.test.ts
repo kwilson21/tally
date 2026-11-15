@@ -15,6 +15,7 @@ import {
 } from "../src/db/category-saves";
 import { Database } from "../src/db/database";
 import { resetDemo } from "../src/demo/reset";
+import { MAX_ACTIVE } from "../src/settings/category-form";
 import {
 	addCategory,
 	archiveCategory,
@@ -311,6 +312,85 @@ describe("a save on a list that changed since the rule read it", () => {
 		expect(await ending(statements())).toBe("NameTaken");
 		// A save that sets no name has no such refusal: the same failure there is a defect, and the request fails.
 		await expect(run(saveCategories(statements()))).rejects.toThrow(/UNIQUE/);
+	});
+});
+
+// Archive and restore through their rules, as the settings screen runs them (the live path): the cases the retired
+// setArchived helper used to cover, now on the code the app runs.
+describe("archive and restore through the rules", () => {
+	const archive = (id: number, today: string) =>
+		decideCategory(archiveCategory, { id, today }, archiveCategoryStatements);
+
+	const restore = (id: number, today: string) =>
+		decideCategory(restoreCategory, { id, today }, restoreCategoryStatements);
+
+	const transactionsOf = async (id: number) =>
+		(
+			await db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE category_id = ?",
+				)
+				.bind(id)
+				.first<{ n: number }>()
+		)?.n;
+
+	it("leaves the archive period open when a restore is refused because the list is full", async () => {
+		await archive(2, "2026-09-15");
+
+		// Fill the list to its limit, so the restore has no room.
+		const active = (await rows()).filter((c) => !c.archived).length;
+		await db.batch(
+			Array.from({ length: MAX_ACTIVE - active }, (_, i) =>
+				db
+					.prepare(
+						"INSERT INTO categories (name, icon, color) VALUES (?, 'tag', 'cat-blue')",
+					)
+					.bind(`Extra ${i + 1}`),
+			),
+		);
+
+		expect(await restore(2, "2026-10-01")).toEqual({ refused: "ListFull" });
+		expect((await rows()).find((c) => c.id === 2)?.archived).toBe(1);
+		expect(await periods(2)).toEqual([
+			{ archivedOn: "2026-09-15", restoredOn: null },
+		]);
+	});
+
+	it("opens a new period on a later archive and keeps the first one closed", async () => {
+		await archive(2, "2026-08-20");
+		await restore(2, "2026-10-05");
+		await archive(2, "2026-10-20");
+
+		expect(await periods(2)).toEqual([
+			{ archivedOn: "2026-08-20", restoredOn: "2026-10-05" },
+			{ archivedOn: "2026-10-20", restoredOn: null },
+		]);
+	});
+
+	it("leaves the category's transactions as they were, on archive and on restore", async () => {
+		const before = await transactionsOf(2);
+		expect(before).toBeGreaterThan(0);
+
+		await archive(2, "2026-09-15");
+		expect(await transactionsOf(2)).toBe(before);
+
+		await restore(2, "2026-10-01");
+		expect(await transactionsOf(2)).toBe(before);
+	});
+
+	it("keeps the first archive date when a later archive finds the category already archived", async () => {
+		await archive(5, "2026-09-30");
+
+		const later = await archive(5, "2026-10-01");
+
+		expect("decided" in later && Option.isNone(later.decided)).toBe(true);
+		expect((await rows()).find((c) => c.id === 5)).toMatchObject({
+			archived: 1,
+			archivedOn: "2026-09-30",
+		});
+		expect(await periods(5)).toEqual([
+			{ archivedOn: "2026-09-30", restoredOn: null },
+		]);
 	});
 });
 
