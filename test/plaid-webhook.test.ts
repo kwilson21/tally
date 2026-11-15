@@ -399,6 +399,57 @@ describe("Plaid webhook route", () => {
 		});
 	});
 
+	it("starts no sync for a disconnected bank, even when Plaid says updates are ready", async () => {
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES ('item-gone-2', ?, 'Gone Bank', 'person', datetime('now'))",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.run();
+		const sign = await signer();
+
+		const body = JSON.stringify({
+			item_id: "item-gone-2",
+			webhook_type: "TRANSACTIONS",
+			webhook_code: "SYNC_UPDATES_AVAILABLE",
+		});
+
+		const { token, jwk } = await sign(body);
+
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+			String(input).endsWith("/webhook_verification_key/get")
+				? Response.json({ key: { ...jwk, expired_at: null } })
+				: Response.json({}),
+		);
+
+		vi.stubGlobal("fetch", fetchMock);
+
+		const promises: Promise<unknown>[] = [];
+
+		expect(
+			(
+				await app.request(
+					"http://tally.test/webhooks/plaid",
+					{
+						method: "POST",
+						body,
+						headers: {
+							"content-type": "application/json",
+							"Plaid-Verification": token,
+						},
+					},
+					env,
+					collectingContext(promises),
+				)
+			).status,
+		).toBe(200);
+		await Promise.all(promises);
+		expect(
+			fetchMock.mock.calls.some(([input]) =>
+				String(input).endsWith("/transactions/sync"),
+			),
+		).toBe(false);
+	});
+
 	it("answers 503 so Plaid retries an expiry warning that loses three races in a row (decision 173)", async () => {
 		const row = await env.DB.prepare(
 			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person') RETURNING id",
