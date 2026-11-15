@@ -5,10 +5,10 @@ import { JEV_THRESHOLD } from "../ai/categorize";
 import { meetsConfidenceThreshold } from "../ai/confidence";
 import type { JevAnswer } from "../ai/decide";
 import { isUnsure } from "../ai/maybe";
-import type { JevSeen } from "../db/transactions";
+import { type JevSeen, jevInputOf } from "../db/transactions";
 
 /** A version tag in the hashed text, so a change to what the fingerprint covers changes every mark at once. */
-const MARK_VERSION = "lookup-input-v1";
+const MARK_VERSION = "lookup-input-v2";
 
 /** SHA-256 of a text, as lower-case hex. */
 export async function sha256Hex(text: string): Promise<string> {
@@ -24,18 +24,17 @@ export async function sha256Hex(text: string): Promise<string> {
 
 /**
  * The fingerprint of every fact Jev is told about a row (JevSeen), as one JSON array in a fixed order, so no key order
- * can change it. No date: Jev is not told one.
+ * can change it. It holds the name Jev is told (jevInputOf), not the own name, the chosen name or the suggestions, so a
+ * suggestion Jev is not told cannot clear or un-clear a row. The merchant key stays: the search text is read from it.
+ * No date: Jev is not told one.
  */
 export function inputMark(seen: JevSeen): Promise<string> {
 	return sha256Hex(
 		JSON.stringify([
 			MARK_VERSION,
 			seen.rawName,
-			seen.ownName,
+			jevInputOf(seen).displayName,
 			seen.merchantKey,
-			seen.merchantName,
-			seen.suggestedNames,
-			seen.suggestionStatus,
 			seen.amountCents,
 			seen.accountId,
 			seen.accountType,

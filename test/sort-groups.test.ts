@@ -381,7 +381,12 @@ describe("sortGroups with a fake step runner", () => {
 			runId: "run-budget-first",
 		});
 
-		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(done).toEqual({
+			asked: 0,
+			applied: 0,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(fetchImpl).not.toHaveBeenCalled();
 		// The group stops the run, so the same rows aren't read again by a second group in this run.
 		expect(fake.names()).not.toContain("group-2-read");
@@ -533,7 +538,12 @@ describe("sortGroups with a fake step runner", () => {
 			runId: "run-reserve-reject",
 		});
 
-		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(done).toEqual({
+			asked: 0,
+			applied: 0,
+			jevBusy: false,
+			failed: true,
+		});
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(fake.names()).toContain("group-1-write");
 		expect(fake.names()).not.toContain("group-2-read");
@@ -573,6 +583,67 @@ describe("sortGroups with a fake step runner", () => {
 		expect(fake.names()).not.toContain("group-2-read");
 	});
 
+	it("a reserve step that throws after its tries is reported as failed, not as Jev busy (#1113)", async () => {
+		const ids = await addWaiting(3);
+		const fake = fakeSteps({ fails: ["group-1-reserve"] });
+
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-reserve-failed",
+			},
+		);
+
+		expect(done.failed).toBe(true);
+		expect(done.jevBusy).toBe(false);
+	});
+
+	it("a write step that throws after its tries is reported as failed, not as Jev busy (#1113)", async () => {
+		const ids = await addWaiting(3);
+
+		const fake = fakeSteps({
+			fails: ["group-1-write"],
+			limits: { "group-1-write": 2 },
+		});
+
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-write-failed",
+			},
+		);
+
+		expect(done.failed).toBe(true);
+		expect(done.jevBusy).toBe(false);
+	});
+
+	it("an ask step that rejects loses its row and is not a failed group (#1113)", async () => {
+		const ids = await addWaiting(3);
+		const fake = fakeSteps({ fails: [`group-1-ask-${ids[1]}`] });
+
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-ask-lost",
+			},
+		);
+
+		expect(fake.names()).toContain("group-1-write");
+		expect(done.failed).toBe(false);
+	});
+
 	it("a short group that runs out of its 2-minute budget after 4 asks leaves 6 rows, and the next group asks them", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
@@ -599,7 +670,12 @@ describe("sortGroups with a fake step runner", () => {
 			fake.names().filter((name) => name.startsWith("group-2-ask-")),
 		).toHaveLength(6);
 		expect(fetchImpl).toHaveBeenCalledTimes(10);
-		expect(done).toEqual({ asked: 10, applied: 10 });
+		expect(done).toEqual({
+			asked: 10,
+			applied: 10,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(fake.names()).not.toContain("group-3-read");
 	});
 
@@ -623,7 +699,12 @@ describe("sortGroups with a fake step runner", () => {
 			runId: "run-short-budget-first",
 		});
 
-		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(done).toEqual({
+			asked: 0,
+			applied: 0,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(fake.names()).not.toContain("group-2-read");
 		expect(await turnRow()).toBeNull();
@@ -811,7 +892,12 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			runId: "run-again",
 		});
 
-		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 3,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(attemptsOf(fake, "group-1-write")).toBe(3);
 
@@ -833,7 +919,12 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			runId: "run-many-tries",
 		});
 
-		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 3,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
 		expect(attemptsOf(fake, "group-1-write")).toBe(5);
 		expect(await logged(ids)).toBe(3);
@@ -876,7 +967,12 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			expect(
 				fake.steps.find((step) => step.name === "group-1-write")?.config,
 			).toEqual(WRITE);
-			expect(done).toEqual({ asked: 0, applied: 0 });
+			expect(done).toEqual({
+				asked: 0,
+				applied: 0,
+				jevBusy: false,
+				failed: true,
+			});
 			expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
 				"sorting: save step Error",
 			]);
@@ -1004,7 +1100,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 					runId: "run-busy-replay",
 				},
 			),
-		).resolves.toEqual({ asked: 3, applied: 3 });
+		).resolves.toEqual({ asked: 3, applied: 3, jevBusy: false, failed: false });
 		expect(await logged(ids)).toBe(3);
 		expect(JSON.parse((await turnValue()) ?? "{}").id).toBe("other:1");
 	});
@@ -1045,7 +1141,12 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		);
 
 		expect(attemptsOf(fake, "group-1-write")).toBe(2);
-		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 3,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(await logged(ids)).toBe(3);
 		expect(await turnRow()).toBeNull();
 	});
@@ -1160,7 +1261,12 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			},
 		);
 
-		expect(done).toEqual({ asked: 2, applied: 2 });
+		expect(done).toEqual({
+			asked: 2,
+			applied: 2,
+			jevBusy: false,
+			failed: false,
+		});
 
 		const days = await db
 			.prepare(
@@ -1201,7 +1307,12 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 			},
 		);
 
-		expect(done).toEqual({ asked: 2, applied: 2 });
+		expect(done).toEqual({
+			asked: 2,
+			applied: 2,
+			jevBusy: false,
+			failed: false,
+		});
 
 		const days = await db
 			.prepare(
@@ -1310,7 +1421,12 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			expect(await logged([target])).toBe(0);
 			expect(await categoryOf(itemAt(ids, 0))).not.toBeNull();
 			expect(await categoryOf(itemAt(ids, 2))).not.toBeNull();
-			expect(done).toEqual({ asked: 3, applied: 2 });
+			expect(done).toEqual({
+				asked: 3,
+				applied: 2,
+				jevBusy: false,
+				failed: false,
+			});
 			expect(await callsUsed()).toBe(3);
 		},
 	);
@@ -1346,7 +1462,12 @@ describe("a changed row keeps no answer (decision 143)", () => {
 
 		expect(await categoryOf(credit)).toBeNull();
 		expect(await logged([credit])).toBe(0);
-		expect(done).toEqual({ asked: 3, applied: 2 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 2,
+			jevBusy: false,
+			failed: false,
+		});
 	});
 
 	it("a split part keeps no answer once its parent's own name changed", async () => {
@@ -1539,7 +1660,12 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			},
 		);
 
-		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 3,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(await logged(ids)).toBe(3);
 	});
 
@@ -1738,7 +1864,12 @@ describe("a category archived or removed since the read keeps no answer (decisio
 				{ rulesApplied: true, onlyIds: ids, runId: "run-archived" },
 			);
 
-			expect(done).toEqual({ asked: 3, applied: 2 });
+			expect(done).toEqual({
+				asked: 3,
+				applied: 2,
+				jevBusy: false,
+				failed: false,
+			});
 			expect(await categoryOf(target)).toBeNull();
 			expect(await storedAnswer(target)).toEqual({
 				suggested: null,
@@ -1791,7 +1922,12 @@ describe("a category archived or removed since the read keeps no answer (decisio
 			expect(
 				fake.steps.find((step) => step.name === "group-1-write")?.attempts,
 			).toBe(1);
-			expect(done).toEqual({ asked: 3, applied: 2 });
+			expect(done).toEqual({
+				asked: 3,
+				applied: 2,
+				jevBusy: false,
+				failed: false,
+			});
 			expect(await categoryOf(target)).toBeNull();
 			expect(await storedAnswer(target)).toEqual({
 				suggested: null,
@@ -1835,7 +1971,12 @@ describe("a category archived or removed since the read keeps no answer (decisio
 
 		expect(await categoryOf(credit)).toBeNull();
 		expect(await logged([credit])).toBe(0);
-		expect(done).toEqual({ asked: 3, applied: 2 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 2,
+			jevBusy: false,
+			failed: false,
+		});
 	});
 
 	it("a category archived and restored before the save still applies", async () => {
@@ -1861,7 +2002,12 @@ describe("a category archived or removed since the read keeps no answer (decisio
 			{ rulesApplied: true, onlyIds: ids, runId: "run-restored" },
 		);
 
-		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 3,
+			jevBusy: false,
+			failed: false,
+		});
 
 		for (const id of ids) expect(await categoryOf(id)).not.toBeNull();
 		expect(await logged(ids)).toBe(3);
@@ -1887,7 +2033,12 @@ describe("the reservation record (decision 143)", () => {
 		expect(
 			fake.steps.find((step) => step.name === "group-1-reserve")?.attempts,
 		).toBe(2);
-		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(done).toEqual({
+			asked: 3,
+			applied: 3,
+			jevBusy: false,
+			failed: false,
+		});
 		expect(await callsUsed()).toBe(3);
 	});
 
@@ -2132,6 +2283,37 @@ describe("sortGroups waits out a busy Jev (decision 145)", () => {
 		expect(await failedForGood(ids)).toBe(0);
 		// 30 answers and the one 429, each a call of the day.
 		expect(await callsUsed()).toBe(31);
+	});
+
+	it("reports jevBusy when the run stops because nextWait says Jev stayed busy (#1113)", async () => {
+		const ids = await addWaiting(3);
+		const { sleeps, sleep } = recordingSleep();
+
+		const done = await sortWith(
+			fakeSteps(),
+			vi.fn(async () => rateLimit("5")),
+			ids,
+			"run-busy-stays",
+			sleep,
+		);
+
+		expect(sleeps.length).toBeGreaterThan(0);
+		expect(done.jevBusy).toBe(true);
+	});
+
+	it("does not report jevBusy when the run ends for another reason", async () => {
+		const ids = await addWaiting(3);
+		const { sleep } = recordingSleep();
+
+		const done = await sortWith(
+			fakeSteps(),
+			vi.fn(async () => reply(0.9)),
+			ids,
+			"run-not-busy",
+			sleep,
+		);
+
+		expect(done.jevBusy).toBe(false);
 	});
 
 	it("honours a longer retry-after: a 429 with retry-after 90 waits 90 s", async () => {
