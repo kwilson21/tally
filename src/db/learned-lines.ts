@@ -4,10 +4,13 @@
 // loader. A person's Change (decision 163) is a rule on the text: withBankTextRules shows the rule's category on the
 // line, or makes a line from the rule alone, and the loader does that overlay, so Jev is told the same line.
 
+import { asc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { cleanBankText } from "../clean-bank-text";
 import { isVague, VAGUE_TEXTS } from "../same-text-matches";
 import { activeBankTextRules, type BankTextRule } from "./bank-text-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
+import { categories, forgottenTexts } from "./schema";
 
 /** How many of a text's latest answers decide its line (decision 162). */
 export const LEARNED_WINDOW = 5;
@@ -161,6 +164,7 @@ export function learnedLines(
  * calls mixed (decision 156), whose parts follow their parent. `excluded = 0` is strict: a bill's link does not make an
  * excluded row count here, unlike the budget (INCLUDED).
  */
+// Stays raw SQL: it embeds jevSaysMixedSql's shared SQL text (decision 179).
 const ANSWERS_SQL = `SELECT t.id, t.date, t.raw_name AS rawName, t.updated_at AS updatedAt,
 		t.category_id AS categoryId, c.name AS categoryName, c.icon, c.color
 	FROM transactions t JOIN categories c ON c.id = t.category_id
@@ -224,11 +228,12 @@ export function withBankTextRules(
 export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 	const { results: rows } = await db.prepare(ANSWERS_SQL).all<AnswerRow>();
 
-	const { results: forgotten } = await db
-		.prepare(
-			"SELECT cleaned_text AS cleanedText, forgotten_at AS forgottenAt FROM forgotten_texts",
-		)
-		.all<Forgotten>();
+	const forgotten = await drizzle(db)
+		.select({
+			cleanedText: forgottenTexts.cleanedText,
+			forgottenAt: forgottenTexts.forgottenAt,
+		})
+		.from(forgottenTexts);
 
 	return withBankTextRules(
 		learnedLines(rows, forgotten),
@@ -240,11 +245,10 @@ export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 export async function learnedCategoryChoices(
 	db: D1Database,
 ): Promise<{ id: number; name: string }[]> {
-	const { results } = await db
-		.prepare(
-			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		)
-		.all<{ id: number; name: string }>();
-
-	return results;
+	return drizzle(db)
+		.select({ id: categories.id, name: categories.name })
+		.from(categories)
+		.where(eq(categories.archived, 0))
+		.orderBy(asc(categories.sortOrder), asc(categories.name))
+		.all();
 }
