@@ -1,15 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { householdSettingUpsert } from "./household-setting";
 import { householdSettings } from "./schema";
-
-const saveSetting = (db: D1Database, key: string, value: string) =>
-	drizzle(db)
-		.insert(householdSettings)
-		.values({ key, value })
-		.onConflictDoUpdate({
-			target: householdSettings.key,
-			set: { value: sql`excluded.value` },
-		});
 
 export async function readBankSignInEmails(db: D1Database): Promise<boolean> {
 	const row = await drizzle(db)
@@ -25,7 +17,7 @@ export async function saveBankSignInEmails(
 	db: D1Database,
 	on: boolean,
 ): Promise<void> {
-	await saveSetting(db, "bank_sign_in_emails", on ? "on" : "off");
+	await householdSettingUpsert(db, "bank_sign_in_emails", on ? "on" : "off");
 }
 
 /**
