@@ -1,3 +1,5 @@
+import { asc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
@@ -6,6 +8,7 @@ import { householdToday } from "../dates";
 import { decideCreate } from "../db/category-suggestions";
 import { runWith } from "../db/database";
 import { runningRecheck, startResortFor } from "../db/resort-start";
+import { categories as categoriesTable } from "../db/schema";
 import {
 	type NewCategorySuggestion,
 	newCategoryItem,
@@ -44,8 +47,6 @@ import { TextInput } from "../views/text-input";
 import { CHANGED_SUGGESTION } from "./suggestions";
 
 type App = { Bindings: Env & { JEV_API_KEY?: string } };
-
-type Category = { id: number; name: string; icon: string; color: string };
 
 type Values = {
 	categoryId: number | null;
@@ -119,9 +120,18 @@ async function renderOrganize(
 
 	const [allGroups, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
-		c.env.DB.prepare(
-			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		).all<Category>(),
+		// Active categories only: categoryNames also lists the archived ones, so it is not used here (decision 179).
+		drizzle(c.env.DB)
+			.select({
+				id: categoriesTable.id,
+				name: categoriesTable.name,
+				icon: categoriesTable.icon,
+				color: categoriesTable.color,
+			})
+			.from(categoriesTable)
+			.where(eq(categoriesTable.archived, 0))
+			.orderBy(asc(categoriesTable.sortOrder), asc(categoriesTable.name))
+			.all(),
 	]);
 
 	const currentNames = new Set(allGroups.map((group) => group.name));
@@ -266,7 +276,7 @@ async function renderOrganize(
 							>
 								<legend class="text-base text-ink">Category</legend>
 								<div class="flex flex-wrap gap-2">
-									{categories.results.map((category) => (
+									{categories.map((category) => (
 										<Chip
 											type="radio"
 											name="category"
