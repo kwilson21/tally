@@ -5,6 +5,10 @@ import {
 	CATEGORY_SUGGESTION_LABELS,
 	categorySuggestionMachine,
 } from "../src/machines/category-suggestion";
+import {
+	FEEDBACK_FILING_LABELS,
+	feedbackFiling,
+} from "../src/machines/feedback-filing";
 import { machineGraph } from "../src/machines/graph";
 import {
 	MERCHANT_SUGGESTION_LABELS,
@@ -35,6 +39,7 @@ const MACHINES = [
 	[sortingTurnMachine, SORTING_TURN_LABELS],
 	[plaidLeaseMachine, PLAID_LEASE_LABELS],
 	[readyClaimMachine, READY_CLAIM_LABELS],
+	[feedbackFiling, FEEDBACK_FILING_LABELS],
 ] as const;
 
 // The machine's definition as written, read straight from `config` and not through machineGraph, so these checks can
@@ -199,6 +204,17 @@ describe("MachineDiagram", () => {
 							`${machine.id}.${key}.${event}`,
 						).toBeTruthy();
 			}
+		}
+	});
+
+	it("says every arrow of the feedback filing in plain words, read from each transition", () => {
+		for (const [key, state] of Object.entries(configStates(feedbackFiling))) {
+			for (const [event, raw] of Object.entries(state.on ?? {}))
+				for (const transition of Array.isArray(raw) ? raw : [raw])
+					expect(
+						transition.description,
+						`feedbackFiling.${key}.${event}`,
+					).toBeTruthy();
 		}
 	});
 
