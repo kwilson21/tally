@@ -94,7 +94,7 @@ export type Req = {
 	query?: [string, string][];
 	form?: [string, Value][];
 	/** Seeds the state the request reads before it is sent. */
-	prep?: "none" | "learned" | "organize" | "suggest";
+	prep?: "none" | "learned" | "organize" | "suggest" | "budget";
 };
 
 const sha = async (text: string) => {
@@ -205,6 +205,18 @@ async function prepare(prep: Req["prep"]): Promise<void> {
 				"UPDATE transactions SET category_id = NULL, category_source = NULL WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
 			)
 			.run();
+	}
+
+	if (prep === "budget") {
+		// The live category's budget, saved the way the budget sheet saves it.
+		await exports.default.fetch(`${BASE}/budget/${ids.live}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: "budget=700",
+		});
 	}
 
 	if (prep === "suggest") {
@@ -353,6 +365,8 @@ export async function cases(): Promise<Req[]> {
 				method: "POST",
 				path: `/budget/${encodeURIComponent(text)}/nudge/up`,
 				hx,
+				// A nudge only moves a budgeted category, so the live one gets its budget first.
+				prep: "budget",
 			});
 		}
 
