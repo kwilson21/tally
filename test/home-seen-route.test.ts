@@ -180,20 +180,33 @@ describe("POST /home/seen: the presence check-in", () => {
 		await setSeen(PERSON, "-31 seconds");
 
 		// The database as this request sees it: once it has read the member's row, another tab's check-in lands.
+		// Drizzle sends the member read as a lower-case select and reads it with raw, all or first, so the hook matches
+		// that select on home_seen_at, and each of those reads lets the other tab's check-in land after it.
 		const afterTheRead = (sql: string) => {
 			const statement = env.DB.prepare(sql);
 
-			if (!sql.startsWith("SELECT removed_at IS NULL")) return statement;
+			if (!/^select\b/i.test(sql) || !sql.includes("home_seen_at"))
+				return statement;
+
+			const thenOtherTab =
+				(bound: D1PreparedStatement, method: "first" | "raw" | "all") =>
+				async () => {
+					const result = await bound[method]();
+					await setSeen(PERSON, "+5 seconds");
+
+					return result;
+				};
 
 			return {
-				bind: (...values: (string | number)[]) => ({
-					first: async () => {
-						const row = await statement.bind(...values).first();
-						await setSeen(PERSON, "+5 seconds");
+				bind: (...values: (string | number)[]) => {
+					const bound = statement.bind(...values);
 
-						return row;
-					},
-				}),
+					return {
+						first: thenOtherTab(bound, "first"),
+						raw: thenOtherTab(bound, "raw"),
+						all: thenOtherTab(bound, "all"),
+					};
+				},
 			};
 		};
 
