@@ -13,6 +13,7 @@ import {
 	type Eligibility,
 	type EligibilityRow,
 	eligibility,
+	jevOf,
 	type ReadRow,
 	readEligibility,
 	readEligibilityRows,
@@ -651,9 +652,14 @@ describe("readEligibility: split parents keep their mark", () => {
 
 	it("a split parent Jev gave up on (five failures), with no mark and no answer, holds the text back (red before the fix)", async () => {
 		await clearedRow();
-		await addRow({ is_split: 1, jev_attempts: 5 });
+		const parent = await addRow({ is_split: 1, jev_attempts: 5 });
 
-		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+		// Owed, not empty: Jev was asked about the parent (five failures), so it is answered, and with no mark it is owed.
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [parent],
+		});
 	});
 
 	it("a split parent Jev gave up on, with a cleared mark that still matches, does not block", async () => {
@@ -737,7 +743,7 @@ function readRow(
 		categorySource: "jev",
 		categoryConfidence: null,
 		attempts: 0,
-		holdsAnswer: 1,
+		jevAsked: 1,
 		storedPrivate: null,
 		merchantRule: 0,
 		markInput: null,
@@ -771,6 +777,67 @@ describe("readRowFacts: the account guard and the flags, pure", () => {
 			readRowFacts(readRow({ accountType: "depository" }), noPrivateText).sign,
 		).toBe(true);
 	});
+});
+
+describe("jevOf: every combination of branch, retry state, failed asks, mark and Jev-asked", () => {
+	type Retry = "waiting" | "unsure" | "gave_up" | "filed";
+
+	/** The row's columns for each retry state, with the failed-ask count it carries. */
+	const retryColumns = (state: Retry, failed: boolean) => ({
+		categoryId: state === "filed" ? 1 : null,
+		categorySource: state === "filed" ? "user" : null,
+		categoryConfidence: state === "unsure" ? 0.5 : null,
+		attempts: state === "gave_up" ? 5 : failed ? 1 : 0,
+	});
+
+	const cases: {
+		branch: "ordinary" | "split" | "refund";
+		state: Retry;
+		failed: boolean;
+		mark: boolean;
+		holds: boolean;
+	}[] = [];
+
+	for (const branch of ["ordinary", "split", "refund"] as const)
+		for (const state of ["waiting", "unsure", "gave_up", "filed"] as const)
+			for (const failed of [false, true])
+				for (const mark of [false, true])
+					for (const holds of [false, true])
+						cases.push({ branch, state, failed, mark, holds });
+
+	/** The rule in the jevOf comment, written out separately: the table checks the code against it. */
+	const expected = (c: (typeof cases)[number], asked: boolean) => {
+		if (c.branch === "ordinary" && c.state === "waiting") return "waiting";
+
+		if (c.branch === "ordinary" && c.state === "gave_up" && !c.mark)
+			return "gave_up";
+
+		return asked ? "answered" : "never";
+	};
+
+	it.each(cases)(
+		"$branch, $state, failed $failed, mark $mark, holds $holds",
+		(c) => {
+			const attempts = retryColumns(c.state, c.failed).attempts;
+			const asked = c.mark || c.holds || attempts > 0;
+
+			const row = readRow({
+				...retryColumns(c.state, c.failed),
+				isSplit: c.branch === "split" ? 1 : 0,
+				followsPurchase: c.branch === "refund" ? 1 : 0,
+				markInput: c.mark ? "a-fingerprint" : null,
+				markCleared: c.mark ? 1 : null,
+				jevAsked: asked ? 1 : 0,
+			});
+
+			const result = jevOf(row);
+
+			expect(result).toBe(expected(c, asked));
+
+			// Jev was asked or a mark exists: never a row that reads as never.
+			if (asked || c.mark) expect(result).not.toBe("never");
+		},
+	);
 });
 
 describe("readEligibility: a refund linked to its purchase follows it", () => {
@@ -856,7 +923,12 @@ describe("readEligibility: a refund linked to its purchase follows it", () => {
 		const refund = await addRow({ amount_cents: -1200, jev_attempts: 5 });
 		await linkAndRemark(refund, purchase);
 
-		expect(await decided()).toEqual({ kind: "not_yet", why: "rows", owed: [] });
+		// Owed, not empty: Jev was asked about the refund (five failures), so it is answered, and with no mark it is owed.
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [refund],
+		});
 	});
 });
 
@@ -906,6 +978,94 @@ describe("readEligibility: a row Jev gave up on after a privacy answer", () => {
 			kind: "not_yet",
 			why: "rows",
 			owed: [failed],
+		});
+	});
+});
+
+describe("readEligibility: a row Jev was asked about holds its store until cleared", () => {
+	/** A person files a row through the edit panel's own save (saveEdit with a category), as the person's choice. */
+	const personFiles = (id: number) =>
+		saveEdit(
+			db,
+			id,
+			{
+				categoryId: other,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: false,
+			},
+			WHO,
+		);
+
+	// The store's cleared row is made after the person's save, so its mark is taken with the merchant row the save writes.
+	it("a row Jev failed five times on, then a person filed, with no mark, holds the store back as owed (red before the fix)", async () => {
+		const id = await addRow({ jev_attempts: 5 });
+		await personFiles(id);
+		await clearedRow();
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [id],
+		});
+	});
+
+	it("a row Jev failed once on, then a person filed, with no mark, holds the store back as owed", async () => {
+		const id = await addRow({ jev_attempts: 1 });
+		await personFiles(id);
+		await clearedRow();
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [id],
+		});
+	});
+
+	it("the same filed row with a current cleared mark does not block", async () => {
+		const id = await addRow({ jev_attempts: 5 });
+		await personFiles(id);
+		await clearedRow();
+		await markCleared(id, 1);
+
+		await expectMaySearch();
+	});
+
+	it("a row a person filed that Jev was never asked about (no attempts, no answer, no mark) does not block", async () => {
+		const id = await addRow({});
+		await personFiles(id);
+		await clearedRow();
+
+		expect(id).toBeGreaterThan(0);
+		await expectMaySearch();
+	});
+
+	it("an unsure row with no mark is answered and owed, and blocks its store", async () => {
+		await clearedRow();
+
+		const id = await addRow({
+			category_confidence: 0.5,
+			jev_category_id: food,
+		});
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [id],
+		});
+	});
+
+	it("a split parent Jev was asked about (attempts above zero) and that has no mark is owed and blocks", async () => {
+		await clearedRow();
+		const parent = await addRow({ is_split: 1, jev_attempts: 1 });
+
+		expect(await decided()).toEqual({
+			kind: "not_yet",
+			why: "rows",
+			owed: [parent],
 		});
 	});
 });

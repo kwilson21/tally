@@ -102,6 +102,16 @@ export function holdsJevAnswerSql(alias: string): string {
 }
 
 /**
+ * The one rule for "Jev was asked about this row": it has a lookup_cleared row, or it holds a Jev answer (holdsJevAnswerSql),
+ * or Jev has failed on it at least once (jev_attempts above zero, even at the cap). A row a person filed that none of these
+ * touch was never asked, so a person's or a rule's choice alone never holds its store back.
+ */
+export function jevAskedSql(alias: string): string {
+	return `(${holdsJevAnswerSql(alias)} OR ${alias}.jev_attempts > 0
+		OR EXISTS (SELECT 1 FROM lookup_cleared jaMark WHERE jaMark.transaction_id = ${alias}.id))`;
+}
+
+/**
  * A read row's privacy and sign, pure: `privateText` judges a text (privateTextReason) and is passed in so each distinct text is
  * judged once. A row with no account is never a sign (the LEFT JOIN leaves its account empty), but its privacy facts still apply.
  */
@@ -154,7 +164,8 @@ export type ReadRow = JevSeenColumns & {
 	categorySource: string | null;
 	categoryConfidence: number | null;
 	attempts: number;
-	holdsAnswer: number;
+	/** jevAskedSql: Jev was asked about this row (an answer, a mark, or a failed ask). */
+	jevAsked: number;
 	storedPrivate: number | null;
 	merchantRule: number;
 	markInput: string | null;
@@ -168,7 +179,7 @@ const READ_SQL = `SELECT t.id AS id, t.raw_name AS rawName, t.plaid_category AS 
 		t.parent_id AS parentId, t.is_split AS isSplit, (${FOLLOWS_PURCHASE}) AS followsPurchase, a.subtype AS accountSubtype,
 		t.category_id AS categoryId, t.category_source AS categorySource,
 		t.category_confidence AS categoryConfidence, t.jev_attempts AS attempts,
-		${holdsJevAnswerSql("t")} AS holdsAnswer, mlt.private AS storedPrivate,
+		${jevAskedSql("t")} AS jevAsked, mlt.private AS storedPrivate,
 		EXISTS (SELECT 1 FROM merchants m JOIN categories c ON c.id = m.default_category_id
 			WHERE m.raw_name = ${merchantKeySql("t")} AND c.archived = 0) AS merchantRule,
 		lc.input_mark AS markInput, lc.cleared AS markCleared,
@@ -184,8 +195,16 @@ const READ_SQL = `SELECT t.id AS id, t.raw_name AS rawName, t.plaid_category AS 
 const RULES_SQL = `SELECT r.cleaned_text AS cleanedText FROM bank_text_rules r
 	JOIN categories c ON c.id = r.category_id WHERE c.archived = 0`;
 
-/** The jev state of a row, from its retry columns (retryStateOf), a split parent is never asked, and a filed row counts as answered only when it holds an answer or a mark. */
-function jevOf(row: ReadRow): EligibilityRow["jev"] {
+/**
+ * The jev state of a row, for every row. Truth table (branch = a split parent or a refund that follows its purchase):
+ *   waiting state, not branch              -> waiting (ordinary: Jev is still to be asked)
+ *   gave_up state, not branch, no mark     -> gave_up (uncategorized, Jev gave up, no privacy answer: BUG_GAVE_UP_OK)
+ *   anything else                          -> answered when Jev was asked (jevAskedSql), otherwise never
+ * So a filed, unsure, branch or gave-up-with-mark row that Jev was ever asked about is answered (and owed without a current
+ * mark); only a row Jev was never asked about, filed by a person or a rule, is never. The combinations are walked in
+ * test/lookup-eligibility.test.ts.
+ */
+export function jevOf(row: ReadRow): EligibilityRow["jev"] {
 	const state = retryStateOf({
 		attempts: row.attempts,
 		categoryId: row.categoryId,
@@ -193,27 +212,14 @@ function jevOf(row: ReadRow): EligibilityRow["jev"] {
 		confidence: row.categoryConfidence,
 	});
 
-	// A split parent, and a refund that follows its purchase, is never waiting: Jev is not asked about it again. So it reads
-	// by its mark first; then gave_up when Jev failed on it five times (it holds its store back, as any gave-up row does);
-	// then answered when it holds a Jev answer; otherwise never.
-	if (row.isSplit === 1 || row.followsPurchase === 1) {
-		if (row.markInput !== null) return "answered";
+	const branch = row.isSplit === 1 || row.followsPurchase === 1;
 
-		if (state === "gave_up") return "gave_up";
+	if (!branch && state === "waiting") return "waiting";
 
-		return row.holdsAnswer === 1 ? "answered" : "never";
-	}
+	if (!branch && state === "gave_up" && row.markInput === null)
+		return "gave_up";
 
-	if (state === "waiting") return "waiting";
-
-	// A row Jev gave up on after a privacy answer keeps that answer: its mark decides, as for any answered row. Without a mark,
-	// it is still gave_up, and holds its store back (BUG_GAVE_UP_OK).
-	if (state === "gave_up")
-		return row.markInput !== null ? "answered" : "gave_up";
-
-	if (state === "unsure") return "answered";
-
-	return row.holdsAnswer === 1 || row.markInput !== null ? "answered" : "never";
+	return row.jevAsked === 1 ? "answered" : "never";
 }
 
 /**
