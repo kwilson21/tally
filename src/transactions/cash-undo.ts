@@ -1,5 +1,7 @@
+import * as Schema from "effect/Schema";
 import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
+import { parseStoredWith } from "../db/stored-shape";
 import type { Json } from "../json";
 import { UNDO_MS, undoLeftMs } from "../undo";
 
@@ -8,10 +10,25 @@ type Row = { [key: string]: Json };
 export type Snapshot = {
 	transaction: Row;
 	parts: Row[];
-	payments: (Row & { bill_name: string })[];
+	payments: Row[];
 	refunds: Row[];
 	plans: { id: number; transaction_id: number }[];
 };
+
+/**
+ * A stored row: a plain object, whose keys are the column names and stay as stored (the restore writes each key as a column),
+ * and whose values are not checked, since the restore binds them as JSON. Schema.Unknown does not recurse, so a deeply
+ * nested value is kept whole.
+ */
+const StoredRow = Schema.Record(Schema.String, Schema.Unknown);
+
+const StoredRows = Schema.mutable(Schema.Array(StoredRow));
+
+const StoredPlans = Schema.mutable(
+	Schema.Array(
+		Schema.Struct({ id: Schema.Number, transaction_id: Schema.Number }),
+	),
+);
 
 const jsonColumn = (column: string, alias = "") =>
 	`json_extract(${alias}value, '$."${column}"')`;
@@ -77,20 +94,40 @@ export async function cashDeleteUndoExpiresInMs(db: D1Database, token: string) {
 	return hold ? undoLeftMs(hold.created_at, Date.now()) : 0;
 }
 
-/** The snapshot the five stored columns hold, parsed as they are stored (no shape is checked yet). */
+/**
+ * The snapshot the five stored columns hold, as they are stored. Text that is not JSON throws its SyntaxError (as JSON.parse
+ * always did), and every column is parsed before any shape is judged. A column of the wrong shape makes the whole snapshot
+ * null, which the restore answers as "cannot restore", so nothing is written (#1120, decision 233).
+ */
 export function snapshotOf(hold: {
 	transaction_row: string;
 	split_rows: string;
 	payment_rows: string;
 	refund_rows: string;
 	plan_rows: string;
-}): Snapshot {
+}): Snapshot | null {
+	const transaction = parseStoredWith(StoredRow, hold.transaction_row);
+	const parts = parseStoredWith(StoredRows, hold.split_rows);
+	const payments = parseStoredWith(StoredRows, hold.payment_rows);
+	const refunds = parseStoredWith(StoredRows, hold.refund_rows);
+	const plans = parseStoredWith(StoredPlans, hold.plan_rows);
+
+	if (
+		transaction === null ||
+		parts === null ||
+		payments === null ||
+		refunds === null ||
+		plans === null
+	)
+		return null;
+
+	// SAFETY: each text was JSON.parse'd above, so every value in these is a Json value; the Schemas checked only the shape.
 	return {
-		transaction: JSON.parse(hold.transaction_row),
-		parts: JSON.parse(hold.split_rows),
-		payments: JSON.parse(hold.payment_rows),
-		refunds: JSON.parse(hold.refund_rows),
-		plans: JSON.parse(hold.plan_rows),
+		transaction: transaction as Row,
+		parts: parts as Row[],
+		payments: payments as Row[],
+		refunds: refunds as Row[],
+		plans,
 	};
 }
 
@@ -119,6 +156,8 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 	if (hold.created_at <= now - UNDO_MS || hold.created_at > now) return null;
 
 	const snapshot = snapshotOf(hold);
+
+	if (snapshot === null) return null;
 
 	const transaction = snapshot.transaction;
 	const columns = Object.keys(transaction);
