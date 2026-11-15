@@ -1,6 +1,8 @@
+import * as Schema from "effect/Schema";
 import { isRealMonth } from "../dates";
 import { occurrenceAmountSql } from "../db/bill-amounts";
 import { occurrenceMonthSql } from "../db/counted-month";
+import { readStoredWith } from "../db/stored-shape";
 import { BILL_AMOUNT_TOLERANCE_PERCENT } from "./status";
 
 /**
@@ -45,13 +47,10 @@ export function unpaidBillsSentence(bills: UnpaidBill[]): string {
 	return `The ${bill.name} bill for ${occurrenceWords(bill.period)} is no longer paid.`;
 }
 
-const isUnpaidBill = (value: unknown): value is UnpaidBill =>
-	typeof value === "object" &&
-	value !== null &&
-	"name" in value &&
-	typeof value.name === "string" &&
-	"period" in value &&
-	typeof value.period === "string";
+/** One stored bill: a name and a period, and any other keys (billId) left as they are. Checked entry by entry. */
+const isUnpaidBill = Schema.is(
+	Schema.Struct({ name: Schema.String, period: Schema.String }),
+);
 
 /** The bills a purchase's bank change stored, read back for its note; nothing for none or a damaged value. */
 export function parseUnpaidBills(
@@ -59,13 +58,9 @@ export function parseUnpaidBills(
 ): UnpaidBill[] {
 	if (!stored) return [];
 
-	try {
-		const parsed: unknown = JSON.parse(stored);
+	const rows = readStoredWith(Schema.Array(Schema.Unknown), stored);
 
-		return Array.isArray(parsed) ? parsed.filter(isUnpaidBill) : [];
-	} catch {
-		return [];
-	}
+	return rows ? rows.filter(isUnpaidBill) : [];
 }
 
 /** The sentence a purchase's note adds for the bills its bank change unlinked: " The … is no longer paid.", or "". */

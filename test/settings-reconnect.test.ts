@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	noteHouseholdMember,
 	readBankSignInEmails,
-	removeHouseholdMember,
 	saveBankSignInEmails,
 } from "../src/db/reconnect";
 import { resetDemo } from "../src/demo/reset";
@@ -15,6 +14,7 @@ import {
 	runReconnectReminders,
 } from "../src/reconnect/reminders";
 import { recordSorting } from "./record-sorting";
+import { removeAddressOn } from "./sign-in-address";
 
 // Every scheduled call here runs with a stand-in sorting binding, so no real instance starts (test/record-sorting.ts).
 recordSorting();
@@ -920,7 +920,7 @@ describe("bank sign-in reminder Settings", () => {
 
 	it("restores a removed address only for a session issued after removal", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
-		await removeHouseholdMember(env.DB, "dana@example.com");
+		await removeAddressOn(env.DB, "dana@example.com", Date.now());
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 
 		let row = await env.DB.prepare(
@@ -982,7 +982,7 @@ describe("bank sign-in reminder Settings", () => {
 
 	it("leaves a removed member's last visit alone when the visit has no issue time", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
-		await removeHouseholdMember(env.DB, "dana@example.com");
+		await removeAddressOn(env.DB, "dana@example.com", Date.now());
 		await env.DB.prepare(
 			"UPDATE household_members SET last_seen_at = '2026-01-01 00:00:00' WHERE email = ?",
 		)

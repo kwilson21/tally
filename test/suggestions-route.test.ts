@@ -249,6 +249,42 @@ beforeEach(async () => {
 	]);
 });
 
+// Characterisation (#963): the category options of the "something else" answer are the active categories only, in
+// sort order and then name, as the page read them before the Drizzle conversion.
+describe("GET /settings/suggestions: the category options (#963)", () => {
+	it("offers the active categories only, in sort order then name", async () => {
+		const ids = await oneOfEach();
+		await db.batch([
+			db.prepare(
+				"UPDATE categories SET archived = 1 WHERE id = (SELECT MIN(id) FROM categories WHERE archived = 0)",
+			),
+			db.prepare(
+				"UPDATE categories SET sort_order = -1 WHERE id = (SELECT MAX(id) FROM categories WHERE archived = 0)",
+			),
+		]);
+
+		const { res, html } = await get(
+			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`,
+		);
+
+		const offered = [...html.matchAll(/<option value="(\d+)"/g)].map((m) =>
+			Number(m[1]),
+		);
+
+		const expected = (
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+				)
+				.all<{ id: number }>()
+		).results.map((row) => row.id);
+
+		expect(res.status).toBe(200);
+		expect(expected.length).toBeGreaterThan(1);
+		expect(offered).toEqual(expected);
+	});
+});
+
 describe("GET /settings/suggestions", () => {
 	it("asks the first item of the queue, with its place and the one question", async () => {
 		const ids = await oneOfEach();

@@ -1,3 +1,5 @@
+import { asc, count, gt } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
@@ -46,6 +48,7 @@ import {
 } from "../db/never-suggest";
 import { readBankSignInEmails } from "../db/reconnect";
 import { runningRecheck, startResortFor } from "../db/resort-start";
+import { householdPeople } from "../db/schema";
 import {
 	addPersonStatements,
 	addressFacts,
@@ -461,9 +464,11 @@ async function renderContents(c: Context<App>) {
 	const tally = await readAiTally(db, today);
 	const bankEmailsOn = await readBankSignInEmails(db);
 
-	const people = await db
-		.prepare("SELECT COUNT(*) AS n FROM household_people WHERE id > 1")
-		.first<{ n: number }>();
+	const people = await drizzle(db)
+		.select({ n: count() })
+		.from(householdPeople)
+		.where(gt(householdPeople.id, 1))
+		.get();
 
 	const waiting = (await suggestionQueue(db, aiSwitches)).length;
 	const rules = await merchantRules(db, aiSwitches.names, "");
@@ -829,9 +834,11 @@ async function renderHousehold(c: Context<App>, view: View = {}) {
 
 /** People (decision 81): the household's names, Everyone first. */
 async function renderPeople(c: Context<App>, view: View = {}) {
-	const people = await c.env.DB.prepare(
-		"SELECT id, name FROM household_people ORDER BY id",
-	).all<{ id: number; name: string }>();
+	const people = await drizzle(c.env.DB)
+		.select({ id: householdPeople.id, name: householdPeople.name })
+		.from(householdPeople)
+		.orderBy(asc(householdPeople.id))
+		.all();
 
 	return settingsPage(
 		c,
@@ -844,7 +851,7 @@ async function renderPeople(c: Context<App>, view: View = {}) {
 					focus={view.peopleFocus}
 				/>
 			}
-			people={people.results}
+			people={people}
 			openId={view.peopleOpen}
 			addOpen={view.peopleAddOpen}
 			error={view.peopleError}

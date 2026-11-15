@@ -277,6 +277,7 @@ export async function dismissPriceOffer(
 	period: string,
 	transactionId: number,
 ): Promise<void> {
+	// stays SQL: INSERT ... SELECT WHERE NOT EXISTS; Drizzle's insert-select lists all 8 columns, and no unique key covers dismissed rows (decision 179).
 	await db
 		.prepare(
 			`INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status)

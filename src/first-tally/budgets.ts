@@ -1,11 +1,14 @@
 // The budgets step's words and its shown values (P125 E, spec §6 and §8.8, decision 114, #590): what each question says,
 // what the ledger line and the announcements say, and what a form carries so an answer covers only the suggestions the
 // page showed. Every number comes from the family's own bank, through first-page.ts's reading.
+
+import * as Schema from "effect/Schema";
 import type {
 	FirstBudgetSuggestion,
 	MonthSpent,
 } from "../budgets/first-suggestion";
 import { monthName } from "../dates";
+import { readStoredWith } from "../db/stored-shape";
 import { formatCents } from "../money";
 import { dollarsWords } from "./pay";
 
@@ -45,13 +48,12 @@ export function keepShownBudgets(
 	return current.filter((ask) => shown.has(shownBudgetValue(ask)));
 }
 
-/** True for a parsed JSON object (not null); its fields are checked where they are read. */
-const isParsedObject = <Fields extends object>(
-	value: unknown,
-): value is Fields => typeof value === "object" && value !== null;
-
-/** True for an integer. */
-const isInteger = (value: unknown): value is number => Number.isInteger(value);
+/** A value a keep-all form drew: an object with an integer id (Number.isInteger, so 1e20 counts, as it always has). */
+const DrawnBudget = Schema.Struct({
+	id: Schema.Unknown.pipe(
+		Schema.refine((id): id is number => Number.isInteger(id)),
+	),
+});
 
 /**
  * The category ids a keep-all form submitted, each once, read from the values shownBudgetValue wrote (the snapshot the
@@ -61,19 +63,9 @@ export function shownBudgetIds(values: string[]): number[] {
 	const ids = new Set<number>();
 
 	for (const value of values) {
-		let parsed: unknown;
+		const drawn = readStoredWith(DrawnBudget, value);
 
-		try {
-			parsed = JSON.parse(value);
-		} catch {
-			continue;
-		}
-
-		if (!isParsedObject<{ id?: unknown }>(parsed)) continue;
-
-		const { id } = parsed;
-
-		if (isInteger(id)) ids.add(id);
+		if (drawn) ids.add(drawn.id);
 	}
 
 	return [...ids];

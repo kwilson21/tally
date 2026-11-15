@@ -4,7 +4,7 @@
 import * as Schema from "effect/Schema";
 import { readAtEdge } from "../edge";
 import { textOf, textOrNull } from "../edge-kinds";
-import { normalizeFeedbackContext } from "./diagnostics";
+import { normalizeContextText } from "./diagnostics";
 import { sanitizeFeedbackMessage, sanitizeFeedbackRoute } from "./privacy";
 
 export const FEEDBACK_TYPES = ["Bug", "Idea", "Question", "Other"] as const;
@@ -55,7 +55,7 @@ export function safePath(value: string | null, navigation = false) {
 /** The opted-in technical context, kept to its allowlisted fields, or null for anything that is not a JSON object. */
 function contextOf(text: string, from: string) {
 	try {
-		return normalizeFeedbackContext(JSON.parse(text), from);
+		return normalizeContextText(text, from);
 	} catch {
 		return null;
 	}
