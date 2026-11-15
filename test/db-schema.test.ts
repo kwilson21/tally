@@ -77,7 +77,7 @@ import {
 // database. It compares columns, CHECK lists, the other CHECKs (CHECKS and TABLE_CHECKS, read by test/schema-text.ts),
 // AUTOINCREMENT keys, COLLATE names (COLLATIONS), indexes, foreign keys (target, ON UPDATE, ON DELETE) and the unique
 // constraints a CREATE TABLE writes inline; and the set of application tables against the schema file.
-// Every one of the 32 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
+// Every one of the 33 application tables is described in src/db/schema.ts: accounts, ai_log, balance_history,
 // bank_text_rules, bill_amounts, bill_payments, bills, budget_amounts, cash_delete_holds, categories,
 // category_archive_periods, category_suggestions, documents, feedback, forgotten_texts, household_members,
 // household_people, household_settings, maybe_answers, maybe_names, merchant_name_failures, merchant_suggested_names,
@@ -1921,7 +1921,7 @@ describe("the table-set check fails on a wrong list", () => {
 		expect(tableSetProblems(["a"], described)).toEqual([]);
 	});
 
-	it("the exports the drift test enumerates are all 32 application tables", () => {
+	it("the exports the drift test enumerates are all 33 application tables", () => {
 		expect(
 			schemaTables()
 				.map((table) => getTableConfig(table).name)
