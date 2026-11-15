@@ -660,6 +660,43 @@ describe("the run, through the sorting instance", () => {
 		});
 	});
 
+	it("16f. each step's config is the literal the brief gives, read from the steps the run recorded", async () => {
+		await eligibleStore(storeName(0));
+
+		const steps = await runInstance({
+			search: fakeSearch([T(0)]),
+			ai: fakeAi([T(0)]).ai,
+		});
+
+		const configOf = (name: string) =>
+			steps.steps.find((step) => step.name === name)?.config;
+
+		const d1Settings = {
+			retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
+			timeout: "1 minute",
+			sensitive: "output",
+		};
+
+		expect(configOf("lookup-run-texts")).toEqual(d1Settings);
+		expect(configOf("lookup-1-claim")).toEqual(d1Settings);
+		expect(configOf("lookup-1-save")).toEqual(d1Settings);
+		expect(configOf("lookup-1-search")).toEqual({
+			retries: { limit: 0, delay: 0 },
+			timeout: "2 minutes",
+			sensitive: "output",
+		});
+
+		const lookupSteps = steps.steps.filter(
+			(step) => step.name.startsWith("lookup-") && step.name !== "lookup-texts",
+		);
+
+		expect(lookupSteps.length).toBeGreaterThan(0);
+
+		for (const step of lookupSteps) {
+			expect(step.config.sensitive).toBe("output");
+		}
+	});
+
 	it("16c. lookup-run-texts comes after the last re-ask step and before lookup-1-claim", async () => {
 		await eligibleStore(storeName(0));
 

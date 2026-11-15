@@ -113,6 +113,24 @@ type Row = {
 const ROWS: Row[] = [
 	{
 		title:
+			"row 20b, a new row of S1 still waiting for Jev arrives before the save: the save's own check refuses the line, nothing saved; mutation: qualifiesNow true at the save",
+		setup: bothEligible,
+		before: async (name) => {
+			if (name === "lookup-1-save") await addRow({ raw_name: N1 });
+		},
+		expect: {
+			s1Fetched: true,
+			s1Ai: true,
+			s2Fetched: true,
+			count: 2,
+			status: "pending",
+			attempts: 0,
+			claimedBy: null,
+			line: null,
+		},
+	},
+	{
+		title:
 			"row 1, another run holds the store (live lease): its claim untouched, the run goes on",
 		setup: async () => {
 			await bothEligible();
