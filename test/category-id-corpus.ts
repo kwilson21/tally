@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { resetDemo } from "../src/demo/reset";
+import { resetDemo, TABLES_CHILD_FIRST } from "../src/demo/reset";
 import { pinClock } from "./pinned-clock";
 
 // Every route that reads a category id with CategoryId (#1111). Each case posts or gets one input a browser can send,
@@ -117,17 +117,14 @@ const plain = (text: string) =>
 
 type Row = Record<string, string | number | null>;
 
-/** Every table's rows without their timestamps, hashed. */
-async function stateOf(): Promise<string> {
-	const { results: tables } = await db
-		.prepare(
-			"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
-		)
-		.all<{ name: string }>();
-
+/**
+ * The rows of the given tables without their timestamps, hashed. The tables are the ones the demo reset clears before every
+ * case, so no case sees what an earlier one wrote.
+ */
+async function stateOf(tables: readonly string[]): Promise<string> {
 	let text = "";
 
-	for (const { name } of tables) {
+	for (const name of tables) {
 		const { results } = await db
 			.prepare(`SELECT * FROM "${name}" ORDER BY rowid`)
 			.all<Row>();
@@ -233,7 +230,7 @@ async function suggestionId(): Promise<string> {
 }
 
 /** The line for a response: as the other characterisation corpora write it. */
-async function lineOf(res: Response): Promise<string> {
+async function lineOf(res: Response, before: Snapshot): Promise<string> {
 	const html = await res.text();
 
 	const hx = [...res.headers.entries()]
@@ -241,14 +238,31 @@ async function lineOf(res: Response): Promise<string> {
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([name, value]) => `${name}=${plain(value)}`);
 
+	// The row ids are not reset between cases, so a case's tables are compared with the same case's state before the
+	// request, and only whether it wrote anything is recorded.
+	const after = await snapshot();
+	const written = after.tables === before.tables ? "unchanged" : "written";
+	const settings = after.settings === before.settings ? "same" : "changed";
+
 	return [
 		res.status,
 		res.headers.get("location") ?? "-",
 		...hx,
 		`autofocus ${html.split("autofocus").length - 1}`,
 		`body ${await sha(plain(html))}`,
-		`state ${await stateOf()}`,
+		`state ${written}`,
+		`settings ${settings}`,
 	].join(" | ");
+}
+
+/** The tables a case can write, hashed before its request and again after it. */
+type Snapshot = { tables: string; settings: string };
+
+async function snapshot(): Promise<Snapshot> {
+	return {
+		tables: await stateOf(TABLES_CHILD_FIRST),
+		settings: await stateOf(["household_settings"]),
+	};
 }
 
 /** Runs one case on a freshly reset demo and returns its line. */
@@ -256,6 +270,7 @@ export async function runCase(req: Req): Promise<string> {
 	pinClock(CLOCK);
 	await reset();
 	await prepare(req.prep);
+	const before = await snapshot();
 
 	// The suggestion cases name their question by the charge the prep seeds, so its id is read after the seed.
 	const form: [string, Value][] = [];
@@ -278,7 +293,7 @@ export async function runCase(req: Req): Promise<string> {
 	const url = `${BASE}${req.path}${query.size ? `?${query}` : ""}`;
 
 	if (req.method === "GET") {
-		return lineOf(await exports.default.fetch(url, { headers }));
+		return lineOf(await exports.default.fetch(url, { headers }), before);
 	}
 
 	headers.set("Origin", BASE);
@@ -297,6 +312,7 @@ export async function runCase(req: Req): Promise<string> {
 
 	return lineOf(
 		await exports.default.fetch(url, { method: "POST", headers, body }),
+		before,
 	);
 }
 
