@@ -69,10 +69,16 @@ export function MachineTable({
 				);
 
 				return (
-					<table class="w-full border-collapse text-sm">
+					<table class="w-full table-fixed border-collapse text-sm">
 						<caption class="mb-2 text-left font-semibold">
 							{group.title}
 						</caption>
+						{/* The same three widths in every group's table, so the From, To and What happens columns line up. */}
+						<colgroup>
+							<col class="w-[32%]" />
+							<col class="w-[24%]" />
+							<col />
+						</colgroup>
 						<thead>
 							<tr class="align-bottom">
 								<th scope="col" class="pb-2 pr-4 text-left font-semibold">
