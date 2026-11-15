@@ -1,5 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { MACHINE_PURPOSE } from "../src/design-system/machine-purpose";
 import { machineGraph } from "../src/machines/graph";
 import {
 	SORTING_TURN_LABELS,
@@ -82,6 +83,24 @@ describe("P144, the sorting turn's picture with its context", () => {
 
 		for (const label of Object.values(SORTING_TURN_LABELS))
 			expect(block).toContain(`>${label}<`);
+	});
+
+	it("CURRENT shows the catalog's purpose sentence above its picture, the same one the catalog shows", async () => {
+		const block = await proposal();
+		const start = block.indexOf("Current: the picture as the catalog shows it");
+		const end = block.indexOf("Proposed: the picture with its table");
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+
+		// The text is HTML-escaped by the renderer (the apostrophe in "household's"), so decode it before comparing.
+		const current = block
+			.slice(start, end)
+			.replace(/&#39;/g, "'")
+			.replace(/&amp;/g, "&");
+
+		expect(current).toContain(
+			`<p class="max-w-prose text-muted">${MACHINE_PURPOSE.sortingTurn}</p>`,
+		);
 	});
 
 	it("has a state table with one row per state of the machine, under a caption and header cells", async () => {

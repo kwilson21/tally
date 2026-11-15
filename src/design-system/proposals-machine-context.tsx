@@ -8,6 +8,7 @@ import {
 	sortingTurnMachine,
 } from "../machines/sorting-turn";
 import { MachineDiagram } from "../views/machine-diagram";
+import { MACHINE_PURPOSE } from "./machine-purpose";
 
 const TITLE = "How the sorting turn is held and given back";
 
@@ -39,6 +40,7 @@ export function MachineContextProposal() {
 					The picture and its arrow sentences as they are on the catalog's
 					MachineDiagram row now. Nothing here is changed.
 				</p>
+				<p class="max-w-prose text-muted">{MACHINE_PURPOSE.sortingTurn}</p>
 				<MachineDiagram
 					id="p144-current"
 					title={TITLE}
