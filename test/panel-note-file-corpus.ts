@@ -10,7 +10,8 @@ import { pinClock } from "./pinned-clock";
 // and records the answer: the status, the type, the Location, the HX headers, a hash of the page, the notes as they stand
 // after, and a hash of every row. The lines in fixtures/panel-note-file-baseline.json were recorded on the code before the
 // change. After the change only the rows with a file in `note` or `note_was` differ, and each of those must end with the
-// saved note unchanged and equal its twin: the same post with `note` set to the saved note (a row the change does not touch).
+// saved note unchanged (a file in `note`) and equal its twin: the same post with the file replaced by the saved note, or
+// with a file in `note_was` left out (see twinOf). The twin is a row the change does not touch.
 
 const db = env.DB;
 const BASE = "http://tally.test";
@@ -37,6 +38,8 @@ export type Step = {
 	replay: boolean;
 	/** True when a file is posted in `note` or `note_was`. */
 	file: boolean;
+	/** True when a file is posted in `note`: the saved note must then stay as it is. */
+	fileNote: boolean;
 	/** The label of the twin row (the same post with the saved note in `note`), for a file row. */
 	sibling?: string;
 };
@@ -214,9 +217,11 @@ async function post(
 function pendingOf(html: string): string | null {
 	const match = /name="pending_edit" value="([^"]*)"/.exec(html);
 
-	if (!match) return null;
+	const value = match?.[1];
 
-	return match[1]
+	if (value === undefined) return null;
+
+	return value
 		.replaceAll("&quot;", '"')
 		.replaceAll("&#39;", "'")
 		.replaceAll("&lt;", "<")
@@ -367,9 +372,23 @@ function labelOf(stored: boolean, hx: boolean, path: string, form: Form) {
 	return `stored=${stored ? "yes" : "no"} ${hx ? "htmx" : "plain"} POST ${path} ${fields}`;
 }
 
-/** A file in `note_why`'s place is the saved note in the twin; any other `note_was` is kept as it is. */
-const twinNoteWas = (noteWas: Value): Value =>
-	noteWas === FILE ? SAVED : noteWas;
+/**
+ * The twin of a post with a file: a file in `note` is the saved note (the note is not changed), and a file in `note_was`
+ * is no `note_was` at all (not drawn, as a missing field is). Both files: the saved note, and the saved note as drawn.
+ */
+const twinOf = (
+	note: Value,
+	noteWas: Value,
+	redrawn: boolean,
+): [Value, Value | typeof ABSENT] => {
+	if (note === FILE) return [SAVED, noteWas === FILE ? SAVED : noteWas];
+
+	// A refused category draws the panel again with its note_was echoed: a file there is drawn as the saved note,
+	// which is the same page as the saved note posted, not as a missing field (the panel draws the note instead).
+	if (redrawn && noteWas === FILE) return [note, SAVED];
+
+	return [note, noteWas === FILE ? ABSENT : noteWas];
+};
 
 /** Builds every case: the matrix, the keep answer, the redraw after a refused category, and the split replay. */
 function buildSteps(): Step[] {
@@ -377,7 +396,8 @@ function buildSteps(): Step[] {
 	const seen = new Set<string>();
 
 	const add = (step: Omit<Step, "label">, label: string) => {
-		if (seen.has(label)) throw new Error(`two proof cases share a label: ${label}`);
+		if (seen.has(label))
+			throw new Error(`two proof cases share a label: ${label}`);
 
 		seen.add(label);
 		steps.push({ ...step, label });
@@ -394,20 +414,30 @@ function buildSteps(): Step[] {
 		details: Value,
 		note: Value,
 		noteWas: Value,
-		options: { extra?: Form; replay?: boolean } = {},
+		options: { extra?: Form; replay?: boolean; redrawn?: boolean } = {},
 	) => {
 		const extra = options.extra ?? [];
 		const form = panelForm(base, details, note, noteWas, extra);
 		const file = isFile(note) || isFile(noteWas);
+
+		const [twinNote, twinNoteWas] = twinOf(
+			note,
+			noteWas,
+			options.redrawn ?? false,
+		);
+
+		const suffix = options.replay ? " (then the split save)" : "";
+
 		const twin = file
 			? labelOf(
 					stored,
 					hx,
 					path,
-					panelForm(base, details, SAVED, twinNoteWas(noteWas), extra),
-				) + (options.replay ? " (then the split save)" : "")
+					panelForm(base, details, twinNote, twinNoteWas, extra),
+				) + suffix
 			: undefined;
-		const label = labelOf(stored, hx, path, form) + (options.replay ? " (then the split save)" : "");
+
+		const label = labelOf(stored, hx, path, form) + suffix;
 
 		add(
 			{
@@ -417,6 +447,7 @@ function buildSteps(): Step[] {
 				stored,
 				replay: options.replay ?? false,
 				file,
+				fileNote: isFile(note),
 				sibling: twin,
 			},
 			label,
@@ -427,9 +458,24 @@ function buildSteps(): Step[] {
 	for (const stored of [true, false]) {
 		for (const hx of [true, false]) {
 			for (const details of DETAILS) {
-				for (const note of [FILE, "", ABSENT, "a new note", " spaced ", SAVED] as Value[]) {
-					for (const noteWas of [ABSENT, SAVED, "other", FILE] as Value[]) {
-						addPanel(stored, hx, "/transactions/$ID", EDIT, details, note, noteWas);
+				for (const note of [
+					FILE,
+					"",
+					ABSENT,
+					"a new note",
+					" spaced ",
+					SAVED,
+				]) {
+					for (const noteWas of [ABSENT, SAVED, "other", FILE]) {
+						addPanel(
+							stored,
+							hx,
+							"/transactions/$ID",
+							EDIT,
+							details,
+							note,
+							noteWas,
+						);
 					}
 				}
 			}
@@ -440,11 +486,20 @@ function buildSteps(): Step[] {
 	for (const stored of [true, false]) {
 		for (const hx of [true, false]) {
 			for (const details of DETAILS) {
-				for (const note of [FILE, SAVED] as Value[]) {
-					for (const noteWas of [ABSENT, SAVED, FILE] as Value[]) {
-						addPanel(stored, hx, "/transactions/$ID", EDIT, details, note, noteWas, {
-							extra: [["details_action", "keep"]],
-						});
+				for (const note of [FILE, SAVED]) {
+					for (const noteWas of [ABSENT, SAVED, FILE]) {
+						addPanel(
+							stored,
+							hx,
+							"/transactions/$ID",
+							EDIT,
+							details,
+							note,
+							noteWas,
+							{
+								extra: [["details_action", "keep"]],
+							},
+						);
 					}
 				}
 			}
@@ -455,9 +510,20 @@ function buildSteps(): Step[] {
 	for (const stored of [true, false]) {
 		for (const hx of [true, false]) {
 			for (const details of DETAILS) {
-				for (const note of [FILE, SAVED, ABSENT, "a new note"] as Value[]) {
-					for (const noteWas of [ABSENT, SAVED, FILE] as Value[]) {
-						addPanel(stored, hx, "/transactions/$ID", EDIT_BAD_CATEGORY, details, note, noteWas);
+				for (const note of [FILE, SAVED, ABSENT, "a new note"]) {
+					for (const noteWas of [ABSENT, SAVED, FILE]) {
+						addPanel(
+							stored,
+							hx,
+							"/transactions/$ID",
+							EDIT_BAD_CATEGORY,
+							details,
+							note,
+							noteWas,
+							{
+								redrawn: true,
+							},
+						);
 					}
 				}
 			}
@@ -468,12 +534,21 @@ function buildSteps(): Step[] {
 	// save replays the pending edit. A file in the note must not clear the saved note on the replay either.
 	for (const stored of [true, false]) {
 		for (const details of DETAILS) {
-			for (const note of [FILE, "", ABSENT, SAVED, "a new note"] as Value[]) {
-				for (const noteWas of [ABSENT, SAVED, FILE] as Value[]) {
-					addPanel(stored, true, "/transactions/$CASH", EDIT, details, note, noteWas, {
-						extra: [["amount", "100.00"]],
-						replay: true,
-					});
+			for (const note of [FILE, "", ABSENT, SAVED, "a new note"]) {
+				for (const noteWas of [ABSENT, SAVED, FILE]) {
+					addPanel(
+						stored,
+						true,
+						"/transactions/$CASH",
+						EDIT,
+						details,
+						note,
+						noteWas,
+						{
+							extra: [["amount", "100.00"]],
+							replay: true,
+						},
+					);
 				}
 			}
 		}

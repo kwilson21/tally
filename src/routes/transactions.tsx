@@ -3014,6 +3014,9 @@ function pendingEditOf(form: FormData): string {
 		if (key !== "change_parts" && isText(value)) fields.append(key, value);
 	});
 
+	// A file in the note is not a note (parseEdit): the sheet holds only text, so its replay is told so here.
+	if (form.get("note") instanceof File) fields.append("note_not_posted", "1");
+
 	return fields.toString();
 }
 
@@ -3182,8 +3185,16 @@ async function savePanel(
 			alwaysWas: form.get("always_was") === "1",
 			merchantRuleWas: numberOfPosted(form.get("rule_category_was")) || null,
 			displayName: textOrNull(form.get("merchant")),
-			note: form.get("note")?.toString() ?? null,
-			noteWas: form.get("note_was")?.toString() ?? null,
+			// A file in either note is drawn back as the saved note, or "" when there is none, as a browser posts an
+			// empty box (parseEdit reads a file as not posted), never as text. A null here would draw the note in note_was.
+			note:
+				form.get("note") instanceof File
+					? (tx.note ?? "")
+					: (form.get("note")?.toString() ?? null),
+			noteWas:
+				form.get("note_was") instanceof File
+					? (tx.note ?? "")
+					: (form.get("note_was")?.toString() ?? null),
 			excluded: form.get("excluded") === "1",
 			excludedWas: form.has("excluded_was")
 				? form.get("excluded_was") === "1"
