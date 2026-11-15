@@ -353,6 +353,52 @@ describe("Plaid webhook route", () => {
 		});
 	});
 
+	it("leaves a disconnected bank's status alone, answering 200 with no write", async () => {
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES ('item-gone', ?, 'Gone Bank', 'person', datetime('now'))",
+		)
+			.bind(await encryptToken("access-token", KEY))
+			.run();
+		const sign = await signer();
+
+		const body = JSON.stringify({
+			item_id: "item-gone",
+			webhook_type: "ITEM",
+			webhook_code: "PENDING_EXPIRATION",
+		});
+
+		const { token, jwk } = await sign(body);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({ key: { ...jwk, expired_at: null } })),
+		);
+		expect(
+			(
+				await app.request(
+					"http://tally.test/webhooks/plaid",
+					{
+						method: "POST",
+						body,
+						headers: {
+							"content-type": "application/json",
+							"Plaid-Verification": token,
+						},
+					},
+					env,
+				)
+			).status,
+		).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT status, attention_login, attention_held FROM plaid_items",
+			).first(),
+		).toEqual({
+			status: "ok",
+			attention_login: 0,
+			attention_held: 0,
+		});
+	});
+
 	it("answers 503 so Plaid retries an expiry warning that loses three races in a row (decision 173)", async () => {
 		const row = await env.DB.prepare(
 			"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-1', ?, 'Bank', 'person') RETURNING id",
