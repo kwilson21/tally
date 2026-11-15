@@ -1,6 +1,9 @@
 // A bill's amount rows as the Bills screens, the matcher and the payment offers read them (spec §5
 // `bill_amounts`, decision 101). The rules for picking a month's amount are in src/bills/amount.ts.
+import { asc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import type { AmountRow } from "../bills/amount";
+import { billAmounts } from "./schema";
 
 /**
  * Every bill's amount rows, grouped by bill id and in month order, from one statement. With `billId`, only
@@ -10,17 +13,17 @@ export async function amountRowsByBill(
 	db: D1Database,
 	billId?: number,
 ): Promise<Map<number, AmountRow[]>> {
-	const columns =
-		"SELECT bill_id AS billId, effective_month AS effectiveMonth, amount_cents AS amountCents FROM bill_amounts";
+	const results = await drizzle(db)
+		.select({
+			billId: billAmounts.billId,
+			effectiveMonth: billAmounts.effectiveMonth,
+			amountCents: billAmounts.amountCents,
+		})
+		.from(billAmounts)
+		.where(billId === undefined ? undefined : eq(billAmounts.billId, billId))
+		.orderBy(asc(billAmounts.billId), asc(billAmounts.effectiveMonth))
+		.all();
 
-	const statement =
-		billId === undefined
-			? db.prepare(`${columns} ORDER BY bill_id, effective_month`)
-			: db
-					.prepare(`${columns} WHERE bill_id = ? ORDER BY effective_month`)
-					.bind(billId);
-
-	const { results } = await statement.all<AmountRow & { billId: number }>();
 	const byBill = new Map<number, AmountRow[]>();
 
 	for (const row of results) {
@@ -35,6 +38,7 @@ export async function amountRowsByBill(
 	return byBill;
 }
 
+// Stays raw SQL: a string helper placed inside other raw statements (src/bills/unpaid.ts, src/bills/price-change.ts).
 /**
  * The amount a bill occurrence is judged at, as SQL, the rule src/bills/amount.ts's `amountForMonth` reads: the
  * latest row on or before `month`, else the earliest row, else the bill's own amount. `billId` and `month` are
