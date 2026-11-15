@@ -154,7 +154,7 @@ A new table (one migration), kept apart from `merchants` as `merchant_name_failu
 
 `merchant_lookups`: `lookup_text` (primary key: the redacted text that is sent, see "What leaves the app"), `status` (`found`, `nothing_found`, `skipped`, `gave_up`, or `pending` for a store a run has claimed or is to try again), `line` (null unless `found`), `attempts`, `claimed_at`, `claimed_by`, `failed_at`, `looked_up_at`. No row means `none`.
 
-`lookup_answers`: `transaction_id` (primary key), `lookup_text`. One row for each transaction whose stored Jev answer was asked with the line.
+`lookup_answers`: `transaction_id` (primary key), `lookup_text`, `kept`, `kept_category_id`, `kept_confidence`. One row for each transaction Jev was asked about with the line, in the second ask, saying whether the line-backed guess was kept and which it was; it counts only while the row still holds that guess. `lookup_cleared` and `merchant_lookup_texts.private` are described in spec §5, the source of truth for every column here.
 
 Four rules the review of the plan added (PR #997):
 - **Claim before calling.** A run claims a store in the table before it searches, and searches only what it claimed, so two runs at once make one search.
