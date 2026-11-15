@@ -1,3 +1,5 @@
+import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { type Context, Hono } from "hono";
@@ -36,6 +38,7 @@ import { COUNTED_JOINS, countedMonthSql } from "../db/counted-month";
 import { runWith } from "../db/database";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
+import { householdMembers } from "../db/schema";
 import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
 import { readAtEdge } from "../edge";
 import { numberOfPosted } from "../edge-kinds";
@@ -766,11 +769,16 @@ home.post("/home/seen", async (c) => {
 	if (c.env.DEMO === "true") return c.body(null, 204);
 	const request = { member: actor(c), now: Date.now() };
 
-	const seen = await c.env.DB.prepare(
-		"SELECT removed_at IS NULL AS member, unixepoch(home_seen_at) * 1000 AS last_seen_ms FROM household_members WHERE email = ?",
-	)
-		.bind(request.member)
-		.first<{ member: number; last_seen_ms: number | null }>();
+	const seen = await drizzle(c.env.DB)
+		.select({
+			member: sql<number>`${householdMembers.removedAt} IS NULL`,
+			last_seen_ms: sql<
+				number | null
+			>`unixepoch(${householdMembers.homeSeenAt}) * 1000`,
+		})
+		.from(householdMembers)
+		.where(eq(householdMembers.email, request.member))
+		.get();
 
 	const asked = decided(
 		checkIn.decide(request, {
@@ -782,11 +790,21 @@ home.post("/home/seen", async (c) => {
 	// The save checks again what the rule read: the person is still a member, and no other tab's check-in landed inside
 	// the window meanwhile, so one window is written once and an older request never overwrites a newer one.
 	if (asked.kind === "write")
-		await c.env.DB.prepare(
-			`UPDATE household_members SET home_seen_at = datetime(?1 / 1000, 'unixepoch') WHERE email = ?2 AND removed_at IS NULL
-			 AND (home_seen_at IS NULL OR unixepoch(home_seen_at) <= ?1 / 1000 - ${HOME_SEEN_EVERY_MS / 1000})`,
-		)
-			.bind(asked.save.now, asked.save.member)
+		await drizzle(c.env.DB)
+			.update(householdMembers)
+			.set({
+				homeSeenAt: sql`datetime(${asked.save.now} / 1000, 'unixepoch')`,
+			})
+			.where(
+				and(
+					eq(householdMembers.email, asked.save.member),
+					isNull(householdMembers.removedAt),
+					or(
+						isNull(householdMembers.homeSeenAt),
+						sql`unixepoch(${householdMembers.homeSeenAt}) <= ${asked.save.now} / 1000 - ${HOME_SEEN_EVERY_MS / 1000}`,
+					),
+				),
+			)
 			.run();
 	const form = await c.req.parseBody();
 	const shown = SHOWN_STEPS.find((step) => step === form.step);
