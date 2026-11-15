@@ -113,9 +113,11 @@ describe("GET /transactions/organize: the category chips (#963)", () => {
 		]);
 
 		const { res, html } = await get();
+
 		const offered = [
 			...html.matchAll(/name="category"[^>]*value="(\d+)"/g),
 		].map((m) => Number(m[1]));
+
 		const expected = (
 			await env.DB.prepare(
 				"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, name",

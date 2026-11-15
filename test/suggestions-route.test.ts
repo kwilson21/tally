@@ -266,9 +266,11 @@ describe("GET /settings/suggestions: the category options (#963)", () => {
 		const { res, html } = await get(
 			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`,
 		);
+
 		const offered = [...html.matchAll(/<option value="(\d+)"/g)].map((m) =>
 			Number(m[1]),
 		);
+
 		const expected = (
 			await db
 				.prepare(

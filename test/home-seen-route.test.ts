@@ -188,12 +188,14 @@ describe("POST /home/seen: the presence check-in", () => {
 			if (!/^select\b/i.test(sql) || !sql.includes("home_seen_at"))
 				return statement;
 
-			const thenOtherTab = (read: () => Promise<unknown>) => async () => {
-				const result = await read();
-				await setSeen(PERSON, "+5 seconds");
+			const thenOtherTab =
+				<T>(read: () => Promise<T>) =>
+				async (): Promise<T> => {
+					const result = await read();
+					await setSeen(PERSON, "+5 seconds");
 
-				return result;
-			};
+					return result;
+				};
 
 			return {
 				bind: (...values: (string | number)[]) => {
@@ -237,6 +239,7 @@ describe("POST /home/seen: the presence check-in", () => {
 	it("writes a check-in that is exactly 30 seconds old (the window's edge is inclusive)", async () => {
 		// The clock sits on a whole second, and the stored check-in is that second less 30: the window's edge exactly.
 		vi.useFakeTimers({ toFake: ["Date"] });
+
 		try {
 			const now = Math.floor(Date.now() / 1000) * 1000;
 			vi.setSystemTime(now);
