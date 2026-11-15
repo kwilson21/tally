@@ -85,7 +85,7 @@ export function MachineContextProposal() {
 							No <Code>sorting_turn</Code> row in{" "}
 							<Code>household_settings</Code>. A release deletes the row. A
 							damaged row (its <Code>value</Code> is not an object with a text{" "}
-							<Code>id</Code> and a numeric or missing <Code>until</Code>)
+							<Code>id</Code> and a numeric, null or missing <Code>until</Code>)
 							counts as no row.
 						</StateRow>
 						<StateRow label="Held">
@@ -94,9 +94,9 @@ export function MachineContextProposal() {
 							clock. Taking the turn writes <Code>until</Code> 15 minutes on.
 						</StateRow>
 						<StateRow label="Ran out">
-							The same row, with an <Code>until</Code> in the past or none.
-							Nothing is written when a turn runs out: a reader compares{" "}
-							<Code>until</Code> with the clock.
+							The same row, with an <Code>until</Code> in the past, null or
+							missing. Nothing is written when a turn runs out: a reader
+							compares <Code>until</Code> with the clock.
 						</StateRow>
 					</tbody>
 				</table>
