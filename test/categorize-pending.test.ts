@@ -11,7 +11,7 @@ import {
 	saveAiSwitches,
 } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
-import { forgetText, loadLearnedLines } from "../src/db/learned-lines";
+import { loadLearnedLines } from "../src/db/learned-lines";
 import { loadMonth } from "../src/db/month";
 import {
 	monthCounts,
@@ -23,6 +23,7 @@ import { resetDemo } from "../src/demo/reset";
 import { jevCallLimit } from "../src/sort-groups";
 import { seedMerchant } from "./helpers/merchants";
 import { isMemberOf, isMethod, itemAt, present } from "./helpers/present";
+import { forgetOn } from "./learned-forget";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -772,7 +773,7 @@ describe("categorizePending", () => {
 		it("sends no learned line for a forgotten text", async () => {
 			for (const day of [1, 2])
 				await answer("FORGET ME SHOP", "Eating Out", day);
-			await forgetText(db, "forget me shop");
+			await forgetOn(db, "forget me shop", Date.now());
 			const { sent } = await askRows(["FORGET ME SHOP"]);
 			expect(sent[0]?.state).not.toHaveProperty("learned_category");
 		});
@@ -780,7 +781,7 @@ describe("categorizePending", () => {
 		it("brings a forgotten text's line back once it is answered again after the Forget", async () => {
 			for (const day of [1, 2, 3])
 				await answer("FORGET ME SHOP", "Eating Out", day);
-			await forgetText(db, "forget me shop");
+			await forgetOn(db, "forget me shop", Date.now());
 			await answer(
 				"FORGET ME SHOP",
 				"Eating Out",
