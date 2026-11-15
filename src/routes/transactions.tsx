@@ -51,6 +51,8 @@ import {
 	rowIdOf,
 	SafeCentsText,
 	SheetToken,
+	textOf,
+	textOrNull,
 } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
@@ -1870,9 +1872,9 @@ const cashValues = (today: string, form?: FormData): CashValues => ({
 	date: form?.get("date")?.toString() ?? today,
 	// Opens blank, as Add a bill does: a missing amount is refused with its error, not saved as $20.00 (#342).
 	amount: form?.get("amount")?.toString() ?? "",
-	merchant: form?.get("merchant")?.toString() ?? "",
+	merchant: textOf(form?.get("merchant")),
 	category: form?.get("category")?.toString() ?? "",
-	note: form?.get("note")?.toString() ?? "",
+	note: textOf(form?.get("note")),
 });
 
 function CashSheet({
@@ -2978,7 +2980,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 				categoryId:
 					posted === null ? tx.categoryId : numberOfPosted(posted) || null,
 				newCategory: posted === "new",
-				newCategoryName: form.get("new_category_name")?.toString() ?? "",
+				newCategoryName: textOf(form.get("new_category_name")),
 			}}
 			purchase={locked}
 			back={back}
@@ -3089,7 +3091,7 @@ async function savePanel(
 	// The category the panel posted, kept for a 422's redraw: the linking branch below empties the form of it, and
 	// the redraw must still draw what the person chose (a validation error keeps the panel as it was left).
 	const postedCategory = form.get("category");
-	const postedNewCategoryName = form.get("new_category_name")?.toString() ?? "";
+	const postedNewCategoryName = textOf(form.get("new_category_name"));
 
 	if (
 		linkedPurchase &&
@@ -3177,7 +3179,7 @@ async function savePanel(
 			alwaysForMerchant: form.get("always") === "1",
 			alwaysWas: form.get("always_was") === "1",
 			merchantRuleWas: numberOfPosted(form.get("rule_category_was")) || null,
-			displayName: form.get("merchant")?.toString() ?? null,
+			displayName: textOrNull(form.get("merchant")),
 			note: form.get("note")?.toString() ?? null,
 			noteWas: form.get("note_was")?.toString() ?? null,
 			excluded: form.get("excluded") === "1",
@@ -3723,7 +3725,7 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 		.bind(categoryId)
 		.first<{ id: number; name: string }>();
 
-	const askedName = form.get("merchant")?.toString() ?? "";
+	const askedName = textOf(form.get("merchant"));
 
 	const merchantName = merchantKey
 		? await c.env.DB.prepare(

@@ -3,6 +3,7 @@
 // (src/rules/feedback.ts).
 import * as Schema from "effect/Schema";
 import { readAtEdge } from "../edge";
+import { textOf, textOrNull } from "../edge-kinds";
 import { normalizeFeedbackContext } from "./diagnostics";
 import { sanitizeFeedbackMessage, sanitizeFeedbackRoute } from "./privacy";
 
@@ -64,9 +65,10 @@ function contextOf(text: string, from: string) {
 export function readFeedbackForm(form: FormData) {
 	const field = (name: string) => form.get(name);
 	const text = (name: string) => String(field(name) ?? "");
-	const typed = text("message").replace(/\r\n/g, "\n");
+	const typed = textOf(field("message")).replace(/\r\n/g, "\n");
 	const message = sanitizeFeedbackMessage(typed).trim();
-	const from = sanitizeFeedbackRoute(String(field("from") ?? "/"));
+	// A file part is no value of a text box: it reads as a missing field, so the route falls back as it does for one.
+	const from = sanitizeFeedbackRoute(textOrNull(field("from")) ?? "/");
 
 	return {
 		type: oneOf(FEEDBACK_TYPES, text("type"), "Other"),
@@ -78,7 +80,7 @@ export function readFeedbackForm(form: FormData) {
 			text("message_reviewed") === message && field("confirm_review") === "yes",
 		from,
 		returnTo: safePath(
-			String(field("return_to") ?? field("from") ?? "/"),
+			textOrNull(field("return_to")) ?? textOrNull(field("from")) ?? "/",
 			true,
 		),
 		device: oneOf(DEVICES, String(field("device_category")), "Unknown"),
