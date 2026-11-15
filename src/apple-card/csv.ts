@@ -304,18 +304,18 @@ export function appleRowCells(line: number) {
 }
 
 function readRow(fields: string[], line: number, width: number): RowResult {
-	if (fields.length !== width)
-		return { ok: false, error: unreadableWords(line) };
+	const unreadable = { ok: false as const, error: unreadableWords(line) };
+
+	if (fields.length !== width) return unreadable;
 
 	// A U+FFFD means the file was re-saved in another encoding; a field over the cap can't be stored safely.
-	if (fields.some((field) => field.includes("�")))
-		return { ok: false, error: unreadableWords(line) };
+	if (fields.some((field) => field.includes("�"))) return unreadable;
 
 	const cells = fields.map(cleanText);
 
-	if (cells.some((cell) => cell.length > MAX_FIELD))
-		return { ok: false, error: unreadableWords(line) };
+	if (cells.some((cell) => cell.length > MAX_FIELD)) return unreadable;
 
+	// The schema's refusal is the row's sentence, so the message is passed on as it is.
 	const read = Schema.decodeUnknownResult(appleRowCells(line))(cells);
 
 	return Result.isSuccess(read)
