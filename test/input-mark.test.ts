@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { askJev } from "../src/ai/categorize";
 import type { JevAnswer } from "../src/ai/decide";
-import type { JevSeen } from "../src/db/transactions";
+import { type JevSeen, jevInputOf } from "../src/db/transactions";
 import {
 	clearsForLookup,
 	inputMark,
@@ -31,8 +32,6 @@ const changes: Partial<JevSeen>[] = [
 	{ ownName: "Music" },
 	{ merchantKey: "apple music" },
 	{ merchantName: "Apple" },
-	{ suggestedNames: '["Apple"]' },
-	{ suggestionStatus: "confirmed" },
 	{ amountCents: 1000 },
 	{ accountId: 2 },
 	{ accountType: "checking" },
@@ -78,8 +77,11 @@ describe("inputMark", () => {
 	});
 
 	it("changes when any one fact Jev is told changes, and each fact is listed once", async () => {
+		// The suggestions and their status change the mark only through the name Jev is told (see the test below).
 		expect(changes.flatMap((change) => Object.keys(change))).toEqual(
-			Object.keys(seen),
+			Object.keys(seen).filter(
+				(key) => key !== "suggestedNames" && key !== "suggestionStatus",
+			),
 		);
 		const mark = await inputMark(seen);
 
@@ -95,6 +97,90 @@ describe("inputMark", () => {
 		) as JevSeen;
 
 		expect(await inputMark(reordered)).toBe(await inputMark(seen));
+	});
+});
+
+/** Every combination of own name, chosen name, suggestion status and suggestions, on one merchant whose key is "apple". */
+function nameVariants(): JevSeen[] {
+	const variants: JevSeen[] = [];
+
+	for (const ownName of [null, "Corner Shop"])
+		for (const merchantName of [null, "Chosen"])
+			for (const suggestionStatus of [
+				null,
+				"none",
+				"pending",
+				"accepted",
+				"rejected",
+			])
+				for (const suggestedNames of [
+					null,
+					'["apple"]',
+					'["Tally Guess"]',
+					'["apple","Tally Guess"]',
+				])
+					variants.push({
+						...seen,
+						ownName,
+						merchantName,
+						suggestionStatus,
+						suggestedNames,
+					});
+
+	return variants;
+}
+
+/** The body askJev sends for a row, with no categories and the payee question on. */
+async function bodyOf(row: JevSeen): Promise<string> {
+	let sent = "";
+
+	await askJev(
+		jevInputOf(row),
+		[],
+		"test-key",
+		async (_url, init) => {
+			sent = String(init?.body);
+
+			return new Response("{}", { status: 200 });
+		},
+		{ payee: true },
+	);
+
+	return sent;
+}
+
+describe("inputMark: the name Jev is told", () => {
+	it("is equal for two rows exactly when the name Jev is told is equal", async () => {
+		const variants = nameVariants();
+		const marks = await Promise.all(variants.map((row) => inputMark(row)));
+
+		for (let i = 0; i < variants.length; i++) {
+			for (let j = i + 1; j < variants.length; j++) {
+				const same =
+					jevInputOf(variants[i] as JevSeen).displayName ===
+					jevInputOf(variants[j] as JevSeen).displayName;
+
+				expect(marks[i] === marks[j]).toBe(same);
+			}
+		}
+	});
+
+	it("gives equal requests for equal marks, so no fact Jev is told is left out of the hash", async () => {
+		const variants = nameVariants();
+		const marks = await Promise.all(variants.map((row) => inputMark(row)));
+		const bodies = await Promise.all(variants.map((row) => bodyOf(row)));
+
+		for (let i = 0; i < variants.length; i++) {
+			for (let j = i + 1; j < variants.length; j++) {
+				if (marks[i] === marks[j]) expect(bodies[i]).toBe(bodies[j]);
+			}
+		}
+	});
+
+	it("changes when the merchant key alone changes, since the search text is read from it", async () => {
+		expect(await inputMark({ ...seen, merchantKey: "apple pay" })).not.toBe(
+			await inputMark(seen),
+		);
 	});
 });
 
