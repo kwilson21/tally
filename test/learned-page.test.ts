@@ -710,4 +710,57 @@ describe("the learned page with a rule", () => {
 			"Forgot Netflix.com → Books & audio. Tally goes back to guessing.",
 		);
 	});
+
+	it("Undo of a Forget leaves a newer rule on the same text as it is", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+
+		const forgot = await post("/settings/learned/forget", {
+			text: "netflix.com",
+		});
+
+		// A newer answer brings the line back, and a newer rule files it under Groceries.
+		await answer("NETFLIX.COM", "Entertainment", "user", "2026-10-11");
+		await db
+			.prepare(
+				"UPDATE transactions SET updated_at = datetime('now', '+1 minute') WHERE raw_name = 'NETFLIX.COM'",
+			)
+			.run();
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Groceries")),
+		});
+
+		const undo = await post("/settings/learned/undo", {
+			token: trigger(forgot.res).toast?.undo ?? "",
+			back: "/settings/learned",
+		});
+
+		expect(trigger(undo.res).toast?.message).toBe(
+			"Forget undone. Tally has that line back.",
+		);
+		expect(await ruleOf("netflix.com")).toBe(await categoryId("Groceries"));
+	});
+
+	it("Undo of a Forget that had no rule adds none", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+
+		const forgot = await post("/settings/learned/forget", {
+			text: "netflix.com",
+		});
+
+		const undo = await post("/settings/learned/undo", {
+			token: trigger(forgot.res).toast?.undo ?? "",
+			back: "/settings/learned",
+		});
+
+		expect(trigger(undo.res).toast?.message).toBe(
+			"Forget undone. Tally has that line back.",
+		);
+		expect(await ruleOf("netflix.com")).toBeNull();
+		expect(textOf(undo.html)).toContain("Netflix.com → Entertainment");
+	});
 });
