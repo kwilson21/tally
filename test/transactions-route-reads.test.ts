@@ -69,12 +69,15 @@ describe("the delete sheet for a cash entry", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_people(name) VALUES ('Ada Route'), ('Ben Route')",
 		).run();
+
 		const ben = await env.DB.prepare(
 			"SELECT id FROM household_people WHERE name = 'Ben Route'",
 		).first<{ id: number }>();
+
 		const cash = await env.DB.prepare(
 			"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.parent_id IS NULL ORDER BY t.id LIMIT 1",
 		).first<{ id: number }>();
+
 		await env.DB.prepare(
 			"UPDATE transactions SET for_person_id = ? WHERE id = ?",
 		)
@@ -85,6 +88,7 @@ describe("the delete sheet for a cash entry", () => {
 			`/transactions/${cash?.id}/delete`,
 			"back=/transactions",
 		);
+
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 
 		expect(sheet).toContain("Ben Route");

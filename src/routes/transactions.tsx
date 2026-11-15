@@ -2422,6 +2422,7 @@ async function splitContext(c: Context<App>) {
 	const tx = await transactionAt(c);
 
 	const categories = await activeCategories(c.env.DB);
+
 	return { tx, categories };
 }
 
@@ -2446,6 +2447,7 @@ async function archivedPartCategories(db: D1Database, parentId: number) {
 			),
 		)
 		.all();
+
 	return new Map(
 		rows.map((row) => [row.partId, { id: row.id, name: row.name }]),
 	);
