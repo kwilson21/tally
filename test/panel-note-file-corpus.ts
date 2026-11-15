@@ -383,9 +383,10 @@ const twinOf = (
 ): [Value, Value | typeof ABSENT] => {
 	if (note === FILE) return [SAVED, noteWas === FILE ? SAVED : noteWas];
 
-	// A refused category draws the panel again with its note_was echoed: a file there is drawn as the saved note,
-	// which is the same page as the saved note posted, not as a missing field (the panel draws the note instead).
-	if (redrawn && noteWas === FILE) return [note, SAVED];
+	// A refused category draws the panel again with a file in note_was (and no note text) as the saved note in both
+	// boxes (the note is left alone): the twin posts the saved note. With note text, the note is drawn as typed.
+	if (redrawn && noteWas === FILE)
+		return [note === "" || note === ABSENT ? SAVED : note, SAVED];
 
 	return [note, noteWas === FILE ? ABSENT : noteWas];
 };

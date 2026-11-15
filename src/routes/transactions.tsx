@@ -3011,11 +3011,14 @@ transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 function pendingEditOf(form: FormData): string {
 	const fields = new URLSearchParams();
 	form.forEach((value, key) => {
-		if (key !== "change_parts" && isText(value)) fields.append(key, value);
+		if (key !== "change_parts" && key !== "note_not_posted" && isText(value))
+			fields.append(key, value);
 	});
 
 	// A file in the note is not a note (parseEdit): the sheet holds only text, so its replay is told so here.
-	if (form.get("note") instanceof File) fields.append("note_not_posted", "1");
+	// The marker is set here, never copied from the post, so a crafted earlier value cannot sit in front of it.
+	if (form.get("note") instanceof File || form.get("note_not_posted") === "1")
+		fields.set("note_not_posted", "1");
 
 	return fields.toString();
 }
@@ -3172,6 +3175,14 @@ async function savePanel(
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
 	// is the household as it is now, used when a For person was removed during the save.
+	// The note was not posted as text (a file, or a Change the parts replay's marker), or its baseline was a file
+	// and no text came with it: the saved note stays, drawn in both boxes so a resubmit cannot clear it.
+	const noteLeftAlone =
+		form.get("note") instanceof File ||
+		form.get("note_not_posted") === "1" ||
+		(form.get("note_was") instanceof File &&
+			!(form.get("note")?.toString() ?? "").trim());
+
 	const showErrors = async (
 		errors: EditErrors,
 		changePartsTotalCents?: number,
@@ -3187,12 +3198,11 @@ async function savePanel(
 			displayName: textOrNull(form.get("merchant")),
 			// A file in either note is drawn back as the saved note, or "" when there is none, as a browser posts an
 			// empty box (parseEdit reads a file as not posted), never as text. A null here would draw the note in note_was.
-			note:
-				form.get("note") instanceof File
-					? (tx.note ?? "")
-					: (form.get("note")?.toString() ?? null),
+			note: noteLeftAlone
+				? (tx.note ?? "")
+				: (form.get("note")?.toString() ?? null),
 			noteWas:
-				form.get("note_was") instanceof File
+				noteLeftAlone || form.get("note_was") instanceof File
 					? (tx.note ?? "")
 					: (form.get("note_was")?.toString() ?? null),
 			excluded: form.get("excluded") === "1",
