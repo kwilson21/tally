@@ -2961,7 +2961,7 @@ export async function pendingForJev(
 > {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, ${jevSeenColumnsSql()}, COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName,
+			`SELECT t.id, ${jevSeenColumnsSql()},
 				t.details_asked AS detailsAsked,
 				t.kind_cleared AS kindCleared, t.for_person_cleared AS forPersonCleared,
 				(t.category_id IS NOT NULL OR t.category_source IS NOT NULL OR t.category_confidence IS NOT NULL) AS categoryAnswered,
@@ -3028,24 +3028,8 @@ export async function pendingForJev(
 			accountId,
 			forPersonId,
 			...transaction
-		}) => ({
-			...transaction,
-			// With no name chosen, Jev is told the bank's own store name, never a name Tally guessed (decision 103).
-			displayName:
-				transaction.displayName ??
-				usableSuggestedNames({
-					stored: suggestedNames,
-					status: suggestionStatus,
-					key: transaction.merchantKey,
-					namesOn: false,
-				})[0] ??
-				null,
-			categoryOnly: transaction.categoryOnly === 1,
-			detailsAsked: transaction.detailsAsked === 1,
-			kindCleared: transaction.kindCleared === 1,
-			forPersonCleared: transaction.forPersonCleared === 1,
-			categoryAnswered: transaction.categoryAnswered === 1,
-			seen: jevSeenOf({
+		}) => {
+			const seen = jevSeenOf({
 				...transaction,
 				suggestedNames,
 				suggestionStatus,
@@ -3053,8 +3037,19 @@ export async function pendingForJev(
 				merchantName,
 				accountId,
 				forPersonId,
-			}),
-		}),
+			});
+
+			return {
+				...transaction,
+				...jevInputOf(seen),
+				categoryOnly: transaction.categoryOnly === 1,
+				detailsAsked: transaction.detailsAsked === 1,
+				kindCleared: transaction.kindCleared === 1,
+				forPersonCleared: transaction.forPersonCleared === 1,
+				categoryAnswered: transaction.categoryAnswered === 1,
+				seen,
+			};
+		},
 	);
 }
 
@@ -3182,6 +3177,33 @@ export function jevSeenOf(row: JevSeenColumns): JevSeen {
 		kind: row.kind ?? null,
 		forPersonId: row.forPersonId,
 		forPersonName: row.forPerson ?? null,
+	};
+}
+
+/**
+ * What Jev is told of a row (the request's facts, without the learned line), from its JevSeen: the one place the name Jev
+ * is told is chosen. With no own name, the chosen name, then a suggestion Jev may be told (usableSuggestedNames with names
+ * off, so only the bank's own name, never one Tally guessed, decision 103). The store lookup's mark is hashed from this too.
+ */
+export function jevInputOf(seen: JevSeen): JevInput {
+	return {
+		rawName: seen.rawName,
+		displayName:
+			seen.ownName ??
+			seen.merchantName ??
+			usableSuggestedNames({
+				stored: seen.suggestedNames,
+				status: seen.suggestionStatus,
+				key: seen.merchantKey,
+				namesOn: false,
+			})[0] ??
+			null,
+		amountCents: seen.amountCents,
+		accountType: seen.accountType,
+		plaidCategory: seen.plaidCategory,
+		note: seen.note,
+		kind: seen.kind,
+		forPerson: seen.forPersonName,
 	};
 }
 
