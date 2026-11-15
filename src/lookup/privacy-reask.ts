@@ -46,8 +46,9 @@ export type ReaskRow = { id: number; text: string; seen: JevSeen };
 
 /**
  * The rows the re-ask asks about this run, pure (the selection table in #1113). A text is passed over unless its eligibility
- * is "rows" or "no_cleared", and passed over too when any of its rows is asked (its mark is "asked"), has given up, or is
- * answered and owed with no account to read its facts from: re-asking cannot make such a text searchable. Otherwise its
+ * is "rows" or "no_cleared", and passed over too when any of its rows is asked (its mark is "asked"), is still waiting for
+ * Jev, has given up, or is answered and owed with no account to read its facts from: re-asking cannot make such a text
+ * searchable, and a row still waiting would be asked later, after this one's calls were spent. Otherwise its
  * answered rows whose mark is owed are picked. Texts with the fewest owed rows come first, then by text; ids ascend within
  * a text.
  */
@@ -79,6 +80,7 @@ export function reaskPicks(
 		const blocked = group.some(
 			(row) =>
 				row.mark === "asked" ||
+				row.jev === "waiting" ||
 				row.jev === "gave_up" ||
 				(row.jev === "answered" && row.mark === "owed" && row.seen === null),
 		);

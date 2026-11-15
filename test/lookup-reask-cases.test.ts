@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { householdTimeZone, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { saveAskedNames } from "../src/db/merchant-names";
+import type { JevSeen } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import type {
 	Eligibility,
@@ -641,6 +642,38 @@ describe("the re-ask in the instance's run (#1113)", () => {
 	});
 });
 
+/** The facts Jev is told about a row, for the pure selection cases below. */
+const SEEN: JevSeen = {
+	rawName: "Harbor Bakery 42",
+	ownName: null,
+	merchantKey: "harbor bakery",
+	merchantName: null,
+	suggestedNames: null,
+	suggestionStatus: null,
+	amountCents: -1200,
+	accountId: 1,
+	accountType: "credit",
+	plaidCategory: "FOOD_AND_DRINK",
+	note: null,
+	kind: null,
+	forPersonId: null,
+	forPersonName: null,
+};
+
+/** A decided read row for the pure selection cases: an answered row whose mark is owed, unless given. */
+const pureRow = (
+	over: Partial<ReadEligibilityRow> & { id: number },
+): ReadEligibilityRow => ({
+	lookupText: "t",
+	private: false,
+	sign: true,
+	jev: "answered",
+	mark: "owed",
+	ruleSettled: false,
+	seen: SEEN,
+	...over,
+});
+
 describe("which rows are asked (#1113)", () => {
 	it("an owed split parent is asked once", async () => {
 		const parent = await answeredRow({
@@ -730,6 +763,52 @@ describe("which rows are asked (#1113)", () => {
 		expect(
 			reaskPicks([row({ id: 1 }), row({ id: 2, seen: null })], decided, 10),
 		).toEqual([]);
+	});
+
+	it("a text with an owed row and a row still waiting for Jev asks no row of that text (pure)", () => {
+		const decided = new Map<string, Eligibility>([
+			["t", { kind: "not_yet", why: "rows", owed: [] }],
+		]);
+
+		expect(
+			reaskPicks(
+				[pureRow({ id: 1 }), pureRow({ id: 2, jev: "waiting", mark: "owed" })],
+				decided,
+				10,
+			),
+		).toEqual([]);
+	});
+
+	it("once the waiting row is answered and cleared, the text's owed row is asked (pure)", () => {
+		const decided = new Map<string, Eligibility>([
+			["t", { kind: "not_yet", why: "rows", owed: [] }],
+		]);
+
+		expect(
+			reaskPicks(
+				[pureRow({ id: 1 }), pureRow({ id: 2, mark: "cleared" })],
+				decided,
+				10,
+			),
+		).toEqual([{ id: 1, text: "t", seen: SEEN }]);
+	});
+
+	it("a row still waiting for Jev in another text does not block this text (pure)", () => {
+		const decided = new Map<string, Eligibility>([
+			["a", { kind: "not_yet", why: "rows", owed: [] }],
+			["b", { kind: "not_yet", why: "rows", owed: [] }],
+		]);
+
+		expect(
+			reaskPicks(
+				[
+					pureRow({ id: 1, lookupText: "a" }),
+					pureRow({ id: 2, lookupText: "b", jev: "waiting" }),
+				],
+				decided,
+				10,
+			).map((pick) => pick.id),
+		).toEqual([1]);
 	});
 });
 
