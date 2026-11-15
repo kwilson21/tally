@@ -66,7 +66,7 @@ describe("P144, the sorting turn's picture with its context", () => {
 		const block = await proposal();
 
 		expect(block).toContain("Current: the picture as the catalog shows it");
-		expect(block).toContain("Proposed (C): the picture with its context");
+		expect(block).toContain("Proposed: the picture with its table");
 		expect(block).toContain(
 			"One sorting group at a time may ask Jev about the household",
 		);

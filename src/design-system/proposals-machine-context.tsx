@@ -49,7 +49,7 @@ export function MachineContextProposal() {
 
 			<div class="flex flex-col gap-3">
 				<h3 class="font-serif text-2xl font-semibold">
-					Proposed (C): the picture with its context
+					Proposed: the picture with its table
 				</h3>
 				<p class="max-w-prose text-muted">
 					The sorting turn's picture with one table beside it.
