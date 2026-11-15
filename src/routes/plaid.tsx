@@ -95,7 +95,7 @@ async function storedItem(db: D1Database, id: string) {
 	return drizzle(db)
 		.select({
 			id: plaidItems.id,
-			// Raw bytes: the schema's blob() is JSON-mode, which would try to parse the token, so the column is read as SQL.
+			// Raw bytes: the column is read as SQL so the token stays the D1 blob, unchanged (decryptToken takes ArrayBuffer or Uint8Array).
 			access_token_encrypted: sql<ArrayBuffer>`${plaidItems.accessTokenEncrypted}`,
 			institution_name: plaidItems.institutionName,
 		})

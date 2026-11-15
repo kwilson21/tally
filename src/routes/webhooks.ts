@@ -86,7 +86,7 @@ webhooks.post("/webhooks/plaid", async (c) => {
 	const item = await drizzle(c.env.DB)
 		.select({
 			id: plaidItems.id,
-			// Raw bytes: the schema's blob() is JSON-mode, which would try to parse the token, so the column is read as SQL.
+			// Raw bytes: the column is read as SQL so the token stays the D1 blob, unchanged (decryptToken takes ArrayBuffer or Uint8Array).
 			access_token_encrypted: sql<ArrayBuffer>`${plaidItems.accessTokenEncrypted}`,
 			status: plaidItems.status,
 			disconnected_at: plaidItems.disconnectedAt,
