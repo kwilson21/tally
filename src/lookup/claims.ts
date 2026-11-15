@@ -52,7 +52,8 @@ export type ClaimPick = {
 /**
  * Which store a run claims next. A store this token already claims wins. Otherwise the candidate whose first (smallest)
  * transaction id is smallest wins: the store Tally saw first. A store is skipped when it is private, and a text with no
- * rows is never considered. Asks the machine for each move, so a state it refuses is never picked.
+ * rows is never considered. A text in `exclude` (the stores this run already tried) is never a candidate, though its
+ * privacy is still read. Asks the machine for each move, so a state it refuses is never picked.
  */
 export function claimPick({
 	rows,
@@ -60,12 +61,14 @@ export function claimPick({
 	lookups,
 	token,
 	now,
+	exclude = new Set<string>(),
 }: {
 	rows: readonly { id: number; lookupText: string }[];
 	decided: ReadonlyMap<string, Eligibility>;
 	lookups: ReadonlyMap<string, StoredLookup>;
 	token: string;
 	now: Date;
+	exclude?: ReadonlySet<string>;
 }): ClaimPick {
 	const firstId = new Map<string, number>();
 
@@ -97,6 +100,7 @@ export function claimPick({
 			skip.push(text);
 		} else if (
 			verdict === "may_search" &&
+			!exclude.has(text) &&
 			next(storeLookupMachine, state, "CLAIM")
 		) {
 			candidates.push({ text, id, attempts, mine: false });

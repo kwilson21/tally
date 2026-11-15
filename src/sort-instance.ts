@@ -14,6 +14,7 @@ import { finishRun } from "./db/resort-run";
 import { waitingForJevSql } from "./db/transactions";
 import { lookupAsks, lookupEnvOpen } from "./lookup/gate";
 import { runPrivacyReask } from "./lookup/privacy-reask";
+import { runStoreLookup } from "./lookup/run";
 import { fillLookupTexts } from "./lookup/texts";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -35,7 +36,7 @@ type InstanceEnv = SortEnv & { AI?: Ai };
 export const INSTANCE_MAX_CALLS = 5000;
 
 // A step that only writes D1 may run again after a failed save: the re-ask's finish (finishRun is idempotent), the night's
-// wait mark, and the lookup texts (whose fill never throws out of its step, see runSortInstance).
+// wait mark, and the lookup texts (whose fill never throws out of its step, see lookupTextsStep).
 const D1_STEP = {
 	retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 	timeout: "1 minute",
@@ -77,6 +78,40 @@ export function instanceSortOptions(
 }
 
 /**
+ * The store lookup's privacy marks (spec §7), as one step: the fill reads once and saves once. It never throws out of its
+ * step, so a failure is logged and the step returns, and a replay does not retry it.
+ */
+async function lookupTextsStep(
+	env: InstanceEnv,
+	runStep: StepRunner,
+	name: string,
+): Promise<void> {
+	try {
+		await runStep(name, D1_STEP, async () => {
+			const switches = await readAiSwitches(env.DB);
+
+			if (!lookupAsks(env, switches))
+				return { keys: 0, private: 0, failed: false };
+
+			try {
+				return { ...(await fillLookupTexts(env.DB)), failed: false };
+			} catch (error) {
+				// Logged by name only: no key or bank text reaches the log. Returning, not throwing, keeps a replay from retrying it.
+				console.error(
+					`lookup texts: stopped ${error instanceof Error ? error.name : "unknown"}`,
+				);
+
+				return { keys: 0, private: 0, failed: true };
+			}
+		});
+	} catch (error) {
+		console.error(
+			`lookup texts: step failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
+	}
+}
+
+/**
  * Runs one sorting instance's steps through `runStep` (see StepRunner). The sort is the same as ever. With `params.night`
  * (the 09:00 run's instance), the daily run's wait mark is cleared in production, and the night's names and new-category
  * suggestions follow.
@@ -89,6 +124,8 @@ export async function runSortInstance(
 		runId: string;
 		/** Jev's fetch; the Workflow passes none (the global fetch). */
 		fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
+		/** Tavily's fetch for the store lookup; the Workflow passes none (the global fetch). */
+		searchFetch?: typeof fetch;
 		/** The clock the Workers AI steps' deadlines read, inside their steps; the Workflow passes none (Date.now). */
 		now?: () => number;
 		/** The wait before a busy Jev is asked again (decision 145): the Workflow's step.sleep; the tests pass a fake. */
@@ -97,31 +134,7 @@ export async function runSortInstance(
 ): Promise<void> {
 	// The store lookup's privacy marks (spec §7), first, so the groups and the rules read them. Registered only while the
 	// gate's environment half is open (a Tavily key and a cap above 0), so with the gate closed the step list is as before.
-	if (lookupEnvOpen(env)) {
-		try {
-			await runStep("lookup-texts", D1_STEP, async () => {
-				const switches = await readAiSwitches(env.DB);
-
-				if (!lookupAsks(env, switches))
-					return { keys: 0, private: 0, failed: false };
-
-				try {
-					return { ...(await fillLookupTexts(env.DB)), failed: false };
-				} catch (error) {
-					// Logged by name only: no key or bank text reaches the log. Returning, not throwing, keeps a replay from retrying it.
-					console.error(
-						`lookup texts: stopped ${error instanceof Error ? error.name : "unknown"}`,
-					);
-
-					return { keys: 0, private: 0, failed: true };
-				}
-			});
-		} catch (error) {
-			console.error(
-				`lookup texts: step failed ${error instanceof Error ? error.name : "unknown"}`,
-			);
-		}
-	}
+	if (lookupEnvOpen(env)) await lookupTextsStep(env, runStep, "lookup-texts");
 
 	// The privacy re-ask runs only after the groups finished without a busy Jev or a failed group (#1113).
 	let sorted = false;
@@ -174,6 +187,28 @@ export async function runSortInstance(
 		} catch (error) {
 			console.error(
 				`privacy re-ask: stopped ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
+
+	// The store lookup (spec §7): after the re-ask, and only when the groups finished, as the re-ask does. Its privacy marks
+	// are one step of their own; the run's failure is logged by its error's name, and the night's steps still run.
+	if (sorted && lookupEnvOpen(env) && env.AI && env.TAVILY_API_KEY) {
+		await lookupTextsStep(env, runStep, "lookup-run-texts");
+
+		try {
+			await runStoreLookup(
+				{ ...env, AI: env.AI, TAVILY_API_KEY: env.TAVILY_API_KEY },
+				runStep,
+				{
+					runId: options.runId,
+					bySync: params.bySync,
+					searchFetch: options.searchFetch,
+				},
+			);
+		} catch (error) {
+			console.error(
+				`store lookup: stopped ${error instanceof Error ? error.name : "unknown"}`,
 			);
 		}
 	}
