@@ -1,5 +1,8 @@
 // The household's AI suggestions switches (spec §8.6, decision 73): one `household_settings` row each,
 // "on" or "off". A switch with no row is on, so a fresh database and the demo's reset start all on.
+import { inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { householdSettings } from "./schema";
 
 /** One flag per AI feature; off means Tally works from rules and people's choices alone. */
 export type AiSwitches = {
@@ -71,15 +74,13 @@ export function stillOnKeys(switches: Partial<AiSwitches>): string {
 export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
 	const keys = Object.values(KEYS);
 
-	const { results } = await db
-		.prepare(
-			`SELECT key, value FROM household_settings WHERE key IN (${keys.map(() => "?").join(", ")})`,
-		)
-		.bind(...keys)
-		.all<{ key: string; value: string }>();
+	const rows = await drizzle(db)
+		.select({ key: householdSettings.key, value: householdSettings.value })
+		.from(householdSettings)
+		.where(inArray(householdSettings.key, keys));
 
 	const off = new Set(
-		results.filter((row) => row.value === "off").map((row) => row.key),
+		rows.filter((row) => row.value === "off").map((row) => row.key),
 	);
 
 	return {
@@ -115,6 +116,7 @@ export const aiSwitchStatements = (
 ) =>
 	SWITCH_NAMES.filter((name) => switches[name] !== undefined).map((name) =>
 		db
+			// stays raw: a batch feeder, batched with the raw statements a caller passes in `alongside` (decision 179)
 			.prepare(
 				"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 			)

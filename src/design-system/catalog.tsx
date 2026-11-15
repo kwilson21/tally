@@ -30,6 +30,12 @@ import {
 	MERCHANT_SUGGESTION_LABELS,
 	merchantSuggestionMachine,
 } from "../machines/merchant-suggestion";
+import { PLAID_LEASE_LABELS, plaidLeaseMachine } from "../machines/plaid-lease";
+import { READY_CLAIM_LABELS, readyClaimMachine } from "../machines/ready-claim";
+import {
+	SORTING_TURN_LABELS,
+	sortingTurnMachine,
+} from "../machines/sorting-turn";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { closingToast, FINISHED_ANNOUNCEMENT } from "../resort-toast";
@@ -197,6 +203,7 @@ import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 import { YourBanks } from "../views/your-banks";
 import { DEMO_MONTH_RESULTS } from "./demo-month-results";
+import { MACHINE_PURPOSE } from "./machine-purpose";
 import {
 	ADJUST_ROWS,
 	APPLE_LINE,
@@ -6724,7 +6731,8 @@ function Diagrams() {
 				components={["MachineDiagram"]}
 				sentence="A state machine drawn by Pele from its own definition (decisions 175 and 181): one box for each state, top to bottom, finished states shaded, a dot and arrow into the first, a word on each arrow, and under the picture a sentence for every arrow. Add a state or an event to the machine and the picture changes with it."
 			>
-				<State label="A suggested new category (one state, three ways out)">
+				<State label="A suggested new category">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.category}</p>
 					<MachineDiagram
 						id="machine-diagram-category"
 						title="How a suggested new category is decided"
@@ -6732,12 +6740,40 @@ function Diagrams() {
 						labels={CATEGORY_SUGGESTION_LABELS}
 					/>
 				</State>
-				<State label="A suggested store name (a loop on one state, an arrow back, two ways out)">
+				<State label="A suggested store name">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.name}</p>
 					<MachineDiagram
 						id="machine-diagram-name"
 						title="How a suggested store name is decided"
 						machine={merchantSuggestionMachine}
 						labels={MERCHANT_SUGGESTION_LABELS}
+					/>
+				</State>
+				<State label="The sorting turn">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.sortingTurn}</p>
+					<MachineDiagram
+						id="machine-diagram-sorting-turn"
+						title="How the sorting turn is held and given back"
+						machine={sortingTurnMachine}
+						labels={SORTING_TURN_LABELS}
+					/>
+				</State>
+				<State label="The Plaid lease">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.plaidLease}</p>
+					<MachineDiagram
+						id="machine-diagram-plaid-lease"
+						title="How a bank's sync lease is taken and given back"
+						machine={plaidLeaseMachine}
+						labels={PLAID_LEASE_LABELS}
+					/>
+				</State>
+				<State label="The ready-email claim">
+					<p class="max-w-prose text-muted">{MACHINE_PURPOSE.readyClaim}</p>
+					<MachineDiagram
+						id="machine-diagram-ready-claim"
+						title="How a ready email is claimed and sent"
+						machine={readyClaimMachine}
+						labels={READY_CLAIM_LABELS}
 					/>
 				</State>
 			</Specimen>

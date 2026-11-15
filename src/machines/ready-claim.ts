@@ -27,28 +27,53 @@ export const readyClaimMachine = setup({}).createMachine({
 		// Not in readyEmailedTo. A kept try may be stored, from an earlier try Resend may hold; the next claim sends it.
 		waiting: {
 			on: {
-				CLAIM: { target: "sending" },
+				CLAIM: {
+					target: "sending",
+					description: "A run claims the address and writes its email",
+				},
 			},
 		},
 		// In readyEmailedTo with a fresh stamp: a run is sending (or was, and has not yet been cut off).
 		sending: {
 			on: {
-				DELIVERED: { target: "reached" },
-				HELD: { target: "waiting" },
-				FAILED: { target: "waiting" },
-				DROP_OLD: { target: "reached" },
+				DELIVERED: {
+					target: "reached",
+					description: "The email is delivered, and the address is done",
+				},
+				HELD: {
+					target: "waiting",
+					description:
+						"Resend holds the send, and the address waits again with its kept email",
+				},
+				FAILED: {
+					target: "waiting",
+					description:
+						"The send fails for good, and the address waits again with nothing kept",
+				},
+				DROP_OLD: {
+					target: "reached",
+					description:
+						"A kept email over 23 hours old is dropped, and the address is done",
+				},
 			},
 		},
 		// In readyEmailedTo, the stamp is at least the lease old, and a kept try is stored: a run was cut off, or its release
 		// failed. The stored email is the one to send, again.
 		in_doubt: {
 			on: {
-				RECOVER: { target: "sending" },
-				DROP_OLD: { target: "reached" },
+				RECOVER: {
+					target: "sending",
+					description: "A later run sends the kept email again, through Resend",
+				},
+				DROP_OLD: {
+					target: "reached",
+					description:
+						"A kept email over 23 hours old is dropped, and the address is done",
+				},
 			},
 		},
 		// Final: in readyEmailedTo with nothing to send again. Nothing moves it.
-		reached: {},
+		reached: { type: "final" },
 	},
 });
 
@@ -60,6 +85,17 @@ export type ReadyEntry = {
 };
 
 export type ReadyState = "waiting" | "sending" | "in_doubt" | "reached";
+
+/** The short word each state wears in a diagram box. Typed by state, so a new state fails to compile until it has one. */
+export const READY_CLAIM_LABELS: Record<
+	keyof typeof readyClaimMachine.states,
+	string
+> = {
+	waiting: "Waiting",
+	sending: "Sending",
+	in_doubt: "Cut off",
+	reached: "Done",
+};
 
 /**
  * The state an address is in, from its stored entry, with `now` (epoch milliseconds) passed in, so the machine itself reads no
