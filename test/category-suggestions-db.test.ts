@@ -1,4 +1,6 @@
 import { env } from "cloudflare:workers";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
 import { householdToday } from "../src/dates";
@@ -6,6 +8,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { saveCategory } from "../src/db/categories";
 import {
 	createFromSuggestion,
+	decideDismiss,
 	dismissSuggestion,
 	namesToAvoid,
 	noneFitTransactions,
@@ -14,10 +17,12 @@ import {
 	purchaseNamesToAvoid,
 	saveSuggestion,
 } from "../src/db/category-suggestions";
+import { runWith } from "../src/db/database";
 import { addNeverSuggest } from "../src/db/never-suggest";
 import { newCategoryItem } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import type { SuggestionState } from "../src/rules/suggestions";
 import { archiveOn, restoreOn } from "./archive-category";
 import { forwardMember, present } from "./helpers/present";
 
@@ -775,6 +780,30 @@ describe("namesToAvoid", () => {
 		);
 		expect(avoid).not.toContain("Subscriptions");
 		expect(pending).not.toBeNull();
+	});
+});
+
+// The two avoid lists are SQL UNIONs, so a name that is both a category and a dismissed suggestion comes once (#963).
+describe("namesToAvoid and purchaseNamesToAvoid list a name once", () => {
+	it("holds a name that is both a category and a dismissed suggestion once, in each list", async () => {
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
+			.run();
+
+		for (const name of ["Groceries", "Gas"])
+			await db
+				.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'dismissed')",
+				)
+				.bind(name)
+				.run();
+
+		const all = await namesToAvoid(db);
+		const purchase = await purchaseNamesToAvoid(db);
+
+		expect(all.filter((name) => name === "Groceries")).toHaveLength(1);
+		expect(all.filter((name) => name === "Gas")).toHaveLength(1);
+		expect(purchase.filter((name) => name === "Gas")).toHaveLength(1);
 	});
 });
 
@@ -2919,5 +2948,45 @@ describe("dismissSuggestion", () => {
 		await dismissSuggestion(db, id);
 		expect(await dismissSuggestion(db, id)).toBeNull();
 		expect(await dismissSuggestion(db, 9999)).toBeNull();
+	});
+
+	it("does not turn down a suggestion that changed after it was read: the save lands on nothing and the rule is asked again", async () => {
+		const id = present(
+			await saveSuggestion(db, "Subscriptions", [
+				await add(),
+				await add({ rawName: "HULU" }),
+				await add({ rawName: "SPOTIFY" }),
+			]),
+		);
+
+		const seen: (string | null)[] = [];
+
+		const rule = {
+			decide: (request: { suggestionId: number }, facts: SuggestionState) =>
+				Effect.promise(async () => {
+					seen.push(facts.status);
+
+					if (facts.status !== "pending") return Option.none();
+
+					// Another request files the suggestion between this read and the save.
+					await db
+						.prepare(
+							"UPDATE category_suggestions SET status = 'created' WHERE id = ?",
+						)
+						.bind(request.suggestionId)
+						.run();
+
+					return Option.some({
+						suggestionId: request.suggestionId,
+						status: "dismissed",
+						expectedStatus: "pending",
+					});
+				}),
+		};
+
+		await runWith(db, decideDismiss(rule, { suggestionId: id }));
+
+		expect(seen).toEqual(["pending", "created"]);
+		expect(await suggestion(id)).toMatchObject({ status: "created" });
 	});
 });
