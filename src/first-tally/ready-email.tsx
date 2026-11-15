@@ -11,6 +11,7 @@
 // Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a deploy that changes the words cannot
 // change the key. After that the address stays reached and nothing more is sent (decisions 146, 147 and 224). It is drawn like
 // the bank sign-in email (src/reconnect/email.tsx).
+import * as Schema from "effect/Schema";
 import {
 	anyQuestionAnswered,
 	type FirstTally,
@@ -180,12 +181,23 @@ type StoredTry = {
 	tried?: unknown;
 };
 
-/** The fields of a stored email, each checked where it is read. */
-type StoredMail = { subject?: unknown; html?: unknown; text?: unknown };
+/** The stored held map: an object with an entry per address hash. */
+const HeldMap = Schema.Record(Schema.String, Schema.Unknown);
 
-/** True for a stored JSON object (not null). Its fields are checked where they are read. */
-const isStored = <Stored extends object>(value: unknown): value is Stored =>
-	typeof value === "object" && value !== null;
+/** One kept try: its time, and a stored email or a read line. Its other fields are checked where they are read. */
+const KeptEntry = Schema.Struct({
+	at: Schema.String,
+	mail: Schema.optional(Schema.Unknown),
+	line: Schema.optional(Schema.Unknown),
+	tried: Schema.optional(Schema.Unknown),
+});
+
+/** A stored email's words, each a string. */
+const KeptMail = Schema.Struct({
+	subject: Schema.String,
+	html: Schema.String,
+	text: Schema.String,
+});
 
 /** True for a value stored as text. */
 const isText = (value: unknown): value is string => typeof value === "string";
@@ -295,33 +307,25 @@ export function keptTryFrom(held: string | null, hash: string): KeptTry | null {
 
 	const parsed: unknown = JSON.parse(held);
 
-	const entry = isStored<{ [hash: string]: StoredTry | undefined }>(parsed)
-		? parsed[hash]
-		: undefined;
+	const entry: unknown = Schema.is(HeldMap)(parsed) ? parsed[hash] : undefined;
 
-	if (!isStored<StoredTry>(entry)) return null;
+	if (!Schema.is(KeptEntry)(entry)) return null;
 
 	const { mail, line, at, tried } = entry;
-
-	if (!isText(at)) return null;
 
 	// Only a claim's own entry is marked fresh: the email was stored and no run has sent it.
 	const fresh = tried === false;
 
-	if (mail === undefined && isText(line))
+	if (mail === undefined && typeof line === "string")
 		return { mail: renderReadyEmail(line), at, ...(fresh && { tried: false }) };
 
-	if (!isStored<StoredMail>(mail)) return null;
+	if (!Schema.is(KeptMail)(mail)) return null;
 
-	const { subject, html, text } = mail;
-
-	return isText(subject) && isText(html) && isText(text)
-		? {
-				mail: { subject, html, text },
-				at,
-				...(fresh && { tried: false }),
-			}
-		: null;
+	return {
+		mail: { subject: mail.subject, html: mail.html, text: mail.text },
+		at,
+		...(fresh && { tried: false }),
+	};
 }
 
 /**
