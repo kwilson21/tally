@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { makeCategory, saveCategory } from "../src/db/categories";
+import { makeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
+import { renameOn } from "./category-changes";
 
 // Two saves at once can't both file a name that differs only in accented capitals ("Café" and "CAFÉ"):
 // the unique name_key index refuses the second write (migration 0052), and the answer is the usual error.
@@ -43,12 +44,12 @@ describe("a rename and a create of names that differ only in accented capitals, 
 		if (!pet.ok) throw new Error("Could not make the test category");
 
 		const outcomes = await Promise.allSettled([
-			saveCategory(db, pet.id, { name: "CAFÉ" }),
+			renameOn(db, pet.id, "CAFÉ"),
 			makeCategory(db, { name: "Café" }),
 		]);
 
 		const [renamed, created] = outcomes;
-		const renameFiled = renamed.status === "fulfilled";
+		const renameFiled = renamed.status === "fulfilled" && renamed.value;
 
 		const createFiled =
 			created.status === "fulfilled" && created.value.ok === true;

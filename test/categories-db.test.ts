@@ -3,13 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	addCategory,
 	categoryNames,
-	moveCategory,
-	saveCategory,
 	settingsCategories,
 } from "../src/db/categories";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { archiveOn, restoreOn } from "./archive-category";
+import { moveOn } from "./category-changes";
 import { present } from "./helpers/present";
 
 const db = env.DB;
@@ -51,19 +50,9 @@ describe("addCategory", () => {
 	});
 });
 
-describe("saveCategory", () => {
-	it("renames, leaving the budget as it was", async () => {
-		await saveCategory(db, 1, { name: "Food at home" });
-		expect(await names()).toContain("Food at home");
-		expect((await settingsCategories(db, MONTH)).active[0]?.budgetCents).toBe(
-			95000,
-		);
-	});
-});
-
-describe("moveCategory", () => {
+describe("moving a category", () => {
 	it("renumbers the active list 1, 2, 3 as it moves", async () => {
-		await moveCategory(db, 3, "up");
+		await moveOn(db, 3, "up");
 
 		const rows = await db
 			.prepare(
@@ -77,7 +66,7 @@ describe("moveCategory", () => {
 	});
 
 	it("moves a category up or down one place, and does nothing past either end", async () => {
-		await moveCategory(db, 3, "up");
+		await moveOn(db, 3, "up");
 		expect(await names()).toEqual([
 			"Groceries",
 			"Gas",
@@ -87,7 +76,7 @@ describe("moveCategory", () => {
 			"Childcare",
 			"Rent",
 		]);
-		await moveCategory(db, 3, "down");
+		await moveOn(db, 3, "down");
 		expect(await names()).toEqual([
 			"Groceries",
 			"Eating Out",
@@ -97,8 +86,8 @@ describe("moveCategory", () => {
 			"Childcare",
 			"Rent",
 		]);
-		await moveCategory(db, 1, "up");
-		await moveCategory(db, 7, "down");
+		await moveOn(db, 1, "up");
+		await moveOn(db, 7, "down");
 		expect(await names()).toEqual([
 			"Groceries",
 			"Eating Out",
@@ -114,7 +103,7 @@ describe("moveCategory", () => {
 describe("restoring after a move", () => {
 	it("puts a restored category at the end, never sharing a place with another", async () => {
 		await archiveOn(db, 2, "2026-09-22");
-		await moveCategory(db, 5, "up");
+		await moveOn(db, 5, "up");
 		await restoreOn(db, 2, "2026-09-22");
 		expect(await names()).toEqual([
 			"Groceries",
@@ -139,9 +128,6 @@ describe("names that differ only in capitals", () => {
 	it("are refused by the database itself, so two saves at once can't both win", async () => {
 		await addCategory(db, { name: "Travel" });
 		await expect(addCategory(db, { name: "travel" })).rejects.toThrow(/UNIQUE/);
-		await expect(saveCategory(db, 1, { name: "GAS" })).rejects.toThrow(
-			/UNIQUE/,
-		);
 	});
 });
 

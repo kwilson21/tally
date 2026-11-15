@@ -123,20 +123,3 @@ export async function merchantRules(
 		total: total?.n ?? 0,
 	};
 }
-
-/** Clears only the rule; transactions already sorted under it remain as they are. */
-export async function removeMerchantRule(
-	db: D1Database,
-	merchantKey: string,
-): Promise<string | null> {
-	// stays SQL: an UPDATE ... RETURNING with COALESCE/NULLIF (decision 179); no caller, audit #966.
-	const result = await db
-		.prepare(
-			`${CLEAR_MERCHANT_RULE_SQL} AND default_category_id IS NOT NULL
-			RETURNING COALESCE(NULLIF(display_name, ''), raw_name) AS merchant`,
-		)
-		.bind(merchantKey)
-		.first<{ merchant: string }>();
-
-	return result?.merchant ?? null;
-}

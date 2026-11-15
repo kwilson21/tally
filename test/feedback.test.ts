@@ -1402,6 +1402,14 @@ describe("a GitHub answer leaves the stored columns the machine's move says", ()
 				lastStatus: 201,
 				issue: 7,
 			});
+			// The filing write also stamps when GitHub took the report (filed_at, a CURRENT_TIMESTAMP).
+			expect(
+				await env.DB.prepare(
+					"SELECT filed_at AS filedAt FROM feedback WHERE id = ?",
+				)
+					.bind(id)
+					.first(),
+			).toEqual({ filedAt: expect.any(String) });
 		},
 	);
 

@@ -807,6 +807,32 @@ describe("Cancel", () => {
 	});
 });
 
+// Characterisation (#963): the page reads and the People count stay as they were before the Drizzle conversion.
+describe("household people reads (#963)", () => {
+	it("counts the people besides Everyone on the Settings contents page", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person A'),('Person B')",
+		).run();
+
+		const { html } = await get("/settings");
+
+		expect(html).toContain("2 people");
+	});
+
+	it("lists the people in id order, Everyone first, not by name", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Zed'),('Amy')",
+		).run();
+
+		const { html } = await get("/settings/people");
+		const people = html.slice(html.indexOf('id="household-people"'));
+
+		expect(people.indexOf("Everyone")).toBeGreaterThan(-1);
+		expect(people.indexOf("Everyone")).toBeLessThan(people.indexOf("Zed"));
+		expect(people.indexOf("Zed")).toBeLessThan(people.indexOf("Amy"));
+	});
+});
+
 describe("household people", () => {
 	it.each(["", "x".repeat(61)])(
 		"shows an invalid rename on that person's row",

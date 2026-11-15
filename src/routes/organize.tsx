@@ -3,6 +3,7 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
+import { activeCategories } from "../db/active-categories";
 import { decideCreate } from "../db/category-suggestions";
 import { runWith } from "../db/database";
 import { runningRecheck, startResortFor } from "../db/resort-start";
@@ -44,8 +45,6 @@ import { TextInput } from "../views/text-input";
 import { CHANGED_SUGGESTION } from "./suggestions";
 
 type App = { Bindings: Env & { JEV_API_KEY?: string } };
-
-type Category = { id: number; name: string; icon: string; color: string };
 
 type Values = {
 	categoryId: number | null;
@@ -119,9 +118,7 @@ async function renderOrganize(
 
 	const [allGroups, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
-		c.env.DB.prepare(
-			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-		).all<Category>(),
+		activeCategories(c.env.DB),
 	]);
 
 	const currentNames = new Set(allGroups.map((group) => group.name));
@@ -266,7 +263,7 @@ async function renderOrganize(
 							>
 								<legend class="text-base text-ink">Category</legend>
 								<div class="flex flex-wrap gap-2">
-									{categories.results.map((category) => (
+									{categories.map((category) => (
 										<Chip
 											type="radio"
 											name="category"
