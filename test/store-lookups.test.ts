@@ -703,7 +703,12 @@ describe("a saved line is kept only while its text is not private", () => {
 		const line = status === "found" ? "Bakery in Arlington, VA." : null;
 
 		it(`a ${status} save changes nothing when the text is private`, async () => {
-			await seed({ text: PRIVATE_TEXT, status: "pending", claimedBy: ME, claimedAt: LIVE_ISO });
+			await seed({
+				text: PRIVATE_TEXT,
+				status: "pending",
+				claimedBy: ME,
+				claimedAt: LIVE_ISO,
+			});
 			await markText(PRIVATE_TEXT, 1);
 
 			const result = await saveResultStatement(db, {
@@ -719,7 +724,12 @@ describe("a saved line is kept only while its text is not private", () => {
 		});
 
 		it(`a ${status} save lands when the text's mark is 0`, async () => {
-			await seed({ text: "public bakery", status: "pending", claimedBy: ME, claimedAt: LIVE_ISO });
+			await seed({
+				text: "public bakery",
+				status: "pending",
+				claimedBy: ME,
+				claimedAt: LIVE_ISO,
+			});
 			await markText("public bakery", 0);
 
 			const result = await saveResultStatement(db, {
@@ -734,7 +744,12 @@ describe("a saved line is kept only while its text is not private", () => {
 		});
 
 		it(`a ${status} save lands when the text has no mark row`, async () => {
-			await seed({ text: "unmarked bakery", status: "pending", claimedBy: ME, claimedAt: LIVE_ISO });
+			await seed({
+				text: "unmarked bakery",
+				status: "pending",
+				claimedBy: ME,
+				claimedAt: LIVE_ISO,
+			});
 
 			const result = await saveResultStatement(db, {
 				text: "unmarked bakery",

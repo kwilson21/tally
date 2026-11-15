@@ -15,6 +15,7 @@ import { fakeSteps } from "./fake-sort-steps";
 
 export const db = env.DB;
 export const DAY = "2026-11-15";
+
 /** Noon on DAY in New York, the household's default zone (decision 67). A lease is 15 minutes, so tests move less than that. */
 export const NOON_MS = Date.parse("2026-11-15T17:00:00.000Z");
 export const MINUTE = 60_000;
@@ -36,6 +37,15 @@ export const STORE_NAMES = [
 	"Kelp Sushi",
 	"Linden Pizza",
 ];
+
+/** The store at index `i` of STORE_NAMES. A bad index fails the test at once, rather than as an undefined name. */
+export function storeName(i: number): string {
+	const name = STORE_NAMES[i];
+
+	if (name === undefined) throw new Error(`no store ${i}`);
+
+	return name;
+}
 
 /** A store's lookup text: its name in lower case, as lookupTextOf keeps it. */
 export const textOf = (name: string) => name.toLowerCase();
@@ -106,9 +116,7 @@ export async function eligibleStore(name: string): Promise<number> {
 /** Makes a text private, as a person's transfer flag does (readRowFacts): the store's rows are never searched again. */
 export async function makePrivate(name: string) {
 	await db
-		.prepare(
-			"UPDATE transactions SET flag_transfer = 1 WHERE raw_name = ?",
-		)
+		.prepare("UPDATE transactions SET flag_transfer = 1 WHERE raw_name = ?")
 		.bind(name)
 		.run();
 }
@@ -133,7 +141,9 @@ export async function lookupRow(text: string) {
 /** One search taken from the day's count (lookup_calls_<day>); 0 when no row exists. */
 export async function dayCount(day = DAY): Promise<number> {
 	const row = await db
-		.prepare("SELECT CAST(value AS INTEGER) AS n FROM household_settings WHERE key = ?")
+		.prepare(
+			"SELECT CAST(value AS INTEGER) AS n FROM household_settings WHERE key = ?",
+		)
 		.bind(lookupCallsKey(day))
 		.first<{ n: number }>();
 
@@ -156,9 +166,14 @@ export function gateEnv(ai: Ai) {
 }
 
 /** The params a sort with no rows of its own takes: the groups ask nothing, so only the lookup runs. */
-export const PARAMS: SortParams = { bySync: false, rulesApplied: false, ids: [] };
+export const PARAMS: SortParams = {
+	bySync: false,
+	rulesApplied: false,
+	ids: [],
+};
 
 /** A Jev fetch that must never be called: a lookup test has no Jev key, so any call is a violation. */
+// SAFETY: the fake always throws, so no caller ever reads a Response from it; it only needs fetch's call shape.
 export const noJev = (async () => {
 	violations.push("jev call");
 	throw new Error("no Jev call in a lookup test");
@@ -168,7 +183,7 @@ export const noJev = (async () => {
 export type SearchPlan = (
 	query: string,
 	call: number,
-) => Promise<Response> | Response | undefined;
+) => Promise<Response | undefined> | Response | undefined;
 
 /**
  * A fake Tavily: records every query it is asked, answers with one result for a known store (or with `plan`'s answer),
@@ -186,6 +201,7 @@ export function fakeSearch(known: string[], plan?: SearchPlan) {
 			throw new Error("unexpected url");
 		}
 
+		// SAFETY: searchStore sends one JSON body with a query, so the parsed body has that one field.
 		const body = JSON.parse(String(init?.body)) as { query: string };
 
 		queries.push(body.query);
@@ -212,6 +228,7 @@ export function fakeSearch(known: string[], plan?: SearchPlan) {
 		});
 	};
 
+	// SAFETY: fetchFake takes fetch's parameters and answers with a Response, which is all a caller of fetch reads.
 	return { fetch: fetchFake as typeof fetch, queries };
 }
 
@@ -226,13 +243,17 @@ export const httpStatus = (code: number) => new Response("", { status: code });
 export type AiPlan = (
 	store: string,
 	call: number,
-) => Promise<string | Error> | string | Error | undefined;
+) => Promise<string | Error | undefined> | string | Error | undefined;
 
 /**
  * A fake Workers AI binding: records every call, answers with `plan`'s reply or the default line, and records a violation
  * for any message that is not a store's line request (its user message starts with `Store: `).
  */
-export function fakeAi(known: string[], plan?: AiPlan) {
+export function fakeAi(
+	known: string[],
+	plan?: AiPlan,
+	options: { nightNames?: boolean } = {},
+) {
 	const stores: string[] = [];
 
 	const run = async (
@@ -243,6 +264,9 @@ export function fakeAi(known: string[], plan?: AiPlan) {
 		const content = input.messages[1]?.content ?? "";
 
 		if (!content.startsWith("Store: ")) {
+			// A night test runs the night's name step, which asks Workers AI for its own answers: not a lookup call.
+			if (options.nightNames) return { response: LINE };
+
 			violations.push("ai message");
 			throw new Error("unexpected message");
 		}
@@ -261,7 +285,7 @@ export function fakeAi(known: string[], plan?: AiPlan) {
 	};
 
 	// SAFETY: the module calls only ai.run, the one member this fake provides.
-	return { ai: { run } as unknown as Ai, stores };
+	return { ai: { run } as Ai, stores };
 }
 
 /** Runs one sorting instance with fake steps, the lookup open and the given fakes. Returns the steps it ran. */
@@ -277,7 +301,13 @@ export async function runInstance({
 	ai: Ai;
 	runId?: string;
 	steps?: Parameters<typeof fakeSteps>[0];
-	env?: Record<string, unknown>;
+	env?: {
+		DB?: D1Database;
+		DEMO?: string;
+		JEV_API_KEY?: string;
+		TAVILY_API_KEY?: string;
+		AI?: Ai;
+	};
 	params?: SortParams;
 }) {
 	const fake = fakeSteps(steps);
@@ -313,7 +343,9 @@ export function lookupRunSetup() {
 		await saveAiSwitches(db, AI_SWITCHES_ALL_ON);
 
 		const categories = await db
-			.prepare("SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1")
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
 			.all<{ id: number }>();
 
 		food = Number(categories.results[0]?.id);
