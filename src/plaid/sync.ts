@@ -1,4 +1,6 @@
 import { createEffectActor, waitFor } from "@xstate/effect";
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import { movePartDismissalsSql } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
@@ -15,6 +17,7 @@ import {
 	unlinkUnfitPlanPaymentsSql,
 } from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
+import { accounts as accountsTable, plaidItems } from "../db/schema";
 import {
 	extendLeaseSql,
 	ownsLeaseSql,
@@ -94,12 +97,6 @@ type SyncRequest = {
 	access_token: string;
 	count: number;
 	cursor?: string;
-};
-
-type ItemRow = {
-	access_token_encrypted: ArrayBuffer;
-	sync_cursor: string | null;
-	sync_update_cursor: string | null;
 };
 
 /** Item errors that clear up on their own; every other ITEM_ERROR needs the person to fix the connection. */
@@ -591,11 +588,11 @@ export async function syncItem(
 		.run();
 
 	if (lock.meta.changes === 0) {
-		const exists = await env.DB.prepare(
-			"SELECT id FROM plaid_items WHERE id = ?",
-		)
-			.bind(itemRowId)
-			.first();
+		const exists = await drizzle(env.DB)
+			.select({ id: plaidItems.id })
+			.from(plaidItems)
+			.where(eq(plaidItems.id, itemRowId))
+			.get();
 
 		if (!exists) throw new Error("Plaid Item not found");
 
@@ -603,11 +600,16 @@ export async function syncItem(
 	}
 
 	try {
-		const item = await env.DB.prepare(
-			"SELECT access_token_encrypted, sync_cursor, sync_update_cursor FROM plaid_items WHERE id = ?",
-		)
-			.bind(itemRowId)
-			.first<ItemRow>();
+		const item = await drizzle(env.DB)
+			.select({
+				// Raw bytes: the column is read as SQL so the token stays the D1 blob (a plain blob() column is buffer mode).
+				access_token_encrypted: sql<ArrayBuffer>`${plaidItems.accessTokenEncrypted}`,
+				sync_cursor: plaidItems.syncCursor,
+				sync_update_cursor: plaidItems.syncUpdateCursor,
+			})
+			.from(plaidItems)
+			.where(eq(plaidItems.id, itemRowId))
+			.get();
 
 		if (!item) throw new Error("Plaid Item not found");
 
@@ -641,15 +643,15 @@ export async function syncItem(
 			);
 		}
 
-		const stored = await env.DB.prepare(
-			"SELECT plaid_account_id FROM accounts WHERE plaid_item_id = ?",
-		)
-			.bind(itemRowId)
-			.all<{ plaid_account_id: string }>();
+		const stored = await drizzle(env.DB)
+			.select({ plaid_account_id: accountsTable.plaidAccountId })
+			.from(accountsTable)
+			.where(eq(accountsTable.plaidItemId, itemRowId))
+			.all();
 
 		const knownAccounts = new Set([
 			...accounts.map((account) => account.account_id),
-			...stored.results.map((account) => account.plaid_account_id),
+			...stored.map((account) => account.plaid_account_id),
 		]);
 
 		// The run goes on from the saved position. An update that changed while it was being paged starts again from its

@@ -166,9 +166,9 @@ describe("syncItem", () => {
 		const accountsCall = fetchImpl.mock.calls.find(([url]) =>
 			String(url).endsWith("/accounts/get"),
 		);
-		expect(JSON.parse(String(accountsCall?.[1]?.body)).access_token).toBe(
-			"secret-access-token",
-		);
+
+		const sent = JSON.parse(String(accountsCall?.[1]?.body));
+		expect(sent.access_token).toBe("secret-access-token");
 	});
 
 	it("throws Plaid Item not found, and calls Plaid for nothing, when the id has no row", async () => {
