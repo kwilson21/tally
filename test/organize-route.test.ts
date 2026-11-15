@@ -94,6 +94,40 @@ beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 
+// Characterisation (#963): the category chips are the active categories only, in sort order and then name.
+describe("GET /transactions/organize: the category chips (#963)", () => {
+	it("offers the active categories only, in sort order then name", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW ONE', 'Target')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+			env.DB.prepare(
+				"UPDATE categories SET archived = 1 WHERE id = (SELECT MIN(id) FROM categories WHERE archived = 0)",
+			),
+			env.DB.prepare(
+				"UPDATE categories SET sort_order = -1 WHERE id = (SELECT MAX(id) FROM categories WHERE archived = 0)",
+			),
+		]);
+
+		const { res, html } = await get();
+		const offered = [
+			...html.matchAll(/name="category"[^>]*value="(\d+)"/g),
+		].map((m) => Number(m[1]));
+		const expected = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+			).all<{ id: number }>()
+		).results.map((row) => row.id);
+
+		expect(res.status).toBe(200);
+		expect(expected.length).toBeGreaterThan(1);
+		expect(offered).toEqual(expected);
+	});
+});
+
 describe("GET /transactions/organize", () => {
 	it("groups different raw names by the name people see and shows the largest total first", async () => {
 		await env.DB.batch([
