@@ -519,8 +519,6 @@ async function demoCardMonths(db: D1Database, anchor: string) {
 	const orm = drizzle(db);
 	const seeded = alias(balanceHistory, "h");
 	const seededBank = alias(accountsTable, "a");
-	const earliestSeeded = alias(balanceHistory, "eh");
-	const earliestBank = alias(accountsTable, "eb");
 
 	await orm.batch([
 		orm
@@ -551,13 +549,10 @@ async function demoCardMonths(db: D1Database, anchor: string) {
 			.set({
 				balanceOn: anchor,
 				countedFrom: sql`(${orm
-					.select({ earliest: sql<string>`MIN(${earliestSeeded.date})` })
-					.from(earliestSeeded)
-					.innerJoin(
-						earliestBank,
-						eq(earliestBank.id, earliestSeeded.accountId),
-					)
-					.where(isNotNull(earliestBank.plaidItemId))})`,
+					.select({ earliest: sql<string>`MIN(${seeded.date})` })
+					.from(seeded)
+					.innerJoin(seededBank, eq(seededBank.id, seeded.accountId))
+					.where(isNotNull(seededBank.plaidItemId))})`,
 			})
 			.where(eq(accountsTable.subtype, "apple_card")),
 	]);
