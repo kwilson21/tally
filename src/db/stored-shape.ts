@@ -70,24 +70,6 @@ export function readStored<T>(text: string, guard: Guard<T>): T | null {
 }
 
 /**
- * Any JSON value as JSON.parse gives it. A number is any number, Infinity included: a stored 1e999 parses to Infinity, and
- * the old reads kept such a value, so a Schema that refused it would drop a whole context (test/stored-json-corpus.ts).
- */
-export const StoredJson: Schema.Codec<Json> = Schema.Union([
-	Schema.String,
-	Schema.Number,
-	Schema.Boolean,
-	Schema.Null,
-	Schema.mutable(
-		Schema.Array(Schema.suspend((): Schema.Codec<Json> => StoredJson)),
-	),
-	Schema.Record(
-		Schema.String,
-		Schema.suspend((): Schema.Codec<Json> => StoredJson),
-	),
-]);
-
-/**
  * The stored text as the Schema's type, or null when it is not JSON or is not shaped like it: the Schema read beside the
  * guards above (decision 206). It checks the shape and gives the value as stored, so a key the Schema does not name stays
  * on it, as with readStored. Its answers match readStored's for the guard of the same shape (test/stored-json-read.test.ts).

@@ -2,10 +2,9 @@ import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import { runWith } from "../db/database";
 import { decideFeedback } from "../db/feedback-saves";
-import { readStoredWith, StoredJson } from "../db/stored-shape";
 import {
 	diagnosticsEnabled,
-	normalizeFeedbackContext,
+	normalizeContextText,
 } from "../feedback/diagnostics";
 import {
 	FEEDBACK_FEELINGS,
@@ -280,10 +279,7 @@ export function diagnosticLinesOf(clientContext: string | null, page: string) {
 
 	if (clientContext) {
 		try {
-			const context = normalizeFeedbackContext(
-				readStoredWith(StoredJson, clientContext),
-				page,
-			);
+			const context = normalizeContextText(clientContext, page);
 
 			if (context)
 				lines.push(
