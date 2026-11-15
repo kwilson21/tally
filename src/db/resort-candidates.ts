@@ -130,8 +130,8 @@ export async function resortCandidates(
 
 	if (!active) return [];
 
+	// Stays raw: the merchantKeySql, jevSaysMixedSql, visibleNoteSql and COUNTED_JOINS fragments are shared (decision 179).
 	const { results } = await db
-		// Stays raw: the merchantKeySql, jevSaysMixedSql, visibleNoteSql and COUNTED_JOINS fragments are shared (decision 179).
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.plaid_transaction_id AS plaidTransactionId, t.raw_name AS rawName,
 				${merchantKeySql("t")} AS merchantKey, (${jevSaysMixedSql("t")}) AS mixed,
@@ -199,8 +199,8 @@ export async function currentClusterRows(
 > {
 	if (ids.length === 0) return [];
 
+	// Stays raw: the same shared fragments, with json_each over bound ids (decision 179).
 	const { results } = await db
-		// Stays raw: the same shared fragments, with json_each over bound ids (decision 179).
 		.prepare(
 			`SELECT t.id, t.amount_cents AS amountCents, t.raw_name AS rawName, ${merchantKeySql("t")} AS merchantKey,
 				(${jevSaysMixedSql("t")}) AS mixed, ${visibleNoteSql(false)} AS whatItWasNote

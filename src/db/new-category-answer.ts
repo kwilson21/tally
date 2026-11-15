@@ -76,8 +76,8 @@ export async function pendingCategoryNames(
 
 	if (merchantKeys.length === 0) return names;
 
+	// Stays raw: the merchantKeySql and neverSuggestedSql fragments, with json_each (decision 179).
 	const { results } = await db
-		// Stays raw: the merchantKeySql and neverSuggestedSql fragments, with json_each (decision 179).
 		.prepare(
 			`SELECT ${merchantKeySql("t")} AS key, cs.name AS name FROM category_suggestions cs
 			JOIN transactions t ON t.category_suggestion_id = cs.id
@@ -110,8 +110,8 @@ export async function suggestedCategoryName(
 	item: { transactionId: number; merchantKey: string; merchant: string },
 ): Promise<string | null> {
 	// The purchase's raw bank text comes with the same read that checks the Never suggest, so no extra query per card.
+	// Stays raw: the neverSuggestedSql fragment is shared (decision 179).
 	const allowed = await db
-		// Stays raw: the neverSuggestedSql fragment is shared (decision 179).
 		.prepare(
 			`SELECT (SELECT t.raw_name FROM transactions t WHERE t.id = ?) AS raw
 			WHERE NOT EXISTS (SELECT 1 FROM transactions t WHERE t.id = ? AND ${neverSuggestedSql("t", "new_category")})`,
@@ -144,8 +144,8 @@ export async function suggestedCategoryName(
 	// purchase's row.
 	const token = crypto.randomUUID();
 
+	// Stays raw: an INSERT ... SELECT with a conditional ON CONFLICT ... WHERE upsert (decision 179).
 	const claim = await db
-		// Stays raw: an INSERT ... SELECT with a conditional ON CONFLICT ... WHERE upsert (decision 179).
 		.prepare(
 			`INSERT INTO maybe_names (transaction_id, name, claim, categories_key)
 			SELECT id, NULL, ?, ? FROM transactions WHERE id = ?

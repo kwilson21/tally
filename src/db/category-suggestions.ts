@@ -50,8 +50,8 @@ export async function noneFitTransactions(
 		AND t.is_split = 0 AND t.parent_id IS NULL
 		AND NOT ${neverSuggestedSql("t", "new_category")}`;
 
+	// Stays raw: the theme and merchant-key fragments are shared SQL strings (decision 179).
 	const { results: groups } = await db
-		// Stays raw: the theme and merchant-key fragments are shared SQL strings (decision 179).
 		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3
 			ORDER BY count DESC, theme LIMIT 10`)
@@ -60,8 +60,8 @@ export async function noneFitTransactions(
 
 	if (!groups.length) return [];
 
+	// Stays raw: the theme, merchant-key and own-name fragments are shared SQL strings (decision 179).
 	const { results } = await db
-		// Stays raw: the theme, merchant-key and own-name fragments are shared SQL strings (decision 179).
 		.prepare(`SELECT t.id, ${theme} theme, ${merchantKeySql("t")} merchantKey,
 			COALESCE(m.display_name, NULLIF(t.merchant_name,''), t.raw_name) merchant, ${ownNameSql("t")} ownName
 		FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
@@ -119,8 +119,8 @@ export async function saveSuggestion(
 		const existing = await pendingSuggestionIdByName(db, safeName);
 
 		if (existing) {
+			// Stays raw: the eligible fragment and a placeholders() list, in the saveSuggestion batch (decision 179).
 			await db
-				// Stays raw: the eligible fragment and a placeholders() list, in the saveSuggestion batch (decision 179).
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id = ? WHERE id IN (${placeholders()}) AND category_confidence >= ? AND jev_none_fit=1 AND jev_category_id IS NULL AND amount_cents>0 AND pending=0 AND excluded=0 AND flag_income=0 AND is_split=0 AND parent_id IS NULL AND category_id IS NULL AND category_source IS NULL AND category_suggestion_id IS NULL`,
 				)
@@ -136,20 +136,20 @@ export async function saveSuggestion(
 
 	try {
 		const results = await db.batch<{ id: number }>([
+			// Stays raw: the placeholders() fragment with json_each, in the saveSuggestion batch (decision 179).
 			db
-				// Stays raw: the placeholders() fragment with json_each, in the saveSuggestion batch (decision 179).
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id=NULL WHERE id IN (${placeholders()}) AND category_suggestion_id IN (SELECT id FROM category_suggestions WHERE status='none')`,
 				)
 				.bind(JSON.stringify(ids)),
+			// Stays raw: the eligible fragment, in a batch whose RETURNING id feeds the next statement (decision 179).
 			db
-				// Stays raw: the eligible fragment, in a batch whose RETURNING id feeds the next statement (decision 179).
 				.prepare(
 					`INSERT INTO category_suggestions (name,status) SELECT ?,? WHERE (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 RETURNING id`,
 				)
 				.bind(safeName, status, JSON.stringify(ids), JEV_THRESHOLD),
+			// Stays raw: the eligible fragment, in the saveSuggestion batch (decision 179).
 			db
-				// Stays raw: the eligible fragment, in the saveSuggestion batch (decision 179).
 				.prepare(
 					`UPDATE transactions SET category_suggestion_id=(SELECT id FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=? ORDER BY id DESC LIMIT 1) WHERE ${eligible} AND (SELECT COUNT(*) FROM transactions WHERE ${eligible}) >= 3 AND EXISTS (SELECT 1 FROM category_suggestions WHERE name=? COLLATE NOCASE AND status=?)`,
 				)
@@ -177,8 +177,8 @@ export async function saveSuggestion(
 		const existing = await pendingSuggestionIdByName(db, safeName);
 
 		if (!existing) throw error;
+		// Stays raw: the shared eligible fragment (decision 179).
 		await db
-			// Stays raw: the shared eligible fragment (decision 179).
 			.prepare(
 				`UPDATE transactions SET category_suggestion_id=? WHERE ${eligible}`,
 			)
@@ -296,8 +296,8 @@ export async function pendingSuggestionPage(
 	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
 	const [onlyClause, onlyBinds] = filterClause(only);
 
+	// Stays raw: the suggestedRowSql and neverSuggestedSql fragments, with window functions (decision 179).
 	const { results: suggestions } = await db
-		// Stays raw: the suggestedRowSql and neverSuggestedSql fragments, with window functions (decision 179).
 		.prepare(
 			`WITH candidates AS (
 				SELECT cs.id, cs.name, COUNT(t.id) n
@@ -313,8 +313,8 @@ export async function pendingSuggestionPage(
 
 	if (!suggestions.length) return { suggestions: [], more: 0 };
 
+	// Stays raw: json_each over bound ids, with the shared fragments (decision 179).
 	const { results } = await db
-		// Stays raw: json_each over bound ids, with the shared fragments (decision 179).
 		.prepare(`WITH pending AS (
 			SELECT value AS id FROM json_each(?)
 		), candidates AS (
@@ -420,16 +420,16 @@ export async function createFacts(
 	// SAFETY: the batch below lists exactly four statements, so its results are the four D1Results typed here. A batch
 	// is one transaction, so the version is of the very rows read beside it.
 	const [suggestion, list, suggested, version] = (await db.batch([
+		// Stays raw: a plain read, but createFacts' batch holds raw fragment statements (decision 179).
 		db
-			// Stays raw: a plain read, but createFacts' batch holds raw fragment statements (decision 179).
 			.prepare("SELECT status, name FROM category_suggestions WHERE id = ?1")
 			.bind(id),
 		// Stays raw: the LIST constant is built from shared fragments (decision 179).
 		db.prepare(LIST),
 		// Stays raw: STILL_SUGGESTED is built from shared fragments with json_each (decision 179).
 		db.prepare(STILL_SUGGESTED).bind(id, shownJson(shown)),
+		// Stays raw: the CREATE_VERSION fragment (decision 179).
 		db
-			// Stays raw: the CREATE_VERSION fragment (decision 179).
 			.prepare(`SELECT ${CREATE_VERSION} AS version`)
 			.bind(id, shownJson(shown)),
 	])) as [
@@ -457,8 +457,8 @@ const categoryStatements = (
 ) =>
 	category.kind === "create"
 		? [
+				// Stays raw: a batch statement returned into createStatements, which has raw siblings (decision 179).
 				db
-					// Stays raw: a batch statement returned into createStatements, which has raw siblings (decision 179).
 					.prepare(
 						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', ?, ?)",
 					)
@@ -471,14 +471,14 @@ const categoryStatements = (
 			]
 		: category.kind === "restore"
 			? [
+					// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 					db
-						// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 						.prepare(
 							"UPDATE categories SET archived = 0, archived_on = NULL, sort_order = ? WHERE id = ?",
 						)
 						.bind(category.sortOrder, category.id),
+					// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 					db
-						// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 						.prepare(
 							"UPDATE category_archive_periods SET restored_on = ? WHERE category_id = ? AND restored_on IS NULL",
 						)
@@ -499,21 +499,21 @@ export const createStatements = (
 	save: CreateWrite,
 	shown: number[],
 ) => [
+	// Stays raw: the CREATE_VERSION fragment (decision 179).
 	db
-		// Stays raw: the CREATE_VERSION fragment (decision 179).
 		.prepare(
 			`INSERT INTO categories (name, icon, color) SELECT NULL, 'tag', 'cat-blue' WHERE ${CREATE_VERSION} IS NOT ?3`,
 		)
 		.bind(save.suggestionId, shownJson(shown), save.expectedVersion),
 	...categoryStatements(db, save.category),
+	// Stays raw: the createStatements batch has raw siblings (decision 179).
 	db
-		// Stays raw: the createStatements batch has raw siblings (decision 179).
 		.prepare(
 			"UPDATE category_suggestions SET status = ?, decided_at = datetime('now') WHERE id = ?",
 		)
 		.bind(save.status, save.suggestionId),
+	// Stays raw: shared fragments, in the createStatements batch with raw siblings (decision 179).
 	db
-		// Stays raw: shared fragments, in the createStatements batch with raw siblings (decision 179).
 		.prepare(
 			`UPDATE transactions SET category_id = COALESCE(?1, (SELECT id FROM categories WHERE name_key = ?2 AND archived = 0)),
 				category_source = 'user', category_confidence = NULL, jev_none_fit = 0, category_suggestion_id = NULL,
@@ -526,23 +526,23 @@ export const createStatements = (
 			save.who,
 			JSON.stringify(save.file),
 		),
+	// Stays raw: json_each over bound note JSON (decision 179).
 	db
-		// Stays raw: json_each over bound note JSON (decision 179).
 		.prepare(
 			`UPDATE transactions SET note = json_extract(note.value, '$.note'), note_guessed = 0, note_state = 'written',
 				updated_by = ?1, updated_at = datetime('now')
 			FROM json_each(?2) AS note WHERE transactions.id = json_extract(note.value, '$.id')`,
 		)
 		.bind(save.who, JSON.stringify(save.notes)),
+	// Stays raw: the suggestedRowSql fragment (decision 179).
 	db
-		// Stays raw: the suggestedRowSql fragment (decision 179).
 		.prepare(
 			`UPDATE transactions SET category_suggestion_id = NULL, category_confidence = NULL, jev_none_fit = 0
 			WHERE category_suggestion_id = ? AND ${suggestedRowSql("transactions")}`,
 		)
 		.bind(save.suggestionId),
+	// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 	db
-		// Stays raw: an UPDATE in the createStatements batch, which has raw siblings (decision 179).
 		.prepare(
 			"UPDATE transactions SET category_suggestion_id = NULL WHERE category_suggestion_id = ?",
 		)

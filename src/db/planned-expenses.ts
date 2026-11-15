@@ -126,8 +126,8 @@ export async function plansSetAsideCents(
 
 /** Every plan, in month order, with its payment's date and name when paid. */
 export async function loadPlans(db: D1Database): Promise<PlannedExpense[]> {
+	// Stays raw: the PAYER_NAME fragment is shared by the plan reads (decision 179).
 	const { results } = await db
-		// Stays raw: the PAYER_NAME fragment is shared by the plan reads (decision 179).
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
 					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.raw_name AS paidRawName, t.amount_cents AS paidAmountCents
@@ -145,8 +145,8 @@ export async function loadPlan(
 	db: D1Database,
 	id: number,
 ): Promise<PlannedExpense | null> {
+	// Stays raw: the PAYER_NAME fragment is shared by the plan reads (decision 179).
 	const row = await db
-		// Stays raw: the PAYER_NAME fragment is shared by the plan reads (decision 179).
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
 					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.raw_name AS paidRawName, t.amount_cents AS paidAmountCents
@@ -165,8 +165,8 @@ export async function planPaymentCandidates(
 	db: D1Database,
 	plan: Pick<PlannedExpense, "month" | "amountCents">,
 ): Promise<PlanPaymentCandidate[]> {
+	// Stays raw: the canPayPlanSql and PAYER_NAME fragments are shared (decision 179).
 	const { results } = await db
-		// Stays raw: the canPayPlanSql and PAYER_NAME fragments are shared (decision 179).
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS name, t.raw_name AS rawName, t.excluded AS excluded
 			 FROM transactions t

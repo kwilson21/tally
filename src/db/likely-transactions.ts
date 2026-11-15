@@ -172,8 +172,8 @@ export async function likelyTransactions(
 ): Promise<LikelyRow[]> {
 	const { names: namesOn, details: detailsOn } = await readAiSwitches(db);
 
+	// Stays raw: LIKELY_SELECT, LIKELY_WHERE and LIKELY_LIMIT are shared strings (decision 179).
 	const { results } = await db
-		// Stays raw: LIKELY_SELECT, LIKELY_WHERE and LIKELY_LIMIT are shared strings (decision 179).
 		.prepare(
 			`${LIKELY_SELECT} ${LIKELY_WHERE}
 			ORDER BY sameMerchant DESC, t.date DESC, t.id DESC LIMIT ${LIKELY_LIMIT}`,
@@ -239,8 +239,8 @@ export async function likelyStill(
 
 	if (ids.length === 0) return [];
 
+	// Stays raw: COUNTED_JOINS, LIKELY_WHERE and PANEL_CATEGORY_SQL are shared, with json_each (decision 179).
 	const { results } = await db
-		// Stays raw: COUNTED_JOINS, LIKELY_WHERE and PANEL_CATEGORY_SQL are shared, with json_each (decision 179).
 		.prepare(
 			`SELECT t.id AS id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
 				AND ${PANEL_CATEGORY_SQL} AND t.id IN (SELECT value FROM json_each(?8))`,
@@ -279,8 +279,8 @@ export async function addLikely(
 	// (excluded, income, pending, or its guess withdrawn) is left alone, and so is every row when the category
 	// was archived or renamed since the read. ?1-?7 are the panel's parameters and category (panelBinds), ?8 the
 	// ticked ids as JSON and ?9 the actor. RETURNING reads the category's stored name back for the toast.
+	// Stays raw: the same shared fragments, with json_each over bound ids (decision 179).
 	const { results } = await db
-		// Stays raw: the same shared fragments, with json_each over bound ids (decision 179).
 		.prepare(
 			`UPDATE transactions SET category_id = ?5, category_source = 'user', category_confidence = NULL,
 				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?9, updated_at = datetime('now')
