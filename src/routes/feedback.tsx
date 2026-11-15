@@ -270,14 +270,16 @@ function fenced(text: string): string {
 }
 
 function diagnosticLines(item: FeedbackRow) {
+	return diagnosticLinesOf(item.client_context, item.page);
+}
+
+/** The diagnostic lines for a stored client context text and its page; none for no text or a malformed one. */
+export function diagnosticLinesOf(clientContext: string | null, page: string) {
 	const lines: string[] = [];
 
-	if (item.client_context) {
+	if (clientContext) {
 		try {
-			const context = normalizeFeedbackContext(
-				JSON.parse(item.client_context),
-				item.page,
-			);
+			const context = normalizeFeedbackContext(JSON.parse(clientContext), page);
 
 			if (context)
 				lines.push(

@@ -283,12 +283,20 @@ async function keptTryOf(
 ): Promise<KeptTry | null> {
 	const row = await db.prepare(HELD_SQL).first<{ held: string | null }>();
 
-	if (!row?.held) return null;
+	return keptTryFrom(row?.held ?? null, await addressHashOf(address));
+}
 
-	const held: unknown = JSON.parse(row.held);
+/**
+ * keptTryOf's reading of the stored `held` text for one address hash (addressHashOf). It is a pure function so a test can
+ * read the text the way the query gives it. Malformed text is not caught: JSON.parse throws, as it always has.
+ */
+export function keptTryFrom(held: string | null, hash: string): KeptTry | null {
+	if (!held) return null;
 
-	const entry = isStored<{ [hash: string]: StoredTry | undefined }>(held)
-		? held[await addressHashOf(address)]
+	const parsed: unknown = JSON.parse(held);
+
+	const entry = isStored<{ [hash: string]: StoredTry | undefined }>(parsed)
+		? parsed[hash]
 		: undefined;
 
 	if (!isStored<StoredTry>(entry)) return null;
