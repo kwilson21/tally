@@ -1,3 +1,6 @@
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
@@ -85,6 +88,13 @@ import {
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
 import { leftEmpty } from "./refused";
+import {
+	billPayments,
+	bills,
+	householdPeople,
+	plannedExpenses,
+	transactions,
+} from "./schema";
 import { withTurnGuard } from "./sorting-turn";
 import { askedSql } from "./suggestions-queue";
 
@@ -609,24 +619,36 @@ export async function startHereRows(
 	db: D1Database,
 	fallbackMonth: string,
 ): Promise<StartHereLines> {
-	const bakeryDate = await db
-		.prepare("SELECT date FROM transactions WHERE id = ?")
-		.bind(DEMO_BAKERY_ID)
-		.first<{ date: string }>();
+	const orm = drizzle(db);
+
+	const bakeryDate = await orm
+		.select({ date: transactions.date })
+		.from(transactions)
+		.where(eq(transactions.id, DEMO_BAKERY_ID))
+		.get();
 
 	const month = bakeryDate?.date.slice(0, 7) ?? fallbackMonth;
 
-	const latest = (flag: "flag_income" | "flag_transfer") =>
-		db
-			.prepare(
-				`SELECT id FROM transactions WHERE ${flag} = 1 AND parent_id IS NULL AND substr(date, 1, 7) = ? ORDER BY date DESC, id DESC LIMIT 1`,
+	const latest = (
+		flag: typeof transactions.flagIncome | typeof transactions.flagTransfer,
+	) =>
+		orm
+			.select({ id: transactions.id })
+			.from(transactions)
+			.where(
+				and(
+					eq(flag, 1),
+					isNull(transactions.parentId),
+					sql`substr(${transactions.date}, 1, 7) = ${month}`,
+				),
 			)
-			.bind(month)
-			.first<{ id: number }>();
+			.orderBy(desc(transactions.date), desc(transactions.id))
+			.limit(1)
+			.get();
 
 	const [paycheck, transfer] = await Promise.all([
-		latest("flag_income"),
-		latest("flag_transfer"),
+		latest(transactions.flagIncome),
+		latest(transactions.flagTransfer),
 	]);
 
 	const ids = [paycheck?.id, transfer?.id, DEMO_BAKERY_ID].filter(
@@ -794,6 +816,7 @@ export type FirstVisit = "no-bank" | "importing";
 export async function firstVisitState(
 	db: D1Database,
 ): Promise<FirstVisit | null> {
+	// stays SQL: one row whose CASE reads two EXISTS over two tables; as a builder query the EXISTS wrappers say less.
 	const row = await db
 		.prepare(
 			`SELECT CASE
@@ -1817,10 +1840,11 @@ export async function saveEdit(
 			if (
 				personChanged &&
 				isNumber(edit.forPersonId) &&
-				!(await db
-					.prepare("SELECT 1 FROM household_people WHERE id = ?")
-					.bind(edit.forPersonId)
-					.first())
+				!(await drizzle(db)
+					.select({ id: householdPeople.id })
+					.from(householdPeople)
+					.where(eq(householdPeople.id, edit.forPersonId))
+					.get())
 			)
 				return null;
 			throw error;
@@ -1872,14 +1896,38 @@ export async function saveEdit(
 	}
 
 	if (cashChangeIndex !== null && !own[cashChangeIndex]?.meta.changes) {
-		const state = await db
-			.prepare(
-				`SELECT COALESCE((SELECT SUM(amount_cents) FROM transactions part WHERE part.parent_id = cash.id), 0) AS parts,
-				COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) AS refunds
-				FROM transactions cash WHERE cash.id = ?`,
-			)
-			.bind(id)
-			.first<{ parts: number; refunds: number }>();
+		const cash = alias(transactions, "cash");
+		const part = alias(transactions, "part");
+		const refund = alias(transactions, "refund");
+		// Each sum is its own builder query, so the outer row's id is written as a qualified column.
+
+		const partsSum = drizzle(db)
+			.select({ total: sql<number>`COALESCE(SUM(${part.amountCents}), 0)` })
+			.from(part)
+			.where(eq(part.parentId, cash.id));
+
+		const refundsSum = drizzle(db)
+			.select({
+				total: sql<number>`COALESCE(SUM(ABS(${refund.amountCents})), 0)`,
+			})
+			.from(refund)
+			.where(
+				and(
+					eq(refund.refundOfId, cash.id),
+					eq(refund.isSplit, 0),
+					sql`${refund.amountCents} < 0`,
+					eq(refund.flagIncome, 0),
+				),
+			);
+
+		const state = await drizzle(db)
+			.select({
+				parts: sql<number>`(${partsSum})`,
+				refunds: sql<number>`(${refundsSum})`,
+			})
+			.from(cash)
+			.where(eq(cash.id, id))
+			.get();
 
 		// The row is there unless it was deleted during the save, and then nothing says why it was refused.
 		if (!state) throw new Error(`No transaction ${id}`);
@@ -2032,17 +2080,24 @@ async function partBills(
 	db: D1Database,
 	parentId: number,
 ): Promise<PartPayment[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT bp.id AS paymentId, b.id AS billId, b.name AS name, bp.period AS period, bp.transaction_id AS transactionId,
-			part.amount_cents AS amountCents, part.category_id AS categoryId
-			FROM bill_payments bp JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
-			WHERE part.parent_id = ? AND bp.status = 'linked' ORDER BY bp.id`,
-		)
-		.bind(parentId)
-		.all<PartPayment>();
+	const part = alias(transactions, "part");
 
-	return results;
+	return drizzle(db)
+		.select({
+			paymentId: billPayments.id,
+			billId: bills.id,
+			name: bills.name,
+			period: billPayments.period,
+			transactionId: billPayments.transactionId,
+			amountCents: part.amountCents,
+			categoryId: part.categoryId,
+		})
+		.from(billPayments)
+		.innerJoin(bills, eq(bills.id, billPayments.billId))
+		.innerJoin(part, eq(part.id, billPayments.transactionId))
+		.where(and(eq(part.parentId, parentId), eq(billPayments.status, "linked")))
+		.orderBy(asc(billPayments.id))
+		.all();
 }
 
 /**
@@ -2061,16 +2116,21 @@ async function partPlans(
 	db: D1Database,
 	parentId: number,
 ): Promise<PartPlan[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT pe.id AS id, pe.transaction_id AS transactionId, part.amount_cents AS amountCents, part.category_id AS categoryId
-			FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
-			WHERE part.parent_id = ? ORDER BY part.id`,
-		)
-		.bind(parentId)
-		.all<PartPlan>();
+	const part = alias(transactions, "part");
 
-	return results;
+	return drizzle(db)
+		.select({
+			id: plannedExpenses.id,
+			// The inner join keeps only plans on a part, so the id is set; the column itself is nullable.
+			transactionId: sql<number>`${plannedExpenses.transactionId}`,
+			amountCents: part.amountCents,
+			categoryId: part.categoryId,
+		})
+		.from(plannedExpenses)
+		.innerJoin(part, eq(part.id, plannedExpenses.transactionId))
+		.where(eq(part.parentId, parentId))
+		.orderBy(asc(part.id))
+		.all();
 }
 
 /**
@@ -2201,10 +2261,11 @@ export async function saveSplit(
 	bills: UnpaidBill[];
 	moved: { date: string; part: number }[];
 }> {
-	const parent = await db
-		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
-		.bind(parentId)
-		.first();
+	const parent = await drizzle(db)
+		.select({ id: transactions.id })
+		.from(transactions)
+		.where(and(eq(transactions.id, parentId), isNull(transactions.parentId)))
+		.get();
 
 	if (!parent) throw new Error(`No transaction ${parentId}`);
 	// Every child reads its parent inside the atomic batch, so date, exclusion and review edits
@@ -2672,13 +2733,15 @@ async function prepareCashSplitCorrection(
 
 	const savedJson = JSON.stringify(savedParts);
 
-	const current = await db
-		.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
-		.bind(parentId)
-		.all<{ id: number }>();
+	const current = await drizzle(db)
+		.select({ id: transactions.id })
+		.from(transactions)
+		.where(eq(transactions.parentId, parentId))
+		.orderBy(asc(transactions.id))
+		.all();
 
 	const savedIds = savedParts.map((part) => part.id).sort((x, y) => x - y);
-	const currentIds = current.results.map((row) => row.id);
+	const currentIds = current.map((row) => row.id);
 
 	if (
 		savedIds.length !== currentIds.length ||
@@ -2830,10 +2893,11 @@ export async function removeSplit(
 	const unlinked = unlinkedDates(await linkedRefunds(db, parentId, false));
 	const bills = await partBills(db, parentId);
 
-	const parent = await db
-		.prepare("SELECT date FROM transactions WHERE id = ?")
-		.bind(parentId)
-		.first<{ date: string }>();
+	const parent = await drizzle(db)
+		.select({ date: transactions.date })
+		.from(transactions)
+		.where(eq(transactions.id, parentId))
+		.get();
 
 	const unlinkRefund = db
 		.prepare(unlinkSplitOverRefundedSql("?1"))
@@ -3864,26 +3928,25 @@ const COUNTED_BY = {
 	jev: countedBy("jev_category_id"),
 };
 
-/**
- * This month's numbers for the How Tally works page (spec §9): counted transactions, how many
- * need a category (the same set Home counts), and who categorized the rest. A linked refund goes
- * with its purchase: categorized the same way, or waiting with it (linkedWaiting).
- */
 /** How many transactions the bank dated in a month, wherever they count (a refund or late payment can count earlier). */
 export async function bankDatedCount(
 	db: D1Database,
 	month: string,
 ): Promise<number> {
-	const row = await db
-		.prepare(
-			"SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ?",
-		)
-		.bind(month)
-		.first<{ n: number }>();
+	const row = await drizzle(db)
+		.select({ n: sql<number>`COUNT(*)` })
+		.from(transactions)
+		.where(sql`substr(${transactions.date}, 1, 7) = ${month}`)
+		.get();
 
 	return row?.n ?? 0;
 }
 
+/**
+ * This month's numbers for the How Tally works page (spec §9): counted transactions, how many
+ * need a category (the same set Home counts), and who categorized the rest. A linked refund goes
+ * with its purchase: categorized the same way, or waiting with it (linkedWaiting).
+ */
 export async function monthCounts(
 	db: D1Database,
 	month: string,
