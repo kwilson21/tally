@@ -1,4 +1,7 @@
+import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
+import { plaidItems } from "../db/schema";
 import { enabled } from "../routes/plaid";
 import { afterSync } from "./after-sync";
 import { type PlaidEnv, PlaidError } from "./client";
@@ -87,11 +90,24 @@ export async function syncAllItems(
 
 	// The daily run also retries a bank that needs attention (decision 173): a sync that gets every page clears its
 	// flag. A bank that still fails stays flagged, and its reminder is not touched here.
-	const liveStatuses = retryFlagged ? "('ok', 'needs_attention')" : "('ok')";
+	const liveStatuses: ("ok" | "needs_attention")[] = retryFlagged
+		? ["ok", "needs_attention"]
+		: ["ok"];
 
-	const { results: items } = await env.DB.prepare(
-		`SELECT id, institution_name FROM plaid_items WHERE status IN ${liveStatuses} AND disconnected_at IS NULL ORDER BY id`,
-	).all<Bank>();
+	const items: Bank[] = await drizzle(env.DB)
+		.select({
+			id: plaidItems.id,
+			institution_name: plaidItems.institutionName,
+		})
+		.from(plaidItems)
+		.where(
+			and(
+				inArray(plaidItems.status, liveStatuses),
+				isNull(plaidItems.disconnectedAt),
+			),
+		)
+		.orderBy(asc(plaidItems.id))
+		.all();
 
 	// One bank's turn. It never throws: a failure is counted and logged here, so one bank cannot stop the others.
 	const syncBank = async (item: Bank): Promise<BankOutcome> => {
@@ -101,22 +117,35 @@ export async function syncAllItems(
 		try {
 			// Claiming the attempt is one statement, so two overlapping manual syncs can't both win.
 			// The attempt is recorded before syncing, so a failed attempt still counts toward the minute.
-			const claim = await env.DB.prepare(
-				respectCooldown
-					? `UPDATE plaid_items SET last_sync_attempt_at = datetime('now')
-						WHERE id = ? AND (last_sync_attempt_at IS NULL OR last_sync_attempt_at <= datetime('now', '-${SYNC_COOLDOWN_SECONDS} seconds'))`
-					: "UPDATE plaid_items SET last_sync_attempt_at = datetime('now') WHERE id = ?",
-			)
-				.bind(item.id)
+			// The cooldown is a bound value, so the window's text is never built into the SQL.
+			const claim = await drizzle(env.DB)
+				.update(plaidItems)
+				.set({ lastSyncAttemptAt: sql`datetime('now')` })
+				.where(
+					respectCooldown
+						? and(
+								eq(plaidItems.id, item.id),
+								or(
+									isNull(plaidItems.lastSyncAttemptAt),
+									lte(
+										plaidItems.lastSyncAttemptAt,
+										sql`datetime('now', ${`-${SYNC_COOLDOWN_SECONDS} seconds`})`,
+									),
+								),
+							)
+						: eq(plaidItems.id, item.id),
+				)
 				.run();
 
 			if (claim.meta.changes !== 1) return { kind: "busy" };
 
-			const current = await env.DB.prepare(
-				"SELECT status FROM plaid_items WHERE id = ? AND disconnected_at IS NULL",
-			)
-				.bind(item.id)
-				.first<{ status: string }>();
+			const current = await drizzle(env.DB)
+				.select({ status: plaidItems.status })
+				.from(plaidItems)
+				.where(
+					and(eq(plaidItems.id, item.id), isNull(plaidItems.disconnectedAt)),
+				)
+				.get();
 
 			// Gone, disconnected, or (for a manual run) flagged since the list was read: skip.
 			if (!current || (!retryFlagged && current.status !== "ok"))

@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { plaidItems } from "../db/schema";
 import { next } from "../machines/next";
 import { plaidConnectionMachine } from "../machines/plaid-connection";
 import { ownsLeaseSql } from "../machines/plaid-lease";
@@ -159,12 +162,17 @@ async function readCurrent(
 	db: D1Database,
 	itemId: number,
 ): Promise<Current | null> {
-	const row = await db
-		.prepare(
-			"SELECT status, disconnected_at, attention_login, attention_held, connection_revision FROM plaid_items WHERE id = ?",
-		)
-		.bind(itemId)
-		.first<Row & { connection_revision: number }>();
+	const row = await drizzle(db)
+		.select({
+			status: plaidItems.status,
+			disconnected_at: plaidItems.disconnectedAt,
+			attention_login: plaidItems.attentionLogin,
+			attention_held: plaidItems.attentionHeld,
+			connection_revision: plaidItems.connectionRevision,
+		})
+		.from(plaidItems)
+		.where(eq(plaidItems.id, itemId))
+		.get();
 
 	if (!row) return null;
 

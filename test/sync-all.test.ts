@@ -573,7 +573,8 @@ describe("syncAllItems", () => {
 			get(target, prop) {
 				if (prop === "prepare") {
 					return (sql: string) => {
-						if (sql.startsWith("SELECT status FROM plaid_items"))
+						// Drizzle renders the status read in lower case with quoted names (#963).
+						if (sql.startsWith('select "status" from "plaid_items"'))
 							statusChecks += 1;
 
 						return target.prepare(sql);
@@ -651,20 +652,28 @@ describe("syncAllItems", () => {
 		const afterTheList = (sql: string) => {
 			const statement = env.DB.prepare(sql);
 
-			if (!sql.includes("SELECT id, institution_name FROM plaid_items"))
+			// Drizzle renders the bank list in lower case with quoted names (#963).
+			if (!sql.includes('select "id", "institution_name" from "plaid_items"'))
 				return statement;
 
+			// Drizzle reads a select's rows with bind(...).raw(), so the stub stands in for that path.
 			return {
-				all: async () => {
-					const listed = await statement.all();
+				bind: (...values: unknown[]) => {
+					const bound = statement.bind(...values);
 
-					await env.DB.prepare(
-						"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
-					)
-						.bind(second)
-						.run();
+					return {
+						raw: async () => {
+							const listed = await bound.raw();
 
-					return listed;
+							await env.DB.prepare(
+								"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = ?",
+							)
+								.bind(second)
+								.run();
+
+							return listed;
+						},
+					};
 				},
 			};
 		};
@@ -762,7 +771,7 @@ describe("syncAllItems", () => {
 				if (prop === "prepare") {
 					return (sql: string) => {
 						if (
-							sql.startsWith("SELECT status FROM plaid_items") &&
+							sql.startsWith('select "status" from "plaid_items"') &&
 							++statusChecks === 1
 						) {
 							throw new Error("D1 unavailable");
