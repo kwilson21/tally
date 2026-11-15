@@ -61,25 +61,6 @@ describe("saveCategory", () => {
 	});
 });
 
-describe("setArchived", () => {
-	it("archives and restores without deleting anything (spec §7)", async () => {
-		const before = await db
-			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = 2")
-			.first<{ n: number }>();
-
-		await archiveOn(db, 2, "2026-09-22");
-		expect(await names()).not.toContain("Eating Out");
-		await restoreOn(db, 2, "2026-09-22");
-		expect(await names()).toContain("Eating Out");
-
-		const after = await db
-			.prepare("SELECT COUNT(*) AS n FROM transactions WHERE category_id = 2")
-			.first<{ n: number }>();
-
-		expect(after?.n).toBe(before?.n);
-	});
-});
-
 describe("moveCategory", () => {
 	it("renumbers the active list 1, 2, 3 as it moves", async () => {
 		await moveCategory(db, 3, "up");

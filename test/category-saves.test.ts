@@ -315,8 +315,7 @@ describe("a save on a list that changed since the rule read it", () => {
 	});
 });
 
-// Archive and restore through their rules, as the settings screen runs them (the live path): the cases the retired
-// setArchived helper used to cover, now on the code the app runs.
+// Archive and restore through their rules, as the settings screen runs them (the live path).
 describe("archive and restore through the rules", () => {
 	const archive = (id: number, today: string) =>
 		decideCategory(archiveCategory, { id, today }, archiveCategoryStatements);
