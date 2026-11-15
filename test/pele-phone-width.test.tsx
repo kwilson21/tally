@@ -6,6 +6,10 @@ import {
 	categorySuggestionMachine,
 } from "../src/machines/category-suggestion";
 import {
+	FEEDBACK_FILING_LABELS,
+	feedbackFiling,
+} from "../src/machines/feedback-filing";
+import {
 	MERCHANT_SUGGESTION_LABELS,
 	merchantSuggestionMachine,
 } from "../src/machines/merchant-suggestion";
@@ -60,6 +64,16 @@ describe("Pele pictures on a phone (issue #904)", () => {
 					title: "t",
 					machine: categorySuggestionMachine,
 					labels: CATEGORY_SUGGESTION_LABELS,
+				}),
+		],
+		[
+			"the feedback filing machine",
+			() =>
+				MachineDiagram({
+					id: "m6",
+					title: "t",
+					machine: feedbackFiling,
+					labels: FEEDBACK_FILING_LABELS,
 				}),
 		],
 		[

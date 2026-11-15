@@ -127,6 +127,15 @@ describe("GET /design-system in the demo", () => {
 		expect(text).toContain("How a ready email is claimed and sent");
 	});
 
+	it("shows the feedback filing with its purpose sentence and state label (#865)", async () => {
+		const { html } = await get("/design-system");
+		const text = html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+		expect(text).toContain(MACHINE_PURPOSE.feedbackFiling);
+		expect(text).toContain("The feedback filing");
+		expect(text).toContain("How a feedback message is filed as a GitHub issue");
+	});
+
 	it("quotes in NetWorthChart's words the examples its states draw: the card and the bank, both on Oct 1 (#780)", async () => {
 		const { html } = await get("/design-system");
 		const start = html.indexOf('<section id="net-worth-chart"');

@@ -15,7 +15,13 @@ import { setup } from "xstate";
 //   FAILED         any other failed try (a non-2xx answer, a timeout, an unreadable body, a 2xx with no issue number):
 //                  the claim is released, and the try stays counted. Every case after GitHub's answer writes its status;
 //                  only a fetch that never got an answer, such as a timeout, writes none.
+//   FAILED_LAST_TRY  the same failed try, on the cap's try: the row gives up as exhausted.
 //   LEASE_EXPIRED  a claim has run out with no answer: the same as a failed try.
+//   LEASE_EXPIRED_LAST_TRY  the same cut-off try, on the cap's try: the row gives up as exhausted.
+//
+// FAILED and LEASE_EXPIRED come as a pair with a _LAST_TRY twin, because this xstate cannot guard a transition object,
+// and the target depends on the count. failureMove picks the plain move below the cap and the twin at the cap, from the
+// row's stored count, so every caller (the machine's tests included) takes the same move.
 //
 // Not a move: a row that GitHub filed, but whose number could not be stored (the final UPDATE failed), is filed again by
 // the next try, so GitHub gets a duplicate issue. No machine can close that gap, since the number is never written.
@@ -47,41 +53,92 @@ export const feedbackFiling = setup({}).createMachine({
 				CLAIM: {
 					target: "claimed",
 					context: ({ context }) => ({ attempts: context.attempts + 1 }),
+					description: "A run starts filing the row, and the try is counted",
 				},
 			},
 		},
 		claimed: {
 			on: {
-				FILED: { target: "filed" },
+				FILED: {
+					target: "filed",
+					description:
+						"GitHub created the issue and its number is stored, so the row is filed for good",
+				},
 				REJECTED: {
 					target: "gave_up",
 					context: { attempts: FILING_ATTEMPT_CAP },
+					description:
+						"GitHub answered 422, which it never accepts, so the row gives up at once",
 				},
 				// The token is wrong, not the row: the try goes back, and the row is ready again. The run that hit this
 				// stops (see retryFeedback), and the next run tries again with the same count.
 				TOKEN_REFUSED: {
 					target: "unfiled",
 					context: ({ context }) => ({ attempts: context.attempts - 1 }),
+					description:
+						"GitHub refused the token, so the try is given back and the row is ready again",
 				},
-				// A failed try and a cut-off try count the same: below the cap the row is ready again, at the cap it gives up.
-				// These two are functions, not objects, because the target depends on the count. This xstate refuses a
-				// guard inside a transition object (error E4), so graph drawing (#865) cannot draw these two edges.
-				FAILED: ({ context }) =>
-					context.attempts >= FILING_ATTEMPT_CAP
-						? { target: "gave_up" }
-						: { target: "unfiled" },
-				LEASE_EXPIRED: ({ context }) =>
-					context.attempts >= FILING_ATTEMPT_CAP
-						? { target: "gave_up" }
-						: { target: "unfiled" },
+				FAILED: {
+					target: "unfiled",
+					description:
+						"A failed try below the cap releases the claim and stays counted, so the row is ready again",
+				},
+				FAILED_LAST_TRY: {
+					target: "gave_up",
+					description:
+						"A failed try on the cap's last try releases the claim, and the row gives up",
+				},
+				LEASE_EXPIRED: {
+					target: "unfiled",
+					description:
+						"A cut-off try below the cap ran out with no answer, so the row is ready again",
+				},
+				LEASE_EXPIRED_LAST_TRY: {
+					target: "gave_up",
+					description:
+						"A cut-off try on the cap's last try ran out with no answer, so the row gives up",
+				},
 			},
 		},
 		// Filed is final: the issue exists.
-		filed: {},
+		filed: { type: "final" },
 		// Given up is final here: nothing in the app gives a row another try, so the machine has no way out either.
-		gave_up: {},
+		gave_up: { type: "final" },
 	},
 });
+
+/** The short word each state wears in a diagram box. Typed by state, so a new state fails to compile until it has one. */
+export const FEEDBACK_FILING_LABELS: Record<
+	keyof typeof feedbackFiling.states,
+	string
+> = {
+	unfiled: "Waiting to file",
+	claimed: "Filing now",
+	filed: "Filed",
+	gave_up: "Gave up",
+};
+
+/** The move a failed or cut-off try makes: the plain event below the cap, its _LAST_TRY twin at the cap (see the header). */
+export type FailureEvent =
+	| "FAILED"
+	| "FAILED_LAST_TRY"
+	| "LEASE_EXPIRED"
+	| "LEASE_EXPIRED_LAST_TRY";
+
+/**
+ * The move for a failed try ("FAILED") or a cut-off try ("LEASE_EXPIRED"), from the row's stored count. A try at the cap
+ * is the last one, so its move is the _LAST_TRY twin.
+ */
+export function failureMove(
+	kind: "FAILED" | "LEASE_EXPIRED",
+	attempts: number,
+): FailureEvent {
+	const lastTry = attempts >= FILING_ATTEMPT_CAP;
+
+	if (kind === "FAILED") return lastTry ? "FAILED_LAST_TRY" : "FAILED";
+
+	return lastTry ? "LEASE_EXPIRED_LAST_TRY" : "LEASE_EXPIRED";
+}
 
 /** A row's four columns, as the state helper reads them. `filingAt` is SQLite's UTC "YYYY-MM-DD HH:MM:SS" or null. */
 export type StoredFiling = {
