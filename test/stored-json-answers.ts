@@ -67,10 +67,15 @@ function run(c: StoredCase): unknown {
 	}
 }
 
+/** A value as the text the baseline holds it: JSON, with -0 and non-finite numbers kept apart. */
+export function encodeAnswer(value: unknown): string {
+	return JSON.stringify(value, replacer) ?? "undefined";
+}
+
 /** The answer for one case, as the text the baseline holds. */
 export function answerOf(c: StoredCase): string {
 	try {
-		return JSON.stringify(run(c), replacer) ?? "undefined";
+		return encodeAnswer(run(c));
 	} catch (error) {
 		return `throws ${error instanceof Error ? error.name : typeof error}`;
 	}
