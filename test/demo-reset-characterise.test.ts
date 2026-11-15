@@ -7,7 +7,8 @@ import baseline from "./fixtures/demo-reset-baseline.json";
 // recorded them (fixtures/demo-reset-baseline.json). The reset runs twice: from an empty database with no example,
 // then again over those rows with the category example, after a household setting that must stay (jev_calls_*) and
 // one that must go. A timestamp column (any `_at`) keeps its place as "<ts>" when it has a value, since datetime('now')
-// is the clock; a column whose default is missing or changed still shows as null or a different value.
+// is the clock; a column whose default is missing or changed still shows as null or a different value. The migration
+// counter (d1_migrations in sqlite_sequence) is left out: it moves with every new migration, and the reset never writes it.
 
 const db = env.DB;
 const TODAY = "2026-10-15";
@@ -34,7 +35,9 @@ async function dump(): Promise<Record<string, Row[]>> {
 	}
 
 	const { results: sequences } = await db
-		.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name")
+		.prepare(
+			"SELECT name, seq FROM sqlite_sequence WHERE name <> 'd1_migrations' ORDER BY name",
+		)
 		.all<Row>();
 
 	out.sqlite_sequence = sequences;

@@ -12462,10 +12462,6 @@
 		],
 		"sqlite_sequence": [
 			{
-				"name": "d1_migrations",
-				"seq": 74
-			},
-			{
 				"name": "household_people",
 				"seq": 1
 			},
@@ -25162,10 +25158,6 @@
 			{
 				"name": "category_suggestions",
 				"seq": 1
-			},
-			{
-				"name": "d1_migrations",
-				"seq": 74
 			},
 			{
 				"name": "household_people",
