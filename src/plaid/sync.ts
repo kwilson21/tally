@@ -46,6 +46,13 @@ import { type PlaidEnv, PlaidError, plaidPost } from "./client";
 import { markNeedsAttention, markSyncSucceeded, readSeen } from "./item-store";
 import { loginStillBroken } from "./login-broken";
 import { mergePendingIntoPosted } from "./pending-merge";
+import {
+	type PlaidAccount,
+	type PlaidTransaction,
+	readAccountsAnswer,
+	readSyncPage,
+	type SyncResponse,
+} from "./sync-answers";
 import { decryptToken } from "./token-crypto";
 
 type SyncEnv = PlaidEnv & {
@@ -53,44 +60,6 @@ type SyncEnv = PlaidEnv & {
 	TOKEN_ENCRYPTION_KEY?: string;
 	DEMO?: string;
 	TAVILY_API_KEY?: string;
-};
-
-type PlaidAccount = {
-	account_id: string;
-	name: string;
-	mask?: string | null;
-	type: string;
-	subtype?: string | null;
-	balances: { current?: number | null };
-};
-
-type PlaidTransaction = {
-	transaction_id: string;
-	account_id: string;
-	date: string;
-	amount: number;
-	name: string;
-	merchant_name?: string | null;
-	pending: boolean;
-	/** On a posted transaction, the id of the pending one it replaces, when the bank gave one. */
-	pending_transaction_id?: string | null;
-	personal_finance_category?: {
-		primary?: string | null;
-		detailed?: string | null;
-	} | null;
-};
-
-type SyncResponse = {
-	added: PlaidTransaction[];
-	modified: PlaidTransaction[];
-	removed: { transaction_id: string }[];
-	next_cursor: string;
-	has_more: boolean;
-	/**
-	 * Plaid's own report of the Item's pulls: TRANSACTIONS_UPDATE_STATUS_UNKNOWN, NOT_READY, INITIAL_UPDATE_COMPLETE or
-	 * HISTORICAL_UPDATE_COMPLETE (Plaid's transactions API reference, /transactions/sync).
-	 */
-	transactions_update_status?: string | null;
 };
 
 /** Plaid's transactions_update_status once the Item's 90-day history is in (spec §5, #581). */
@@ -628,12 +597,14 @@ export async function syncItem(
 		let accounts: PlaidAccount[];
 
 		try {
-			({ accounts } = await plaidPost<{ accounts: PlaidAccount[] }>(
-				env,
-				"/accounts/get",
-				{ access_token: accessToken },
-				fetchImpl,
-			));
+			accounts = readAccountsAnswer(
+				await plaidPost(
+					env,
+					"/accounts/get",
+					{ access_token: accessToken },
+					fetchImpl,
+				),
+			);
 		} catch (error) {
 			if (!(error instanceof PlaidError)) throw error;
 
@@ -1451,11 +1422,9 @@ export async function syncItem(
 						// (the entire history of updates), so an empty one is sent as none.
 						if (cursor) request.cursor = cursor;
 
-						asked = await plaidPost<SyncResponse>(
-							env,
-							"/transactions/sync",
-							request,
-							fetchImpl,
+						// A page the sync cannot take fails the run here, as a plain Error, before any statement is built.
+						asked = readSyncPage(
+							await plaidPost(env, "/transactions/sync", request, fetchImpl),
 						);
 
 						return {

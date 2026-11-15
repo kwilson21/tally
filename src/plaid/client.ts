@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import type { Json } from "../json";
 
 export type PlaidEnv = {
 	PLAID_CLIENT_ID?: string;
@@ -170,19 +171,19 @@ export async function orThrow<A>(
 	throw thrown(result.failure);
 }
 
-/** One call whose answer the caller names and nothing checks: for the callers that are not in Effect yet. */
-export async function plaidPost<T>(
+/** One call whose answer is not read here: the caller checks it, for the callers that are not in Effect yet. */
+export async function plaidPost(
 	env: PlaidEnv,
 	path: string,
 	body: PlaidBody,
 	fetchImpl: typeof fetch = fetch,
-): Promise<T> {
+): Promise<Json> {
 	const parsed = await orThrow(
 		askPlaid(env, path, body, Schema.Unknown, fetchImpl),
 	);
 
-	// SAFETY: T is the response shape the caller names for this Plaid path, and parsed is that path's JSON body.
-	return parsed as T;
+	// SAFETY: parsed is the answer askPlaid read with JSON.parse, so it is a JSON value; no caller reads it as more until it has checked it.
+	return parsed as Json;
 }
 
 export type LinkTokenRequest = {
