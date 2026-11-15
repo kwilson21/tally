@@ -222,6 +222,25 @@ const NAMED: Seed[] = [
 		category_confidence: 0.9,
 		jev_category_id: ACTIVE_CAT,
 	},
+	// #870: a stuck credit a person picked before the trigger existed stays held (no trigger is run for it), and a
+	// credit the trigger settled counts as reviewed by the person, in its category.
+	{
+		name: "credit held, person picked a category, Jev said not income (10%) (#870 stuck row)",
+		amount_cents: -500,
+		income_confidence: 0.1,
+		category_id: ACTIVE_CAT,
+		category_source: "user",
+	},
+	{
+		name: "credit settled by a person's pick, Jev said not income (10%) (#870)",
+		amount_cents: -500,
+		income_confidence: 0.1,
+		category_id: ACTIVE_CAT,
+		category_source: "user",
+		income_source: "user",
+		credit_reviewed: 1,
+		credit_reviewed_by: "user",
+	},
 	{
 		name: "credit held, excluded by user",
 		amount_cents: -500,
