@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
@@ -237,11 +237,23 @@ describe("POST /home/seen: the presence check-in", () => {
 	});
 
 	it("writes a check-in that is exactly 30 seconds old (the window's edge is inclusive)", async () => {
-		await setSeen(PERSON, "-30 seconds");
-		const before = await seenOf(PERSON);
-		await checkIn();
-		const after = await seenOf(PERSON);
-		expect(after).not.toBe(before);
+		// The clock sits on a whole second, and the stored check-in is that second less 30: the window's edge exactly.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const now = Math.floor(Date.now() / 1000) * 1000;
+			vi.setSystemTime(now);
+			await env.DB.prepare(
+				"UPDATE household_members SET home_seen_at = datetime(?, 'unixepoch') WHERE email = ?",
+			)
+				.bind(now / 1000 - 30, PERSON)
+				.run();
+			const before = await seenOf(PERSON);
+			await checkIn();
+
+			expect(await seenOf(PERSON)).not.toBe(before);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("writes nothing for a removed member, and still answers 204", async () => {
