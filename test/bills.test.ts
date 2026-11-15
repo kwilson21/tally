@@ -1341,6 +1341,7 @@ describe("Bills", () => {
 				"SELECT id FROM bills WHERE active=1 ORDER BY id LIMIT 1",
 			).first<{ id: number }>(),
 		);
+
 		const activeBefore = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM bills WHERE active=1",
 		).first<{ n: number }>();
@@ -1360,9 +1361,9 @@ describe("Bills", () => {
 				.first("active"),
 		).toBe(0);
 		expect(
-			await env.DB.prepare("SELECT COUNT(*) AS n FROM bills WHERE active=1").first(
-				"n",
-			),
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bills WHERE active=1",
+			).first("n"),
 		).toBe((activeBefore?.n ?? 0) - 1);
 	});
 
