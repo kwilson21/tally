@@ -235,7 +235,7 @@ const isPushClaimOrRelease = (sql: string) =>
 	sql.startsWith("UPDATE household_settings") && sql.includes("readyPushedTo");
 
 /** A statement that reads. */
-const isRead = (sql: string) => sql.startsWith("SELECT");
+const isRead = (sql: string) => /^select\b/i.test(sql); // Drizzle writes lower-case `select`; the raw reads upper-case.
 
 /** The address list the push has claimed, as the record holds it. */
 const pushedList = async () => (await readFirstTally(env.DB))?.readyPushedTo;
@@ -640,11 +640,13 @@ describe("the ready push: how each answer counts", () => {
 		});
 
 		await runReadyPush(
-			pushing({ DB: failingOn("DELETE FROM push_subscriptions") }),
+			pushing({ DB: failingOn(`delete from "push_subscriptions" where`) }),
 			{ fetchImpl },
 		);
 		expect(inAnyOrder(pushed)).toEqual(inAnyOrder([PHONE, LAPTOP]));
 		expect(await pushedList()).toEqual([DANA]);
+		// The failed delete leaves PHONE stored: only the delete that did not fail removes a device.
+		expect(await devicesOf(DANA)).toEqual([PHONE, LAPTOP]);
 	});
 
 	it("logs counts and the status only, never an endpoint", async () => {
