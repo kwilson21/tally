@@ -36,6 +36,7 @@ import {
 } from "../machines/merchant-suggestion";
 import {
 	PLAID_CONNECTION_LABELS,
+	PLAID_CONNECTION_MOVE_GROUPS,
 	plaidConnectionMachine,
 } from "../machines/plaid-connection";
 import { PLAID_LEASE_LABELS, plaidLeaseMachine } from "../machines/plaid-lease";
@@ -6800,7 +6801,7 @@ function Diagrams() {
 				title="MachineTable"
 				tier="visual"
 				components={["MachineTable"]}
-				sentence="A state machine as a table, read from its own definition: one row for each state, what it means, and what moves it, with a sentence for every move, for a machine too tangled to draw as a picture."
+				sentence="A state machine as a table, read from its own definition: every move grouped by what sets it off, with where it goes from, where it goes and what happens, for a machine too tangled to draw as a picture."
 			>
 				<State label="The Plaid connection">
 					<p class="max-w-prose text-muted">
@@ -6811,6 +6812,7 @@ function Diagrams() {
 						title="How a bank connection moves between states"
 						machine={plaidConnectionMachine}
 						labels={PLAID_CONNECTION_LABELS}
+						groups={PLAID_CONNECTION_MOVE_GROUPS}
 					/>
 				</State>
 			</Specimen>

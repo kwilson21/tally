@@ -158,3 +158,17 @@ export const PLAID_CONNECTION_LABELS: Record<
 	login_broken_and_needs_relink: "Login broken and needs reconnecting",
 	disconnected: "Disconnected",
 };
+
+/** One heading of a move table: a title, then the events it groups, each one event of the machine. */
+export type MoveGroup = { title: string; events: readonly string[] };
+
+// The Plaid connection's moves, grouped by who or what sets them off, for the table that shows it (MachineTable).
+// Every event of the machine is in exactly one group; MachineTable throws when one is missing, doubled or unknown.
+export const PLAID_CONNECTION_MOVE_GROUPS: readonly MoveGroup[] = [
+	{
+		title: "When Plaid tells Tally",
+		events: ["LOGIN_BROKEN", "RELINK_NEEDED"],
+	},
+	{ title: "When a sync finishes", events: ["SYNC_SUCCEEDED"] },
+	{ title: "When you act", events: ["RELINKED", "DISCONNECT"] },
+];

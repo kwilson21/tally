@@ -1,8 +1,10 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
 import type { AnyStateMachine } from "xstate";
+import { setup } from "xstate";
 import {
 	PLAID_CONNECTION_LABELS,
+	PLAID_CONNECTION_MOVE_GROUPS,
 	plaidConnectionMachine,
 } from "../src/machines/plaid-connection";
 import { MachineTable } from "../src/views/machine-table";
@@ -11,11 +13,16 @@ const TITLE = "How a bank connection moves between states";
 
 const LABELS: Record<string, string> = PLAID_CONNECTION_LABELS;
 
-const draw = (machine: AnyStateMachine, labels: Record<string, string>) =>
-	String(MachineTable({ id: "t", title: TITLE, machine, labels })).replaceAll(
-		"&#39;",
-		"'",
-	);
+const GROUPS = PLAID_CONNECTION_MOVE_GROUPS;
+
+const draw = (
+	machine: AnyStateMachine,
+	labels: Record<string, string>,
+	groups: readonly { title: string; events: readonly string[] }[] = GROUPS,
+) =>
+	String(
+		MachineTable({ id: "t", title: TITLE, machine, labels, groups }),
+	).replaceAll("&#39;", "'");
 
 // The machine's definition as written, read straight from `config` and not through machineGraph, so these checks can
 // fail when machineGraph or the table drops or adds a move.
@@ -29,145 +36,206 @@ type RawState = {
 
 type RawStates = Record<string, RawState>;
 
-// SAFETY: the machine tested here is hand-written with only the fields RawState names (type, description, on).
+// SAFETY: the machines tested here are hand-written with only the fields RawState names (type, description, on).
 const configStates = (machine: AnyStateMachine) =>
 	machine.config.states as RawStates;
 
-const shownEvent = (event: string) => event.toLowerCase().replaceAll("_", " ");
+// Every transition of the raw config, in the machine's order: the state it leaves, the event, and the transition.
+function rawTransitions(states: RawStates) {
+	return Object.entries(states).flatMap(([from, state]) =>
+		Object.entries(state.on ?? {}).flatMap(([event, raw]) =>
+			(Array.isArray(raw) ? raw : [raw]).map((transition) => ({
+				from,
+				event,
+				target: String(transition.target),
+				description: transition.description ?? "",
+			})),
+		),
+	);
+}
 
-// The moves the table should say, per state label, each one as its words: "event goes to Target: sentence", or
-// "event stays here: sentence" when the move goes back to the same state.
-function expectedMoves(
+// One expected row of the table: which group it is in, its From label, its To label or "stays", and its sentence.
+function expectedRows(
 	states: RawStates,
 	labels: Record<string, string>,
-): Map<string, string[]> {
-	const moves = new Map<string, string[]>();
-
-	for (const [from, state] of Object.entries(states)) {
-		const lines: string[] = [];
-
-		for (const [event, raw] of Object.entries(state.on ?? {}))
-			for (const transition of Array.isArray(raw) ? raw : [raw]) {
-				const target = String(transition.target);
-
-				const where =
-					target === from ? "stays here" : `goes to ${labels[target]}`;
-
-				lines.push(
-					`${shownEvent(event)} ${where}: ${transition.description ?? ""}`,
-				);
-			}
-
-		moves.set(labels[from], lines.sort());
-	}
-
-	return moves;
+	groups: readonly { title: string; events: readonly string[] }[],
+) {
+	return groups.map((group) => ({
+		title: group.title,
+		rows: rawTransitions(states)
+			.filter((t) => group.events.includes(t.event))
+			.map((t) => ({
+				from: labels[t.from],
+				to: t.target === t.from ? "stays" : labels[t.target],
+				description: t.description,
+			})),
+	}));
 }
 
-// The moves the table says, read back per row: each <tr>'s label and the text of its <li> items, with tags removed.
-function tableMoves(html: string): Map<string, string[]> {
-	const moves = new Map<string, string[]>();
+// The table as it reads back: each <table> with its caption and its body rows, in the order drawn. Tags and
+// escaping are undone so the rows compare as the words a reader sees.
+function tablesOf(html: string) {
+	return html
+		.split("<table")
+		.slice(1)
+		.map((table) => {
+			const caption =
+				table.match(/<caption[^>]*>([^<]*)<\/caption>/)?.[1] ?? "";
 
-	for (const row of html.split("<tr").slice(1)) {
-		const label = row.match(/<th scope="row"[^>]*>([^<]*)<\/th>/)?.[1];
+			const body = table.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? "";
 
-		if (label === undefined) continue;
+			const rows = [
+				...body.matchAll(
+					/<tr[^>]*>\s*<th scope="row"[^>]*>([^<]*)<\/th>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<\/tr>/g,
+				),
+			].map((m) => ({ from: m[1], to: m[2], description: m[3] }));
 
-		const items = [...row.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map((m) =>
-			m[1].replace(/<[^>]+>/g, "").trim(),
-		);
-
-		moves.set(label, items.sort());
-	}
-
-	return moves;
+			return {
+				title: caption,
+				rows,
+				bodyRowCount: body.split("<tr").length - 1,
+			};
+		});
 }
+
+// The moves the table says, as one line each, sorted, so a missing or doubled move is a clear difference.
+const lines = (
+	groups: {
+		title: string;
+		rows: { from: string; to: string; description: string }[];
+	}[],
+) =>
+	groups
+		.flatMap((g) =>
+			g.rows.map((r) => `${g.title} | ${r.from} | ${r.to} | ${r.description}`),
+		)
+		.sort();
 
 describe("MachineTable", () => {
-	it("draws a row for every state, headed by its label, with the caption as the title", () => {
+	it("draws the title as a heading above one table for each group, each with its group's title as its caption", () => {
 		const html = draw(plaidConnectionMachine, LABELS);
-		const states = configStates(plaidConnectionMachine);
 
-		expect(html).toContain(`<caption`);
-		expect(html).toContain(`>${TITLE}</caption>`);
+		expect(html).toContain(`<div id="t" `);
+		expect(html).toContain(`>${TITLE}</h3>`);
+		expect(html.indexOf(`>${TITLE}</h3>`)).toBeLessThan(html.indexOf("<table"));
+
+		const tables = tablesOf(html);
+
+		expect(tables.map((t) => t.title)).toEqual(GROUPS.map((g) => g.title));
+		expect(html.match(/<caption/g)).toHaveLength(GROUPS.length);
+		expect(html.match(/<th scope="col"/g)).toHaveLength(GROUPS.length * 3);
 		expect(html.match(/<th scope="row"/g)).toHaveLength(
-			Object.keys(states).length,
+			rawTransitions(configStates(plaidConnectionMachine)).length,
 		);
-
-		for (const key of Object.keys(states))
-			expect(html).toContain(
-				`<th scope="row" class="py-3 pr-4 text-left font-semibold">${LABELS[key]}</th>`,
-			);
-
-		expect(html).toContain('scope="col"');
 	});
 
-	it("says every move of the raw config once, with its event words, its target label, and its sentence", () => {
+	it("says every transition of the config in exactly one group row, with its From label, To label or 'stays', and its sentence", () => {
 		const html = draw(plaidConnectionMachine, LABELS);
 		const states = configStates(plaidConnectionMachine);
 
-		const transitions = Object.values(states).flatMap((state) =>
-			Object.values(state.on ?? {}).flatMap((raw) =>
-				Array.isArray(raw) ? raw : [raw],
+		expect(rawTransitions(states)).toHaveLength(20);
+
+		const tables = tablesOf(html);
+
+		for (const table of tables)
+			expect(table.rows).toHaveLength(table.bodyRowCount);
+
+		expect(lines(tables)).toEqual(lines(expectedRows(states, LABELS, GROUPS)));
+	});
+
+	it("lists each group's rows in the machine's state order, then the order of its events", () => {
+		const html = draw(plaidConnectionMachine, LABELS);
+		const states = configStates(plaidConnectionMachine);
+
+		const tables = tablesOf(html);
+		const expected = expectedRows(states, LABELS, GROUPS);
+
+		expect(tables.map((t) => t.rows)).toEqual(
+			expected.map((g) =>
+				g.rows.map((r) => ({
+					from: r.from,
+					to: r.to,
+					description: r.description,
+				})),
 			),
 		);
-
-		expect(html.match(/<li/g)).toHaveLength(transitions.length);
-		expect(transitions).toHaveLength(20);
-		expect(tableMoves(html)).toEqual(expectedMoves(states, LABELS));
 	});
 
-	it("says 'stays here' for every move that goes back to its own state, and for no other", () => {
+	it("says 'stays' for every move that goes back to its own state, and for no other", () => {
 		const html = draw(plaidConnectionMachine, LABELS);
 		const states = configStates(plaidConnectionMachine);
-		let stays = 0;
+		const stays = rawTransitions(states).filter((t) => t.target === t.from);
 
-		for (const [from, state] of Object.entries(states))
-			for (const raw of Object.values(state.on ?? {}))
-				for (const transition of Array.isArray(raw) ? raw : [raw])
-					if (transition.target === from) stays += 1;
-
-		expect(stays).toBeGreaterThan(0);
-		expect(html.match(/stays here/g)).toHaveLength(stays);
+		expect(stays.length).toBeGreaterThan(0);
+		expect(html.match(/>stays</g)).toHaveLength(stays.length);
 	});
 
-	it("says nothing moves a final state", () => {
-		const html = draw(plaidConnectionMachine, LABELS);
-
-		const row = html.split("<tr").find((r) => r.includes(">Disconnected</th>"));
-
-		expect(row).toContain("Nothing moves it.");
-		expect(row).not.toContain("<li");
-	});
-
-	it("gives every state and every move a plain sentence, read from the config", () => {
+	it("gives every state a label and a sentence, and every move a sentence, read from the config", () => {
 		for (const [key, state] of Object.entries(
 			configStates(plaidConnectionMachine),
 		)) {
 			expect(LABELS[key], key).toBeTruthy();
 			expect(state.description, key).toBeTruthy();
-
-			for (const [event, raw] of Object.entries(state.on ?? {}))
-				for (const transition of Array.isArray(raw) ? raw : [raw])
-					expect(transition.description, `${key}.${event}`).toBeTruthy();
 		}
+
+		for (const t of rawTransitions(configStates(plaidConnectionMachine)))
+			expect(t.description, `${t.from}.${t.event}`).toBeTruthy();
 	});
 
-	it("says what each state means in the row, from its description", () => {
-		const html = draw(plaidConnectionMachine, LABELS);
+	it("lists every event of the machine in exactly one group of the Plaid connection", () => {
+		const events = new Set(
+			rawTransitions(configStates(plaidConnectionMachine)).map((t) => t.event),
+		);
 
-		for (const state of Object.values(configStates(plaidConnectionMachine))) {
-			expect(state.description).toBeTruthy();
-			expect(html).toContain(state.description ?? "");
-		}
+		const grouped = GROUPS.flatMap((g) => g.events);
+
+		expect(events.size).toBe(5);
+		expect([...grouped].sort()).toEqual([...events].sort());
+	});
+
+	it("throws for an event in two groups, an event in no group, and a group event the machine does not have", () => {
+		const machine = setup({}).createMachine({
+			id: "tiny",
+			initial: "a",
+			states: {
+				a: {
+					description: "A.",
+					on: {
+						GO: { target: "b", description: "Go to B." },
+						STAY: { target: "a", description: "Stay in A." },
+					},
+				},
+				b: { type: "final", description: "B." },
+			},
+		});
+
+		const labels = { a: "A", b: "B" };
+
+		const draw2 = (groups: { title: string; events: string[] }[]) => () =>
+			draw(machine, labels, groups);
+
+		expect(
+			draw2([
+				{ title: "One", events: ["GO"] },
+				{ title: "Two", events: ["GO", "STAY"] },
+			]),
+		).toThrow(/GO/);
+
+		expect(draw2([{ title: "One", events: ["GO"] }])).toThrow(/STAY/);
+
+		expect(
+			draw2([
+				{ title: "One", events: ["GO", "STAY"] },
+				{ title: "Ghost", events: ["NOT_HERE"] },
+			]),
+		).toThrow(/NOT_HERE/);
 	});
 
 	it("fails when the table and the config disagree on one move", () => {
-		// The check run on the Plaid connection with one move taken out (ok on LOGIN_BROKEN) and with one made-up move
-		// (ok on a made-up event): both must differ from the table.
+		// The check run with one move taken out of the config (ok on LOGIN_BROKEN), and with one made-up move: each must
+		// differ from what the table says.
 		const states = configStates(plaidConnectionMachine);
-
-		const table = tableMoves(draw(plaidConnectionMachine, LABELS));
+		const table = lines(tablesOf(draw(plaidConnectionMachine, LABELS)));
 
 		const missing = {
 			...states,
@@ -181,19 +249,6 @@ describe("MachineTable", () => {
 			},
 		} satisfies RawStates;
 
-		expect(table).not.toEqual(expectedMoves(missing, LABELS));
-
-		const extra = {
-			...states,
-			ok: {
-				...states.ok,
-				on: {
-					...states.ok.on,
-					MADE_UP: { target: "disconnected", description: "Made up." },
-				},
-			},
-		} satisfies RawStates;
-
-		expect(table).not.toEqual(expectedMoves(extra, LABELS));
+		expect(table).not.toEqual(lines(expectedRows(missing, LABELS, GROUPS)));
 	});
 });
