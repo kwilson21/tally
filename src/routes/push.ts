@@ -10,6 +10,8 @@
 // restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
 // 409, so opening Home on a shared device does not hand it to whoever is looking, and the page shows that device as Off.
 
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -17,6 +19,7 @@ import { Hono } from "hono";
 import { actor } from "../actor";
 import { runWith } from "../db/database";
 import { decideDevice } from "../db/push-saves";
+import { householdMembers } from "../db/schema";
 import { fromBase64Url } from "../push/base64url";
 import { isPushServiceEndpoint } from "../push/endpoint";
 import { vapidKeys } from "../push/keys";
@@ -95,11 +98,16 @@ push.post("/push/subscribe", async (c) => {
 
 	// The early answer for someone who isn't a member. The rule checks membership again on what it reads, and the save's guard
 	// holds it to that, so a removal that lands after this check still stores nothing.
-	const current = await c.env.DB.prepare(
-		"SELECT 1 AS present FROM household_members WHERE email = ? AND removed_at IS NULL",
-	)
-		.bind(member)
-		.first();
+	const current = await drizzle(c.env.DB)
+		.select({ present: sql<number>`1` })
+		.from(householdMembers)
+		.where(
+			and(
+				eq(householdMembers.email, member),
+				isNull(householdMembers.removedAt),
+			),
+		)
+		.get();
 
 	if (!current) return c.body(null, 404);
 	// The body is read only when its declared size is a number of bytes within MAX_BODY_LENGTH: a missing or unreadable

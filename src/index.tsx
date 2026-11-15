@@ -1,7 +1,10 @@
+import { lte } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { verifiedAccessIdentity } from "./access";
 import { DAY_MS, DEFAULT_TIME_ZONE, todayIn } from "./dates";
 import { noteHouseholdMember } from "./db/reconnect";
+import { cashDeleteHolds } from "./db/schema";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
@@ -119,8 +122,9 @@ export async function runScheduled(
 	fetchImpl?: typeof fetch,
 	time?: RunClock,
 ) {
-	await env.DB.prepare("DELETE FROM cash_delete_holds WHERE created_at <= ?")
-		.bind(Date.now() - DAY_MS)
+	await drizzle(env.DB)
+		.delete(cashDeleteHolds)
+		.where(lte(cashDeleteHolds.createdAt, Date.now() - DAY_MS))
 		.run();
 
 	if (canResetDemo(env)) {

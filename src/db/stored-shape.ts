@@ -87,3 +87,18 @@ export function readStoredWith<S extends Schema.Constraint>(
 
 	return Schema.is(schema)(read.success) ? read.success : null;
 }
+
+/**
+ * The stored text as the Schema's type, given as stored. JSON.parse runs first, so text that is not JSON throws the
+ * SyntaxError it always threw; the parsed value is then checked with `Schema.is`, and a value of the wrong shape is null.
+ * Unlike readStoredWith, the two failures are told apart, so a read that must refuse bad data can throw on one and
+ * not the other (#1120). Decoding would strip the keys the Schema does not name, so the value is returned as parsed.
+ */
+export function parseStoredWith<S extends Schema.Constraint>(
+	schema: S,
+	text: string,
+): S["Type"] | null {
+	const value: unknown = JSON.parse(text);
+
+	return Schema.is(schema)(value) ? value : null;
+}
