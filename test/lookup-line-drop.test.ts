@@ -148,6 +148,13 @@ describe("dropLineStatements", () => {
 		expect(
 			dropLineStatements(db, [textOf(storeName(0)), textOf(storeName(0))]),
 		).toHaveLength(2);
+		// 501 copies of one text are one text: without the dedupe, 501 entries make two chunks, four statements.
+		expect(
+			dropLineStatements(
+				db,
+				Array.from({ length: 501 }, () => textOf(storeName(0))),
+			),
+		).toHaveLength(2);
 		expect(dropLineStatements(db, [])).toEqual([]);
 	});
 });
