@@ -1,0 +1,909 @@
+{
+	"free | done | release ok": {
+		"returned": {
+			"added": 1,
+			"modified": 0,
+			"removed": 0,
+			"changedIds": 1
+		},
+		"bank": {
+			"sync_cursor": "cursor-1",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		]
+	},
+	"free | done | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": "cursor-1",
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		]
+	},
+	"free | refused at accounts | release ok": {
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | refused at accounts | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | refused at transactions | release ok": {
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | refused at transactions | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | fetch throws | release ok": {
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | fetch throws | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | ask fails | release ok": {
+		"thrown": "Error: Plaid sync page is missing a field the sync needs",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | ask fails | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | save fails | release ok": {
+		"thrown": "Error: the page save failed",
+		"identity": "the save's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | save fails | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"free | no key | release ok": {
+		"thrown": "Error: TOKEN_ENCRYPTION_KEY is required",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	},
+	"free | no key | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | done | release ok": {
+		"returned": {
+			"added": 1,
+			"modified": 0,
+			"removed": 0,
+			"changedIds": 1
+		},
+		"bank": {
+			"sync_cursor": "cursor-1",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		]
+	},
+	"expired | done | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": "cursor-1",
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		]
+	},
+	"expired | refused at accounts | release ok": {
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | refused at accounts | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | refused at transactions | release ok": {
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | refused at transactions | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1,
+			"/item/get": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | fetch throws | release ok": {
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | fetch throws | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | ask fails | release ok": {
+		"thrown": "Error: Plaid sync page is missing a field the sync needs",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | ask fails | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | save fails | release ok": {
+		"thrown": "Error: the page save failed",
+		"identity": "the save's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | save fails | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | no key | release ok": {
+		"thrown": "Error: TOKEN_ENCRYPTION_KEY is required",
+		"identity": "another object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	},
+	"expired | no key | release fails": {
+		"thrown": "Error: the release statement failed",
+		"identity": "the release's error object",
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "<run lock>",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	},
+	"held | not taken": {
+		"returned": {
+			"skipped": true
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": "<time>",
+			"sync_lock_id": "held-run",
+			"disconnected_at": null,
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	},
+	"disconnected | not taken": {
+		"returned": {
+			"skipped": true
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": "<time>",
+			"status": "ok"
+		},
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	},
+	"missing | not taken": {
+		"thrown": "Error: Plaid Item not found",
+		"identity": "another object",
+		"bank": null,
+		"takes": [
+			{
+				"item": "<item>",
+				"lock": "<run lock>"
+			}
+		],
+		"releases": [],
+		"plaidPaths": {},
+		"charges": [],
+		"accounts": []
+	}
+}

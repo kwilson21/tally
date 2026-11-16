@@ -20,12 +20,7 @@ import { unlinkOverRefundedSql } from "../db/refunded";
 import { accounts as accountsTable, plaidItems } from "../db/schema";
 import { lookupEnvOpen } from "../lookup/gate";
 import { syncedTextRows, syncedTextsStatements } from "../lookup/texts";
-import {
-	extendLeaseSql,
-	ownsLeaseSql,
-	releaseLeaseSql,
-	takeLeaseSql,
-} from "../machines/plaid-lease";
+import { extendLeaseSql, ownsLeaseSql } from "../machines/plaid-lease";
 import {
 	type Asked,
 	RESTARTS,
@@ -53,6 +48,7 @@ import {
 	readSyncPage,
 	type SyncResponse,
 } from "./sync-answers";
+import { withSyncLease } from "./sync-lease";
 import { decryptToken } from "./token-crypto";
 
 type SyncEnv = PlaidEnv & {
@@ -556,23 +552,8 @@ export async function syncItem(
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 
-	const lock = await env.DB.prepare(takeLeaseSql("?", "?"))
-		.bind(lockId, itemRowId)
-		.run();
-
-	if (lock.meta.changes === 0) {
-		const exists = await drizzle(env.DB)
-			.select({ id: plaidItems.id })
-			.from(plaidItems)
-			.where(eq(plaidItems.id, itemRowId))
-			.get();
-
-		if (!exists) throw new Error("Plaid Item not found");
-
-		return { skipped: true };
-	}
-
-	try {
+	// The run holds the bank's lease for its whole body, and gives it back however the body ends (sync-lease.ts, #1164).
+	return withSyncLease(env.DB, itemRowId, lockId, async () => {
 		const item = await drizzle(env.DB)
 			.select({
 				// Raw bytes: the column is read as SQL so the token stays the D1 blob (a plain blob() column is buffer mode).
@@ -1502,9 +1483,5 @@ export async function syncItem(
 			);
 
 		throw failure?.error ?? new Error("Plaid sync stopped without a reason");
-	} finally {
-		await env.DB.prepare(releaseLeaseSql("?", "?"))
-			.bind(itemRowId, lockId)
-			.run();
-	}
+	});
 }
