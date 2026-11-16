@@ -109,6 +109,15 @@ const cases: Case[] = [
 		lineGuess: false,
 	},
 	{
+		n: "5b",
+		note: "kept 0 with matching copies is not a guess",
+		confidence: 0.95,
+		line: { kept: 0, category: "eating", confidence: 0.95 },
+		chip: false,
+		card: false,
+		lineGuess: false,
+	},
+	{
 		n: "6",
 		note: "floor dropped for line guesses",
 		confidence: 0.39,

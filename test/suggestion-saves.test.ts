@@ -448,6 +448,42 @@ describe("with_line: a Maybe answer says whether it answered a kept line-backed 
 			},
 			{ withLine: 0, answer: "yes", confidence: 0.5 },
 		],
+		[
+			"an income Yes on a row with a matching kept line",
+			"income",
+			async () => {
+				const eatingOut = await categoryId("Eating Out");
+
+				const id =
+					(
+						await db
+							.prepare(
+								`INSERT INTO transactions (account_id, date, amount_cents, raw_name, income_confidence, jev_category_id, category_confidence)
+							VALUES ((SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', -500000, 'PAYROLL', 0.5, ?, 0.95)
+							RETURNING id`,
+							)
+							.bind(eatingOut)
+							.first<{ id: number }>()
+					)?.id ?? 0;
+
+				await keepLine(id, 1, eatingOut, 0.95);
+
+				const { version } = await maybeFacts(db, "income", id);
+
+				await db.batch(
+					moneyMaybeStatements(db, {
+						kind: "income",
+						answer: "yes",
+						transactionId: id,
+						today: TODAY,
+						who: WHO,
+						confidence: 0.5,
+						expectedVersion: version,
+					}),
+				);
+			},
+			{ withLine: 0, answer: "yes", confidence: 0.5 },
+		],
 	])(
 		"%s records with_line as the batch reads it",
 		async (_name, kind, act, expected) => {
