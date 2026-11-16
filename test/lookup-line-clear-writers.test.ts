@@ -2,25 +2,38 @@ import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
 import { cleanBankText } from "../src/clean-bank-text";
 import { changeBankTextRule } from "../src/db/bank-text-rules";
+import {
+	createFromSuggestion,
+	saveSuggestion,
+} from "../src/db/category-suggestions";
 import { runWith } from "../src/db/database";
-import { newCategoryTarget } from "../src/db/new-category-answer";
-import { decideCategoryMaybe, fileInNewCategory } from "../src/db/suggestion-saves";
-import { saveSuggestion, createFromSuggestion } from "../src/db/category-suggestions";
 import { addLikely } from "../src/db/likely-transactions";
 import { addMoreLikeThis } from "../src/db/more-like-this";
-import { applyMerchantRules, saveEdit, saveSplit, setMerchantRule } from "../src/db/transactions";
+import { newCategoryTarget } from "../src/db/new-category-answer";
+import {
+	decideCategoryMaybe,
+	fileInNewCategory,
+} from "../src/db/suggestion-saves";
+import {
+	applyMerchantRules,
+	saveEdit,
+	saveSplit,
+	setMerchantRule,
+} from "../src/db/transactions";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { acceptCategoryGuess, chooseCategory } from "../src/rules/suggestions";
 import { saveCash } from "../src/transactions/cash";
-import { holdCashDelete, restoreCashDelete } from "../src/transactions/cash-undo";
+import {
+	holdCashDelete,
+	restoreCashDelete,
+} from "../src/transactions/cash-undo";
 import { setOrganizeRule } from "../src/transactions/organize";
-import { fileOrganizeGroup } from "./organize-group";
 import { present } from "./helpers/present";
 import {
 	asksAgain,
 	db,
-	edit,
 	EATING,
+	edit,
 	expectCleared,
 	filedRow,
 	GROCERIES,
@@ -36,6 +49,7 @@ import {
 	useLineFixture,
 	WHO,
 } from "./lookup-line-fixture";
+import { fileOrganizeGroup } from "./organize-group";
 
 // Rule 13 (spec §7, "One answer corrects the whole store"): every writer that files a row of a store clears the line-backed
 // guesses of the store's other rows (S, under K2, shares the lookup text). Each case runs one real writer on A (the row it
@@ -54,7 +68,9 @@ async function idOf(name: string): Promise<number> {
 /** The first child of a split parent, as saved (both parts are inserted in one statement, so they are read by id). */
 async function firstPartOf(parentId: number): Promise<number> {
 	const row = await db
-		.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1")
+		.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1",
+		)
 		.bind(parentId)
 		.first<{ id: number }>();
 
@@ -109,20 +125,27 @@ const CASES: Case[] = [
 		},
 	},
 	{
-		label: "W3 edit panel 'Always for these merchants' (the panel's own write is user, so W3 cannot isolate the WHEN)",
+		label:
+			"W3 edit panel 'Always for these merchants' (the panel's own write is user, so W3 cannot isolate the WHEN)",
 		source: "user",
 		category: "Groceries",
 		run: async () => {
 			const a = await lineRow({ key: K1 });
 			const s = await lineRow({ key: K2 });
 
-			await saveEdit(db, a, edit({ categoryId: GROCERIES, alwaysForMerchant: true }), WHO);
+			await saveEdit(
+				db,
+				a,
+				edit({ categoryId: GROCERIES, alwaysForMerchant: true }),
+				WHO,
+			);
 
 			return { a, s };
 		},
 	},
 	{
-		label: "W4 setMerchantRule files the store (no 'merchant_rule' in the WHEN: W4 fails)",
+		label:
+			"W4 setMerchantRule files the store (no 'merchant_rule' in the WHEN: W4 fails)",
 		source: "merchant_rule",
 		category: "Groceries",
 		run: async () => {
@@ -158,14 +181,21 @@ const CASES: Case[] = [
 	{
 		// A correction updates the kept part in place, and that update also fires the trigger, so this case cannot tell the
 		// INSERT trigger from the UPDATE one (the brief's "no INSERT trigger: W6 fails" does not hold for it).
-		label: "W6 cash split correction: a kept part updated and a new part inserted (the update alone fires it)",
+		label:
+			"W6 cash split correction: a kept part updated and a new part inserted (the update alone fires it)",
 		source: "user",
 		category: "Eating Out",
 		run: async () => {
 			const parent = (
 				await saveCash(
 					db,
-					{ date: TODAY, amountCents: 1200, merchant: K1, categoryId: GROCERIES, note: null },
+					{
+						date: TODAY,
+						amountCents: 1200,
+						merchant: K1,
+						categoryId: GROCERIES,
+						note: null,
+					},
 					WHO,
 				)
 			).id;
@@ -199,7 +229,9 @@ const CASES: Case[] = [
 			).toMatchObject({ saved: true });
 
 			const added = await db
-				.prepare("SELECT id FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)")
+				.prepare(
+					"SELECT id FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)",
+				)
 				.bind(parent, kept[0] ?? 0, kept[1] ?? 0)
 				.first<{ id: number }>();
 
@@ -212,10 +244,17 @@ const CASES: Case[] = [
 		category: "Groceries",
 		run: async () => {
 			const s = await lineRow({ key: K2 });
+
 			const a = (
 				await saveCash(
 					db,
-					{ date: TODAY, amountCents: 1200, merchant: K1, categoryId: GROCERIES, note: null },
+					{
+						date: TODAY,
+						amountCents: 1200,
+						merchant: K1,
+						categoryId: GROCERIES,
+						note: null,
+					},
 					WHO,
 				)
 			).id;
@@ -231,22 +270,31 @@ const CASES: Case[] = [
 			const a = (
 				await saveCash(
 					db,
-					{ date: TODAY, amountCents: 1200, merchant: K1, categoryId: GROCERIES, note: null },
+					{
+						date: TODAY,
+						amountCents: 1200,
+						merchant: K1,
+						categoryId: GROCERIES,
+						note: null,
+					},
 					WHO,
 				)
 			).id;
-			const token = await holdCashDelete(db, a, K1);
+
+			const token = present(await holdCashDelete(db, a, K1));
 			const s = await lineRow({ key: K2 });
 			const restored = await restoreCashDelete(db, token);
 
 			// The restore inserts the row again under a new id (the freed one went to the sibling above).
-			if (!restored || !("id" in restored)) throw new Error("restore refused");
+			if (!restored || restored.alreadyRestored)
+				throw new Error("restore refused");
 
 			return { a: restored.id, s, own: "none" };
 		},
 	},
 	{
-		label: "W9 card Yes, accepting the line-backed guess (no UPDATE trigger: W9 fails)",
+		label:
+			"W9 card Yes, accepting the line-backed guess (no UPDATE trigger: W9 fails)",
 		source: "user",
 		category: "Eating Out",
 		run: async () => {
@@ -294,13 +342,20 @@ const CASES: Case[] = [
 		run: async () => {
 			const a = await lineRow({ key: K1 });
 			const s = await lineRow({ key: K2 });
+
 			const target = newCategoryTarget("Books & audio", [
 				{ id: GROCERIES, name: "Groceries", archived: false },
 			]);
 
-			if (!target.ok || target.kind !== "create") throw new Error("expected create");
+			if (!target.ok || target.kind !== "create")
+				throw new Error("expected create");
 
-			await fileInNewCategory(db, { transactionId: a, target, today: TODAY, who: WHO });
+			await fileInNewCategory(db, {
+				transactionId: a,
+				target,
+				today: TODAY,
+				who: WHO,
+			});
 
 			return { a, s };
 		},
@@ -314,7 +369,12 @@ const CASES: Case[] = [
 			const a = await lineRow({ key: K1 });
 			const s = await lineRow({ key: K2 });
 
-			await addMoreLikeThis(db, { filedId: filed, category: GROCERIES, ticked: [a], who: WHO });
+			await addMoreLikeThis(db, {
+				filedId: filed,
+				category: GROCERIES,
+				ticked: [a],
+				who: WHO,
+			});
 
 			return { a, s };
 		},
@@ -348,13 +408,21 @@ const CASES: Case[] = [
 			const a = await lineRow({ key: K1 });
 			const s = await lineRow({ key: K2 });
 
-			await fileOrganizeGroup(db, [K1], GROCERIES, null, "Lupitas Taqueria", WHO);
+			await fileOrganizeGroup(
+				db,
+				[K1],
+				GROCERIES,
+				null,
+				"Lupitas Taqueria",
+				WHO,
+			);
 
 			return { a, s };
 		},
 	},
 	{
-		label: "W15 Organize's store rule (no 'merchant_rule' in the WHEN: W15 fails)",
+		label:
+			"W15 Organize's store rule (no 'merchant_rule' in the WHEN: W15 fails)",
 		source: "merchant_rule",
 		category: "Groceries",
 		run: async () => {
@@ -370,25 +438,50 @@ const CASES: Case[] = [
 	{
 		// A new-category suggestion is only made from rows Jev could not fit (jev_category_id IS NULL), and a line-backed guess
 		// needs one, so A here is an unguessed suggestion row with no line. S is the line-backed sibling that must clear.
-		label: "W16 new-category Create (A is an unguessed suggestion row, so it has no line; no UPDATE trigger: W16 fails)",
+		label:
+			"W16 new-category Create (A is an unguessed suggestion row, so it has no line; no UPDATE trigger: W16 fails)",
 		source: "user",
 		category: "Subscriptions",
 		run: async () => {
-			const a = await insertTx({ raw_name: K1, merchant_name: K1, jev_none_fit: 1, category_confidence: 0.9 });
-			const x = await insertTx({ raw_name: "HULU", merchant_name: "HULU", jev_none_fit: 1, category_confidence: 0.9 });
-			const y = await insertTx({ raw_name: "SPOTIFY", merchant_name: "SPOTIFY", jev_none_fit: 1, category_confidence: 0.9 });
+			const a = await insertTx({
+				raw_name: K1,
+				merchant_name: K1,
+				jev_none_fit: 1,
+				category_confidence: 0.9,
+			});
+
+			const x = await insertTx({
+				raw_name: "HULU",
+				merchant_name: "HULU",
+				jev_none_fit: 1,
+				category_confidence: 0.9,
+			});
+
+			const y = await insertTx({
+				raw_name: "SPOTIFY",
+				merchant_name: "SPOTIFY",
+				jev_none_fit: 1,
+				category_confidence: 0.9,
+			});
+
 			const s = await lineRow({ key: K2 });
 			const id = present(await saveSuggestion(db, "Subscriptions", [a, x, y]));
 
 			expect(
-				await createFromSuggestion(db, id, { ticked: [a], shown: [a, x, y], notes: {} }, "person"),
+				await createFromSuggestion(
+					db,
+					id,
+					{ ticked: [a], shown: [a, x, y], notes: {} },
+					"person",
+				),
 			).toMatchObject({ ok: true });
 
 			return { a, s, own: "none" };
 		},
 	},
 	{
-		label: "W17 pending merge, a person's pick moves onto the posted row (no UPDATE trigger: W17 fails)",
+		label:
+			"W17 pending merge, a person's pick moves onto the posted row (no UPDATE trigger: W17 fails)",
 		source: "user",
 		category: "Groceries",
 		run: async () => {
@@ -404,12 +497,16 @@ const CASES: Case[] = [
 			const s = await lineRow({ key: K2 });
 
 			await db
-				.prepare("UPDATE transactions SET plaid_transaction_id = 'post-17' WHERE id = ?")
+				.prepare(
+					"UPDATE transactions SET plaid_transaction_id = 'post-17' WHERE id = ?",
+				)
 				.bind(a)
 				.run();
 
 			const item = present(
-				await db.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1").first<{ id: number }>(),
+				await db
+					.prepare("SELECT id FROM plaid_items ORDER BY id LIMIT 1")
+					.first<{ id: number }>(),
 			).id;
 
 			await db
@@ -432,7 +529,8 @@ const CASES: Case[] = [
 		},
 	},
 	{
-		label: "W18 pending merge, a split removed by amount (direct UPDATE, the SET list of pending-merge.ts:426; no UPDATE trigger: W18 fails)",
+		label:
+			"W18 pending merge, a split removed by amount (direct UPDATE, the SET list of pending-merge.ts:426; no UPDATE trigger: W18 fails)",
 		source: "user",
 		category: "Groceries",
 		run: async () => {
@@ -450,7 +548,8 @@ const CASES: Case[] = [
 		},
 	},
 	{
-		label: "W19 merchant rules after sync (no 'merchant_rule' in the WHEN: W19 fails)",
+		label:
+			"W19 merchant rules after sync (no 'merchant_rule' in the WHEN: W19 fails)",
 		source: "merchant_rule",
 		category: "Groceries",
 		run: async () => {
@@ -458,7 +557,9 @@ const CASES: Case[] = [
 			const s = await lineRow({ key: K2 });
 
 			await db
-				.prepare("INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)")
+				.prepare(
+					"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)",
+				)
 				.bind(K1, GROCERIES)
 				.run();
 			await applyMerchantRules(db);
@@ -467,7 +568,8 @@ const CASES: Case[] = [
 		},
 	},
 	{
-		label: "W20 a bank-text Change rule (no 'merchant_rule' in the WHEN: W20 fails)",
+		label:
+			"W20 a bank-text Change rule (no 'merchant_rule' in the WHEN: W20 fails)",
 		source: "merchant_rule",
 		category: "Groceries",
 		run: async () => {

@@ -51,14 +51,17 @@ export async function setCategory(ids: number[], category: number) {
 
 	for (const id of ids) body.append("ids", String(id));
 
-	const res = await exports.default.fetch("http://tally.test/transactions/select/category/save", {
-		method: "POST",
-		body,
-		headers: {
-			Origin: "http://tally.test",
-			"HX-Request": "true",
+	const res = await exports.default.fetch(
+		"http://tally.test/transactions/select/category/save",
+		{
+			method: "POST",
+			body,
+			headers: {
+				Origin: "http://tally.test",
+				"HX-Request": "true",
+			},
 		},
-	});
+	);
 
 	expect(res.status).toBe(200);
 }
@@ -76,7 +79,9 @@ async function categoryId(name: string): Promise<number> {
  * Inserts one ordinary purchase (positive is money out, Plaid's sign) and returns its id. The values override the defaults.
  * Each row gets its own Plaid id, so a posted row is never confused with a sync's.
  */
-export async function insertTx(values: Record<string, string | number | null>): Promise<number> {
+export async function insertTx(
+	values: Record<string, string | number | null>,
+): Promise<number> {
 	plaidSeq += 1;
 
 	const row = {
@@ -123,6 +128,7 @@ export async function lineRow({
 	attempts?: number;
 }): Promise<number> {
 	const eating = EATING;
+
 	const id = await insertTx({
 		raw_name: key,
 		merchant_name: key,
@@ -131,12 +137,19 @@ export async function lineRow({
 		jev_also_category_id: GROCERIES,
 		category_confidence: confidence,
 		jev_attempts: attempts,
-		...(filed === "jev"
-			? { category_id: eating, category_source: "jev" }
-			: {}),
 	});
 
-	const copy = line === "stale" ? Math.round((confidence - 0.05) * 100) / 100 : confidence;
+	if (filed === "jev") {
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev' WHERE id = ?",
+			)
+			.bind(eating, id)
+			.run();
+	}
+
+	const copy =
+		line === "stale" ? Math.round((confidence - 0.05) * 100) / 100 : confidence;
 
 	await db
 		.prepare(
@@ -149,7 +162,11 @@ export async function lineRow({
 }
 
 /** A row a person (or a rule) filed before the line rows exist: the trigger must see it first (the order rule). */
-export async function filedRow(key: string, categoryId: number, source: "user" | "merchant_rule" = "user"): Promise<number> {
+export async function filedRow(
+	key: string,
+	categoryId: number,
+	source: "user" | "merchant_rule" = "user",
+): Promise<number> {
 	return insertTx({
 		raw_name: key,
 		merchant_name: key,
@@ -163,7 +180,7 @@ export async function rowOf(id: number) {
 	const tx = await db
 		.prepare("SELECT * FROM transactions WHERE id = ?")
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<Record<string, string | number | null>>();
 
 	const answer = await db
 		.prepare(
@@ -214,7 +231,9 @@ export async function expectCleared(id: number) {
 	const { tx, answer } = await rowOf(id);
 
 	for (const column of CLEAR_COLUMNS) {
-		expect(tx[column] ?? null, column).toBe(column === "jev_none_fit" ? 0 : null);
+		expect(tx[column] ?? null, column).toBe(
+			column === "jev_none_fit" ? 0 : null,
+		);
 	}
 
 	expect(answer?.kept).toBe(0);

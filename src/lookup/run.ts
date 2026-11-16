@@ -9,6 +9,7 @@ import { dayChanged, householdTimeZone, todayIn } from "../dates";
 import { readAiSwitches } from "../db/ai-switches";
 import {
 	claimStatements,
+	dropLineStatements,
 	failStatement,
 	holdsClaim,
 	letGoStatement,
@@ -114,8 +115,15 @@ export async function claimNext(
 	);
 
 	const statements = skipStatements(db, pick.skip, nowMs);
+	// A found store skipped as private loses its line, and its open line-backed guesses go with it in the same batch (#1040, rule 7).
+	statements.push(
+		...dropLineStatements(
+			db,
+			pick.skip.filter((text) => lookups.get(text)?.status === "found"),
+		),
+	);
 	const claimPushed = pick.pick !== null && !mine;
-	// The claim's result sits after the skips and the drop of older counts (claimStatements' order).
+	// The claim's result sits after the skips, the line drops and the drop of older counts (claimStatements' order).
 	const claimIndex = statements.length + 1;
 
 	if (claimPushed && pick.pick) {

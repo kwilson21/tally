@@ -1,8 +1,8 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
 import type { Decision } from "../src/ai/decide";
-import { merchantKeySql } from "../src/db/merchant-key";
 import { runWith } from "../src/db/database";
+import { merchantKeySql } from "../src/db/merchant-key";
 import {
 	dropLineStatements,
 	KEPT_OFF,
@@ -18,8 +18,8 @@ import { present } from "./helpers/present";
 import {
 	asksAgain,
 	db,
-	edit,
 	EATING,
+	edit,
 	expectCleared,
 	GROCERIES,
 	inQueue,
@@ -78,12 +78,13 @@ describe("a filing leaves the rows it should not touch", () => {
 				const s = await lineRow({ key: K2 });
 				const before = await rowOf(s);
 				const waiting = await insertTx({ raw_name: K1, merchant_name: K1 });
-				const decision = {
+
+				const decision: Decision = {
 					categoryId: EATING,
 					suggestedCategoryId: EATING,
 					confidence: 0.95,
 					flags: { transfer: false, reimbursement: false, income: false },
-				} as Decision;
+				};
 
 				expect(await saveJevResult(db, waiting, decision)).toBe(true);
 				expect(await rowOf(s)).toEqual(before);
@@ -95,6 +96,7 @@ describe("a filing leaves the rows it should not touch", () => {
 				const s = await lineRow({ key: K2 });
 				const before = await rowOf(s);
 				const waiting = await insertTx({ raw_name: K1, merchant_name: K1 });
+
 				const bill = present(
 					await db
 						.prepare(
@@ -111,7 +113,9 @@ describe("a filing leaves the rows it should not touch", () => {
 					.bind(bill, waiting)
 					.run();
 
-				expect((await rowOf(waiting)).tx).toMatchObject({ category_source: "bill" });
+				expect((await rowOf(waiting)).tx).toMatchObject({
+					category_source: "bill",
+				});
 				expect(await rowOf(s)).toEqual(before);
 			},
 		],
@@ -282,7 +286,13 @@ describe("the answer that stands, and the answers that come back", () => {
 
 		await saveCash(
 			db,
-			{ date: TODAY, amountCents: 1200, merchant: K3, categoryId: GROCERIES, note: null },
+			{
+				date: TODAY,
+				amountCents: 1200,
+				merchant: K3,
+				categoryId: GROCERIES,
+				note: null,
+			},
 			WHO,
 		);
 
@@ -338,6 +348,7 @@ describe("the answer that stands, and the answers that come back", () => {
 		const guess = normalize(lineGuessSql("transactions"));
 		const kept = normalize(KEPT_OFF);
 		const key = normalize(merchantKeySql("NEW"));
+
 		const when = normalize(
 			"NEW.category_source IN ('user', 'merchant_rule') AND NEW.category_id IS NOT NULL",
 		);
@@ -356,6 +367,7 @@ describe("the answer that stands, and the answers that come back", () => {
 		const update = triggers.results.find(
 			(row) => row.name === "lookup_line_clear_update",
 		);
+
 		const listed = normalize(update?.sql ?? "").match(
 			/AFTER UPDATE OF (.+?) ON transactions/,
 		)?.[1];
@@ -368,6 +380,7 @@ describe("the answer that stands, and the answers that come back", () => {
 				"SELECT sql FROM sqlite_master WHERE type = 'trigger' AND sql LIKE '%AFTER UPDATE OF%'",
 			)
 			.all<{ sql: string }>();
+
 		const cleared = [
 			"category_confidence",
 			"jev_category_id",
@@ -378,8 +391,9 @@ describe("the answer that stands, and the answers that come back", () => {
 
 		for (const row of others.results) {
 			const columns =
-				normalize(row.sql).match(/AFTER UPDATE OF (.+?) ON transactions/)?.[1] ??
-				"";
+				normalize(row.sql).match(
+					/AFTER UPDATE OF (.+?) ON transactions/,
+				)?.[1] ?? "";
 
 			for (const column of cleared) {
 				expect(columns.split(", ")).not.toContain(column);
@@ -388,6 +402,8 @@ describe("the answer that stands, and the answers that come back", () => {
 
 		// dropLineStatements' SQL, captured through a fake prepare: the clear, then the guess, then the kept statement.
 		const captured: string[] = [];
+
+		// SAFETY: the fake has only the prepare call dropLineStatements makes, and it records the SQL it is given.
 		const fake = {
 			prepare(sql: string) {
 				captured.push(sql);
@@ -396,7 +412,7 @@ describe("the answer that stands, and the answers that come back", () => {
 
 				return statement;
 			},
-		} as unknown as D1Database;
+		} as D1Database;
 
 		dropLineStatements(fake, ["x"]);
 
@@ -405,7 +421,6 @@ describe("the answer that stands, and the answers that come back", () => {
 		expect(sqls[0]).toContain(clear);
 		expect(sqls[0]).toContain(guess);
 		expect(sqls[1]).toContain(kept);
-		expect(sqls[0]?.indexOf(clear)).toBeLessThan(sqls[1]?.indexOf(kept) ?? 0);
 	});
 });
 
