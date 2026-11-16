@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { dropLineStatements } from "../src/db/store-lookups";
 import { claimNext, type LookupEnv } from "../src/lookup/run";
 import { asksAgain, expectCleared } from "./lookup-line-fixture";
@@ -258,4 +259,56 @@ describe("the claim's result index, with the drops in the batch", () => {
 		await expectCleared(s);
 		expect((await answerOf(s))?.kept).toBe(0);
 	});
+});
+
+describe("the privacy drop runs whatever the switches say", () => {
+	lookupRunSetup();
+
+	// A found store that turns private loses its line and its open guesses even while the lookup's search is off: the privacy
+	// part runs whenever the lookup step does, and only the claim waits for the switches.
+	it.each([
+		["the lookup switch off", { lookupStores: false }, false],
+		["Guess categories off", { categories: false }, false],
+		["Spot paychecks off", { income: false }, false],
+		[
+			"a sync instance with Sort right away off",
+			{ sortOnArrival: false },
+			true,
+		],
+	] as const)(
+		"%s: a found private store is skipped and its line dropped, with no claim and no count",
+		async (_label, off, bySync) => {
+			await eligibleStore(storeName(0));
+			await runInstance({
+				search: fakeSearch([textOf(storeName(0))]),
+				ai: fakeAi([textOf(storeName(0))]).ai,
+				runId: "run-1",
+			});
+
+			const s = await standingRow(storeName(0));
+			await makePrivate(storeName(0));
+			await eligibleStore(storeName(1));
+			await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...off });
+
+			const countBefore = await dayCount();
+			const ai = fakeAi([]);
+
+			// SAFETY: gateEnv gives the database, the gate's cap and the AI binding, the only keys a claim reads.
+			const claim = await claimNext(gateEnv(ai.ai) as LookupEnv, {
+				token: "claim-off",
+				bySync,
+			});
+
+			expect(claim).toBeNull();
+			expect(await lookupRow(textOf(storeName(0)))).toMatchObject({
+				status: "skipped",
+				line: null,
+			});
+			await expectCleared(s);
+			expect((await answerOf(s))?.kept).toBe(0);
+			expect(await lookupRow(textOf(storeName(1)))).toBeNull();
+			expect(await dayCount()).toBe(countBefore);
+			expect(ai.stores).toEqual([]);
+		},
+	);
 });

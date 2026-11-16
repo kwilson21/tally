@@ -88,9 +88,9 @@ export async function claimNext(
 	const nowMs = Date.now();
 	const switches = await readAiSwitches(db);
 
-	if (!lookupAsks(env, switches) || (bySync && !switches.sortOnArrival)) {
-		return null;
-	}
+	// The privacy skip and line drop run whatever this says; only a new claim waits for it (no line is used while it is off).
+	const asks =
+		lookupAsks(env, switches) && !(bySync && !switches.sortOnArrival);
 
 	const timeZone = await householdTimeZone(db);
 	const rows = await readEligibilityRows(db);
@@ -122,7 +122,7 @@ export async function claimNext(
 			pick.skip.filter((text) => lookups.get(text)?.status === "found"),
 		),
 	);
-	const claimPushed = pick.pick !== null && !mine;
+	const claimPushed = asks && pick.pick !== null && !mine;
 	// The claim's result sits after the skips, the line drops and the drop of older counts (claimStatements' order).
 	const claimIndex = statements.length + 1;
 
@@ -140,7 +140,7 @@ export async function claimNext(
 
 	const results = statements.length > 0 ? await db.batch(statements) : [];
 
-	if (!pick.pick) return null;
+	if (!asks || !pick.pick) return null;
 
 	const { text, attempts } = pick.pick;
 
