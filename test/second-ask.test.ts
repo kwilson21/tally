@@ -3,6 +3,8 @@ import { NONE_FIT } from "../src/ai/decide";
 import { cleanBankText } from "../src/clean-bank-text";
 import type { AiSwitches } from "../src/db/ai-switches";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { suggestionQueue } from "../src/db/suggestions-queue";
+import { listRowsByIds } from "../src/db/transactions";
 import { dailyJevCap } from "../src/sort-groups";
 import {
 	answerOf,
@@ -754,6 +756,18 @@ describe("9. secondAskKeepsBetter", () => {
 			keptConfidence: 0.95,
 		});
 
+		// The kept guess as people see it: the queue holds its category card, and the list row shows the Maybe chip.
+		const queue = await suggestionQueue(db);
+
+		expect(queue.map((item) => item.id)).toContain(`category-${r1}`);
+
+		const [listed] = await listRowsByIds(db, [r1]);
+
+		expect(listed).toMatchObject({
+			categoryId: null,
+			maybeCategoryName: "Groceries",
+		});
+
 		const lookupAfter = await db
 			.prepare(
 				"SELECT input_mark AS mark, cleared FROM lookup_cleared WHERE transaction_id = ?",
@@ -1288,9 +1302,29 @@ describe("14. steps", () => {
 			]),
 		);
 
+		// The settings as literals, written here rather than imported, so a changed retry count or dropped `sensitive` fails.
+		const literal = (name: string) =>
+			name === "lookup-second-read"
+				? {
+						retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
+						timeout: "1 minute",
+						sensitive: "output",
+					}
+				: name === "lookup-second-write"
+					? {
+							retries: { limit: 960, delay: "1 minute", backoff: "constant" },
+							timeout: "30 seconds",
+							sensitive: "output",
+						}
+					: {
+							retries: { limit: 0, delay: 0 },
+							timeout: "1 minute",
+							sensitive: "output",
+						};
+
 		for (const step of second) {
 			expect(step.name).toMatch(/^lookup-second-(read|reserve|row-\d+|write)$/);
-			expect(step.config.sensitive).toBe("output");
+			expect(step.config).toEqual(literal(step.name));
 		}
 
 		expect(turn).toBe(`${RUN_ID}:lookup-second`);
