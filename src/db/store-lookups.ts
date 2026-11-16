@@ -18,6 +18,7 @@ import {
 	takeSearchStatement,
 } from "./lookup-calls";
 import { merchantLookups } from "./schema";
+import { lineGuessSql } from "./suggestions-queue";
 
 /** A stored lookup as the run reads it: its state's fields, its text, and how many searches have failed in a row. */
 export type StoredLookup = StoreLookupRow & {
@@ -128,6 +129,27 @@ export function claimStatements(
 }
 
 /**
+ * The unique texts, in chunks of at most SKIP_TEXTS_PER_STATEMENT, each as the JSON array a statement's json_each reads. A set
+ * with no cap, so one statement per chunk (decision 209, point 2). The skip and the line drop both batch these chunks.
+ */
+function textChunks(texts: readonly string[]): string[] {
+	const unique = [...new Set(texts)];
+	const chunks: string[] = [];
+
+	for (
+		let start = 0;
+		start < unique.length;
+		start += SKIP_TEXTS_PER_STATEMENT
+	) {
+		chunks.push(
+			JSON.stringify(unique.slice(start, start + SKIP_TEXTS_PER_STATEMENT)),
+		);
+	}
+
+	return chunks;
+}
+
+/**
  * Skips texts that are private: none, to_retry and found become skipped (a found line is dropped). A live claim and the
  * final states are untouched. A set with no cap, so it is one statement per 500 texts, each guarded by the stored row's
  * state (decision 209, point 2).
@@ -137,31 +159,53 @@ export function skipStatements(
 	texts: readonly string[],
 	nowMs: number,
 ): D1PreparedStatement[] {
-	const unique = [...new Set(texts)];
 	const cutoff = leaseCutoff(nowMs);
-	const statements: D1PreparedStatement[] = [];
 
-	for (
-		let start = 0;
-		start < unique.length;
-		start += SKIP_TEXTS_PER_STATEMENT
-	) {
-		const chunk = unique.slice(start, start + SKIP_TEXTS_PER_STATEMENT);
+	return textChunks(texts).map((json) =>
+		db
+			// stays raw: a set with no cap (decision 209, point 2), guarded by each stored row's state.
+			.prepare(
+				`INSERT INTO merchant_lookups (lookup_text, status, attempts) SELECT value, 'skipped', 0 FROM json_each(?) WHERE true
+				ON CONFLICT(lookup_text) DO UPDATE SET status = 'skipped', line = NULL, claimed_by = NULL, claimed_at = NULL
+				WHERE merchant_lookups.status = 'found' OR (merchant_lookups.status = 'pending' AND (merchant_lookups.claimed_by IS NULL
+					OR merchant_lookups.claimed_at IS NULL OR merchant_lookups.claimed_at <= ?))`,
+			)
+			.bind(json, cutoff),
+	);
+}
 
-		statements.push(
-			db
-				// stays raw: a set with no cap (decision 209, point 2), guarded by each stored row's state.
-				.prepare(
-					`INSERT INTO merchant_lookups (lookup_text, status, attempts) SELECT value, 'skipped', 0 FROM json_each(?) WHERE true
-					ON CONFLICT(lookup_text) DO UPDATE SET status = 'skipped', line = NULL, claimed_by = NULL, claimed_at = NULL
-					WHERE merchant_lookups.status = 'found' OR (merchant_lookups.status = 'pending' AND (merchant_lookups.claimed_by IS NULL
-						OR merchant_lookups.claimed_at IS NULL OR merchant_lookups.claimed_at <= ?))`,
-				)
-				.bind(JSON.stringify(chunk), cutoff),
-		);
-	}
+/** What a row's line-backed guess is cleared to, so the next sort asks it again without the line (spec §7). Migration 0079 runs the same. */
+export const LINE_GUESS_CLEAR =
+	"category_confidence = NULL, jev_category_id = NULL, jev_mixed = NULL, jev_also_category_id = NULL, jev_none_fit = 0";
 
-	return statements;
+/** Ends the lookup_answers rows it reaches, so none counts any more (spec §5). The kept = 1 guard keeps a no-op out of meta.changes. */
+export const KEPT_OFF = "UPDATE lookup_answers SET kept = 0 WHERE kept = 1";
+
+/**
+ * Drops the line from every row of these texts: a row that still holds its kept line-backed guess has it cleared, then
+ * no lookup_answers row of the texts counts any more. Two statements per 500 texts, the clear first, since it reads kept = 1.
+ * The privacy skip (claimNext, #1040) and "Don't use this" (#988) batch it with their own status change.
+ */
+export function dropLineStatements(
+	db: D1Database,
+	texts: readonly string[],
+): D1PreparedStatement[] {
+	return textChunks(texts).flatMap((json) => [
+		db
+			// stays raw: a set with no cap (decision 209); the same clear as migration 0079's trigger (its drift test).
+			.prepare(
+				`UPDATE transactions SET ${LINE_GUESS_CLEAR}
+				WHERE id IN (SELECT sib.transaction_id FROM lookup_answers sib WHERE sib.lookup_text IN (SELECT value FROM json_each(?)))
+					AND ${lineGuessSql("transactions")}`,
+			)
+			.bind(json),
+		db
+			// stays raw: a set with no cap (decision 209); the same ends as migration 0079's trigger (its drift test).
+			.prepare(
+				`${KEPT_OFF} AND lookup_text IN (SELECT value FROM json_each(?))`,
+			)
+			.bind(json),
+	]);
 }
 
 /**

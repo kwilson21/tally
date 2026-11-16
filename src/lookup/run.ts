@@ -9,6 +9,7 @@ import { dayChanged, householdTimeZone, todayIn } from "../dates";
 import { readAiSwitches } from "../db/ai-switches";
 import {
 	claimStatements,
+	dropLineStatements,
 	failStatement,
 	holdsClaim,
 	letGoStatement,
@@ -87,9 +88,9 @@ export async function claimNext(
 	const nowMs = Date.now();
 	const switches = await readAiSwitches(db);
 
-	if (!lookupAsks(env, switches) || (bySync && !switches.sortOnArrival)) {
-		return null;
-	}
+	// The privacy skip and line drop run whatever this says; only a new claim waits for it (no line is used while it is off).
+	const asks =
+		lookupAsks(env, switches) && !(bySync && !switches.sortOnArrival);
 
 	const timeZone = await householdTimeZone(db);
 	const rows = await readEligibilityRows(db);
@@ -114,8 +115,15 @@ export async function claimNext(
 	);
 
 	const statements = skipStatements(db, pick.skip, nowMs);
-	const claimPushed = pick.pick !== null && !mine;
-	// The claim's result sits after the skips and the drop of older counts (claimStatements' order).
+	// A found store skipped as private loses its line, and its open line-backed guesses go with it in the same batch (#1040, rule 7).
+	statements.push(
+		...dropLineStatements(
+			db,
+			pick.skip.filter((text) => lookups.get(text)?.status === "found"),
+		),
+	);
+	const claimPushed = asks && pick.pick !== null && !mine;
+	// The claim's result sits after the skips, the line drops and the drop of older counts (claimStatements' order).
 	const claimIndex = statements.length + 1;
 
 	if (claimPushed && pick.pick) {
@@ -132,7 +140,7 @@ export async function claimNext(
 
 	const results = statements.length > 0 ? await db.batch(statements) : [];
 
-	if (!pick.pick) return null;
+	if (!asks || !pick.pick) return null;
 
 	const { text, attempts } = pick.pick;
 
