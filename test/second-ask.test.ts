@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { NONE_FIT } from "../src/ai/decide";
 import { cleanBankText } from "../src/clean-bank-text";
 import type { AiSwitches } from "../src/db/ai-switches";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { listRowsByIds } from "../src/db/transactions";
+import { lookupTextOf } from "../src/lookup/lookup-text";
 import { dailyJevCap } from "../src/sort-groups";
 import {
 	answerOf,
@@ -418,6 +419,81 @@ describe("5. the owed table", () => {
 	);
 });
 
+// The sibling under another key with the same lookup text (arm (a) of householdAnsweredSql): R1 is under K1, and K2's cleaned
+// text differs, so only a person's or a rule's filing under K2 can refuse R1, not a learned line (arm (d)).
+const K1 = "Lupitas Taqueria";
+const K2 = "LUPITAS TAQUERIA MEMBER1234";
+const LUPITAS = "lupitas taqueria";
+
+beforeAll(() => {
+	expect(lookupTextOf(K2)).toBe(lookupTextOf(K1));
+	expect(cleanBankText(K2)).not.toBe(cleanBankText(K1));
+});
+
+/** R1 under K1, at a found store with its line. */
+async function lupitasBase() {
+	await foundStore(K1);
+
+	return guessRow(K1);
+}
+
+/** A row under K2 with the given filing (null: none), and K2's own text row for the same lookup text. */
+async function addK2(source: "user" | "merchant_rule" | "jev" | null) {
+	const groceries = await categoryId("Groceries");
+
+	await guessRow(K2, {
+		plaid_transaction_id: "k2-row",
+		category_id: source ? groceries : null,
+		category_source: source,
+		jev_category_id: groceries,
+		category_confidence: source ? 0.9 : 0.6,
+	});
+	await db
+		.prepare(
+			"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, ?, 0) ON CONFLICT(merchant_key) DO NOTHING",
+		)
+		.bind(K2, LUPITAS)
+		.run();
+}
+
+// 19b and 20b: a sibling under K2 filed by a person or by a rule means R1 is not asked (owed table, arm (a)).
+describe("19b and 20b. a filing under another key of the store", () => {
+	it.each([
+		{ name: "no sibling (positive control)", source: null, asked: true },
+		{
+			name: "19b: the K2 sibling is filed by a person (user)",
+			source: "user" as const,
+			asked: false,
+		},
+		{
+			name: "20b: the K2 sibling is filed by Always for these merchants (merchant_rule)",
+			source: "merchant_rule" as const,
+			asked: false,
+		},
+	])("$name", async ({ source, asked }) => {
+		await lupitasBase();
+		await addK2(source);
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl);
+
+		expect(fake.violations).toEqual([]);
+		expect(callsFor(fake.bodies, K1) > 0).toBe(asked);
+
+		if (source) {
+			const text = await db
+				.prepare(
+					"SELECT lookup_text AS text FROM merchant_lookup_texts WHERE merchant_key = ?",
+				)
+				.bind(K2)
+				.first<{ text: string }>();
+
+			expect(text?.text).toBe(LUPITAS);
+		}
+	});
+});
+
 // 6. Newest first, ten a run.
 describe("6. newest first, 10 a run", () => {
 	it("asks the ten newest owed rows in order, then the other two on the next run", async () => {
@@ -785,6 +861,8 @@ type SaveGuard = {
 	name: string;
 	/** Run before the read, so the read holds what it holds in the table's row. */
 	before?: () => Promise<void>;
+	/** R1 is under K1 (the sibling fixtures) rather than STORE_A. */
+	lupitas?: boolean;
 	change: (r1: number) => Promise<void>;
 	r2Asked: boolean;
 	kept: "yes" | "none" | "injected";
@@ -910,6 +988,22 @@ describe("10. the guards at the save", () => {
 			bySync: true,
 		},
 		{
+			name: "a person files the K2 sibling during R1's call (arm (a) at the save)",
+			lupitas: true,
+			before: async () => {
+				await addK2("jev");
+			},
+			change: async () => {
+				await db
+					.prepare(
+						"UPDATE transactions SET category_source = 'user' WHERE plaid_transaction_id = 'k2-row'",
+					)
+					.run();
+			},
+			r2Asked: true,
+			kept: "none",
+		},
+		{
 			name: "R1's note edited",
 			change: async (r1) => {
 				await db
@@ -1013,8 +1107,18 @@ describe("10. the guards at the save", () => {
 
 	it.each(guards)(
 		"$name",
-		async ({ before, change, r2Asked, kept, bySync, limits, name }) => {
-			const r1 = await base();
+		async ({
+			before,
+			change,
+			r2Asked,
+			kept,
+			bySync,
+			limits,
+			name,
+			lupitas,
+		}) => {
+			const r1 = lupitas ? await lupitasBase() : await base();
+			const r1Name = lupitas ? K1 : STORE_A;
 
 			await before?.();
 
@@ -1027,7 +1131,7 @@ describe("10. the guards at the save", () => {
 			const deleted = name === "R1 deleted during a Jev 500";
 
 			const fake = fakeJev(async (body) => {
-				if (body.state.bank_description !== STORE_A)
+				if (body.state.bank_description !== r1Name)
 					return categoryReply("Groceries", 0.9);
 
 				await change(r1);
