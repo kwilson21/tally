@@ -98,15 +98,15 @@ export type SecondAskResult =
 	| Exclude<AskResult, { outcome: "answered" }>;
 
 /**
- * A row whose guess is open (spec §5, §7; 987-plan 5.1 point 4), with Q-B1: a row a new-category card already asks about is not
- * second-asked. One fragment, used by the read and by the save.
+ * A row whose guess is open (spec §5, §7; 987-plan 5.1 point 4), with Q-B1: a row a pending new-category card asks about is not
+ * second-asked. A dismissed card no longer asks, so its row stays owed. One fragment, used by the read and by the save.
  */
 // stays raw: a fragment inlined into raw statements (decision 179)
 export const openGuessSql = (
 	a: string,
 ) => `(${a}.category_id IS NULL AND ${a}.category_source IS NULL AND ${a}.category_confidence IS NOT NULL
 	AND ${a}.parent_id IS NULL AND ${a}.is_split = 0 AND ${a}.flag_income = 0 AND ${a}.pending = 0
-	AND ${a}.category_suggestion_id IS NULL
+	AND NOT EXISTS (SELECT 1 FROM category_suggestions ocs WHERE ocs.id = ${a}.category_suggestion_id AND ocs.status = 'pending')
 	AND ${jevAsksAboutSql(a)} AND (${a}.amount_cents >= 0 OR COALESCE(${a}.credit_reviewed, 0) = 1)
 	AND NOT ${gaveUpSql(a)})`;
 

@@ -387,6 +387,24 @@ describe("5. the owed table", () => {
 					.run();
 			},
 		},
+		{
+			name: "26b: a confident None fit whose suggestion was dismissed (the card no longer asks): asked",
+			asked: true,
+			setup: async (r1) => {
+				const suggestion = await db
+					.prepare(
+						"INSERT INTO category_suggestions (name, status, decided_at) VALUES ('Pet food', 'dismissed', datetime('now')) RETURNING id",
+					)
+					.first<{ id: number }>();
+
+				await db
+					.prepare(
+						"UPDATE transactions SET jev_category_id = NULL, jev_none_fit = 1, category_confidence = 0.85, category_suggestion_id = ? WHERE id = ?",
+					)
+					.bind(suggestion?.id, r1)
+					.run();
+			},
+		},
 	];
 
 	it.each(owed)(
@@ -998,6 +1016,24 @@ describe("10. the guards at the save", () => {
 					.prepare(
 						"UPDATE transactions SET category_source = 'user' WHERE plaid_transaction_id = 'k2-row'",
 					)
+					.run();
+			},
+			r2Asked: true,
+			kept: "none",
+		},
+		{
+			name: "a new-category card is made pending for R1 during R1's call (the save refuses it)",
+			change: async (r1) => {
+				await db
+					.prepare(
+						"INSERT INTO category_suggestions (name, status) VALUES ('Pet food', 'pending')",
+					)
+					.run();
+				await db
+					.prepare(
+						"UPDATE transactions SET category_suggestion_id = (SELECT id FROM category_suggestions WHERE name = 'Pet food' AND status = 'pending') WHERE id = ?",
+					)
+					.bind(r1)
 					.run();
 			},
 			r2Asked: true,
