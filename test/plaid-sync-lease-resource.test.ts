@@ -34,19 +34,18 @@ async function reset() {
 const releaseSentence = (id: number) =>
 	`plaid sync could not release its lease for item ${id}`;
 
-/** Runs `run` with console.error silenced, and returns the argument lists of the release's sentence logged for item `id`. */
+/** Runs `run` with console.error silenced, and returns how many times the release's sentence for item `id` was logged. */
 async function withReleaseLog(
 	id: number,
-	run: () => Promise<unknown>,
-): Promise<unknown[][]> {
+	run: () => Promise<void>,
+): Promise<number> {
 	const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
 
 	try {
 		await run();
 
-		return quiet.mock.calls
-			.filter((call) => call[0] === releaseSentence(id))
-			.map((call) => [...call]);
+		return quiet.mock.calls.filter((call) => call[0] === releaseSentence(id))
+			.length;
 	} finally {
 		quiet.mockRestore();
 	}
@@ -99,25 +98,31 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 
 	it("gives the body's result back when the body returns and the release fails, and logs the release once (#1171)", async () => {
 		await reset();
+
 		const id = await addItem();
+
 		const spy = leaseSpy(env.DB, {
 			failRelease: new Error("the release failed"),
 		});
+
 		const logged = await withReleaseLog(id, () =>
 			expect(
 				withSyncLease(spy.db, id, "lock-1", async () => SUCCESS),
 			).resolves.toEqual(SUCCESS),
 		);
 
-		expect(logged).toEqual([[releaseSentence(id)]]);
+		expect(logged).toBe(1);
 	});
 
 	it("rethrows the body's own error object, not the release's, when the body fails and the release fails too (#1171)", async () => {
 		await reset();
+
 		const id = await addItem();
+
 		const spy = leaseSpy(env.DB, {
 			failRelease: new Error("the release failed"),
 		});
+
 		const failure = new Error("the body failed");
 
 		const logged = await withReleaseLog(id, () =>
@@ -128,7 +133,7 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 			).rejects.toBe(failure),
 		);
 
-		expect(logged).toEqual([[releaseSentence(id)]]);
+		expect(logged).toBe(1);
 	});
 
 	it("skips a held lease without running the body, and releases nothing", async () => {

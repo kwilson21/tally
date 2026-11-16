@@ -10,12 +10,6 @@ import type { SyncResult } from "./sync";
 // released, so nothing is given back that another run holds.
 
 /**
- * A release that failed, kept until the run has settled. The release's error is thrown in place of the run's result or
- * error, as the `finally` that this replaces always did, so a failing release is never hidden behind the body's error.
- */
-export type ReleaseFailure = { failure: { error: unknown } | null };
-
-/**
  * Takes the bank's lease for `lockId`. True when this run holds it. False when a live lease is held or the bank is
  * disconnected: the run is skipped. Throws "Plaid Item not found" when the bank has no row.
  */
@@ -46,15 +40,14 @@ async function takeLease(
 
 /**
  * The lease as an Effect: taken, then `body` runs holding it, then released on every exit. The release is registered only
- * after a successful take, so a lease that was not taken is never released. A release that fails is kept in `failure`
- * and does not fail this Effect, so the caller decides what the run's outcome is (see withSyncLease).
+ * after a successful take, so a lease that was not taken is never released. A release that fails is logged and swallowed,
+ * so the run's own result or error is the Effect's outcome.
  */
 export function leaseScoped(
 	db: D1Database,
 	itemRowId: number,
 	lockId: string,
 	body: () => Promise<SyncResult>,
-	failure: ReleaseFailure,
 ): Effect.Effect<SyncResult> {
 	const skipped: SyncResult = { skipped: true };
 
@@ -65,8 +58,11 @@ export function leaseScoped(
 					.prepare(releaseLeaseSql("?", "?"))
 					.bind(itemRowId, lockId)
 					.run();
-			} catch (error) {
-				failure.failure = { error };
+			} catch {
+				// Only the item row id is logged: no error message, lock id, token or transaction detail.
+				console.error(
+					`plaid sync could not release its lease for item ${itemRowId}`,
+				);
 			}
 		});
 
@@ -87,29 +83,14 @@ export function leaseScoped(
 
 /**
  * Runs `body` holding the bank's lease, and gives the lease back however the body ends. Resolves with the body's result
- * or `{ skipped: true }` when the lease is held; rejects with the body's error, or with the release's error when the
- * release fails, which wins over the body's result and error.
+ * or `{ skipped: true }` when the lease is held; rejects with the body's own error. A release that fails is logged and
+ * does not change either.
  */
-export async function withSyncLease(
+export function withSyncLease(
 	db: D1Database,
 	itemRowId: number,
 	lockId: string,
 	body: () => Promise<SyncResult>,
 ): Promise<SyncResult> {
-	const failure: ReleaseFailure = { failure: null };
-	let result: SyncResult;
-
-	try {
-		result = await Effect.runPromise(
-			leaseScoped(db, itemRowId, lockId, body, failure),
-		);
-	} catch (error) {
-		if (failure.failure) throw failure.failure.error;
-
-		throw error;
-	}
-
-	if (failure.failure) throw failure.failure.error;
-
-	return result;
+	return Effect.runPromise(leaseScoped(db, itemRowId, lockId, body));
 }

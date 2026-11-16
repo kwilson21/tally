@@ -331,6 +331,7 @@ describe("the sync's bank lease, cell by cell (#1164)", () => {
 		const releaseLogs = Object.fromEntries(
 			[...got].map(([label, run]) => [label, run.releaseLog]),
 		);
+
 		const expectedLogs = Object.fromEntries(
 			cells.map((cell) => [
 				cell.label,
