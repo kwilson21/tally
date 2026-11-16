@@ -214,9 +214,14 @@ export async function runSortInstance(
 		}
 	}
 
-	// The second ask (decision 225): after the store lookup, so a store found in this run is asked about in the same run, and,
-	// as the privacy re-ask, only when the groups finished. A failure is logged by its error's name; the night's steps still run.
-	if (sorted && lookupEnvOpen(env) && env.JEV_API_KEY) {
+	// The second ask (decision 225): only nightly and after-sync background runs, after the store lookup.
+	// Manual Ask again and category re-sorts must not spend calls on unrelated lookup guesses.
+	if (
+		sorted &&
+		(params.night || params.bySync) &&
+		lookupEnvOpen(env) &&
+		env.JEV_API_KEY
+	) {
 		try {
 			await runSecondAsk(env, runStep, {
 				runId: options.runId,

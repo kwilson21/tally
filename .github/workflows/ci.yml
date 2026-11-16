@@ -4,12 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  validation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,4 +43,41 @@ jobs:
       - run: pnpm exec lsc check --backend=dafny
       - run: pnpm run lint
       - run: pnpm run test:feedback-integration
-      - run: pnpm test
+
+  tests:
+    name: Workers tests (${{ matrix.shard }}/12)
+    runs-on: ubuntu-latest
+    strategy:
+      # One failure must not hide the results from the other shards.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    steps:
+      - uses: actions/checkout@v7
+      # Installs the pnpm version package.json names in packageManager (decision 204).
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
+      - uses: actions/setup-node@v7
+        with:
+          # .nvmrc pins Node's current LTS line (decision 203). It has Temporal built in; test:feedback-integration runs
+          # the app under plain Node, and src/dates.ts uses it.
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Tests read generated CSS/vendor assets; each runner needs its own build.
+      - run: pnpm run build
+      # Native Vitest sharding partitions the complete discovered suite. Keep the
+      # Workers runtime, D1 migrations and per-test isolation exactly as before.
+      - run: pnpm test --shard=${{ matrix.shard }}/12
+
+  # Keep the existing required check name, and fail closed for failed, cancelled
+  # or skipped dependencies. No path filters or affected-only test shortcuts.
+  check:
+    if: ${{ always() }}
+    needs: [validation, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every validation and test shard
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'length == 2 and all(.[]; .result == "success")'

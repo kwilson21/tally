@@ -1309,6 +1309,26 @@ describe("11. the read just before each call", () => {
 
 // 12. When it runs.
 describe("12. when it runs", () => {
+	it.each([
+		["nightly", { ...params, night: DAY, bySync: false }, true],
+		["after sync", { ...params, night: undefined, bySync: true }, true],
+		["manual Ask again", { ...params, night: undefined, bySync: false }, false],
+		[
+			"manual category re-sort",
+			{ ...params, night: undefined, bySync: false, rulesApplied: true },
+			false,
+		],
+	] as const)(
+		"%s follows the background-only second-ask boundary",
+		async (_name, runParams, asks) => {
+			await base();
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			const steps = await runSecond(fake.fetchImpl, { runParams });
+			expect(steps.names().includes("lookup-second-read")).toBe(asks);
+			expect(fake.bodies.length > 0).toBe(asks);
+		},
+	);
+
 	const off = [
 		["no Jev key", { ...gateOpen, JEV_API_KEY: undefined }],
 		["no Tavily key", { ...gateOpen, TAVILY_API_KEY: undefined }],

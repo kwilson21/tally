@@ -30,8 +30,9 @@ export const gateOpen = {
 	TAVILY_API_KEY: "tvly",
 };
 
-// No ids: the sorting groups ask nothing, so only the second ask runs.
+// No ids: the nightly sorting groups ask nothing, leaving the second ask to exercise.
 export const params: SortParams = {
+	night: DAY,
 	bySync: false,
 	rulesApplied: false,
 	ids: [],
