@@ -16,6 +16,10 @@ export type LeaseSpyOptions = {
 	failRelease?: Error;
 	/** Thrown by every D1 batch, which is how the sync saves a page. */
 	failBatch?: Error;
+	/** Called when a take statement starts to run, before `takeGate` is awaited. */
+	onTakeRun?: () => void;
+	/** A take statement waits for this before it runs, so a test can hold a take pending. */
+	takeGate?: Promise<void>;
 };
 
 export type LeaseSpy = {
@@ -55,6 +59,11 @@ export function leaseSpy(base: D1Database, options: LeaseSpyOptions): LeaseSpy {
 											return forwardMember(boundStatement, runMember);
 
 										return async () => {
+											if (kind === "take") {
+												options.onTakeRun?.();
+												if (options.takeGate) await options.takeGate;
+											}
+
 											if (kind === "release" && options.failRelease)
 												throw options.failRelease;
 

@@ -159,4 +159,43 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 			[id, "lock-1"],
 		]);
 	});
+
+	it("an interruption while the lease is being taken still releases it", async () => {
+		await reset();
+		const id = await addItem();
+
+		let reached: () => void = () => {};
+		const takeReached = new Promise<void>((resolve) => {
+			reached = resolve;
+		});
+
+		let open: () => void = () => {};
+		const takeGate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+
+		const spy = leaseSpy(env.DB, { onTakeRun: reached, takeGate });
+		const body = vi.fn(async () => SUCCESS);
+
+		const fiber = Effect.runFork(
+			leaseScoped(spy.db, id, "lock-1", body, { failure: null }),
+		);
+
+		// The take statement is running and has not landed: the fiber is interrupted in the middle of taking the lease.
+		await takeReached;
+		const interrupted = Effect.runPromise(Fiber.interrupt(fiber));
+
+		// The take now lands, and takes the lease (its row is free).
+		open();
+		await interrupted;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(takes(spy.calls).map((call) => call.binds)).toEqual([
+			["lock-1", id],
+		]);
+		expect(body).not.toHaveBeenCalled();
+		expect(releases(spy.calls).map((call) => call.binds)).toEqual([
+			[id, "lock-1"],
+		]);
+	});
 });
