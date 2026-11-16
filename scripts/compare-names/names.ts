@@ -1,5 +1,5 @@
 // Measures candidate Workers AI models at Tally's merchant-name suggestion (spec §7), because the model it
-// uses today (Llama 3.1 8B fp8) is deprecated on Nov 20, 2026. It asks each model exactly what production
+// previously used (Llama 3.1 8B fp8) is deprecated on Nov 20, 2026. Mistral is now the baseline. It asks each model exactly what production
 // asks (`INSTRUCTIONS`, the same messages, the same limits), runs each answer through production's own name
 // check (`cleanSuggestedNames`), and returns a markdown report to read side by side. It decides nothing: a
 // person reads the names. Never deploy it: it bills Workers AI. Only bank texts are sent, no amounts or
@@ -12,12 +12,14 @@
 import {
 	cleanSuggestedNames,
 	INSTRUCTIONS,
+	restatesStore,
 	suggestCategoryName,
 	suggestNote,
 } from "../../src/ai/suggest-name";
 import { cleanBankText } from "../../src/clean-bank-text";
 import { DEFAULT_TIME_ZONE, todayIn } from "../../src/dates";
 import { buildSeed, type Seed } from "../../src/demo/seed";
+import { usableSuggestedNames } from "../../src/transactions/name-suggestions";
 import { tidyName } from "../../src/transactions/tidy-name";
 import { demoCategories } from "../compare-models/score";
 
@@ -26,7 +28,7 @@ export type CompareEnv = { AI: Ai };
 /** The models to measure; the key is what `?models=` takes. `baseline` is what production runs today. */
 export const CANDIDATES = {
 	llama: {
-		label: "Llama 3.1 8B fp8 (today's, baseline)",
+		label: "Llama 3.1 8B fp8 (previous model; retires 2026-11-20)",
 		id: "@cf/meta/llama-3.1-8b-instruct-fp8",
 	},
 	granite: {
@@ -34,7 +36,7 @@ export const CANDIDATES = {
 		id: "@cf/ibm-granite/granite-4.0-h-micro",
 	},
 	"mistral-small": {
-		label: "Mistral Small 3.1 24B",
+		label: "Mistral Small 3.1 24B (today's, baseline)",
 		id: "@cf/mistralai/mistral-small-3.1-24b-instruct",
 	},
 	"llama4-scout": {
@@ -99,20 +101,70 @@ const EXTRA_TEXTS = [
 	"CHECKCARD 1105 STARBUCKS STORE 08812",
 ];
 
+export type ComparisonFixture = {
+	text: string;
+	place: string;
+	shownNames: (string | null)[];
+};
+
+/** Seed rows keep their merchant context; extras have only a tidied bank-text fallback. First text wins. */
+export function comparisonFixtures(
+	seed: Seed,
+	limit?: number,
+): ComparisonFixture[] {
+	const merchants = new Map(
+		seed.merchants.map((merchant) => [merchant.key, merchant]),
+	);
+
+	const fixtures = new Map<string, ComparisonFixture>();
+
+	for (const transaction of seed.transactions) {
+		const text = transaction.rawName.trim();
+
+		if (!text || fixtures.has(text)) continue;
+		const key = transaction.merchantName || transaction.rawName;
+		const merchant = merchants.get(key);
+		// suggestions-queue's merchantLabel: the chosen display name, otherwise the tidied merchant key.
+		const place = merchant?.displayName || tidyName(key);
+		fixtures.set(text, {
+			text,
+			place,
+			// notesNotRestatingShownNames at save time, for the static demo with names switched on.
+			// The seed has no own names; reset marks its first three suggestions pending.
+			shownNames: [
+				transaction.rawName,
+				transaction.merchantName ?? null,
+				merchant?.displayName ?? null,
+				...usableSuggestedNames({
+					stored: JSON.stringify(
+						(merchant?.suggestedNames ?? [])
+							.slice(0, 3)
+							.map((name, position) => [position, name]),
+					),
+					status: "pending",
+					key,
+					namesOn: true,
+				}),
+			],
+		});
+	}
+
+	for (const raw of EXTRA_TEXTS) {
+		const text = raw.trim();
+
+		if (!text || fixtures.has(text)) continue;
+		const place = tidyName(text) || text;
+		fixtures.set(text, { text, place, shownNames: [text, place] });
+	}
+
+	const all = [...fixtures.values()];
+
+	return limit === undefined ? all : all.slice(0, limit);
+}
+
 /** The seed's bank texts, then the extras, each once, optionally only the first `limit`. */
 export function bankTexts(seed: Seed, limit?: number): string[] {
-	const all = [
-		...seed.transactions.map((transaction) => transaction.rawName),
-		...EXTRA_TEXTS,
-	].flatMap((text) => {
-		const trimmed = text.trim();
-
-		return trimmed ? [trimmed] : [];
-	});
-
-	const unique = [...new Set(all)];
-
-	return limit === undefined ? unique : unique.slice(0, limit);
+	return comparisonFixtures(seed, limit).map((fixture) => fixture.text);
 }
 
 export type Reply = {
@@ -320,20 +372,29 @@ export async function askOther(
 	task: Exclude<Task, "names">,
 	ai: Ai,
 	modelId: string,
-	text: string,
+	fixture: ComparisonFixture,
 	categories: string[],
 ): Promise<NameResult> {
 	const started = Date.now();
 	const candidate = withModel(ai, modelId);
+	const { text } = fixture;
 
 	const value =
 		task === "notes"
 			? await suggestNote(candidate, text).then((r) =>
-					r.ok ? { ok: true as const, value: r.note } : { ok: false as const },
+					r.ok
+						? {
+								ok: true as const,
+								value:
+									r.note && !restatesStore(r.note, fixture.shownNames)
+										? r.note
+										: null,
+							}
+						: { ok: false as const },
 				)
 			: await suggestCategoryName(
 					candidate,
-					[tidyName(text) || text],
+					[fixture.place],
 					// Names to avoid: none. Production lists only archived categories and dismissed suggestions here
 					// (purchaseNamesToAvoid), and gives the active ones as choices, so the fixtures have nothing to avoid.
 					[],
@@ -391,18 +452,24 @@ export async function runNamesComparison(
 		throw new Error(`Unknown task ${task}. Choose from ${TASKS.join(", ")}.`);
 	const tokens = slice.tokens ?? PRODUCTION_TOKENS;
 	const seed = buildSeed(today);
-	const texts = bankTexts(seed, slice.limit);
+	const fixtures = comparisonFixtures(seed, slice.limit);
 	const categories = demoCategories(seed);
 	const models: ReportModel[] = [];
 
 	for (const key of keys) {
 		const results: NameResult[] = [];
 
-		for (const text of texts) {
+		for (const fixture of fixtures) {
 			results.push(
 				task === "names"
-					? await askNames(env.AI, CANDIDATES[key].id, text, tokens)
-					: await askOther(task, env.AI, CANDIDATES[key].id, text, categories),
+					? await askNames(env.AI, CANDIDATES[key].id, fixture.text, tokens)
+					: await askOther(
+							task,
+							env.AI,
+							CANDIDATES[key].id,
+							fixture,
+							categories,
+						),
 			);
 		}
 

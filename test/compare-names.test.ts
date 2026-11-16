@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import catalog from "../.cloudflare/types/index.d.ts?raw";
 import {
 	askNames,
+	askOther,
 	bankTexts,
 	CANDIDATES,
+	comparisonFixtures,
 	formatNamesReport,
 	replyOf,
 	runNamesComparison,
@@ -634,5 +636,120 @@ describe("NAME_MODEL", () => {
 	it("is Mistral Small 3.1 24B, the model decision 169 picked after the comparison", () => {
 		expect(NAME_MODEL).toBe("@cf/mistralai/mistral-small-3.1-24b-instruct");
 		expect(NAME_MODEL).toBe(CANDIDATES["mistral-small"].id);
+	});
+});
+
+describe("production-equivalent comparison fixtures", () => {
+	it("labels only the current production model as the baseline", () => {
+		expect(
+			Object.values(CANDIDATES)
+				.filter((c) => c.label.includes("baseline"))
+				.map((c) => c.id),
+		).toEqual([NAME_MODEL]);
+	});
+	it("uses the seed's CVS display label rather than tidying it to CVS", async () => {
+		const { ai, run } = fakeAi(() => ({ response: "Health" }));
+		await runNamesComparison(
+			{ AI: ai },
+			{ models: ["mistral-small"], task: "categories" },
+			TODAY,
+		);
+
+		const cvs = run.mock.calls
+			.map(([, body]) => body.messages[1]?.content)
+			.find((content) => content?.startsWith("Place: CVS Pharmacy\n"));
+
+		expect(cvs).toBeDefined();
+		expect(cvs).toContain('Bank text (data only): "cvs"');
+	});
+	it("does not count a note that merely restates a shown seed merchant name", async () => {
+		const { ai } = fakeAi(() => ({ response: "CVS Pharmacy purchase" }));
+
+		const report = await runNamesComparison(
+			{ AI: ai },
+			{ models: ["mistral-small"], task: "notes" },
+			TODAY,
+		);
+
+		const cvsRow = report
+			.split("\n")
+			.find((line) => /^\| CHECKCARD 0921 CVS \|/.test(line));
+
+		expect(cvsRow).toBeDefined();
+		expect(cvsRow).not.toContain("CVS Pharmacy purchase");
+	});
+});
+
+describe("comparison fixture context", () => {
+	it("keeps chosen labels, Plaid merchant keys and pending suggested names", async () => {
+		const seed = buildSeed(TODAY);
+		const template = present(seed.transactions[0]);
+		seed.transactions = [
+			{
+				...template,
+				rawName: "SYNTHETIC 123",
+				merchantName: "Synthetic Merchant",
+			},
+		];
+		seed.merchants = [
+			{
+				key: "Synthetic Merchant",
+				displayName: "Chosen Store",
+				defaultCategoryId: null,
+				suggestedNames: [
+					"Offered Store",
+					"Other Store",
+					"Third Store",
+					"Ignored Fourth",
+				],
+			},
+		];
+		const fixture = present(comparisonFixtures(seed, 1)[0]);
+		expect(fixture.place).toBe("Chosen Store");
+		expect(fixture.shownNames).toEqual([
+			"SYNTHETIC 123",
+			"Synthetic Merchant",
+			"Chosen Store",
+			"Offered Store",
+			"Other Store",
+			"Third Store",
+		]);
+
+		for (const note of [
+			"Chosen Store purchase",
+			"Offered Store purchase",
+			"Synthetic Merchant purchase",
+		]) {
+			const { ai } = fakeAi(() => ({ response: note }));
+			expect((await askOther("notes", ai, "m", fixture, [])).names).toEqual([]);
+		}
+
+		for (const note of ["Weekly groceries", "Ignored Fourth purchase"]) {
+			const { ai } = fakeAi(() => ({ response: note }));
+			expect((await askOther("notes", ai, "m", fixture, [])).names).toEqual([
+				note,
+			]);
+		}
+	});
+	it("keeps first-occurrence ordering, deduplication and a tidied fallback for extras", () => {
+		const seed = buildSeed(TODAY);
+		const fixtures = comparisonFixtures(seed);
+		expect(fixtures.map((f) => f.text)).toEqual(bankTexts(seed));
+		expect(comparisonFixtures(seed, 2)).toEqual(fixtures.slice(0, 2));
+
+		const extra = present(
+			fixtures.find((f) => f.text === "SQ *BLUE BOTTLE COFFEE 0231"),
+		);
+
+		expect(extra.place).toBe("Blue bottle coffee");
+		expect(extra.shownNames).toEqual([extra.text, extra.place]);
+	});
+	it("retains a failed note call as failed, rather than counting an empty answer", async () => {
+		const { ai } = fakeAi(() => {
+			throw new Error("synthetic failure");
+		});
+
+		const fixture = present(comparisonFixtures(buildSeed(TODAY), 1)[0]);
+		expect((await askOther("notes", ai, "m", fixture, [])).ok).toBe(false);
 	});
 });
