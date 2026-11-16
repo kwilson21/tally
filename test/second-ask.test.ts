@@ -1503,6 +1503,167 @@ describe("14. steps", () => {
 	);
 });
 
+// Review round 2 (#987): the bank texts are read again before each call and at the save; a row that is waiting for Jev ends the
+// step at once; and a grant goes only to a row that makes a call.
+const K3 = "Harbor Bakery Annex";
+
+/** A sibling under K3 (the same lookup text as A, a different cleaned text) with a bank-text rule on its cleaned text, arriving mid-run. */
+async function addAnnexRule() {
+	const groceries = await categoryId("Groceries");
+
+	await guessRow(K3, {
+		plaid_transaction_id: "k3-row",
+		category_id: groceries,
+		category_source: "jev",
+		jev_category_id: groceries,
+		category_confidence: 0.9,
+	});
+	await db
+		.prepare(
+			"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, 'harbor bakery', 0) ON CONFLICT(merchant_key) DO NOTHING",
+		)
+		.bind(K3)
+		.run();
+	await db
+		.prepare(
+			"INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES (?, ?)",
+		)
+		.bind(cleanBankText(K3), groceries)
+		.run();
+}
+
+describe("1a. the bank texts are read again before the call", () => {
+	it("a bank-text rule that arrives mid-run refuses the row before its call, and the next row is asked", async () => {
+		expect(cleanBankText(K3)).not.toBe(cleanBankText(STORE_A));
+
+		const r1 = await base();
+
+		await foundStore(STORE_B);
+		await guessRow(STORE_B, {
+			date: "2026-11-14",
+			plaid_transaction_id: "r2-1a",
+		});
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (name) => {
+				if (name === `lookup-second-row-${r1}`) await addAnnexRule();
+			},
+		});
+
+		expect(callsFor(fake.bodies, STORE_A)).toBe(0);
+		expect(await answerOf(r1)).toBeNull();
+		expect(callsFor(fake.bodies, STORE_B) > 0).toBe(true);
+		expect(fake.violations).toEqual([]);
+	});
+});
+
+describe("1b. the bank texts are read again at the save", () => {
+	it("a bank-text rule that arrives during R1's call refuses its answer, and no lookup_answers row is written", async () => {
+		expect(cleanBankText(K3)).not.toBe(cleanBankText(STORE_A));
+
+		const r1 = await base();
+
+		await foundStore(STORE_B);
+		await guessRow(STORE_B, {
+			date: "2026-11-14",
+			plaid_transaction_id: "r2-1b",
+		});
+
+		const fake = fakeJev(async (body) => {
+			if (body.state.bank_description !== STORE_A)
+				return categoryReply("Groceries", 0.9);
+
+			await addAnnexRule();
+
+			return categoryReply("Groceries", 0.95);
+		});
+
+		await runSecond(fake.fetchImpl);
+
+		expect(await answerOf(r1)).toBeNull();
+		expect(await guessOf(r1)).toMatchObject({
+			confidence: 0.6,
+			jevCategoryId: await categoryId("Eating Out"),
+		});
+		expect(callsFor(fake.bodies, STORE_B) > 0).toBe(true);
+		expect(fake.violations).toEqual([]);
+	});
+});
+
+describe("2. a row that waits for Jev yields the step", () => {
+	it("yields before R2's call, writes nothing for R2, gives its call back, and the write still lands", async () => {
+		const r1 = await base();
+
+		await foundStore(STORE_B);
+
+		const r2 = await guessRow(STORE_B, {
+			date: "2026-11-14",
+			plaid_transaction_id: "r2-2",
+		});
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (name) => {
+				if (name === `lookup-second-row-${r2}`) {
+					await guessRow("Waiting Cafe", {
+						plaid_transaction_id: "wait-2",
+						category_confidence: null,
+						jev_category_id: null,
+					});
+				}
+			},
+		});
+
+		expect(callsFor(fake.bodies, STORE_A)).toBe(1);
+		expect(callsFor(fake.bodies, STORE_B)).toBe(0);
+		expect(await answerOf(r2)).toBeNull();
+		expect(await answerOf(r1)).toMatchObject({ kept: 1 });
+		expect(await dayCount()).toBe(1);
+	});
+});
+
+describe("3. grants go to rows that make a call", () => {
+	it("a row with no line takes no grant, so the next owed row is asked and the day's count rises by one", async () => {
+		const cap = await dailyJevCap(db, gateOpen);
+
+		const r1 = await base();
+
+		await foundStore(STORE_B);
+
+		const r2 = await guessRow(STORE_B, {
+			date: "2026-11-14",
+			plaid_transaction_id: "r2-3",
+		});
+
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, ?)")
+			.bind(`jev_calls_${DAY}`, String(cap - 1))
+			.run();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (name) => {
+				if (name === `lookup-second-row-${r1}`) {
+					await db
+						.prepare(
+							"UPDATE merchant_lookups SET line = NULL WHERE lookup_text = 'harbor bakery'",
+						)
+						.run();
+				}
+			},
+		});
+
+		expect(callsFor(fake.bodies, STORE_A)).toBe(0);
+		expect(callsFor(fake.bodies, STORE_B)).toBe(1);
+		expect(await answerOf(r2)).toMatchObject({ kept: 1 });
+		expect(await dayCount()).toBe(cap);
+	});
+});
+
 // 15. Logging: nothing given to the console carries the text, the line, the raw name or a cleaned text.
 describe("15. logging", () => {
 	it("logs nothing that carries the text, the line, the raw name or a cleaned text", async () => {

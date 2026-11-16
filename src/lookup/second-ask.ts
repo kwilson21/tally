@@ -95,6 +95,7 @@ export type SecondAskResult =
 			category: { label: string; confidence: number };
 	  }
 	| { id: number; outcome: "no-line" }
+	| { id: number; outcome: "yield" }
 	| Exclude<AskResult, { outcome: "answered" }>;
 
 /**
@@ -118,6 +119,20 @@ type OwedRow = JevSeenColumns & {
 	lookupText: string;
 };
 
+/** The cleaned bank texts a lookup text's raw names hold, sorted and distinct (rule 6c reads them). Pure. */
+export function cleanedFor(
+	rawNames: { lookupText: string; rawName: string }[],
+	text: string,
+): string[] {
+	return [
+		...new Set(
+			rawNames.flatMap((named) =>
+				named.lookupText === text ? [cleanBankText(named.rawName)] : [],
+			),
+		),
+	].sort();
+}
+
 /**
  * The rows the second ask asks about this run, pure. Each row is skipped when its store text is stale (its merchant key no
  * longer maps to the text), when a bank-text rule covers one of its store's cleaned texts, or when a learned line covers its
@@ -135,15 +150,7 @@ export function secondAskPicks(
 	for (const row of owed) {
 		if (lookupTextOf(row.merchantKey) !== row.lookupText) continue;
 
-		const cleaned = [
-			...new Set(
-				rawNames.flatMap((named) =>
-					named.lookupText === row.lookupText
-						? [cleanBankText(named.rawName)]
-						: [],
-				),
-			),
-		].sort();
+		const cleaned = cleanedFor(rawNames, row.lookupText);
 
 		if (cleaned.some((text) => ruleTexts.includes(text))) continue;
 
@@ -279,15 +286,30 @@ export async function askSecondRow(
 
 	if (blocked && blocked.outcome !== "answered") return blocked;
 
+	// A new row that waits for Jev takes the day's calls first (spec §7): this step yields with no call, and its grant goes back.
+	if ((await countWaitingForJev(db, { categories: true, income: true })) > 0) {
+		return { id: row.id, outcome: "yield" };
+	}
+
 	const learned = await learnedTexts(db);
 
 	if (learned.includes(cleanBankText(row.seen.rawName))) {
 		return { id: row.id, outcome: "no-line" };
 	}
 
+	// The store's bank texts as they stand now: a raw name a sync added since the plan counts (rule 6c).
+	const current = await db
+		.prepare(
+			`SELECT DISTINCT mlt.lookup_text AS lookupText, t.raw_name AS rawName
+			FROM transactions t JOIN merchant_lookup_texts mlt ON mlt.merchant_key = ${merchantKeySql("t")}
+			WHERE mlt.lookup_text = ?`,
+		)
+		.bind(row.text)
+		.all<{ lookupText: string; rawName: string }>();
+
 	const line = await readLineForAsk(db, {
 		text: row.text,
-		cleanedTexts: row.cleanedTexts,
+		cleanedTexts: cleanedFor(current.results, row.text),
 		switchKeys: secondAskSwitchKeys(plan.bySync),
 	});
 
@@ -459,6 +481,16 @@ export async function writeSecondAsk(
 	const reservedKey = reservedKeyFor(plan.day, plan.turnId);
 	const learned = await learnedTexts(db);
 
+	// One read for every text in the plan: the bank texts as they stand at the save (rule 6c, the save's own guard).
+	const current = await db
+		.prepare(
+			`SELECT DISTINCT mlt.lookup_text AS lookupText, t.raw_name AS rawName
+			FROM transactions t JOIN merchant_lookup_texts mlt ON mlt.merchant_key = ${merchantKeySql("t")}
+			WHERE mlt.lookup_text IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify([...new Set(plan.rows.map((row) => row.text))]))
+		.all<{ lookupText: string; rawName: string }>();
+
 	const statements: D1PreparedStatement[] = [
 		takeSortingTurnStatement(db, plan.turnId, reservedKey),
 	];
@@ -466,9 +498,14 @@ export async function writeSecondAsk(
 	let asked = 0;
 
 	for (const outcome of outcomes) {
-		const row = plan.rows.find((candidate) => candidate.id === outcome.id);
+		const planned = plan.rows.find((candidate) => candidate.id === outcome.id);
 
-		if (!row) continue;
+		if (!planned) continue;
+
+		const row = {
+			...planned,
+			cleanedTexts: cleanedFor(current.results, planned.text),
+		};
 
 		// A call was made for an answer, a failure or a loss, so each is charged; a row never reached, or cut by the budget, is not.
 		if (
@@ -562,7 +599,12 @@ export async function runSecondAsk(
 
 	const outcomes: SecondAskResult[] = [];
 
-	for (const row of plan.rows.slice(0, granted)) {
+	// A row with no line makes no call and takes no grant, so the next owed row takes its place (review round 2).
+	let made = 0;
+
+	for (const row of plan.rows) {
+		if (made >= granted) break;
+
 		let outcome: SecondAskResult;
 
 		try {
@@ -579,6 +621,13 @@ export async function runSecondAsk(
 		}
 
 		outcomes.push(outcome);
+
+		if (
+			outcome.outcome === "answered" ||
+			outcome.outcome === "failed" ||
+			outcome.outcome === "lost"
+		)
+			made += 1;
 
 		if (outcome.outcome !== "answered" && outcome.outcome !== "no-line") break;
 	}
