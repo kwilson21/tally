@@ -1124,7 +1124,8 @@ describe("10. the guards at the save", () => {
 					.bind(JSON.stringify({ id: "other", until: NOON_MS + 15 * MINUTE }))
 					.run();
 			},
-			r2Asked: true,
+			// A caller that lost its turn must not spend another reserved call.
+			r2Asked: false,
 			kept: "none",
 			limits: { "lookup-second-write": 1 },
 		},
@@ -1724,4 +1725,80 @@ describe("15. logging", () => {
 		expect(joined).not.toContain(cleaned);
 		expect(joined).not.toContain("harbor bakery");
 	});
+});
+
+// A save-time guard cannot undo sending a note that a person removed before the call.
+describe("the planned row is revalidated immediately before its call", () => {
+	it.each([
+		["note removed", "UPDATE transactions SET note = NULL WHERE id = ?"],
+		["note edited", "UPDATE transactions SET note = 'New note' WHERE id = ?"],
+		["pending", "UPDATE transactions SET pending = 1 WHERE id = ?"],
+		["split", "UPDATE transactions SET is_split = 1 WHERE id = ?"],
+		[
+			"bill filed",
+			"UPDATE transactions SET category_id = jev_category_id, category_source = 'bill' WHERE id = ?",
+		],
+		[
+			"guess changed",
+			"UPDATE transactions SET category_confidence = 0.7 WHERE id = ?",
+		],
+		["deleted", "DELETE FROM transactions WHERE id = ?"],
+	] as const)(
+		"%s: no stale data leaves, no call is spent or recorded",
+		async (_name, sql) => {
+			await foundStore(STORE_A);
+			const id = await guessRow(STORE_A, { note: "Private note" });
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (step === `lookup-second-row-${id}`)
+						await db.prepare(sql).bind(id).run();
+				},
+			});
+			expect(fake.bodies).toHaveLength(0);
+			expect(await answerOf(id)).toBeNull();
+			expect(await dayCount()).toBe(0);
+		},
+	);
+});
+
+describe("a reused transaction id is not the transaction Jev was asked about", () => {
+	it.each(["answered", "failed", "lost"] as const)(
+		"%s never marks a replacement as asked",
+		async (outcome) => {
+			const id = await base();
+			let replacement = 0;
+
+			const replace = async () => {
+				await db
+					.prepare("DELETE FROM transactions WHERE id = ?")
+					.bind(id)
+					.run();
+				replacement = await guessRow(STORE_A, {
+					plaid_transaction_id: "replacement-bank-row",
+				});
+				expect(replacement).toBe(id);
+			};
+
+			const fake = fakeJev(async () => {
+				await replace();
+
+				return outcome === "failed"
+					? new Response("", { status: 500 })
+					: categoryReply("Groceries", 0.95);
+			});
+
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (outcome === "lost" && step === `lookup-second-row-${id}`) {
+						await replace();
+						throw new Error("lost ask step");
+					}
+				},
+			});
+			expect(replacement).toBe(id);
+			expect(await answerOf(replacement)).toBeNull();
+			expect((await guessOf(replacement))?.confidence).toBe(0.6);
+		},
+	);
 });

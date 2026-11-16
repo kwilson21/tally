@@ -69,6 +69,7 @@ const secondAskSwitchKeys = (bySync: boolean) =>
 /** A row the read picked: its lookup text, what Jev is told of it, its first guess and the cleaned bank texts of its store. */
 export type SecondAskRow = {
 	id: number;
+	plaidTransactionId: string | null;
 	text: string;
 	seen: JevSeen;
 	confidence: number;
@@ -111,9 +112,27 @@ export const openGuessSql = (
 	AND ${jevAsksAboutSql(a)} AND (${a}.amount_cents >= 0 OR COALESCE(${a}.credit_reviewed, 0) = 1)
 	AND NOT ${gaveUpSql(a)})`;
 
+/** The planned guess must still be open, unanswered, and about exactly the same input facts. */
+function unchangedGuessGuard(row: SecondAskRow) {
+	const seen = seenSaveGuard(row.seen);
+
+	return {
+		sql: `${openGuessSql("transactions")} AND transactions.plaid_transaction_id IS ? AND transactions.category_confidence = ? AND transactions.jev_category_id IS ?
+			AND ${seen.sql}
+			AND NOT EXISTS (SELECT 1 FROM lookup_answers gla WHERE gla.transaction_id = transactions.id)`,
+		binds: [
+			row.plaidTransactionId,
+			row.confidence,
+			row.guessedCategoryId,
+			...seen.binds,
+		],
+	};
+}
+
 /** The owed rows the read selects: the seen columns, the guess and the lookup text. */
 type OwedRow = JevSeenColumns & {
 	id: number;
+	plaidTransactionId: string | null;
 	confidence: number;
 	guessedCategoryId: number | null;
 	lookupText: string;
@@ -158,6 +177,7 @@ export function secondAskPicks(
 
 		picks.push({
 			id: row.id,
+			plaidTransactionId: row.plaidTransactionId,
 			text: row.lookupText,
 			seen: jevSeenOf(row),
 			confidence: row.confidence,
@@ -206,7 +226,7 @@ export async function readSecondAsk(
 		// type of the statement at its position.
 		const [owed, raw, rules, categories] = (await db.batch([
 			db.prepare(
-				`SELECT t.id AS id, t.category_confidence AS confidence, t.jev_category_id AS guessedCategoryId,
+				`SELECT t.id AS id, t.plaid_transaction_id AS plaidTransactionId, t.category_confidence AS confidence, t.jev_category_id AS guessedCategoryId,
 					mlt.lookup_text AS lookupText, ${jevSeenColumnsSql()}
 				FROM transactions t JOIN accounts a ON a.id = t.account_id
 				LEFT JOIN household_people hp ON hp.id = t.for_person_id
@@ -315,6 +335,19 @@ export async function askSecondRow(
 
 	if (line === null) return { id: row.id, outcome: "no-line" };
 
+	// A later save cannot undo transmitting a note that was edited or removed after the plan.
+	// Skip stale rows instead of rebuilding their input without a matching saved-plan guard.
+	const guess = unchangedGuessGuard(row);
+
+	const stillOwed = await db
+		.prepare(
+			`SELECT transactions.id FROM transactions WHERE transactions.id = ? AND ${guess.sql} AND ${turnHeldSql()}`,
+		)
+		.bind(row.id, ...guess.binds, plan.turnId)
+		.first();
+
+	if (!stillOwed) return { id: row.id, outcome: "no-line" };
+
 	try {
 		const result: JevCategoryResult = await askJevCategoryOnly(
 			{ ...jevInputOf(row.seen), storeLookup: line },
@@ -406,24 +439,26 @@ function moveStatements(
 				.prepare(
 					`INSERT INTO lookup_answers (transaction_id, lookup_text, kept)
 					SELECT transactions.id, ?, 0 FROM transactions WHERE transactions.id = ?
+						AND transactions.plaid_transaction_id IS ? AND transactions.amount_cents = ?
 						AND NOT EXISTS (SELECT 1 FROM lookup_answers fla WHERE fla.transaction_id = transactions.id) AND ${turnHeldSql()}`,
 				)
-				.bind(row.text, row.id, plan.turnId),
+				.bind(
+					row.text,
+					row.id,
+					row.plaidTransactionId,
+					row.seen.amountCents,
+					plan.turnId,
+				),
 		];
 	}
 
-	const seen = seenSaveGuard(row.seen);
+	const guess = unchangedGuessGuard(row);
 	const line = lineGuard(row.text, row.cleanedTexts);
 
 	const guard = {
-		sql: `${openGuessSql("transactions")} AND transactions.category_confidence = ? AND transactions.jev_category_id IS ?
-			AND ${seen.sql}
-			AND NOT EXISTS (SELECT 1 FROM lookup_answers gla WHERE gla.transaction_id = transactions.id)
-			AND ${line.sql} AND ${STILL_ON_SQL} AND ${turnHeldSql()}`,
+		sql: `${guess.sql} AND ${line.sql} AND ${STILL_ON_SQL} AND ${turnHeldSql()}`,
 		binds: [
-			row.confidence,
-			row.guessedCategoryId,
-			...seen.binds,
+			...guess.binds,
 			...line.binds,
 			secondAskSwitchKeys(plan.bySync),
 			plan.turnId,
