@@ -49,6 +49,23 @@ export function isUnsure(confidence: number, kind: MaybeKind): boolean {
 }
 
 /**
+ * A category guess is a Maybe: unsure (isUnsure), or a guess the store lookup's second ask kept with the line (`lineGuess`,
+ * lookup_answers) at the 40% floor or above, with no upper end (decision 225, spec §8.6). It matches categoryMaybeSql
+ * (src/db/suggestions-queue.ts), and test/classify.test.ts checks the two agree row by row. This is the one place the category
+ * range is written in TypeScript.
+ */
+export function isCategoryMaybe(
+	confidence: number,
+	lineGuess: boolean,
+): boolean {
+	return (
+		isUnsure(confidence, "category") ||
+		(lineGuess &&
+			confidenceBasisPoints(confidence) > askedBounds("category").above)
+	);
+}
+
+/**
  * A low-confidence credit is a visible income guess only until someone decides what it is. A payment for a bill or a
  * planned expense counts whatever its exclusion (decision 82), so it is asked as the income queue asks it (incomeAskedSql).
  */

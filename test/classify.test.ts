@@ -49,7 +49,13 @@ const SPLIT_PARENT = 3; // split parent, paid by a planned expense
 
 type Link = "bill" | "plan" | "dismissed_bill";
 
-type Seed = Partial<Row> & { name?: string; link?: Link; raw_name?: string };
+/** `line`: the store lookup's line row for the seed (lookup_answers): "kept" holds its guess, "stale" holds an older one. */
+type Seed = Partial<Row> & {
+	name?: string;
+	link?: Link;
+	raw_name?: string;
+	line?: "kept" | "stale";
+};
 
 // The bank text a "Never suggest income" rule covers. Seeds have no merchant name, so their merchant key is their bank
 // text, and the rule's key is this text. The oracle reads that fact from the seed itself; SQL reads the rule table.
@@ -164,6 +170,50 @@ const NAMED: Seed[] = [
 		name: "purchase flagged as transfer (Jev 90%)",
 		flag_transfer: 1,
 		transfer_confidence: 0.9,
+	},
+	// The store lookup's line-backed guess, kept (decision 225): a Maybe at 40% or more, with no upper end
+	{
+		name: "kept line guess, Jev 39.99%",
+		line: "kept",
+		category_confidence: 0.3999,
+		jev_category_id: ACTIVE_CAT,
+	},
+	{
+		name: "kept line guess, Jev 40%",
+		line: "kept",
+		category_confidence: 0.4,
+		jev_category_id: ACTIVE_CAT,
+	},
+	{
+		name: "kept line guess, Jev 80%",
+		line: "kept",
+		category_confidence: 0.8,
+		jev_category_id: ACTIVE_CAT,
+	},
+	{
+		name: "kept line guess, Jev 95%",
+		line: "kept",
+		category_confidence: 0.95,
+		jev_category_id: ACTIVE_CAT,
+	},
+	{
+		name: "kept line guess, Jev 100%",
+		line: "kept",
+		category_confidence: 1,
+		jev_category_id: ACTIVE_CAT,
+	},
+	{
+		name: "stale line guess, Jev 95%",
+		line: "stale",
+		category_confidence: 0.95,
+		jev_category_id: ACTIVE_CAT,
+	},
+	{
+		name: "kept line guess, Jev 95%, pending",
+		line: "kept",
+		category_confidence: 0.95,
+		jev_category_id: ACTIVE_CAT,
+		pending: 1,
 	},
 	// Split parts
 	{ name: "split part", parent_id: SPLIT_PARENT },
@@ -627,6 +677,29 @@ beforeAll(async () => {
 	for (let i = 0; i < statements.length; i += 100)
 		await db.batch(statements.slice(i, i + 100));
 
+	// The store lookup's line rows (lookup_answers, migration 0078): a kept row copies the seed's guess, a stale one
+	// copies an older confidence, so the guess it holds no longer matches.
+	const lineRows = all.flatMap((seed, index) =>
+		seed.line
+			? [
+					db
+						.prepare(
+							"INSERT INTO lookup_answers (transaction_id, lookup_text, kept, kept_category_id, kept_confidence) VALUES (?, ?, 1, ?, ?)",
+						)
+						.bind(
+							index + 1,
+							seed.raw_name ?? PLAIN_RAW,
+							seed.jev_category_id ?? null,
+							seed.line === "stale"
+								? (seed.category_confidence ?? 0) - 0.05
+								: (seed.category_confidence ?? null),
+						),
+				]
+			: [],
+	);
+
+	if (lineRows.length > 0) await db.batch(lineRows);
+
 	rows = (await db.prepare("SELECT * FROM transactions ORDER BY id").all<Row>())
 		.results;
 	const byId = new Map(rows.map((r) => [r.id, r]));
@@ -650,6 +723,9 @@ beforeAll(async () => {
 		all.map((s, i) => [i + 1, s.raw_name ?? PLAIN_RAW]),
 	);
 
+	// The line flag is read from the seed, so the oracle does not read the lookup table that SQL reads.
+	const lineOf = new Map(all.map((s, i) => [i + 1, s.line]));
+
 	const contextFor = (r: Row): Context => {
 		const target =
 			r.refund_of_id === null ? undefined : byId.get(r.refund_of_id);
@@ -664,6 +740,7 @@ beforeAll(async () => {
 				r.jev_category_id !== null && ACTIVE_IDS.has(r.jev_category_id),
 			anyActiveCategory: activeCategories > 0,
 			neverSuggestIncome: bankTextOf.get(r.id) === NEVER_RAW,
+			lineGuess: lineOf.get(r.id) === "kept",
 		};
 	};
 
@@ -848,6 +925,54 @@ describe("named rows come out as the readable answers", () => {
 			source: null,
 			guess: { kind: "sure" },
 		});
+	});
+});
+
+// A kept line-backed guess is a Maybe at 40% or more, with no upper end (decision 225). These pin the oracle's
+// reading of the line rows to the SQL: a stale or pending one is not asked, and an unsure one below the floor stays so.
+describe("a kept line-backed guess is a Maybe at 40% or more (decision 225)", () => {
+	it("is a Maybe, and asked, at 40%, 80%, 95% and 100%", () => {
+		for (const name of [
+			"kept line guess, Jev 40%",
+			"kept line guess, Jev 80%",
+			"kept line guess, Jev 95%",
+			"kept line guess, Jev 100%",
+		]) {
+			expect(classifiedOf(idOf(name)).category).toEqual({
+				kind: "unset",
+				source: null,
+				guess: { kind: "maybe" },
+			});
+			expect(sqlSays("categoryAsked", name)).toBe(true);
+		}
+	});
+
+	it("a kept line guess under 40% is below the floor, and not asked", () => {
+		const name = "kept line guess, Jev 39.99%";
+
+		expect(classifiedOf(idOf(name)).category).toEqual({
+			kind: "unset",
+			source: null,
+			guess: { kind: "below_floor" },
+		});
+		expect(sqlSays("categoryAsked", name)).toBe(false);
+	});
+
+	it("a stale line guess at 95% is sure, and not asked", () => {
+		const name = "stale line guess, Jev 95%";
+
+		expect(classifiedOf(idOf(name)).category).toEqual({
+			kind: "unset",
+			source: null,
+			guess: { kind: "sure" },
+		});
+		expect(sqlSays("categoryAsked", name)).toBe(false);
+	});
+
+	it("a kept line guess on a pending purchase is not asked", () => {
+		expect(sqlSays("categoryAsked", "kept line guess, Jev 95%, pending")).toBe(
+			false,
+		);
 	});
 });
 

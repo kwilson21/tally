@@ -24,6 +24,7 @@ import {
 } from "../src/db/resort-run";
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { categoryAskedSql } from "../src/db/suggestions-queue";
+import { getTransaction, listRowsByIds } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { type UndoFacts, undoResort } from "../src/rules/sorting";
 import { UNDO_MS } from "../src/undo";
@@ -1414,6 +1415,55 @@ describe("undoRun", () => {
 		expect(result).toEqual({ restored: 2, changedSince: 0, expired: false });
 		expect(await state(a)).toMatchObject({ categoryId: null });
 	});
+
+	// A row whose kept line guess (Eating Out) the re-check moves to Groceries: the row's stored guess no longer
+	// matches the kept line, so it is not line-backed (lineGuess false). Undo puts the snapshot back, which holds the
+	// guess the row had, so the line-backed guess is back (lineGuess true) with its exact confidence.
+	it.each([0.6, 0.7123456789012345])(
+		"kept describes the guess stored now: after the re-check it is false, after its Undo it is true again (confidence %s)",
+		async (confidence) => {
+			const a = await tx({
+				plaidCategory: HINT,
+				confidence,
+				jevCategoryId: eatingOut,
+			});
+
+			await db
+				.prepare(
+					"INSERT INTO lookup_answers (transaction_id, lookup_text, kept, kept_category_id, kept_confidence) VALUES (?, 'CHECKCARD 0921 CVS', 1, ?, ?)",
+				)
+				.bind(a, eatingOut, confidence)
+				.run();
+
+			const started = await startOrJoinRun(db, {
+				candidates: (await candidatesNow()).filter((c) => c.id === a),
+				categoryId: groceries,
+				categoryName: "Groceries",
+				now: T0,
+			});
+
+			const runId = runIdOf(started);
+
+			await clear([a]);
+			await answer(a, groceries);
+			await finishRun(db, { runId, now: T0 + 5000 });
+			await closeToastOnce(db, runId, T0 + 5000);
+
+			expect((await getTransaction(db, a))?.lineGuess).toBe(false);
+
+			await undoRun(db, { runId, now: T0 + 6000 });
+
+			expect(await state(a)).toMatchObject({
+				categoryId: null,
+				confidence,
+				jevCategoryId: eatingOut,
+			});
+			expect((await getTransaction(db, a))?.lineGuess).toBe(true);
+			expect((await listRowsByIds(db, [a]))[0]?.maybeCategoryName).toBe(
+				"Eating Out",
+			);
+		},
+	);
 
 	it("a second undo after a successful one reports expired and changes nothing", async () => {
 		const { a, runId } = await finishedRunWithTwoMoved();

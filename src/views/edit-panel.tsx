@@ -1,5 +1,5 @@
 import type { Child } from "hono/jsx";
-import { isUnsure } from "../ai/maybe";
+import { isCategoryMaybe } from "../ai/maybe";
 import { unpaidBillsNote } from "../bills/unpaid";
 import { dayLabel, shortDay } from "../dates";
 import { isIncluded } from "../db/counted-month";
@@ -221,7 +221,7 @@ export function CategoryChoice({
 		!tx.maybeCategoryNew &&
 		Boolean(tx.suggestedCategoryName) &&
 		tx.categoryConfidence !== null &&
-		isUnsure(tx.categoryConfidence, "category");
+		isCategoryMaybe(tx.categoryConfidence, tx.lineGuess);
 
 	const guessChip = unsureGuess && tx.suggestedCategoryId !== null;
 

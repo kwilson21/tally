@@ -139,6 +139,26 @@ export const askedSql = (kind: MaybeKind, confidence: string) => {
 };
 
 /**
+ * The row `alias` still holds the category guess the store lookup's second ask kept, made with the line (spec §5, §7; decision 225).
+ * It counts only while the row's guess is still that one: a later answer that replaces it ends it by itself, and an Undo that puts it
+ * back brings it back. A cleared confidence never matches (`=`, not IS), and a row filed by a person or by Jev never does.
+ * stays raw: a fragment inlined into raw readers (decision 179)
+ */
+export const lineGuessSql = (alias: string) =>
+	`EXISTS (SELECT 1 FROM lookup_answers la WHERE la.transaction_id = ${alias}.id AND la.kept = 1
+		AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
+		AND la.kept_category_id IS ${alias}.jev_category_id AND la.kept_confidence = ${alias}.category_confidence)`;
+
+/**
+ * A category guess the review asks about: in its asked range (askedSql), or a line-backed guess (lineGuessSql) at the 40% floor
+ * or above, with no upper end (decision 225, spec §8.6). Its TypeScript twin is isCategoryMaybe (src/ai/maybe.ts).
+ * stays raw: a fragment inlined into raw readers (decision 179)
+ */
+export const categoryMaybeSql = (alias: string) =>
+	`(${askedSql("category", `${alias}.category_confidence`)} OR (${lineGuessSql(alias)}
+		AND CAST((${alias}.category_confidence) * ${BASIS_POINTS} AS INTEGER) > ${askedBounds("category").above}))`;
+
+/**
  * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked, and it must still be in the Maybe range (`askedSql`), so a guess that became sure or dropped below it is never saved against.
  * A pending credit is not asked: Plaid can still change or remove a pending transaction, so a question about it could go stale,
  * and it is asked once it posts (an owner decision). A transfer is not asked, since it is settled, as payAskedSql leaves transfers out too.
@@ -270,7 +290,7 @@ async function transferSuggestions(
  */
 export const categoryAskedSql = (alias: string) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
-		AND ${alias}.pending = 0 AND ${askedSql("category", `${alias}.category_confidence`)} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
+		AND ${alias}.pending = 0 AND ${categoryMaybeSql(alias)} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
 		AND EXISTS (SELECT 1 FROM categories ac WHERE ac.id = ${alias}.jev_category_id AND ac.archived = 0))`;
 

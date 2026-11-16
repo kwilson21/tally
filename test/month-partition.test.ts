@@ -214,6 +214,7 @@ async function contextFor(r: Row, byId: Map<number, Row>): Promise<Context> {
 		jevCategoryActive: false,
 		anyActiveCategory: true,
 		neverSuggestIncome: false,
+		lineGuess: false,
 	};
 }
 

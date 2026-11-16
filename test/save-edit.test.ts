@@ -1877,6 +1877,7 @@ describe("saveEdit counts a transfer credit as income when a person turns Exclud
 			jevCategoryActive: false,
 			anyActiveCategory: true,
 			neverSuggestIncome: false,
+			lineGuess: false,
 		});
 
 		expect(c.income).toEqual({ kind: "income", setBy: "user" });
