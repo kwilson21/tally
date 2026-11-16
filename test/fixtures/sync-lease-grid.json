@@ -42,8 +42,12 @@
 		]
 	},
 	"free | done | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"returned": {
+			"added": 1,
+			"modified": 0,
+			"removed": 0,
+			"changedIds": 1
+		},
 		"bank": {
 			"sync_cursor": "cursor-1",
 			"sync_locked_until": "<time>",
@@ -109,8 +113,8 @@
 		"accounts": []
 	},
 	"free | refused at accounts | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -168,8 +172,8 @@
 		"accounts": []
 	},
 	"free | refused at transactions | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -227,8 +231,8 @@
 		"accounts": []
 	},
 	"free | fetch throws | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -285,8 +289,8 @@
 		"accounts": []
 	},
 	"free | ask fails | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "Error: Plaid sync page is missing a field the sync needs",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -343,8 +347,8 @@
 		"accounts": []
 	},
 	"free | save fails | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "Error: the page save failed",
+		"identity": "the save's error object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -398,8 +402,8 @@
 		"accounts": []
 	},
 	"free | no key | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "Error: TOKEN_ENCRYPTION_KEY is required",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -466,8 +470,12 @@
 		]
 	},
 	"expired | done | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"returned": {
+			"added": 1,
+			"modified": 0,
+			"removed": 0,
+			"changedIds": 1
+		},
 		"bank": {
 			"sync_cursor": "cursor-1",
 			"sync_locked_until": "<time>",
@@ -533,8 +541,8 @@
 		"accounts": []
 	},
 	"expired | refused at accounts | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -592,8 +600,8 @@
 		"accounts": []
 	},
 	"expired | refused at transactions | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -651,8 +659,8 @@
 		"accounts": []
 	},
 	"expired | fetch throws | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "PlaidError: Plaid request failed",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -709,8 +717,8 @@
 		"accounts": []
 	},
 	"expired | ask fails | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "Error: Plaid sync page is missing a field the sync needs",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -767,8 +775,8 @@
 		"accounts": []
 	},
 	"expired | save fails | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "Error: the page save failed",
+		"identity": "the save's error object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
@@ -822,8 +830,8 @@
 		"accounts": []
 	},
 	"expired | no key | release fails": {
-		"thrown": "Error: the release statement failed",
-		"identity": "the release's error object",
+		"thrown": "Error: TOKEN_ENCRYPTION_KEY is required",
+		"identity": "another object",
 		"bank": {
 			"sync_cursor": null,
 			"sync_locked_until": "<time>",
