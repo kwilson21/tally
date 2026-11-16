@@ -70,15 +70,17 @@ export function leaseScoped(
 			}
 		});
 
-	return Effect.promise(() => takeLease(db, itemRowId, lockId)).pipe(
-		Effect.flatMap((taken) =>
-			taken
-				? Effect.scoped(
-						Effect.acquireRelease(Effect.void, releaseLease).pipe(
-							Effect.andThen(Effect.promise(body)),
-						),
-					)
-				: Effect.succeed(skipped),
+	// The take is the acquisition, so the release is registered with it: an interruption while the take is pending still
+	// finds the release, and a take that lands is always given back. A take that is not taken (or fails) registers nothing
+	// to release, since the finalizer releases only when the take took the lease.
+	return Effect.scoped(
+		Effect.acquireRelease(
+			Effect.promise(() => takeLease(db, itemRowId, lockId)),
+			(taken) => (taken ? releaseLease() : Effect.void),
+		).pipe(
+			Effect.flatMap((taken) =>
+				taken ? Effect.promise(body) : Effect.succeed(skipped),
+			),
 		),
 	);
 }
