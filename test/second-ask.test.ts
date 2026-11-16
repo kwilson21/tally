@@ -1,0 +1,882 @@
+import { describe, expect, it, vi } from "vitest";
+import type { AiSwitches } from "../src/db/ai-switches";
+import { NONE_FIT } from "../src/ai/decide";
+import { cleanBankText } from "../src/clean-bank-text";
+import { dailyJevCap } from "../src/sort-groups";
+import {
+	answerOf,
+	callsFor,
+	categoryId,
+	categoryReply,
+	dayCount,
+	db,
+	DAY,
+	fakeJev,
+	foundStore,
+	gateOpen,
+	guessOf,
+	guessRow,
+	isSecondAskBody,
+	LINE,
+	MINUTE,
+	NOON_MS,
+	params,
+	RUN_ID,
+	runSecond,
+	STORE_A,
+	STORE_B,
+} from "./second-ask-setup";
+
+// The second ask (#987 part B, spec §7 "The second ask", decision 225), through the sorting instance with fake steps.
+
+/** The owed table's base: store A found with its line, and one posted purchase at it that Jev filed at 0.6 (Eating Out). */
+async function base() {
+	await foundStore(STORE_A);
+
+	return guessRow(STORE_A);
+}
+
+/** A Jev reply to any ordinary (group) call: the category at a confidence, every flag low. */
+const groupReply = (choice: string, confidence: number) =>
+	new Response(
+		JSON.stringify({
+			answers: {
+				category: { type: "choice", choice, confidence },
+				transfer: { type: "noul", noul: 0.01 },
+				reimbursement: { type: "noul", noul: 0.01 },
+				income: { type: "noul", noul: 0.01 },
+			},
+		}),
+		{ status: 200 },
+	);
+
+// 4. Rule 14, at the group's call: only the second ask carries the line.
+describe("4. firstAskHasNoLine", () => {
+	it("sends no line on the group's first ask, and the line on the second", async () => {
+		await foundStore(STORE_A);
+
+		const row = await guessRow(STORE_A, { category_confidence: null, jev_category_id: null });
+
+		const fake = fakeJev((body) =>
+			isSecondAskBody(body)
+				? categoryReply("Groceries", 0.95)
+				: groupReply("Eating Out", 0.6),
+		);
+
+		await runSecond(fake.fetchImpl, {
+			runParams: { ...params, ids: [row] },
+		});
+
+		const [first, second] = fake.bodies;
+
+		expect(first && "store_lookup" in first.state).toBe(false);
+		expect(second?.state.store_lookup).toBe(LINE);
+		expect(fake.violations).toEqual([]);
+	});
+});
+
+// 5. Rule 6 and 5.1: the owed table.
+describe("5. the owed table", () => {
+	const owed: {
+		name: string;
+		asked: boolean;
+		setup?: (r1: number) => Promise<void>;
+		switches?: Partial<AiSwitches>;
+		bySync?: boolean;
+	}[] = [
+		{ name: "none (positive control)", asked: true },
+		{ name: "Look up new stores on the web off", asked: false, switches: { lookupStores: false } },
+		{ name: "Spot paychecks off", asked: false, switches: { income: false } },
+		{ name: "a sync, Sort right away off", asked: false, bySync: true, switches: { sortOnArrival: false } },
+		{ name: "a sync, Sort right away on", asked: true, bySync: true },
+		{
+			name: "another purchase waits for Jev",
+			asked: false,
+			setup: async () => {
+				await guessRow(STORE_A, { category_confidence: null, jev_category_id: null, plaid_transaction_id: "wait-1" });
+			},
+		},
+		{
+			name: "R1 has a lookup_answers row (kept 0)",
+			asked: false,
+			setup: async (r1) => {
+				await db.prepare("INSERT INTO lookup_answers (transaction_id, lookup_text, kept) VALUES (?, 'harbor bakery', 0)").bind(r1).run();
+			},
+		},
+		{
+			name: "R1 filed by Jev (Eating Out, 0.9)",
+			asked: false,
+			setup: async (r1) => {
+				await db.prepare("UPDATE transactions SET category_id = jev_category_id, category_source = 'jev', category_confidence = 0.9 WHERE id = ?").bind(r1).run();
+			},
+		},
+		{
+			name: "R1's confidence NULL, Jev gave up on the call",
+			asked: false,
+			setup: async (r1) => {
+				await db.prepare("UPDATE transactions SET category_confidence = NULL, jev_failed_at = ? WHERE id = ?").bind(`${DAY} 12:00:00`, r1).run();
+			},
+		},
+		{
+			name: "R1 is a split part",
+			asked: false,
+			setup: async (r1) => {
+				const parent = await guessRow(STORE_B, { plaid_transaction_id: "parent-1" });
+
+				await db.prepare("UPDATE transactions SET parent_id = ? WHERE id = ?").bind(parent, r1).run();
+			},
+		},
+		{
+			name: "R1 is pending (Q1)",
+			asked: false,
+			setup: async (r1) => {
+				await db.prepare("UPDATE transactions SET pending = 1 WHERE id = ?").bind(r1).run();
+			},
+		},
+		{
+			name: "R1 is an unreviewed credit (-1200)",
+			asked: false,
+			setup: async (r1) => {
+				await db.prepare("UPDATE transactions SET amount_cents = -1200 WHERE id = ?").bind(r1).run();
+			},
+		},
+		{
+			name: "R1 is a reviewed credit (-1200)",
+			asked: true,
+			setup: async (r1) => {
+				await db.prepare("UPDATE transactions SET amount_cents = -1200, credit_reviewed = 1 WHERE id = ?").bind(r1).run();
+			},
+		},
+		{
+			name: "Jev gave up on R1",
+			asked: false,
+			setup: async (r1) => {
+				await db.prepare("UPDATE transactions SET jev_attempts = 5 WHERE id = ?").bind(r1).run();
+			},
+		},
+		{
+			name: "A is nothing_found",
+			asked: false,
+			setup: async () => {
+				await db.prepare("UPDATE merchant_lookups SET status = 'nothing_found' WHERE lookup_text = 'harbor bakery'").run();
+			},
+		},
+		{
+			name: "A is found with no line",
+			asked: false,
+			setup: async () => {
+				await db.prepare("UPDATE merchant_lookups SET line = NULL WHERE lookup_text = 'harbor bakery'").run();
+			},
+		},
+		{
+			name: "a sibling's flag_transfer set after the fill (rule 9)",
+			asked: false,
+			setup: async () => {
+				const sibling = await guessRow(STORE_A, { plaid_transaction_id: "sibling-9" });
+
+				await db.prepare("UPDATE transactions SET flag_transfer = 0 WHERE id = ?").bind(sibling).run();
+			},
+		},
+		{
+			name: "another key of the same text is private",
+			asked: false,
+			setup: async () => {
+				await db.prepare("INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES ('HARBOR BAKERY 42 SQ', 'harbor bakery', 1)").run();
+			},
+		},
+		{
+			name: "a sibling filed by a person (user)",
+			asked: false,
+			setup: async () => {
+				await guessRow(STORE_A, {
+					plaid_transaction_id: "user-1",
+					category_id: await categoryId("Groceries"),
+					category_source: "user",
+					jev_category_id: await categoryId("Groceries"),
+					category_confidence: 0.9,
+				});
+			},
+		},
+		{
+			name: "a sibling filed by Always for these merchants (merchant_rule)",
+			asked: false,
+			setup: async () => {
+				await guessRow(STORE_A, {
+					plaid_transaction_id: "rule-1",
+					category_id: await categoryId("Groceries"),
+					category_source: "merchant_rule",
+					jev_category_id: await categoryId("Groceries"),
+					category_confidence: 0.9,
+				});
+			},
+		},
+		{
+			name: "an active merchant rule on R1's key",
+			asked: false,
+			setup: async () => {
+				await db.prepare("INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)").bind(STORE_A, await categoryId("Groceries")).run();
+			},
+		},
+		{
+			name: "an archived merchant rule",
+			asked: true,
+			setup: async () => {
+				await db.prepare("INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)").bind(STORE_A, await categoryId("Groceries")).run();
+				await db.prepare("UPDATE categories SET archived = 1 WHERE name = 'Groceries'").run();
+			},
+		},
+		{
+			name: "a bank-text rule on a sibling's cleaned text",
+			asked: false,
+			setup: async () => {
+				const sideRaw = "Harbor Bakery side door 9";
+
+				await guessRow(sideRaw, { plaid_transaction_id: "side-1", category_confidence: 0.9 });
+				await db.prepare("INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, 'harbor bakery', 0)").bind(sideRaw).run();
+				await db.prepare("INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES (?, ?)").bind(cleanBankText(sideRaw), await categoryId("Groceries")).run();
+			},
+		},
+		{
+			name: "a learned line for R1's cleaned text, from a person's row of another text",
+			asked: false,
+			setup: async () => {
+				await guessRow(STORE_A, {
+					plaid_transaction_id: "learned-1",
+					merchant_name: "Other Store",
+					category_id: await categoryId("Groceries"),
+					category_source: "user",
+					jev_category_id: await categoryId("Groceries"),
+					category_confidence: 0.9,
+				});
+			},
+		},
+		{
+			name: "one sibling filed by Jev, another by a bill",
+			asked: true,
+			setup: async () => {
+				await guessRow(STORE_A, {
+					plaid_transaction_id: "jev-sib",
+					category_id: await categoryId("Groceries"),
+					category_source: "jev",
+					jev_category_id: await categoryId("Groceries"),
+					category_confidence: 0.9,
+				});
+				await guessRow(STORE_A, {
+					plaid_transaction_id: "bill-sib",
+					category_id: await categoryId("Groceries"),
+					category_source: "bill",
+					jev_category_id: await categoryId("Groceries"),
+					category_confidence: 0.9,
+				});
+			},
+		},
+		{
+			name: "Q-B1: a confident None fit behind a pending new-category suggestion",
+			asked: false,
+			setup: async (r1) => {
+				const suggestion = await db
+					.prepare("INSERT INTO category_suggestions (name, status) VALUES ('Pet food', 'pending') RETURNING id")
+					.first<{ id: number }>();
+
+				await db
+					.prepare("UPDATE transactions SET jev_category_id = NULL, jev_none_fit = 1, category_confidence = 0.85, category_suggestion_id = ? WHERE id = ?")
+					.bind(suggestion?.id, r1)
+					.run();
+			},
+		},
+	];
+
+	it.each(owed)("$name: asked $asked", async ({ asked, setup, switches, bySync }) => {
+		const r1 = await base();
+
+		if (switches) {
+			const { saveAiSwitches, AI_SWITCHES_ALL_ON } = await import("../src/db/ai-switches");
+
+			await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, ...switches });
+		}
+
+		await setup?.(r1);
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl, {
+			runParams: bySync ? { ...params, bySync: true } : params,
+		});
+
+		expect(fake.violations).toEqual([]);
+		expect(callsFor(fake.bodies, STORE_A) > 0).toBe(asked);
+	});
+});
+
+// 6. Newest first, ten a run.
+describe("6. newest first, 10 a run", () => {
+	it("asks the ten newest owed rows in order, then the other two on the next run", async () => {
+		await foundStore(STORE_A);
+
+		const names: string[] = [];
+
+		for (let i = 1; i <= 12; i += 1) {
+			const name = `Harbor Bakery 4${i}`;
+
+			await foundStore(name);
+			names.push(name);
+			await guessRow(name, { plaid_transaction_id: `order-${i}` });
+		}
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl);
+
+		const askedFirst = fake.bodies.map((body) => String(body.state.bank_description));
+
+		expect(askedFirst).toEqual([...names].reverse().slice(0, 10));
+
+		const next = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(next.fetchImpl);
+
+		expect(next.bodies.map((body) => String(body.state.bank_description))).toEqual(
+			[...names].slice(0, 2).reverse(),
+		);
+	});
+});
+
+// 7. The day's cap.
+describe("7. the day's cap", () => {
+	it("reserves and gives back the calls against the day's count", async () => {
+		const cap = await dailyJevCap(db, gateOpen);
+
+		await foundStore(STORE_A);
+		await foundStore(STORE_B);
+		await guessRow(STORE_A, { plaid_transaction_id: "cap-1" });
+		await guessRow(STORE_B, { plaid_transaction_id: "cap-2" });
+
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, ?)")
+			.bind(`jev_calls_${DAY}`, String(cap - 1))
+			.run();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl);
+
+		expect(fake.bodies).toHaveLength(1);
+		expect(await dayCount()).toBe(cap);
+	});
+
+	it("gives back the calls it did not make, so the count is five less than the cap minus one more", async () => {
+		const cap = await dailyJevCap(db, gateOpen);
+
+		await foundStore(STORE_A);
+		await guessRow(STORE_A, { plaid_transaction_id: "cap-3" });
+
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, ?)")
+			.bind(`jev_calls_${DAY}`, String(cap - 5))
+			.run();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl);
+
+		expect(fake.bodies).toHaveLength(1);
+		expect(await dayCount()).toBe(cap - 4);
+	});
+});
+
+// 8. The exit table (5.3): R1 is the newer row at store A; R2 the older at store B, always answered Groceries 0.9.
+type Exit = {
+	name: string;
+	reply: (body: { state: Record<string, unknown> }) => Response | Promise<Response>;
+	before?: (r1: number) => Promise<void>;
+	runOptions?: (r1: number) => Parameters<typeof runSecond>[1];
+	kept: number | null;
+	r1Confidence: number;
+	r1Category: string;
+	r2Asked: boolean;
+	count: number;
+	again: boolean;
+};
+
+describe("8. the exit table", () => {
+	const rows: Exit[] = [
+		{ name: "1: Groceries 0.95 is kept", reply: () => categoryReply("Groceries", 0.95), kept: 1, r1Confidence: 0.95, r1Category: "Groceries", r2Asked: true, count: 2, again: false },
+		{ name: "2: Eating Out 0.9 (same category, more sure) is kept", reply: () => categoryReply("Eating Out", 0.9), kept: 1, r1Confidence: 0.9, r1Category: "Eating Out", r2Asked: true, count: 2, again: false },
+		{ name: "3: Groceries 0.6 (a tie) is not kept", reply: () => categoryReply("Groceries", 0.6), kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: true, count: 2, again: false },
+		{ name: "4: Groceries 0.5 is not kept", reply: () => categoryReply("Groceries", 0.5), kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: true, count: 2, again: false },
+		{ name: "5: None fit 0.99 is not kept (Q2)", reply: () => categoryReply(NONE_FIT, 0.99), kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: true, count: 2, again: false },
+		{ name: "6: Jev 500 writes kept 0 and stops", reply: () => new Response("", { status: 500 }), kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 1, again: false },
+		{
+			name: "7: a 429 with retry-after writes kept 0 and stops",
+			reply: () => new Response("", { status: 429, headers: { "retry-after": "30" } }),
+			kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 1, again: false,
+		},
+		{ name: "8: a 200 naming a category not offered (Q-B2) writes kept 0 and stops", reply: () => categoryReply("Not a category", 0.9), kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 1, again: false },
+		{
+			name: "9: a fetch that throws writes kept 0 and stops",
+			reply: () => {
+				throw new Error("network");
+			},
+			kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 1, again: false,
+		},
+		{
+			name: "10: the row step throws once (attempt 2, no call) writes kept 0 and stops",
+			reply: () => categoryReply("Groceries", 0.95),
+			runOptions: (r1) => ({ throws: { [`lookup-second-row-${r1}`]: 1 } }),
+			kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 1, again: false,
+		},
+		{
+			name: "11: the row step is rejected writes kept 0 and stops",
+			reply: () => categoryReply("Groceries", 0.95),
+			runOptions: (r1) => ({ fails: [`lookup-second-row-${r1}`] }),
+			kept: 0, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 1, again: false,
+		},
+		{
+			name: "12: out of time writes nothing and calls nothing",
+			reply: () => categoryReply("Groceries", 0.95),
+			runOptions: (r1) => ({
+				beforeAttempt: async (name) => {
+					if (name === `lookup-second-row-${r1}`) vi.setSystemTime(NOON_MS + 3 * MINUTE);
+				},
+			}),
+			kept: null, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 0, again: true,
+		},
+		{
+			name: "13: the day changed writes nothing and calls nothing",
+			reply: () => categoryReply("Groceries", 0.95),
+			runOptions: (r1) => ({
+				beforeAttempt: async (name) => {
+					if (name === `lookup-second-row-${r1}`) vi.setSystemTime(NOON_MS + 24 * 60 * MINUTE);
+				},
+			}),
+			kept: null, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: false, count: 0, again: true,
+		},
+		{
+			name: "14: A's line dropped before the call: no call for R1, R2 asked",
+			reply: () => categoryReply("Groceries", 0.95),
+			runOptions: (r1) => ({
+				beforeAttempt: async (name) => {
+					if (name === `lookup-second-row-${r1}`) {
+						await db.prepare("UPDATE merchant_lookups SET line = NULL WHERE lookup_text = 'harbor bakery'").run();
+					}
+				},
+			}),
+			kept: null, r1Confidence: 0.6, r1Category: "Eating Out", r2Asked: true, count: 1, again: false,
+		},
+	];
+
+	it.each(rows)("$name", async (row) => {
+		const r1 = await base();
+		await foundStore(STORE_B);
+		await guessRow(STORE_B, { date: "2026-11-14", plaid_transaction_id: "r2" });
+
+		const fake = fakeJev((body) =>
+			body.state.bank_description === STORE_A ? row.reply(body) : categoryReply("Groceries", 0.9),
+		);
+
+		await runSecond(fake.fetchImpl, row.runOptions?.(r1));
+
+		const r1After = await guessOf(r1);
+		const answer = await answerOf(r1);
+
+		expect(r1After?.confidence).toBe(row.r1Confidence);
+		expect(r1After?.jevCategoryId).toBe(await categoryId(row.r1Category));
+		expect(r1After?.categoryId).toBeNull();
+		expect(r1After?.categorySource).toBeNull();
+		expect(r1After?.noneFit).toBe(0);
+		expect(answer?.kept ?? null).toBe(row.kept);
+		expect(callsFor(fake.bodies, STORE_B) > 0).toBe(row.r2Asked);
+		expect(await dayCount()).toBe(row.count);
+		expect(fake.violations).toEqual([]);
+
+		vi.setSystemTime(NOON_MS);
+
+		const again = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(again.fetchImpl);
+
+		expect(callsFor(again.bodies, STORE_A) > 0).toBe(row.again);
+	});
+});
+
+// 9. Rule 12: a line-backed guess kept at 0.95 keeps its guess and its attempts.
+describe("9. secondAskKeepsBetter", () => {
+	it("files nothing, keeps the attempts and the Maybe, and records the answer", async () => {
+		const r1 = await base();
+		await db.prepare("UPDATE transactions SET jev_attempts = 2 WHERE id = ?").bind(r1).run();
+
+		const lookupCleared = await db
+			.prepare("SELECT input_mark AS mark, cleared FROM lookup_cleared WHERE transaction_id = ?")
+			.bind(r1)
+			.first();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl);
+
+		const after = await guessOf(r1);
+		const answer = await answerOf(r1);
+
+		expect(after).toMatchObject({ categoryId: null, categorySource: null, attempts: 2, noneFit: 0, alsoCategoryId: null, mixed: null, confidence: 0.95 });
+		expect(answer).toEqual({ kept: 1, keptCategoryId: await categoryId("Groceries"), keptConfidence: 0.95 });
+
+		const lookupAfter = await db
+			.prepare("SELECT input_mark AS mark, cleared FROM lookup_cleared WHERE transaction_id = ?")
+			.bind(r1)
+			.first();
+
+		expect(lookupAfter).toEqual(lookupCleared);
+	});
+});
+
+// 10. The guards at the save: each change is made while R1's call is in flight.
+describe("10. the guards at the save", () => {
+	const changes: [string, (r1: number) => Promise<void>, boolean][] = [
+		["nothing (positive control)", async () => {}, true],
+		[
+			"a person files R1's sibling at A (user)",
+			async () => {
+				await guessRow(STORE_A, { plaid_transaction_id: "g10-user", category_id: await categoryId("Groceries"), category_source: "user", jev_category_id: await categoryId("Groceries"), category_confidence: 0.9 });
+			},
+			true,
+		],
+		[
+			"an active merchant rule on A's key",
+			async () => {
+				await db.prepare("INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)").bind(STORE_A, await categoryId("Groceries")).run();
+			},
+			true,
+		],
+		[
+			"a bank-text rule on a sibling's cleaned text",
+			async () => {
+				await db.prepare("INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES (?, ?)").bind(cleanBankText(STORE_A), await categoryId("Groceries")).run();
+			},
+			true,
+		],
+		[
+			"a person files a row of another text with R1's cleaned text",
+			async () => {
+				await guessRow(STORE_A, { plaid_transaction_id: "g10-learned", merchant_name: "Other Store", category_id: await categoryId("Groceries"), category_source: "user", jev_category_id: await categoryId("Groceries"), category_confidence: 0.9 });
+			},
+			true,
+		],
+		[
+			"A's line dropped (skipped, line NULL)",
+			async () => {
+				await db.prepare("UPDATE merchant_lookups SET status = 'skipped', line = NULL WHERE lookup_text = 'harbor bakery'").run();
+			},
+			true,
+		],
+		[
+			"A's mark set private",
+			async () => {
+				await db.prepare("UPDATE merchant_lookup_texts SET private = 1 WHERE lookup_text = 'harbor bakery'").run();
+			},
+			true,
+		],
+		[
+			"the lookup switch off",
+			async () => {
+				const { saveAiSwitches, AI_SWITCHES_ALL_ON } = await import("../src/db/ai-switches");
+
+				await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, lookupStores: false });
+			},
+			false,
+		],
+		[
+			"R1's note edited",
+			async (r1) => {
+				await db.prepare("UPDATE transactions SET note = 'edited' WHERE id = ?").bind(r1).run();
+			},
+			true,
+		],
+		[
+			"R1's guess changed to Groceries 0.7",
+			async (r1) => {
+				await db.prepare("UPDATE transactions SET jev_category_id = ?, category_confidence = 0.7 WHERE id = ?").bind(await categoryId("Groceries"), r1).run();
+			},
+			true,
+		],
+		[
+			"a person files R1 (user, Groceries)",
+			async (r1) => {
+				await db.prepare("UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?").bind(await categoryId("Groceries"), r1).run();
+			},
+			true,
+		],
+		[
+			"a bill files R1 (bill)",
+			async (r1) => {
+				await db.prepare("UPDATE transactions SET category_id = ?, category_source = 'bill' WHERE id = ?").bind(await categoryId("Groceries"), r1).run();
+			},
+			true,
+		],
+		[
+			"Groceries archived",
+			async () => {
+				await db.prepare("UPDATE categories SET archived = 1 WHERE name = 'Groceries'").run();
+			},
+			true,
+		],
+		[
+			"another run writes R1's lookup_answers (kept 0)",
+			async (r1) => {
+				await db.prepare("INSERT INTO lookup_answers (transaction_id, lookup_text, kept) VALUES (?, 'harbor bakery', 0)").bind(r1).run();
+			},
+			true,
+		],
+		[
+			"another run takes the sorting turn",
+			async () => {
+				await db.prepare("UPDATE household_settings SET value = ? WHERE key = 'sorting_turn'").bind(JSON.stringify({ id: "other", until: NOON_MS + 15 * MINUTE })).run();
+			},
+			true,
+		],
+		[
+			"R1 deleted during a Jev 500",
+			async () => {},
+			false,
+		],
+	];
+
+	it.each(changes)("%s", async (name, change, r2Asked) => {
+		const r1 = await base();
+
+		await foundStore(STORE_B);
+		await guessRow(STORE_B, { date: "2026-11-14", plaid_transaction_id: "r2-10" });
+
+		const deleted = name === "R1 deleted during a Jev 500";
+
+		const fake = fakeJev(async (body) => {
+			if (body.state.bank_description !== STORE_A) return categoryReply("Groceries", 0.9);
+
+			await change(r1);
+
+			if (deleted) {
+				await db.prepare("DELETE FROM transactions WHERE id = ?").bind(r1).run();
+
+				return new Response("", { status: 500 });
+			}
+
+			return categoryReply("Groceries", 0.95);
+		});
+
+		await runSecond(fake.fetchImpl);
+
+		const after = await guessOf(r1);
+
+		if (!deleted) {
+			expect(after?.jevCategoryId).toBe(await categoryId("Eating Out"));
+			expect(after?.confidence).toBe(0.6);
+		}
+
+		const answer = await answerOf(r1);
+
+		expect(answer?.kept === 1).toBe(false);
+		expect(callsFor(fake.bodies, STORE_B) > 0).toBe(r2Asked);
+		expect(fake.violations).toEqual([]);
+	});
+});
+
+// 11. The read just before each call.
+describe("11. the read just before each call", () => {
+	const reads: [string, (r1: number) => Promise<void>, boolean, boolean][] = [
+		["nothing", async () => {}, true, true],
+		["A's line dropped", async () => { await db.prepare("UPDATE merchant_lookups SET line = NULL WHERE lookup_text = 'harbor bakery'").run(); }, false, true],
+		["A's mark private (rule 9)", async () => { await db.prepare("UPDATE merchant_lookup_texts SET private = 1 WHERE lookup_text = 'harbor bakery'").run(); }, false, true],
+		["R1's sibling filed by a person", async () => { await guessRow(STORE_A, { plaid_transaction_id: "g11-user", category_id: await categoryId("Groceries"), category_source: "user", jev_category_id: await categoryId("Groceries"), category_confidence: 0.9 }); }, false, true],
+		["a learned line for R1's cleaned text, from another text's person-filed row", async () => { await guessRow(STORE_A, { plaid_transaction_id: "g11-learned", merchant_name: "Other Store", category_id: await categoryId("Groceries"), category_source: "user", jev_category_id: await categoryId("Groceries"), category_confidence: 0.9 }); }, false, true],
+		["the lookup switch off", async () => { const { saveAiSwitches, AI_SWITCHES_ALL_ON } = await import("../src/db/ai-switches"); await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, lookupStores: false }); }, false, false],
+	];
+
+	it.each(reads)("%s", async (_name, change, r1Called, r2Asked) => {
+		const r1 = await base();
+
+		await foundStore(STORE_B);
+		await guessRow(STORE_B, { date: "2026-11-14", plaid_transaction_id: "r2-11" });
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (name) => {
+				if (name === `lookup-second-row-${r1}`) await change(r1);
+			},
+		});
+
+		expect(callsFor(fake.bodies, STORE_A) > 0).toBe(r1Called);
+		expect(callsFor(fake.bodies, STORE_B) > 0).toBe(r2Asked);
+		expect(Boolean(await answerOf(r1))).toBe(r1Called);
+		expect(fake.violations).toEqual([]);
+	});
+});
+
+// 12. When it runs.
+describe("12. when it runs", () => {
+	const off = [
+		["no Jev key", { ...gateOpen, JEV_API_KEY: undefined }],
+		["no Tavily key", { ...gateOpen, TAVILY_API_KEY: undefined }],
+		["the demo", { ...gateOpen, DEMO: "true" }],
+	] as const;
+
+	it.each(off)("%s: no second-ask step is registered", async (_name, instanceEnv) => {
+		await base();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		const steps = await runSecond(fake.fetchImpl, { instanceEnv });
+
+		expect(steps.names().some((name) => name.startsWith("lookup-second"))).toBe(false);
+		expect(fake.bodies).toHaveLength(0);
+	});
+
+	it("with the lookup switch off, the read runs and returns null (no row is asked)", async () => {
+		await base();
+		const { saveAiSwitches, AI_SWITCHES_ALL_ON } = await import("../src/db/ai-switches");
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, lookupStores: false });
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		const steps = await runSecond(fake.fetchImpl);
+
+		expect(steps.names()).toContain("lookup-second-read");
+		expect(steps.names().some((name) => name.startsWith("lookup-second-row"))).toBe(false);
+		expect(fake.bodies).toHaveLength(0);
+	});
+
+	it("when the privacy re-ask threw, the second ask still runs", async () => {
+		await base();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		const steps = await runSecond(fake.fetchImpl, { fails: ["lookup-reask-read"] });
+
+		expect(steps.names()).toContain("lookup-second-read");
+	});
+
+	it("with a row waiting for Jev, the read returns null and nothing is asked", async () => {
+		await base();
+		await guessRow(STORE_A, { plaid_transaction_id: "waiting-12", category_confidence: null, jev_category_id: null });
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		const steps = await runSecond(fake.fetchImpl);
+
+		expect(steps.names().some((name) => name.startsWith("lookup-second-row"))).toBe(false);
+		expect(fake.bodies).toHaveLength(0);
+	});
+});
+
+// 13. Placement, and a throw.
+describe("13. placement and a throw", () => {
+	it("runs the second ask after the re-ask and before the night's names, and a throw is logged by its name", async () => {
+		await base();
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		const steps = await runSecond(fake.fetchImpl, {
+			runParams: { ...params, night: DAY },
+			fails: ["lookup-second-read"],
+		});
+
+		const names = steps.names();
+
+		expect(names.indexOf("lookup-second-read")).toBeGreaterThan(-1);
+		expect(names.indexOf("lookup-second-read")).toBeLessThan(names.indexOf("night-names"));
+		expect(names).toContain("night-names");
+		expect(console.error).toHaveBeenCalledWith("second ask: stopped Error");
+	});
+});
+
+// 14. Steps: names, configs, the turn's id, nothing left behind, and each step replayed.
+describe("14. steps", () => {
+	it("names, configs, the turn's id, and what is left after the run", async () => {
+		const r1 = await base();
+
+		let turn: string | null = null;
+
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		const steps = await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (name) => {
+				if (name === `lookup-second-row-${r1}`) {
+					const row = await db
+						.prepare("SELECT value FROM household_settings WHERE key = 'sorting_turn'")
+						.first<{ value: string }>();
+
+					turn = row ? (JSON.parse(row.value) as { id: string }).id : null;
+				}
+			},
+		});
+
+		const second = steps.steps.filter((step) => step.name.startsWith("lookup-second"));
+
+		expect(second.map((step) => step.name)).toEqual(
+			expect.arrayContaining([
+				"lookup-second-read",
+				"lookup-second-reserve",
+				`lookup-second-row-${r1}`,
+				"lookup-second-write",
+			]),
+		);
+		for (const step of second) {
+			expect(step.name).toMatch(/^lookup-second-(read|reserve|row-\d+|write)$/);
+			expect(step.config.sensitive).toBe("output");
+		}
+		expect(turn).toBe(`${RUN_ID}:lookup-second`);
+
+		const left = await db
+			.prepare("SELECT COUNT(*) AS n FROM household_settings WHERE key = 'sorting_turn' OR key GLOB 'jev_reserved_*'")
+			.first<{ n: number }>();
+
+		expect(left?.n).toBe(0);
+	});
+
+	it.each(["lookup-second-read", "lookup-second-reserve", "lookup-second-row", "lookup-second-write"])(
+		"a replay of %s calls Jev once for R1 and changes no lookup_answers row",
+		async (stepPrefix) => {
+			const r1 = await base();
+			const replayName = stepPrefix === "lookup-second-row" ? `lookup-second-row-${r1}` : stepPrefix;
+
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+			await runSecond(fake.fetchImpl, { replayAfter: [replayName] });
+
+			expect(callsFor(fake.bodies, STORE_A)).toBe(1);
+			expect((await answerOf(r1))?.kept).toBe(1);
+		},
+	);
+});
+
+// 15. Logging: nothing given to the console carries the text, the line, the raw name or a cleaned text.
+describe("15. logging", () => {
+	it("logs nothing that carries the text, the line, the raw name or a cleaned text", async () => {
+		await base();
+
+		const cleaned = cleanBankText(STORE_A);
+		const logs: string[] = [];
+
+		for (const method of ["log", "error", "warn", "info", "debug"] as const) {
+			vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+				logs.push(args.map(String).join(" "));
+			});
+		}
+
+		const kept = fakeJev(() => categoryReply("Groceries", 0.95));
+		await runSecond(kept.fetchImpl);
+
+		await foundStore(STORE_B);
+		await guessRow(STORE_B, { date: "2026-11-14", plaid_transaction_id: "log-2" });
+
+		const failing = fakeJev(() => new Response("", { status: 500 }));
+		await runSecond(failing.fetchImpl);
+
+		const thrown = fakeJev(() => {
+			throw new Error("network");
+		});
+		await runSecond(thrown.fetchImpl);
+
+		const joined = logs.join("\n");
+
+		expect(joined).not.toContain(LINE);
+		expect(joined).not.toContain(STORE_A);
+		expect(joined).not.toContain(STORE_B);
+		expect(joined).not.toContain(cleaned);
+		expect(joined).not.toContain("harbor bakery");
+	});
+});
