@@ -227,6 +227,24 @@ describe("the error a run ends with (#1164, step 2)", () => {
 		expect(context.error).toBeNull();
 	});
 
+	// The restart's error was the last one the run met when the invoke died, so the sync throws it, as it did before the
+	// machine carried the error: an invoke's death keeps the run's error, it does not replace it.
+	it("keeps a restart's error when the run then ends in an invoke that dies", async () => {
+		const context = await land(
+			{ first: "a", cursor: "a" },
+			{
+				ask: ({ restarts }) =>
+					restarts === 0
+						? Effect.succeed<Asked>({ kind: "changed", error: RESTART })
+						: Effect.die(FAILURE),
+				save: () => Effect.succeed<Saved>("saved"),
+			},
+		);
+
+		expect(context.outcome).toBe("failed");
+		expect(context.error).toBe(RESTART);
+	});
+
 	// The one named difference of this step: an error thrown inside an invoke itself is not the answer's error, so the
 	// run ends failed with no error and the sync throws its fallback. It is reached only if an ask or save dies, which the
 	// sync's own closures never do, since each catches what it throws.
