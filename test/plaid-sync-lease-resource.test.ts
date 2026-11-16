@@ -30,6 +30,28 @@ async function reset() {
 	]);
 }
 
+/** The one sentence a failed release logs: the item row id and nothing else (#1171). */
+const releaseSentence = (id: number) =>
+	`plaid sync could not release its lease for item ${id}`;
+
+/** Runs `run` with console.error silenced, and returns the argument lists of the release's sentence logged for item `id`. */
+async function withReleaseLog(
+	id: number,
+	run: () => Promise<unknown>,
+): Promise<unknown[][]> {
+	const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+	try {
+		await run();
+
+		return quiet.mock.calls
+			.filter((call) => call[0] === releaseSentence(id))
+			.map((call) => [...call]);
+	} finally {
+		quiet.mockRestore();
+	}
+}
+
 const releases = (calls: LeaseCall[]) =>
 	calls.filter((call) => call.kind === "release");
 
@@ -75,28 +97,38 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 		]);
 	});
 
-	it("throws the release's error when the body returns and the release fails", async () => {
+	it("gives the body's result back when the body returns and the release fails, and logs the release once (#1171)", async () => {
 		await reset();
 		const id = await addItem();
-		const releaseError = new Error("the release failed");
-		const spy = leaseSpy(env.DB, { failRelease: releaseError });
+		const spy = leaseSpy(env.DB, {
+			failRelease: new Error("the release failed"),
+		});
+		const logged = await withReleaseLog(id, () =>
+			expect(
+				withSyncLease(spy.db, id, "lock-1", async () => SUCCESS),
+			).resolves.toEqual(SUCCESS),
+		);
 
-		await expect(
-			withSyncLease(spy.db, id, "lock-1", async () => SUCCESS),
-		).rejects.toBe(releaseError);
+		expect(logged).toEqual([[releaseSentence(id)]]);
 	});
 
-	it("throws the release's error, not the body's, when the body fails and the release fails too", async () => {
+	it("rethrows the body's own error object, not the release's, when the body fails and the release fails too (#1171)", async () => {
 		await reset();
 		const id = await addItem();
-		const releaseError = new Error("the release failed");
-		const spy = leaseSpy(env.DB, { failRelease: releaseError });
+		const spy = leaseSpy(env.DB, {
+			failRelease: new Error("the release failed"),
+		});
+		const failure = new Error("the body failed");
 
-		await expect(
-			withSyncLease(spy.db, id, "lock-1", async () => {
-				throw new Error("the body failed");
-			}),
-		).rejects.toBe(releaseError);
+		const logged = await withReleaseLog(id, () =>
+			expect(
+				withSyncLease(spy.db, id, "lock-1", async () => {
+					throw failure;
+				}),
+			).rejects.toBe(failure),
+		);
+
+		expect(logged).toEqual([[releaseSentence(id)]]);
 	});
 
 	it("skips a held lease without running the body, and releases nothing", async () => {
@@ -148,9 +180,7 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 			return SUCCESS;
 		};
 
-		const fiber = Effect.runFork(
-			leaseScoped(spy.db, id, "lock-1", body, { failure: null }),
-		);
+		const fiber = Effect.runFork(leaseScoped(spy.db, id, "lock-1", body));
 
 		await bodyStarted;
 		await Effect.runPromise(Fiber.interrupt(fiber));
@@ -179,9 +209,7 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 		const spy = leaseSpy(env.DB, { onTakeRun: reached, takeGate });
 		const body = vi.fn(async () => SUCCESS);
 
-		const fiber = Effect.runFork(
-			leaseScoped(spy.db, id, "lock-1", body, { failure: null }),
-		);
+		const fiber = Effect.runFork(leaseScoped(spy.db, id, "lock-1", body));
 
 		// The take statement is running and has not landed: the fiber is interrupted in the middle of taking the lease.
 		await takeReached;
