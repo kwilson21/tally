@@ -1,0 +1,446 @@
+{
+	"(a) refused on the second page, after the first page saved": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": "ITEM_ERROR",
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"request_id": "request-1",
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": "c1",
+			"sync_update_cursor": "",
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 2,
+			"/item/get": 1
+		},
+		"cursors": ["(none)", "c1"],
+		"consoleErrors": ["plaid sync error request-1"]
+	},
+	"(a2) refused on the second page, and Plaid says the login is broken": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": "ITEM_ERROR",
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"request_id": "request-1",
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": "c1",
+			"sync_update_cursor": "",
+			"status": "needs_attention",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 2,
+			"/item/get": 1
+		},
+		"cursors": ["(none)", "c1"],
+		"consoleErrors": ["plaid sync error request-1"]
+	},
+	"(b) refused on the first page": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": "ITEM_ERROR",
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"request_id": "request-1",
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1,
+			"/item/get": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": ["plaid sync error request-1"]
+	},
+	"(c) changed, starts again, then refused": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": "ITEM_ERROR",
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"request_id": "request-1",
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": "c1",
+			"sync_update_cursor": "",
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 3,
+			"/item/get": 1
+		},
+		"cursors": ["(none)", "c1", "(none)"],
+		"consoleErrors": [
+			"plaid sync mutation retry 1 request-mutation",
+			"plaid sync error request-1"
+		]
+	},
+	"(d) changed, starts again, then succeeds": {
+		"returned": {
+			"added": 2,
+			"modified": 0,
+			"removed": 0,
+			"changedIds": 2
+		},
+		"bank": {
+			"sync_cursor": "c2",
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			},
+			{
+				"plaid_transaction_id": "transaction-2",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 4
+		},
+		"cursors": ["(none)", "c1", "(none)", "c1"],
+		"consoleErrors": ["plaid sync mutation retry 1 request-mutation"]
+	},
+	"(e) changed on every ask: three restarts, then the fourth is refused": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": "TRANSACTIONS_ERROR",
+			"error_code": "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
+			"request_id": "request-mutation",
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 4
+		},
+		"cursors": ["(none)", "(none)", "(none)", "(none)"],
+		"consoleErrors": [
+			"plaid sync mutation retry 1 request-mutation",
+			"plaid sync mutation retry 2 request-mutation",
+			"plaid sync mutation retry 3 request-mutation",
+			"plaid sync error request-mutation"
+		]
+	},
+	"(f) a save fails on the first page": {
+		"threw": {
+			"kind": "Error",
+			"message": "the page save failed",
+			"identity": "the injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(g) a save fails on the second page, after the first saved": {
+		"threw": {
+			"kind": "Error",
+			"message": "the page save failed",
+			"identity": "the injected value"
+		},
+		"bank": {
+			"sync_cursor": "c1",
+			"sync_update_cursor": "",
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [
+			{
+				"plaid_transaction_id": "transaction-1",
+				"amount_cents": 1234
+			}
+		],
+		"accounts": [
+			{
+				"plaid_account_id": "account-1"
+			}
+		],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 2
+		},
+		"cursors": ["(none)", "c1"],
+		"consoleErrors": []
+	},
+	"(h) a save throws a string": {
+		"threw": {
+			"kind": "not an Error",
+			"text": "\"the save broke\"",
+			"identity": "the injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(h) a save throws 0": {
+		"threw": {
+			"kind": "not an Error",
+			"text": "0",
+			"identity": "the injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(h) a save throws an empty string": {
+		"threw": {
+			"kind": "not an Error",
+			"text": "\"\"",
+			"identity": "the injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(h) a save throws undefined": {
+		"threw": {
+			"kind": "Error",
+			"message": "Plaid sync stopped without a reason",
+			"identity": "another value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(h) a save throws null": {
+		"threw": {
+			"kind": "Error",
+			"message": "Plaid sync stopped without a reason",
+			"identity": "another value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(h2) a save throws a Plaid login error, and Plaid says the login is broken": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": "ITEM_ERROR",
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"request_id": "request-save",
+			"identity": "the injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(i) the page cannot be read, so the ask fails with a plain Error": {
+		"threw": {
+			"kind": "Error",
+			"message": "Plaid sync page is missing a field the sync needs",
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": []
+	},
+	"(j) the Plaid fetch throws, which is refused with no error code": {
+		"threw": {
+			"kind": "PlaidError",
+			"error_type": null,
+			"error_code": null,
+			"request_id": null,
+			"identity": "no injected value"
+		},
+		"bank": {
+			"sync_cursor": null,
+			"sync_update_cursor": null,
+			"status": "ok",
+			"sync_locked_until": null,
+			"sync_lock_id": null,
+			"disconnected_at": null
+		},
+		"charges": [],
+		"accounts": [],
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"cursors": ["(none)"],
+		"consoleErrors": ["plaid sync error"]
+	}
+}
