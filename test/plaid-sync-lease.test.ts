@@ -12,7 +12,8 @@ import { GOOD_ACCOUNT, GOOD_PAGE } from "./sync-page-corpus";
 // was before the lease became an Effect resource, and fixtures/sync-lease-grid.json holds what it did. A conversion must
 // leave every cell's answer where it is: the same returned value or thrown error (and the same error object where the grid
 // compares it), the same bank row, the same Plaid asks, the same lease statements with the same values, and the same stored
-// charges. A release that fails replaces the run's result, as it always has.
+// charges. A release that fails is logged once, by a fixed sentence that names the item and nothing else, and leaves the
+// run's own result or error as it is (#1171).
 
 const KEY = btoa("01234567890123456789012345678901");
 
@@ -139,19 +140,12 @@ function lockName(
 	return "<other lock>";
 }
 
-/** A thrown value as the grid names it: its name and message for an Error, and whether it is one of the injected errors. */
-function describeThrown(
-	thrown: Error,
-	injected: { release: Error; save: Error },
-) {
+/** A thrown value as the grid names it: its name and message for an Error, and whether it is the injected save error. */
+function describeThrown(thrown: Error, injected: { save: Error }) {
 	return {
 		thrown: `${thrown.name}: ${thrown.message}`,
 		identity:
-			thrown === injected.release
-				? "the release's error object"
-				: thrown === injected.save
-					? "the save's error object"
-					: "another object",
+			thrown === injected.save ? "the save's error object" : "another object",
 	};
 }
 
@@ -183,12 +177,13 @@ async function runCell(bank: Bank, ending: Ending, releaseFails: boolean) {
 	const paths = new Map<string, number>();
 
 	const injected = {
-		release: new Error("the release statement failed"),
 		save: new Error("the page save failed"),
 	};
 
 	const spy = leaseSpy(env.DB, {
-		failRelease: releaseFails ? injected.release : undefined,
+		failRelease: releaseFails
+			? new Error("the release statement failed")
+			: undefined,
 		failBatch: ending === "save fails" ? injected.save : undefined,
 	});
 
@@ -200,6 +195,8 @@ async function runCell(bank: Bank, ending: Ending, releaseFails: boolean) {
 
 	const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
 	const log = vi.spyOn(console, "log").mockImplementation(() => {});
+	const releaseSentence = `plaid sync could not release its lease for item ${id}`;
+	let releaseLog: number[] = [];
 	let outcome: Outcome;
 
 	try {
@@ -209,6 +206,9 @@ async function runCell(bank: Bank, ending: Ending, releaseFails: boolean) {
 			}),
 		);
 	} finally {
+		releaseLog = quiet.mock.calls
+			.filter((call) => call[0] === releaseSentence)
+			.map((call) => call.length);
 		quiet.mockRestore();
 		log.mockRestore();
 	}
@@ -266,7 +266,7 @@ async function runCell(bank: Bank, ending: Ending, releaseFails: boolean) {
 						}
 				: describeThrown(outcome.thrown, injected);
 
-	return {
+	const answer = {
 		...result,
 		bank: bankRow
 			? {
@@ -284,6 +284,8 @@ async function runCell(bank: Bank, ending: Ending, releaseFails: boolean) {
 		charges: transactions.results,
 		accounts: accounts.results,
 	};
+
+	return { answer, releaseLog };
 }
 
 const cells = [
@@ -318,9 +320,27 @@ describe("the sync's bank lease, cell by cell (#1164)", () => {
 			);
 		}
 
-		const answers = Object.fromEntries(got);
+		const answers = Object.fromEntries(
+			[...got].map(([label, run]) => [label, run.answer]),
+		);
 
 		expect(Object.keys(answers).sort()).toEqual(Object.keys(grid).sort());
 		expect(answers).toEqual(grid);
+
+		// A failing release is logged once, with the fixed sentence; a cell whose lease is not taken runs no release, so logs nothing.
+		const releaseLogs = Object.fromEntries(
+			[...got].map(([label, run]) => [label, run.releaseLog]),
+		);
+
+		const expectedLogs = Object.fromEntries(
+			cells.map((cell) => [
+				cell.label,
+				cell.releaseFails && (cell.bank === "free" || cell.bank === "expired")
+					? [1]
+					: [],
+			]),
+		);
+
+		expect(releaseLogs).toEqual(expectedLogs);
 	}, 900_000);
 });
