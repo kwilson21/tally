@@ -49,14 +49,25 @@ export async function learnedTexts(db: D1Database): Promise<string[]> {
  */
 export async function readLineForAsk(
 	db: D1Database,
-	ask: { text: string; cleanedTexts: string[]; switchKeys: string },
+	ask: {
+		text: string;
+		cleanedTexts: string[];
+		switchKeys: string;
+		transactionGuard: { sql: string; binds: (string | number | null)[] };
+	},
 ): Promise<string | null> {
 	const row = await db
 		.prepare(
 			`SELECT ml.line AS line FROM merchant_lookups ml WHERE ml.lookup_text = ?
-				AND ${lineStandsSql("ml.lookup_text")} AND NOT ${householdAnsweredSql("ml.lookup_text", "?")} AND ${STILL_ON_SQL}`,
+				AND ${lineStandsSql("ml.lookup_text")} AND NOT ${householdAnsweredSql("ml.lookup_text", "?")} AND ${STILL_ON_SQL}
+				AND EXISTS (SELECT 1 FROM transactions WHERE ${ask.transactionGuard.sql})`,
 		)
-		.bind(ask.text, JSON.stringify(ask.cleanedTexts), ask.switchKeys)
+		.bind(
+			ask.text,
+			JSON.stringify(ask.cleanedTexts),
+			ask.switchKeys,
+			...ask.transactionGuard.binds,
+		)
 		.first<{ line: string | null }>();
 
 	return row?.line ?? null;

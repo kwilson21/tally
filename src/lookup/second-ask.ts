@@ -289,8 +289,8 @@ export async function readSecondAsk(
 
 /**
  * One row's ask: the guards first (askBlocked), then the household's learned lines, then the line read just before the call
- * (readLineForAsk). Only then Jev, with the category alone. It never throws: a failed call is a `failed` answer, and a read that
- * throws rejects the step (the caller counts it lost).
+ * (readLineForAsk). Only then Jev, with the category alone. A failed call is a `failed` answer; known preflight read failures yield without spending a call.
+ * A lost workflow step remains uncertain and is handled by the caller.
  */
 export async function askSecondRow(
 	apiKey: string,
@@ -306,47 +306,53 @@ export async function askSecondRow(
 
 	if (blocked && blocked.outcome !== "answered") return blocked;
 
-	// A new row that waits for Jev takes the day's calls first (spec §7): this step yields with no call, and its grant goes back.
-	if ((await countWaitingForJev(db, { categories: true, income: true })) > 0) {
-		return { id: row.id, outcome: "yield" };
-	}
+	let line: string | null;
 
-	const learned = await learnedTexts(db);
+	try {
+		// A new row that waits for Jev takes the day's calls first (spec §7): this step yields with no call, and its grant goes back.
+		if (
+			(await countWaitingForJev(db, { categories: true, income: true })) > 0
+		) {
+			return { id: row.id, outcome: "yield" };
+		}
 
-	if (learned.includes(cleanBankText(row.seen.rawName))) {
-		return { id: row.id, outcome: "no-line" };
-	}
+		const learned = await learnedTexts(db);
 
-	// The store's bank texts as they stand now: a raw name a sync added since the plan counts (rule 6c).
-	const current = await db
-		.prepare(
-			`SELECT DISTINCT mlt.lookup_text AS lookupText, t.raw_name AS rawName
+		if (learned.includes(cleanBankText(row.seen.rawName))) {
+			return { id: row.id, outcome: "no-line" };
+		}
+
+		// The store's bank texts as they stand now: a raw name a sync added since the plan counts (rule 6c).
+		const current = await db
+			.prepare(
+				`SELECT DISTINCT mlt.lookup_text AS lookupText, t.raw_name AS rawName
 			FROM transactions t JOIN merchant_lookup_texts mlt ON mlt.merchant_key = ${merchantKeySql("t")}
 			WHERE mlt.lookup_text = ?`,
-		)
-		.bind(row.text)
-		.all<{ lookupText: string; rawName: string }>();
+			)
+			.bind(row.text)
+			.all<{ lookupText: string; rawName: string }>();
 
-	const line = await readLineForAsk(db, {
-		text: row.text,
-		cleanedTexts: cleanedFor(current.results, row.text),
-		switchKeys: secondAskSwitchKeys(plan.bySync),
-	});
+		// Read the current store line, privacy, switches, household answers and unchanged
+		// transaction together: a separate last read would leave an avoidable privacy gap.
+		const guess = unchangedGuessGuard(row);
+		line = await readLineForAsk(db, {
+			text: row.text,
+			cleanedTexts: cleanedFor(current.results, row.text),
+			switchKeys: secondAskSwitchKeys(plan.bySync),
+			transactionGuard: {
+				sql: `transactions.id = ? AND ${guess.sql} AND ${turnHeldSql()}`,
+				binds: [row.id, ...guess.binds, plan.turnId],
+			},
+		});
 
-	if (line === null) return { id: row.id, outcome: "no-line" };
+		if (line === null) return { id: row.id, outcome: "no-line" };
+	} catch (error) {
+		console.error(
+			`second ask: preflight failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
 
-	// A later save cannot undo transmitting a note that was edited or removed after the plan.
-	// Skip stale rows instead of rebuilding their input without a matching saved-plan guard.
-	const guess = unchangedGuessGuard(row);
-
-	const stillOwed = await db
-		.prepare(
-			`SELECT transactions.id FROM transactions WHERE transactions.id = ? AND ${guess.sql} AND ${turnHeldSql()}`,
-		)
-		.bind(row.id, ...guess.binds, plan.turnId)
-		.first();
-
-	if (!stillOwed) return { id: row.id, outcome: "no-line" };
+		return { id: row.id, outcome: "yield" };
+	}
 
 	try {
 		const result: JevCategoryResult = await askJevCategoryOnly(

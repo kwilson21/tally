@@ -1802,3 +1802,95 @@ describe("a reused transaction id is not the transaction Jev was asked about", (
 		},
 	);
 });
+
+/** Inject a concurrent change at the final pre-call read, not in the earlier store read. */
+function beforeFinalRead(change: () => Promise<void>) {
+	const prepare = db.prepare.bind(db);
+	let injected = false;
+	vi.spyOn(db, "prepare").mockImplementation((sql) => {
+		const statement = prepare(sql);
+
+		if (!sql.startsWith("SELECT") || !sql.includes("transactions.id = ?"))
+			return statement;
+		const bind = statement.bind.bind(statement);
+		vi.spyOn(statement, "bind").mockImplementation((...values) => {
+			const bound = bind(...values);
+			const first = bound.first.bind(bound);
+			vi.spyOn(bound, "first").mockImplementation(
+				async <T>(column?: string): Promise<T | null> => {
+					if (!injected) {
+						injected = true;
+						await change();
+					}
+
+					return column === undefined ? first<T>() : first<T>(column);
+				},
+			);
+
+			return bound;
+		});
+
+		return statement;
+	});
+}
+
+describe("the final pre-call read keeps store and transaction guards together", () => {
+	it.each([
+		[
+			"private store",
+			"UPDATE merchant_lookup_texts SET private = 1 WHERE lookup_text = 'harbor bakery'",
+		],
+		[
+			"disabled lookup",
+			"UPDATE household_settings SET value = 'off' WHERE key = 'ai_lookup_stores'",
+		],
+		[
+			"household answer",
+			"INSERT INTO merchants (raw_name, default_category_id) SELECT 'Harbor Bakery 42', id FROM categories WHERE name = 'Groceries'",
+		],
+	] as const)(
+		"%s at the final read prevents transmission",
+		async (_name, sql) => {
+			const id = await base();
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (step === `lookup-second-row-${id}`)
+						beforeFinalRead(async () => {
+							await db.prepare(sql).run();
+						});
+				},
+			});
+			expect(fake.bodies).toHaveLength(0);
+			expect(await answerOf(id)).toBeNull();
+			expect(await dayCount()).toBe(0);
+		},
+	);
+});
+
+describe("known preflight failures are not lost transmissions", () => {
+	it.each(["first prepare", "final query"])(
+		"%s failure spends no call and records no answer",
+		async (where) => {
+			const id = await base();
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (step !== `lookup-second-row-${id}`) return;
+
+					if (where === "first prepare")
+						vi.spyOn(db, "prepare").mockImplementationOnce(() => {
+							throw new Error("D1 unavailable");
+						});
+					else
+						beforeFinalRead(async () => {
+							throw new Error("D1 unavailable");
+						});
+				},
+			});
+			expect(fake.bodies).toHaveLength(0);
+			expect(await answerOf(id)).toBeNull();
+			expect(await dayCount()).toBe(0);
+		},
+	);
+});
