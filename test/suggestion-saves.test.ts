@@ -626,6 +626,7 @@ describe("a suggested name's guard", () => {
 describe("16. a line-backed card's guard", () => {
 	const lineRow = async () => {
 		const eatingOut = await categoryId("Eating Out");
+
 		const row = await db
 			.prepare(
 				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, jev_category_id, category_confidence)
@@ -634,6 +635,7 @@ describe("16. a line-backed card's guard", () => {
 			)
 			.bind(eatingOut)
 			.first<{ id: number }>();
+
 		const id = row?.id ?? 0;
 
 		await db
@@ -694,7 +696,9 @@ describe("16. a line-backed card's guard", () => {
 				.bind(id)
 				.run();
 
-			expect(await raised(writeFor(kind, id, eatingOut, version))).not.toBeNull();
+			expect(
+				await raised(writeFor(kind, id, eatingOut, version)),
+			).not.toBeNull();
 		},
 	);
 

@@ -58,7 +58,7 @@ const ROW =
  */
 const version = (kind: MaybeKind) =>
 	`COALESCE((SELECT ${QUESTION[kind].asked} || ':' || COALESCE(${QUESTION[kind].confidence}, '') || ':'
-		|| COALESCE(t.jev_category_id, '') || ':' || COALESCE(c.archived, 'none') ${ROW}), 'none')`;
+		|| COALESCE(t.jev_category_id, '') || ':' || COALESCE(c.archived, 'none')${kind === "category" ? ` || ':' || (${lineGuessSql("t")})` : ""} ${ROW}), 'none')`;
 
 /** What a Maybe's rule reads about a transaction and the category its answer names, with its version, in one statement. */
 export async function maybeFacts(
@@ -357,7 +357,7 @@ const MAY_PROPOSE = `(NOT ${neverSuggestedSql("t", "new_category")})`;
  * purchase whether the review still asks, whether Tally may propose, the guess and the guessed category.
  */
 const FILE_VERSION = `(${LIST_VERSION} || '/' || COALESCE((SELECT ${QUESTION.category.asked} || ':' || ${MAY_PROPOSE} || ':'
-	|| COALESCE(t.category_confidence, '') || ':' || COALESCE(t.jev_category_id, '') FROM transactions t WHERE t.id = ?1), 'none'))`;
+	|| COALESCE(t.category_confidence, '') || ':' || COALESCE(t.jev_category_id, '') || ':' || (${lineGuessSql("t")}) FROM transactions t WHERE t.id = ?1), 'none'))`;
 
 /** What the filing rule reads: the family's categories and the purchase's question, with their version, in one batch. */
 export async function fileFacts(

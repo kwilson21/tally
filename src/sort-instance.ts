@@ -15,6 +15,7 @@ import { waitingForJevSql } from "./db/transactions";
 import { lookupAsks, lookupEnvOpen } from "./lookup/gate";
 import { runPrivacyReask } from "./lookup/privacy-reask";
 import { runStoreLookup } from "./lookup/run";
+import { runSecondAsk } from "./lookup/second-ask";
 import { fillLookupTexts } from "./lookup/texts";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -209,6 +210,22 @@ export async function runSortInstance(
 		} catch (error) {
 			console.error(
 				`store lookup: stopped ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
+
+	// The second ask (decision 225): after the store lookup, so a store found in this run is asked about in the same run, and,
+	// as the privacy re-ask, only when the groups finished. A failure is logged by its error's name; the night's steps still run.
+	if (sorted && lookupEnvOpen(env) && env.JEV_API_KEY) {
+		try {
+			await runSecondAsk(env, runStep, {
+				runId: options.runId,
+				bySync: params.bySync,
+				fetchImpl: options.fetchImpl,
+			});
+		} catch (error) {
+			console.error(
+				`second ask: stopped ${error instanceof Error ? error.name : "unknown"}`,
 			);
 		}
 	}

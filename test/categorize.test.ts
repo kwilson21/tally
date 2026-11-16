@@ -664,18 +664,37 @@ describe("askJevCategoryOnly", () => {
 		["a missing category", undefined, 0.9, false],
 		["a confidence above 1", "Groceries", 1.2, false],
 	])("reads the reply %s as ok %s", async (_name, choice, confidence, good) => {
-		const reply = choice === undefined ? ok({ answers: {} }) : categoryReply(choice, confidence);
+		const reply =
+			choice === undefined
+				? ok({ answers: {} })
+				: categoryReply(choice, confidence);
+
 		const { fetchImpl } = fakeFetch(() => reply);
-		const result = await askJevCategoryOnly(lineInput, categories, "k", fetchImpl);
+
+		const result = await askJevCategoryOnly(
+			lineInput,
+			categories,
+			"k",
+			fetchImpl,
+		);
 
 		expect(result.ok).toBe(good);
 	});
 
 	it("needs no flags: a reply with no transfer, reimbursement or income answer is ok", async () => {
 		const { fetchImpl } = fakeFetch(() => categoryReply("Eating Out", 0.85));
-		const result = await askJevCategoryOnly(lineInput, categories, "k", fetchImpl);
 
-		expect(result).toEqual({ ok: true, category: { label: "Eating Out", confidence: 0.85 } });
+		const result = await askJevCategoryOnly(
+			lineInput,
+			categories,
+			"k",
+			fetchImpl,
+		);
+
+		expect(result).toEqual({
+			ok: true,
+			category: { label: "Eating Out", confidence: 0.85 },
+		});
 	});
 });
 
@@ -701,13 +720,19 @@ describe("rule 14: only the second ask carries the line", () => {
 			eager: true,
 		});
 
-		const calling = Object.keys(sources).filter((path) => sources[path]?.includes("askJevCategoryOnly("));
-		const keyed = Object.keys(sources).filter((path) => sources[path]?.includes("store_lookup"));
+		const calling = Object.keys(sources).filter((path) =>
+			sources[path]?.includes("askJevCategoryOnly("),
+		);
 
-		expect(calling.map((path) => path.replace(/^.*\/src\//, "")).sort()).toEqual([
+		const keyed = Object.keys(sources).filter((path) =>
+			/\bstore_lookup\b/.test(sources[path] ?? ""),
+		);
+
+		expect(
+			calling.map((path) => path.replace(/^.*\/src\//, "")).sort(),
+		).toEqual(["ai/categorize.ts", "lookup/second-ask.ts"]);
+		expect(keyed.map((path) => path.replace(/^.*\/src\//, ""))).toEqual([
 			"ai/categorize.ts",
-			"lookup/second-ask.ts",
 		]);
-		expect(keyed.map((path) => path.replace(/^.*\/src\//, ""))).toEqual(["ai/categorize.ts"]);
 	});
 });

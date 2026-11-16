@@ -14,6 +14,7 @@ import { fakeSteps } from "./fake-sort-steps";
 
 export const db = env.DB;
 export const DAY = "2026-11-15";
+
 /** Noon on DAY in New York, the household's default zone (decision 67). */
 export const NOON_MS = Date.parse("2026-11-15T17:00:00.000Z");
 export const MINUTE = 60_000;
@@ -30,7 +31,11 @@ export const gateOpen = {
 };
 
 // No ids: the sorting groups ask nothing, so only the second ask runs.
-export const params: SortParams = { bySync: false, rulesApplied: false, ids: [] };
+export const params: SortParams = {
+	bySync: false,
+	rulesApplied: false,
+	ids: [],
+};
 
 /** The id of an active category, by its name. */
 export async function categoryId(name: string): Promise<number> {
@@ -68,14 +73,33 @@ export async function foundStore(name: string, line: string | null = LINE) {
 
 let seq = 0;
 
+/** The columns a test may set on a guess row, beyond the posted purchase's defaults. */
+export type GuessOver = {
+	date?: string;
+	plaid_transaction_id?: string;
+	merchant_name?: string | null;
+	category_id?: number | null;
+	category_source?: string | null;
+	category_confidence?: number | null;
+	jev_category_id?: number | null;
+	amount_cents?: number;
+	pending?: number;
+	credit_reviewed?: number;
+	parent_id?: number | null;
+	flag_transfer?: number;
+	jev_attempts?: number;
+	jev_failed_at?: string | null;
+	note?: string | null;
+};
+
 /** Inserts one posted purchase (money out) that the second ask may be owed, with Eating Out at 0.6, and clears its mark. */
 export async function guessRow(
 	name: string,
-	over: Record<string, string | number | null> = {},
+	over: GuessOver = {},
 ): Promise<number> {
 	seq += 1;
 
-	const row: Record<string, string | number | null> = {
+	const row = {
 		account_id: 1,
 		date: DAY,
 		amount_cents: 1200,
@@ -123,36 +147,62 @@ export async function clearMark(id: number) {
 /** A Jev reply to the category-only question: a category at a confidence. */
 export const categoryReply = (choice: string, confidence = 0.9, status = 200) =>
 	new Response(
-		JSON.stringify({ answers: { category: { type: "choice", choice, confidence } } }),
+		JSON.stringify({
+			answers: { category: { type: "choice", choice, confidence } },
+		}),
 		{ status },
 	);
 
+/** The parts of a Jev call the fakes read: the state's facts and the questions asked, by name. */
 export type JevBody = {
-	state: Record<string, unknown>;
-	questions: Record<string, unknown>;
+	state: { bank_description?: string; store_lookup?: string };
+	questions: {
+		category?: unknown;
+		payee?: unknown;
+		mixed?: unknown;
+		transfer?: unknown;
+	};
 };
+
+const isText = (value: unknown): value is string => typeof value === "string";
 
 /** A call the second ask makes: the category question alone, with the line as a fact. */
 export const isSecondAskBody = (body: JevBody) =>
 	Object.keys(body.questions).join(",") === "category" &&
-	typeof body.state.store_lookup === "string";
+	isText(body.state.store_lookup);
 
 /**
  * A fake Jev: each second-ask call is answered by `plan`, given its body; any other call is a recorded violation. `bodies`
  * holds every body sent, in order.
  */
-export function fakeJev(
-	plan: (body: JevBody) => Response | Promise<Response>,
-) {
+export function fakeJev(plan: (body: JevBody) => Response | Promise<Response>) {
 	const bodies: JevBody[] = [];
 	const violations: string[] = [];
 
 	const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+		// SAFETY: the body is the JSON askJevCategoryOnly and askJev send, whose state and questions the fake reads by name.
 		const body = JSON.parse(String(init?.body ?? "{}")) as JevBody;
 
 		bodies.push(body);
 
-		if (!isSecondAskBody(body)) violations.push(Object.keys(body.questions).join(","));
+		// The privacy re-ask asks its payee question alone (it is not the second ask, so it is answered and not counted).
+		if (!("category" in body.questions) && "payee" in body.questions) {
+			return new Response(
+				JSON.stringify({
+					answers: {
+						transfer: { type: "noul", noul: 0.01 },
+						reimbursement: { type: "noul", noul: 0.01 },
+						income: { type: "noul", noul: 0.01 },
+						payee: { type: "choice", choice: "business", confidence: 0.95 },
+					},
+				}),
+				{ status: 200 },
+			);
+		}
+
+		// Any other ordinary call is a violation: the second ask never makes one.
+		if (!isSecondAskBody(body))
+			violations.push(Object.keys(body.questions).join(","));
 
 		return plan(body);
 	});
@@ -162,7 +212,9 @@ export function fakeJev(
 
 /** How many calls were made for the store whose raw name is `name`. */
 export const callsFor = (bodies: JevBody[], name: string) =>
-	bodies.filter((body) => body.state.bank_description === name).length;
+	bodies.filter(
+		(body) => isSecondAskBody(body) && body.state.bank_description === name,
+	).length;
 
 /** The day's Jev call count, as the reservation leaves it. */
 export async function dayCount(): Promise<number> {
@@ -203,7 +255,11 @@ export const answerOf = (id: number) =>
 			"SELECT kept, kept_category_id AS keptCategoryId, kept_confidence AS keptConfidence FROM lookup_answers WHERE transaction_id = ?",
 		)
 		.bind(id)
-		.first<{ kept: number; keptCategoryId: number | null; keptConfidence: number | null }>();
+		.first<{
+			kept: number;
+			keptCategoryId: number | null;
+			keptConfidence: number | null;
+		}>();
 
 /** Runs one sorting instance with fake steps, the gate open and the given Jev fetch. */
 export async function runSecond(
@@ -254,7 +310,9 @@ beforeEach(async () => {
 	]);
 	await saveAiSwitches(db, AI_SWITCHES_ALL_ON);
 
-	expect(await countWaitingForJev(db, { categories: true, income: true })).toBe(0);
+	expect(await countWaitingForJev(db, { categories: true, income: true })).toBe(
+		0,
+	);
 });
 
 afterEach(() => {
