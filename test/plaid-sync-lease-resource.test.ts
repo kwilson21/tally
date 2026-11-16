@@ -165,11 +165,13 @@ describe("withSyncLease: the bank's lease around a run (#1164)", () => {
 		const id = await addItem();
 
 		let reached: () => void = () => {};
+
 		const takeReached = new Promise<void>((resolve) => {
 			reached = resolve;
 		});
 
 		let open: () => void = () => {};
+
 		const takeGate = new Promise<void>((resolve) => {
 			open = resolve;
 		});

@@ -61,6 +61,7 @@ export function leaseSpy(base: D1Database, options: LeaseSpyOptions): LeaseSpy {
 										return async () => {
 											if (kind === "take") {
 												options.onTakeRun?.();
+
 												if (options.takeGate) await options.takeGate;
 											}
 
