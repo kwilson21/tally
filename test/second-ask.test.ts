@@ -6,7 +6,8 @@ import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { listRowsByIds } from "../src/db/transactions";
 import { lookupTextOf } from "../src/lookup/lookup-text";
-import { dailyJevCap } from "../src/sort-groups";
+import { askSecondRow, readSecondAsk } from "../src/lookup/second-ask";
+import { ASK_BUDGET_MS, dailyJevCap } from "../src/sort-groups";
 import {
 	answerOf,
 	callsFor,
@@ -1810,7 +1811,13 @@ function beforeFinalRead(change: () => Promise<void>) {
 	vi.spyOn(db, "prepare").mockImplementation((sql) => {
 		const statement = prepare(sql);
 
-		if (!sql.startsWith("SELECT") || !sql.includes("transactions.id = ?"))
+		if (
+			!(
+				sql.startsWith("SELECT") ||
+				sql.startsWith("INSERT INTO lookup_second_claims")
+			) ||
+			!sql.includes("transactions.id = ?")
+		)
 			return statement;
 		const bind = statement.bind.bind(statement);
 		vi.spyOn(statement, "bind").mockImplementation((...values) => {
@@ -1893,4 +1900,185 @@ describe("known preflight failures are not lost transmissions", () => {
 			expect(await dayCount()).toBe(0);
 		},
 	);
+});
+
+// These changes land after the separate preflight queries, in the final database snapshot.
+describe("final-snapshot concurrency guards", () => {
+	it.each(["mapping", "sibling", "queue", "day", "budget"] as const)(
+		"refuses a concurrent %s change without transmission or charge",
+		async (change) => {
+			const id = await base();
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (step !== `lookup-second-row-${id}`) return;
+					beforeFinalRead(async () => {
+						if (change === "mapping") {
+							await db
+								.prepare(
+									"UPDATE merchant_lookup_texts SET lookup_text = 'private replacement', private = 1 WHERE merchant_key = ?",
+								)
+								.bind(STORE_A)
+								.run();
+						} else if (change === "sibling") {
+							await addSibling();
+							await db
+								.prepare(
+									"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, 'harbor bakery', 0)",
+								)
+								.bind(SIDE_RAW)
+								.run();
+						} else if (change === "queue") {
+							await guessRow(STORE_B, {
+								category_confidence: null,
+								jev_category_id: null,
+								plaid_transaction_id: "new-waiting",
+							});
+						} else {
+							vi.setSystemTime(
+								NOON_MS +
+									(change === "day" ? 24 * 60 * MINUTE : ASK_BUDGET_MS + 1),
+							);
+						}
+					});
+				},
+			});
+			expect(fake.bodies).toHaveLength(0);
+			expect(await answerOf(id)).toBeNull();
+			expect(await dayCount()).toBe(0);
+			expect(
+				await db
+					.prepare(
+						"SELECT transaction_id FROM lookup_second_claims WHERE transaction_id = ?",
+					)
+					.bind(id)
+					.first(),
+			).toBeNull();
+
+			if (change === "day" || change === "budget") {
+				await runSecond(fake.fetchImpl, { runId: "new-day-run" });
+				expect(fake.bodies).toHaveLength(1);
+			}
+		},
+	);
+});
+
+describe("durable second-ask claims", () => {
+	it("does not repeat a transmitted row after the sorting lease expires before save", async () => {
+		const id = await base();
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (step) => {
+				if (step === "lookup-second-write") throw new Error("save unavailable");
+			},
+		});
+		expect(fake.bodies).toHaveLength(1);
+		expect(await answerOf(id)).toBeNull();
+		vi.setSystemTime(NOON_MS + 16 * MINUTE);
+		await runSecond(fake.fetchImpl, { runId: "later-second-run" });
+		expect(fake.bodies).toHaveLength(1);
+	});
+});
+
+describe("dispatch claim lifecycle", () => {
+	it("allows only one concurrent dispatch of the same planned row", async () => {
+		await base();
+
+		const plan = await readSecondAsk(gateOpen, {
+			turnId: "concurrent",
+			bySync: false,
+		});
+
+		if (!plan?.rows[0]) throw new Error("missing positive-control plan");
+		const row = plan.rows[0];
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+
+		const outcomes = await Promise.all(
+			[1, 2].map(() =>
+				askSecondRow("jev", db, plan, row, fake.fetchImpl, {
+					attempt: 1,
+				}),
+			),
+		);
+
+		expect(fake.bodies).toHaveLength(1);
+		expect(outcomes.map((outcome) => outcome.outcome).sort()).toEqual([
+			"answered",
+			"no-line",
+		]);
+	});
+
+	it("retains a claim when the database committed but its reply was lost", async () => {
+		const id = await base();
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		const prepare = db.prepare.bind(db);
+		let injected = false;
+		vi.spyOn(db, "prepare").mockImplementation((sql) => {
+			const statement = prepare(sql);
+
+			if (!sql.startsWith("INSERT INTO lookup_second_claims")) return statement;
+			const bind = statement.bind.bind(statement);
+			vi.spyOn(statement, "bind").mockImplementation((...values) => {
+				const bound = bind(...values);
+				const first = bound.first.bind(bound);
+				vi.spyOn(bound, "first").mockImplementation(
+					async <T>(): Promise<T | null> => {
+						const result = await first<T>();
+
+						if (!injected) {
+							injected = true;
+							throw new Error("committed reply lost");
+						}
+
+						return result;
+					},
+				);
+
+				return bound;
+			});
+
+			return statement;
+		});
+		await runSecond(fake.fetchImpl);
+		await runSecond(fake.fetchImpl, { runId: "after-crash" });
+		expect(fake.bodies).toHaveLength(0);
+		expect(await answerOf(id)).toBeNull();
+		expect(
+			await db
+				.prepare(
+					"SELECT transaction_id FROM lookup_second_claims WHERE transaction_id = ?",
+				)
+				.bind(id)
+				.first(),
+		).not.toBeNull();
+		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(id).run();
+		expect(
+			await db
+				.prepare(
+					"SELECT transaction_id FROM lookup_second_claims WHERE transaction_id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toBeNull();
+	});
+
+	it("refuses a successful answer after its live mapping moves", async () => {
+		const id = await base();
+
+		const fake = fakeJev(async () => {
+			await db
+				.prepare(
+					"UPDATE merchant_lookup_texts SET lookup_text = 'private replacement', private = 1 WHERE merchant_key = ?",
+				)
+				.bind(STORE_A)
+				.run();
+
+			return categoryReply("Groceries", 0.95);
+		});
+
+		await runSecond(fake.fetchImpl);
+		expect(fake.bodies).toHaveLength(1);
+		expect(await answerOf(id)).toBeNull();
+		expect((await guessOf(id))?.confidence).toBe(0.6);
+	});
 });

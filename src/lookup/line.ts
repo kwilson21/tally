@@ -5,6 +5,7 @@
 import { STILL_ON_SQL } from "../db/ai-switches";
 import { loadLearnedLines } from "../db/learned-lines";
 import { merchantKeySql } from "../db/merchant-key";
+import { waitingForJevSql } from "../db/transactions";
 
 /** The line of the lookup text `text` (an SQL expression) stands: found, with a line, and no key of the text private (spec §7). */
 // stays raw: a fragment inlined into raw statements (decision 179)
@@ -27,14 +28,35 @@ export const householdAnsweredSql = (text: string, cleaned: string) =>
 		OR EXISTS (SELECT 1 FROM bank_text_rules hab JOIN categories hbc ON hbc.id = hab.category_id AND hbc.archived = 0
 				WHERE hab.cleaned_text IN (SELECT value FROM json_each(${cleaned}))))`;
 
+/** Fail closed if a sibling raw name arrived after TypeScript cleaned the snapshot.
+ * Cleaning is intentionally not reimplemented in SQL. In the final snapshot every
+ * current name must have been checked; removed names only make the check stricter.
+ */
+export const siblingNamesCoveredSql = (text: string, rawNames: string) =>
+	`NOT EXISTS (SELECT 1 FROM transactions snt JOIN merchant_lookup_texts snm
+ ON snm.merchant_key = ${merchantKeySql("snt")} WHERE snm.lookup_text = ${text}
+ AND snt.raw_name NOT IN (SELECT value FROM json_each(${rawNames})))`;
+
 /** A save's WHERE guard as SQL, with the values it binds in order. */
 export type LineGuard = { sql: string; binds: string[] };
 
 /** Both, with the text bound, for a save's WHERE: the line stands and the household has no answer of its own. Binds in order. */
-export function lineGuard(text: string, cleanedTexts: string[]): LineGuard {
+export function lineGuard(
+	text: string,
+	cleanedTexts: string[],
+	rawNames: string[],
+): LineGuard {
 	return {
-		sql: `${lineStandsSql("?")} AND NOT ${householdAnsweredSql("?", "?")}`,
-		binds: [text, text, text, text, JSON.stringify(cleanedTexts)],
+		sql: `${lineStandsSql("?")} AND NOT ${householdAnsweredSql("?", "?")} AND ${siblingNamesCoveredSql("?", "?")}`,
+		binds: [
+			text,
+			text,
+			text,
+			text,
+			JSON.stringify(cleanedTexts),
+			text,
+			JSON.stringify(rawNames),
+		],
 	};
 }
 
@@ -44,29 +66,41 @@ export async function learnedTexts(db: D1Database): Promise<string[]> {
 }
 
 /**
- * The read made just before each second-ask call (spec §7:248): the line, or null when it no longer stands, the household now
+ * The atomic claim made just before each second-ask call (spec §7:248): the line, or null when it no longer stands, the household now
  * has an answer of its own (the SQL part), or a switch in `switchKeys` (stillOnKeys) is off.
  */
-export async function readLineForAsk(
+export async function claimLineForAsk(
 	db: D1Database,
 	ask: {
 		text: string;
+		transactionId: number;
+		turnId: string;
 		cleanedTexts: string[];
+		rawNames: string[];
 		switchKeys: string;
 		transactionGuard: { sql: string; binds: (string | number | null)[] };
 	},
 ): Promise<string | null> {
 	const row = await db
 		.prepare(
-			`SELECT ml.line AS line FROM merchant_lookups ml WHERE ml.lookup_text = ?
+			`INSERT INTO lookup_second_claims (transaction_id, turn_id)
+             SELECT ?, ? FROM merchant_lookups ml WHERE ml.lookup_text = ?
 				AND ${lineStandsSql("ml.lookup_text")} AND NOT ${householdAnsweredSql("ml.lookup_text", "?")} AND ${STILL_ON_SQL}
-				AND EXISTS (SELECT 1 FROM transactions WHERE ${ask.transactionGuard.sql})`,
+				AND ${siblingNamesCoveredSql("ml.lookup_text", "?")}
+                AND NOT EXISTS (SELECT 1 ${waitingForJevSql({ categories: true, income: true })})
+                AND EXISTS (SELECT 1 FROM transactions WHERE ${ask.transactionGuard.sql})
+                ON CONFLICT(transaction_id) DO NOTHING
+                RETURNING (SELECT line FROM merchant_lookups WHERE lookup_text = ?) AS line`,
 		)
 		.bind(
+			ask.transactionId,
+			ask.turnId,
 			ask.text,
 			JSON.stringify(ask.cleanedTexts),
 			ask.switchKeys,
+			JSON.stringify(ask.rawNames),
 			...ask.transactionGuard.binds,
+			ask.text,
 		)
 		.first<{ line: string | null }>();
 

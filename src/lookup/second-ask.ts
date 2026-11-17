@@ -45,11 +45,11 @@ import {
 } from "../sort-groups";
 import { lookupAsks } from "./gate";
 import {
+	claimLineForAsk,
 	householdAnsweredSql,
 	learnedTexts,
 	lineGuard,
 	lineStandsSql,
-	readLineForAsk,
 } from "./line";
 import { lookupTextOf } from "./lookup-text";
 import { READ_STEP } from "./privacy-reask";
@@ -119,12 +119,15 @@ function unchangedGuessGuard(row: SecondAskRow) {
 	return {
 		sql: `${openGuessSql("transactions")} AND transactions.plaid_transaction_id IS ? AND transactions.category_confidence = ? AND transactions.jev_category_id IS ?
 			AND ${seen.sql}
+            AND EXISTS (SELECT 1 FROM merchant_lookup_texts live_mapping
+                WHERE live_mapping.merchant_key = ${merchantKeySql("transactions")} AND live_mapping.lookup_text = ?)
 			AND NOT EXISTS (SELECT 1 FROM lookup_answers gla WHERE gla.transaction_id = transactions.id)`,
 		binds: [
 			row.plaidTransactionId,
 			row.confidence,
 			row.guessedCategoryId,
 			...seen.binds,
+			row.text,
 		],
 	};
 }
@@ -233,6 +236,7 @@ export async function readSecondAsk(
 				JOIN merchant_lookup_texts mlt ON mlt.merchant_key = ${merchantKeySql("t")}
 				WHERE ${openGuessSql("t")}
 					AND NOT EXISTS (SELECT 1 FROM lookup_answers la WHERE la.transaction_id = t.id)
+                    AND NOT EXISTS (SELECT 1 FROM lookup_second_claims lsc WHERE lsc.transaction_id = t.id)
 					AND ${lineStandsSql("mlt.lookup_text")} AND NOT ${householdAnsweredSql("mlt.lookup_text", "'[]'")}
 				ORDER BY t.date DESC, t.id DESC`,
 			),
@@ -289,7 +293,7 @@ export async function readSecondAsk(
 
 /**
  * One row's ask: the guards first (askBlocked), then the household's learned lines, then the line read just before the call
- * (readLineForAsk). Only then Jev, with the category alone. A failed call is a `failed` answer; known preflight read failures yield without spending a call.
+ * (claimLineForAsk). Only then Jev, with the category alone. A failed call is a `failed` answer; known preflight read failures yield without spending a call.
  * A lost workflow step remains uncertain and is handled by the caller.
  */
 export async function askSecondRow(
@@ -335,9 +339,12 @@ export async function askSecondRow(
 		// Read the current store line, privacy, switches, household answers and unchanged
 		// transaction together: a separate last read would leave an avoidable privacy gap.
 		const guess = unchangedGuessGuard(row);
-		line = await readLineForAsk(db, {
+		line = await claimLineForAsk(db, {
 			text: row.text,
+			transactionId: row.id,
+			turnId: plan.turnId,
 			cleanedTexts: cleanedFor(current.results, row.text),
+			rawNames: current.results.map((item) => item.rawName),
 			switchKeys: secondAskSwitchKeys(plan.bySync),
 			transactionGuard: {
 				sql: `transactions.id = ? AND ${guess.sql} AND ${turnHeldSql()}`,
@@ -352,6 +359,25 @@ export async function askSecondRow(
 		);
 
 		return { id: row.id, outcome: "yield" };
+	}
+
+	const afterPreflight = askBlocked(row.id, { attempt }, plan);
+
+	if (afterPreflight && afterPreflight.outcome !== "answered") {
+		// Definitely no dispatch: release only this run's claim. If cleanup fails,
+		// retain it conservatively; another run must not guess whether we sent.
+		try {
+			await db
+				.prepare(
+					"DELETE FROM lookup_second_claims WHERE transaction_id = ? AND turn_id = ?",
+				)
+				.bind(row.id, plan.turnId)
+				.run();
+		} catch {
+			/* Retaining a claim can lose an optional ask, never duplicate one. */
+		}
+
+		return afterPreflight;
 	}
 
 	try {
@@ -433,7 +459,7 @@ export function answerMove(
  */
 function moveStatements(
 	db: D1Database,
-	row: SecondAskRow,
+	row: SecondAskRow & { rawNames: string[] },
 	move: Move,
 	plan: SecondAskPlan,
 ): D1PreparedStatement[] {
@@ -459,7 +485,7 @@ function moveStatements(
 	}
 
 	const guess = unchangedGuessGuard(row);
-	const line = lineGuard(row.text, row.cleanedTexts);
+	const line = lineGuard(row.text, row.cleanedTexts, row.rawNames);
 
 	const guard = {
 		sql: `${guess.sql} AND ${line.sql} AND ${STILL_ON_SQL} AND ${turnHeldSql()}`,
@@ -546,6 +572,9 @@ export async function writeSecondAsk(
 		const row = {
 			...planned,
 			cleanedTexts: cleanedFor(current.results, planned.text),
+			rawNames: current.results
+				.filter((item) => item.lookupText === planned.text)
+				.map((item) => item.rawName),
 		};
 
 		// A call was made for an answer, a failure or a loss, so each is charged; a row never reached, or cut by the budget, is not.

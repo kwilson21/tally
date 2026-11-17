@@ -3601,6 +3601,7 @@
 			}
 		],
 		"lookup_cleared": [],
+		"lookup_second_claims": [],
 		"lookup_answers": [],
 		"transactions": [
 			{
@@ -16074,6 +16075,7 @@
 			}
 		],
 		"lookup_cleared": [],
+		"lookup_second_claims": [],
 		"lookup_answers": [],
 		"transactions": [
 			{
