@@ -109,21 +109,25 @@ stateDiagram-v2
     skipped --> [*]
 ```
 
-A row's guess, as the lookup sees it (the last two differ by its `lookup_answers` entry):
+A row's guess, as the lookup sees it. The ordinary call never carries the line; only the second ask does, and only about a guess Jev was not sure of (spec §7, "The second ask"). The two guessed states after it differ by the row's `lookup_answers` entry, and `guessed_with_line` lasts only while the row still holds the kept guess (spec §5):
 
 ```mermaid
 stateDiagram-v2
     [*] --> waiting
-    waiting --> asking: Jev is asked, with the line if the store has one
-    asking --> guessed_with_line: saved, if the line still stands and nobody changed the row
-    asking --> guessed_without_line: saved, asked with no line
+    waiting --> asking: Jev's ordinary call, never with the line
     asking --> waiting: Jev failed, or the save was refused
-    guessed_without_line --> waiting: owed a re-ask (the store now has a line): the guess is cleared
-    guessed_with_line --> waiting: "Don't use this" clears it
-    guessed_with_line --> guessed_without_line: a category re-check saves over it
-    waiting --> answered: a person answers
+    asking --> filed: Jev is sure (80% or more), as today
+    asking --> guessed: Jev is unsure, as today
+    guessed --> second_ask: posted, its store found with a line that stands, no answer of the household's own, nothing waiting for Jev
+    second_ask --> guessed_with_line: more sure with the line (kept = 1), a Maybe at 40% or more, never filed
+    second_ask --> guessed_without_line: a tie, less sure, none fit, or Jev failed (kept = 0), the first guess stands
+    second_ask --> guessed: refused (the line went, the household answered, the row changed), no lookup_answers row
+    guessed_with_line --> guessed_without_line: a re-check or a new ask saves another guess over it
+    guessed_with_line --> waiting: a person answers for the store, "Don't use this", or the store turns private, and the guess is cleared
+    guessed --> answered: a person answers
     guessed_with_line --> answered: a person answers
     guessed_without_line --> answered: a person answers
+    filed --> answered: a person changes it
     answered --> [*]
 ```
 

@@ -202,6 +202,14 @@ export const lookupAnswers = sqliteTable(
 	(t) => [index("lookup_answers_lookup_text").on(t.lookupText)],
 );
 
+/** Durable second-ask dispatch identity; no financial facts (migration 0080). */
+export const lookupSecondClaims = sqliteTable("lookup_second_claims", {
+	transactionId: integer("transaction_id")
+		.primaryKey()
+		.references(() => transactions.id, { onDelete: "cascade" }),
+	turnId: text("turn_id").notNull(),
+});
+
 /** The store lookup's privacy mark for a transaction Jev was asked the payee question about (migrations/0075_lookup_cleared.sql). */
 export const lookupCleared = sqliteTable("lookup_cleared", {
 	transactionId: integer("transaction_id")

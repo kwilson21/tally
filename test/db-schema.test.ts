@@ -2002,7 +2002,7 @@ describe("the table-set check fails on a wrong list", () => {
 		expect(tableSetProblems(["a"], described)).toEqual([]);
 	});
 
-	it("the exports the drift test enumerates are all 34 application tables", () => {
+	it("the exports the drift test enumerates are all 35 application tables", () => {
 		expect(
 			schemaTables()
 				.map((table) => getTableConfig(table).name)
@@ -2028,6 +2028,7 @@ describe("the table-set check fails on a wrong list", () => {
 			"household_settings",
 			"lookup_answers",
 			"lookup_cleared",
+			"lookup_second_claims",
 			"maybe_answers",
 			"maybe_names",
 			"merchant_lookup_texts",

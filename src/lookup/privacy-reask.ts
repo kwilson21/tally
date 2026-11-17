@@ -307,7 +307,7 @@ export async function writeReask(
 }
 
 /** The read step's settings: the sorting groups' read, four retries ten seconds apart (#1113). */
-const READ_STEP = {
+export const READ_STEP = {
 	retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 	timeout: "1 minute",
 	sensitive: "output",

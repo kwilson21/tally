@@ -15,6 +15,7 @@ import { waitingForJevSql } from "./db/transactions";
 import { lookupAsks, lookupEnvOpen } from "./lookup/gate";
 import { runPrivacyReask } from "./lookup/privacy-reask";
 import { runStoreLookup } from "./lookup/run";
+import { runSecondAsk } from "./lookup/second-ask";
 import { fillLookupTexts } from "./lookup/texts";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -209,6 +210,27 @@ export async function runSortInstance(
 		} catch (error) {
 			console.error(
 				`store lookup: stopped ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
+
+	// The second ask (decision 225): only nightly and after-sync background runs, after the store lookup.
+	// Manual Ask again and category re-sorts must not spend calls on unrelated lookup guesses.
+	if (
+		sorted &&
+		(params.night || params.bySync) &&
+		lookupEnvOpen(env) &&
+		env.JEV_API_KEY
+	) {
+		try {
+			await runSecondAsk(env, runStep, {
+				runId: options.runId,
+				bySync: params.bySync,
+				fetchImpl: options.fetchImpl,
+			});
+		} catch (error) {
+			console.error(
+				`second ask: stopped ${error instanceof Error ? error.name : "unknown"}`,
 			);
 		}
 	}

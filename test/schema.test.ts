@@ -75,6 +75,7 @@ describe("schema", () => {
 			"household_settings",
 			"lookup_answers",
 			"lookup_cleared",
+			"lookup_second_claims",
 			"maybe_answers",
 			"maybe_names",
 			"merchant_lookup_texts",
