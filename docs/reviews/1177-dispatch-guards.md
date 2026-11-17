@@ -23,3 +23,9 @@ Disable lookup and drain old workers/workflows before rollout because old code d
 All requests in these tests use fake model responses and seeded local D1 data. Passing them proves neither current production settings nor live model quality. Remote migration, activation, paid calls and production financial data access are out of scope.
 
 No deepening needed: the existing line module owns the single final-snapshot gate; this fix extends that boundary rather than adding a second rule implementation.
+
+## Learned-line source races
+
+The second ask derives its learned lines from one ordered database-produced JSON snapshot of eligible answers, forgotten texts and active rules. The final claim and successful-save statements compare those exact sources again, so a cross-store answer or Undo Forget arriving between reads cannot be missed. Deriving the decision from the compared snapshot also avoids an ABA gap. Existing answer filtering and TypeScript cleaning stay shared; the ordinary learned-page loader remains row-based.
+
+This evidence is transient, never logged or persisted. SQL counts the UTF-8 bytes of the same projections before aggregating and refuses evidence over 500KiB, below D1's bound-value/row limits. Unrelated source changes can conservatively skip this optional improvement. Oversized or unavailable evidence leaves the original guess intact; the save still accounts for calls already made and releases its reservation and turn. At most ten successful-save guards rescan the household source set, trading additional local reads for a simple fail-closed boundary without writer-version triggers.

@@ -15,6 +15,7 @@ import {
 	giveBackReservedJevCallsStatement,
 	reservedKeyFor,
 } from "../db/jev-calls";
+import { LEARNED_SOURCES_SQL } from "../db/learned-lines";
 import { merchantKeySql } from "../db/merchant-key";
 import {
 	releaseSortingTurn,
@@ -47,6 +48,7 @@ import { lookupAsks } from "./gate";
 import {
 	claimLineForAsk,
 	householdAnsweredSql,
+	learnedTextSnapshot,
 	learnedTexts,
 	lineGuard,
 	lineStandsSql,
@@ -320,9 +322,11 @@ export async function askSecondRow(
 			return { id: row.id, outcome: "yield" };
 		}
 
-		const learned = await learnedTexts(db);
+		const learned = await learnedTextSnapshot(db);
 
-		if (learned.includes(cleanBankText(row.seen.rawName))) {
+		if (learned.source === null) return { id: row.id, outcome: "yield" };
+
+		if (learned.texts.includes(cleanBankText(row.seen.rawName))) {
 			return { id: row.id, outcome: "no-line" };
 		}
 
@@ -341,6 +345,7 @@ export async function askSecondRow(
 		const guess = unchangedGuessGuard(row);
 		line = await claimLineForAsk(db, {
 			text: row.text,
+			learnedSource: learned.source,
 			transactionId: row.id,
 			turnId: plan.turnId,
 			cleanedTexts: cleanedFor(current.results, row.text),
@@ -462,6 +467,7 @@ function moveStatements(
 	row: SecondAskRow & { rawNames: string[] },
 	move: Move,
 	plan: SecondAskPlan,
+	learnedSource: string | null,
 ): D1PreparedStatement[] {
 	if (move.kind === "none" || move.kind === "refused") return [];
 
@@ -484,14 +490,17 @@ function moveStatements(
 		];
 	}
 
+	if (learnedSource === null) return [];
+
 	const guess = unchangedGuessGuard(row);
 	const line = lineGuard(row.text, row.cleanedTexts, row.rawNames);
 
 	const guard = {
-		sql: `${guess.sql} AND ${line.sql} AND ${STILL_ON_SQL} AND ${turnHeldSql()}`,
+		sql: `${guess.sql} AND ${line.sql} AND ${LEARNED_SOURCES_SQL} = ? AND ${STILL_ON_SQL} AND ${turnHeldSql()}`,
 		binds: [
 			...guess.binds,
 			...line.binds,
+			learnedSource,
 			secondAskSwitchKeys(plan.bySync),
 			plan.turnId,
 		],
@@ -546,7 +555,12 @@ export async function writeSecondAsk(
 ): Promise<{ asked: number }> {
 	const db = env.DB;
 	const reservedKey = reservedKeyFor(plan.day, plan.turnId);
-	const learned = await learnedTexts(db);
+	// Missing evidence refuses optional successful saves, not reservation/turn cleanup.
+
+	const learned = await learnedTextSnapshot(db).catch(() => ({
+		texts: [],
+		source: null,
+	}));
 
 	// One read for every text in the plan: the bank texts as they stand at the save (rule 6c, the save's own guard).
 	const current = await db
@@ -589,8 +603,9 @@ export async function writeSecondAsk(
 			...moveStatements(
 				db,
 				row,
-				answerMove(row, outcome, plan.categories, learned),
+				answerMove(row, outcome, plan.categories, learned.texts),
 				plan,
+				learned.source,
 			),
 		);
 	}

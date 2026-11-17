@@ -2082,3 +2082,164 @@ describe("dispatch claim lifecycle", () => {
 		expect((await guessOf(id))?.confidence).toBe(0.6);
 	});
 });
+
+describe("learned-line source races across lookup texts", () => {
+	it.each(["dispatch", "save"] as const)(
+		"refuses a new cross-text learned line at %s",
+		async (boundary) => {
+			const id = await base();
+			await foundStore("Other Store");
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			let injected = false;
+
+			const change = async () => {
+				injected = true;
+				await guessRow(STORE_A, {
+					plaid_transaction_id: "late-cross-text-answer",
+					merchant_name: "Other Store",
+					category_id: await categoryId("Groceries"),
+					category_source: "user",
+				});
+			};
+
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (boundary === "dispatch" && step === `lookup-second-row-${id}`)
+						beforeFinalRead(change);
+
+					if (boundary === "save" && step === "lookup-second-write") {
+						const batch = db.batch.bind(db);
+						vi.spyOn(db, "batch").mockImplementation(async (statements) => {
+							if (!injected) await change();
+
+							return batch(statements);
+						});
+					}
+				},
+			});
+			expect(injected).toBe(true);
+			expect(fake.bodies).toHaveLength(boundary === "dispatch" ? 0 : 1);
+			expect(await answerOf(id)).toBeNull();
+			expect((await guessOf(id))?.confidence).toBe(0.6);
+			expect(await dayCount()).toBe(boundary === "dispatch" ? 0 : 1);
+		},
+	);
+
+	it.each(["dispatch", "save"] as const)(
+		"refuses a cross-text learned line restored by Undo Forget at %s",
+		async (boundary) => {
+			const id = await base();
+			await foundStore("Other Store");
+			await guessRow(STORE_A, {
+				plaid_transaction_id: "forgotten-cross-text-answer",
+				merchant_name: "Other Store",
+				category_id: await categoryId("Groceries"),
+				category_source: "user",
+			});
+			await db
+				.prepare(
+					"INSERT INTO forgotten_texts (cleaned_text, forgotten_at) VALUES (?, '2099-01-01 00:00:00')",
+				)
+				.bind(cleanBankText(STORE_A))
+				.run();
+			const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+			let injected = false;
+
+			const change = async () => {
+				injected = true;
+				await db
+					.prepare("DELETE FROM forgotten_texts WHERE cleaned_text = ?")
+					.bind(cleanBankText(STORE_A))
+					.run();
+			};
+
+			await runSecond(fake.fetchImpl, {
+				beforeAttempt: async (step) => {
+					if (boundary === "dispatch" && step === `lookup-second-row-${id}`)
+						beforeFinalRead(change);
+
+					if (boundary === "save" && step === "lookup-second-write") {
+						const batch = db.batch.bind(db);
+						vi.spyOn(db, "batch").mockImplementation(async (statements) => {
+							if (!injected) await change();
+
+							return batch(statements);
+						});
+					}
+				},
+			});
+			expect(injected).toBe(true);
+			expect(fake.bodies).toHaveLength(boundary === "dispatch" ? 0 : 1);
+			expect(await answerOf(id)).toBeNull();
+			expect((await guessOf(id))?.confidence).toBe(0.6);
+			expect(await dayCount()).toBe(boundary === "dispatch" ? 0 : 1);
+		},
+	);
+});
+
+describe("bounded learned-line dispatch evidence", () => {
+	it("makes no call when a synthetic answer expands the source snapshot beyond its bound", async () => {
+		const id = await base();
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (step) => {
+				if (step !== `lookup-second-row-${id}`) return;
+
+				await guessRow(`synthetic oversized ${"x".repeat(600_000)}`, {
+					plaid_transaction_id: "oversized-learned-source",
+					merchant_name: "Other Store",
+					category_id: await categoryId("Groceries"),
+					category_source: "user",
+				});
+			},
+		});
+		expect(fake.bodies).toHaveLength(0);
+		expect(await answerOf(id)).toBeNull();
+		expect((await guessOf(id))?.confidence).toBe(0.6);
+		expect(await dayCount()).toBe(0);
+	});
+});
+
+describe("learned-line save evidence failures", () => {
+	it("settles the paid call without saving a guess when the source snapshot read fails", async () => {
+		const id = await base();
+		const fake = fakeJev(() => categoryReply("Groceries", 0.95));
+		let injected = false;
+		await runSecond(fake.fetchImpl, {
+			beforeAttempt: async (step) => {
+				if (step !== "lookup-second-write") return;
+
+				const prepare = db.prepare.bind(db);
+				vi.spyOn(db, "prepare").mockImplementation((sql) => {
+					const statement = prepare(sql);
+
+					if (
+						sql.startsWith("SELECT") &&
+						sql.endsWith(" AS source") &&
+						!injected
+					) {
+						vi.spyOn(statement, "first").mockImplementationOnce(async () => {
+							injected = true;
+							throw new Error("snapshot read unavailable");
+						});
+					}
+
+					return statement;
+				});
+			},
+		});
+		expect(injected).toBe(true);
+		expect(fake.bodies).toHaveLength(1);
+		expect(await answerOf(id)).toBeNull();
+		expect((await guessOf(id))?.confidence).toBe(0.6);
+		expect(await dayCount()).toBe(1);
+
+		const left = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM household_settings WHERE key = 'sorting_turn' OR key GLOB 'jev_reserved_*'",
+			)
+			.first<{ n: number }>();
+
+		expect(left?.n).toBe(0);
+	});
+});

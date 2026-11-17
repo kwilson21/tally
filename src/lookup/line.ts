@@ -3,7 +3,11 @@
 // TypeScript with SQL fragments; the save and the read live in second-ask.ts.
 
 import { STILL_ON_SQL } from "../db/ai-switches";
-import { loadLearnedLines } from "../db/learned-lines";
+import {
+	LEARNED_SOURCES_SQL,
+	loadLearnedLineSnapshot,
+	loadLearnedLines,
+} from "../db/learned-lines";
 import { merchantKeySql } from "../db/merchant-key";
 import { waitingForJevSql } from "../db/transactions";
 
@@ -65,6 +69,18 @@ export async function learnedTexts(db: D1Database): Promise<string[]> {
 	return (await loadLearnedLines(db)).map((line) => line.cleanedText);
 }
 
+/** Bound transient guard evidence below D1's bound-value limit; never truncate safety evidence. */
+export async function learnedTextSnapshot(
+	db: D1Database,
+): Promise<{ texts: string[]; source: string | null }> {
+	const snapshot = await loadLearnedLineSnapshot(db);
+
+	return {
+		texts: snapshot.lines.map((line) => line.cleanedText),
+		source: snapshot.source,
+	};
+}
+
 /**
  * The atomic claim made just before each second-ask call (spec §7:248): the line, or null when it no longer stands, the household now
  * has an answer of its own (the SQL part), or a switch in `switchKeys` (stillOnKeys) is off.
@@ -73,6 +89,7 @@ export async function claimLineForAsk(
 	db: D1Database,
 	ask: {
 		text: string;
+		learnedSource: string;
 		transactionId: number;
 		turnId: string;
 		cleanedTexts: string[];
@@ -87,6 +104,7 @@ export async function claimLineForAsk(
              SELECT ?, ? FROM merchant_lookups ml WHERE ml.lookup_text = ?
 				AND ${lineStandsSql("ml.lookup_text")} AND NOT ${householdAnsweredSql("ml.lookup_text", "?")} AND ${STILL_ON_SQL}
 				AND ${siblingNamesCoveredSql("ml.lookup_text", "?")}
+                AND ${LEARNED_SOURCES_SQL} = ?
                 AND NOT EXISTS (SELECT 1 ${waitingForJevSql({ categories: true, income: true })})
                 AND EXISTS (SELECT 1 FROM transactions WHERE ${ask.transactionGuard.sql})
                 ON CONFLICT(transaction_id) DO NOTHING
@@ -99,6 +117,7 @@ export async function claimLineForAsk(
 			JSON.stringify(ask.cleanedTexts),
 			ask.switchKeys,
 			JSON.stringify(ask.rawNames),
+			ask.learnedSource,
 			...ask.transactionGuard.binds,
 			ask.text,
 		)
