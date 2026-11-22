@@ -193,6 +193,7 @@ import {
 	NewCategoryCard,
 	OrganizeNewCategoryCard,
 } from "../views/suggestion-card";
+import { LookupLine } from "../views/lookup-line";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
@@ -4517,6 +4518,25 @@ const audibleCategories = [
 	{ id: 3, name: "Gas" },
 ];
 
+/** The LookupLine specimen's use spec (P146 B, #988). */
+const LOOKUP_LINE_SPEC: UseSpecText = {
+	purpose:
+		"Show the line Tally looked a store up for, under a Maybe guess it helped make, and let the person drop that store's line for good with one press.",
+	affordance:
+		"Under Tally's guess, a row of its own: a small search icon and “From the web: …”. Under that row, a quiet “Don't use this”, underlined, with 44px of height. The store's name is in its accessible name, not on screen.",
+	states:
+		"Shown only under a guess that was made with the line, while the lookup switch is on and Categories and Income are on. Hidden, not dropped, while any of them is off, so the line comes back when they are turned on. Gone after a press: the row becomes an ordinary Maybe with no line.",
+	feedback:
+		"A press answers with one toast and one announce, the same sentence: “Tally won't use the web for {store} again.” There is no confirmation and no Undo. A press that the rule refuses shows its sentence as an info toast instead.",
+	input:
+		"Touch: the button is 44px tall. Keyboard: Tab reaches it after Why? and before Yes. Screen reader: the button reads “Don't use this for {store}”, and the line is words, not colour.",
+	motion: "None added. Reduced motion changes nothing.",
+	edges:
+		"An 80-character line wraps inside its row and never clips. The button keeps the app's focus ring. With no script, the card's button posts its own form, and the edit panel's button posts to its own address.",
+	words:
+		"“From the web:” · “Don't use this” · “Tally won't use the web for {store} again.” · “That line is already gone.” · “That guess has changed, so nothing was dropped.”",
+};
+
 function SuggestionsReview() {
 	// SAFETY: each review item cast here is one of reviewItems above, and reviewItems.newCategory is the new_category item the Extract names.
 	return (
@@ -4590,6 +4610,65 @@ function SuggestionsReview() {
 						</div>
 					</State>
 				</div>
+			</Specimen>
+			<Specimen
+				id="lookup-line"
+				title="LookupLine"
+				tier="visual"
+				components={["LookupLine", "Button", "Icon"]}
+				sentence="The store lookup's line under a Maybe guess Tally made with it: its own row with a small search icon and “From the web: …”, and a quiet “Don't use this” on the row below, named for its store (P146 B, decision 244). It shows only under a guess asked with the line while the switch is on."
+			>
+				<State label="A short line: La Coop">
+					<div class="max-w-md" hx-ignore>
+						<LookupLine
+							line="Coffee shop in Arlington, VA"
+							store="La Coop"
+							button={{ type: "button" }}
+						/>
+					</div>
+				</State>
+				<State label="An 80-character line: Maple Street Hardware (it wraps at 390 and never clips)">
+					<div class="max-w-md" hx-ignore>
+						<LookupLine
+							line="Independent hardware store and garden store in Takoma Park, Maryland, since 1946"
+							store="Maple Street Hardware"
+							button={{ type: "button" }}
+						/>
+					</div>
+				</State>
+				<State label="In the card: Tally's guess with its line, above Yes">
+					<div class="max-w-md" hx-ignore>
+						<SuggestionCard
+							action="/settings/suggestions"
+							item={
+								{
+									...reviewItems.category,
+									merchant: "La Coop",
+									lookupLine: "Coffee shop in Arlington, VA",
+								} as SuggestionItem
+							}
+							today={REVIEW_TODAY}
+							skipHref="/settings/suggestions?skip=income-1"
+							categories={reviewCategories}
+						/>
+					</div>
+				</State>
+				<State label="In the edit panel: Tally's guess, then its line, then the button that posts to its own address">
+					<div class="max-w-md" hx-ignore>
+						<p class="text-sm text-muted">Tally's guess · 88% sure</p>
+						<LookupLine
+							line="Coffee shop in Arlington, VA"
+							store="La Coop"
+							button={{
+								formaction: "/transactions/901/lookup-line/dont-use",
+								formmethod: "post",
+								formnovalidate: true,
+								type: "button",
+							}}
+						/>
+					</div>
+				</State>
+				<UseSpec spec={LOOKUP_LINE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="suggestion-maybe-answers"
@@ -5583,6 +5662,30 @@ function Controls() {
 								hint="Sorts them right after each sync, not only overnight."
 								disabled
 								note="Needs Categories and exclusions or Income on."
+							/>
+						</li>
+					</ul>
+				</State>
+				<State label="Look up new stores on the web: on, and greyed with the note it needs (the store lookup's switch, #988)">
+					<ul class="max-w-xl divide-y divide-rule border-y border-rule">
+						<li>
+							<Switch
+								id="ds-switch-lookup-on"
+								name="ds-switch-lookup-on"
+								label="Look up new stores on the web"
+								hint="Searches the web once for a store, to help guess its category and name. Only the store's name as your bank gives it is sent, with numbers taken out."
+								checked
+							/>
+						</li>
+						<li>
+							<Switch
+								id="ds-switch-lookup-greyed"
+								name="ds-switch-lookup-greyed"
+								label="Look up new stores on the web"
+								hint="Searches the web once for a store, to help guess its category and name. Only the store's name as your bank gives it is sent, with numbers taken out."
+								checked
+								disabled
+								note="Needs Categories and exclusions and Income on."
 							/>
 						</li>
 					</ul>

@@ -1047,6 +1047,31 @@ describe("GET /design-system in the demo", () => {
 		expect(state).not.toContain("Upload a file");
 	});
 
+	it("draws the LookupLine specimen: a short line, an 80-character line, the card, the edit panel (#988)", async () => {
+		const { html } = await get("/design-system");
+
+		const section =
+			html.split('id="lookup-line"')[1]?.split("</section>")[0] ?? "";
+
+		expect(section).toContain("From the web: Coffee shop in Arlington, VA");
+		expect(section).toContain("Don&#39;t use this for La Coop");
+		expect(section).toContain("Maple Street Hardware");
+		expect(section).toContain("wrap-anywhere");
+		expect(section).toContain("Tally&#39;s guess");
+		expect(section).toContain('value="dont_use"');
+		expect(section).toContain('formaction="/transactions/901/lookup-line/dont-use"');
+		expect(section.match(/hx-ignore/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+	});
+
+	it("draws the lookup switch in the switch specimen, on and greyed with its note (#988)", async () => {
+		const { html } = await get("/design-system");
+
+		const section = html.split('id="switch"')[1]?.split("</section>")[0] ?? "";
+
+		expect(section).toContain("Look up new stores on the web");
+		expect(section).toContain("Needs Categories and exclusions and Income on.");
+	});
+
 	it("draws the SuggestionCard specimen's Yes full width, with No under it, never beside it (P42 A)", async () => {
 		const { html } = await get("/design-system");
 
