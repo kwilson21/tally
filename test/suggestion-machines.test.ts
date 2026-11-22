@@ -15,6 +15,7 @@ import {
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	MERCHANT_STATUS_VALUES,
 } from "../src/db/schema";
+import { dropLineStatements } from "../src/db/store-lookups";
 import { resetDemo } from "../src/demo/reset";
 import {
 	CATEGORY_SUGGESTION_LABELS,
@@ -323,6 +324,24 @@ describe("the merchant suggestion store follows its machine", () => {
 		for (const state of states) {
 			await seed(state);
 			expect(await stateNow(), state).toBe(state);
+		}
+	});
+
+	// The line drop (spec §7, rule 10): a Workers AI name that is not its key is withdrawn exactly where the machine says.
+	it("the line drop withdraws a row exactly where the machine says", async () => {
+		for (const state of states) {
+			await seed(state);
+			await db.prepare("DELETE FROM merchant_lookup_texts").run();
+			await db
+				.prepare(
+					"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES ('ZED CAFE', 'zed cafe', 0)",
+				)
+				.run();
+			await db.batch(dropLineStatements(db, ["zed cafe"]));
+			expect(await stateNow(), `${state} after the line drop`).toBe(
+				next(merchantSuggestionMachine, state, "WITHDRAW") ?? state,
+			);
+			await assertMerchantInvariants(db);
 		}
 	});
 

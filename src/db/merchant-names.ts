@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
 import { householdToday } from "../dates";
+import type { LineGuard } from "../lookup/line";
 import {
 	answerNameSuggestion,
 	type NameFacts,
@@ -136,23 +137,28 @@ export function pendingNameStatements(
  * The bank texts to ask Workers AI about, at most `limit` (NAME_ASKED_SQL). A merchant is asked about once, so an answer
  * with no usable name is kept as an empty suggestion. A text whose call failed (`merchant_name_failures`, #468) is still
  * asked, but after the ones never tried, the longest-ago failure first, so texts that keep failing can't hold up the
- * rest. Within each group, most charges first.
+ * rest. Within each group, most charges first. `waiting` are lookup texts whose names wait (names.ts); a merchant whose
+ * key has one is left out before the limit, so it never holds a call slot.
  */
 export async function merchantsToAsk(
 	db: D1Database,
 	limit: number,
+	waiting: readonly string[] = [],
 ): Promise<string[]> {
 	const { results } = await db
 		.prepare(
+			// stays raw: the waiting set is the night's pending texts, a set with no cap, and the query is one statement (decision 209)
 			`SELECT t.raw_name AS rawName FROM transactions t
 			 LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			 LEFT JOIN merchant_name_failures f ON f.raw_name = t.raw_name
 			 WHERE ${NAME_ASKED_SQL}
+			   AND NOT EXISTS (SELECT 1 FROM merchant_lookup_texts wk WHERE wk.merchant_key = t.raw_name
+			     AND wk.lookup_text IN (SELECT value FROM json_each(?)))
 			 GROUP BY t.raw_name
 			 ORDER BY f.failed_at IS NOT NULL, f.failed_at, COUNT(*) DESC, t.raw_name
 			 LIMIT ?`,
 		)
-		.bind(limit)
+		.bind(JSON.stringify(waiting), limit)
 		.all<{ rawName: string }>();
 
 	return results.map((row) => row.rawName);
@@ -169,11 +175,16 @@ export async function merchantsToAsk(
  */
 export async function saveAskedNames(
 	db: D1Database,
-	answers: { rawName: string; names: string[] }[],
+	answers: { rawName: string; names: string[]; lineText?: string }[],
 	failed: string[],
+	guard: LineGuard = { sql: "1", binds: [] },
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
-	const firstByText = new Map<string, { rawName: string; names: string[] }>();
+
+	const firstByText = new Map<
+		string,
+		{ rawName: string; names: string[]; lineText?: string }
+	>();
 
 	// The key is kept exactly as the bank text is (a padded text has its own row, as merchantsToAsk asked it): only the names
 	// are trimmed. An empty key is refused. Padded bank-sent names are skipped in pendingNameStatements, where a name must
@@ -182,13 +193,15 @@ export async function saveAskedNames(
 		if (answer.rawName !== "" && !firstByText.has(answer.rawName))
 			firstByText.set(answer.rawName, answer);
 
-	const kept = [...firstByText.values()].map(({ rawName, names }) => {
+	const kept = [...firstByText.values()].map(({ rawName, names, lineText }) => {
 		const usable = normaliseNames(names);
 
 		return {
 			rawName,
 			names: usable,
 			status: usable.length > 0 ? "pending" : "none",
+			// The lookup text the answer was asked with, or null: the guard checks it at the save (names.ts nameLineGuard).
+			lineText: lineText ?? null,
 		};
 	});
 
@@ -200,12 +213,12 @@ export async function saveAskedNames(
 					`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
 					 SELECT json_extract(value, '$.rawName'), json_extract(value, '$.status'),
 						CASE WHEN json_extract(value, '$.status') = 'pending' THEN 0 ELSE 1 END
-					 FROM json_each(?) WHERE 1
+					 FROM json_each(?) AS a WHERE ${guard.sql}
 					 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = excluded.suggestion_status, names_asked = excluded.names_asked
 					 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.names_asked = 0
 					 RETURNING raw_name, suggestion_status`,
 				)
-				.bind(json),
+				.bind(json, ...guard.binds),
 		);
 		statements.push(
 			db
@@ -217,9 +230,10 @@ export async function saveAskedNames(
 					 JOIN json_each(a.value, '$.names') AS n
 					 WHERE m.display_name IS NULL AND m.suggestion_status = 'pending'
 					   AND NOT EXISTS (SELECT 1 FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name)
-					   AND trim(n.value, ${NAME_TRIM_SQL}) <> ''`,
+					   AND trim(n.value, ${NAME_TRIM_SQL}) <> ''
+						   AND ${guard.sql}`,
 				)
-				.bind(json),
+				.bind(json, ...guard.binds),
 		);
 	}
 
