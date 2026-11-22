@@ -106,18 +106,19 @@ async function namesOf(key: string): Promise<string[]> {
 	return results.map((row) => row.name);
 }
 
-beforeEach(async () => {
-	await db.prepare("DELETE FROM bill_payments").run();
-	await db.prepare("DELETE FROM transactions").run();
-	await db.prepare("DELETE FROM merchant_suggested_names").run();
-	await db.prepare("DELETE FROM merchants").run();
-	await db.prepare("DELETE FROM merchant_lookups").run();
-	await db.prepare("DELETE FROM merchant_name_failures").run();
-	await db.prepare("DELETE FROM merchant_lookup_texts").run();
-});
-
 describe("the names' line, through the name run", () => {
 	lookupRunSetup();
+
+	// After the demo reset (lookupRunSetup), so only this test's rows are asked about.
+	beforeEach(async () => {
+		await db.prepare("DELETE FROM bill_payments").run();
+		await db.prepare("DELETE FROM transactions").run();
+		await db.prepare("DELETE FROM merchant_suggested_names").run();
+		await db.prepare("DELETE FROM merchants").run();
+		await db.prepare("DELETE FROM merchant_lookups").run();
+		await db.prepare("DELETE FROM merchant_name_failures").run();
+		await db.prepare("DELETE FROM merchant_lookup_texts").run();
+	});
 
 	// 11. Truth table 1, rows L1 to L12: whether A waits, and whether its request carried the line. B, with no lookup row,
 	// is asked plain in every row (the control).
