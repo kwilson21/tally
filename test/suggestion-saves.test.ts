@@ -620,3 +620,95 @@ describe("a suggested name's guard", () => {
 		).toEqual({ name: "Zed Cafe", status: "rejected" });
 	});
 });
+
+// 16. The card guard (#987 part B): a line-backed card's version reads the kept answer, so a card drawn while it stood is
+// refused once the answer is no longer kept.
+describe("16. a line-backed card's guard", () => {
+	const lineRow = async () => {
+		const eatingOut = await categoryId("Eating Out");
+
+		const row = await db
+			.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, jev_category_id, category_confidence)
+				VALUES ((SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-03', 1800, 'SQ *HARBOR BAKERY', ?, 0.6)
+				RETURNING id`,
+			)
+			.bind(eatingOut)
+			.first<{ id: number }>();
+
+		const id = row?.id ?? 0;
+
+		await db
+			.prepare(
+				"INSERT INTO lookup_answers (transaction_id, lookup_text, kept, kept_category_id, kept_confidence) VALUES (?, 'HARBOR BAKERY', 1, ?, 0.6)",
+			)
+			.bind(id, eatingOut)
+			.run();
+
+		return { id, eatingOut };
+	};
+
+	const writeFor = (
+		kind: "category" | "filing",
+		id: number,
+		eatingOut: number,
+		version: string,
+	) =>
+		kind === "category"
+			? categoryMaybeStatements(db, {
+					transactionId: id,
+					categoryId: eatingOut,
+					today: TODAY,
+					who: WHO,
+					record: "yes",
+					confidence: 0.6,
+					expectedVersion: version,
+				})
+			: fileStatements(db, {
+					transactionId: id,
+					today: TODAY,
+					who: WHO,
+					create: null,
+					categoryId: eatingOut,
+					name: "Eating Out",
+					record: "yes",
+					confidence: 0.6,
+					expectedVersion: version,
+				});
+
+	const versionFor = async (
+		kind: "category" | "filing",
+		id: number,
+		eatingOut: number,
+	) =>
+		kind === "category"
+			? (await maybeFacts(db, "category", id, eatingOut)).version
+			: (await fileFacts(db, id)).version;
+
+	it.each(["category", "filing"] as const)(
+		"%s: refuses a save drawn while the line-backed guess stood, once it is no longer kept",
+		async (kind) => {
+			const { id, eatingOut } = await lineRow();
+			const version = await versionFor(kind, id, eatingOut);
+
+			await db
+				.prepare("UPDATE lookup_answers SET kept = 0 WHERE transaction_id = ?")
+				.bind(id)
+				.run();
+
+			expect(
+				await raised(writeFor(kind, id, eatingOut, version)),
+			).not.toBeNull();
+		},
+	);
+
+	it.each(["category", "filing"] as const)(
+		"%s: positive control, the same save is accepted while the guess is still kept",
+		async (kind) => {
+			const { id, eatingOut } = await lineRow();
+			const version = await versionFor(kind, id, eatingOut);
+
+			expect(await raised(writeFor(kind, id, eatingOut, version))).toBeNull();
+		},
+	);
+});

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { askJev, JEV_THRESHOLD, JEV_URL } from "../src/ai/categorize";
+import {
+	askJev,
+	askJevCategoryOnly,
+	JEV_THRESHOLD,
+	JEV_URL,
+	STORE_LOOKUP_SENTENCE,
+} from "../src/ai/categorize";
 import { NONE_FIT } from "../src/ai/decide";
 
 const input = {
@@ -623,5 +629,110 @@ describe("askJev", () => {
 
 	it("starts with a threshold of 0.80", () => {
 		expect(JEV_THRESHOLD).toBe(0.8);
+	});
+});
+
+// The second ask (spec §7, decision 225): the category question alone, with the store's line as a labelled fact.
+const LINE = "Grocery store chain";
+
+const lineInput = { ...input, storeLookup: LINE };
+
+const categoryReply = (choice: string, confidence = 0.9) =>
+	ok({ answers: { category: { type: "choice", choice, confidence } } });
+
+describe("askJevCategoryOnly", () => {
+	it("sends the category question alone, with the line as the state's last key and the sentence once after the instructions", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => categoryReply("Groceries"));
+		await askJevCategoryOnly(lineInput, categories, "k", fetchImpl);
+		const body = JSON.parse(String(calls[0]?.init.body));
+
+		expect(Object.keys(body.questions)).toEqual(["category"]);
+		expect(body.state.store_lookup).toBe(LINE);
+		expect(Object.keys(body.state).at(-1)).toBe("store_lookup");
+
+		const instructions = String(body.questions.category.instructions);
+
+		expect(instructions.endsWith(STORE_LOOKUP_SENTENCE)).toBe(true);
+		expect(instructions.split(STORE_LOOKUP_SENTENCE).length - 1).toBe(1);
+		expect(instructions).not.toContain(LINE);
+	});
+
+	it.each([
+		["a category alone", "Groceries", 0.9, true],
+		["None of these fit", NONE_FIT, 0.99, true],
+		["a label that was not offered", "Gas station", 0.9, false],
+		["a missing category", undefined, 0.9, false],
+		["a confidence above 1", "Groceries", 1.2, false],
+	])("reads the reply %s as ok %s", async (_name, choice, confidence, good) => {
+		const reply =
+			choice === undefined
+				? ok({ answers: {} })
+				: categoryReply(choice, confidence);
+
+		const { fetchImpl } = fakeFetch(() => reply);
+
+		const result = await askJevCategoryOnly(
+			lineInput,
+			categories,
+			"k",
+			fetchImpl,
+		);
+
+		expect(result.ok).toBe(good);
+	});
+
+	it("needs no flags: a reply with no transfer, reimbursement or income answer is ok", async () => {
+		const { fetchImpl } = fakeFetch(() => categoryReply("Eating Out", 0.85));
+
+		const result = await askJevCategoryOnly(
+			lineInput,
+			categories,
+			"k",
+			fetchImpl,
+		);
+
+		expect(result).toEqual({
+			ok: true,
+			category: { label: "Eating Out", confidence: 0.85 },
+		});
+	});
+});
+
+describe("rule 14: only the second ask carries the line", () => {
+	it.each([
+		["the plain ask", {}],
+		["the ask with details", { details: true }],
+		["the ask with a payee question", { payee: true }],
+	])("%s sends no store_lookup and no sentence", async (_name, options) => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(lineInput, categories, "k", fetchImpl, options);
+		const text = String(calls[0]?.init.body);
+
+		expect(text).not.toContain("store_lookup");
+		expect(text).not.toContain(STORE_LOOKUP_SENTENCE);
+		expect(text).not.toContain(LINE);
+	});
+
+	it("keeps the call sites to the second ask, in src/ only, and the line's key to categorize.ts", () => {
+		const sources = import.meta.glob<string>(["../src/**/*.ts"], {
+			query: "?raw",
+			import: "default",
+			eager: true,
+		});
+
+		const calling = Object.keys(sources).filter((path) =>
+			sources[path]?.includes("askJevCategoryOnly("),
+		);
+
+		const keyed = Object.keys(sources).filter((path) =>
+			/\bstore_lookup\b/.test(sources[path] ?? ""),
+		);
+
+		expect(
+			calling.map((path) => path.replace(/^.*\/src\//, "")).sort(),
+		).toEqual(["ai/categorize.ts", "lookup/second-ask.ts"]);
+		expect(keyed.map((path) => path.replace(/^.*\/src\//, ""))).toEqual([
+			"ai/categorize.ts",
+		]);
 	});
 });

@@ -224,6 +224,60 @@ export function withBankTextRules(
 	return out.sort((a, b) => a.cleanedText.localeCompare(b.cleanedText));
 }
 
+/** One ordered source snapshot: the TS decision must use exactly the data compared by a later SQL guard.
+ * Stays raw: shared by the loader and atomic second-ask claim/save, with no SQL copy of cleanBankText.
+ */
+const ANSWER_JSON =
+	"json_object('id', id, 'date', date, 'rawName', rawName, 'updatedAt', updatedAt, 'categoryId', categoryId, 'categoryName', categoryName, 'icon', icon, 'color', color)";
+
+const FORGOTTEN_JSON =
+	"json_object('cleanedText', cleaned_text, 'forgottenAt', forgotten_at)";
+
+const RULE_JSON =
+	"json_object('cleanedText', b.cleaned_text, 'categoryId', b.category_id, 'categoryName', c.name, 'icon', c.icon, 'color', c.color)";
+
+const RULE_SOURCES =
+	"bank_text_rules b JOIN categories c ON c.id = b.category_id WHERE c.archived = 0";
+
+// Count encoded bytes before aggregation: SQLite CASE evaluates only its selected branch.
+// The spare 12KiB covers object/array syntax; no source evidence is ever truncated.
+export const LEARNED_SOURCES_SQL = `(CASE WHEN
+ (SELECT COALESCE(SUM(length(CAST(${ANSWER_JSON} AS BLOB)) + 1), 0) FROM (${ANSWERS_SQL})) +
+ (SELECT COALESCE(SUM(length(CAST(${FORGOTTEN_JSON} AS BLOB)) + 1), 0) FROM forgotten_texts) +
+ (SELECT COALESCE(SUM(length(CAST(${RULE_JSON} AS BLOB)) + 1), 0) FROM ${RULE_SOURCES}) > 500 * 1024
+ THEN NULL ELSE json_object(
+ 'answers', (SELECT json_group_array(${ANSWER_JSON} ORDER BY date DESC, id DESC) FROM (${ANSWERS_SQL})),
+ 'forgotten', (SELECT json_group_array(${FORGOTTEN_JSON} ORDER BY cleaned_text) FROM forgotten_texts),
+ 'rules', (SELECT json_group_array(${RULE_JSON} ORDER BY b.cleaned_text) FROM ${RULE_SOURCES})) END)`;
+
+/** The learned lines and their exact source evidence, read in one database snapshot. Never log or persist source. */
+export async function loadLearnedLineSnapshot(
+	db: D1Database,
+): Promise<{ lines: LearnedLine[]; source: string | null }> {
+	const row = await db
+		.prepare(`SELECT ${LEARNED_SOURCES_SQL} AS source`)
+		.first<{ source: string | null }>();
+
+	if (!row) throw new Error("learned-line snapshot unavailable");
+
+	if (row.source === null) return { lines: [], source: null };
+
+	// SAFETY: this JSON is produced only by the fixed SQL projections above from the typed application schema.
+	const data = JSON.parse(row.source) as {
+		answers: AnswerRow[];
+		forgotten: Forgotten[];
+		rules: BankTextRule[];
+	};
+
+	return {
+		source: row.source,
+		lines: withBankTextRules(
+			learnedLines(data.answers, data.forgotten),
+			data.rules,
+		),
+	};
+}
+
 /** The learned lines as the database has them now, with the person's rules on top (decision 163). */
 export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 	const { results: rows } = await db.prepare(ANSWERS_SQL).all<AnswerRow>();

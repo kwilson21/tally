@@ -18,6 +18,7 @@ export const EXPORT_COLUMNS = {
 	// The store lookup's payee mark, one row per transaction Jev was asked about (migration 0075, spec §5).
 	lookup_cleared: "transaction_id, input_mark, cleared",
 	// The store lookup's answer, one row per transaction Jev was asked about with the line (migration 0078, spec §5).
+	lookup_second_claims: "transaction_id, turn_id",
 	lookup_answers:
 		"transaction_id, lookup_text, kept, kept_category_id, kept_confidence",
 	merchant_name_failures: "raw_name, failed_at",
