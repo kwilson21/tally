@@ -30,6 +30,24 @@ const trigger = (res: Response) =>
 		announce?: string;
 	};
 
+// The store's name (its merchants row) differs from the one transaction's own name (This one only), so a toast that
+// names the transaction instead of its store is caught.
+const STORE_NAME = "Lupita's Taqueria";
+const OWN_NAME = "Team lunch";
+const STORE_SENTENCE = `Tally won't use the web for ${STORE_NAME} again.`;
+
+async function nameStoreAndTransaction(id: number) {
+	await env.DB.batch([
+		env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES (?, ?)",
+		).bind(K1, STORE_NAME),
+		env.DB.prepare("UPDATE transactions SET own_name = ? WHERE id = ?").bind(
+			OWN_NAME,
+			id,
+		),
+	]);
+}
+
 const lookupOf = (text: string) =>
 	env.DB.prepare(
 		"SELECT status, line FROM merchant_lookups WHERE lookup_text = ?",
@@ -54,6 +72,21 @@ describe("Don't use this on the review card (#988)", () => {
 		expect(trigger(res).announce).toBe(trigger(res).toast?.message);
 		expect(html).not.toContain("From the web:");
 		expect(await lookupOf(TEXT)).toEqual({ status: "skipped", line: null });
+	});
+
+	it("toasts the store's name, not the transaction's own name", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await nameStoreAndTransaction(id);
+
+		const { res } = await post(PATH, {
+			id: `category-${id}`,
+			answer: "dont_use",
+		});
+
+		expect(trigger(res).toast?.message).toBe(STORE_SENTENCE);
+		expect(trigger(res).announce).toBe(STORE_SENTENCE);
+		expect(trigger(res).toast?.message).not.toContain(OWN_NAME);
+		expect(trigger(res).announce).not.toContain(OWN_NAME);
 	});
 
 	it("without HX-Request redirects 303 to the review address", async () => {
@@ -137,6 +170,18 @@ describe("Don't use this in the edit panel (#988)", () => {
 		expect(trigger(res).toast?.type).toBe("success");
 		expect(trigger(res).announce).toBe(trigger(res).toast?.message);
 		expect(await lookupOf(TEXT)).toEqual({ status: "skipped", line: null });
+	});
+
+	it("toasts and announces the store's name, not the transaction's own name", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await nameStoreAndTransaction(id);
+
+		const { res } = await post(route(id), { back: "/transactions" });
+
+		expect(trigger(res).toast?.message).toBe(STORE_SENTENCE);
+		expect(trigger(res).announce).toBe(STORE_SENTENCE);
+		expect(trigger(res).toast?.message).not.toContain(OWN_NAME);
+		expect(trigger(res).announce).not.toContain(OWN_NAME);
 	});
 
 	it("404 for an unknown id", async () => {
