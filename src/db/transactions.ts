@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
+import * as Schema from "effect/Schema";
 import type { JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
@@ -96,6 +97,7 @@ import {
 	transactions,
 } from "./schema";
 import { withTurnGuard } from "./sorting-turn";
+import { parseStoredWith } from "./stored-shape";
 import { categoryMaybeSql, lineGuessSql } from "./suggestions-queue";
 
 /** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
@@ -941,6 +943,34 @@ export async function refundPurchases(
 	return results;
 }
 
+/** The rows the SELECT's json_group_array of json_object writes: name, date and part (0 or 1). */
+const OwnedNamesSchema = Schema.mutable(
+	Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			date: Schema.String,
+			part: Schema.Number,
+		}),
+	),
+);
+
+/**
+ * The other own-named transactions from a merchant, newest first, from the SELECT's json_group_array of json_object rows
+ * (name, date and part, 0 or 1). Read with Effect Schema (#1180). The SQL always writes that shape, so text that is not a
+ * list of such rows is a bug to show: JSON that does not parse throws the SyntaxError it always threw, and any other shape
+ * throws a plain Error with a fixed sentence.
+ */
+export function ownedNamesOf(ownedJson: string): OwnedRow[] {
+	const rows = parseStoredWith(OwnedNamesSchema, ownedJson);
+
+	if (rows === null)
+		throw new Error("the owned names are not a list of name, date and part");
+
+	return rows
+		.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
+		.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
 /** One transaction with what the edit panel shows: account, merchant name, and category source. */
 export async function getTransaction(
 	db: D1Database,
@@ -1076,11 +1106,7 @@ export async function getTransaction(
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	const tidied = tidyName(r.rawName);
 
-	const owned =
-		// SAFETY: ownedJson is json_group_array of json_object rows with name, date and part (0 or 1), as the SELECT builds it.
-		(JSON.parse(ownedJson) as { name: string; date: string; part: number }[])
-			.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
-			.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+	const owned = ownedNamesOf(ownedJson);
 
 	return {
 		...row,
