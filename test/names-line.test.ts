@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTRUCTIONS } from "../src/ai/suggest-name";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { saveAskedNames } from "../src/db/merchant-names";
+import { nameLineGuard } from "../src/lookup/names";
 import {
 	suggestMerchantNames,
 	suggestNightlyNames,
@@ -481,6 +483,45 @@ describe("the names' line, through the name run", () => {
 		expect(await statusOf(A)).toBe("pending");
 	});
 
+	// 12b. The names' statement carries the guard too: a row that is already pending with no names is written by its names
+	// statement alone (the rows' upsert cannot touch a pending row), so only that statement's guard can refuse the names.
+	it.each([
+		{
+			name: "the line stands (control)",
+			change: async () => {},
+			saved: true,
+		},
+		{
+			name: "status skipped, line NULL",
+			change: async () => {
+				await db
+					.prepare(
+						"UPDATE merchant_lookups SET status = 'skipped', line = NULL WHERE lookup_text = ?",
+					)
+					.bind(textOf(A))
+					.run();
+			},
+			saved: false,
+		},
+	])(
+		"12b. A pending with no names, a line answer: $name",
+		async ({ change, saved }) => {
+			await lookupAt(textOf(A), "found", LINE);
+			await mapText(A);
+			await seedMerchant(db, { key: A, status: "pending" });
+			await change();
+
+			await saveAskedNames(
+				db,
+				[{ rawName: A, names: ["Tidy Name"], lineText: textOf(A) }],
+				[],
+				nameLineGuard(),
+			);
+
+			expect(await namesOf(A)).toEqual(saved ? ["Tidy Name"] : []);
+		},
+	);
+
 	// 13. The line is read before each call, not once for the run (spec §7:248).
 	it.each([
 		{
@@ -493,6 +534,7 @@ describe("the names' line, through the name run", () => {
 					.bind(textOf(C))
 					.run();
 			},
+			aSaved: true,
 		},
 		{
 			name: "C's key is made private",
@@ -504,16 +546,19 @@ describe("the names' line, through the name run", () => {
 					.bind(C)
 					.run();
 			},
+			aSaved: true,
 		},
 		{
 			name: "the lookup switch is turned off",
 			change: async () => {
 				await saveAiSwitches(db, { lookupStores: false });
 			},
+			// A's line stood when its answer was read, but the switch is off at the save, so the answer is dropped.
+			aSaved: false,
 		},
 	])(
 		"13. $name during A's call: C's request carries no line",
-		async ({ change }) => {
+		async ({ change, aSaved }) => {
 			await lookupAt(textOf(A), "found", LINE);
 			await mapText(A);
 			await lookupAt(textOf(C), "found", LINE);
@@ -531,6 +576,15 @@ describe("the names' line, through the name run", () => {
 			expect(ai.calls.find((call) => call.bank === A)?.line).toBe(LINE);
 			expect(ai.calls.find((call) => call.bank === C)?.line ?? null).toBeNull();
 			expect(await namesOf(C)).toEqual(["Tidy Name"]);
+
+			// A's own answer: saved pending with its name, or dropped with no row when the line dropped at the save.
+			if (aSaved) {
+				expect(await statusOf(A)).toBe("pending");
+				expect(await namesOf(A)).toEqual(["Tidy Name"]);
+			} else {
+				expect(await statusOf(A)).toBeNull();
+				expect(await namesOf(A)).toEqual([]);
+			}
 		},
 	);
 
