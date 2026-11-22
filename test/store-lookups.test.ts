@@ -5,6 +5,7 @@ import { lookupCallsKey } from "../src/db/lookup-calls";
 import { dontUse } from "../src/db/lookup-saves";
 import {
 	claimStatements,
+	dontUseStatements,
 	failStatement,
 	holdsClaim,
 	leaseCutoff,
@@ -650,6 +651,36 @@ describe("the skip table", () => {
 		const texts = Array.from({ length: 1200 }, (_, i) => `text ${i}`);
 
 		expect(skipStatements(db, texts, NOW_MS)).toHaveLength(3);
+	});
+});
+
+describe("dontUseStatements alone (#988)", () => {
+	// The statements on their own, not through dontUse: only a found row changes, and no row is made.
+	const tableCount = async () =>
+		(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM merchant_lookups")
+				.first<{ n: number }>()
+		)?.n;
+
+	for (const status of ["pending", "nothing_found", "gave_up"]) {
+		it(`a ${status} row is unchanged by the batch`, async () => {
+			await seed({ text: "kept-text", status, line: null });
+			const before = await rowOf("kept-text");
+
+			await db.batch(dontUseStatements(db, "kept-text"));
+
+			expect(await rowOf("kept-text")).toEqual(before);
+		});
+	}
+
+	it("a missing row stays missing and none is inserted", async () => {
+		const before = await tableCount();
+
+		await db.batch(dontUseStatements(db, "absent-text"));
+
+		expect(await rowOf("absent-text")).toBeNull();
+		expect(await tableCount()).toBe(before);
 	});
 });
 
