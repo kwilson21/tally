@@ -10,6 +10,12 @@ import {
 	saveNoteAttempts,
 	transactionsNeedingNoteGuess,
 } from "./db/transactions";
+import {
+	linedNames,
+	nameLineGuard,
+	readLineForName,
+	waitingLookupTexts,
+} from "./lookup/names";
 import { type Deadline, pastDeadline } from "./run-budget";
 import { MAX_FAILURES_IN_A_ROW } from "./sort-groups";
 import { usableSuggestedNames } from "./transactions/name-suggestions";
@@ -31,6 +37,9 @@ type NamesEnv = {
 	DB: D1Database;
 	/** Workers AI. Production and the demo have it (cloudflare.config.ts); local development and tests don't, so no name is asked for there. */
 	AI?: Ai;
+	/** The store lookup's gate (src/lookup/gate.ts): the demo's cap, and the Tavily key a line needs. */
+	DEMO?: string;
+	TAVILY_API_KEY?: string;
 };
 
 /**
@@ -164,13 +173,23 @@ export async function suggestMerchantNames(
 
 	if (pastDeadline(time)) return done;
 
-	if (!(await readAiSwitches(env.DB)).names) return done;
+	const switches = await readAiSwitches(env.DB);
+
+	if (!switches.names) return done;
 
 	let failuresInARow = 0;
-	const rawNames = await merchantsToAsk(env.DB, limit);
+	// A store whose lookup is still under way waits (spec §7, "The wait"); a name with a standing line carries it (decision 216).
+	const rawNames = await merchantsToAsk(
+		env.DB,
+		limit,
+		await waitingLookupTexts(env, env.DB, switches),
+	);
+	const lined = await linedNames(env, env.DB, switches, rawNames);
+	const guard = lined.size > 0 ? nameLineGuard() : undefined;
 
 	for (let i = 0; i < rawNames.length; i += SWITCH_CHECK_BATCH) {
-		const answers: { rawName: string; names: string[] }[] = [];
+		const answers: { rawName: string; names: string[]; lineText?: string }[] =
+			[];
 		const failed: string[] = [];
 
 		for (const rawName of rawNames.slice(i, i + SWITCH_CHECK_BATCH)) {
@@ -180,7 +199,12 @@ export async function suggestMerchantNames(
 			}
 
 			done.asked += 1;
-			const result = await suggestNames(ai, rawName);
+			const text = lined.get(rawName);
+			// Read immediately before each call (spec §7:248), not once for the run: the spec requires it, which is why this read
+			// sits in the loop despite decision 209.
+			const line =
+				text === undefined ? null : await readLineForName(env.DB, text);
+			const result = await suggestNames(ai, rawName, line);
 
 			if (!result.ok) {
 				// Recorded before the stop below, so the failure that ends the run is in this batch's write too.
@@ -192,14 +216,18 @@ export async function suggestMerchantNames(
 			}
 
 			failuresInARow = 0;
-			answers.push({ rawName, names: result.names });
+			answers.push({
+				rawName,
+				names: result.names,
+				...(line === null || text === undefined ? {} : { lineText: text }),
+			});
 		}
 
 		// One read per batch of five keeps the switch boundary (a switch turned off mid-run stops it)
 		// without a D1 read for every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
-		// A batch's answers and failed calls are saved in one D1 batch.
-		done.suggested += await saveAskedNames(env.DB, answers, failed);
+		// A batch's answers and failed calls are saved in one D1 batch; an answer asked with a line lands only while it stands.
+		done.suggested += await saveAskedNames(env.DB, answers, failed, guard);
 
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
@@ -233,7 +261,17 @@ export async function suggestNightlyNames(
 async function namesWaiting(env: NamesEnv): Promise<boolean> {
 	if (!env.AI) return false;
 
-	if (!(await readAiSwitches(env.DB)).names) return false;
+	const switches = await readAiSwitches(env.DB);
 
-	return (await merchantsToAsk(env.DB, 1)).length > 0;
+	if (!switches.names) return false;
+
+	return (
+		(
+			await merchantsToAsk(
+				env.DB,
+				1,
+				await waitingLookupTexts(env, env.DB, switches),
+			)
+		).length > 0
+	);
 }

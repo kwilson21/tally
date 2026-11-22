@@ -21,6 +21,7 @@ import {
 } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
 import { KEPT_NAME_LOG_SQL } from "./ai-log";
+import type { LineGuard } from "../lookup/line";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { Database, runWith } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
@@ -174,11 +175,15 @@ export async function merchantsToAsk(
  */
 export async function saveAskedNames(
 	db: D1Database,
-	answers: { rawName: string; names: string[] }[],
+	answers: { rawName: string; names: string[]; lineText?: string }[],
 	failed: string[],
+	guard: LineGuard = { sql: "1", binds: [] },
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
-	const firstByText = new Map<string, { rawName: string; names: string[] }>();
+	const firstByText = new Map<
+		string,
+		{ rawName: string; names: string[]; lineText?: string }
+	>();
 
 	// The key is kept exactly as the bank text is (a padded text has its own row, as merchantsToAsk asked it): only the names
 	// are trimmed. An empty key is refused. Padded bank-sent names are skipped in pendingNameStatements, where a name must
@@ -187,13 +192,15 @@ export async function saveAskedNames(
 		if (answer.rawName !== "" && !firstByText.has(answer.rawName))
 			firstByText.set(answer.rawName, answer);
 
-	const kept = [...firstByText.values()].map(({ rawName, names }) => {
+	const kept = [...firstByText.values()].map(({ rawName, names, lineText }) => {
 		const usable = normaliseNames(names);
 
 		return {
 			rawName,
 			names: usable,
 			status: usable.length > 0 ? "pending" : "none",
+			// The lookup text the answer was asked with, or null: the guard checks it at the save (names.ts nameLineGuard).
+			lineText: lineText ?? null,
 		};
 	});
 
@@ -205,12 +212,12 @@ export async function saveAskedNames(
 					`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
 					 SELECT json_extract(value, '$.rawName'), json_extract(value, '$.status'),
 						CASE WHEN json_extract(value, '$.status') = 'pending' THEN 0 ELSE 1 END
-					 FROM json_each(?) WHERE 1
+					 FROM json_each(?) AS a WHERE ${guard.sql}
 					 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = excluded.suggestion_status, names_asked = excluded.names_asked
 					 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.names_asked = 0
 					 RETURNING raw_name, suggestion_status`,
 				)
-				.bind(json),
+				.bind(json, ...guard.binds),
 		);
 		statements.push(
 			db
@@ -222,9 +229,10 @@ export async function saveAskedNames(
 					 JOIN json_each(a.value, '$.names') AS n
 					 WHERE m.display_name IS NULL AND m.suggestion_status = 'pending'
 					   AND NOT EXISTS (SELECT 1 FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name)
-					   AND trim(n.value, ${NAME_TRIM_SQL}) <> ''`,
+					   AND trim(n.value, ${NAME_TRIM_SQL}) <> ''
+						   AND ${guard.sql}`,
 				)
-				.bind(json),
+				.bind(json, ...guard.binds),
 		);
 	}
 
