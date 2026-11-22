@@ -73,7 +73,7 @@ export function readStored<T>(text: string, guard: Guard<T>): T | null {
  * The stored text as the Schema's type, or null when it is not JSON or is not shaped like it: the Schema read beside the
  * guards above (decision 206). It checks the shape and gives the value as stored, so a key the Schema does not name stays
  * on it, as with readStored. Its answers match readStored's for the guard of the same shape (test/stored-json-read.test.ts).
- * resort-run.ts still reads through the guards: its guards move here when #963 lets that file change.
+ * resort-run.ts reads through it (#1150); the guards above are now used only by their own tests.
  */
 export function readStoredWith<S extends Schema.Constraint>(
 	schema: S,
