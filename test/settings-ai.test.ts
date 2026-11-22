@@ -178,13 +178,16 @@ describe("GET /settings: the AI suggestions group", () => {
 	});
 
 	it("says so plainly when every switch is off", async () => {
-		await saveAiSwitches(env.DB, allOff);
+		await saveAiSwitches(env.DB, { ...allOff, lookupStores: false });
 		const { html } = await get("/settings/ai");
-		expect(
-			inputs(html)
-				.filter((i) => i.name !== "lookupStores")
-				.every((i) => !i.on),
-		).toBe(true);
+		expect(inputs(html)).toEqual([
+			{ name: "names", on: false },
+			{ name: "details", on: false },
+			{ name: "categories", on: false },
+			{ name: "income", on: false },
+			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: false },
+		]);
 		expect(textOf(group(html))).toContain(
 			"Tally sorts by your rules and choices only.",
 		);
