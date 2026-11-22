@@ -70,14 +70,15 @@ const ODD: [string, Field][] = [
 	["infinity", "__INFINITY__"],
 	["negative zero", "__NEGATIVE_ZERO__"],
 	["huge integer", "__HUGE__"],
-	["above 2^53", 9007199254740993],
+	["above 2^53", "__ABOVE_2_53__"],
 ];
 
 const encode = (value: Fields) =>
 	JSON.stringify(value)
 		.replaceAll('"__INFINITY__"', "1e999")
 		.replaceAll('"__NEGATIVE_ZERO__"', "-0")
-		.replaceAll('"__HUGE__"', "1e300");
+		.replaceAll('"__HUGE__"', "1e300")
+		.replaceAll('"__ABOVE_2_53__"', "9007199254740993");
 
 const withKey = (base: Fields, key: string, value: Field) => ({
 	...base,
