@@ -229,6 +229,22 @@ export function dropLineStatements(
 }
 
 /**
+ * "Don't use this" (spec §7, #988): the machine's DONT_USE, guarded by the stored state, then the line drop the privacy skip uses.
+ * No version guard: every interleaving ends in the same state, since `skipped` is final and the drop is idempotent.
+ */
+export const dontUseStatements = (
+	db: D1Database,
+	text: string,
+): D1PreparedStatement[] => [
+	db
+		.prepare(
+			"UPDATE merchant_lookups SET status = 'skipped', line = NULL, claimed_by = NULL, claimed_at = NULL WHERE lookup_text = ? AND status = 'found'",
+		)
+		.bind(text),
+	...dropLineStatements(db, [text]),
+];
+
+/**
  * Saves a search's line, or "nothing found" (`line` null), for the run that holds the claim. It lands only on that
  * run's pending claim, only while every switch is still on, and only while the text is not private (a text that turned
  * private since the save's read stops the save, spec §7 "when its line is saved"); the claim is then let go.
