@@ -751,14 +751,14 @@ describe("GET /design-system in the demo", () => {
 			(m) => m[0],
 		);
 
-		// Three live ones, and two greyed out (P86 A): one saved On and one saved Off.
-		expect(inputs).toHaveLength(6);
+		// Five live ones, and three greyed out (P86 A, #988): one saved On and one saved Off, and the lookup row.
+		expect(inputs).toHaveLength(8);
 		const on = (input: string) => /\schecked(\s|>|=)/.test(input);
 		const greyed = (input: string) => /\sdisabled(\s|>|=)/.test(input);
-		expect(inputs.filter((i) => !greyed(i))).toHaveLength(4);
-		expect(inputs.filter(greyed)).toHaveLength(2);
-		expect(inputs.filter((i) => greyed(i) && on(i))).toHaveLength(1);
-		expect(inputs.filter(on)).toHaveLength(4);
+		expect(inputs.filter((i) => !greyed(i))).toHaveLength(5);
+		expect(inputs.filter(greyed)).toHaveLength(3);
+		expect(inputs.filter((i) => greyed(i) && on(i))).toHaveLength(2);
+		expect(inputs.filter(on)).toHaveLength(6);
 		expect(inputs.filter((i) => !on(i))).toHaveLength(2);
 		// The real checkboxes are the only controls here: nothing posts from the catalog.
 		expect(section).not.toContain("<form");
