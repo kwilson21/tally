@@ -125,6 +125,7 @@ import { LearnedPage } from "../views/learned-page";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
 import { LinkBankButton, LinkBankError } from "../views/link-bank";
+import { LookupLine } from "../views/lookup-line";
 import { MachineDiagram } from "../views/machine-diagram";
 import { MachineTable } from "../views/machine-table";
 import {
@@ -193,7 +194,6 @@ import {
 	NewCategoryCard,
 	OrganizeNewCategoryCard,
 } from "../views/suggestion-card";
-import { LookupLine } from "../views/lookup-line";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";

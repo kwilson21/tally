@@ -233,46 +233,89 @@ step("phone shell controls stay clear of simulated safe areas");
 
 // #988: "Don't use this" in the edit panel drops the line, keeps the panel open, and leaves focus on the category.
 await page.setViewportSize({ width: 390, height: 844 });
+
 await goto(`${BASE}/transactions/901`, { waitUntil: "networkidle" });
-await page.locator("#sheet").getByText("From the web: Independent hardware store").waitFor();
+
+await page
+	.locator("#sheet")
+	.getByText("From the web: Independent hardware store")
+	.waitFor();
 
 const panelPosts = [];
+
 const recordPanelPost = (request) => {
-	if (request.method() === "POST") panelPosts.push(new URL(request.url()).pathname);
+	if (request.method() === "POST")
+		panelPosts.push(new URL(request.url()).pathname);
 };
+
 page.on("request", recordPanelPost);
-await page.getByRole("button", { name: "Don't use this for Maple Street Hardware" }).click();
+
+await page
+	.getByRole("button", { name: "Don't use this for Maple Street Hardware" })
+	.click();
+
 const panelMessage = "Tally won't use the web for Maple Street Hardware again.";
+
 await page.locator("#toasts").getByText(panelMessage).waitFor();
+
 page.off("request", recordPanelPost);
 
 assert.deepEqual(panelPosts, ["/transactions/901/lookup-line/dont-use"]);
+
 assert.equal(await page.locator("#announcer").textContent(), panelMessage);
-assert.equal(await page.locator("#edit-category").getByText("From the web").count(), 0);
-assert.equal(await page.locator("#edit-category").getByText("Tally's guess").count(), 0);
+
+assert.equal(
+	await page.locator("#edit-category").getByText("From the web").count(),
+	0,
+);
+
+assert.equal(
+	await page.locator("#edit-category").getByText("Tally's guess").count(),
+	0,
+);
+
 assert.equal(await page.locator('[role="dialog"]').isVisible(), true);
-assert.equal(await page.evaluate(() => document.activeElement?.id), "edit-category");
+
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"edit-category",
+);
+
 await page.getByRole("link", { name: "Cancel" }).click();
 
-step("Don't use this in the edit panel drops the line and keeps the panel open");
+step(
+	"Don't use this in the edit panel drops the line and keeps the panel open",
+);
 
 // #988: "Don't use this" on the review card drops the line and moves on to the next question.
 await goto(`${BASE}/settings/suggestions`, { waitUntil: "networkidle" });
+
 await page.getByText("From the web: Coffee shop in Arlington, VA").waitFor();
 
 await page.getByRole("link", { name: "Why?" }).first().focus();
+
 await page.keyboard.press("Tab");
+
 assert.equal(
 	await page.evaluate(() => document.activeElement?.textContent?.trim()),
 	"Don't use this",
 );
+
 await page.keyboard.press("Enter");
 
 const cardMessage = "Tally won't use the web for La Coop again.";
+
 await page.locator("#toasts").getByText(cardMessage).waitFor();
+
 assert.equal(await page.locator("#announcer").textContent(), cardMessage);
+
 assert.equal(await page.getByText("From the web").count(), 0);
-assert.equal(await page.evaluate(() => document.activeElement?.id), "suggestion-title");
+
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"suggestion-title",
+);
+
 await page.getByRole("button", { name: /Create Pet Care/ }).waitFor();
 
 step("Don't use this on the card drops the line and moves on");

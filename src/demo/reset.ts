@@ -421,49 +421,51 @@ export async function resetDemo(
 		// lookup text, never typed; the confidences are one JS number, since the answer compares them for equality.
 		const lookupMonth = monthOffset(today, 2);
 
-		const lineStatements = SEED_LINE_GUESSES.flatMap((g) => {
-			const lookupText = lookupTextOf(g.rawName);
+		const lineStatements: BatchItem<"sqlite">[] = SEED_LINE_GUESSES.flatMap(
+			(g): BatchItem<"sqlite">[] => {
+				const lookupText = lookupTextOf(g.rawName);
 
-			return [
-				orm.insert(merchants).values({
-					rawName: g.rawName,
-					displayName: g.displayName,
-					notABill: 1,
-				}),
-				orm.insert(merchantLookups).values({
-					lookupText,
-					status: "found",
-					line: g.line,
-					attempts: 0,
-				}),
-				orm
-					.insert(merchantLookupTexts)
-					.values({ merchantKey: g.rawName, lookupText, isPrivate: 0 }),
-				orm.insert(transactions).values({
-					id: g.id,
-					accountId: 3,
-					date: `${lookupMonth}-${g.day}`,
-					amountCents: g.cents,
-					rawName: g.rawName,
-					plaidCategory: g.plaidCategory,
-					categoryConfidence: g.confidence,
-					jevCategoryId: g.categoryId,
-					updatedBy: "demo",
-				}),
-				orm.insert(lookupAnswers).values({
-					transactionId: g.id,
-					lookupText,
-					kept: 1,
-					keptCategoryId: g.categoryId,
-					keptConfidence: g.confidence,
-				}),
-			];
-		});
+				return [
+					orm.insert(merchants).values({
+						rawName: g.rawName,
+						displayName: g.displayName,
+						notABill: 1,
+					}),
+					orm.insert(merchantLookups).values({
+						lookupText,
+						status: "found",
+						line: g.line,
+						attempts: 0,
+					}),
+					orm
+						.insert(merchantLookupTexts)
+						.values({ merchantKey: g.rawName, lookupText, isPrivate: 0 }),
+					orm.insert(transactions).values({
+						id: g.id,
+						accountId: 3,
+						date: `${lookupMonth}-${g.day}`,
+						amountCents: g.cents,
+						rawName: g.rawName,
+						plaidCategory: g.plaidCategory,
+						categoryConfidence: g.confidence,
+						jevCategoryId: g.categoryId,
+						updatedBy: "demo",
+					}),
+					orm.insert(lookupAnswers).values({
+						transactionId: g.id,
+						lookupText,
+						kept: 1,
+						keptCategoryId: g.categoryId,
+						keptConfidence: g.confidence,
+					}),
+				];
+			},
+		);
 
 		const storedKey = seedMerchantKey(SEED_STORED_LOOKUP.rawName);
 		const storedText = lookupTextOf(storedKey);
 
-		const writes = [
+		const writes: BatchItem<"sqlite">[] = [
 			...lineStatements,
 			orm.insert(merchantLookups).values({
 				lookupText: storedText,

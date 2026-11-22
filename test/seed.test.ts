@@ -1,9 +1,12 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { cleanLine } from "../src/ai/lookup-store";
 import { summarizeMonth } from "../src/budget";
 import { daysBefore } from "../src/dates";
 import { merchantKeySql } from "../src/db/merchant-key";
 import { loadMonth } from "../src/db/month";
+import { suggestionQueue } from "../src/db/suggestions-queue";
+import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import {
 	buildSeed,
@@ -12,9 +15,6 @@ import {
 	SEED_LINE_GUESSES,
 	seedMerchantKey,
 } from "../src/demo/seed";
-import { cleanLine } from "../src/ai/lookup-store";
-import { suggestionQueue } from "../src/db/suggestions-queue";
-import { getTransaction } from "../src/db/transactions";
 import { lookupTextOf, privateTextReason } from "../src/lookup/lookup-text";
 import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
 import { merchantNames } from "./helpers/merchants";
@@ -712,6 +712,7 @@ describe("resetDemo's store lookups (#988)", () => {
 
 		for (const guess of SEED_LINE_GUESSES) {
 			const key = seedMerchantKey(guess.rawName);
+
 			const row = await env.DB.prepare(
 				"SELECT lookup_text AS lookupText, private AS isPrivate FROM merchant_lookup_texts WHERE merchant_key = ?",
 			)
@@ -729,6 +730,7 @@ describe("resetDemo's store lookups (#988)", () => {
 		for (const guess of SEED_LINE_GUESSES) {
 			expect(cleanLine(guess.line)).toBe(guess.line);
 		}
+
 		expect(SEED_LINE_GUESSES[1]?.line).toHaveLength(80);
 	});
 
@@ -770,11 +772,13 @@ describe("resetDemo's store lookups (#988)", () => {
 	it("runs twice to the same rows", async () => {
 		const options = { categoryExample: true, storeLookups: true };
 		await resetDemo(env.DB, "2026-10-05", options);
+
 		const first = await env.DB.prepare(
 			"SELECT lookup_text, status, line FROM merchant_lookups ORDER BY lookup_text",
 		).all();
 
 		await resetDemo(env.DB, "2026-10-05", options);
+
 		const second = await env.DB.prepare(
 			"SELECT lookup_text, status, line FROM merchant_lookups ORDER BY lookup_text",
 		).all();
@@ -785,14 +789,22 @@ describe("resetDemo's store lookups (#988)", () => {
 	it("without the option no lookup table has a row, and ids 900 and 901 do not exist", async () => {
 		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
 
-		for (const table of ["merchant_lookups", "merchant_lookup_texts", "lookup_answers"]) {
-			const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>();
+		for (const table of [
+			"merchant_lookups",
+			"merchant_lookup_texts",
+			"lookup_answers",
+		]) {
+			const row = await env.DB.prepare(
+				`SELECT COUNT(*) AS n FROM ${table}`,
+			).first<{ n: number }>();
+
 			expect(row?.n).toBe(0);
 		}
 
 		const ids = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM transactions WHERE id IN (900, 901)",
 		).first<{ n: number }>();
+
 		expect(ids?.n).toBe(0);
 	});
 });

@@ -1059,7 +1059,9 @@ describe("GET /design-system in the demo", () => {
 		expect(section).toContain("wrap-anywhere");
 		expect(section).toContain("Tally&#39;s guess");
 		expect(section).toContain('value="dont_use"');
-		expect(section).toContain('formaction="/transactions/901/lookup-line/dont-use"');
+		expect(section).toContain(
+			'formaction="/transactions/901/lookup-line/dont-use"',
+		);
 		expect(section.match(/hx-ignore/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
 	});
 

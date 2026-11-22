@@ -97,6 +97,7 @@ describe("P146, the store lookup's line on a Maybe guess", () => {
 
 	it("draws option B with the real LookupLine, the same markup for the same store and line", async () => {
 		const block = await proposal();
+
 		const real = renderToString(
 			LookupLine({
 				line: "Coffee shop in Arlington, VA",
