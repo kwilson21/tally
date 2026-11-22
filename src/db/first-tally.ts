@@ -5,6 +5,8 @@
 
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import type { PayDeposit } from "../first-tally/pay";
 import type { Json } from "../json";
 import { householdSettings } from "./schema";
@@ -142,29 +144,61 @@ export async function readFirstTally(
 	return row ? parseFirstTally(row.value) : null;
 }
 
-/** A field read from a stored object, which is absent when the object has no such key. */
-type StoredJson = Json | undefined;
+// The record is read with Effect Schema (decision 206, #1181). Each Schema below says what one part must be; a part of the wrong
+// shape is left out and the rest is kept (see parseFirstTally), so no Schema here is run over the whole record.
 
-const isObject = (value: StoredJson): value is { [key: string]: Json } =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
+/** Whole cents, as the record keeps them (an integer of any size, as Number.isInteger says). */
+const Cents = Schema.Number.check(Schema.makeFilter(Number.isInteger));
 
-const isCents = (value: unknown): value is number => Number.isInteger(value);
-const isText = (value: unknown): value is string => typeof value === "string";
+const BudgetAnswerSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("skipped"), cents: Schema.Null }),
+	Schema.Struct({
+		kind: Schema.Literals(["suggested", "another"]),
+		cents: Cents,
+	}),
+]);
 
-const textList = (value: StoredJson): string[] | undefined =>
-	Array.isArray(value) ? value.filter(isText) : undefined;
+const PayDepositSchema = Schema.Struct({
+	date: Schema.String,
+	cents: Cents,
+});
 
-/** Keeps the entries of an object that `keep` accepts, each as `keep` returns it; the rest are left out. */
+/** What an object of stored entries is read from: any object that is not a list. */
+const StoredObject = Schema.Record(Schema.String, Schema.Unknown);
+
+const DayOrNull = Schema.NullOr(Schema.String);
+
+const BillsSchema = Schema.Struct({ kept: Cents, cents: Cents });
+
+const ReAskSchema = Schema.Struct({ bank: Schema.String });
+
+const SavingsSchema = Schema.Union([Schema.Literal("skipped"), Cents]);
+
+/** A part read as the Schema's type, or undefined when it is not shaped like it. */
+function partOf<S extends Schema.ConstraintDecoder<unknown>>(
+	schema: S,
+	value: Json | undefined,
+): S["Type"] | undefined {
+	const read = Schema.decodeUnknownResult(schema)(value);
+
+	return Result.isSuccess(read) ? read.success : undefined;
+}
+
+/** True for an object of stored entries: not null, not a number or text, and not a list. */
+const isObject = (value: Json | undefined): value is { [key: string]: Json } =>
+	Schema.is(StoredObject)(value) && !Array.isArray(value);
+
+/** Keeps the entries of an object that `read` accepts, each as `read` returns it; the rest are left out. */
 function pickEntries<T>(
-	value: StoredJson,
-	keep: (entry: StoredJson) => T | undefined,
+	value: Json | undefined,
+	read: (entry: Json | undefined) => T | undefined,
 ) {
 	const kept = {};
 
 	if (!isObject(value)) return kept;
 
 	for (const [key, entry] of Object.entries(value)) {
-		const result = keep(entry);
+		const result = read(entry);
 
 		// defineProperty, not assignment: a key named __proto__ (a merchant's raw name can be) would set the prototype.
 		if (result !== undefined)
@@ -179,34 +213,26 @@ function pickEntries<T>(
 	return kept;
 }
 
-function budgetAnswer(entry: StoredJson): BudgetAnswer | undefined {
+/** A list of stored texts with whatever is not text left out, or undefined when the part is not a list. */
+const textList = (value: Json | undefined): string[] | undefined =>
+	Array.isArray(value) ? value.filter(Schema.is(Schema.String)) : undefined;
+
+/** The deposits one answer covered: the entries that are deposits, or undefined when the part is not an object. */
+function payDeposits(value: Json | undefined): PayDeposits | undefined {
+	return isObject(value)
+		? pickEntries(value, (deposit) => partOf(PayDepositSchema, deposit))
+		: undefined;
+}
+
+/** One merchant's pay record, or undefined when its place (`at`) is not whole cents. */
+function payRecord(entry: Json | undefined): PayRecord | undefined {
 	if (!isObject(entry)) return undefined;
 
-	if (entry.kind === "skipped")
-		return entry.cents === null ? { kind: "skipped", cents: null } : undefined;
+	const at = partOf(Cents, entry.at);
 
-	if (
-		(entry.kind === "suggested" || entry.kind === "another") &&
-		isCents(entry.cents)
-	)
-		return { kind: entry.kind, cents: entry.cents };
+	if (at === undefined) return undefined;
 
-	return undefined;
-}
-
-function payDeposits(value: StoredJson): PayDeposits | undefined {
-	if (!isObject(value)) return undefined;
-
-	return pickEntries(value, (deposit) =>
-		isObject(deposit) && isText(deposit.date) && isCents(deposit.cents)
-			? { date: deposit.date, cents: deposit.cents }
-			: undefined,
-	);
-}
-
-function payRecord(entry: StoredJson): PayRecord | undefined {
-	if (!isObject(entry) || !isCents(entry.at)) return undefined;
-	const record: PayRecord = { at: entry.at };
+	const record: PayRecord = { at };
 	const yes = payDeposits(entry.yes);
 	const no = payDeposits(entry.no);
 
@@ -238,27 +264,27 @@ export function parseFirstTally(value: string): FirstTally {
 
 	if (isObject(parsed.strokes))
 		for (const stroke of STROKES) {
-			const day = parsed.strokes[stroke];
+			const day = partOf(DayOrNull, parsed.strokes[stroke]);
 
-			if (day === null || isText(day)) strokes[stroke] = day;
+			if (day !== undefined) strokes[stroke] = day;
 		}
 
 	const record: FirstTally = {
 		strokes,
-		budgets: pickEntries(parsed.budgets, budgetAnswer),
+		budgets: pickEntries(parsed.budgets, (entry) =>
+			partOf(BudgetAnswerSchema, entry),
+		),
 	};
 
 	if (isObject(parsed.pay)) record.pay = pickEntries(parsed.pay, payRecord);
 
-	if (
-		isObject(parsed.bills) &&
-		isCents(parsed.bills.kept) &&
-		isCents(parsed.bills.cents)
-	)
-		record.bills = { kept: parsed.bills.kept, cents: parsed.bills.cents };
+	const bills = partOf(BillsSchema, parsed.bills);
 
-	if (isObject(parsed.reAsk) && isText(parsed.reAsk.bank))
-		record.reAsk = { bank: parsed.reAsk.bank };
+	if (bills) record.bills = bills;
+
+	const reAsk = partOf(ReAskSchema, parsed.reAsk);
+
+	if (reAsk) record.reAsk = reAsk;
 
 	if (parsed.waitsForRun === true) record.waitsForRun = true;
 	const emailed = textList(parsed.readyEmailedTo);
@@ -270,12 +296,12 @@ export function parseFirstTally(value: string): FirstTally {
 
 	if (isObject(parsed.readyPushedAt))
 		record.readyPushedAt = pickEntries(parsed.readyPushedAt, (at) =>
-			isText(at) ? at : undefined,
+			partOf(Schema.String, at),
 		);
 
 	if (isObject(parsed.readyClaimedAt))
 		record.readyClaimedAt = pickEntries(parsed.readyClaimedAt, (at) =>
-			isText(at) ? at : undefined,
+			partOf(Schema.String, at),
 		);
 
 	if (isObject(parsed.heldReadyEmail))
@@ -284,8 +310,9 @@ export function parseFirstTally(value: string): FirstTally {
 			isObject(entry) ? (entry as HeldReadyEmail) : undefined,
 		);
 
-	if (parsed.savings === "skipped" || isCents(parsed.savings))
-		record.savings = parsed.savings;
+	const savings = partOf(SavingsSchema, parsed.savings);
+
+	if (savings !== undefined) record.savings = savings;
 
 	return record;
 }
