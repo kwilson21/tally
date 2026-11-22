@@ -399,6 +399,13 @@ describe("a found store flagged private, through the claim", () => {
 	it("16. a found store flagged private loses its unchosen Workers AI name in the claim's batch, and is asked again with no line", async () => {
 		const name = storeName(0);
 
+		// The demo's own charges would be asked about too: this test asks about its one store only.
+		await db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM transactions"),
+			db.prepare("DELETE FROM merchant_suggested_names"),
+			db.prepare("DELETE FROM merchants"),
+		]);
 		await addRow({ raw_name: name });
 		await db
 			.prepare(
