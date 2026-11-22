@@ -16,6 +16,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
 import type { UndoFacts, UndoWrite } from "../rules/sorting";
@@ -32,18 +33,7 @@ import {
 } from "./resort-candidates";
 import { householdSettings } from "./schema";
 import { withTurnGuard } from "./sorting-turn";
-import {
-	type Guard,
-	hasStoredFields,
-	isArrayOf,
-	isBoolean,
-	isNullable,
-	isNumber,
-	isOptional,
-	isRecordOf,
-	isString,
-	readStored,
-} from "./stored-shape";
+import { readStoredWith } from "./stored-shape";
 import { categoryAskedSql } from "./suggestions-queue";
 import { type JevSeen, seenSaveGuard } from "./transactions";
 
@@ -116,73 +106,73 @@ export type MovedRecord = {
 	needAnswer: number;
 };
 
-// What the stored text is checked against when it is read. Each guard names every key of its type (hasStoredFields), so a key
-// added to a type above and not here is a compile error.
-const isRunSnapshot = hasStoredFields<RunSnapshot>({
-	id: isNumber,
-	category_id: isNullable(isNumber),
-	category_source: isNullable(isString),
-	category_confidence: isNullable(isNumber),
-	jev_category_id: isNullable(isNumber),
-	jev_none_fit: isNumber,
-	jev_mixed: isNullable(isNumber),
-	jev_also_category_id: isNullable(isNumber),
-	jev_failed_at: isNullable(isString),
-	jev_attempts: isOptional(isNumber),
-	plaid_transaction_id: isNullable(isString),
-	amount_cents: isNumber,
+// What the stored text is checked against when it is read, with Effect Schema (decision 206, #1150). Each Schema names what the
+// code reads and lets other keys be (SQL writers add keys with `json_set`); lists and the row map are mutable, as the types say.
+const RunSnapshotSchema = Schema.Struct({
+	id: Schema.Finite,
+	category_id: Schema.NullOr(Schema.Finite),
+	category_source: Schema.NullOr(Schema.String),
+	category_confidence: Schema.NullOr(Schema.Finite),
+	jev_category_id: Schema.NullOr(Schema.Finite),
+	jev_none_fit: Schema.Finite,
+	jev_mixed: Schema.NullOr(Schema.Finite),
+	jev_also_category_id: Schema.NullOr(Schema.Finite),
+	jev_failed_at: Schema.NullOr(Schema.String),
+	jev_attempts: Schema.optionalKey(Schema.Finite),
+	plaid_transaction_id: Schema.NullOr(Schema.String),
+	amount_cents: Schema.Finite,
 });
 
-const isNamedCategory = hasStoredFields<{ id: number; name: string }>({
-	id: isNumber,
-	name: isString,
-});
-
-const isResortRun = hasStoredFields<ResortRun>({
-	id: isString,
-	total: isNumber,
-	done: isNumber,
-	status: (value): value is ResortRun["status"] =>
-		value === "running" || value === "done",
-	instances: isNumber,
-	ids: isArrayOf(isNumber),
-	snapshots: isArrayOf(isRunSnapshot),
-	categoryId: isNumber,
-	categoryName: isString,
-	categories: isArrayOf(isNamedCategory),
-	categoryByRow: isRecordOf(isNumber),
-	finishedKeys: isArrayOf(isString),
-	keptCleared: isOptional(isArrayOf(isNumber)),
-	startedAt: isNumber,
-	toasted: isBoolean,
-	finishToken: isOptional(isString),
-});
-
-const isMovedRecord = hasStoredFields<MovedRecord>({
-	runId: isString,
-	categoryId: isNumber,
-	categoryName: isString,
-	categories: isArrayOf(isString),
-	byCategory: isArrayOf(
-		hasStoredFields<{ id: number; name: string; count: number }>({
-			id: isNumber,
-			name: isString,
-			count: isNumber,
-		}),
+const ResortRunSchema = Schema.Struct({
+	id: Schema.String,
+	total: Schema.Finite,
+	done: Schema.Finite,
+	status: Schema.Literals(["running", "done"]),
+	instances: Schema.Finite,
+	ids: Schema.mutable(Schema.Array(Schema.Finite)),
+	snapshots: Schema.mutable(Schema.Array(RunSnapshotSchema)),
+	categoryId: Schema.Finite,
+	categoryName: Schema.String,
+	categories: Schema.mutable(
+		Schema.Array(Schema.Struct({ id: Schema.Finite, name: Schema.String })),
 	),
-	claimedAt: isNullable(isNumber),
-	until: isNullable(isNumber),
-	finalizedAt: isNumber,
-	rows: isArrayOf(
-		hasStoredFields<MovedRecord["rows"][number]>({
-			id: isNumber,
-			categoryId: isNumber,
-			plaid_transaction_id: isNullable(isString),
-			amount_cents: isNumber,
-			snapshot: isRunSnapshot,
-		}),
+	categoryByRow: Schema.Record(Schema.String, Schema.Finite),
+	finishedKeys: Schema.mutable(Schema.Array(Schema.String)),
+	keptCleared: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.Finite))),
+	startedAt: Schema.Finite,
+	toasted: Schema.Boolean,
+	finishToken: Schema.optionalKey(Schema.String),
+});
+
+const MovedRecordSchema = Schema.Struct({
+	runId: Schema.String,
+	categoryId: Schema.Finite,
+	categoryName: Schema.String,
+	categories: Schema.mutable(Schema.Array(Schema.String)),
+	byCategory: Schema.mutable(
+		Schema.Array(
+			Schema.Struct({
+				id: Schema.Finite,
+				name: Schema.String,
+				count: Schema.Finite,
+			}),
+		),
 	),
-	needAnswer: isNumber,
+	claimedAt: Schema.NullOr(Schema.Finite),
+	until: Schema.NullOr(Schema.Finite),
+	finalizedAt: Schema.Finite,
+	rows: Schema.mutable(
+		Schema.Array(
+			Schema.Struct({
+				id: Schema.Finite,
+				categoryId: Schema.Finite,
+				plaid_transaction_id: Schema.NullOr(Schema.String),
+				amount_cents: Schema.Finite,
+				snapshot: RunSnapshotSchema,
+			}),
+		),
+	),
+	needAnswer: Schema.Finite,
 });
 
 /**
@@ -190,8 +180,11 @@ const isMovedRecord = hasStoredFields<MovedRecord>({
  * logged (never the record's text). Both records are temporary state that gates a feature, so one that cannot be read
  * must not hold the re-sort for good: the next start replaces a run, and a moved record is just not there to show or undo.
  */
-function usable<T>(text: string, guard: Guard<T>): T | null {
-	const record = readStored(text, guard);
+function usable<S extends Schema.Constraint>(
+	text: string,
+	schema: S,
+): S["Type"] | null {
+	const record = readStoredWith(schema, text);
 
 	if (record === null)
 		console.error("a stored re-sort record is unusable, none used");
@@ -199,8 +192,11 @@ function usable<T>(text: string, guard: Guard<T>): T | null {
 	return record;
 }
 
-const parseRun = (value: string) => usable(value, isResortRun);
-const parseMoved = (value: string) => usable(value, isMovedRecord);
+const parseRun = (value: string): ResortRun | null =>
+	usable(value, ResortRunSchema);
+
+const parseMoved = (value: string): MovedRecord | null =>
+	usable(value, MovedRecordSchema);
 
 /** The stored text of one household_settings key, or undefined when there is no row. */
 const storedValue = (db: D1Database, key: string) =>
