@@ -8,6 +8,14 @@ import {
 } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import { suggestionQueue } from "../src/db/suggestions-queue";
+import {
+	K1,
+	LINE,
+	lineRow,
+	TEXT,
+	useLineFixture,
+} from "./lookup-line-fixture";
 
 // The AI suggestions group in Settings (spec §8.6, decision 73, P41 B): switches with On or Off in
 // words, one Save under the group, working with or without JavaScript. It shows only the switches
@@ -144,9 +152,8 @@ describe("GET /settings: the AI suggestions group", () => {
 
 	it("has a row for every switch that is stored", async () => {
 		const { html } = await get("/settings/ai");
-		// The store lookup's switch has no row on this page until its Settings screen exists (decision 216).
 		expect(inputs(html).map((i) => i.name)).toEqual(
-			Object.keys(AI_SWITCHES_ALL_ON).filter((name) => name !== "lookupStores"),
+			Object.keys(AI_SWITCHES_ALL_ON),
 		);
 	});
 
@@ -840,5 +847,106 @@ describe("POST /settings/ai: turning Sort right away back on (decision 150)", ()
 		await post("/settings/ai", WITHOUT_SORT);
 		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(false);
 		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
+	});
+});
+
+// #988: the store lookup's switch on Settings. Its line is hidden, not dropped, while it or a switch it runs on is off.
+describe("the Look up new stores on the web switch (#988)", () => {
+	useLineFixture();
+
+	it("has the lookup row's words, with the hint's apostrophes escaped", async () => {
+		const { html } = await get("/settings/ai");
+
+		expect(html).toContain("Look up new stores on the web");
+		expect(html).toContain(
+			"Searches the web once for a store, to help guess its category and name. Only the store&#39;s name as your bank gives it is sent, with numbers taken out.",
+		);
+	});
+
+	it("is greyed with its note while Categories and exclusions is off", async () => {
+		await saveAiSwitches(env.DB, { categories: false });
+		const { html } = await get("/settings/ai");
+		const row = html.slice(html.indexOf('name="lookupStores"') - 200);
+
+		expect(row).toContain("disabled");
+		expect(html).toContain("Needs Categories and exclusions and Income on.");
+		expect(html).toContain('name="lookupStoresGreyed" value="1"');
+	});
+
+	it("is greyed while Income is off too", async () => {
+		await saveAiSwitches(env.DB, { income: false });
+		const { html } = await get("/settings/ai");
+
+		expect(html).toContain('name="lookupStoresGreyed" value="1"');
+	});
+
+	it("a save from a page that drew it greyed leaves it as saved, on or off", async () => {
+		await saveAiSwitches(env.DB, { lookupStores: true });
+		await post("/settings/ai", { lookupStoresGreyed: "1", names: "on" });
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(true);
+
+		await saveAiSwitches(env.DB, { lookupStores: false });
+		await post("/settings/ai", { lookupStoresGreyed: "1", names: "on" });
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(false);
+	});
+
+	it("flipping it off stores ai_lookup_stores off, keeps focus on it, and announces it", async () => {
+		const { res, html } = await post("/settings/ai", {
+			flipped: "lookupStores",
+			drawnOn: "names lookupStores",
+			names: "on",
+		});
+
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(false);
+		expect(html).toContain("autofocus");
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			announce?: string;
+		};
+		expect(trigger.announce).toContain("looking up new stores on the web off");
+	});
+
+	it("turning it off drops nothing: the stored lines stay, and turning it on brings the line back", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		await post("/settings/ai", {
+			flipped: "lookupStores",
+			drawnOn: "lookupStores",
+			names: "on",
+		});
+
+		const off = await env.DB.prepare(
+			"SELECT status, line FROM merchant_lookups WHERE lookup_text = ?",
+		)
+			.bind(TEXT)
+			.first<{ status: string; line: string | null }>();
+		expect(off).toEqual({ status: "found", line: LINE });
+		expect(
+			(await suggestionQueue(env.DB)).find((i) => i.id === `category-${id}`),
+		).not.toHaveProperty("lookupLine");
+
+		await post("/settings/ai", {
+			flipped: "lookupStores",
+			drawnOn: "names",
+			names: "on",
+			lookupStores: "on",
+		});
+
+		expect(
+			(await suggestionQueue(env.DB)).find((i) => i.id === `category-${id}`),
+		).toHaveProperty("lookupLine", LINE);
+	});
+
+	it("flipping Income off does not write ai_lookup_stores", async () => {
+		await saveAiSwitches(env.DB, { lookupStores: true });
+
+		await post("/settings/ai", {
+			flipped: "income",
+			drawnOn: "names lookupStores income categories",
+			lookupStoresGreyed: "1",
+			names: "on",
+			categories: "on",
+		});
+
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(true);
 	});
 });

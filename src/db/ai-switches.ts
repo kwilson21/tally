@@ -133,11 +133,9 @@ export const AI_SWITCHES_VERSION = `(SELECT COALESCE(group_concat(key || '=' || 
 		.map((key) => `'${key}'`)
 		.join(", ")}) ORDER BY key))`;
 
-/** The switches a Settings form shows and posts: every switch but the store lookup's, which has no Settings page yet. */
-export type FormSwitch = Exclude<keyof AiSwitches, "lookupStores">;
+/** The switches a Settings form shows and posts: every stored switch, the store lookup's included (#988). */
+export type FormSwitch = keyof AiSwitches;
 
 /** The name of a form switch from what a form posts, or undefined. */
 export const switchNamed = (text: string): FormSwitch | undefined =>
-	SWITCH_NAMES.find(
-		(name): name is FormSwitch => name !== "lookupStores" && name === text,
-	);
+	SWITCH_NAMES.find((name): name is FormSwitch => name === text);
