@@ -1384,10 +1384,8 @@ export async function syncItem(
 			}
 		};
 
-		// The page Plaid last answered with, kept for the save that follows, and whatever stopped the run, kept so the
-		// run fails with it exactly as it was thrown.
+		// The page Plaid last answered with, kept for the save that follows.
 		let asked: SyncResponse | null = null;
-		let stopped: { error: unknown } | null = null;
 
 		const pages: SyncPages["Service"] = {
 			ask: ({ cursor, restarts }) =>
@@ -1414,15 +1412,14 @@ export async function syncItem(
 							more: asked.has_more,
 						};
 					} catch (error) {
-						stopped = { error };
-
-						if (!(error instanceof PlaidError)) return { kind: "failed" };
+						if (!(error instanceof PlaidError))
+							return { kind: "failed", error };
 
 						if (
 							error.error_code !==
 							"TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"
 						)
-							return { kind: "refused" };
+							return { kind: "refused", error };
 
 						// The machine starts again while it has restarts left, and this is the line that says so.
 						if (restarts < RESTARTS)
@@ -1430,7 +1427,7 @@ export async function syncItem(
 								`plaid sync mutation retry ${restarts + 1} ${error.request_id ?? ""}`.trim(),
 							);
 
-						return { kind: "changed" };
+						return { kind: "changed", error };
 					}
 				}),
 			save: ({ cursor, fresh }) =>
@@ -1441,15 +1438,13 @@ export async function syncItem(
 
 						return "saved";
 					} catch (error) {
-						stopped = { error };
-
-						return "failed";
+						return { kind: "failed", error };
 					}
 				}),
 		};
 
 		// The run's moves are the machine's (src/machines/sync-pages.ts): ask, save, start again, stop.
-		const outcome = await Effect.runPromise(
+		const { outcome, error } = await Effect.runPromise(
 			Effect.gen(function* () {
 				const actor = yield* createEffectActor(syncPagesMachine, {
 					input: { first: firstCursor, cursor: item.sync_cursor },
@@ -1462,26 +1457,26 @@ export async function syncItem(
 					{ timeout: "1 hour" },
 				);
 
-				return landed.context.outcome;
+				return {
+					outcome: landed.context.outcome,
+					error: landed.context.error,
+				};
 			}).pipe(Effect.scoped, Effect.provideService(SyncPages, pages)),
 		);
 
 		if (outcome === "done") return { ...summary, changedIds: [...changedIds] };
 
-		// SAFETY: `stopped` is assigned inside the closures above, which TypeScript does not follow, so it reads as null here.
-		const failure = stopped as { error: unknown } | null;
-
 		// Plaid refused: the bank may need attention, and the run fails with Plaid's error.
-		if (outcome === "refused" && failure?.error instanceof PlaidError)
+		if (outcome === "refused" && error instanceof PlaidError)
 			return await handlePlaidError(
 				env,
 				itemRowId,
 				lockId,
 				item.access_token_encrypted,
-				failure.error,
+				error,
 				fetchImpl,
 			);
 
-		throw failure?.error ?? new Error("Plaid sync stopped without a reason");
+		throw error ?? new Error("Plaid sync stopped without a reason");
 	});
 }

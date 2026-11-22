@@ -12,30 +12,35 @@ import * as Schema from "effect/Schema";
 //   saving_the_page   The page's rows and its position are saved together. Then the next page is asked for, or, after
 //                     the last page, the run is done. A save that fails ends the run.
 //
-// The machine holds only where the run is: the cursor, how many times it started again, and whether the next page is
-// the first of a pass. The pages themselves, and what a save writes, stay in src/plaid/sync.ts, which provides the two
-// pieces of outside work below.
+// The machine holds only where the run is: the cursor, how many times it started again, whether the next page is the
+// first of a pass, and the last error the run met. The pages themselves, and what a save writes, stay in
+// src/plaid/sync.ts, which provides the two pieces of outside work below. An ask or a save that fails carries its error
+// in its answer, and the machine keeps it as the run's error, so the run's end is read from the machine, never from a
+// variable beside it. An error thrown inside an invoke itself (onError) is not kept: the run ends failed with no error.
 
 /** How many times one run starts an update again after Plaid says it changed. */
 export const RESTARTS = 3;
 
-/** Plaid's answer to a request for a page, as far as the next move needs it. */
+/** Plaid's answer to a request for a page, as far as the next move needs it. Each failing answer carries the error it was given. */
 const Asked = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("page"),
 		next: Schema.String,
 		more: Schema.Boolean,
 	}),
-	Schema.Struct({ kind: Schema.Literal("changed") }),
-	Schema.Struct({ kind: Schema.Literal("refused") }),
+	Schema.Struct({ kind: Schema.Literal("changed"), error: Schema.Unknown }),
+	Schema.Struct({ kind: Schema.Literal("refused"), error: Schema.Unknown }),
 	// Plaid was never reached or its answer could not be used: not Plaid refusing, so the bank's state is left alone.
-	Schema.Struct({ kind: Schema.Literal("failed") }),
+	Schema.Struct({ kind: Schema.Literal("failed"), error: Schema.Unknown }),
 ]);
 
 export type Asked = typeof Asked.Type;
 
-/** Whether the page and its position were saved. */
-const Saved = Schema.Literals(["saved", "failed"]);
+/** Whether the page and its position were saved; a save that failed carries the error it threw. */
+const Saved = Schema.Union([
+	Schema.Literal("saved"),
+	Schema.Struct({ kind: Schema.Literal("failed"), error: Schema.Unknown }),
+]);
 
 export type Saved = typeof Saved.Type;
 
@@ -61,6 +66,13 @@ export class SyncPages extends Context.Service<
 export type SyncOutcome = "running" | "done" | "refused" | "failed";
 
 const RUNNING: SyncOutcome = "running";
+
+/** A run's error: whatever was thrown, as it was thrown, so the schema takes it as it comes. */
+const RunError = Schema.Unknown;
+
+type RunError = typeof RunError.Type;
+
+const NO_ERROR: RunError = null;
 
 export const syncPagesMachine = setupEffect({
 	schemas: {
@@ -89,6 +101,8 @@ export const syncPagesMachine = setupEffect({
 		next: "",
 		more: false,
 		outcome: RUNNING,
+		/** The last error the run met, as it was thrown: Plaid's refusal, or the failure that ended the run. */
+		error: NO_ERROR,
 	}),
 	initial: "asking_plaid",
 	states: {
@@ -108,6 +122,7 @@ export const syncPagesMachine = setupEffect({
 							context: { ...context, next: asked.next, more: asked.more },
 						};
 
+					// The last error wins: a restart's error is kept too, and a later one replaces it.
 					if (asked.kind === "changed" && context.restarts < RESTARTS)
 						return {
 							target: "starting_again",
@@ -116,18 +131,20 @@ export const syncPagesMachine = setupEffect({
 								cursor: context.first,
 								restarts: context.restarts + 1,
 								fresh: true,
+								error: asked.error,
 							},
 						};
 
 					if (asked.kind === "failed")
 						return {
 							target: "failed",
-							context: { ...context, outcome: "failed" },
+							context: { ...context, outcome: "failed", error: asked.error },
 						};
 
+					// Refused, or changed with no restarts left: the run ends refused with the error that was thrown.
 					return {
 						target: "refused",
-						context: { ...context, outcome: "refused" },
+						context: { ...context, outcome: "refused", error: asked.error },
 					};
 				},
 				onError: ({ context }) => ({
@@ -146,10 +163,14 @@ export const syncPagesMachine = setupEffect({
 					fresh: context.fresh,
 				}),
 				onDone: ({ context, event }) => {
-					if (event.output === "failed")
+					if (event.output !== "saved")
 						return {
 							target: "failed",
-							context: { ...context, outcome: "failed" },
+							context: {
+								...context,
+								outcome: "failed",
+								error: event.output.error,
+							},
 						};
 
 					return context.more
