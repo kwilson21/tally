@@ -5,7 +5,7 @@ import { BASIS_POINTS, confidencePercent } from "../ai/confidence";
 import { askedBounds, type MaybeKind } from "../ai/maybe";
 import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
-import { type AiSwitches, readAiSwitches } from "./ai-switches";
+import { type AiSwitches, linesShown, readAiSwitches } from "./ai-switches";
 import { categoryNames } from "./categories";
 import {
 	pendingSuggestions,
@@ -18,6 +18,7 @@ import {
 	maybeIncomeConfidenceSql,
 	storedIncomeGuessSql,
 } from "./income";
+import { lineStandsSql } from "./line-stands";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
 import { type NeverSuggestKind, neverSuggestedSql } from "./never-suggest";
@@ -43,6 +44,8 @@ export type TransactionSuggestion = {
 	/** The category Tally guessed (category kind only). */
 	categoryId: number | null;
 	category: string | null;
+	/** The store's line, on a category guess Tally asked with it, while the line is shown (absent otherwise). */
+	lookupLine?: string;
 };
 
 /** A suggested new category and the purchases behind it, each ticked to go in (§7). */
@@ -148,6 +151,11 @@ export const lineGuessSql = (alias: string) =>
 	`EXISTS (SELECT 1 FROM lookup_answers la WHERE la.transaction_id = ${alias}.id AND la.kept = 1
 		AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
 		AND la.kept_category_id IS ${alias}.jev_category_id AND la.kept_confidence = ${alias}.category_confidence)`;
+
+/** The line the row's kept guess was asked with, while it still stands (spec §7 "What a person sees"); NULL otherwise. */
+export const shownLineSql = (alias: string) =>
+	`(SELECT sml.line FROM lookup_answers sla JOIN merchant_lookups sml ON sml.lookup_text = sla.lookup_text
+		WHERE sla.transaction_id = ${alias}.id AND ${lineStandsSql("sla.lookup_text")} AND ${lineGuessSql(alias)})`;
 
 /**
  * A category guess the review asks about: in its asked range (askedSql), or a line-backed guess (lineGuessSql) at the 40% floor
@@ -302,11 +310,13 @@ export const categoryAskedSql = (alias: string) =>
  */
 async function categorySuggestions(
 	db: D1Database,
+	showLines: boolean,
 ): Promise<{ item: TransactionSuggestion; order: number }[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS bankText, ${merchantKeySql("t")} AS merchantKey, ${LABEL_SQL},
-				t.category_confidence AS categoryConfidence, c.id AS categoryId, c.name AS category
+				t.category_confidence AS categoryConfidence, c.id AS categoryId, c.name AS category,
+				${shownLineSql("t")} AS lookupLine
 			FROM transactions t ${JOIN_MERCHANT}
 			JOIN categories c ON c.id = t.jev_category_id AND c.archived = 0
 			WHERE ${categoryAskedSql("t")}`,
@@ -316,6 +326,7 @@ async function categorySuggestions(
 				categoryConfidence: number;
 				categoryId: number;
 				category: string;
+				lookupLine: string | null;
 			}
 		>();
 
@@ -334,6 +345,7 @@ async function categorySuggestions(
 			sure: confidencePercent(row.categoryConfidence),
 			categoryId: row.categoryId,
 			category: row.category,
+			...(showLines && row.lookupLine ? { lookupLine: row.lookupLine } : {}),
 		},
 	}));
 }
@@ -498,7 +510,7 @@ export async function suggestionQueue(
 	const [income, transfer, category, newCategory, names] = await Promise.all([
 		s.income ? incomeSuggestions(db) : [],
 		s.categories ? transferSuggestions(db) : [],
-		s.categories ? categorySuggestions(db) : [],
+		s.categories ? categorySuggestions(db, linesShown(s)) : [],
 		s.categories ? newCategorySuggestions(db) : [],
 		nameSuggestions(db, s),
 	]);

@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import * as Effect from "effect/Effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { runWith } from "../src/db/database";
 import { decideCategoryMaybe, maybeFacts } from "../src/db/suggestion-saves";
@@ -13,6 +13,14 @@ import {
 import { resetDemo } from "../src/demo/reset";
 import { acceptCategoryGuess } from "../src/rules/suggestions";
 import { present } from "./helpers/present";
+import {
+	GROCERIES,
+	K1,
+	LINE,
+	lineRow,
+	TEXT,
+	useLineFixture,
+} from "./lookup-line-fixture";
 
 // The store lookup's line-backed guess (spec §5, §7, §8.6; decision 225). A category guess Jev made with the line,
 // and kept, is a Maybe at 40% or more with no upper end, for as long as the row still holds that guess
@@ -507,5 +515,137 @@ describe("SQLite reads the 0.3999 edge in the same basis points as TypeScript", 
 				.prepare("SELECT CAST(0.3999 * 10000 AS INTEGER) AS basis")
 				.first<{ basis: number }>(),
 		).toEqual({ basis: 3999 });
+	});
+});
+
+describe("the line a person sees (#988, P146): the queue and the edit panel show the same line", () => {
+	useLineFixture();
+
+	/** The queue item's line: undefined when the row is asked with no line, null when the queue does not hold the row. */
+	async function queueLine(id: number): Promise<string | undefined | null> {
+		const item = (await suggestionQueue(db)).find(
+			(i) => i.id === `category-${id}`,
+		);
+
+		if (!item) return null;
+
+		return (item as { lookupLine?: string }).lookupLine;
+	}
+
+	/** The edit panel's line: null when the row shows none. */
+	async function panelLine(id: number): Promise<string | null> {
+		return (await getTransaction(db, id))?.lookupLine ?? null;
+	}
+
+	it("a kept line-backed guess shows its line on the card and in the panel", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		expect(await queueLine(id)).toBe(LINE);
+		expect(await panelLine(id)).toBe(LINE);
+	});
+
+	it("hides the line while Look up new stores on the web is off", async () => {
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, lookupStores: false });
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line while Income is off, which greys the lookup", async () => {
+		await saveAiSwitches(db, { ...AI_SWITCHES_ALL_ON, income: false });
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it.each([
+		[
+			"skipped",
+			"UPDATE merchant_lookups SET status = 'skipped' WHERE lookup_text = ?",
+		],
+		[
+			"nothing_found",
+			"UPDATE merchant_lookups SET status = 'nothing_found' WHERE lookup_text = ?",
+		],
+		["an empty line", "UPDATE merchant_lookups SET line = '' WHERE lookup_text = ?"],
+	])("hides the line when the lookup is %s", async (_, sql) => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await db.prepare(sql).bind(TEXT).run();
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line when a key of the text is private", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await db
+			.prepare("UPDATE merchant_lookup_texts SET private = 1 WHERE lookup_text = ?")
+			.bind(TEXT)
+			.run();
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line when the lookup answer was not kept", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await db
+			.prepare("UPDATE lookup_answers SET kept = 0 WHERE transaction_id = ?")
+			.bind(id)
+			.run();
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line when the guess is a stale copy", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5, line: "stale" });
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("leaves a row a person filed out of the queue, with no line", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(GROCERIES, id)
+			.run();
+
+		expect(await queueLine(id)).toBeNull();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line when the row has no lookup answer", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await db
+			.prepare("DELETE FROM lookup_answers WHERE transaction_id = ?")
+			.bind(id)
+			.run();
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("reads the line in the queue's own statement: the same number of statements with five line rows as with one", async () => {
+		await lineRow({ key: K1, confidence: 0.5 });
+
+		const spy = vi.spyOn(db, "prepare");
+		await suggestionQueue(db);
+		const withOne = spy.mock.calls.length;
+
+		spy.mockClear();
+		for (let n = 0; n < 4; n++) await lineRow({ key: `${K1} ${n}` });
+		spy.mockClear();
+		await suggestionQueue(db);
+		const withFive = spy.mock.calls.length;
+		spy.mockRestore();
+
+		expect(withOne).toBeGreaterThan(0);
+		expect(withFive).toBe(withOne);
 	});
 });

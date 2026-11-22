@@ -55,6 +55,10 @@ export const asksJev = (s: AiSwitches): boolean =>
  * The guard a save appends to its WHERE clause, bound with `stillOnKeys`: it holds while none of these
  * switches has been turned off since they were read.
  */
+/** A store's line is shown while the switches the lookup runs on are on (#988): hidden, not dropped, when one is off. */
+export const linesShown = (s: AiSwitches): boolean =>
+	s.lookupStores && s.categories && s.income;
+
 export const STILL_ON_SQL =
 	"NOT EXISTS (SELECT 1 FROM household_settings WHERE value = 'off' AND key IN (SELECT value FROM json_each(?)))";
 

@@ -8,14 +8,11 @@ import {
 	loadLearnedLineSnapshot,
 	loadLearnedLines,
 } from "../db/learned-lines";
+import { lineStandsSql } from "../db/line-stands";
 import { merchantKeySql } from "../db/merchant-key";
 import { waitingForJevSql } from "../db/transactions";
 
-/** The line of the lookup text `text` (an SQL expression) stands: found, with a line, and no key of the text private (spec §7). */
-// stays raw: a fragment inlined into raw statements (decision 179)
-export const lineStandsSql = (text: string) =>
-	`(EXISTS (SELECT 1 FROM merchant_lookups lsl WHERE lsl.lookup_text = ${text} AND lsl.status = 'found' AND COALESCE(lsl.line, '') != '')
-		AND NOT EXISTS (SELECT 1 FROM merchant_lookup_texts lsp WHERE lsp.lookup_text = ${text} AND lsp.private = 1))`;
+export { lineStandsSql } from "../db/line-stands";
 
 /**
  * The household has its own answer for the lookup text `text` (987-plan 5.1 point 6, the part SQL can do): a row of any of its
