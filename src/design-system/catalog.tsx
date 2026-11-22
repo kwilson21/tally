@@ -4644,6 +4644,7 @@ function SuggestionsReview() {
 								{
 									...reviewItems.category,
 									merchant: "La Coop",
+									label: "La Coop",
 									lookupLine: "Coffee shop in Arlington, VA",
 								} as SuggestionItem
 							}
