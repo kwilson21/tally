@@ -432,7 +432,10 @@ function AiPage({
 	tally: AiTallyCounts;
 	focus?: keyof AiSwitches;
 }) {
-	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
+	// The store lookup's switch is left out: it can do nothing without Categories and Income, so it doesn't count (#988).
+	const allOff = AI_FEATURES.every(
+		(f) => f.key === "lookupStores" || !switches[f.key],
+	);
 
 	return (
 		<section
@@ -1580,8 +1583,11 @@ settings.post("/settings/ai", async (c) => {
 	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
 	const before = await readAiSwitches(c.env.DB);
 	// The page's baseline, shared by the save and the focus below. A page drawn before DRAWN_ON existed is compared
-	// with what was saved before this save.
-	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
+	// with what was saved before this save. Such a page also predates the store lookup's row, so the lookup switch
+	// counts as not drawn there: leaving it out of that page is not a change (#988).
+	const drawn = String(
+		form.get(DRAWN_ON) ?? drawnOnOf({ ...before, lookupStores: false }),
+	).split(" ");
 	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
 
 	await runWith(
@@ -1610,9 +1616,12 @@ settings.post("/settings/ai", async (c) => {
 
 	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 
-	const states = AI_FEATURES.map(
-		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
-	).join(", ");
+	// The five older switches are always spoken as they were; the store lookup's is spoken only when it changed (#988).
+	const states = AI_FEATURES.filter(
+		(f) => f.key !== "lookupStores" || before.lookupStores !== now.lookupStores,
+	)
+		.map((f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`)
+		.join(", ");
 
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
 

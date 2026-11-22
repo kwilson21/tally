@@ -104,7 +104,7 @@ describe("GET /settings: the AI suggestions group", () => {
 		);
 	});
 
-	it("has five switches, on to start, each with its words and its muted line", async () => {
+	it("has six switches, on to start, each with its words and its muted line", async () => {
 		const { html } = await get("/settings/ai");
 		expect(inputs(html)).toEqual([
 			{ name: "names", on: true },
@@ -112,6 +112,7 @@ describe("GET /settings: the AI suggestions group", () => {
 			{ name: "categories", on: true },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: true },
+			{ name: "lookupStores", on: true },
 		]);
 		const words = textOf(group(html));
 
@@ -130,8 +131,8 @@ describe("GET /settings: the AI suggestions group", () => {
 		])
 			expect(words).toContain(sentence);
 		// On and Off are both in the markup; the checkbox's state decides which one shows.
-		expect(group(html).match(/>On</g)).toHaveLength(5);
-		expect(group(html).match(/>Off</g)).toHaveLength(5);
+		expect(group(html).match(/>On</g)).toHaveLength(6);
+		expect(group(html).match(/>Off</g)).toHaveLength(6);
 	});
 
 	it("shows the names switch first and the sorting switch last, as the P41 drawing does", async () => {
@@ -169,6 +170,7 @@ describe("GET /settings: the AI suggestions group", () => {
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: true },
 		]);
 		expect(textOf(group(html))).toContain(
 			"Off means your rules and choices only.",
@@ -178,11 +180,23 @@ describe("GET /settings: the AI suggestions group", () => {
 	it("says so plainly when every switch is off", async () => {
 		await saveAiSwitches(env.DB, allOff);
 		const { html } = await get("/settings/ai");
-		expect(inputs(html).every((i) => !i.on)).toBe(true);
+		expect(
+			inputs(html)
+				.filter((i) => i.name !== "lookupStores")
+				.every((i) => !i.on),
+		).toBe(true);
 		expect(textOf(group(html))).toContain(
 			"Tally sorts by your rules and choices only.",
 		);
 		expect(textOf(group(html))).not.toContain("Off means your rules");
+	});
+
+	it("still says every switch is off when only the store lookup is on (#988)", async () => {
+		await saveAiSwitches(env.DB, { ...allOff, lookupStores: true });
+		const { html } = await get("/settings/ai");
+		expect(textOf(group(html))).toContain(
+			"Tally sorts by your rules and choices only.",
+		);
 	});
 
 	it("posts when a switch is flipped, with Save only inside noscript, and swaps with it", async () => {
@@ -218,7 +232,7 @@ describe("GET /settings: the AI suggestions group", () => {
 			...group(html).matchAll(/<input[^>]*role="switch"[^>]*>/g),
 		].map((m) => m[0]);
 
-		expect(raws).toHaveLength(5);
+		expect(raws).toHaveLength(6);
 
 		for (const raw of raws) {
 			const name = raw.match(/name="([^"]*)"/)?.[1];
@@ -240,9 +254,9 @@ describe("GET /settings: the AI suggestions group", () => {
 		const { html } = await get("/settings/ai");
 		expect(drawnOnField(html)).toContain('type="hidden"');
 		expect(drawnOnField(html)).toContain(
-			'value="names details categories income sortOnArrival"',
+			'value="names details categories income sortOnArrival lookupStores"',
 		);
-		await saveAiSwitches(env.DB, allOff);
+		await saveAiSwitches(env.DB, { ...allOff, lookupStores: false });
 		expect(drawnOnField((await get("/settings/ai")).html)).toContain(
 			'value=""',
 		);
@@ -267,6 +281,7 @@ describe("POST /settings/ai", () => {
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: true },
 		]);
 		expect(trigger(res)).toEqual({
 			toast: { message: "Saved AI suggestions", type: "success" },
@@ -630,6 +645,7 @@ describe("the sorting switch with categories, income and details all off", () =>
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: true },
+			{ name: "lookupStores", on: true },
 		]);
 		await saveAiSwitches(env.DB, { sortOnArrival: false });
 		expect(inputs((await get("/settings/ai")).html)).toEqual([
@@ -638,6 +654,7 @@ describe("the sorting switch with categories, income and details all off", () =>
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: true },
 		]);
 	});
 
@@ -651,7 +668,8 @@ describe("the sorting switch with categories, income and details all off", () =>
 			await saveAiSwitches(env.DB, on);
 			const { html } = await get("/settings/ai");
 			expect(disabled(html, "sortOnArrival")).toBe(false);
-			expect(textOf(group(html))).not.toContain("Needs ");
+			// The sorting switch's own note only: the store lookup's row says what it needs when it is greyed (#988).
+			expect(textOf(group(html))).not.toContain("Needs Fill in details");
 		},
 	);
 

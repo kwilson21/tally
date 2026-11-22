@@ -6,6 +6,7 @@ import {
 	asksJev,
 	readAiSwitches,
 	saveAiSwitches,
+	switchNamed,
 } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 
@@ -201,4 +202,10 @@ describe("asksJev", () => {
 						).toBe(asked || details);
 		},
 	);
+});
+
+describe("switchNamed (#988)", () => {
+	it("names the store lookup's switch like any other", () => {
+		expect(switchNamed("lookupStores")).toBe("lookupStores");
+	});
 });
