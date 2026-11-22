@@ -4,6 +4,7 @@ export type WhySection =
 	| "transactions"
 	| "exclusions"
 	| "categorization"
+	| "store-lookup"
 	| "names"
 	| "bills"
 	| "trends"
