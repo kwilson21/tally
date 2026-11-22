@@ -824,3 +824,37 @@ function reimbursement(date: string): SeedTransaction {
 		excluded: true,
 	};
 }
+
+// The store lookup's demo lines (#988): two guesses made with a line, in the month two back (the pets' month, already over
+// budget, so this month's counts do not move). La Coop's first guess was Groceries; the guess made with the line is Eating
+// Out. The first guess is stored nowhere once replaced, so no column holds it.
+export const SEED_LINE_GUESSES = [
+	{
+		id: 900,
+		rawName: "LA COOP 0423 ARLINGTON VA",
+		displayName: "La Coop",
+		plaidCategory: "FOOD_AND_DRINK",
+		day: 20,
+		cents: 675,
+		categoryId: EATING_OUT,
+		confidence: 0.88,
+		line: "Coffee shop in Arlington, VA",
+	},
+	{
+		id: 901,
+		rawName: "MAPLE ST HDWE 0098",
+		displayName: "Maple Street Hardware",
+		plaidCategory: "HOME_IMPROVEMENT",
+		day: 19,
+		cents: 4120,
+		categoryId: HOUSEHOLD,
+		confidence: 0.64,
+		line: "Independent hardware store and garden store in Takoma Park, Maryland, since 1946",
+	},
+] as const;
+
+/** A store the lookup looked up once, with its line and no guess (Blue Bottle; scripts/compare-models/lookup-lines.ts). */
+export const SEED_STORED_LOOKUP = {
+	rawName: "BLUE BOTTLE COFFEE",
+	line: "Coffee shop chain",
+} as const;
