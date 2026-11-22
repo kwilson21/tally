@@ -941,6 +941,19 @@ export async function refundPurchases(
 	return results;
 }
 
+/**
+ * The other own-named transactions from a merchant, newest first, from the SELECT's json_group_array of json_object rows
+ * (name, date and part, 0 or 1).
+ */
+export function ownedNamesOf(ownedJson: string): OwnedRow[] {
+	// SAFETY: ownedJson is json_group_array of json_object rows with name, date and part (0 or 1), as the SELECT builds it.
+	return (
+		JSON.parse(ownedJson) as { name: string; date: string; part: number }[]
+	)
+		.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
+		.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
 /** One transaction with what the edit panel shows: account, merchant name, and category source. */
 export async function getTransaction(
 	db: D1Database,
@@ -1076,11 +1089,7 @@ export async function getTransaction(
 	const offered = r.merchantName ? [] : offeredNames(merchant, r.rawName);
 	const tidied = tidyName(r.rawName);
 
-	const owned =
-		// SAFETY: ownedJson is json_group_array of json_object rows with name, date and part (0 or 1), as the SELECT builds it.
-		(JSON.parse(ownedJson) as { name: string; date: string; part: number }[])
-			.map(({ name, date, part }) => ({ name, date, part: part === 1 }))
-			.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+	const owned = ownedNamesOf(ownedJson);
 
 	return {
 		...row,
