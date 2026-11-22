@@ -230,6 +230,7 @@ describe("MaybeQuestion is a quiet tag under one serif headline", () => {
 
 // #988: the store lookup's line sits under a category guess that used it, with its own "Don't use this" form.
 describe("a category card draws the store lookup's line (#988)", () => {
+	// SAFETY: the card reads lookupLine on a category item only; the cast adds the key to that item and no other.
 	const withLine = {
 		...category,
 		lookupLine: "Coffee shop in Arlington, VA",
@@ -271,7 +272,11 @@ describe("a category card draws the store lookup's line (#988)", () => {
 
 	it("income, transfer, new_category and name cards never draw it", () => {
 		for (const item of [income, transfer, newCategory, name]) {
-			const html = card({ ...item, lookupLine: "Coffee shop" } as SuggestionItem);
+			// SAFETY: the card must ignore a stray lookupLine on any other kind; the cast only adds that key for the test.
+			const html = card({
+				...item,
+				lookupLine: "Coffee shop",
+			} as SuggestionItem);
 
 			expect(html).not.toContain("From the web");
 		}

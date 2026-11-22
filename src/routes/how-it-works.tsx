@@ -544,15 +544,16 @@ howItWorks.get("/how-it-works", async (c) => {
 					)}
 					<p id="store-lookup" class="mt-3">
 						Tally looks a store up on the web once, and keeps one short line
-						about what kind of place it is, like “Coffee shop in Arlington,
-						VA”. Only the store's name as your bank gives it is sent, with its
-						numbers taken out. The line is used for two things: a second look
-						at a category guess Tally wasn't sure of, and a suggested name for
-						a store your bank didn't name. A guess made with it is never filed
-						by itself; it waits as a Maybe for you. “Don't use this” under a
-						line stops it for that store for good, and “Look up new stores on
-						the web” in Settings stops it everywhere.
-						{demo && " The demo never searches; its few lines were written by hand."}
+						about what kind of place it is, like “Coffee shop in Arlington, VA”.
+						Only the store's name as your bank gives it is sent, with its
+						numbers taken out. The line is used for two things: a second look at
+						a category guess Tally wasn't sure of, and a suggested name for a
+						store your bank didn't name. A guess made with it is never filed by
+						itself; it waits as a Maybe for you. “Don't use this” under a line
+						stops it for that store for good, and “Look up new stores on the
+						web” in Settings stops it everywhere.
+						{demo &&
+							" The demo never searches; its few lines were written by hand."}
 					</p>
 					<p class="mt-3">
 						When {ai} finds three or more purchases that fit no category, Tally

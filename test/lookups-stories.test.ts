@@ -55,7 +55,7 @@ describe("Don't use a store's lookup line, by its facts", () => {
 		});
 	});
 
-	it.each([
+	it.each<[string | null, string]>([
 		["pending", "a search is under way"],
 		["nothing_found", "the search found nothing"],
 		["gave_up", "Tally gave up on the search"],

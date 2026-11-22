@@ -22,7 +22,7 @@ describe("LookupLine", () => {
 			<LookupLine line="Coffee shop in Arlington, VA" store="La Coop" />,
 		);
 
-		expect(html).toContain("aria-label=\"Don&#39;t use this for La Coop\"");
+		expect(html).toContain('aria-label="Don&#39;t use this for La Coop"');
 		expect(html).toContain("Don&#39;t use this</button>");
 		expect(html).toContain('type="submit"');
 		expect(html).toContain("min-h-11");

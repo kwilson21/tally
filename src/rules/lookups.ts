@@ -39,8 +39,10 @@ export class GuessChanged extends Data.TaggedError("GuessChanged") {
 
 const stateOf = (status: string | null): StoreLookupState => {
 	if (status === null) return "none";
+
 	if (status === "pending") return "to_retry";
 
+	// SAFETY: every other stored status is the name of the state it stands for (STORE_LOOKUP_ROWS: found, nothing_found, skipped, gave_up).
 	return status as StoreLookupState;
 };
 

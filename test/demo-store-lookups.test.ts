@@ -1,15 +1,15 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { cleanLine } from "../src/ai/lookup-store";
+import { suggestionQueue } from "../src/db/suggestions-queue";
+import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import {
 	SEED_LINE_GUESSES,
 	SEED_STORED_LOOKUP,
 	seedMerchantKey,
 } from "../src/demo/seed";
-import { privateTextReason, lookupTextOf } from "../src/lookup/lookup-text";
-import { suggestionQueue } from "../src/db/suggestions-queue";
-import { getTransaction } from "../src/db/transactions";
+import { lookupTextOf, privateTextReason } from "../src/lookup/lookup-text";
 
 // #988: the demo's two store lines and one stored lookup, added by the scheduled reset only (decision 216 and the plan, Task 8).
 
@@ -81,6 +81,7 @@ describe("resetDemo with storeLookups (#988)", () => {
 		await resetDemo(db, TODAY, { categoryExample: true, storeLookups: true });
 
 		expect(await count("merchant_lookups")).toBe(3);
+
 		const stored = await db
 			.prepare("SELECT line FROM merchant_lookups WHERE lookup_text = ?")
 			.bind(lookupTextOf(seedMerchantKey(SEED_STORED_LOOKUP.rawName)))

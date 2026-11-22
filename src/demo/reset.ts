@@ -425,9 +425,11 @@ export async function resetDemo(
 			const lookupText = lookupTextOf(g.rawName);
 
 			return [
-				orm
-					.insert(merchants)
-					.values({ rawName: g.rawName, displayName: g.displayName, notABill: 1 }),
+				orm.insert(merchants).values({
+					rawName: g.rawName,
+					displayName: g.displayName,
+					notABill: 1,
+				}),
 				orm.insert(merchantLookups).values({
 					lookupText,
 					status: "found",
@@ -461,7 +463,7 @@ export async function resetDemo(
 		const storedKey = seedMerchantKey(SEED_STORED_LOOKUP.rawName);
 		const storedText = lookupTextOf(storedKey);
 
-		await orm.batch([
+		const writes = [
 			...lineStatements,
 			orm.insert(merchantLookups).values({
 				lookupText: storedText,
@@ -469,10 +471,15 @@ export async function resetDemo(
 				line: SEED_STORED_LOOKUP.line,
 				attempts: 0,
 			}),
-			orm
-				.insert(merchantLookupTexts)
-				.values({ merchantKey: storedKey, lookupText: storedText, isPrivate: 0 }),
-		] as unknown as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+			orm.insert(merchantLookupTexts).values({
+				merchantKey: storedKey,
+				lookupText: storedText,
+				isPrivate: 0,
+			}),
+		];
+
+		// SAFETY: the list holds the inserts above, every one a batch item, and it is never empty (the stored lookup adds two).
+		await orm.batch(writes as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
 	}
 
 	await matchBillPayments(db, today);

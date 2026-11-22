@@ -967,8 +967,8 @@ export function Proposals() {
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
 					Drawn Nov 22 for issue #988. When Tally looked a store up on the web
-					and that helped its guess, the card says so. The owner picked B on
-					Nov 22.
+					and that helped its guess, the card says so. The owner picked B on Nov
+					22.
 				</p>
 				<LookupLineProposal />
 			</section>

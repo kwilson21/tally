@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { reserveJevCalls } from "../src/db/jev-calls";
-import { dontUse } from "../src/db/lookup-saves";
 import { lookupCallsKey } from "../src/db/lookup-calls";
+import { dontUse } from "../src/db/lookup-saves";
 import {
 	claimStatements,
 	failStatement,
@@ -16,6 +16,12 @@ import {
 } from "../src/db/store-lookups";
 import { next } from "../src/machines/next";
 import {
+	LOOKUP_LEASE_MS,
+	STORE_LOOKUP_ROWS,
+	storeLookupMachine,
+	storeLookupState,
+} from "../src/machines/store-lookup";
+import {
 	asksAgain,
 	expectCleared,
 	K1,
@@ -28,12 +34,6 @@ import {
 	TEXT,
 	useLineFixture,
 } from "./lookup-line-fixture";
-import {
-	LOOKUP_LEASE_MS,
-	STORE_LOOKUP_ROWS,
-	storeLookupMachine,
-	storeLookupState,
-} from "../src/machines/store-lookup";
 
 // The store lookup's guarded statements (spec §7, §5 `lookup_calls_<date>`): each claim takes one search from the
 // day's count in its own batch, and each save, failure, let-go and skip is guarded by the stored row's state.

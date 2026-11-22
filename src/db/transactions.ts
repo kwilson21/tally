@@ -1093,11 +1093,7 @@ export async function getTransaction(
 	} = r;
 
 	const switches = await readAiSwitches(db);
-	const {
-		names: namesOn,
-		details: detailsOn,
-		income: incomeOn,
-	} = switches;
+	const { names: namesOn, details: detailsOn, income: incomeOn } = switches;
 
 	const merchant = {
 		stored: suggestedNames,

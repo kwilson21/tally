@@ -330,9 +330,8 @@ async function categorySuggestions(
 			}
 		>();
 
-	return results.map((row) => ({
-		order: row.id,
-		item: {
+	return results.map((row) => {
+		const item: TransactionSuggestion = {
 			kind: "category",
 			id: `category-${row.id}`,
 			transactionId: row.id,
@@ -345,9 +344,13 @@ async function categorySuggestions(
 			sure: confidencePercent(row.categoryConfidence),
 			categoryId: row.categoryId,
 			category: row.category,
-			...(showLines && row.lookupLine ? { lookupLine: row.lookupLine } : {}),
-		},
-	}));
+		};
+
+		// The line is added only while the line is shown (#988), so no other item carries the key.
+		if (showLines && row.lookupLine) item.lookupLine = row.lookupLine;
+
+		return { order: row.id, item };
+	});
 }
 
 /**

@@ -783,7 +783,10 @@ describe("the edit panel draws the store lookup's line (#988)", () => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
 		const html = (await get(`/transactions/${id}`)).html;
 
-		const fieldset = html.indexOf('<legend class="text-base text-ink">Category</legend>');
+		const fieldset = html.indexOf(
+			'<legend class="text-base text-ink">Category</legend>',
+		);
+
 		const line = html.indexOf(`From the web: ${LINE}`);
 		const close = html.indexOf("</fieldset>", fieldset);
 

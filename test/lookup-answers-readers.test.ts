@@ -529,6 +529,7 @@ describe("the line a person sees (#988, P146): the queue and the edit panel show
 
 		if (!item) return null;
 
+		// SAFETY: lookupLine is set only on a category item; the other kinds have no such key, so the read is undefined for them.
 		return (item as { lookupLine?: string }).lookupLine;
 	}
 
@@ -569,7 +570,10 @@ describe("the line a person sees (#988, P146): the queue and the edit panel show
 			"nothing_found",
 			"UPDATE merchant_lookups SET status = 'nothing_found' WHERE lookup_text = ?",
 		],
-		["an empty line", "UPDATE merchant_lookups SET line = '' WHERE lookup_text = ?"],
+		[
+			"an empty line",
+			"UPDATE merchant_lookups SET line = '' WHERE lookup_text = ?",
+		],
 	])("hides the line when the lookup is %s", async (_, sql) => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
 		await db.prepare(sql).bind(TEXT).run();
@@ -581,7 +585,9 @@ describe("the line a person sees (#988, P146): the queue and the edit panel show
 	it("hides the line when a key of the text is private", async () => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
 		await db
-			.prepare("UPDATE merchant_lookup_texts SET private = 1 WHERE lookup_text = ?")
+			.prepare(
+				"UPDATE merchant_lookup_texts SET private = 1 WHERE lookup_text = ?",
+			)
 			.bind(TEXT)
 			.run();
 
@@ -639,6 +645,7 @@ describe("the line a person sees (#988, P146): the queue and the edit panel show
 		const withOne = spy.mock.calls.length;
 
 		spy.mockClear();
+
 		for (let n = 0; n < 4; n++) await lineRow({ key: `${K1} ${n}` });
 		spy.mockClear();
 		await suggestionQueue(db);

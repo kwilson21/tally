@@ -12,7 +12,6 @@ import { accountChoices } from "../db/accounts";
 import { activeCategories } from "../db/active-categories";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { dontUse } from "../db/lookup-saves";
 import { FOLLOWS_PURCHASE, isIncluded } from "../db/counted-month";
 import { householdPeopleList } from "../db/household-people";
 import {
@@ -21,6 +20,7 @@ import {
 	likelyStill,
 	likelyTransactions,
 } from "../db/likely-transactions";
+import { dontUse } from "../db/lookup-saves";
 import { mixedCategories } from "../db/mixed-trip";
 import { refundedByOthersSql } from "../db/refunded";
 import {
@@ -44,10 +44,10 @@ import {
 	offeredToSplit,
 	PAGE_SIZE,
 	payingCounts,
+	type RefundPurchase,
 	refundPurchases,
 	removeSplit,
 	saveEdit,
-	type RefundPurchase,
 	saveSplit,
 	selectableMatchIds,
 	selectableTickIds,
@@ -2980,6 +2980,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 					: "Pick a category.",
 			}),
 		);
+
 	return c.html(await categoryChoiceFrom(c, tx, form, categories, locked));
 });
 
@@ -3036,49 +3037,53 @@ async function categoryChoiceFrom(
 // drawn again, with no guess line, and takes focus, since it is not a control. Without JavaScript the press is a plain redirect
 // back to the panel. A store with several lookup texts keeps the lines of its other texts; the toast names the store.
 // The store's name and the line are never logged.
-transactions.post("/transactions/:id{[0-9]+}/lookup-line/dont-use", async (c) => {
-	const tx = await transactionAt(c);
+transactions.post(
+	"/transactions/:id{[0-9]+}/lookup-line/dont-use",
+	async (c) => {
+		const tx = await transactionAt(c);
 
-	if (!tx) return c.notFound();
-	const form = await c.req.formData();
-	const back = safeBack(form.get("back")?.toString());
+		if (!tx) return c.notFound();
+		const form = await c.req.formData();
+		const back = safeBack(form.get("back")?.toString());
 
-	const asked = await dontUse(c.env.DB, tx.id);
-	const message =
-		asked.kind === "refuse"
-			? asked.refusal.say
-			: `Tally won't use the web for ${tx.storeName} again.`;
+		const asked = await dontUse(c.env.DB, tx.id);
 
-	if (!c.req.header("HX-Request")) {
-		const query = back.includes("?") ? back.slice(back.indexOf("?")) : "";
+		const message =
+			asked.kind === "refuse"
+				? asked.refusal.say
+				: `Tally won't use the web for ${tx.storeName} again.`;
 
-		return c.redirect(`/transactions/${tx.id}${query}`, 303);
-	}
+		if (!c.req.header("HX-Request")) {
+			const query = back.includes("?") ? back.slice(back.indexOf("?")) : "";
 
-	c.header(
-		"HX-Trigger",
-		hxTrigger({
-			toast: {
-				message,
-				type: asked.kind === "refuse" ? "info" : "success",
-			},
-			announce: message,
-		}),
-	);
+			return c.redirect(`/transactions/${tx.id}${query}`, 303);
+		}
 
-	const after = (await transactionAt(c)) ?? tx;
+		c.header(
+			"HX-Trigger",
+			hxTrigger({
+				toast: {
+					message,
+					type: asked.kind === "refuse" ? "info" : "success",
+				},
+				announce: message,
+			}),
+		);
 
-	return c.html(
-		await categoryChoiceFrom(
-			c,
-			after,
-			form,
-			await activeCategories(c.env.DB),
-			undefined,
-			true,
-		),
-	);
-});
+		const after = (await transactionAt(c)) ?? tx;
+
+		return c.html(
+			await categoryChoiceFrom(
+				c,
+				after,
+				form,
+				await activeCategories(c.env.DB),
+				undefined,
+				true,
+			),
+		);
+	},
+);
 
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {

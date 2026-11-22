@@ -7,11 +7,7 @@ import { K1, lineRow, TEXT, useLineFixture } from "./lookup-line-fixture";
 const BASE = "http://tally.test";
 const PATH = "/settings/suggestions";
 
-async function post(
-	path: string,
-	fields: Record<string, string>,
-	htmx = true,
-) {
+async function post(path: string, fields: Record<string, string>, htmx = true) {
 	const headers = {
 		Origin: BASE,
 		"content-type": "application/x-www-form-urlencoded",
@@ -27,6 +23,7 @@ async function post(
 	return { res, html: await res.text() };
 }
 
+// SAFETY: the HX-Trigger header is JSON this app writes itself, with the toast and announce keys named here.
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 		toast?: { message: string; type: string };
@@ -34,7 +31,9 @@ const trigger = (res: Response) =>
 	};
 
 const lookupOf = (text: string) =>
-	env.DB.prepare("SELECT status, line FROM merchant_lookups WHERE lookup_text = ?")
+	env.DB.prepare(
+		"SELECT status, line FROM merchant_lookups WHERE lookup_text = ?",
+	)
 		.bind(text)
 		.first<{ status: string; line: string | null }>();
 
@@ -43,6 +42,7 @@ describe("Don't use this on the review card (#988)", () => {
 
 	it("drops the line, shows the next card and toasts the store's sentence", async () => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
+
 		const { res, html } = await post(PATH, {
 			id: `category-${id}`,
 			answer: "dont_use",
@@ -58,6 +58,7 @@ describe("Don't use this on the review card (#988)", () => {
 
 	it("without HX-Request redirects 303 to the review address", async () => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
+
 		const { res } = await post(
 			PATH,
 			{ id: `category-${id}`, answer: "dont_use" },
@@ -146,6 +147,7 @@ describe("Don't use this in the edit panel (#988)", () => {
 
 	it("without HX-Request redirects 303 to /transactions/:id with back's query", async () => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
+
 		const { res } = await post(
 			route(id),
 			{ back: "/transactions?month=2026-11" },

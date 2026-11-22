@@ -30,6 +30,7 @@ const ALL_ON: Switches = {
 	categories: true,
 	income: true,
 	sortOnArrival: true,
+	lookupStores: true,
 };
 
 describe("Save the AI suggestions switches", () => {

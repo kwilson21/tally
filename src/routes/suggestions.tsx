@@ -846,6 +846,7 @@ suggestions.post(PATH, async (c) => {
 			// `done()` (which words its announce with the count left) is not used; the announce is the sentence alone.
 			if (answer === "dont_use") {
 				const asked = await dontUse(db, item.transactionId);
+
 				const message =
 					asked.kind === "refuse"
 						? asked.refusal.say

@@ -7,15 +7,9 @@ import {
 	saveAiSwitches,
 } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
-import { resetDemo } from "../src/demo/reset";
 import { suggestionQueue } from "../src/db/suggestions-queue";
-import {
-	K1,
-	LINE,
-	lineRow,
-	TEXT,
-	useLineFixture,
-} from "./lookup-line-fixture";
+import { resetDemo } from "../src/demo/reset";
+import { K1, LINE, lineRow, TEXT, useLineFixture } from "./lookup-line-fixture";
 
 // The AI suggestions group in Settings (spec §8.6, decision 73, P41 B): switches with On or Off in
 // words, one Save under the group, working with or without JavaScript. It shows only the switches
@@ -899,9 +893,12 @@ describe("the Look up new stores on the web switch (#988)", () => {
 
 		expect((await readAiSwitches(env.DB)).lookupStores).toBe(false);
 		expect(html).toContain("autofocus");
+
+		// SAFETY: the HX-Trigger header is JSON this app writes itself, with the announce key named here.
 		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
 			announce?: string;
 		};
+
 		expect(trigger.announce).toContain("looking up new stores on the web off");
 	});
 
@@ -919,6 +916,7 @@ describe("the Look up new stores on the web switch (#988)", () => {
 		)
 			.bind(TEXT)
 			.first<{ status: string; line: string | null }>();
+
 		expect(off).toEqual({ status: "found", line: LINE });
 		expect(
 			(await suggestionQueue(env.DB)).find((i) => i.id === `category-${id}`),

@@ -1574,6 +1574,7 @@ settings.post("/settings/ai", async (c) => {
 	) as Partial<AiSwitches>;
 
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
+
 	// A greyed lookup switch posts nothing, so the save leaves it as it was saved (#988).
 	if (form.get(LOOKUP_GREYED) === "1") delete next.lookupStores;
 	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
