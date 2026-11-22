@@ -67,6 +67,7 @@ import {
 } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
+import { dontUseReply } from "../rules/lookups";
 import { decided } from "../rules/terms";
 import {
 	addCash,
@@ -3048,10 +3049,7 @@ transactions.post(
 
 		const asked = await dontUse(c.env.DB, tx.id);
 
-		const message =
-			asked.kind === "refuse"
-				? asked.refusal.say
-				: `Tally won't use the web for ${tx.storeName} again.`;
+		const reply = dontUseReply(tx.storeName, asked);
 
 		if (!c.req.header("HX-Request")) {
 			const query = back.includes("?") ? back.slice(back.indexOf("?")) : "";
@@ -3062,11 +3060,8 @@ transactions.post(
 		c.header(
 			"HX-Trigger",
 			hxTrigger({
-				toast: {
-					message,
-					type: asked.kind === "refuse" ? "info" : "success",
-				},
-				announce: message,
+				toast: { message: reply.message, type: reply.type },
+				announce: reply.message,
 			}),
 		);
 

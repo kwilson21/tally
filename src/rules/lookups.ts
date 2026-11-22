@@ -5,7 +5,7 @@ import {
 	type StoreLookupState,
 	storeLookupMachine,
 } from "../machines/store-lookup";
-import { rule, term, unless } from "./terms";
+import { type Decided, rule, term, unless } from "./terms";
 
 export type DontUseRequest = { transactionId: number };
 
@@ -80,3 +80,17 @@ export const dontUseLine = rule({
 	writesText:
 		"Moves the store's lookup from found to skipped and drops its line, clears every open guess made with it so the next sort asks again without it, and withdraws the names Tally guessed for the store that nobody chose.",
 });
+
+/** The sentence and toast type for a decided "Don't use this": the refusal's sentence as info, or the store's as success. */
+export function dontUseReply(
+	store: string,
+	asked: Decided<DontUseWrite, LineNotInUse | GuessChanged>,
+): { message: string; type: "success" | "info" } {
+	if (asked.kind === "refuse")
+		return { message: asked.refusal.say, type: "info" };
+
+	return {
+		message: `Tally won't use the web for ${store} again.`,
+		type: "success",
+	};
+}

@@ -48,6 +48,7 @@ import { DigitsUpTo15, numberOf, textOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
+import { dontUseReply } from "../rules/lookups";
 import {
 	type AlreadyAnswered,
 	acceptCategoryGuess,
@@ -847,10 +848,7 @@ suggestions.post(PATH, async (c) => {
 			if (answer === "dont_use") {
 				const asked = await dontUse(db, item.transactionId);
 
-				const message =
-					asked.kind === "refuse"
-						? asked.refusal.say
-						: `Tally won't use the web for ${item.merchant} again.`;
+				const reply = dontUseReply(item.merchant, asked);
 
 				if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 
@@ -858,9 +856,9 @@ suggestions.post(PATH, async (c) => {
 					reviewUrl,
 					focus: true,
 					toast: {
-						message,
-						type: asked.kind === "refuse" ? "info" : "success",
-						announce: message,
+						message: reply.message,
+						type: reply.type,
+						announce: reply.message,
 					},
 				});
 			}
