@@ -7,6 +7,7 @@
 import { Button } from "../views/button";
 import { CategoryGrid } from "../views/category-grid";
 import { Icon } from "../views/icons";
+import { LookupLine as AppLookupLine } from "../views/lookup-line";
 import { MaybeQuestion } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { WhyLink } from "../views/why-link";
@@ -44,14 +45,14 @@ const LA_COOP: CardContent = {
 };
 
 const LONG_LINE_CARD: CardContent = {
-	store: "Strosniders",
-	bank: "STROSNIDERS HDWE 0098",
+	store: "Maple Street Hardware",
+	bank: "MAPLE ST HDWE 0098",
 	amount: "$41.20",
 	day: "Nov 19",
 	maybe: "Home",
 	sure: 64,
 	yes: "Yes, Home",
-	line: "Independent hardware store and garden centre in Takoma Park, Maryland, since 1946",
+	line: "Independent hardware store and garden store in Takoma Park, Maryland, since 1946",
 	position: "Suggestions · 2 of 5",
 };
 
@@ -108,15 +109,7 @@ function LookupLine({
 
 	if (treatment === "b") {
 		return (
-			<div class="flex flex-col items-start">
-				<p class="flex items-start gap-1.5 text-sm text-muted">
-					<Icon name="search" class="size-4 mt-0.5 shrink-0" />
-					<span>From the web: {line}</span>
-				</p>
-				<Button type="button" kind="quiet" aria-label={aria}>
-					Don't use this
-				</Button>
-			</div>
+			<AppLookupLine line={line} store={store} button={{ type: "button" }} />
 		);
 	}
 
@@ -224,7 +217,12 @@ function EditPanel({
 }
 
 /** The three options for one card at one width, each drawn with its own copy of the card. */
-function cardOptions(card: CardContent, desktop: boolean): Option[] {
+function cardOptions(
+	card: CardContent,
+	desktop: boolean,
+	/** Only the first phone block carries the owner's pick: the proposals test wants one Picked per section. */
+	pickB = false,
+): Option[] {
 	const frame = desktop ? { desktop: true } : {};
 
 	return [
@@ -241,6 +239,10 @@ function cardOptions(card: CardContent, desktop: boolean): Option[] {
 			note: "The line has its own row with a small search icon; the action is a quiet link on the row below.",
 			tradeoff: 'Clear what "this" means; one more row of height.',
 			screen: <MaybeCard card={card} treatment="b" />,
+			recommended: pickB
+				? "The owner's pick: the line and its action each get a row, so “Don't use this” is clear about what it removes."
+				: undefined,
+			picked: pickB,
 			...frame,
 		},
 		{
@@ -283,14 +285,14 @@ function SettingsSwitches() {
 				id="p146-switch-on"
 				name="p146-lookup-on"
 				label="Look up new stores on the web"
-				hint="Searches the web once for a store Tally hasn't seen, to help guess its category and name. Only the store's name from the bank text is sent."
+				hint="Searches the web once for a store, to help guess its category and name. Only the store's name as your bank gives it is sent, with numbers taken out."
 				checked
 			/>
 			<Switch
 				id="p146-switch-off"
 				name="p146-lookup-off"
 				label="Look up new stores on the web"
-				hint="Searches the web once for a store Tally hasn't seen, to help guess its category and name. Only the store's name from the bank text is sent."
+				hint="Searches the web once for a store, to help guess its category and name. Only the store's name as your bank gives it is sent, with numbers taken out."
 				disabled
 				note="Needs Categories and exclusions and Income on."
 			/>
@@ -304,7 +306,7 @@ export function LookupLineProposal() {
 		<div class="mt-6 flex flex-col gap-10">
 			<div class="flex flex-col gap-4">
 				<h3 class="font-serif text-2xl font-semibold">On the review card</h3>
-				<Options options={cardOptions(LA_COOP, false)} />
+				<Options options={cardOptions(LA_COOP, false, true)} />
 				<p class="font-semibold">At 1280</p>
 				<Options options={cardOptions(LA_COOP, true)} />
 			</div>

@@ -80,7 +80,16 @@ describe("P146, the store lookup's line on a Maybe guess", () => {
 		expect(block).toContain("From the web: Coffee shop in Arlington, VA");
 		expect(block).toContain(">Coffee shop in Arlington, VA<");
 		expect(block).toContain(
-			"Independent hardware store and garden centre in Takoma Park, Maryland, since 1946",
+			"Independent hardware store and garden store in Takoma Park, Maryland, since 1946",
+		);
+	});
+
+	it("marks option B picked once, on the first phone card block, and nowhere else", async () => {
+		const block = await proposal();
+
+		expect(count(block, ">Picked<")).toBe(1);
+		expect(block.indexOf(">Picked<")).toBeGreaterThan(
+			block.indexOf(">From the web, action under<"),
 		);
 	});
 
@@ -90,7 +99,9 @@ describe("P146, the store lookup's line on a Maybe guess", () => {
 		// Four drawings of each of three options, each with one Don't use this button in its text.
 		expect(count(block, ">Don&#39;t use this</button>")).toBe(12);
 		expect(block).toContain('aria-label="Don&#39;t use this for La Coop"');
-		expect(block).toContain('aria-label="Don&#39;t use this for Strosniders"');
+		expect(block).toContain(
+			'aria-label="Don&#39;t use this for Maple Street Hardware"',
+		);
 	});
 
 	it("draws the Settings switch on and greyed out, with its words and no request attributes", async () => {
@@ -98,7 +109,7 @@ describe("P146, the store lookup's line on a Maybe guess", () => {
 
 		expect(block).toContain("Look up new stores on the web");
 		expect(block).toContain(
-			"Searches the web once for a store Tally hasn&#39;t seen, to help guess its category and name. Only the store&#39;s name from the bank text is sent.",
+			"Searches the web once for a store, to help guess its category and name. Only the store&#39;s name as your bank gives it is sent, with numbers taken out.",
 		);
 		expect(block).toContain("Needs Categories and exclusions and Income on.");
 		expect(block).not.toMatch(/<input[^>]*hx-/);
