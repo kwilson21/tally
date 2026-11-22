@@ -183,7 +183,9 @@ export const KEPT_OFF = "UPDATE lookup_answers SET kept = 0 WHERE kept = 1";
 
 /**
  * Drops the line from every row of these texts: a row that still holds its kept line-backed guess has it cleared, then
- * no lookup_answers row of the texts counts any more. Two statements per 500 texts, the clear first, since it reads kept = 1.
+ * no lookup_answers row of the texts counts any more. Then the names Workers AI guessed for the texts' keys are withdrawn
+ * (the machine's WITHDRAW), so the next night asks them again without the line (spec §7:247). Four statements per 500 texts, the
+ * clear first, since it reads kept = 1, and the withdraw before the sweep, which reads the withdrawn status.
  * The privacy skip (claimNext, #1040) and "Don't use this" (#988) batch it with their own status change.
  */
 export function dropLineStatements(
@@ -203,6 +205,24 @@ export function dropLineStatements(
 			// stays raw: a set with no cap (decision 209); the same ends as migration 0079's trigger (its drift test).
 			.prepare(
 				`${KEPT_OFF} AND lookup_text IN (SELECT value FROM json_each(?))`,
+			)
+			.bind(json),
+		db
+			// stays raw: a set with no cap (decision 209); the machine's WITHDRAW for a waiting guess, a name that is not its key.
+			// Accepted gap (#987): a guess that sync copied to a Plaid-named key with a different lookup text is not withdrawn here.
+			.prepare(
+				`UPDATE merchants SET suggestion_status = 'none', names_asked = 0
+				WHERE suggestion_status = 'pending' AND display_name IS NULL
+				  AND raw_name IN (SELECT k.merchant_key FROM merchant_lookup_texts k WHERE k.lookup_text IN (SELECT value FROM json_each(?)))
+				  AND EXISTS (SELECT 1 FROM merchant_suggested_names g WHERE g.merchant_key = merchants.raw_name AND g.name != merchants.raw_name)`,
+			)
+			.bind(json),
+		db
+			// stays raw: a set with no cap (decision 209); the sweep as sync.ts sweepStaleNamesSql (invariant I1).
+			.prepare(
+				`DELETE FROM merchant_suggested_names
+				WHERE merchant_key IN (SELECT k.merchant_key FROM merchant_lookup_texts k WHERE k.lookup_text IN (SELECT value FROM json_each(?)))
+				  AND merchant_key IN (SELECT raw_name FROM merchants WHERE suggestion_status = 'none')`,
 			)
 			.bind(json),
 	]);
