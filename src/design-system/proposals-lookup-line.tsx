@@ -10,7 +10,7 @@ import { Icon } from "../views/icons";
 import { MaybeQuestion } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { WhyLink } from "../views/why-link";
-import { Fixed, type Option, Options } from "./proposal-parts";
+import { type Option, Options } from "./proposal-parts";
 import { CATEGORY_COLORS } from "./tokens";
 
 /** The three treatments of the line, in the order the owner sees them. */
@@ -322,10 +322,10 @@ export function LookupLineProposal() {
 				<h3 class="font-serif text-2xl font-semibold">
 					Not part of the pick: the Settings switch
 				</h3>
-				<Fixed>
+				<p class="max-w-prose text-sm text-muted">
 					The switch is the app's own Switch, and its words are as drafted here.
 					It is not part of the three treatments above.
-				</Fixed>
+				</p>
 				<SettingsSwitches />
 			</div>
 		</div>
