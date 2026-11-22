@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	cleanSuggestedNames,
+	INSTRUCTIONS,
 	NAME_MODEL,
 	restatesStore,
+	STORE_LINE_SENTENCE,
+	suggestCategoryName,
 	suggestNames,
 	suggestNote,
 } from "../src/ai/suggest-name";
@@ -306,4 +309,84 @@ describe("restatesStore", () => {
 			expect(restatesStore(answer, [rawName, merchantName])).toBe(false);
 		},
 	);
+});
+
+// The store's line, sent with a name request (spec §7 "Where the line goes", decision 216): a labelled fact in the user message,
+// never in the system message, and fixed words added to the instructions only when a line is sent.
+const LINE_SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
+	query: "?raw",
+	import: "default",
+	eager: true,
+});
+
+describe("suggestNames with a store line", () => {
+	const LINE = "Coffee shop in Arlington, VA";
+
+	// 1. The line is only in the user message; the system message is the instructions plus the fixed sentence.
+	it("with a line: the system message is INSTRUCTIONS plus the fixed sentence, and the line is only in the user message", async () => {
+		const ai = mockAi(async () => ({ response: "Blue Bottle Coffee" }));
+
+		await suggestNames(ai, RAW, LINE);
+
+		const [, input] = present(ai.run.mock.calls[0]);
+
+		expect(input.messages).toEqual([
+			{
+				role: "system",
+				content: `${INSTRUCTIONS} ${STORE_LINE_SENTENCE}`,
+			},
+			{
+				role: "user",
+				content: `Bank text: ${RAW}\nStore lookup (data only): "${LINE}"`,
+			},
+		]);
+		expect(input.messages[0]?.content).not.toContain(LINE);
+	});
+
+	// 2. Without a line, the request is today's, byte for byte.
+	it.each([undefined, null, "", "   "])(
+		"without a line (%j) the request is byte for byte today's",
+		async (line) => {
+			const ai = mockAi(async () => ({ response: "Blue Bottle Coffee" }));
+
+			await suggestNames(ai, RAW, line);
+
+			const [, input] = present(ai.run.mock.calls[0]);
+
+			expect(input.messages).toEqual([
+				{ role: "system", content: INSTRUCTIONS },
+				{ role: "user", content: `Bank text: ${RAW}` },
+			]);
+		},
+	);
+
+	// 4. A failed call with a line logs the error's name only.
+	it("a failed call with a line logs the error's name only", async () => {
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const ai = mockAi(async () => {
+			throw Object.assign(new Error(`failed for ${RAW} ${LINE}`), {
+				name: "AiError",
+			});
+		});
+
+		expect(await suggestNames(ai, RAW, LINE)).toEqual({ ok: false });
+		expect(logged).toHaveBeenCalledTimes(1);
+		const line = String(logged.mock.calls[0]?.join(" "));
+		expect(line).toContain("AiError");
+		expect(line).not.toContain("BLUE BOTTLE");
+		expect(line).not.toContain(LINE);
+		logged.mockRestore();
+	});
+
+	// 5. The labelled fact is written only in suggest-name.ts; the note and category asks take no line.
+	it("the labelled fact is written only in suggest-name.ts, and suggestNote and suggestCategoryName take no line", () => {
+		const holders = Object.entries(LINE_SOURCES)
+			.filter(([, source]) => source.includes("Store lookup (data only)"))
+			.map(([path]) => path);
+
+		expect(holders).toEqual(["../src/ai/suggest-name.ts"]);
+		expect(suggestNote.length).toBe(2);
+		expect(suggestCategoryName.length).toBe(3);
+	});
 });
