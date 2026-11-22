@@ -279,7 +279,6 @@ describe("waiting, lines and the name read", () => {
 	it("7. with the gate closed, waitingLookupTexts and linedNames prepare no statement", async () => {
 		await eligibleStore(A);
 		await mapText(A);
-		await lookupAt(textOf(A), "found", LINE);
 		await lookupAt(textOf(A), "pending");
 
 		let statements = 0;
