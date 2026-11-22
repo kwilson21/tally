@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanBankText } from "../src/clean-bank-text";
 import { readAiSwitches, saveAiSwitches } from "../src/db/ai-switches";
 import { merchantsToAsk } from "../src/db/merchant-names";
@@ -7,19 +7,19 @@ import {
 	readLineForName,
 	waitingLookupTexts,
 } from "../src/lookup/names";
+import { seedMerchant } from "./helpers/merchants";
 import {
 	addRow,
 	db,
 	eligibleStore,
 	LINE,
 	lookupRunSetup,
-	makePrivate,
 	MINUTE,
+	makePrivate,
 	NOON_MS,
 	storeName,
 	textOf,
 } from "./lookup-run-setup";
-import { seedMerchant } from "./helpers/merchants";
 
 // The names' line reads (spec §7, "Where the line goes" and "The wait"; decisions 216 and 225): which asked-about store a name
 // waits for, which bank texts carry a line that stands, and the read made before each call. The fixtures are rows, inserted
@@ -281,27 +281,18 @@ describe("waiting, lines and the name read", () => {
 		await mapText(A);
 		await lookupAt(textOf(A), "pending");
 
-		let statements = 0;
-
-		const counted = new Proxy(db, {
-			get(target, property) {
-				if (property === "prepare" || property === "batch")
-					statements += 1;
-
-				const value = Reflect.get(target, property);
-
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
-
 		const switches = await readAiSwitches(db);
 		const closed = { DEMO: "true", TAVILY_API_KEY: "tvly" };
+		const prepare = vi.spyOn(db, "prepare");
+		const batch = vi.spyOn(db, "batch");
 
-		expect(await waitingLookupTexts(closed, counted, switches)).toEqual([]);
-		expect(await linedNames(closed, counted, switches, [A])).toEqual(
-			new Map(),
-		);
-		expect(statements).toBe(0);
+		expect(await waitingLookupTexts(closed, db, switches)).toEqual([]);
+		expect(await linedNames(closed, db, switches, [A])).toEqual(new Map());
+		expect(prepare).not.toHaveBeenCalled();
+		expect(batch).not.toHaveBeenCalled();
+
+		prepare.mockRestore();
+		batch.mockRestore();
 	});
 
 	// 8. A waiting text's merchants leave the names' list before the limit is applied.
@@ -372,9 +363,9 @@ describe("waiting, lines and the name read", () => {
 	])("9. linedNames, $name", async ({ setup, expected }) => {
 		await setup();
 
-		expect(
-			await linedNames(OPEN, db, await readAiSwitches(db), [A]),
-		).toEqual(expected);
+		expect(await linedNames(OPEN, db, await readAiSwitches(db), [A])).toEqual(
+			expected,
+		);
 	});
 
 	// 10. The read made before a call: the line while it stands, otherwise null.

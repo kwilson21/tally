@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTRUCTIONS } from "../src/ai/suggest-name";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { suggestMerchantNames, suggestNightlyNames } from "../src/suggest-names-pending";
+import {
+	suggestMerchantNames,
+	suggestNightlyNames,
+} from "../src/suggest-names-pending";
+import { fakeAi } from "./helpers/doubles";
 import { seedMerchant } from "./helpers/merchants";
 import {
 	addRow,
@@ -26,7 +30,9 @@ const X = storeName(3);
 type Call = { bank: string; line: string | null };
 
 /** A Workers AI binding that records each name request, and runs `during` with its bank text while the call is out. */
-function recordingAi(during: (bank: string) => Promise<void> | void = () => {}) {
+function recordingAi(
+	during: (bank: string) => Promise<void> | void = () => {},
+) {
 	const calls: Call[] = [];
 
 	const run = async (
@@ -43,8 +49,7 @@ function recordingAi(during: (bank: string) => Promise<void> | void = () => {}) 
 		return { response: "Tidy Name" };
 	};
 
-	// SAFETY: the module calls only ai.run, the one member this fake provides.
-	return { ai: { run } as unknown as Ai, calls };
+	return { ai: fakeAi(run), calls };
 }
 
 /** The name requests (not the notes) the fake recorded. */
@@ -61,7 +66,11 @@ async function mapText(key: string, text = textOf(key), priv = 0) {
 }
 
 /** A stored lookup row for a text (merchant_lookups). */
-async function lookupAt(text: string, status: string, line: string | null = null) {
+async function lookupAt(
+	text: string,
+	status: string,
+	line: string | null = null,
+) {
 	await db
 		.prepare(
 			"INSERT INTO merchant_lookups (lookup_text, status, line, attempts) VALUES (?, ?, ?, 0)",
@@ -79,7 +88,10 @@ async function foodId(): Promise<number> {
 }
 
 /** The open gate's env for a name run, with the given AI and overrides. */
-const envWith = (ai: Ai, overrides: Record<string, string | undefined> = {}) => ({
+const envWith = (
+	ai: Ai,
+	overrides: Record<string, string | undefined> = {},
+) => ({
 	...gateEnv(ai),
 	...overrides,
 });
@@ -208,7 +220,9 @@ describe("the names' line, through the name run", () => {
 				await mapText(A);
 				await lookupAt(textOf(A), "pending");
 				await db
-					.prepare("UPDATE transactions SET plaid_category = NULL WHERE raw_name = ?")
+					.prepare(
+						"UPDATE transactions SET plaid_category = NULL WHERE raw_name = ?",
+					)
 					.bind(A)
 					.run();
 			},
@@ -325,6 +339,7 @@ describe("the names' line, through the name run", () => {
 			setup: async () => {
 				await lookupAt(textOf(A), "found", LINE);
 				await mapText(A);
+
 				for (let i = 0; i < 3; i++) await addRow({ raw_name: X });
 			},
 			during: async (bank) => {
@@ -357,7 +372,9 @@ describe("the names' line, through the name run", () => {
 			// Not asked and no row for A yet; once its lookup is no longer pending, A is asked, plain.
 			expect(await statusOf(A)).toBeNull();
 			await db
-				.prepare("UPDATE merchant_lookups SET status = 'gave_up' WHERE lookup_text = ?")
+				.prepare(
+					"UPDATE merchant_lookups SET status = 'gave_up' WHERE lookup_text = ?",
+				)
 				.bind(textOf(A))
 				.run();
 
@@ -404,7 +421,9 @@ describe("the names' line, through the name run", () => {
 			name: "A's map row made private",
 			change: async () => {
 				await db
-					.prepare("UPDATE merchant_lookup_texts SET private = 1 WHERE merchant_key = ?")
+					.prepare(
+						"UPDATE merchant_lookup_texts SET private = 1 WHERE merchant_key = ?",
+					)
 					.bind(A)
 					.run();
 			},
@@ -479,7 +498,9 @@ describe("the names' line, through the name run", () => {
 			name: "C's key is made private",
 			change: async () => {
 				await db
-					.prepare("UPDATE merchant_lookup_texts SET private = 1 WHERE merchant_key = ?")
+					.prepare(
+						"UPDATE merchant_lookup_texts SET private = 1 WHERE merchant_key = ?",
+					)
 					.bind(C)
 					.run();
 			},
@@ -490,25 +511,28 @@ describe("the names' line, through the name run", () => {
 				await saveAiSwitches(db, { lookupStores: false });
 			},
 		},
-	])("13. $name during A's call: C's request carries no line", async ({ change }) => {
-		await lookupAt(textOf(A), "found", LINE);
-		await mapText(A);
-		await lookupAt(textOf(C), "found", LINE);
-		await mapText(C);
-		await addRow({ raw_name: A });
-		await addRow({ raw_name: A });
-		await addRow({ raw_name: C });
+	])(
+		"13. $name during A's call: C's request carries no line",
+		async ({ change }) => {
+			await lookupAt(textOf(A), "found", LINE);
+			await mapText(A);
+			await lookupAt(textOf(C), "found", LINE);
+			await mapText(C);
+			await addRow({ raw_name: A });
+			await addRow({ raw_name: A });
+			await addRow({ raw_name: C });
 
-		const ai = recordingAi(async (bank) => {
-			if (bank === A) await change();
-		});
+			const ai = recordingAi(async (bank) => {
+				if (bank === A) await change();
+			});
 
-		await suggestMerchantNames(envWith(ai.ai));
+			await suggestMerchantNames(envWith(ai.ai));
 
-		expect(ai.calls.find((call) => call.bank === A)?.line).toBe(LINE);
-		expect(ai.calls.find((call) => call.bank === C)?.line ?? null).toBeNull();
-		expect(await namesOf(C)).toEqual(["Tidy Name"]);
-	});
+			expect(ai.calls.find((call) => call.bank === A)?.line).toBe(LINE);
+			expect(ai.calls.find((call) => call.bank === C)?.line ?? null).toBeNull();
+			expect(await namesOf(C)).toEqual(["Tidy Name"]);
+		},
+	);
 
 	// 14. The wait counts for the note split: with the only name waiting, notes take the whole limit (C3: 60 notes, not 50).
 	it("14. namesWaiting counts the wait: with the only name waiting, the night's notes take all 60 untried calls", async () => {
@@ -527,13 +551,18 @@ describe("the names' line, through the name run", () => {
 		}
 
 		const calls: string[] = [];
-		const ai = {
-			run: vi.fn(async (_model: string, input: { messages: { content: string }[] }) => {
-				calls.push(input.messages[0]?.content === INSTRUCTIONS ? "name" : "note");
 
-				return { response: "" };
-			}),
-		} as unknown as Ai;
+		const ai = fakeAi(
+			vi.fn(
+				async (_model: string, input: { messages: { content: string }[] }) => {
+					calls.push(
+						input.messages[0]?.content === INSTRUCTIONS ? "name" : "note",
+					);
+
+					return { response: "" };
+				},
+			),
+		);
 
 		await suggestNightlyNames(envWith(ai));
 
@@ -560,6 +589,7 @@ describe("the names' line, through the name run", () => {
 	// 16. Nothing logs the bank text, the lookup text or the line, over a saved line answer, a dropped one and a thrown call.
 	it("16. nothing logs the bank text, the lookup text or the line", async () => {
 		const logs: string[] = [];
+
 		const spies = [
 			vi.spyOn(console, "log").mockImplementation((...args) => {
 				logs.push(args.map(String).join(" "));
@@ -583,12 +613,15 @@ describe("the names' line, through the name run", () => {
 		const ai = recordingAi(async (bank) => {
 			if (bank === A) {
 				await db
-					.prepare("UPDATE merchant_lookups SET status = 'skipped', line = NULL WHERE lookup_text = ?")
+					.prepare(
+						"UPDATE merchant_lookups SET status = 'skipped', line = NULL WHERE lookup_text = ?",
+					)
 					.bind(textOf(A))
 					.run();
 			}
 
-			if (bank === C) throw Object.assign(new Error("boom"), { name: "AiError" });
+			if (bank === C)
+				throw Object.assign(new Error("boom"), { name: "AiError" });
 		});
 
 		await suggestMerchantNames(envWith(ai.ai));

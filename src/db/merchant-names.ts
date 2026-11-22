@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
 import { householdToday } from "../dates";
+import type { LineGuard } from "../lookup/line";
 import {
 	answerNameSuggestion,
 	type NameFacts,
@@ -21,7 +22,6 @@ import {
 } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
 import { KEPT_NAME_LOG_SQL } from "./ai-log";
-import type { LineGuard } from "../lookup/line";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { Database, runWith } from "./database";
 import { ChangedSinceRead, decideAndSave } from "./guarded-save";
@@ -180,6 +180,7 @@ export async function saveAskedNames(
 	guard: LineGuard = { sql: "1", binds: [] },
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
+
 	const firstByText = new Map<
 		string,
 		{ rawName: string; names: string[]; lineText?: string }

@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { dropLineStatements } from "../src/db/store-lookups";
-import { suggestMerchantNames } from "../src/suggest-names-pending";
-import { assertMerchantInvariants, seedMerchant } from "./helpers/merchants";
 import { claimNext, type LookupEnv } from "../src/lookup/run";
+import { suggestMerchantNames } from "../src/suggest-names-pending";
+import { fakeAi as aiFake } from "./helpers/doubles";
+import {
+	assertMerchantInvariants,
+	type MerchantSeed,
+	seedMerchant,
+} from "./helpers/merchants";
 import { asksAgain, expectCleared } from "./lookup-line-fixture";
 import {
 	addRow,
@@ -35,7 +40,12 @@ async function merchantRow(key: string) {
 			"SELECT suggestion_status AS status, names_asked AS namesAsked, display_name AS displayName FROM merchants WHERE raw_name = ?",
 		)
 		.bind(key)
-		.first<{ status: string; namesAsked: number; displayName: string | null }>();
+		.first<{
+			status: string;
+			namesAsked: number;
+			displayName: string | null;
+		}>();
+
 	const { results } = await db
 		.prepare(
 			"SELECT name FROM merchant_suggested_names WHERE merchant_key = ? ORDER BY position",
@@ -189,27 +199,52 @@ describe("dropLineStatements", () => {
 		{
 			name: "D1: pending, a Workers AI name that is not its key is withdrawn",
 			merchant: { status: "pending", names: ["Zed Cafe"] },
-			after: { status: "none", namesAsked: false, displayName: null, names: [] },
+			after: {
+				status: "none",
+				namesAsked: false,
+				displayName: null,
+				names: [],
+			},
 		},
 		{
 			name: "D2: pending, its one name is its key (Plaid's) and stays",
 			merchant: { status: "pending", names: ["ZED CAFE"] },
-			after: { status: "pending", namesAsked: false, displayName: null, names: ["ZED CAFE"] },
+			after: {
+				status: "pending",
+				namesAsked: false,
+				displayName: null,
+				names: ["ZED CAFE"],
+			},
 		},
 		{
 			name: "D3: accepted stays",
 			merchant: { status: "accepted", names: ["Zed Cafe"] },
-			after: { status: "accepted", namesAsked: false, displayName: null, names: ["Zed Cafe"] },
+			after: {
+				status: "accepted",
+				namesAsked: false,
+				displayName: null,
+				names: ["Zed Cafe"],
+			},
 		},
 		{
 			name: "D3: rejected stays",
 			merchant: { status: "rejected", names: ["Zed Cafe"] },
-			after: { status: "rejected", namesAsked: false, displayName: null, names: ["Zed Cafe"] },
+			after: {
+				status: "rejected",
+				namesAsked: false,
+				displayName: null,
+				names: ["Zed Cafe"],
+			},
 		},
 		{
 			name: "D4: a display name set stays",
 			merchant: { status: "pending", names: ["Zed Cafe"], displayName: "Zed" },
-			after: { status: "pending", namesAsked: false, displayName: "Zed", names: ["Zed Cafe"] },
+			after: {
+				status: "pending",
+				namesAsked: false,
+				displayName: "Zed",
+				names: ["Zed Cafe"],
+			},
 		},
 		{
 			name: "D5: asked with nothing usable stays",
@@ -220,10 +255,16 @@ describe("dropLineStatements", () => {
 			name: "D6: a row on a key of another text stays",
 			merchant: { status: "pending", names: ["Zed Cafe"] },
 			otherText: true,
-			after: { status: "pending", namesAsked: false, displayName: null, names: ["Zed Cafe"] },
+			after: {
+				status: "pending",
+				namesAsked: false,
+				displayName: null,
+				names: ["Zed Cafe"],
+			},
 		},
 	])("15. removalClearsName, $name", async ({ merchant, otherText, after }) => {
-		await seedMerchant(db, { key: "ZED CAFE", ...merchant });
+		// SAFETY: the row's fields are the seed's own (status, names, namesAsked, displayName); only the key is added here.
+		await seedMerchant(db, { ...merchant, key: "ZED CAFE" } as MerchantSeed);
 		await db
 			.prepare(
 				"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, ?, 0)",
@@ -419,25 +460,29 @@ describe("a found store flagged private, through the claim", () => {
 			)
 			.bind(textOf(name), LINE)
 			.run();
-		await seedMerchant(db, { key: name, status: "pending", names: ["Tidy Name"] });
+		await seedMerchant(db, {
+			key: name,
+			status: "pending",
+			names: ["Tidy Name"],
+		});
 		await makePrivate(name);
 
 		const requests: string[] = [];
-		const ai = {
-			run: async (
-				_model: string,
-				input: { messages: { content: string }[] },
-			) => {
+
+		const ai = aiFake(
+			async (_model: string, input: { messages: { content: string }[] }) => {
 				requests.push(input.messages[1]?.content ?? "");
 
 				return { response: "Tidy Name" };
 			},
-		} as unknown as Ai;
+		);
 
 		await claimNext(gateEnv(ai), { token: "run-1", bySync: false });
 
 		const row = await db
-			.prepare("SELECT suggestion_status AS status, names_asked AS namesAsked FROM merchants WHERE raw_name = ?")
+			.prepare(
+				"SELECT suggestion_status AS status, names_asked AS namesAsked FROM merchants WHERE raw_name = ?",
+			)
 			.bind(name)
 			.first<{ status: string; namesAsked: number }>();
 
@@ -445,7 +490,9 @@ describe("a found store flagged private, through the claim", () => {
 		expect(
 			(
 				await db
-					.prepare("SELECT COUNT(*) AS n FROM merchant_suggested_names WHERE merchant_key = ?")
+					.prepare(
+						"SELECT COUNT(*) AS n FROM merchant_suggested_names WHERE merchant_key = ?",
+					)
 					.bind(name)
 					.first<{ n: number }>()
 			)?.n,

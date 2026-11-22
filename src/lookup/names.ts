@@ -6,9 +6,9 @@ import { type AiSwitches, STILL_ON_SQL } from "../db/ai-switches";
 import { SWITCHES_ON } from "../db/store-lookups";
 import { qualifies } from "./claims";
 import { readEligibility } from "./eligibility";
-import { lineStandsSql, type LineGuard } from "./line";
-import { lookupTextOf } from "./lookup-text";
 import { lookupAsks } from "./gate";
+import { type LineGuard, lineStandsSql } from "./line";
+import { lookupTextOf } from "./lookup-text";
 
 type GateEnv = { DEMO?: string; TAVILY_API_KEY?: string };
 
@@ -35,9 +35,7 @@ export async function waitingLookupTexts(
 	const texts = results.map((row) => row.text);
 	const verdicts = await readEligibility(db, { lookupTexts: texts });
 
-	return texts.filter((text) =>
-		qualifies(env, switches, verdicts.get(text)),
-	);
+	return texts.filter((text) => qualifies(env, switches, verdicts.get(text)));
 }
 
 /**

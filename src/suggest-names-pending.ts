@@ -178,18 +178,21 @@ export async function suggestMerchantNames(
 	if (!switches.names) return done;
 
 	let failuresInARow = 0;
+
 	// A store whose lookup is still under way waits (spec §7, "The wait"); a name with a standing line carries it (decision 216).
 	const rawNames = await merchantsToAsk(
 		env.DB,
 		limit,
 		await waitingLookupTexts(env, env.DB, switches),
 	);
+
 	const lined = await linedNames(env, env.DB, switches, rawNames);
 	const guard = lined.size > 0 ? nameLineGuard() : undefined;
 
 	for (let i = 0; i < rawNames.length; i += SWITCH_CHECK_BATCH) {
 		const answers: { rawName: string; names: string[]; lineText?: string }[] =
 			[];
+
 		const failed: string[] = [];
 
 		for (const rawName of rawNames.slice(i, i + SWITCH_CHECK_BATCH)) {
@@ -200,10 +203,12 @@ export async function suggestMerchantNames(
 
 			done.asked += 1;
 			const text = lined.get(rawName);
+
 			// Read immediately before each call (spec §7:248), not once for the run: the spec requires it, which is why this read
 			// sits in the loop despite decision 209.
 			const line =
 				text === undefined ? null : await readLineForName(env.DB, text);
+
 			const result = await suggestNames(ai, rawName, line);
 
 			if (!result.ok) {
@@ -216,11 +221,11 @@ export async function suggestMerchantNames(
 			}
 
 			failuresInARow = 0;
-			answers.push({
-				rawName,
-				names: result.names,
-				...(line === null || text === undefined ? {} : { lineText: text }),
-			});
+			answers.push(
+				line === null || text === undefined
+					? { rawName, names: result.names }
+					: { rawName, names: result.names, lineText: text },
+			);
 		}
 
 		// One read per batch of five keeps the switch boundary (a switch turned off mid-run stops it)

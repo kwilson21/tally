@@ -15,6 +15,7 @@ import {
 	CATEGORY_SUGGESTION_STATUS_VALUES,
 	MERCHANT_STATUS_VALUES,
 } from "../src/db/schema";
+import { dropLineStatements } from "../src/db/store-lookups";
 import { resetDemo } from "../src/demo/reset";
 import {
 	CATEGORY_SUGGESTION_LABELS,
@@ -23,7 +24,6 @@ import {
 	type CategorySuggestionState,
 	categorySuggestionMachine,
 } from "../src/machines/category-suggestion";
-import { dropLineStatements } from "../src/db/store-lookups";
 import { machineGraph } from "../src/machines/graph";
 import {
 	MERCHANT_SUGGESTION_LABELS,
