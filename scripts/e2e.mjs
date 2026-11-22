@@ -262,7 +262,10 @@ page.off("request", recordPanelPost);
 
 assert.deepEqual(panelPosts, ["/transactions/901/lookup-line/dont-use"]);
 
-await page.waitForFunction((text) => document.getElementById("announcer")?.textContent === text, panelMessage);
+await page.waitForFunction(
+	(text) => document.getElementById("announcer")?.textContent === text,
+	panelMessage,
+);
 
 assert.equal(
 	await page.locator("#edit-category").getByText("From the web").count(),
@@ -307,7 +310,10 @@ const cardMessage = "Tally won't use the web for La Coop again.";
 
 await page.locator("#toasts").getByText(cardMessage).waitFor();
 
-await page.waitForFunction((text) => document.getElementById("announcer")?.textContent === text, cardMessage);
+await page.waitForFunction(
+	(text) => document.getElementById("announcer")?.textContent === text,
+	cardMessage,
+);
 
 assert.equal(await page.getByText("From the web").count(), 0);
 
