@@ -136,23 +136,28 @@ export function pendingNameStatements(
  * The bank texts to ask Workers AI about, at most `limit` (NAME_ASKED_SQL). A merchant is asked about once, so an answer
  * with no usable name is kept as an empty suggestion. A text whose call failed (`merchant_name_failures`, #468) is still
  * asked, but after the ones never tried, the longest-ago failure first, so texts that keep failing can't hold up the
- * rest. Within each group, most charges first.
+ * rest. Within each group, most charges first. `waiting` are lookup texts whose names wait (names.ts); a merchant whose
+ * key has one is left out before the limit, so it never holds a call slot.
  */
 export async function merchantsToAsk(
 	db: D1Database,
 	limit: number,
+	waiting: readonly string[] = [],
 ): Promise<string[]> {
 	const { results } = await db
 		.prepare(
+			// stays raw: the waiting set is the night's pending texts, a set with no cap, and the query is one statement (decision 209)
 			`SELECT t.raw_name AS rawName FROM transactions t
 			 LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			 LEFT JOIN merchant_name_failures f ON f.raw_name = t.raw_name
 			 WHERE ${NAME_ASKED_SQL}
+			   AND NOT EXISTS (SELECT 1 FROM merchant_lookup_texts wk WHERE wk.merchant_key = t.raw_name
+			     AND wk.lookup_text IN (SELECT value FROM json_each(?)))
 			 GROUP BY t.raw_name
 			 ORDER BY f.failed_at IS NOT NULL, f.failed_at, COUNT(*) DESC, t.raw_name
 			 LIMIT ?`,
 		)
-		.bind(limit)
+		.bind(JSON.stringify(waiting), limit)
 		.all<{ rawName: string }>();
 
 	return results.map((row) => row.rawName);

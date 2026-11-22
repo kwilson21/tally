@@ -27,7 +27,7 @@ export type StoredLookup = StoreLookupRow & {
 };
 
 /** The switches a claim and a save are guarded by: every switch the lookup's search and its Jev question rely on. */
-const SWITCHES_ON = stillOnKeys({
+export const SWITCHES_ON = stillOnKeys({
 	lookupStores: true,
 	categories: true,
 	income: true,
