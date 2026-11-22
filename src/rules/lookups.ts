@@ -82,10 +82,12 @@ export const dontUseLine = rule({
 });
 
 /** The sentence and toast type for a decided "Don't use this": the refusal's sentence as info, or the store's as success. */
+export type DontUseReply = { message: string; type: "success" | "info" };
+
 export function dontUseReply(
 	store: string,
 	asked: Decided<DontUseWrite, LineNotInUse | GuessChanged>,
-): { message: string; type: "success" | "info" } {
+): DontUseReply {
 	if (asked.kind === "refuse")
 		return { message: asked.refusal.say, type: "info" };
 
