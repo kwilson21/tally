@@ -1,5 +1,7 @@
 import { exports } from "cloudflare:workers";
+import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
+import { LookupLine } from "../src/views/lookup-line";
 
 // P146 (#988): how the store lookup's line and its "Don't use this" look on a Maybe guess, after P145 on the proposals page.
 
@@ -91,6 +93,19 @@ describe("P146, the store lookup's line on a Maybe guess", () => {
 		expect(block.indexOf(">Picked<")).toBeGreaterThan(
 			block.indexOf(">From the web, action under<"),
 		);
+	});
+
+	it("draws option B with the real LookupLine, the same markup for the same store and line", async () => {
+		const block = await proposal();
+		const real = renderToString(
+			LookupLine({
+				line: "Coffee shop in Arlington, VA",
+				store: "La Coop",
+				button: { type: "button" },
+			}),
+		);
+
+		expect(block).toContain(real);
 	});
 
 	it("puts a real Don't use this button on each treatment, with no lost action", async () => {
