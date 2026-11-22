@@ -11,6 +11,7 @@ import {
 	dismissSuggestion,
 } from "../db/category-suggestions";
 import { type Database, runWith } from "../db/database";
+import { dontUse } from "../db/lookup-saves";
 import {
 	type NameChoice,
 	type NameReview,
@@ -841,6 +842,28 @@ suggestions.post(PATH, async (c) => {
 		}
 
 		case "category": {
+			// "Don't use this" (#988): drops the store's line, then shows the next card. It is not an answer to the guess, so
+			// `done()` (which words its announce with the count left) is not used; the announce is the sentence alone.
+			if (answer === "dont_use") {
+				const asked = await dontUse(db, item.transactionId);
+				const message =
+					asked.kind === "refuse"
+						? asked.refusal.say
+						: `Tally won't use the web for ${item.merchant} again.`;
+
+				if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
+				return renderScreen(c, {
+					reviewUrl,
+					focus: true,
+					toast: {
+						message,
+						type: asked.kind === "refuse" ? "info" : "success",
+						announce: message,
+					},
+				});
+			}
+
 			if (answer === "yes") {
 				const saved =
 					item.categoryId !== null &&

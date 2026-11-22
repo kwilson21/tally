@@ -12,6 +12,7 @@ import { accountChoices } from "../db/accounts";
 import { activeCategories } from "../db/active-categories";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
+import { dontUse } from "../db/lookup-saves";
 import { FOLLOWS_PURCHASE, isIncluded } from "../db/counted-month";
 import { householdPeopleList } from "../db/household-people";
 import {
@@ -46,6 +47,7 @@ import {
 	refundPurchases,
 	removeSplit,
 	saveEdit,
+	type RefundPurchase,
 	saveSplit,
 	selectableMatchIds,
 	selectableTickIds,
@@ -2960,7 +2962,6 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
-	const back = safeBack(form.get("back")?.toString());
 
 	const { linked, locked } = linkedPurchases(
 		tx,
@@ -2979,6 +2980,21 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 					: "Pick a category.",
 			}),
 		);
+	return c.html(await categoryChoiceFrom(c, tx, form, categories, locked));
+});
+
+/**
+ * The category part as a posted form leaves it: the pick the person made kept, the rule tick as they set it, and the
+ * merchant rule named by its category. The lock route and "Don't use this" on a store's line (#988) both answer with it.
+ */
+async function categoryChoiceFrom(
+	c: Context<App>,
+	tx: TransactionDetail,
+	form: FormData,
+	categories: Category[],
+	locked: RefundPurchase | undefined,
+	focus = false,
+) {
 	// A locked choice is disabled, so the browser posts none of its radios: it carries the last pick in hidden
 	// fields (CategoryChoice), and the row's own category is drawn only when nothing is posted.
 	const posted = form.get("category");
@@ -2994,7 +3010,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 				undefined)
 			: undefined;
 
-	return c.html(
+	return (
 		<CategoryChoice
 			tx={tx}
 			categories={categories}
@@ -3005,13 +3021,62 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 				newCategoryName: textOf(form.get("new_category_name")),
 			}}
 			purchase={locked}
-			back={back}
+			back={safeBack(form.get("back")?.toString())}
 			rule={
 				tx.refundOfId == null
 					? { checked: form.get("always") === "1", ruleCategory: ruleName }
 					: undefined
 			}
-		/>,
+			focus={focus}
+		/>
+	);
+}
+
+// "Don't use this" on a store's lookup line in the edit panel (#988, P146 B). The panel stays open: only its category part is
+// drawn again, with no guess line, and takes focus, since it is not a control. Without JavaScript the press is a plain redirect
+// back to the panel. A store with several lookup texts keeps the lines of its other texts; the toast names the store.
+// The store's name and the line are never logged.
+transactions.post("/transactions/:id{[0-9]+}/lookup-line/dont-use", async (c) => {
+	const tx = await transactionAt(c);
+
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+
+	const asked = await dontUse(c.env.DB, tx.id);
+	const message =
+		asked.kind === "refuse"
+			? asked.refusal.say
+			: `Tally won't use the web for ${tx.storeName} again.`;
+
+	if (!c.req.header("HX-Request")) {
+		const query = back.includes("?") ? back.slice(back.indexOf("?")) : "";
+
+		return c.redirect(`/transactions/${tx.id}${query}`, 303);
+	}
+
+	c.header(
+		"HX-Trigger",
+		hxTrigger({
+			toast: {
+				message,
+				type: asked.kind === "refuse" ? "info" : "success",
+			},
+			announce: message,
+		}),
+	);
+
+	const after = (await transactionAt(c)) ?? tx;
+
+	return c.html(
+		await categoryChoiceFrom(
+			c,
+			after,
+			form,
+			await activeCategories(c.env.DB),
+			undefined,
+			true,
+		),
 	);
 });
 
