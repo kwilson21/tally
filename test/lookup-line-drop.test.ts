@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { dropLineStatements } from "../src/db/store-lookups";
+import { suggestMerchantNames } from "../src/suggest-names-pending";
+import { assertMerchantInvariants, seedMerchant } from "./helpers/merchants";
 import { claimNext, type LookupEnv } from "../src/lookup/run";
 import { asksAgain, expectCleared } from "./lookup-line-fixture";
 import {
@@ -11,6 +13,7 @@ import {
 	fakeAi,
 	fakeSearch,
 	gateEnv,
+	LINE,
 	lookupRow,
 	lookupRunSetup,
 	makePrivate,
@@ -22,8 +25,31 @@ import {
 } from "./lookup-run-setup";
 
 // The line drop (#1040, rule 7, spec §7 "The states"): a found store that becomes private loses its line, and its open
-// line-backed guesses are cleared in the same batch. dropLineStatements is the statement pair the privacy skip and
+// line-backed guesses are cleared in the same batch. dropLineStatements is the statement set the privacy skip and
 // "Don't use this" share. These tests run the real claim (claimNext) through the lookup's own harness.
+
+/** A merchant row as the withdraw leaves it: its status, whether Workers AI was asked, its display name and its names. */
+async function merchantRow(key: string) {
+	const row = await db
+		.prepare(
+			"SELECT suggestion_status AS status, names_asked AS namesAsked, display_name AS displayName FROM merchants WHERE raw_name = ?",
+		)
+		.bind(key)
+		.first<{ status: string; namesAsked: number; displayName: string | null }>();
+	const { results } = await db
+		.prepare(
+			"SELECT name FROM merchant_suggested_names WHERE merchant_key = ? ORDER BY position",
+		)
+		.bind(key)
+		.all<{ name: string }>();
+
+	return {
+		status: row?.status,
+		namesAsked: row?.namesAsked === 1,
+		displayName: row?.displayName ?? null,
+		names: results.map((r) => r.name),
+	};
+}
 
 /** The first unarchived category: the one a line-backed guess names as its Eating Out (the lookup-run harness's food). */
 async function foodId(): Promise<number> {
@@ -96,7 +122,7 @@ describe("dropLineStatements", () => {
 	lookupRunSetup();
 
 	// 11. Texts T and O are dropped; X is not. The statements, the chunks and the counts are as the brief states them.
-	it("11. dropLineStatements: T's standing row is cleared; T's stale and person-filed rows keep their rows, kept 0; O's standing row is cleared; X is unchanged; 1001 texts give 6 statements, clear then kept; duplicates collapse; [] gives []", async () => {
+	it("11. dropLineStatements: T's standing row is cleared; T's stale and person-filed rows keep their rows, kept 0; O's standing row is cleared; X is unchanged; 1001 texts give 12 statements, four per chunk; duplicates collapse; [] gives []", async () => {
 		const food = await foodId();
 		// The person-filed row comes first: its own write fires the trigger, which must not see the line rows below.
 
@@ -127,7 +153,7 @@ describe("dropLineStatements", () => {
 
 		const results = await db.batch(statements);
 
-		expect(statements).toHaveLength(2);
+		expect(statements).toHaveLength(4);
 		await expectCleared(t1);
 		expect((await answerOf(t2))?.kept).toBe(0);
 		expect(await txOf(t2)).toEqual(t2Before);
@@ -145,18 +171,70 @@ describe("dropLineStatements", () => {
 				db,
 				Array.from({ length: 1001 }, (_, i) => `text ${i}`),
 			),
-		).toHaveLength(6);
+		).toHaveLength(12);
 		expect(
 			dropLineStatements(db, [textOf(storeName(0)), textOf(storeName(0))]),
-		).toHaveLength(2);
-		// 501 copies of one text are one text: without the dedupe, 501 entries make two chunks, four statements.
+		).toHaveLength(4);
+		// 501 copies of one text are one text: without the dedupe, 501 entries make two chunks, eight statements.
 		expect(
 			dropLineStatements(
 				db,
 				Array.from({ length: 501 }, () => textOf(storeName(0))),
 			),
-		).toHaveLength(2);
+		).toHaveLength(4);
 		expect(dropLineStatements(db, [])).toEqual([]);
+	});
+	// 15. Truth table 3: what the line drop does to a key's merchant row (the withdraw and the sweep), D1 to D6.
+	it.each([
+		{
+			name: "D1: pending, a Workers AI name that is not its key is withdrawn",
+			merchant: { status: "pending", names: ["Zed Cafe"] },
+			after: { status: "none", namesAsked: false, displayName: null, names: [] },
+		},
+		{
+			name: "D2: pending, its one name is its key (Plaid's) and stays",
+			merchant: { status: "pending", names: ["ZED CAFE"] },
+			after: { status: "pending", namesAsked: false, displayName: null, names: ["ZED CAFE"] },
+		},
+		{
+			name: "D3: accepted stays",
+			merchant: { status: "accepted", names: ["Zed Cafe"] },
+			after: { status: "accepted", namesAsked: false, displayName: null, names: ["Zed Cafe"] },
+		},
+		{
+			name: "D3: rejected stays",
+			merchant: { status: "rejected", names: ["Zed Cafe"] },
+			after: { status: "rejected", namesAsked: false, displayName: null, names: ["Zed Cafe"] },
+		},
+		{
+			name: "D4: a display name set stays",
+			merchant: { status: "pending", names: ["Zed Cafe"], displayName: "Zed" },
+			after: { status: "pending", namesAsked: false, displayName: "Zed", names: ["Zed Cafe"] },
+		},
+		{
+			name: "D5: asked with nothing usable stays",
+			merchant: { status: "none", names: [], namesAsked: true },
+			after: { status: "none", namesAsked: true, displayName: null, names: [] },
+		},
+		{
+			name: "D6: a row on a key of another text stays",
+			merchant: { status: "pending", names: ["Zed Cafe"] },
+			otherText: true,
+			after: { status: "pending", namesAsked: false, displayName: null, names: ["Zed Cafe"] },
+		},
+	])("15. removalClearsName, $name", async ({ merchant, otherText, after }) => {
+		await seedMerchant(db, { key: "ZED CAFE", ...merchant });
+		await db
+			.prepare(
+				"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, ?, 0)",
+			)
+			.bind("ZED CAFE", otherText ? "other text" : "zed cafe")
+			.run();
+
+		await db.batch(dropLineStatements(db, ["zed cafe"]));
+
+		expect(await merchantRow("ZED CAFE")).toEqual(after);
+		await assertMerchantInvariants(db);
 	});
 });
 
@@ -311,4 +389,63 @@ describe("the privacy drop runs whatever the switches say", () => {
 			expect(ai.stores).toEqual([]);
 		},
 	);
+});
+
+describe("a found store flagged private, through the claim", () => {
+	lookupRunSetup();
+
+	// 16. The claim's privacy skip drops the line and withdraws the unchosen Workers AI name in the same batch (BUG_KEEP_NAME);
+	// the name run then asks the store again, with no line.
+	it("16. a found store flagged private loses its unchosen Workers AI name in the claim's batch, and is asked again with no line", async () => {
+		const name = storeName(0);
+
+		await addRow({ raw_name: name });
+		await db
+			.prepare(
+				"INSERT INTO merchant_lookup_texts (merchant_key, lookup_text, private) VALUES (?, ?, 0)",
+			)
+			.bind(name, textOf(name))
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO merchant_lookups (lookup_text, status, line) VALUES (?, 'found', ?)",
+			)
+			.bind(textOf(name), LINE)
+			.run();
+		await seedMerchant(db, { key: name, status: "pending", names: ["Tidy Name"] });
+		await makePrivate(name);
+
+		const requests: string[] = [];
+		const ai = {
+			run: async (
+				_model: string,
+				input: { messages: { content: string }[] },
+			) => {
+				requests.push(input.messages[1]?.content ?? "");
+
+				return { response: "Tidy Name" };
+			},
+		} as unknown as Ai;
+
+		await claimNext(gateEnv(ai), { token: "run-1", bySync: false });
+
+		const row = await db
+			.prepare("SELECT suggestion_status AS status, names_asked AS namesAsked FROM merchants WHERE raw_name = ?")
+			.bind(name)
+			.first<{ status: string; namesAsked: number }>();
+
+		expect(row).toEqual({ status: "none", namesAsked: 0 });
+		expect(
+			(
+				await db
+					.prepare("SELECT COUNT(*) AS n FROM merchant_suggested_names WHERE merchant_key = ?")
+					.bind(name)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(0);
+
+		await suggestMerchantNames(gateEnv(ai));
+
+		expect(requests).toEqual([`Bank text: ${name}`]);
+	});
 });
