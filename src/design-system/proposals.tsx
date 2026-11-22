@@ -18,6 +18,7 @@ import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { KeyboardListProposal } from "./proposals-keys";
+import { LookupLineProposal } from "./proposals-lookup-line";
 import { MachineContextProposal } from "./proposals-machine-context";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { MoneyInputProposal } from "./proposals-money";
@@ -952,6 +953,18 @@ export function Proposals() {
 						</li>
 					))}
 				</ul>
+			</section>
+
+			<section aria-labelledby="p146-title" class="mt-12">
+				<h2 id="p146-title" class="font-serif text-3xl font-semibold">
+					P146 · The store lookup's line on a guess
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Nov 22 for issue #988. When Tally looked a store up on the web
+					and that helped its guess, the card says so. Open: the owner picks A,
+					B or C. The words and the placement are both part of the pick.
+				</p>
+				<LookupLineProposal />
 			</section>
 		</>
 	);
