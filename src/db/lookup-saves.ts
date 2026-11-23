@@ -10,7 +10,7 @@ import { type Decided, decided } from "../rules/terms";
 import { dontUseStatements } from "./store-lookups";
 import { lineGuessSql, onCurrentStoreSql } from "./suggestions-queue";
 
-/** The facts "Don't use this" is decided from: the text the row was asked with, its stored status, and whether it still holds the line-backed guess for its current store. */
+/** The facts "Don't use this" is decided from: the text the row was asked with, its stored status, whether it still holds the line-backed guess, and whether its current store is the one that text stands for. */
 export async function dontUseFacts(
 	db: D1Database,
 	transactionId: number,
@@ -18,21 +18,34 @@ export async function dontUseFacts(
 	const row = await db
 		.prepare(
 			`SELECT a.lookup_text AS lookupText, ml.status AS status,
-				(${lineGuessSql("t")} AND ${onCurrentStoreSql("t", "a.lookup_text")}) AS lineBacked
+				${lineGuessSql("t")} AS lineBacked,
+				${onCurrentStoreSql("t", "a.lookup_text")} AS onCurrentStore
 			FROM transactions t
 			JOIN lookup_answers a ON a.transaction_id = t.id
 			LEFT JOIN merchant_lookups ml ON ml.lookup_text = a.lookup_text
 			WHERE t.id = ?`,
 		)
 		.bind(transactionId)
-		.first<{ lookupText: string; status: string | null; lineBacked: number }>();
+		.first<{
+			lookupText: string;
+			status: string | null;
+			lineBacked: number;
+			onCurrentStore: number;
+		}>();
 
-	if (!row) return { lookupText: null, status: null, lineBacked: false };
+	if (!row)
+		return {
+			lookupText: null,
+			status: null,
+			lineBacked: false,
+			onCurrentStore: false,
+		};
 
 	return {
 		lookupText: row.lookupText,
 		status: row.status,
 		lineBacked: row.lineBacked === 1,
+		onCurrentStore: row.onCurrentStore === 1,
 	};
 }
 

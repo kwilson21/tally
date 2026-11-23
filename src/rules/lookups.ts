@@ -14,8 +14,10 @@ export type DontUseFacts = {
 	lookupText: string | null;
 	/** merchant_lookups.status for that text as stored; null when no row. */
 	status: string | null;
-	/** The row still holds its kept line-backed guess (lineGuessSql), and the line is for its current store (onCurrentStoreSql). */
+	/** The row still holds its kept line-backed guess (lineGuessSql). */
 	lineBacked: boolean;
+	/** The transaction's current store is still the one its lookup text stands for (onCurrentStoreSql); false when there is no text. */
+	onCurrentStore: boolean;
 };
 
 export type DontUseGiven = {
@@ -23,6 +25,7 @@ export type DontUseGiven = {
 	/** The state the stored status is in. Both pending states are `to_retry` here, since both refuse the press (decision 195). */
 	state: StoreLookupState;
 	lineBacked: boolean;
+	onCurrentStore: boolean;
 };
 
 export type DontUseWrite = { lookupText: string };
@@ -52,12 +55,21 @@ export const dontUseLine = rule({
 		lookupText: facts.lookupText,
 		state: stateOf(facts.status),
 		lineBacked: facts.lineBacked,
+		onCurrentStore: facts.onCurrentStore,
 	}),
 	nothingToDoIf: term<DontUseGiven>(
-		"the store's line is already dropped",
-		(g) => g.lookupText !== null && g.state === "skipped",
+		"the store's line is already dropped, and the transaction is still on that store",
+		(g) => g.lookupText !== null && g.state === "skipped" && g.onCurrentStore,
 	),
 	refusals: [
+		// A moved transaction is refused first, whatever the old store's line now is: its guess is not the store's to drop.
+		unless(
+			term<DontUseGiven>(
+				"the transaction is still on the store its line was asked for",
+				(g) => g.lookupText === null || g.onCurrentStore,
+			),
+			() => new GuessChanged(),
+		),
 		unless(
 			term<DontUseGiven>(
 				"the transaction was asked with a store's line, and the lookup allows Don't use this",

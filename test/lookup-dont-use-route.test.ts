@@ -70,6 +70,7 @@ const moveToOther = (id: number) =>
 // What a refused press must leave alone: the row's five guess columns and its lookup answer.
 async function guessAndAnswer(id: number) {
 	const { tx, answer } = await rowOf(id);
+
 	const guess = Object.fromEntries(
 		CLEAR_COLUMNS.map((c) => [c, tx[c] ?? null]),
 	);
@@ -171,7 +172,10 @@ describe("Don't use this on the review card (#988)", () => {
 			answer: "dont_use",
 		});
 
-		expect(trigger(res).toast).toEqual({ message: GUESS_CHANGED, type: "info" });
+		expect(trigger(res).toast).toEqual({
+			message: GUESS_CHANGED,
+			type: "info",
+		});
 		expect(await lookupOf(TEXT)).toEqual({ status: "found", line: LINE });
 		expect(await guessAndAnswer(id)).toEqual(before);
 	});
@@ -191,7 +195,10 @@ describe("Don't use this on the review card (#988)", () => {
 			answer: "dont_use",
 		});
 
-		expect(trigger(res).toast).toEqual({ message: GUESS_CHANGED, type: "info" });
+		expect(trigger(res).toast).toEqual({
+			message: GUESS_CHANGED,
+			type: "info",
+		});
 		expect(trigger(res).announce).toBe(GUESS_CHANGED);
 		expect(JSON.stringify(trigger(res))).not.toContain(
 			"Tally won't use the web for",
@@ -286,7 +293,10 @@ describe("Don't use this in the edit panel (#988)", () => {
 		const { res, html } = await post(route(id), { back: "/transactions" });
 
 		expect(html.trimStart().startsWith('<div id="edit-category"')).toBe(true);
-		expect(trigger(res).toast).toEqual({ message: GUESS_CHANGED, type: "info" });
+		expect(trigger(res).toast).toEqual({
+			message: GUESS_CHANGED,
+			type: "info",
+		});
 		expect(trigger(res).announce).toBe(GUESS_CHANGED);
 		expect(JSON.stringify(trigger(res))).not.toContain(
 			"Tally won't use the web for",
