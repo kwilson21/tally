@@ -16,11 +16,17 @@ const found: DontUseFacts = {
 	lookupText: "LUPITAS",
 	status: "found",
 	lineBacked: true,
+	onCurrentStore: true,
 };
 
 describe("Don't use a store's lookup line, by its facts", () => {
 	it("refuses when no lookup answer asked the transaction with a line", () => {
-		const answer = ask({ lookupText: null, status: null, lineBacked: false });
+		const answer = ask({
+			lookupText: null,
+			status: null,
+			lineBacked: false,
+			onCurrentStore: false,
+		});
 
 		expect(answer.kind).toBe("refuse");
 		expect(answer).toMatchObject({
@@ -31,6 +37,24 @@ describe("Don't use a store's lookup line, by its facts", () => {
 	it("has nothing to do when the store's line is already dropped", () => {
 		expect(ask({ ...found, status: "skipped" })).toEqual({
 			kind: "nothingToDo",
+		});
+	});
+
+	it("refuses with GuessChanged when the transaction moved to another store, even though the old store's line is already dropped (#988)", () => {
+		const answer = ask({ ...found, status: "skipped", onCurrentStore: false });
+
+		expect(answer).toMatchObject({
+			kind: "refuse",
+			refusal: expect.any(GuessChanged),
+		});
+	});
+
+	it("refuses with GuessChanged when the transaction moved to another store and the old line is still found (#988)", () => {
+		const answer = ask({ ...found, onCurrentStore: false });
+
+		expect(answer).toMatchObject({
+			kind: "refuse",
+			refusal: expect.any(GuessChanged),
 		});
 	});
 

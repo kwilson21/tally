@@ -1,10 +1,12 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
+	CLEAR_COLUMNS,
 	K1,
 	LINE,
 	lineRow,
 	OTHER,
+	rowOf,
 	TEXT,
 	useLineFixture,
 } from "./lookup-line-fixture";
@@ -53,6 +55,26 @@ async function nameStoreAndTransaction(id: number) {
 			id,
 		),
 	]);
+}
+
+const GUESS_CHANGED = "That guess has changed, so nothing was dropped.";
+
+// The bank now names another store for the row, while the old store's line is what the row was asked with.
+const moveToOther = (id: number) =>
+	env.DB.prepare(
+		"UPDATE transactions SET raw_name = ?, merchant_name = ? WHERE id = ?",
+	)
+		.bind(OTHER, OTHER, id)
+		.run();
+
+// What a refused press must leave alone: the row's five guess columns and its lookup answer.
+async function guessAndAnswer(id: number) {
+	const { tx, answer } = await rowOf(id);
+	const guess = Object.fromEntries(
+		CLEAR_COLUMNS.map((c) => [c, tx[c] ?? null]),
+	);
+
+	return { guess, answer };
 }
 
 const lookupOf = (text: string) =>
@@ -141,22 +163,41 @@ describe("Don't use this on the review card (#988)", () => {
 
 	it("refuses a press for a transaction whose store moved, and writes nothing (#988)", async () => {
 		const id = await lineRow({ key: K1, confidence: 0.5 });
-		await env.DB.prepare(
-			"UPDATE transactions SET raw_name = ?, merchant_name = ? WHERE id = ?",
-		)
-			.bind(OTHER, OTHER, id)
-			.run();
+		const before = await guessAndAnswer(id);
+		await moveToOther(id);
 
 		const { res } = await post(PATH, {
 			id: `category-${id}`,
 			answer: "dont_use",
 		});
 
-		expect(trigger(res).toast).toEqual({
-			message: "That guess has changed, so nothing was dropped.",
-			type: "info",
-		});
+		expect(trigger(res).toast).toEqual({ message: GUESS_CHANGED, type: "info" });
 		expect(await lookupOf(TEXT)).toEqual({ status: "found", line: LINE });
+		expect(await guessAndAnswer(id)).toEqual(before);
+	});
+
+	it("refuses a moved transaction whose old store's line is already skipped, with GuessChanged and no success toast (#988)", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await env.DB.prepare(
+			"UPDATE merchant_lookups SET status = 'skipped', line = NULL WHERE lookup_text = ?",
+		)
+			.bind(TEXT)
+			.run();
+		const before = await guessAndAnswer(id);
+		await moveToOther(id);
+
+		const { res } = await post(PATH, {
+			id: `category-${id}`,
+			answer: "dont_use",
+		});
+
+		expect(trigger(res).toast).toEqual({ message: GUESS_CHANGED, type: "info" });
+		expect(trigger(res).announce).toBe(GUESS_CHANGED);
+		expect(JSON.stringify(trigger(res))).not.toContain(
+			"Tally won't use the web for",
+		);
+		expect(await lookupOf(TEXT)).toEqual({ status: "skipped", line: null });
+		expect(await guessAndAnswer(id)).toEqual(before);
 	});
 
 	it("a guess changed since the page was drawn is refused with its own sentence", async () => {
@@ -230,6 +271,28 @@ describe("Don't use this in the edit panel (#988)", () => {
 		expect(res.headers.get("location")).toBe(
 			`/transactions/${id}?month=2026-11`,
 		);
+	});
+
+	it("refuses a moved transaction whose old store's line is already skipped, with GuessChanged and writes nothing (#988)", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await env.DB.prepare(
+			"UPDATE merchant_lookups SET status = 'skipped', line = NULL WHERE lookup_text = ?",
+		)
+			.bind(TEXT)
+			.run();
+		const before = await guessAndAnswer(id);
+		await moveToOther(id);
+
+		const { res, html } = await post(route(id), { back: "/transactions" });
+
+		expect(html.trimStart().startsWith('<div id="edit-category"')).toBe(true);
+		expect(trigger(res).toast).toEqual({ message: GUESS_CHANGED, type: "info" });
+		expect(trigger(res).announce).toBe(GUESS_CHANGED);
+		expect(JSON.stringify(trigger(res))).not.toContain(
+			"Tally won't use the web for",
+		);
+		expect(await lookupOf(TEXT)).toEqual({ status: "skipped", line: null });
+		expect(await guessAndAnswer(id)).toEqual(before);
 	});
 
 	it("a refusal redraws #edit-category with the info toast", async () => {
