@@ -47,7 +47,12 @@ import { countedTransferSql } from "../transactions/rule-offer";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { jevAnswerLogStatement, KEPT_NAME_LOG_SQL } from "./ai-log";
-import { readAiSwitches, STILL_ON_SQL, stillOnKeys } from "./ai-switches";
+import {
+	linesShown,
+	readAiSwitches,
+	STILL_ON_SQL,
+	stillOnKeys,
+} from "./ai-switches";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -98,7 +103,11 @@ import {
 } from "./schema";
 import { withTurnGuard } from "./sorting-turn";
 import { parseStoredWith } from "./stored-shape";
-import { categoryMaybeSql, lineGuessSql } from "./suggestions-queue";
+import {
+	categoryMaybeSql,
+	lineGuessSql,
+	shownLineSql,
+} from "./suggestions-queue";
 
 /** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
 /** Whether a value is a number, such as a purchase's or a person's id, before a rule branches on it. */
@@ -870,6 +879,8 @@ export type TransactionDetail = ListRow & {
 	markedTransfer: boolean;
 	/** The store lookup's line-backed guess is the one the row holds (lineGuessSql, decision 225): the Maybe chip and the edit panel read it. */
 	lineGuess: boolean;
+	/** The store's line the guess was asked with, while the line is shown (#988); null otherwise. The edit panel draws it under Tally's guess. */
+	lookupLine?: string | null;
 	/** The other category Jev named, when it is active (#233); the mixed line names it after the pick. */
 	alsoCategoryId: number | null;
 	alsoCategoryName: string | null;
@@ -998,6 +1009,7 @@ export async function getTransaction(
 				${countedTransferSql("t")} AS markedTransfer,
 				${MAYBE_CATEGORY_COLUMNS},
 				(${lineGuessSql("t")}) AS lineGuess,
+				${shownLineSql("t")} AS lookupLine,
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType, pi.institution_name AS bankName
 			FROM transactions t
@@ -1034,6 +1046,7 @@ export async function getTransaction(
 				| "jevSaysMixed"
 				| "markedTransfer"
 				| "lineGuess"
+				| "lookupLine"
 			> &
 				NameSuggestionColumns & {
 					/** 1 when Jev says the trip looks mixed (#233), whoever chose the category (`jevSaysMixedSql`). */
@@ -1041,6 +1054,8 @@ export async function getTransaction(
 					markedTransfer: number;
 					/** 1 when the row still holds the line-backed guess (lineGuessSql). */
 					lineGuess: number;
+					/** The line while it is shown, from shownLineSql (the switches are read below). */
+					lookupLine: string | null;
 					merchantTotal: number;
 					/** A JSON array of the other own-named transactions from this merchant (parts included): name, date and whether a part. */
 					ownedJson: string;
@@ -1077,11 +1092,8 @@ export async function getTransaction(
 		...row
 	} = r;
 
-	const {
-		names: namesOn,
-		details: detailsOn,
-		income: incomeOn,
-	} = await readAiSwitches(db);
+	const switches = await readAiSwitches(db);
+	const { names: namesOn, details: detailsOn, income: incomeOn } = switches;
 
 	const merchant = {
 		stored: suggestedNames,
@@ -1133,6 +1145,7 @@ export async function getTransaction(
 		jevSaysMixed: r.jevSaysMixed === 1,
 		markedTransfer: r.markedTransfer === 1,
 		lineGuess: r.lineGuess === 1,
+		lookupLine: linesShown(switches) ? (r.lookupLine ?? null) : null,
 		displayName: shown.name,
 		storeName,
 		nameSuggested: shown.suggested,

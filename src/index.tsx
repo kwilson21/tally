@@ -130,6 +130,7 @@ export async function runScheduled(
 	if (canResetDemo(env)) {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE), {
 			categoryExample: true,
+			storeLookups: true,
 		});
 	}
 

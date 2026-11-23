@@ -30,6 +30,7 @@ const ALL_ON: Switches = {
 	categories: true,
 	income: true,
 	sortOnArrival: true,
+	lookupStores: true,
 };
 
 describe("Save the AI suggestions switches", () => {
@@ -52,12 +53,25 @@ describe("Save the AI suggestions switches", () => {
 		"categories",
 		"income",
 		"sortOnArrival",
+		"lookupStores",
 	];
 
 	it("saves only the switch that differs from what the page drew", () => {
 		expect(ask({ ...ALL_ON, names: false }, everyOne)).toEqual(
 			write({
 				changed: { names: false },
+				rowsWaitFor: null,
+				expectedVersion: VERSION,
+			}),
+		);
+	});
+
+	it("writes a flip of the store lookup's switch like any other switch (#988)", () => {
+		expect(
+			ask({ ...ALL_ON, lookupStores: false }, everyOne, ALL_ON, "lookupStores"),
+		).toEqual(
+			write({
+				changed: { lookupStores: false },
 				rowsWaitFor: null,
 				expectedVersion: VERSION,
 			}),
@@ -93,7 +107,7 @@ describe("Save the AI suggestions switches", () => {
 		expect(
 			ask(
 				{ ...ALL_ON, income: false },
-				["names", "details", "categories", "income"],
+				["names", "details", "categories", "income", "lookupStores"],
 				off,
 			),
 		).toEqual(

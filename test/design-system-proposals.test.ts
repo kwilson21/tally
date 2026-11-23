@@ -510,7 +510,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(98);
+		expect(DECIDED.length).toBe(99);
 
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
@@ -558,7 +558,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
 		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
-		expect(DECIDED.at(-19)).toBe(entry);
+		expect(DECIDED.at(-20)).toBe(entry);
 	});
 
 	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
@@ -567,7 +567,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(202);
 		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
 		expect(entry?.outcome).toContain("decisions 115 and 116");
-		expect(DECIDED.at(-18)).toBe(entry);
+		expect(DECIDED.at(-19)).toBe(entry);
 	});
 
 	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
@@ -583,7 +583,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
-		expect(DECIDED.at(-17)).toBe(entry);
+		expect(DECIDED.at(-18)).toBe(entry);
 	});
 
 	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
@@ -592,7 +592,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(72);
 		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
 		expect(entry?.outcome).toContain("(decision 118).");
-		expect(DECIDED.at(-16)).toBe(entry);
+		expect(DECIDED.at(-17)).toBe(entry);
 	});
 
 	it("lists P129 as decided with issue 80, decision 117 and option A, after P128 and before P130", () => {
@@ -605,7 +605,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"the centred layout stays (decision 117).",
 		);
-		expect(DECIDED.at(-15)).toBe(entry);
+		expect(DECIDED.at(-16)).toBe(entry);
 	});
 
 	it("keeps P125 to P139 in proposal order, so a later decision can't move them", () => {
@@ -668,7 +668,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"up to two bills by name, then “and N more”",
 		);
-		expect(DECIDED.at(-8)).toBe(entry);
+		expect(DECIDED.at(-9)).toBe(entry);
 	});
 
 	it("lists P137 and P138 as decided with issues 644 and 645, option A and decision 126, P138 before P139", () => {
@@ -702,24 +702,33 @@ describe("GET /design-system/proposals", () => {
 			"Option A: Your banks lists each connected bank's state",
 		);
 		expect(banks?.outcome).toContain("(decision 133).");
-		expect(DECIDED.at(-7)).toBe(rules);
-		expect(DECIDED.at(-6)).toBe(payments);
-		expect(DECIDED.at(-5)).toBe(split);
-		expect(DECIDED.at(-4)).toBe(banks);
+		expect(DECIDED.at(-8)).toBe(rules);
+		expect(DECIDED.at(-7)).toBe(payments);
+		expect(DECIDED.at(-6)).toBe(split);
+		expect(DECIDED.at(-5)).toBe(banks);
 		const setup = DECIDED.find((d) => d.title.startsWith("P142 ·"));
-		expect(DECIDED.at(-3)).toBe(setup);
+		expect(DECIDED.at(-4)).toBe(setup);
 		const netWorth = DECIDED.find((d) => d.title.startsWith("P143 ·"));
-		expect(DECIDED.at(-2)).toBe(netWorth);
+		expect(DECIDED.at(-3)).toBe(netWorth);
 	});
 
-	it("lists P145 as decided with issue 865 and option A, last", () => {
-		const entry = DECIDED.at(-1);
+	it("lists P145 as decided with issue 865 and option A, before P146", () => {
+		const entry = DECIDED.at(-2);
 		expect(entry?.title).toBe(
 			"P145 · How the Plaid connection's flow reads as a table",
 		);
 		expect(entry?.issue).toBe(865);
 		expect(entry?.outcome).toBe(
 			"Option A: the moves are grouped by who or what sets them off (Plaid, a finished sync, you), each group a table of from, to and what happens. The by-state table and the getting-worse and worked-example options are not built.",
+		);
+	});
+
+	it("lists P146 as decided with issue 988 and option B, last", () => {
+		const entry = DECIDED.at(-1);
+		expect(entry?.title).toBe("P146 · The store lookup's line on a guess");
+		expect(entry?.issue).toBe(988);
+		expect(entry?.outcome).toBe(
+			"Option B: the line has its own row under Tally's guess, “From the web: …” with a small search icon, and a quiet “Don't use this” on the row below.",
 		);
 	});
 
@@ -5735,7 +5744,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("lists P130 to P133 as the decided entries before P134, each with its issue and decision 121", () => {
-		const last = DECIDED.slice(-14, -10);
+		const last = DECIDED.slice(-15, -11);
 		expect(last.map((d) => d.title.split(" · ")[0])).toEqual([
 			"P130",
 			"P131",

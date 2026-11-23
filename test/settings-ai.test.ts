@@ -7,7 +7,9 @@ import {
 	saveAiSwitches,
 } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
+import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
+import { K1, LINE, lineRow, TEXT, useLineFixture } from "./lookup-line-fixture";
 
 // The AI suggestions group in Settings (spec §8.6, decision 73, P41 B): switches with On or Off in
 // words, one Save under the group, working with or without JavaScript. It shows only the switches
@@ -102,7 +104,7 @@ describe("GET /settings: the AI suggestions group", () => {
 		);
 	});
 
-	it("has five switches, on to start, each with its words and its muted line", async () => {
+	it("has six switches, on to start, each with its words and its muted line", async () => {
 		const { html } = await get("/settings/ai");
 		expect(inputs(html)).toEqual([
 			{ name: "names", on: true },
@@ -110,6 +112,7 @@ describe("GET /settings: the AI suggestions group", () => {
 			{ name: "categories", on: true },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: true },
+			{ name: "lookupStores", on: true },
 		]);
 		const words = textOf(group(html));
 
@@ -128,8 +131,8 @@ describe("GET /settings: the AI suggestions group", () => {
 		])
 			expect(words).toContain(sentence);
 		// On and Off are both in the markup; the checkbox's state decides which one shows.
-		expect(group(html).match(/>On</g)).toHaveLength(5);
-		expect(group(html).match(/>Off</g)).toHaveLength(5);
+		expect(group(html).match(/>On</g)).toHaveLength(6);
+		expect(group(html).match(/>Off</g)).toHaveLength(6);
 	});
 
 	it("shows the names switch first and the sorting switch last, as the P41 drawing does", async () => {
@@ -144,9 +147,8 @@ describe("GET /settings: the AI suggestions group", () => {
 
 	it("has a row for every switch that is stored", async () => {
 		const { html } = await get("/settings/ai");
-		// The store lookup's switch has no row on this page until its Settings screen exists (decision 216).
 		expect(inputs(html).map((i) => i.name)).toEqual(
-			Object.keys(AI_SWITCHES_ALL_ON).filter((name) => name !== "lookupStores"),
+			Object.keys(AI_SWITCHES_ALL_ON),
 		);
 	});
 
@@ -168,6 +170,7 @@ describe("GET /settings: the AI suggestions group", () => {
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: true },
 		]);
 		expect(textOf(group(html))).toContain(
 			"Off means your rules and choices only.",
@@ -175,13 +178,28 @@ describe("GET /settings: the AI suggestions group", () => {
 	});
 
 	it("says so plainly when every switch is off", async () => {
-		await saveAiSwitches(env.DB, allOff);
+		await saveAiSwitches(env.DB, { ...allOff, lookupStores: false });
 		const { html } = await get("/settings/ai");
-		expect(inputs(html).every((i) => !i.on)).toBe(true);
+		expect(inputs(html)).toEqual([
+			{ name: "names", on: false },
+			{ name: "details", on: false },
+			{ name: "categories", on: false },
+			{ name: "income", on: false },
+			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: false },
+		]);
 		expect(textOf(group(html))).toContain(
 			"Tally sorts by your rules and choices only.",
 		);
 		expect(textOf(group(html))).not.toContain("Off means your rules");
+	});
+
+	it("still says every switch is off when only the store lookup is on (#988)", async () => {
+		await saveAiSwitches(env.DB, { ...allOff, lookupStores: true });
+		const { html } = await get("/settings/ai");
+		expect(textOf(group(html))).toContain(
+			"Tally sorts by your rules and choices only.",
+		);
 	});
 
 	it("posts when a switch is flipped, with Save only inside noscript, and swaps with it", async () => {
@@ -217,7 +235,7 @@ describe("GET /settings: the AI suggestions group", () => {
 			...group(html).matchAll(/<input[^>]*role="switch"[^>]*>/g),
 		].map((m) => m[0]);
 
-		expect(raws).toHaveLength(5);
+		expect(raws).toHaveLength(6);
 
 		for (const raw of raws) {
 			const name = raw.match(/name="([^"]*)"/)?.[1];
@@ -239,9 +257,9 @@ describe("GET /settings: the AI suggestions group", () => {
 		const { html } = await get("/settings/ai");
 		expect(drawnOnField(html)).toContain('type="hidden"');
 		expect(drawnOnField(html)).toContain(
-			'value="names details categories income sortOnArrival"',
+			'value="names details categories income sortOnArrival lookupStores"',
 		);
-		await saveAiSwitches(env.DB, allOff);
+		await saveAiSwitches(env.DB, { ...allOff, lookupStores: false });
 		expect(drawnOnField((await get("/settings/ai")).html)).toContain(
 			'value=""',
 		);
@@ -266,6 +284,7 @@ describe("POST /settings/ai", () => {
 			{ name: "categories", on: false },
 			{ name: "income", on: true },
 			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: true },
 		]);
 		expect(trigger(res)).toEqual({
 			toast: { message: "Saved AI suggestions", type: "success" },
@@ -629,6 +648,7 @@ describe("the sorting switch with categories, income and details all off", () =>
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: true },
+			{ name: "lookupStores", on: true },
 		]);
 		await saveAiSwitches(env.DB, { sortOnArrival: false });
 		expect(inputs((await get("/settings/ai")).html)).toEqual([
@@ -637,6 +657,7 @@ describe("the sorting switch with categories, income and details all off", () =>
 			{ name: "categories", on: false },
 			{ name: "income", on: false },
 			{ name: "sortOnArrival", on: false },
+			{ name: "lookupStores", on: true },
 		]);
 	});
 
@@ -650,7 +671,8 @@ describe("the sorting switch with categories, income and details all off", () =>
 			await saveAiSwitches(env.DB, on);
 			const { html } = await get("/settings/ai");
 			expect(disabled(html, "sortOnArrival")).toBe(false);
-			expect(textOf(group(html))).not.toContain("Needs ");
+			// The sorting switch's own note only: the store lookup's row says what it needs when it is greyed (#988).
+			expect(textOf(group(html))).not.toContain("Needs Fill in details");
 		},
 	);
 
@@ -840,5 +862,110 @@ describe("POST /settings/ai: turning Sort right away back on (decision 150)", ()
 		await post("/settings/ai", WITHOUT_SORT);
 		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(false);
 		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
+	});
+});
+
+// #988: the store lookup's switch on Settings. Its line is hidden, not dropped, while it or a switch it runs on is off.
+describe("the Look up new stores on the web switch (#988)", () => {
+	useLineFixture();
+
+	it("has the lookup row's words, with the hint's apostrophes escaped", async () => {
+		const { html } = await get("/settings/ai");
+
+		expect(html).toContain("Look up new stores on the web");
+		expect(html).toContain(
+			"Searches the web once for a store, to help guess its category and name. Only the store&#39;s name as your bank gives it is sent, with numbers taken out.",
+		);
+	});
+
+	it("is greyed with its note while Categories and exclusions is off", async () => {
+		await saveAiSwitches(env.DB, { categories: false });
+		const { html } = await get("/settings/ai");
+		const row = html.slice(html.indexOf('name="lookupStores"') - 200);
+
+		expect(row).toContain("disabled");
+		expect(html).toContain("Needs Categories and exclusions and Income on.");
+		expect(html).toContain('name="lookupStoresGreyed" value="1"');
+	});
+
+	it("is greyed while Income is off too", async () => {
+		await saveAiSwitches(env.DB, { income: false });
+		const { html } = await get("/settings/ai");
+
+		expect(html).toContain('name="lookupStoresGreyed" value="1"');
+	});
+
+	it("a save from a page that drew it greyed leaves it as saved, on or off", async () => {
+		await saveAiSwitches(env.DB, { lookupStores: true });
+		await post("/settings/ai", { lookupStoresGreyed: "1", names: "on" });
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(true);
+
+		await saveAiSwitches(env.DB, { lookupStores: false });
+		await post("/settings/ai", { lookupStoresGreyed: "1", names: "on" });
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(false);
+	});
+
+	it("flipping it off stores ai_lookup_stores off, keeps focus on it, and announces it", async () => {
+		const { res, html } = await post("/settings/ai", {
+			flipped: "lookupStores",
+			drawnOn: "names lookupStores",
+			names: "on",
+		});
+
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(false);
+		expect(html).toContain("autofocus");
+
+		// SAFETY: the HX-Trigger header is JSON this app writes itself, with the announce key named here.
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			announce?: string;
+		};
+
+		expect(trigger.announce).toContain("looking up new stores on the web off");
+	});
+
+	it("turning it off drops nothing: the stored lines stay, and turning it on brings the line back", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		await post("/settings/ai", {
+			flipped: "lookupStores",
+			drawnOn: "lookupStores",
+			names: "on",
+		});
+
+		const off = await env.DB.prepare(
+			"SELECT status, line FROM merchant_lookups WHERE lookup_text = ?",
+		)
+			.bind(TEXT)
+			.first<{ status: string; line: string | null }>();
+
+		expect(off).toEqual({ status: "found", line: LINE });
+		expect(
+			(await suggestionQueue(env.DB)).find((i) => i.id === `category-${id}`),
+		).not.toHaveProperty("lookupLine");
+
+		await post("/settings/ai", {
+			flipped: "lookupStores",
+			drawnOn: "names",
+			names: "on",
+			lookupStores: "on",
+		});
+
+		expect(
+			(await suggestionQueue(env.DB)).find((i) => i.id === `category-${id}`),
+		).toHaveProperty("lookupLine", LINE);
+	});
+
+	it("flipping Income off does not write ai_lookup_stores", async () => {
+		await saveAiSwitches(env.DB, { lookupStores: true });
+
+		await post("/settings/ai", {
+			flipped: "income",
+			drawnOn: "names lookupStores income categories",
+			lookupStoresGreyed: "1",
+			names: "on",
+			categories: "on",
+		});
+
+		expect((await readAiSwitches(env.DB)).lookupStores).toBe(true);
 	});
 });

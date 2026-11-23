@@ -160,7 +160,7 @@ describe("Switches save when flipped", () => {
 			(m) => m[0],
 		);
 
-		expect(switches).toHaveLength(5);
+		expect(switches).toHaveLength(6);
 
 		for (const raw of switches) {
 			expect(raw).toContain('hx-post="/settings/ai"');

@@ -48,7 +48,15 @@ export const PAGES = [
 	// Gas's row open for editing, as in the round 5 study.
 	{ name: "settings-edit", path: "/settings/categories?open=3" },
 	// The one review screen for every "Maybe …" (issue #195) that Settings' Band leads to; /settings/names redirects here.
-	{ name: "settings-suggestions", path: "/settings/suggestions" },
+	// The La Coop and Maple Street Hardware lookup cards are skipped, so the card shows Pet Care as it did (#988).
+	{
+		name: "settings-suggestions",
+		path: "/settings/suggestions?skip=category-900&skip=category-901",
+	},
+	// La Coop's card with the store lookup's line under its guess (#988). test/seed.test.ts keeps 900 and 901 true.
+	{ name: "settings-suggestions-lookup-line", path: "/settings/suggestions" },
+	// Maple Street Hardware in the edit panel, with the 80-character line (#988).
+	{ name: "transaction-edit-lookup-line", path: "/transactions/901" },
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
 	{ name: "feedback", path: "/feedback" },

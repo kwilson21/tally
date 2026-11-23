@@ -751,14 +751,14 @@ describe("GET /design-system in the demo", () => {
 			(m) => m[0],
 		);
 
-		// Three live ones, and two greyed out (P86 A): one saved On and one saved Off.
-		expect(inputs).toHaveLength(6);
+		// Five live ones, and three greyed out (P86 A, #988): one saved On and one saved Off, and the lookup row.
+		expect(inputs).toHaveLength(8);
 		const on = (input: string) => /\schecked(\s|>|=)/.test(input);
 		const greyed = (input: string) => /\sdisabled(\s|>|=)/.test(input);
-		expect(inputs.filter((i) => !greyed(i))).toHaveLength(4);
-		expect(inputs.filter(greyed)).toHaveLength(2);
-		expect(inputs.filter((i) => greyed(i) && on(i))).toHaveLength(1);
-		expect(inputs.filter(on)).toHaveLength(4);
+		expect(inputs.filter((i) => !greyed(i))).toHaveLength(5);
+		expect(inputs.filter(greyed)).toHaveLength(3);
+		expect(inputs.filter((i) => greyed(i) && on(i))).toHaveLength(2);
+		expect(inputs.filter(on)).toHaveLength(6);
 		expect(inputs.filter((i) => !on(i))).toHaveLength(2);
 		// The real checkboxes are the only controls here: nothing posts from the catalog.
 		expect(section).not.toContain("<form");
@@ -1045,6 +1045,33 @@ describe("GET /design-system in the demo", () => {
 		expect(state).toContain("data-link-bank-error");
 		expect(state).not.toContain("data-apple-card");
 		expect(state).not.toContain("Upload a file");
+	});
+
+	it("draws the LookupLine specimen: a short line, an 80-character line, the card, the edit panel (#988)", async () => {
+		const { html } = await get("/design-system");
+
+		const section =
+			html.split('id="lookup-line"')[1]?.split("</section>")[0] ?? "";
+
+		expect(section).toContain("From the web: Coffee shop in Arlington, VA");
+		expect(section).toContain("Don&#39;t use this for La Coop");
+		expect(section).toContain("Maple Street Hardware");
+		expect(section).toContain("wrap-anywhere");
+		expect(section).toContain("Tally&#39;s guess");
+		expect(section).toContain('value="dont_use"');
+		expect(section).toContain(
+			'formaction="/transactions/901/lookup-line/dont-use"',
+		);
+		expect(section.match(/hx-ignore/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+	});
+
+	it("draws the lookup switch in the switch specimen, on and greyed with its note (#988)", async () => {
+		const { html } = await get("/design-system");
+
+		const section = html.split('id="switch"')[1]?.split("</section>")[0] ?? "";
+
+		expect(section).toContain("Look up new stores on the web");
+		expect(section).toContain("Needs Categories and exclusions and Income on.");
 	});
 
 	it("draws the SuggestionCard specimen's Yes full width, with No under it, never beside it (P42 A)", async () => {

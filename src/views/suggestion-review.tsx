@@ -7,6 +7,7 @@ import { formatCents } from "../money";
 import { activeNamed, sameName } from "../settings/category-form";
 import { Button } from "./button";
 import { Icon } from "./icons";
+import { LookupLine } from "./lookup-line";
 import { NameChoices } from "./name-choices";
 import { SelectField } from "./select-field";
 import { NewCategoryCard } from "./suggestion-card";
@@ -43,7 +44,7 @@ function Guess({
 }: {
 	/** How sure Tally is, as a whole percent; a name Tally guessed has no percent. */
 	sure?: number;
-	section: "categorization" | "exclusions" | "names";
+	section: "categorization" | "store-lookup" | "exclusions" | "names";
 }) {
 	return (
 		<p class="flex flex-wrap items-center gap-x-2 text-sm text-ink">
@@ -322,7 +323,20 @@ export function SuggestionCard({
 			{item.kind === "category" && (
 				<>
 					<MaybeQuestion>Maybe {item.category}</MaybeQuestion>
-					<Guess sure={item.sure} section="categorization" />
+					<Guess
+						sure={item.sure}
+						section={item.lookupLine ? "store-lookup" : "categorization"}
+					/>
+					{item.lookupLine && (
+						<form {...answerForm(action)}>
+							<input type="hidden" name="id" value={item.id} />
+							<LookupLine
+								line={item.lookupLine}
+								store={item.merchant}
+								button={{ name: "answer", value: "dont_use" }}
+							/>
+						</form>
+					)}
 					<YesForm action={action} item={item} yes={`Yes, ${item.category}`} />
 					{row.kind === "new" && (
 						<NewCategoryRow

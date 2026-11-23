@@ -227,3 +227,58 @@ describe("MaybeQuestion is a quiet tag under one serif headline", () => {
 		expect(html).not.toContain("wrap-anywhere");
 	});
 });
+
+// #988: the store lookup's line sits under a category guess that used it, with its own "Don't use this" form.
+describe("a category card draws the store lookup's line (#988)", () => {
+	// SAFETY: the card reads lookupLine on a category item only; the cast adds the key to that item and no other.
+	const withLine = {
+		...category,
+		lookupLine: "Coffee shop in Arlington, VA",
+	} as SuggestionItem;
+
+	it("draws LookupLine between the guess and Yes", () => {
+		const html = card(withLine);
+
+		const guess = html.indexOf("% sure");
+		const line = html.indexOf("From the web:");
+		const yes = html.indexOf('value="yes"');
+
+		expect(guess).toBeGreaterThan(-1);
+		expect(line).toBeGreaterThan(guess);
+		expect(yes).toBeGreaterThan(line);
+	});
+
+	it("its form posts dont_use for the item, with the card's guard and sync", () => {
+		const form = postingForms(card(withLine)).find((f) =>
+			f.includes('name="answer" value="dont_use"'),
+		);
+
+		expect(form).toBeDefined();
+		expect(form).toContain('name="id" value="category-3"');
+		expect(form).toContain(ANSWER_GUARD);
+		expect(form).toContain(ANSWER_SYNC);
+	});
+
+	it("its Why? points to the lookup's words", () => {
+		expect(card(withLine)).toContain('href="/how-it-works#store-lookup"');
+	});
+
+	it("no line, no row: without lookupLine the Why? is the categorization section", () => {
+		const html = card(category);
+
+		expect(html).not.toContain("From the web");
+		expect(html).toContain('href="/how-it-works#categorization"');
+	});
+
+	it("income, transfer, new_category and name cards never draw it", () => {
+		for (const item of [income, transfer, newCategory, name]) {
+			// SAFETY: the card must ignore a stray lookupLine on any other kind; the cast only adds that key for the test.
+			const html = card({
+				...item,
+				lookupLine: "Coffee shop",
+			} as SuggestionItem);
+
+			expect(html).not.toContain("From the web");
+		}
+	});
+});
