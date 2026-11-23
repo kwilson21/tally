@@ -26,7 +26,7 @@ export async function loginStillBroken(
 					plaidBankFor(
 						env,
 						{ access_token_encrypted: accessTokenEncrypted },
-						{ fetchImpl, quiet: true, loginReading: "not-null" },
+						{ fetchImpl, loginCheck: true },
 					),
 				),
 			),

@@ -124,12 +124,6 @@ const LANDINGS: readonly ConnectionState[] = [
 const landedState = (value: string, from: LiveBankState): ConnectionState =>
 	LANDINGS.find((state) => state === value) ?? from;
 
-/** Whether an item's `error` field reports a login problem, read as the caller's `loginReading` says (see plaidBankFor). */
-const reportsProblem = (
-	item: { readonly error?: unknown },
-	reading: "truthy" | "not-null",
-) => (reading === "not-null" ? item.error !== null : Boolean(item.error));
-
 /** What Plaid's refusal may log: its request id, never a token (CLAUDE.md). */
 function logRequestId(cause: PlaidFailure | PlaidRefused) {
 	if (Predicate.isTagged(cause, "PlaidRefusal") && cause.request_id)
@@ -139,23 +133,18 @@ function logRequestId(cause: PlaidFailure | PlaidRefused) {
 /**
  * Plaid, for one bank whose stored token the caller read. The login works when Plaid's item carries no error. Letting
  * go succeeds when Plaid removes the bank, and also when Plaid no longer knows it (ITEM_NOT_FOUND), so a retry after a
- * half-finished disconnect finishes. `fetchImpl` is the transport (the sync and the tests inject theirs), and `quiet`
- * keeps a refusal from logging its request id (the login check logs nothing, as it never has).
+ * half-finished disconnect finishes. `fetchImpl` is the transport (the sync and the tests inject theirs).
  *
- * `loginReading` is how Plaid's `error` field says the login is broken. Fix connection has always read any truthy
- * error as broken ("truthy", the default). The login check has always read any error that is not null as broken
- * ("not-null"), so an item with no `error` field at all counts as broken there (decision 245: behaviour unchanged).
+ * `loginCheck` is the login check's reading (decision 245), and changes two things and nothing else. Its login is still
+ * broken unless Plaid's `error` field is null, so an item with no `error` field at all counts as broken (Fix connection
+ * reads any truthy error as broken, and a missing field as working). A refusal logs nothing, as the check never has.
  */
 export const plaidBankFor = (
 	env: PlaidEnv,
 	item: {
 		access_token_encrypted: ArrayBuffer | Uint8Array | readonly number[];
 	},
-	options: {
-		fetchImpl?: typeof fetch;
-		quiet?: boolean;
-		loginReading?: "truthy" | "not-null";
-	} = {},
+	options: { fetchImpl?: typeof fetch; loginCheck?: boolean } = {},
 ): PlaidBank["Service"] => {
 	const token = Effect.tryPromise({
 		try: () =>
@@ -164,7 +153,7 @@ export const plaidBankFor = (
 	});
 
 	const refused = (cause: PlaidFailure | PlaidRefused) => {
-		if (!options.quiet) logRequestId(cause);
+		if (!options.loginCheck) logRequestId(cause);
 
 		return Effect.fail(new PlaidRefused());
 	};
@@ -175,11 +164,13 @@ export const plaidBankFor = (
 				getItem(env, accessToken, options.fetchImpl),
 			),
 			Effect.catch(refused),
-			Effect.flatMap((result) =>
-				reportsProblem(result.item, options.loginReading ?? "truthy")
-					? Effect.fail(new PlaidRefused())
-					: Effect.void,
-			),
+			Effect.flatMap((result) => {
+				const problem = options.loginCheck
+					? result.item.error !== null
+					: Boolean(result.item.error);
+
+				return problem ? Effect.fail(new PlaidRefused()) : Effect.void;
+			}),
 		),
 		letGo: token.pipe(
 			Effect.flatMap((accessToken) =>
