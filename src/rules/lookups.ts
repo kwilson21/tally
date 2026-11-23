@@ -14,7 +14,7 @@ export type DontUseFacts = {
 	lookupText: string | null;
 	/** merchant_lookups.status for that text as stored; null when no row. */
 	status: string | null;
-	/** The row still holds its kept line-backed guess (lineGuessSql). */
+	/** The row still holds its kept line-backed guess (lineGuessSql), and the line is for its current store (onCurrentStoreSql). */
 	lineBacked: boolean;
 };
 

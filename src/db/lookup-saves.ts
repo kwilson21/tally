@@ -8,16 +8,17 @@ import {
 } from "../rules/lookups";
 import { type Decided, decided } from "../rules/terms";
 import { dontUseStatements } from "./store-lookups";
-import { lineGuessSql } from "./suggestions-queue";
+import { lineGuessSql, onCurrentStoreSql } from "./suggestions-queue";
 
-/** The facts "Don't use this" is decided from: the text the row was asked with, its stored status, and whether it still holds the line-backed guess. */
+/** The facts "Don't use this" is decided from: the text the row was asked with, its stored status, and whether it still holds the line-backed guess for its current store. */
 export async function dontUseFacts(
 	db: D1Database,
 	transactionId: number,
 ): Promise<DontUseFacts> {
 	const row = await db
 		.prepare(
-			`SELECT a.lookup_text AS lookupText, ml.status AS status, (${lineGuessSql("t")}) AS lineBacked
+			`SELECT a.lookup_text AS lookupText, ml.status AS status,
+				(${lineGuessSql("t")} AND ${onCurrentStoreSql("t", "a.lookup_text")}) AS lineBacked
 			FROM transactions t
 			JOIN lookup_answers a ON a.transaction_id = t.id
 			LEFT JOIN merchant_lookups ml ON ml.lookup_text = a.lookup_text

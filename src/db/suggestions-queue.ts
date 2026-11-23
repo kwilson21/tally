@@ -152,10 +152,18 @@ export const lineGuessSql = (alias: string) =>
 		AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
 		AND la.kept_category_id IS ${alias}.jev_category_id AND la.kept_confidence = ${alias}.category_confidence)`;
 
-/** The line the row's kept guess was asked with, while it still stands (spec §7 "What a person sees"); NULL otherwise. */
+/**
+ * The lookup text `text` (an SQL expression) is the one the row's current merchant key maps to (merchant_lookup_texts). A sync that
+ * corrects the merchant keeps the guess and its answer, so the line is only for the store the row shows now (#988).
+ */
+export const onCurrentStoreSql = (alias: string, text: string) =>
+	`EXISTS (SELECT 1 FROM merchant_lookup_texts cst WHERE cst.merchant_key = ${merchantKeySql(alias)} AND cst.lookup_text = ${text})`;
+
+/** The line the row's kept guess was asked with, while it still stands for the row's current store (spec §7 "What a person sees"); NULL otherwise. */
 export const shownLineSql = (alias: string) =>
 	`(SELECT sml.line FROM lookup_answers sla JOIN merchant_lookups sml ON sml.lookup_text = sla.lookup_text
-		WHERE sla.transaction_id = ${alias}.id AND ${lineStandsSql("sla.lookup_text")} AND ${lineGuessSql(alias)})`;
+		WHERE sla.transaction_id = ${alias}.id AND ${lineStandsSql("sla.lookup_text")} AND ${lineGuessSql(alias)}
+		AND ${onCurrentStoreSql(alias, "sla.lookup_text")})`;
 
 /**
  * A category guess the review asks about: in its asked range (askedSql), or a line-backed guess (lineGuessSql) at the 40% floor
