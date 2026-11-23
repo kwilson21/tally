@@ -1,0 +1,658 @@
+{
+	"S1 transient PRODUCT_NOT_READY, Plaid says the login is broken": {
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "PRODUCT_NOT_READY",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S10 ITEM_LOGIN_REQUIRED, Plaid says broken, the bank needs_relink": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 1,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S11 ITEM_LOGIN_REQUIRED, Plaid says broken, the bank is login_broken_and_needs_relink": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 1,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S12 ITEM_LOGIN_REQUIRED, Plaid says broken, the bank is disconnected": {
+		"asks": {},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": "<set>",
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": {
+			"skipped": true
+		}
+	},
+	"S13 ITEM_LOGIN_REQUIRED, Plaid says broken, the bank has no row": {
+		"asks": {},
+		"bank": null,
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"threw": {
+			"identity": "no injected value",
+			"kind": "Error",
+			"message": "Plaid Item not found"
+		}
+	},
+	"S14 ITEM_LOGIN_REQUIRED, Plaid says broken, a repair lands while the item lookup is asked": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 1,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S15 ITEM_LOGIN_REQUIRED, Plaid says broken, the sync's lease is lost while the item lookup is asked": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": "<set>",
+			"sync_locked_until": "<set>",
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S16 ITEM_LOGIN_REQUIRED, Plaid says broken, the state read throws": {
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"identity": "another value",
+			"kind": "Error",
+			"message": "Failed query: select \"status\", \"disconnected_at\", \"attention_login\", \"attention_held\", \"connection_revision\" from \"plaid_items\" where \"plaid_items\".\"id\" = ?\nparams: 1"
+		}
+	},
+	"S17 ITEM_LOGIN_REQUIRED, Plaid says broken, the flag's write throws": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"identity": "the injected value",
+			"kind": "Error",
+			"message": "the flag write failed"
+		}
+	},
+	"S2 transient TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION as ITEM_ERROR, Plaid says the login is broken": {
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 4
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [
+			"plaid sync mutation retry 1 request-1",
+			"plaid sync mutation retry 2 request-1",
+			"plaid sync mutation retry 3 request-1",
+			"plaid sync error request-1"
+		],
+		"cursors": ["(none)", "(none)", "(none)", "(none)"],
+		"threw": {
+			"error_code": "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S3 another error type (API_ERROR), Plaid says the login is broken": {
+		"asks": {
+			"/accounts/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "RATE_LIMIT_EXCEEDED",
+			"error_type": "API_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S4 ITEM_LOGIN_REQUIRED, Plaid says the login is broken": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S5 ITEM_LOGIN_REQUIRED, Plaid's item has no error": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S6 ITEM_LOGIN_REQUIRED, Plaid refuses the item lookup": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S7 ITEM_LOGIN_REQUIRED, the item lookup's fetch fails": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S8 ITEM_LOGIN_REQUIRED, Plaid answers the item lookup after 27 seconds with no error": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"S9 ITEM_LOGIN_REQUIRED, Plaid says broken, the bank is login_broken": {
+		"asks": {
+			"/accounts/get": 1,
+			"/item/get": 1,
+			"/transactions/sync": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": ["plaid sync error request-1"],
+		"cursors": ["(none)"],
+		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "no injected value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
+		}
+	},
+	"U1 no TOKEN_ENCRYPTION_KEY": {
+		"asks": {},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": true
+	},
+	"U2 the stored token cannot be read": {
+		"asks": {},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": true
+	},
+	"U3 Plaid says the login is broken": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": true
+	},
+	"U4 Plaid's item has no error": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": false
+	},
+	"U5 Plaid's item lookup fails": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": true
+	},
+	"W1 ITEM ERROR ITEM_LOGIN_REQUIRED, Plaid says the login is broken": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": {
+			"status": 200
+		}
+	},
+	"W2 ITEM ERROR ITEM_LOGIN_REQUIRED, Plaid's item has no error": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": {
+			"status": 200
+		}
+	},
+	"W3 ITEM ERROR ITEM_LOGIN_REQUIRED, Plaid refuses the item lookup": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": {
+			"status": 200
+		}
+	},
+	"W4 ITEM ERROR PRODUCT_NOT_READY (transient), Plaid says broken, the route does not ask": {
+		"asks": {},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 0,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "ok",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": {
+			"status": 200
+		}
+	}
+}
