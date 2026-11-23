@@ -1,8 +1,16 @@
 import * as Effect from "effect/Effect";
-import { getItem, type PlaidEnv } from "./client";
-import { decryptToken } from "./token-crypto";
+import { PlaidBank } from "../machines/bank-request";
+import {
+	askLoginStillBroken,
+	LOGIN_CHECK_WAIT,
+	plaidBankFor,
+} from "./bank-request";
+import type { PlaidEnv } from "./client";
 
-/** Confirms that Plaid still reports a login error, failing safe when it cannot confirm. */
+/**
+ * Confirms that Plaid still reports a login error, failing safe when it cannot confirm (#1192): the check runs the
+ * bank-request machine's login check (decision 245), so the sync and the Plaid webhook ask Plaid the same way.
+ */
 export async function loginStillBroken(
 	env: PlaidEnv,
 	accessTokenEncrypted: ArrayBuffer | Uint8Array | readonly number[],
@@ -11,18 +19,16 @@ export async function loginStillBroken(
 	try {
 		if (!env.TOKEN_ENCRYPTION_KEY) return true;
 
-		const accessToken = await decryptToken(
-			accessTokenEncrypted,
-			env.TOKEN_ENCRYPTION_KEY,
-		);
-
-		// Plaid's item carries a null error while the login works. Any failure to ask counts as still broken.
 		return await Effect.runPromise(
-			getItem(env, accessToken, fetchImpl).pipe(
-				Effect.match({
-					onFailure: () => true,
-					onSuccess: (result) => result.item.error !== null,
-				}),
+			askLoginStillBroken(LOGIN_CHECK_WAIT).pipe(
+				Effect.provideService(
+					PlaidBank,
+					plaidBankFor(
+						env,
+						{ access_token_encrypted: accessTokenEncrypted },
+						{ fetchImpl, quiet: true, loginReading: "not-null" },
+					),
+				),
 			),
 		);
 	} catch {
