@@ -18,6 +18,7 @@ import {
 	K1,
 	LINE,
 	lineRow,
+	OTHER,
 	TEXT,
 	useLineFixture,
 } from "./lookup-line-fixture";
@@ -623,6 +624,33 @@ describe("the line a person sees (#988, P146): the queue and the edit panel show
 			.run();
 
 		expect(await queueLine(id)).toBeNull();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line when the transaction's store moved to a different lookup text (#988)", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		// The bank corrected the merchant without changing the amount: sync keeps the guess and its answer.
+		await db
+			.prepare(
+				"UPDATE transactions SET raw_name = ?, merchant_name = ? WHERE id = ?",
+			)
+			.bind(OTHER, OTHER, id)
+			.run();
+
+		expect(await queueLine(id)).toBeUndefined();
+		expect(await panelLine(id)).toBeNull();
+	});
+
+	it("hides the line when the transaction's current store has no lookup text row (#988)", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await db
+			.prepare(
+				"UPDATE transactions SET raw_name = ?, merchant_name = ? WHERE id = ?",
+			)
+			.bind("Brand New Shop", "Brand New Shop", id)
+			.run();
+
+		expect(await queueLine(id)).toBeUndefined();
 		expect(await panelLine(id)).toBeNull();
 	});
 

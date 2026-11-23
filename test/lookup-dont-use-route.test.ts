@@ -1,6 +1,13 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { K1, lineRow, TEXT, useLineFixture } from "./lookup-line-fixture";
+import {
+	K1,
+	LINE,
+	lineRow,
+	OTHER,
+	TEXT,
+	useLineFixture,
+} from "./lookup-line-fixture";
 
 // #988: "Don't use this" on a store's lookup line, from the review card and from the edit panel.
 
@@ -130,6 +137,26 @@ describe("Don't use this on the review card (#988)", () => {
 			type: "info",
 		});
 		expect((await lookupOf(TEXT))?.status).toBe("pending");
+	});
+
+	it("refuses a press for a transaction whose store moved, and writes nothing (#988)", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await env.DB.prepare(
+			"UPDATE transactions SET raw_name = ?, merchant_name = ? WHERE id = ?",
+		)
+			.bind(OTHER, OTHER, id)
+			.run();
+
+		const { res } = await post(PATH, {
+			id: `category-${id}`,
+			answer: "dont_use",
+		});
+
+		expect(trigger(res).toast).toEqual({
+			message: "That guess has changed, so nothing was dropped.",
+			type: "info",
+		});
+		expect(await lookupOf(TEXT)).toEqual({ status: "found", line: LINE });
 	});
 
 	it("a guess changed since the page was drawn is refused with its own sentence", async () => {
