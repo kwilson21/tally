@@ -18,6 +18,7 @@ import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { KeyboardListProposal } from "./proposals-keys";
+import { LookupLineProposal } from "./proposals-lookup-line";
 import { MachineContextProposal } from "./proposals-machine-context";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { MoneyInputProposal } from "./proposals-money";
@@ -596,6 +597,12 @@ export const DECIDED: readonly {
 			"Option A: the moves are grouped by who or what sets them off (Plaid, a finished sync, you), each group a table of from, to and what happens. The by-state table and the getting-worse and worked-example options are not built.",
 		issue: 865,
 	},
+	{
+		title: "P146 · The store lookup's line on a guess",
+		outcome:
+			"Option B: the line has its own row under Tally's guess, “From the web: …” with a small search icon, and a quiet “Don't use this” on the row below.",
+		issue: 988,
+	},
 ];
 
 /** The proposals page body. */
@@ -952,6 +959,18 @@ export function Proposals() {
 						</li>
 					))}
 				</ul>
+			</section>
+
+			<section id="p146" aria-labelledby="p146-title" class="mt-12">
+				<h2 id="p146-title" class="font-serif text-3xl font-semibold">
+					P146 · The store lookup's line on a guess
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Nov 22 for issue #988. When Tally looked a store up on the web
+					and that helped its guess, the card says so. The owner picked B on Nov
+					22.
+				</p>
+				<LookupLineProposal />
 			</section>
 		</>
 	);

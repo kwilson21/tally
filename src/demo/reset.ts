@@ -40,6 +40,7 @@ import {
 	savingsGoalAmounts,
 	transactions,
 } from "../db/schema";
+import { lookupTextOf } from "../lookup/lookup-text";
 import { nameKey } from "../settings/category-form";
 import {
 	buildSeed,
@@ -48,6 +49,8 @@ import {
 	RENT_CATEGORY,
 	RENT_CENTS,
 	RENT_PAYEE,
+	SEED_LINE_GUESSES,
+	SEED_STORED_LOOKUP,
 	type SeedBalance,
 	SOCCER_DAY,
 	seedMerchantKey,
@@ -165,7 +168,7 @@ function tallyFromJev(orm: Orm, kind: "category" | "income", filed: SQL) {
 export async function resetDemo(
 	db: D1Database,
 	today: string,
-	options: { categoryExample?: boolean } = {},
+	options: { categoryExample?: boolean; storeLookups?: boolean } = {},
 ): Promise<void> {
 	const seed = buildSeed(today);
 	const todayDay = Number(today.slice(8, 10));
@@ -411,6 +414,74 @@ export async function resetDemo(
 			petCharge("PETSMART 0412", "Petsmart", 2399, 14),
 			petCharge("BANFIELD PET HOSPITAL", "Banfield Pet Hospital", 18900, 21),
 		]);
+	}
+
+	if (options.storeLookups) {
+		// Two guesses made with the store lookup's line (#988), and one stored lookup with none. Each text is the key's own
+		// lookup text, never typed; the confidences are one JS number, since the answer compares them for equality.
+		const lookupMonth = monthOffset(today, 2);
+
+		const lineStatements: BatchItem<"sqlite">[] = SEED_LINE_GUESSES.flatMap(
+			(g): BatchItem<"sqlite">[] => {
+				const lookupText = lookupTextOf(g.rawName);
+
+				return [
+					orm.insert(merchants).values({
+						rawName: g.rawName,
+						displayName: g.displayName,
+						notABill: 1,
+					}),
+					orm.insert(merchantLookups).values({
+						lookupText,
+						status: "found",
+						line: g.line,
+						attempts: 0,
+					}),
+					orm
+						.insert(merchantLookupTexts)
+						.values({ merchantKey: g.rawName, lookupText, isPrivate: 0 }),
+					orm.insert(transactions).values({
+						id: g.id,
+						accountId: 3,
+						date: `${lookupMonth}-${g.day}`,
+						amountCents: g.cents,
+						rawName: g.rawName,
+						plaidCategory: g.plaidCategory,
+						categoryConfidence: g.confidence,
+						jevCategoryId: g.categoryId,
+						updatedBy: "demo",
+					}),
+					orm.insert(lookupAnswers).values({
+						transactionId: g.id,
+						lookupText,
+						kept: 1,
+						keptCategoryId: g.categoryId,
+						keptConfidence: g.confidence,
+					}),
+				];
+			},
+		);
+
+		const storedKey = seedMerchantKey(SEED_STORED_LOOKUP.rawName);
+		const storedText = lookupTextOf(storedKey);
+
+		const writes: BatchItem<"sqlite">[] = [
+			...lineStatements,
+			orm.insert(merchantLookups).values({
+				lookupText: storedText,
+				status: "found",
+				line: SEED_STORED_LOOKUP.line,
+				attempts: 0,
+			}),
+			orm.insert(merchantLookupTexts).values({
+				merchantKey: storedKey,
+				lookupText: storedText,
+				isPrivate: 0,
+			}),
+		];
+
+		// SAFETY: the list holds the inserts above, every one a batch item, and it is never empty (the stored lookup adds two).
+		await orm.batch(writes as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
 	}
 
 	await matchBillPayments(db, today);

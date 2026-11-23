@@ -1,11 +1,21 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { cleanLine } from "../src/ai/lookup-store";
 import { summarizeMonth } from "../src/budget";
 import { daysBefore } from "../src/dates";
 import { merchantKeySql } from "../src/db/merchant-key";
 import { loadMonth } from "../src/db/month";
+import { suggestionQueue } from "../src/db/suggestions-queue";
+import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
-import { buildSeed, monthOffset, RENT_PAYEE } from "../src/demo/seed";
+import {
+	buildSeed,
+	monthOffset,
+	RENT_PAYEE,
+	SEED_LINE_GUESSES,
+	seedMerchantKey,
+} from "../src/demo/seed";
+import { lookupTextOf, privateTextReason } from "../src/lookup/lookup-text";
 import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
 import { merchantNames } from "./helpers/merchants";
 
@@ -652,5 +662,149 @@ describe("resetDemo", () => {
 		).all<{ n: number }>();
 
 		expect(results[0]?.n).toBe(1);
+	});
+});
+
+// #988: the demo's store lookups, written by the scheduled reset only (storeLookups), so the line shows after a reset.
+describe("resetDemo's store lookups (#988)", () => {
+	const monthOf = async (month: string) =>
+		summarizeMonth({
+			month,
+			...(await loadMonth(env.DB, month)),
+			unpaidDueBillsCents: 0,
+		});
+
+	it("gives La Coop id 900 and Maple Street Hardware id 901, each a held Maybe the review asks about with its line", async () => {
+		await resetDemo(env.DB, "2026-10-05", {
+			categoryExample: true,
+			storeLookups: true,
+		});
+
+		const queue = await suggestionQueue(env.DB);
+		const coop = queue.find((item) => item.id === "category-900");
+		const hardware = queue.find((item) => item.id === "category-901");
+
+		expect(coop).toMatchObject({
+			kind: "category",
+			category: "Eating Out",
+			sure: 88,
+			lookupLine: "Coffee shop in Arlington, VA",
+		});
+		expect(hardware).toMatchObject({
+			kind: "category",
+			category: "Household",
+			sure: 64,
+			lookupLine: SEED_LINE_GUESSES[1]?.line,
+		});
+		expect(queue[0]?.id).toBe("category-900");
+
+		const tx = await getTransaction(env.DB, 901);
+
+		expect(tx?.lineGuess).toBe(true);
+		expect(tx?.lookupLine).toBe(SEED_LINE_GUESSES[1]?.line);
+	});
+
+	it("stores each text as the key's own lookup text, not private", async () => {
+		await resetDemo(env.DB, "2026-10-05", {
+			categoryExample: true,
+			storeLookups: true,
+		});
+
+		for (const guess of SEED_LINE_GUESSES) {
+			const key = seedMerchantKey(guess.rawName);
+
+			const row = await env.DB.prepare(
+				"SELECT lookup_text AS lookupText, private AS isPrivate FROM merchant_lookup_texts WHERE merchant_key = ?",
+			)
+				.bind(key)
+				.first<{ lookupText: string; isPrivate: number }>();
+
+			expect(row?.lookupText).toBe(lookupTextOf(key));
+			expect(row?.lookupText).not.toBe("");
+			expect(row?.isPrivate).toBe(0);
+			expect(privateTextReason(key)).toBeNull();
+		}
+	});
+
+	it("seeds only lines the lookup would keep, and the long one is 80 characters", () => {
+		for (const guess of SEED_LINE_GUESSES) {
+			expect(cleanLine(guess.line)).toBe(guess.line);
+		}
+
+		expect(SEED_LINE_GUESSES[1]?.line).toHaveLength(80);
+	});
+
+	it("holds three stored lookups, one with no guess (Blue Bottle)", async () => {
+		await resetDemo(env.DB, "2026-10-05", {
+			categoryExample: true,
+			storeLookups: true,
+		});
+
+		const { results } = await env.DB.prepare(
+			"SELECT lookup_text FROM merchant_lookups",
+		).all<{ lookup_text: string }>();
+
+		expect(results).toHaveLength(3);
+
+		const blue = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM lookup_answers la JOIN merchant_lookups ml ON ml.lookup_text = la.lookup_text WHERE ml.lookup_text = ?",
+		)
+			.bind(lookupTextOf(seedMerchantKey("BLUE BOTTLE COFFEE")))
+			.first<{ n: number }>();
+
+		expect(blue?.n).toBe(0);
+	});
+
+	it("does not shift this month's numbers", async () => {
+		await resetDemo(env.DB, "2026-10-05");
+		const before = await monthOf("2026-10");
+
+		await resetDemo(env.DB, "2026-10-05", {
+			categoryExample: true,
+			storeLookups: true,
+		});
+		const after = await monthOf("2026-10");
+
+		expect(after.uncategorized).toEqual(before.uncategorized);
+		expect(after.totalSpentCents).toBe(before.totalSpentCents);
+	});
+
+	it("runs twice to the same rows", async () => {
+		const options = { categoryExample: true, storeLookups: true };
+		await resetDemo(env.DB, "2026-10-05", options);
+
+		const first = await env.DB.prepare(
+			"SELECT lookup_text, status, line FROM merchant_lookups ORDER BY lookup_text",
+		).all();
+
+		await resetDemo(env.DB, "2026-10-05", options);
+
+		const second = await env.DB.prepare(
+			"SELECT lookup_text, status, line FROM merchant_lookups ORDER BY lookup_text",
+		).all();
+
+		expect(second.results).toEqual(first.results);
+	});
+
+	it("without the option no lookup table has a row, and ids 900 and 901 do not exist", async () => {
+		await resetDemo(env.DB, "2026-10-05", { categoryExample: true });
+
+		for (const table of [
+			"merchant_lookups",
+			"merchant_lookup_texts",
+			"lookup_answers",
+		]) {
+			const row = await env.DB.prepare(
+				`SELECT COUNT(*) AS n FROM ${table}`,
+			).first<{ n: number }>();
+
+			expect(row?.n).toBe(0);
+		}
+
+		const ids = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM transactions WHERE id IN (900, 901)",
+		).first<{ n: number }>();
+
+		expect(ids?.n).toBe(0);
 	});
 });

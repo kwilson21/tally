@@ -14,7 +14,8 @@ export type Switch =
 	| "details"
 	| "categories"
 	| "income"
-	| "sortOnArrival";
+	| "sortOnArrival"
+	| "lookupStores";
 
 export type Switches = Record<Switch, boolean>;
 

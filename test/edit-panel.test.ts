@@ -5,6 +5,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { seedMerchant } from "./helpers/merchants";
 import { present } from "./helpers/present";
+import { K1, LINE, lineRow, useLineFixture } from "./lookup-line-fixture";
 
 // The edit panel leads with its category (P120 B, decision 111): the name is the one headline, the category
 // is open while it needs one and folds to a row once it's set, and Exclude and Count as income are switches.
@@ -771,5 +772,66 @@ describe("a bank transaction's panel has no cash fields (#688)", () => {
 		const html = (await get(`/transactions/${bakery}`)).html;
 		expect(html).not.toContain('id="cash-edit-amount"');
 		expect(html).not.toContain('id="cash-edit-date"');
+	});
+});
+
+// #988: the store lookup's line under Tally's guess in the edit panel, with its own Don't use this request.
+describe("the edit panel draws the store lookup's line (#988)", () => {
+	useLineFixture();
+
+	it("draws the line under Tally's guess, inside the Category fieldset, before the chips", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		const html = (await get(`/transactions/${id}`)).html;
+
+		const fieldset = html.indexOf(
+			'<legend class="text-base text-ink">Category</legend>',
+		);
+
+		const line = html.indexOf(`From the web: ${LINE}`);
+		const close = html.indexOf("</fieldset>", fieldset);
+
+		expect(fieldset).toBeGreaterThan(-1);
+		expect(line).toBeGreaterThan(fieldset);
+		expect(line).toBeLessThan(close);
+		const guess = html.indexOf("% sure", fieldset);
+
+		expect(guess).toBeGreaterThan(fieldset);
+		expect(guess).toBeLessThan(line);
+	});
+
+	it("the button carries its own request", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		const html = (await get(`/transactions/${id}`)).html;
+		const path = `/transactions/${id}/lookup-line/dont-use`;
+
+		expect(html).toContain(`formaction="${path}"`);
+		expect(html).toContain('formmethod="post"');
+		expect(html).toContain("formnovalidate");
+		expect(html).toContain(`hx-post="${path}"`);
+		expect(html).toContain('hx-include="closest form"');
+		expect(html).toContain('hx-target="#edit-category"');
+		expect(html).toContain('hx-select="#edit-category"');
+		expect(html).toContain('hx-swap="outerHTML"');
+		expect(html).toContain("Don&#39;t use this for ");
+	});
+
+	it("no line when the source line is not Tally's guess", async () => {
+		const refused = await lineRow({ key: K1, confidence: 0.5, line: "k0" });
+		const filed = await lineRow({ key: K1, confidence: 0.5, filed: "jev" });
+
+		for (const id of [refused, filed]) {
+			const html = (await get(`/transactions/${id}`)).html;
+
+			expect(html).not.toContain("From the web");
+			expect(html).not.toContain("/lookup-line/dont-use");
+		}
+	});
+
+	it("no line while the lookup's switch is off", async () => {
+		await saveAiSwitches(env.DB, { lookupStores: false });
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		const html = (await get(`/transactions/${id}`)).html;
+
+		expect(html).not.toContain("From the web");
 	});
 });

@@ -25,6 +25,7 @@ import { FoldedRow } from "./folded-row";
 import { FormField } from "./form-field";
 import type { HouseholdPerson } from "./household-people";
 import { Icon } from "./icons";
+import { LookupLine } from "./lookup-line";
 import { maybeIncomeVisible, SuggestedCategoryChip } from "./maybe-category";
 import { MerchantRuleTick } from "./merchant-rule-tick";
 import { MixedTripLine } from "./mixed-trip-line";
@@ -199,6 +200,7 @@ export function CategoryChoice({
 	purchase,
 	back,
 	rule,
+	focus,
 }: {
 	tx: TransactionDetail;
 	categories: Category[];
@@ -208,6 +210,8 @@ export function CategoryChoice({
 	back: string;
 	/** The merchant rule tick, for a row that can have a rule: whether it's ticked and the rule's category name. */
 	rule?: { checked: boolean; ruleCategory?: string };
+	/** Focus the category part when it is redrawn after an answer (#988): it is not a control, so it takes focus itself. */
+	focus?: boolean;
 }) {
 	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
 	const mixed = mixedCategories(tx);
@@ -265,6 +269,24 @@ export function CategoryChoice({
 	const source = savedChoice
 		? categorySource(tx, unsureGuess, purchase !== undefined)
 		: undefined;
+
+	// The store lookup's line under Tally's guess, while the guess used it and the line is shown (#988).
+	const lookupNote = source !== undefined && unsureGuess && tx.lookupLine && (
+		<LookupLine
+			line={tx.lookupLine}
+			store={tx.storeName}
+			button={{
+				formaction: `/transactions/${tx.id}/lookup-line/dont-use`,
+				formmethod: "post",
+				formnovalidate: true,
+				"hx-post": `/transactions/${tx.id}/lookup-line/dont-use`,
+				"hx-include": "closest form",
+				"hx-target": "#edit-category",
+				"hx-select": "#edit-category",
+				"hx-swap": "outerHTML",
+			}}
+		/>
+	);
 
 	// A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts.
 	const mixedLine = !purchase && mixed && (
@@ -340,7 +362,12 @@ export function CategoryChoice({
 	);
 
 	return (
-		<div id="edit-category">
+		<div
+			id="edit-category"
+			tabindex={focus ? -1 : undefined}
+			autofocus={focus || undefined}
+			class={focus ? "outline-none" : undefined}
+		>
 			{folded ? (
 				<>
 					<FoldedRow
@@ -369,6 +396,7 @@ export function CategoryChoice({
 					>
 						<legend class="text-base text-ink">Category</legend>
 						{source && <p class="text-sm text-muted">{source}</p>}
+						{lookupNote}
 						{choices}
 					</fieldset>
 					{ruleTick}

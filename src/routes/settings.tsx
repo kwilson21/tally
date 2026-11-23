@@ -328,6 +328,13 @@ const AI_FEATURES: {
 		line: "Sorts them right after each sync, not only overnight.",
 		spoken: "sorting new transactions as they arrive",
 	},
+	{
+		key: "lookupStores",
+		id: "ai-lookup-stores",
+		label: "Look up new stores on the web",
+		line: "Searches the web once for a store, to help guess its category and name. Only the store's name as your bank gives it is sent, with numbers taken out.",
+		spoken: "looking up new stores on the web",
+	},
 ];
 
 /** What the greyed sorting switch says it needs, in the words of the rows above it. */
@@ -336,6 +343,12 @@ const SORT_NEEDS =
 
 /** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
 const SORT_GREYED = "sortOnArrivalGreyed";
+
+/** What the greyed lookup switch says it needs (#988): the switches its lookup runs on. */
+const LOOKUP_NEEDS = "Needs Categories and exclusions and Income on.";
+
+/** Sent when the page drew the lookup switch greyed, so Save leaves it as it was (#988). */
+const LOOKUP_GREYED = "lookupStoresGreyed";
 
 /** Which switches the page drew On, so a save can tell which one the person flipped. */
 const DRAWN_ON = "drawnOn";
@@ -364,6 +377,9 @@ function AiSwitchForm({
 	const nothingToSort =
 		!switches.categories && !switches.income && !switches.details;
 
+	// The lookup runs on Categories and exclusions and Income, so it is greyed while either is off (#988).
+	const lookupGreyed = !switches.categories || !switches.income;
+
 	return (
 		<form method="post" action="/settings/ai" data-switches-revert>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
@@ -375,8 +391,11 @@ function AiSwitchForm({
 							label={f.label}
 							hint={f.line}
 							checked={switches[f.key]}
-							disabled={f.key === "sortOnArrival" && nothingToSort}
-							note={SORT_NEEDS}
+							disabled={
+								(f.key === "sortOnArrival" && nothingToSort) ||
+								(f.key === "lookupStores" && lookupGreyed)
+							}
+							note={f.key === "lookupStores" ? LOOKUP_NEEDS : SORT_NEEDS}
 							autofocus={focus === f.key}
 							hx-post="/settings/ai"
 							hx-trigger="change"
@@ -390,6 +409,7 @@ function AiSwitchForm({
 				))}
 			</ul>
 			{nothingToSort && <input type="hidden" name={SORT_GREYED} value="1" />}
+			{lookupGreyed && <input type="hidden" name={LOOKUP_GREYED} value="1" />}
 			<input type="hidden" name={DRAWN_ON} value={drawnOnOf(switches)} />
 			<noscript>
 				<div class="mt-4">
@@ -412,7 +432,10 @@ function AiPage({
 	tally: AiTallyCounts;
 	focus?: keyof AiSwitches;
 }) {
-	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
+	// The store lookup's switch is left out: it can do nothing without Categories and Income, so it doesn't count (#988).
+	const allOff = AI_FEATURES.every(
+		(f) => f.key === "lookupStores" || !switches[f.key],
+	);
 
 	return (
 		<section
@@ -1554,11 +1577,19 @@ settings.post("/settings/ai", async (c) => {
 	) as Partial<AiSwitches>;
 
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
+
+	// A greyed lookup switch posts nothing, so the save leaves it as it was saved (#988).
+	if (form.get(LOOKUP_GREYED) === "1") delete next.lookupStores;
 	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
 	const before = await readAiSwitches(c.env.DB);
+
 	// The page's baseline, shared by the save and the focus below. A page drawn before DRAWN_ON existed is compared
-	// with what was saved before this save.
-	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
+	// with what was saved before this save. Such a page also predates the store lookup's row, so the lookup switch
+	// counts as not drawn there: leaving it out of that page is not a change (#988).
+	const drawn = String(
+		form.get(DRAWN_ON) ?? drawnOnOf({ ...before, lookupStores: false }),
+	).split(" ");
+
 	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
 
 	await runWith(
@@ -1587,8 +1618,11 @@ settings.post("/settings/ai", async (c) => {
 
 	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 
-	const states = AI_FEATURES.map(
-		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
+	// The five older switches are always spoken as they were; the store lookup's is spoken only when it changed (#988).
+	const states = AI_FEATURES.flatMap((f) =>
+		f.key !== "lookupStores" || before.lookupStores !== now.lookupStores
+			? [`${f.spoken} ${now[f.key] ? "on" : "off"}`]
+			: [],
 	).join(", ");
 
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);

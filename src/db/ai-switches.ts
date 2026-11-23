@@ -51,6 +51,10 @@ const SWITCH_NAMES = Object.keys(KEYS).filter(isSwitchName);
 export const asksJev = (s: AiSwitches): boolean =>
 	s.categories || s.income || s.details;
 
+/** A store's line is shown while the switches the lookup runs on are on (#988): hidden, not dropped, when one is off. */
+export const linesShown = (s: AiSwitches): boolean =>
+	s.lookupStores && s.categories && s.income;
+
 /**
  * The guard a save appends to its WHERE clause, bound with `stillOnKeys`: it holds while none of these
  * switches has been turned off since they were read.
@@ -129,11 +133,9 @@ export const AI_SWITCHES_VERSION = `(SELECT COALESCE(group_concat(key || '=' || 
 		.map((key) => `'${key}'`)
 		.join(", ")}) ORDER BY key))`;
 
-/** The switches a Settings form shows and posts: every switch but the store lookup's, which has no Settings page yet. */
-export type FormSwitch = Exclude<keyof AiSwitches, "lookupStores">;
+/** The switches a Settings form shows and posts: every stored switch, the store lookup's included (#988). */
+export type FormSwitch = keyof AiSwitches;
 
 /** The name of a form switch from what a form posts, or undefined. */
 export const switchNamed = (text: string): FormSwitch | undefined =>
-	SWITCH_NAMES.find(
-		(name): name is FormSwitch => name !== "lookupStores" && name === text,
-	);
+	SWITCH_NAMES.find((name): name is FormSwitch => name === text);

@@ -5,8 +5,9 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { loadMonth } from "../src/db/month";
+import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo as resetDemoBase } from "../src/demo/reset";
-import { monthOffset } from "../src/demo/seed";
+import { monthOffset, SEED_LINE_GUESSES } from "../src/demo/seed";
 import { utcDay } from "../src/first-tally/night";
 import handler, { runScheduled } from "../src/index";
 import { encryptToken } from "../src/plaid/token-crypto";
@@ -174,6 +175,18 @@ describe("scheduled handler", () => {
 		expect(await count()).toBeGreaterThan(0);
 		expect(fetchSpy).not.toHaveBeenCalled();
 		fetchSpy.mockRestore();
+	});
+
+	it("the scheduled demo reset seeds the two store lines into the review queue with their lookup lines (#988)", async () => {
+		await worker.scheduled({ cron: "0 8 * * *" });
+
+		const queue = await suggestionQueue(env.DB);
+		expect(queue.find((i) => i.id === "category-900")).toMatchObject({
+			lookupLine: SEED_LINE_GUESSES[0].line,
+		});
+		expect(queue.find((i) => i.id === "category-901")).toMatchObject({
+			lookupLine: SEED_LINE_GUESSES[1].line,
+		});
 	});
 
 	it("leaves Jev out when there is no key, so the uncategorized seed rows stay uncategorized", async () => {

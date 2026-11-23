@@ -11,6 +11,7 @@ import {
 	dismissSuggestion,
 } from "../db/category-suggestions";
 import { type Database, runWith } from "../db/database";
+import { dontUse } from "../db/lookup-saves";
 import {
 	type NameChoice,
 	type NameReview,
@@ -47,6 +48,7 @@ import { DigitsUpTo15, numberOf, textOf } from "../edge-kinds";
 import { hxTrigger } from "../htmx";
 import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
+import { dontUseReply } from "../rules/lookups";
 import {
 	type AlreadyAnswered,
 	acceptCategoryGuess,
@@ -841,6 +843,26 @@ suggestions.post(PATH, async (c) => {
 		}
 
 		case "category": {
+			// "Don't use this" (#988): drops the store's line, then shows the next card. It is not an answer to the guess, so
+			// `done()` (which words its announce with the count left) is not used; the announce is the sentence alone.
+			if (answer === "dont_use") {
+				const asked = await dontUse(db, item.transactionId);
+
+				const reply = dontUseReply(item.merchant, asked);
+
+				if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+
+				return renderScreen(c, {
+					reviewUrl,
+					focus: true,
+					toast: {
+						message: reply.message,
+						type: reply.type,
+						announce: reply.message,
+					},
+				});
+			}
+
 			if (answer === "yes") {
 				const saved =
 					item.categoryId !== null &&

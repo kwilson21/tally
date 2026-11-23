@@ -2,8 +2,10 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { lookupCallsKey } from "../src/db/lookup-calls";
+import { dontUse } from "../src/db/lookup-saves";
 import {
 	claimStatements,
+	dontUseStatements,
 	failStatement,
 	holdsClaim,
 	leaseCutoff,
@@ -20,6 +22,19 @@ import {
 	storeLookupMachine,
 	storeLookupState,
 } from "../src/machines/store-lookup";
+import {
+	asksAgain,
+	expectCleared,
+	K1,
+	K2,
+	LINE,
+	lineGuessOf,
+	lineRow,
+	OTHER,
+	OTHER_TEXT,
+	TEXT,
+	useLineFixture,
+} from "./lookup-line-fixture";
 
 // The store lookup's guarded statements (spec §7, §5 `lookup_calls_<date>`): each claim takes one search from the
 // day's count in its own batch, and each save, failure, let-go and skip is guarded by the stored row's state.
@@ -639,6 +654,36 @@ describe("the skip table", () => {
 	});
 });
 
+describe("dontUseStatements alone (#988)", () => {
+	// The statements on their own, not through dontUse: only a found row changes, and no row is made.
+	const tableCount = async () =>
+		(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM merchant_lookups")
+				.first<{ n: number }>()
+		)?.n;
+
+	for (const status of ["pending", "nothing_found", "gave_up"]) {
+		it(`a ${status} row is unchanged by the batch`, async () => {
+			await seed({ text: "kept-text", status, line: null });
+			const before = await rowOf("kept-text");
+
+			await db.batch(dontUseStatements(db, "kept-text"));
+
+			expect(await rowOf("kept-text")).toEqual(before);
+		});
+	}
+
+	it("a missing row stays missing and none is inserted", async () => {
+		const before = await tableCount();
+
+		await db.batch(dontUseStatements(db, "absent-text"));
+
+		expect(await rowOf("absent-text")).toBeNull();
+		expect(await tableCount()).toBe(before);
+	});
+});
+
 describe("times", () => {
 	it("every time column written is the given instant, as ISO text", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
@@ -762,4 +807,93 @@ describe("a saved line is kept only while its text is not private", () => {
 			expect(result.meta.changes).toBe(1);
 		});
 	}
+});
+
+// #988: "Don't use this" saves the store's line away for good, and asks each guess made with it again without it.
+describe("Don't use this on a store's line (dontUse)", () => {
+	useLineFixture();
+
+	const lookupRowOf = (text: string) =>
+		env.DB.prepare(
+			"SELECT status, line FROM merchant_lookups WHERE lookup_text = ?",
+		)
+			.bind(text)
+			.first<{ status: string; line: string | null }>();
+
+	it("found becomes skipped and the line is NULL", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		expect((await dontUse(env.DB, id)).kind).toBe("write");
+		expect(await lookupRowOf(TEXT)).toEqual({ status: "skipped", line: null });
+	});
+
+	it("a pending row is untouched and refused", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+		await env.DB.prepare(
+			"UPDATE merchant_lookups SET status = 'pending' WHERE lookup_text = ?",
+		)
+			.bind(TEXT)
+			.run();
+
+		expect((await dontUse(env.DB, id)).kind).toBe("refuse");
+		expect((await lookupRowOf(TEXT))?.status).toBe("pending");
+	});
+
+	it("every row of the text that held the kept guess is cleared and asked again", async () => {
+		const first = await lineRow({ key: K1, confidence: 0.5 });
+		const second = await lineRow({ key: K2, confidence: 0.5 });
+
+		await dontUse(env.DB, first);
+
+		await expectCleared(first);
+		await expectCleared(second);
+		expect(await asksAgain(first)).toBe(true);
+		expect(await asksAgain(second)).toBe(true);
+	});
+
+	it("a row Jev gave up on is cleared and stays not asked", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5, attempts: 5 });
+
+		await dontUse(env.DB, id);
+
+		await expectCleared(id);
+		expect(await asksAgain(id)).toBe(false);
+	});
+
+	it("no lookup answer of the text counts any more", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		await dontUse(env.DB, id);
+
+		const kept = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM lookup_answers WHERE lookup_text = ? AND kept = 1",
+		)
+			.bind(TEXT)
+			.first<{ n: number }>();
+
+		expect(kept?.n).toBe(0);
+	});
+
+	it("another store's line and guesses are untouched", async () => {
+		const other = await lineRow({ key: OTHER, confidence: 0.5 });
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		await dontUse(env.DB, id);
+
+		expect(await lookupRowOf(OTHER_TEXT)).toEqual({
+			status: "found",
+			line: LINE,
+		});
+		expect(await lineGuessOf(other)).toBe(true);
+	});
+
+	it("run twice changes nothing more", async () => {
+		const id = await lineRow({ key: K1, confidence: 0.5 });
+
+		await dontUse(env.DB, id);
+		const again = await dontUse(env.DB, id);
+
+		expect(again.kind).toBe("nothingToDo");
+		expect(await lookupRowOf(TEXT)).toEqual({ status: "skipped", line: null });
+	});
 });
