@@ -118,8 +118,10 @@ export function scriptedPlaid(script: PlaidScript) {
 }
 
 /**
- * The D1 whose statements `matches` picks fail with `failure` on every read or write they make (run, all, first and
- * raw), once `armed` says so. Every other statement is the real one. The check is made when the statement runs.
+ * The D1 whose statements `matches` picks fail with `failure` when they are read (`raw` and `all`: drizzle's select of
+ * the bank's row uses `raw`, per node_modules/drizzle-orm/d1/session.js) or written (`run`, which the item store's
+ * flag update uses), once `armed` says so. Every other statement is the real one, and the check is made when the
+ * statement runs.
  */
 export function failingStatements(
 	base: D1Database,
@@ -127,20 +129,20 @@ export function failingStatements(
 	failure: Thrown,
 	armed: () => boolean,
 ): D1Database {
-	const runs = new Set(["run", "all", "first", "raw"]);
-
 	const guarded = (statement: D1PreparedStatement): D1PreparedStatement =>
 		new Proxy(statement, {
 			get(target, member) {
 				if (member === "bind")
-					return (...values: unknown[]) =>
-						guarded(Reflect.apply(target.bind, target, values));
+					return (...values: unknown[]) => guarded(target.bind(...values));
 
-				if (typeof member === "string" && runs.has(member))
-					return (...args: unknown[]) =>
-						armed()
-							? Promise.reject(failure)
-							: Reflect.apply(Reflect.get(target, member), target, args);
+				if (member === "all")
+					return () => (armed() ? Promise.reject(failure) : target.all());
+
+				if (member === "raw")
+					return () => (armed() ? Promise.reject(failure) : target.raw());
+
+				if (member === "run")
+					return () => (armed() ? Promise.reject(failure) : target.run());
 
 				return forwardMember(target, member);
 			},

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
 import { PlaidError } from "../src/plaid/client";
 import { loginStillBroken } from "../src/plaid/login-broken";
-import { syncItem } from "../src/plaid/sync";
+import { type SyncResult, syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 import recorded from "./fixtures/sync-login-error.json";
 import {
@@ -269,10 +269,14 @@ async function bankRow(id: number) {
 }
 
 /** The fixture names the lock and disconnect fields by whether they are set, not by their values. */
-const marker = (value: unknown) => (value === null ? null : "<set>");
+const marker = (value: string | number | null | undefined) =>
+	value === null ? null : "<set>";
+
+/** What a cell's code path answers: the sync's result, the check's boolean, or the route's status. */
+type Answered = SyncResult | boolean | { status: number };
 
 type Settled =
-	| { kind: "value"; value: unknown }
+	| { kind: "value"; value: Answered }
 	| { kind: "threw"; thrown: Thrown }
 	| { kind: "hangs" };
 
@@ -280,7 +284,7 @@ type Settled =
 const SECONDS = 40_000;
 
 /** The run's value, the value it threw, or "hangs" when it has not settled in SECONDS. */
-async function settle(run: Promise<unknown>): Promise<Settled> {
+async function settle(run: Promise<Answered>): Promise<Settled> {
 	let timer: ReturnType<typeof setTimeout> | null = null;
 
 	try {
@@ -419,7 +423,7 @@ async function run(
 	id: number,
 	plaid: ReturnType<typeof scriptedPlaid>,
 	runEnv: ReturnType<typeof envFor>,
-): Promise<unknown> {
+): Promise<Answered> {
 	if (cell.kind === "sync")
 		return syncItem(runEnv, id, plaid.fetchImpl, { runAfterSync: false });
 
@@ -455,7 +459,8 @@ async function webhookStatus(
 			.replaceAll("/", "_")
 			.replace(/=+$/, "");
 
-	const json64 = (value: unknown) => b64(encoder.encode(JSON.stringify(value)));
+	const json64 = (value: Record<string, string | number | string[]>) =>
+		b64(encoder.encode(JSON.stringify(value)));
 
 	const kid = crypto.randomUUID();
 
@@ -593,9 +598,11 @@ async function runCell(cell: Cell) {
 	};
 }
 
+type Recorded = Awaited<ReturnType<typeof runCell>>;
+
 describe("the login check after a login error (#1192, step 1)", () => {
 	it("gives every cell the answer recorded for it before the check moved", async () => {
-		const answers: Record<string, unknown> = {};
+		const answers: Record<string, Recorded> = {};
 
 		for (const cell of cells) answers[cell.label] = await runCell(cell);
 
