@@ -52,6 +52,10 @@ export type PlaidScript = {
 	transactions: (call: number, cursor: string | null) => Answer;
 	/** Whether /item/get says the login is still broken. */
 	loginBroken: boolean;
+	/** Runs before the `call`th /item/get answer, for a repair or a lost lease that lands while Plaid is being asked. */
+	beforeItemGet?: (call: number) => Promise<void>;
+	/** The `call`th /item/get answer, when it is not the one `loginBroken` gives: a refusal, a fetch that throws, a late answer. */
+	itemGet?: (call: number) => Answer | Promise<Answer>;
 };
 
 /** What the scripted Plaid was asked: the paths with their counts, and the cursor of each /transactions/sync ask. */
@@ -87,6 +91,23 @@ export function scriptedPlaid(script: PlaidScript) {
 				return answer;
 			}
 
+			if (path === "/item/get") {
+				const call = trace.paths.get(path) ?? 0;
+
+				await script.beforeItemGet?.(call);
+
+				const answer = script.itemGet
+					? await script.itemGet(call)
+					: response({
+							item: { error: script.loginBroken ? ITEM_ERROR : null },
+						});
+
+				if (answer === "throws")
+					throw new TypeError("fetch failed: the network is down");
+
+				return answer;
+			}
+
 			return response({
 				item: { error: script.loginBroken ? ITEM_ERROR : null },
 			});
@@ -94,6 +115,50 @@ export function scriptedPlaid(script: PlaidScript) {
 	);
 
 	return { fetchImpl, trace };
+}
+
+/**
+ * The D1 whose statements `matches` picks fail with `failure` when they are read (`raw` and `all`: drizzle's select of
+ * the bank's row uses `raw`, per node_modules/drizzle-orm/d1/session.js) or written (`run`, which the item store's
+ * flag update uses), once `armed` says so. Every other statement is the real one, and the check is made when the
+ * statement runs.
+ */
+export function failingStatements(
+	base: D1Database,
+	matches: (sql: string) => boolean,
+	failure: Thrown,
+	armed: () => boolean,
+): D1Database {
+	const guarded = (statement: D1PreparedStatement): D1PreparedStatement =>
+		new Proxy(statement, {
+			get(target, member) {
+				if (member === "bind")
+					return (...values: unknown[]) => guarded(target.bind(...values));
+
+				if (member === "all")
+					return () => (armed() ? Promise.reject(failure) : target.all());
+
+				if (member === "raw")
+					return () => (armed() ? Promise.reject(failure) : target.raw());
+
+				if (member === "run")
+					return () => (armed() ? Promise.reject(failure) : target.run());
+
+				return forwardMember(target, member);
+			},
+		});
+
+	return new Proxy(base, {
+		get(target, prop) {
+			if (prop !== "prepare") return forwardMember(target, prop);
+
+			return (sql: string) => {
+				const statement = target.prepare(sql);
+
+				return matches(sql) ? guarded(statement) : statement;
+			};
+		},
+	});
 }
 
 /** The D1 with its `nth` batch (counted from 1) rejected with `failure` before it runs: a page's save, which writes nothing. */

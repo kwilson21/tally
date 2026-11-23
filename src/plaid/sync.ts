@@ -486,22 +486,20 @@ async function handlePlaidError(
 	error: PlaidError,
 	fetchImpl?: typeof fetch,
 ): Promise<never> {
-	if (error instanceof PlaidError) {
-		console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
+	console.error(`plaid sync error ${error.request_id ?? ""}`.trim());
+
+	if (
+		error.error_type === "ITEM_ERROR" &&
+		!transient.has(error.error_code ?? "")
+	) {
+		// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
+		const seen = await readSeen(env.DB, itemRowId);
 
 		if (
-			error.error_type === "ITEM_ERROR" &&
-			!transient.has(error.error_code ?? "")
+			seen !== null &&
+			(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
 		) {
-			// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
-			const seen = await readSeen(env.DB, itemRowId);
-
-			if (
-				seen !== null &&
-				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
-			) {
-				await markNeedsAttention(env.DB, itemRowId, "login", { seen, lockId });
-			}
+			await markNeedsAttention(env.DB, itemRowId, "login", { seen, lockId });
 		}
 	}
 
