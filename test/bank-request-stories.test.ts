@@ -1,3 +1,4 @@
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -5,7 +6,7 @@ import {
 	PlaidBank,
 	PlaidRefused,
 } from "../src/machines/bank-request";
-import { askBank } from "../src/plaid/bank-request";
+import { askBank, askLoginStillBroken } from "../src/plaid/bank-request";
 import type { ConnectionState } from "../src/plaid/item-store";
 
 // The bank requests as stories (decisions 187, 206 style 2, 210): each row is the state the bank was in, what the
@@ -111,5 +112,66 @@ describe("a disconnected bank", () => {
 		expect(bankRequestMachine.config.states?.disconnected).toEqual({
 			type: "final",
 		});
+	});
+});
+
+// The login check (#1192, decision 245): the sync and the Plaid webhook ask whether a login error still stands. Where
+// Plaid cannot be asked, or does not answer in time, the login is still broken: the opposite of Fix connection.
+
+/** Asks the login check with a stand-in Plaid whose loginWorks answers as given, and says what Plaid was asked. */
+async function checkLogin(
+	loginWorks: Effect.Effect<void, PlaidRefused>,
+	wait: Duration.Input = "2 seconds",
+) {
+	const asked: string[] = [];
+
+	const stillBroken = await Effect.runPromise(
+		askLoginStillBroken(wait).pipe(
+			Effect.provideService(PlaidBank, {
+				loginWorks: Effect.suspend(() => {
+					asked.push("login");
+
+					return loginWorks;
+				}),
+				letGo: Effect.void,
+			}),
+		),
+	);
+
+	return { stillBroken, asked };
+}
+
+describe("the login check", () => {
+	it("says the login works once Plaid reports no problem", async () => {
+		expect(await checkLogin(Effect.void)).toEqual({
+			stillBroken: false,
+			asked: ["login"],
+		});
+	});
+
+	it("says the login is still broken while Plaid reports a problem", async () => {
+		expect(await checkLogin(Effect.fail(new PlaidRefused()))).toEqual({
+			stillBroken: true,
+			asked: ["login"],
+		});
+	});
+
+	it("says the login is still broken when Plaid does not answer in time", async () => {
+		expect(await checkLogin(Effect.never, "20 millis")).toEqual({
+			stillBroken: true,
+			asked: ["login"],
+		});
+	});
+
+	it("has a login-check request in every live state, which waits for Plaid", () => {
+		for (const state of LIVE) {
+			expect(bankRequestMachine.config.states?.[state]).toMatchObject({
+				on: {
+					LOGIN_ERROR: {
+						target: "asking_plaid_whether_the_login_is_still_broken",
+					},
+				},
+			});
+		}
 	});
 });

@@ -65,7 +65,7 @@ export class PlaidRefusal extends Data.TaggedError("PlaidRefusal")<{
 export type PlaidFailure = PlaidUnreachable | PlaidUnreadable | PlaidRefusal;
 
 /** How long one call may take, the request and the reading of its answer together. */
-const TIMEOUT = "30 seconds";
+export const TIMEOUT = "30 seconds";
 
 type PlaidBody = { [field: string]: JsonValue | undefined };
 

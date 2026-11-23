@@ -12,6 +12,10 @@ import * as Schema from "effect/Schema";
 //               is ok; if Plaid still reports a problem, or cannot be reached, the bank stays as it was.
 //   DISCONNECT  the person disconnects the bank. Tally asks Plaid to let the bank go. Once Plaid has, the bank is
 //               disconnected; if Plaid refuses or cannot be reached, the bank stays as it was.
+//   LOGIN_ERROR a login error came from the sync or the Plaid webhook. Tally asks Plaid whether the login still fails.
+//               The bank never moves: "done" means the login works, and "plaid_refused" means it is still broken. This
+//               is the OPPOSITE of FIX, where "plaid_refused" leaves the bank as it was: here a bank Plaid cannot confirm
+//               counts as still broken (src/plaid/bank-request.ts, askLoginStillBroken).
 //
 // A disconnected bank takes neither request: that state is final. The machine decides only where the bank lands. The
 // row is written by src/plaid/item-store.ts, which asks the connection machine through next(), as every other write
@@ -51,6 +55,7 @@ const WAITING: BankOutcome = "waiting";
 const REQUESTS = {
 	FIX: { target: "asking_plaid_about_the_login" },
 	DISCONNECT: { target: "asking_plaid_to_let_go" },
+	LOGIN_ERROR: { target: "asking_plaid_whether_the_login_is_still_broken" },
 } as const;
 
 export const bankRequestMachine = setupEffect({
@@ -95,6 +100,22 @@ export const bankRequestMachine = setupEffect({
 				src: "letGo",
 				onDone: ({ context }) => ({
 					target: "disconnected",
+					context: { ...context, outcome: "done" },
+				}),
+				onError: ({ context }) => ({
+					target: context.from,
+					context: { ...context, outcome: "plaid_refused" },
+				}),
+			},
+		},
+		// The login check. The bank never moves, so this state goes back to where it started (the caller starts the
+		// machine at "ok" with from "ok", as the check does not depend on the bank's state). Unlike FIX, Plaid refusing
+		// is "plaid_refused", which the caller reads as still broken.
+		asking_plaid_whether_the_login_is_still_broken: {
+			invoke: {
+				src: "loginWorks",
+				onDone: ({ context }) => ({
+					target: context.from,
 					context: { ...context, outcome: "done" },
 				}),
 				onError: ({ context }) => ({
