@@ -194,12 +194,17 @@
 			"sync_update_cursor": null
 		},
 		"charges": [],
-		"consoleErrors": ["plaid sync error request-1"],
+		"consoleErrors": [
+			"plaid sync error request-1",
+			"plaid login flag failed request-1"
+		],
 		"cursors": ["(none)"],
 		"threw": {
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
 			"identity": "another value",
-			"kind": "Error",
-			"message": "Failed query: select \"status\", \"disconnected_at\", \"attention_login\", \"attention_held\", \"connection_revision\" from \"plaid_items\" where \"plaid_items\".\"id\" = ?\nparams: 1"
+			"kind": "PlaidError",
+			"request_id": "request-1"
 		}
 	},
 	"S17 ITEM_LOGIN_REQUIRED, Plaid says broken, the flag's write throws": {
@@ -221,12 +226,17 @@
 			"sync_update_cursor": null
 		},
 		"charges": [],
-		"consoleErrors": ["plaid sync error request-1"],
+		"consoleErrors": [
+			"plaid sync error request-1",
+			"plaid login flag failed request-1"
+		],
 		"cursors": ["(none)"],
 		"threw": {
-			"identity": "the injected value",
-			"kind": "Error",
-			"message": "the flag write failed"
+			"error_code": "ITEM_LOGIN_REQUIRED",
+			"error_type": "ITEM_ERROR",
+			"identity": "another value",
+			"kind": "PlaidError",
+			"request_id": "request-1"
 		}
 	},
 	"S2 transient TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION as ITEM_ERROR, Plaid says the login is broken": {

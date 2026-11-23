@@ -492,14 +492,19 @@ async function handlePlaidError(
 		error.error_type === "ITEM_ERROR" &&
 		!transient.has(error.error_code ?? "")
 	) {
-		// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
-		const seen = await readSeen(env.DB, itemRowId);
+		try {
+			// The state read before Plaid is asked again, so a repair made meanwhile is not overwritten.
+			const seen = await readSeen(env.DB, itemRowId);
 
-		if (
-			seen !== null &&
-			(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
-		) {
-			await markNeedsAttention(env.DB, itemRowId, "login", { seen, lockId });
+			if (
+				seen !== null &&
+				(await loginStillBroken(env, accessTokenEncrypted, fetchImpl))
+			) {
+				await markNeedsAttention(env.DB, itemRowId, "login", { seen, lockId });
+			}
+		} catch {
+			// The Plaid error is what the sync reports, so a failed read or flag never replaces it.
+			console.error(`plaid login flag failed ${error.request_id ?? ""}`.trim());
 		}
 	}
 
