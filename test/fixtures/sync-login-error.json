@@ -654,5 +654,28 @@
 		"returned": {
 			"status": 200
 		}
+	},
+	"W5 ITEM ERROR ITEM_LOGIN_REQUIRED, Plaid's item has no error field at all, the check reads it as still broken": {
+		"asks": {
+			"/item/get": 1
+		},
+		"bank": {
+			"attention_held": 0,
+			"attention_login": 1,
+			"connection_revision": 0,
+			"disconnected_at": null,
+			"reconnect_emailed_at": null,
+			"status": "needs_attention",
+			"sync_cursor": null,
+			"sync_lock_id": null,
+			"sync_locked_until": null,
+			"sync_update_cursor": null
+		},
+		"charges": [],
+		"consoleErrors": [],
+		"cursors": [],
+		"returned": {
+			"status": 200
+		}
 	}
 }

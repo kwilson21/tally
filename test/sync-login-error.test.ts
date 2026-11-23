@@ -252,6 +252,13 @@ const cells: Cell[] = [
 	},
 	{
 		label:
+			"W5 ITEM ERROR ITEM_LOGIN_REQUIRED, Plaid's item has no error field at all, the check reads it as still broken",
+		kind: "webhook",
+		error: ITEM_LOGIN,
+		itemGet: () => response({ item: {} }),
+	},
+	{
+		label:
 			"W4 ITEM ERROR PRODUCT_NOT_READY (transient), Plaid says broken, the route does not ask",
 		kind: "webhook",
 		error: { error_type: "ITEM_ERROR", error_code: "PRODUCT_NOT_READY" },
